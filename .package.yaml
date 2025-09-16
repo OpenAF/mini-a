@@ -1,0 +1,34 @@
+author: Nuno Aguiar
+scripts:
+  preerase: ''
+  posterase: ''
+  preinstall: ''
+  postinstall: ''
+keywords:
+- agent
+- mini-a
+- ai
+- llm
+- gpt
+bugs:
+  url: https://github.com/OpenAF/mini-a/issues
+repository:
+  type: http
+  url: https://openaf.io/opacks/mini-a.opack
+description: A nice description
+name: mini-a
+main: ''
+mainJob: ''
+license: Apache 2.0 license
+version: '20250916'
+dependencies:
+  openaf: '>=20250915'
+files:
+- .package.yaml
+- LICENSE
+- README.md
+- mini-a.yaml
+filesHash:
+  LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
+  README.md: 80a3b8dad4dbccc4f0256194d45471b02993d68a
+  mini-a.yaml: 07258d8c93b223b49def75de2a3ab44c21f2ea5c
