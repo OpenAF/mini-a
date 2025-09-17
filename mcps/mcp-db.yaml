@@ -1,0 +1,96 @@
+# Author: Nuno Aguiar
+help:
+  text   : A STDIO MCP database server 
+  expects: 
+  - name     : jdbc
+    desc     : JDBC connection string
+    example  : jdbc:postgresql://localhost:5432/somedb
+    mandatory: true
+  - name     : user
+    desc     : Database user
+    example  : aUser
+    mandatory: false
+  - name     : pass
+    desc     : Database password
+    example  : aPassword
+    mandatory: false
+
+todo:
+- Connect to database
+- Close database on exit
+- MCP database
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false   # to change when finished
+  argsFromEnvs: true
+  daemon      : true
+        
+include:
+- oJobMCP.yaml
+
+jobs:
+# --------------------------
+- name : Connect to database
+  check:
+    in:
+      jdbc: isString
+      user: isString.default(__)
+      pass: isString.default(__) 
+  exec : | #js
+    global.db = new DB(args.jdbc, args.user, args.pass)
+
+# -----------------------------
+- name : Close database on exit
+  type : shutdown
+  check:
+    in:
+      jdbc: isString
+      user: isString.default(__)
+      pass: isString.default(__)
+  exec : | #js
+    if (global.db) {
+      global.db.close()
+    }
+
+# -------------------
+- name : MCP database
+  to   :
+  - (stdioMCP ):
+      serverInfo:
+        name   : mini-a-db
+        title  : OpenAF mini-a MCP database server
+        version: 1.0.0
+    ((fnsMeta)):
+      dbSQLQuery:
+        name       : dbSQLQuery
+        description: Executes a SQL query against a database using JDBC.
+        inputSchema:
+          type      : object
+          properties:
+            sqlQuery:
+              type        : string
+              description : SQL query to execute.
+          required: [ sqlQuery ]
+        annotations:
+          title         : dbSQLQuery
+          readOnlyHint  : true
+          idempotentHint: true
+    ((fns    )):
+      dbSQLQuery: Execute SQL query
+
+# -----------------------
+- name: Execute SQL query
+  check:
+    in:
+      sqlQuery: isString
+  exec: | #js
+    if (!global.db) {
+      return "[ERROR] Database not connected"
+    } else {
+       var _res = stringify(global.db.q(args.sqlQuery), __, "")
+       return _res
+    }
