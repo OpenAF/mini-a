@@ -14,6 +14,10 @@ help:
     desc     : Database password
     example  : aPassword
     mandatory: false
+  - name     : rw
+    desc     : Allow read/write operations (default is read-only)
+    example  : "true"
+    mandatory: false
 
 todo:
 - Connect to database
@@ -28,6 +32,9 @@ ojob:
   logToConsole: false   # to change when finished
   argsFromEnvs: true
   daemon      : true
+  unique      :
+    pidFile     : .mcp-db.pid
+    killPrevious: true
         
 include:
 - oJobMCP.yaml
@@ -79,18 +86,65 @@ jobs:
           title         : dbSQLQuery
           readOnlyHint  : true
           idempotentHint: true
-    ((fns    )):
-      dbSQLQuery: Execute SQL query
 
-# -----------------------
-- name: Execute SQL query
+      dbDMLStatement:
+        name       : dbDMLStatement
+        description: Executes a SQL DML statement (CREATE, INSERT, UPDATE, DELETE, DROP) against a database using JDBC.
+        inputSchema:
+          type      : object
+          properties:
+            sqlDML:
+              type        : string
+              description : SQL DML statement to execute.
+          required: [ sqlDML ]
+        annotations:
+          title         : dbDMLStatement
+          readOnlyHint  : false
+          idempotentHint: false
+    ((fns    )):
+      dbSQLQuery    : Execute SQL query
+      dbDMLStatement: Execute DML statement
+
+# ------------------------
+- name : Execute SQL query
   check:
     in:
       sqlQuery: isString
-  exec: | #js
+  exec : | #js
     if (!global.db) {
       return "[ERROR] Database not connected"
     } else {
-       var _res = stringify(global.db.q(args.sqlQuery), __, "")
-       return _res
+      var _res 
+      try {
+        _res = global.db.q(args.sqlQuery)
+        global.db.commit()
+      } catch(e) {
+        global.db.rollback()
+        return "[ERROR] " + e.message
+      }
+      return _res
     }
+
+# ----------------------------
+- name : Execute DML statement
+  check:
+    in:
+      sqlDML: isString
+      rw    : toBoolean.isBoolean.default(false)
+  exec : | #js
+    if (!args.rw) {
+      return "[ERROR] Read-only mode. Set rw=true to allow write operations"
+    }
+    if (!global.db) {
+      return "[ERROR] Database not connected"
+    } else {
+      var _res
+      try {
+        _res = global.db.u(args.sqlDML)
+        global.db.commit()
+        return _res + " rows affected"
+      } catch(e) {
+        global.db.rollback()
+        return "[ERROR] " + e.message
+      }
+    } 
