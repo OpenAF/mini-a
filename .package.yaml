@@ -10,12 +10,13 @@ keywords:
 - ai
 - llm
 - gpt
+- mcp
 bugs:
   url: https://github.com/OpenAF/mini-a/issues
 repository:
   type: http
   url: https://openaf.io/opacks/mini-a.opack
-description: A nice description
+description: Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP stdio or http(s) servers to achieve user-defined goals. It is designed to be simple, flexible, and easy to use.
 name: mini-a
 main: ''
 mainJob: ''
