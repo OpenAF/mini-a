@@ -2,20 +2,27 @@
 
 ## Catalog
 
-| Name       | Description                     | Type        | Location                         |
-|------------|---------------------------------|-------------|----------------------------------|
-| mcp-db     | Database access MCP             | STDIO       | [mcp-db.yaml](mcp-db.yaml)       |
+| Name       | Description                     | Type        | Location                           |
+|------------|---------------------------------|-------------|------------------------------------|
+| mcp-db     | Database access MCP             | STDIO       | [mcp-db.yaml](mcp-db.yaml)         |
+| mcp-notify | Notification MCP (Pushover)     | STDIO       | [mcp-notify.yaml](mcp-notify.yaml) |
 
 ### Examples
 
 #### mcp-db
 
 ```bash
-ojob mini-a.yaml goal="create a 'test' table with all union european countries and cities" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- give final answer in markdown\n- generate H2 compatible SQL"
+ojob mini-a.yaml goal="create a 'test' table with all union european countries and cities" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- generate H2 compatible SQL"
 ```
 
 ```bash
-ojob mini-a.yaml goal="build a markdown table with the contents of the 'test' table" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- give final answer in markdown\n- generate H2 compatible SQL" debug=true
+ojob mini-a.yaml goal="build a markdown table with the contents of the 'test' table" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- generate H2 compatible SQL" debug=true
+```
+
+#### mcp-notify
+
+```bash
+ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'" mcp="(cmd: 'ojob mcps/mcp-notify.yaml pushoverkey=<your_pushover_key> userid=<your_user_id>', timeout: 5000)"
 ```
 
 ## How to unit test a MCP
