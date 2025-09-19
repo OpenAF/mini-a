@@ -25,7 +25,11 @@ version: '20250918'
 dependencies:
   openaf: '>=20250915'
 files:
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
 - .package.yaml
+- CODE_OF_CONDUCT.md
+- CONTRIBUTING.md
 - EXTERNAL-MCPS.md
 - LICENSE
 - README.md
@@ -38,6 +42,10 @@ files:
 - mini-a.yaml.old
 - public/index.md
 filesHash:
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
+  CONTRIBUTING.md: 279d907bcbdcddf93716e208b90b683e53b9f83a
   EXTERNAL-MCPS.md: 0eca01e82e2b4f161d7d50463b0977ed31e4d8df
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 96eb82df76fab7475055e92efaeed81bce9bd016
