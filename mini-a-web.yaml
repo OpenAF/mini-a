@@ -1,0 +1,70 @@
+# Author: Nuno Aguiar
+help:
+  text   : Mini-A web interface to interact with the Mini-A agent via HTTP. 
+  expects: 
+  - name     : onport
+    desc     : Port to run the HTTP server on
+    example  : "8888"
+    mandatory: false
+
+include:
+- oJobHTTPd.yaml
+
+todo:
+- Init
+- (httpdStart     ): "${onport:-8888}"
+- (httpdFileBrowse): "${onport:-8888}"
+  ((uri          )): /
+  ((path         )): public
+  ((browse       )): false
+  ((default      )): index.md
+
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /prompt
+  ((execURI      )): | #js
+    var _res = { uuid: genUUID() }
+    var postData = jsonParse(request.files.postData)
+    print("prompt: " + postData.prompt)
+
+    return ow.server.httpd.reply(_res)
+
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /result
+  ((execURI      )): | #js
+    try {
+      var postData = jsonParse(request.files.postData)
+
+      var _res = { content: "", status: "processing" }
+      _res.content = "__coiso__\n"
+
+      if (global.ii.inc() == 5) {
+        _res.content += "\n---\n\n"
+        _res.status = "finished"
+        global.ii.set(0)
+      }
+
+      return ow.server.httpd.reply(_res)
+    } catch(e) {
+      printErr(e)
+      return ow.server.httpd.reply({ error: e.toString() })
+    }
+
+ojob:
+  opacks      :
+  - openaf: 20231222
+  - oJob-common
+  - mini-a
+  catch       : printErrnl("[" + job.name + "] "); if (isDef(exception.javaException)) exception.javaException.printStackTrace(); else printErr(exception)
+  logToConsole: true   # to change when finished
+  daemon      : true
+  loadLibs    :
+  - mini-a.js
+
+jobs:
+# -----------
+- name : Init
+  check:
+    in:
+      something: isString.default(__)
+  exec : |
+    global.ma = new MiniA()
