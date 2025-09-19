@@ -1,6 +1,6 @@
 # OpenAF mini-a
 
-tbc
+Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP stdio or http(s) servers to achieve user-defined goals. It is designed to be simple, flexible, and easy to use.
 
 ## Usage
 
@@ -15,7 +15,7 @@ Examples:
 
 | Provider | Model | OAF_MODEL value |
 |----------|-------|-----------------|
-| OpenAF | gpt-5-mini | ```(type: openai, model: gpt-5-mini-2025-08-07, key: ..., timeout: 900000, temperature: 1)``` |
+| OpenAF | gpt-5-mini | ```(type: openai, model: gpt-5-mini, key: ..., timeout: 900000, temperature: 1)``` |
 | Google | gemini | ```(type: gemini, model: gemini-2.5-flash-lite, key: ..., timeout: 900000, temperature: 0)``` |
 | GitHub | gpt-5-nano | ```(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')``` |
 | Ollama | gemma3n | ```(type: ollama, model: 'gemma3n', url: 'http://ollama.local', timeout: 900000)``` |
