@@ -5,6 +5,7 @@
 | Name       | Description                     | Type        | Location                           |
 |------------|---------------------------------|-------------|------------------------------------|
 | mcp-db     | Database access MCP             | STDIO       | [mcp-db.yaml](mcp-db.yaml)         |
+| mcp-email  | Email sending MCP               | STDIO       | [mcp-email.yaml](mcp-email.yaml)   |
 | mcp-notify | Notification MCP (Pushover)     | STDIO       | [mcp-notify.yaml](mcp-notify.yaml) |
 
 ### Examples
@@ -17,6 +18,12 @@ ojob mini-a.yaml goal="create a 'test' table with all union european countries a
 
 ```bash
 ojob mini-a.yaml goal="build a markdown table with the contents of the 'test' table" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- generate H2 compatible SQL" debug=true
+```
+
+#### mcp-email
+
+```bash
+ojob mini-a.yaml goal="send an email reminding the team about today's standup" mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=bot@example.com user=bot@example.com pass=<app_password> tls=true html=false', timeout: 5000)"
 ```
 
 #### mcp-notify
