@@ -130,7 +130,7 @@ todo:
           } else {
             if (r.event == "👤" || r.event == "⚙️" || r.event == "🖥️" || r.event == "💡" || r.event == "🧠" || r.event == "🤖") {
               if (r.event == "👤") {
-                _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i>\n<br></div>"
+                _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i>\n<br><br></div>"
               } else {
                 _res.content += r.event + " <i>" + r.message + "</i>\n"
               }
