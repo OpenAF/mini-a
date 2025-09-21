@@ -84,7 +84,7 @@ todo:
           if (r.event == "final") {
             _res.status = "finished"
             _res.content += "\n" + r.message + "<br>"
-            delete global.__res[ postData.uuid ]
+            //delete global.__res[ postData.uuid ]
             break
           } else {
             if (r.event == "👤" || r.event == "⚙️" || r.event == "🖥️" || r.event == "💡" || r.event == "🧠" || r.event == "🤖") {

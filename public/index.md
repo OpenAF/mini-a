@@ -152,11 +152,22 @@
         el.id = PREVIEW_ID;
         el.className = 'preview';
         resultsDiv.appendChild(el);
+        scrollResultsToBottom();
     }
 
     function removePreview() {
         const el = document.getElementById(PREVIEW_ID);
         if (el) el.remove();
+    }
+
+    function scrollResultsToBottom() {
+        // Ensure we scroll to show the latest additions
+        try {
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+        } catch (e) {
+            // ignore in unlikely error cases
+            console.error('Scroll error:', e);
+        }
     }
 
     async function handleSubmit() {
@@ -191,6 +202,7 @@
         } catch (error) {
             console.error('Error submitting prompt:', error);
             resultsDiv.innerHTML = '<p style="color: red;">Error submitting prompt. Please try again.</p>';
+            scrollResultsToBottom();
         }
     }
 
@@ -201,6 +213,7 @@
         submitBtn.textContent = 'Stop';
         submitBtn.classList.add('stop');
         resultsDiv.innerHTML = '<p>Processing your request...</p>';
+        scrollResultsToBottom();
         addPreview();
     }
 
@@ -253,6 +266,7 @@
                 // Convert markdown to HTML
                 const htmlContent = converter.makeHtml(data.content || '');
                 resultsDiv.innerHTML = htmlContent;
+                scrollResultsToBottom();
 
                 // Check if finished
                 if (data.status === 'finished') {
@@ -264,7 +278,8 @@
                 
             } catch (error) {
                 console.error('Error fetching results:', error);
-                resultsDiv.innerHTML = '<p style="color: red;">Error fetching results. Please try again.</p>';
+                    resultsDiv.innerHTML = '<p style="color: red;">Error fetching results. Please try again.</p>';
+                    scrollResultsToBottom();
                 stopProcessing();
             }
         }, 1500);
