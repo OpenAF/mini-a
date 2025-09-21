@@ -3,51 +3,71 @@
     document.title = 'Chat Interface';
 </script>
 <style>
-    body {
-        font-family: Arial, sans-serif;
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 20px;
+    :root {
+        --bg: #ffffff;
+        --panel-bg: #f8f9fa;
+        --border: #cccccc;
+        --accent: #007bff;
+        --accent-disabled: #6c757d;
+        --danger: #dc3545;
+        --text: #000000;
+        --preview-1: #e3e6ea;
+        --preview-2: #f5f7f9;
+        --preview-highlight: rgba(255,255,255,0.6);
     }
+
     .chat-container {
         display: flex;
         flex-direction: column;
-        height: 80vh;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
     }
+
     .input-section {
         display: flex;
         gap: 10px;
         margin-bottom: 20px;
     }
+
     #promptInput {
         flex: 1;
         padding: 10px;
-        border: 1px solid #ccc;
+        border: 1px solid var(--border);
         border-radius: 4px;
+        background: transparent;
+        color: inherit;
     }
+
     #submitBtn {
         padding: 10px 20px;
-        background-color: #007bff;
+        background-color: var(--accent);
         color: white;
         border: none;
         border-radius: 4px;
         cursor: pointer;
+        font-size: 14px;
     }
+
     #submitBtn:disabled {
-        background-color: #6c757d;
+        background-color: var(--accent-disabled);
         cursor: not-allowed;
     }
+
     #submitBtn.stop {
-        background-color: #dc3545;
+        background-color: var(--danger);
     }
+
     #resultsDiv {
         flex: 1;
-        border: 1px solid #ccc;
+        border: 1px solid var(--border);
         border-radius: 4px;
         padding: 20px;
         overflow-y: auto;
-        background-color: #f8f9fa;
+        background-color: var(--panel-bg);
+        color: inherit;
     }
+
     /* Anticipation preview styles */
     .preview {
         margin-top: 16px;
@@ -55,10 +75,11 @@
         border-radius: 6px;
         position: relative;
         overflow: hidden;
-        background: linear-gradient(100deg, #e3e6ea 10%, #f5f7f9 40%, #e3e6ea 70%);
+        background: linear-gradient(100deg, var(--preview-1) 10%, var(--preview-2) 40%, var(--preview-1) 70%);
         background-size: 300% 100%;
         animation: shimmer 2s ease-in-out infinite;
     }
+
     .preview::before,
     .preview::after {
         content: '';
@@ -66,9 +87,10 @@
         left: 12px;
         right: 12px;
         height: 10px;
-        background: rgba(255,255,255,0.6);
+        background: var(--preview-highlight);
         border-radius: 4px;
     }
+
     .preview::before { top: 10px; width: 65%; }
     .preview::after { top: 26px; width: 40%; }
     @keyframes shimmer {
@@ -76,19 +98,35 @@
         100% { background-position: -200% 50%; }
     }
 </style>
-
 <div class="chat-container">
+    <div id="resultsDiv">
+        <p>Welcome! Enter a prompt to start chatting.</p>
+    </div>
+    <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
+    <br>
     <div class="input-section">
         <input type="text" id="promptInput" placeholder="Enter your prompt..." disabled>
         <button id="submitBtn">Send</button>
     </div>
-    <div id="resultsDiv">
-        <p>Welcome! Enter a prompt to start chatting.</p>
-    </div>
 </div>
 
 <script>
-    const converter = new showdown.Converter();
+    const converter = new showdown.Converter({
+        "customizedHeaderId"      : true,
+        "parseImgDimensions"      : true,
+        "simplifiedAutoLink"      : true,
+        "strikethrough"           : true,
+        "tables"                  : true,
+        "tablesHeaderId"          : true,
+        "tasklists"               : true,
+        "backslashEscapesHTMLTags": true,
+        "emoji"                   : true,
+        "underline"               : true,
+        "splitAdjacentBlockquotes": true,
+        "simpleLineBreaks"        : true,
+        "ghCompatibleHeaderId"    : true,
+        "disableForced4SpacesIndentedSublists": true
+    });
     let currentSessionUuid = null;
     let pollingInterval = null;
     let isProcessing = false;
@@ -231,5 +269,28 @@
             }
         }, 1500);
     }
+</script>
+
+<script>
+    // Apply dark-mode equivalents when the global __isDark flag is true.
+    (function applyDarkModeIfNeeded() {
+        if (typeof __isDark === 'undefined' || !__isDark) return;
+
+        const root = document.documentElement;
+        const darkVars = {
+            '--bg': '#0b0d11',
+            '--panel-bg': '#0f1115',
+            '--border': '#242629',
+            '--accent': '#3390ff',
+            '--accent-disabled': '#6b6f73',
+            '--danger': '#d9534f',
+            '--text': '#e6e6e6',
+            '--preview-1': '#1a1c20',
+            '--preview-2': '#111215',
+            '--preview-highlight': 'rgba(255,255,255,0.06)'
+        };
+
+        Object.entries(darkVars).forEach(([k, v]) => root.style.setProperty(k, v));
+    })();
 </script>
 

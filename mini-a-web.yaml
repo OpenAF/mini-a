@@ -13,6 +13,7 @@ include:
 todo:
 - Init
 - (httpdStart     ): "${onport:-8888}"
+  ((mapLibs      )): true
 - (httpdFileBrowse): "${onport:-8888}"
   ((uri          )): /
   ((path         )): public
@@ -24,7 +25,49 @@ todo:
   ((execURI      )): | #js
     var _res = { uuid: genUUID() }
     var postData = jsonParse(request.files.postData)
-    print("prompt: " + postData.prompt)
+    if (isUnDef(global.__res[_res.uuid])) {
+      global.__res[ _res.uuid ] = [ ]
+    }
+
+    $doV(() => {
+      var uuid = _res.uuid
+      //if (isUnDef(global.ma)) global.ma = new MiniA()
+      global.ma.setInteractionFn((e, m) => {
+          var _e = ""
+          switch(e) {
+          case "user"   : _e = "👤"; break
+          case "exec"   : _e = "⚙️"; break
+          case "shell"  : _e = "🖥️"; break
+          case "think"  : _e = "💡"; break
+          case "final"  : _e = "🏁"; break
+          case "input"  : _e = "➡️"; break
+          case "output" : _e = "⬅️"; break
+          case "thought": _e = "🧠"; break
+          case "think"  : _e = "💡"; break
+          case "size"   : _e = "📏"; break
+          case "rate"   : _e = "⏳"; break
+          case "mcp"    : _e = "🤖"; break
+          case "done"   : _e = "✅"; break
+          case "error"  : _e = "❌"; break
+          case "libs"   : _e = "📚"; break
+          case "info"   : _e = "ℹ️"; break
+          case "load"   : _e = "📂"; break
+          case "mcp"    : _e = "🤖"; break
+          case "warn"   : _e = "⚠️"; break
+          default       : _e = e
+          }
+          
+          global.__res[uuid].push({ event: _e, message: m })
+          log("[" + uuid + "] " + _e + " " + m)
+      })
+      var _rma = global.ma.start({
+        goal    : postData.prompt,
+        raw     : true
+      })
+      global.__res[uuid].push( { event: "final", message: _rma } )
+      log("[" + uuid + "] " + _rma)
+    })
+    //print("prompt: " + postData.prompt)
 
     return ow.server.httpd.reply(_res)
 
@@ -35,13 +78,32 @@ todo:
       var postData = jsonParse(request.files.postData)
 
       var _res = { content: "", status: "processing" }
-      _res.content = "__coiso__\n"
+      if (isDef(global.__res[ postData.uuid ])) {
+        for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
+          var r = global.__res[ postData.uuid ][i]
+          if (r.event == "final") {
+            _res.status = "finished"
+            _res.content += "\n" + r.message + "<br>"
+            delete global.__res[ postData.uuid ]
+            break
+          } else {
+            if (r.event == "👤" || r.event == "⚙️" || r.event == "🖥️" || r.event == "💡" || r.event == "🧠" || r.event == "🤖") {
+              if (r.event == "👤") {
+                _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i><br><br></div>"
+              } else {
+                _res.content += r.event + " <i>" + r.message + "</i><br>"
+              }
+            }
+          }
+        }
+      }
+      /*_res.content = "__coiso__\n"
 
       if (global.ii.inc() == 5) {
         _res.content += "\n---\n\n"
         _res.status = "finished"
         global.ii.set(0)
-      }
+      }*/
 
       return ow.server.httpd.reply(_res)
     } catch(e) {
@@ -66,5 +128,7 @@ jobs:
   check:
     in:
       something: isString.default(__)
-  exec : |
+  exec : | #js
+    global.__res = {}
     global.ma = new MiniA()
+    global.ma.init()
