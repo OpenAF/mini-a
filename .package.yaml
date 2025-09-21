@@ -21,7 +21,7 @@ name: mini-a
 main: ''
 mainJob: ''
 license: Apache 2.0 license
-version: '20250918'
+version: '20250920'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -35,6 +35,7 @@ files:
 - README.md
 - mcps/README.md
 - mcps/mcp-db.yaml
+- mcps/mcp-email.yaml
 - mcps/mcp-notify.yaml
 - mini-a-web.yaml
 - mini-a.js
@@ -49,8 +50,9 @@ filesHash:
   EXTERNAL-MCPS.md: 0eca01e82e2b4f161d7d50463b0977ed31e4d8df
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 96eb82df76fab7475055e92efaeed81bce9bd016
-  mcps/README.md: 42acf6cc1c1c9a5f1319fde6c8d1cadf2ab53ade
+  mcps/README.md: 66152fb9bcee901891ae39ac2b399e431aefe29f
   mcps/mcp-db.yaml: d90c78a038fa67b340531f86fdc6fccd47c9ce55
+  mcps/mcp-email.yaml: 7d950981f900f390fe6f9cd4d850453b288ec490
   mcps/mcp-notify.yaml: 01743e02dbb9b2873316b4d958c4d1433b6bf25a
   mini-a-web.yaml: 0f21bbfb4f41789cff8d33e9f0be41f1c30f3842
   mini-a.js: d47615cf230f34105913b783befb1e12d30f5e8d

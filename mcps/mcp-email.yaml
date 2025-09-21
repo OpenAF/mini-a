@@ -52,9 +52,6 @@ ojob:
   logToConsole: false   # to change when finished
   argsFromEnvs: true
   daemon      : true
-  unique      :
-    pidFile     : .mcp-email.pid
-    killPrevious: true
 
 include:
 - oJobMCP.yaml
@@ -75,9 +72,9 @@ jobs:
       debug     : toBoolean.isBoolean.default(false)
   exec : | #js
     plugin("Email")
-    global.emailFrom        = args.from
+    global.emailFrom         = args.from
     global.emailContainsHTML = args.html
-    global.emailClient      = new Email(args.smtpserver, args.from, args.ssl, args.tls, args.html)
+    global.emailClient       = new Email(args.smtpserver, args.from, args.ssl, args.tls, args.html)
 
     if (isDef(args.port)) {
       global.emailClient.setPort(args.port)
@@ -154,7 +151,7 @@ jobs:
     ((fns    )):
       sendEmail: Send email
 
-# ----------------
+# -----------------
 - name : Send email
   check:
     in:
