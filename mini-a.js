@@ -299,6 +299,15 @@ MiniA.prototype.init = function(args) {
   this._isInitialized = true
 }
 
+MiniA.prototype.clear = function() {
+  this.llm.getGPT().setConversation([])
+}
+
+MiniA.prototype.set = function(aConversation) {
+  _$(aConversation, "aConversation").isArray().$_()
+  this.llm.getGPT().setConversation(aConversation)
+}
+
 /**
  * <odoc>
  * <key>MinA.start(args) : Object</key>
@@ -435,8 +444,8 @@ MiniA.prototype.start = function(args) {
 
       if (action != "think") {
         if (isMap(msg) || isArray(msg)) {
-          var _msg = thought || msg.think || af.toCSLON(msg) || "(no thought)"
-          if (isObject(_msg)) _msg = af.toCSLON(_msg)
+          var _msg = thought || msg.think || af.toSLON(msg) || "(no thought)"
+          if (isObject(_msg)) _msg = af.toSLON(_msg)
           this._fnI("thought", `${_msg}`)
         } else {
           this._fnI("thought", `${msg}`)
@@ -470,7 +479,7 @@ MiniA.prototype.start = function(args) {
           context.push(`[OBS ${step + 1}] (${origAction}) missing or invalid 'params' from model.`)
           continue
         }
-        this._fnI("exec", `Executing action '${origAction}' with params: ${af.toCSLON(msg.params)}`)
+        this._fnI("exec", `Executing action '${origAction}' with params: ${af.toSLON(msg.params)}`)
         
         // Find the correct MCP connection for this tool
         var connectionIndex = this.mcpToolToConnection[origAction]
@@ -489,10 +498,10 @@ MiniA.prototype.start = function(args) {
         } else if (isDef(toolOutput) && isString(toolOutput)) {
           // keep as is
         } else {
-          toolOutput = af.toCSLON(toolOutput)
+          toolOutput = af.toSLON(toolOutput)
         }
         this._fnI("done", `Action '${origAction}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
-        context.push(`[ACT ${step + 1}] ${origAction}: ${af.toCSLON(msg.params)}`)
+        context.push(`[ACT ${step + 1}] ${origAction}: ${af.toSLON(msg.params)}`)
         context.push(`[OBS ${step + 1}] ${stringify(toolOutput, __, "") || "(no output)"}`)
         continue
       }

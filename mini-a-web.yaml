@@ -12,6 +12,7 @@ include:
 
 todo:
 - Init
+- Periodic cleanup of old sessions
 - (httpdStart     ): "${onport:-8888}"
   ((mapLibs      )): true
 - (httpdFileBrowse): "${onport:-8888}"
@@ -21,12 +22,47 @@ todo:
   ((default      )): index.md
 
 - (httpdService   ): "${onport:-8888}"
+  ((uri          )): /ping
+  ((execURI      )): | #js
+    return ow.server.httpd.reply({ status: "ok" })
+
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /clear
+  ((execURI      )): | #js
+    try {
+      var postData = jsonParse(request.files.postData)
+      if (isDef(global.__res[ postData.uuid ])) {
+        delete global.__res[ postData.uuid ]
+      }
+      if (isDef(global.__conversations[ postData.uuid ])) {
+        delete global.__conversations[ postData.uuid ]
+      }
+      if (isDef(global.__lastActivity[ postData.uuid ])) {
+        delete global.__lastActivity[ postData.uuid ]
+      }
+      return ow.server.httpd.reply({ status: "cleared" })
+    } catch(e) {
+      printErr(e)
+      return ow.server.httpd.reply({ error: e.toString() })
+    }
+
+- (httpdService   ): "${onport:-8888}"
   ((uri          )): /prompt
   ((execURI      )): | #js
-    var _res = { uuid: genUUID() }
+    var _res = {}
     var postData = jsonParse(request.files.postData)
+    if (isDef(postData.uuid)) {
+      _res.uuid = postData.uuid
+    } else {
+      _res.uuid = genUUID()
+    }
+
     if (isUnDef(global.__res[_res.uuid])) {
       global.__res[ _res.uuid ] = [ ]
+      global.__conversations[ _res.uuid ] = []
+      global.__lastActivity[ _res.uuid ] = Date.now()
+    } else {
+      global.__lastActivity[ _res.uuid ] = Date.now()
     }
 
     $doV(() => {
@@ -60,10 +96,11 @@ todo:
           global.__res[uuid].push({ event: _e, message: m })
           log("[" + uuid + "] " + _e + " " + m)
       })
-      var _rma = global.ma.start({
-        goal    : postData.prompt,
-        raw     : true
-      })
+      //global.ma.setConversation(global.__conversations[ uuid ])
+      var _rma = global.ma.start(merge(global.global.maArgs, {
+        goal        : postData.prompt,
+        raw         : true
+      }))
       global.__res[uuid].push( { event: "final", message: _rma } )
       log("[" + uuid + "] " + _rma)
     })
@@ -79,31 +116,28 @@ todo:
 
       var _res = { content: "", status: "processing" }
       if (isDef(global.__res[ postData.uuid ])) {
+        // Update last activity
+        global.__lastActivity[ postData.uuid ] = Date.now()
+
+        // Append all messages to content
         for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
           var r = global.__res[ postData.uuid ][i]
           if (r.event == "final") {
-            _res.status = "finished"
-            _res.content += "\n" + r.message + "<br>"
+            if (i == global.__res[ postData.uuid ].length - 1) _res.status = "finished"
+            _res.content += "\n" + r.message + "\n"
             //delete global.__res[ postData.uuid ]
-            break
+            //break
           } else {
             if (r.event == "👤" || r.event == "⚙️" || r.event == "🖥️" || r.event == "💡" || r.event == "🧠" || r.event == "🤖") {
               if (r.event == "👤") {
-                _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i><br><br></div>"
+                _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i>\n<br></div>"
               } else {
-                _res.content += r.event + " <i>" + r.message + "</i><br>"
+                _res.content += r.event + " <i>" + r.message + "</i>\n"
               }
             }
           }
         }
       }
-      /*_res.content = "__coiso__\n"
-
-      if (global.ii.inc() == 5) {
-        _res.content += "\n---\n\n"
-        _res.status = "finished"
-        global.ii.set(0)
-      }*/
 
       return ow.server.httpd.reply(_res)
     } catch(e) {
@@ -130,5 +164,32 @@ jobs:
       something: isString.default(__)
   exec : | #js
     global.__res = {}
+    global.__conversations = {}
+    global.__lastActivity = { }
+    global.maArgs = {
+      mcp: "(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
+    }
     global.ma = new MiniA()
-    global.ma.init()
+    global.ma.init( global.maArgs )
+
+# ---------------------------------------
+- name : Periodic cleanup of old sessions
+  type : periodic
+  typeArgs:
+    interval: 300000  # every 5 minutes
+  exec : | #js
+    var now = Date.now()
+    var toDelete = []
+    for (var uuid in global.__lastActivity) {
+      // If no activity for more than 5 minutes, delete session
+      if (now - global.__lastActivity[ uuid ] > 300000) {
+        toDelete.push(uuid)
+      }
+    }
+    for (var i = 0; i < toDelete.length; i++) {
+      var uuid = toDelete[i]
+      delete global.__lastActivity[ uuid ]
+      delete global.__res[ uuid ]
+      delete global.__conversations[ uuid ]
+      log("Cleaned up session " + uuid)
+    }
