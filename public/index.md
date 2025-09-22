@@ -221,7 +221,7 @@
             }
 
         // Reset results area to the default welcome message and remove preview
-        resultsDiv.innerHTML = '<p>Welcome! Enter a prompt to start chatting.</p>';
+        resultsDiv.innerHTML = '<p></p>';
         removePreview();
 
         // Clear the in-memory global UUID (fresh restart)

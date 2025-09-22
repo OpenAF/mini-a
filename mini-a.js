@@ -191,18 +191,18 @@ MiniA.prototype.init = function(args) {
   args = _$(args, "args").isMap().default({})
 
   args.mcp = _$(args.mcp, "args.mcp").isString().default(__)
-  args.verbose = _$(args.verbose, "args.verbose").isBoolean().default(false)
+  args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
   args.rtm = _$(args.rtm, "args.rtm").isNumber().default(__) // rate limit (calls per minute)
   args.maxsteps = _$(args.maxsteps, "args.maxsteps").isNumber().default(25)
-  args.readwrite = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
-  args.debug = _$(args.debug, "args.debug").isBoolean().default(false)
-  args.useshell = _$(args.useshell, "args.useshell").isBoolean().default(false)
+  args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
+  args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
+  args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
   args.knowledge = _$(args.knowledge, "args.knowledge").isString().default("")
   args.outfile = _$(args.outfile, "args.outfile").isString().default(__)
   args.libs = _$(args.libs, "args.libs").isString().default("")
   args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
-  args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
-  args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
+  args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
+  args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
 
   // Load additional libraries if specified
   if (isDef(args.libs) && args.libs.length > 0) {
