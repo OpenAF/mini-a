@@ -65,14 +65,6 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
     `
 
   this._fnI = this.defaultInteractionFn
-
-  // Using OAF_MODEL env var for model selection
-  if (isUnDef(getEnv("OAF_MODEL"))) {
-    logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
-    return
-  }
-  if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
-  this.llm = $llm(this._oaf_model)
 }
 
 /**
@@ -219,6 +211,14 @@ MiniA.prototype.init = function(args) {
       loadLib(lib)
     })
   }
+
+  // Using OAF_MODEL env var for model selection
+  if (isUnDef(getEnv("OAF_MODEL"))) {
+    logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
+    return
+  }
+  if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
+  this.llm = $llm(this._oaf_model)
 
   // Load conversation history if provided
   if (isDef(args.conversation) && io.fileExists(args.conversation)) {

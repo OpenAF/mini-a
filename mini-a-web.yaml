@@ -177,9 +177,7 @@ jobs:
     global.__conversations = {}
     global.__lastActivity = { }
     global.__showExecs = args.showExecs
-    global.maArgs = merge(args, {
-      mcp: "(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
-    })
+    global.maArgs = merge(args, {})
     global.ma = new MiniA()
     global.ma.init( global.maArgs )
 
