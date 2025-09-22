@@ -115,7 +115,7 @@
 </style>
 <div class="chat-container">
     <div id="resultsDiv">
-        <p>Welcome! Enter a prompt to start chatting.</p>
+        <p></p>
     </div>
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
     <br>

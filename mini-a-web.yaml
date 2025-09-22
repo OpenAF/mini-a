@@ -6,6 +6,10 @@ help:
     desc     : Port to run the HTTP server on
     example  : "8888"
     mandatory: false
+  - name     : showExecs
+    desc     : Show executed commands in the interaction
+    example  : "false"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -78,7 +82,7 @@ todo:
           case "final"  : _e = "🏁"; break
           case "input"  : _e = "➡️"; break
           case "output" : _e = "⬅️"; break
-          case "thought": _e = "🧠"; break
+          case "thought": _e = "💭"; break
           case "think"  : _e = "💡"; break
           case "size"   : _e = "📏"; break
           case "rate"   : _e = "⏳"; break
@@ -128,7 +132,7 @@ todo:
             //delete global.__res[ postData.uuid ]
             //break
           } else {
-            if (r.event == "👤" || r.event == "⚙️" || r.event == "🖥️" || r.event == "💡" || r.event == "🧠" || r.event == "🤖") {
+            if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🤖") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i>\n<br><br></div>"
               } else {
@@ -153,22 +157,29 @@ ojob:
   catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
   logToConsole: true   # to change when finished
   daemon      : true
+  argsFromEnvs: true
   loadLibs    :
   - mini-a.js
+  channels    :
+    create:
+    - name: conversations
+    - name: lastActivity
+    - name: results
 
 jobs:
 # -----------
 - name : Init
   check:
     in:
-      something: isString.default(__)
+      showExecs: toBoolean().isBoolean().default(false)
   exec : | #js
     global.__res = {}
     global.__conversations = {}
     global.__lastActivity = { }
-    global.maArgs = {
+    global.__showExecs = args.showExecs
+    global.maArgs = merge(args, {
       mcp: "(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
-    }
+    })
     global.ma = new MiniA()
     global.ma.init( global.maArgs )
 

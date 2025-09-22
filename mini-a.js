@@ -92,7 +92,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "final"  : _e = "🏁"; break
   case "input"  : _e = "➡️"; break
   case "output" : _e = "⬅️"; break
-  case "thought": _e = "🧠"; break
+  case "thought": _e = "💭"; break
   case "think"  : _e = "💡"; break
   case "size"   : _e = "📏"; break
   case "rate"   : _e = "⏳"; break
@@ -437,10 +437,10 @@ MiniA.prototype.start = function(args) {
         continue
       }
 
-      if (args.verbose) {
+      /*if (args.verbose) {
         this._fnI("", `--- step ${step + 1} ---`)
         this._fnI("", `\n${isObject(msg) ? printTree(msg) : msg}`)
-      }
+      }*/
 
       if (action != "think") {
         if (isMap(msg) || isArray(msg)) {
@@ -508,9 +508,9 @@ MiniA.prototype.start = function(args) {
 
       // Action 'final': print answer and exit
       if (action == "final") {
-        if (args.verbose && thought) {
+        /*if (args.verbose && thought) {
           this._fnI("", `[THOUGHT ${step + 1}] ${thought}`)
-        }
+        }*/
         
         if (answer.trim().startsWith("```") && answer.trim().endsWith("```")) {
           // Remove code block markers if present
