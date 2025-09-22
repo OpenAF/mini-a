@@ -101,7 +101,6 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "libs"   : _e = "📚"; break
   case "info"   : _e = "ℹ️"; break
   case "load"   : _e = "📂"; break
-  case "mcp"    : _e = "🤖"; break
   case "warn"   : _e = "⚠️"; break
   default       : _e = e
   }
