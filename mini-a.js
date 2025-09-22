@@ -93,7 +93,6 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "input"  : _e = "➡️"; break
   case "output" : _e = "⬅️"; break
   case "thought": _e = "💭"; break
-  case "think"  : _e = "💡"; break
   case "size"   : _e = "📏"; break
   case "rate"   : _e = "⏳"; break
   case "mcp"    : _e = "🤖"; break
