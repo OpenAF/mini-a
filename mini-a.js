@@ -6,23 +6,24 @@
  * </odoc>
  */
 var MiniA = function() {
-    this._SYSTEM_PROMPT = `
-You are a goal-oriented agent. Work step-by-step toward your goal. No user interaction is possible.
+  this._isInitialized = false
+
+  this._SYSTEM_PROMPT = `
+You are a goal-oriented agent running in background. Work step-by-step toward your goal. No user interaction or feedback is possible.
 
 RESPONSE FORMAT: Always respond with exactly one valid JSON object:
 {
     "thought": "your reasoning for this step",
     "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final",{{#if useshell}}
     "command": "required when action=shell: POSIX command to execute",{{/if}}
-    "answer": "required when action=final: your complete answer {{#if isMachine}}as JSON{{/if}}",
+    "answer": "required when action=final: your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}",
     "params": "required when action={{#if actionsList}}{{actionsList}}{{/if}}: JSON object with action parameters"
 }
 
 {{#if actionsList}}
 AVAILABLE ACTIONS:
 {{#each actionsdesc}}
-• {{name}}: {{description}}
-    {{#if inputSchema.properties}}Parameters: {{#each ($keys inputSchema.properties)}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}{{/if}}
+• {{name}}: {{description}}{{#if inputSchema.properties}}(parameters: {{{$stringifyInLine inputSchema.properties}}}){{/if}}
 {{/each}}
 
 {{/if~}}
@@ -34,7 +35,7 @@ ACTION USAGE:
 
 RULES:
 1. Always include "thought" and "action" fields
-2. Be concise - keep responses under 120 tokens
+2. Be concise
 3. Use tools only when necessary
 4. Work incrementally toward your goal
 5. Respond with valid JSON only - no extra text
@@ -45,7 +46,7 @@ CONTEXT:
 {{/if}}
     `
 
-    this._STEP_PROMPT_TEMPLATE = `
+  this._STEP_PROMPT_TEMPLATE = `
 GOAL: {{{goal}}}
 
 {{#if context}}PROGRESS SO FAR:
@@ -54,7 +55,7 @@ GOAL: {{{goal}}}
 {{/if}}What's your next step? Respond with a single JSON object following the schema.
     `
 
-    this._FINAL_PROMPT = `
+  this._FINAL_PROMPT = `
 GOAL: {{{goal}}}
 
 PROGRESS: {{{context}}}
@@ -63,7 +64,15 @@ Maximum steps reached. Provide your best final answer now.
 Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete answer"}
     `
 
-    this._fnI = this.defaultInteractionFn
+  this._fnI = this.defaultInteractionFn
+
+  // Using OAF_MODEL env var for model selection
+  if (isUnDef(getEnv("OAF_MODEL"))) {
+    logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
+    return
+  }
+  if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
+  this.llm = $llm(this._oaf_model)
 }
 
 /**
@@ -76,14 +85,14 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
 MiniA.prototype.defaultInteractionFn = function(e, m) {
   var _e = ""
   switch(e) {
+  case "user"   : _e = "👤"; break
   case "exec"   : _e = "⚙️"; break
   case "shell"  : _e = "🖥️"; break
   case "think"  : _e = "💡"; break
   case "final"  : _e = "🏁"; break
   case "input"  : _e = "➡️"; break
   case "output" : _e = "⬅️"; break
-  case "thought": _e = "🧠"; break
-  case "think"  : _e = "💡"; break
+  case "thought": _e = "💭"; break
   case "size"   : _e = "📏"; break
   case "rate"   : _e = "⏳"; break
   case "mcp"    : _e = "🤖"; break
@@ -92,7 +101,6 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "libs"   : _e = "📚"; break
   case "info"   : _e = "ℹ️"; break
   case "load"   : _e = "📂"; break
-  case "mcp"    : _e = "🤖"; break
   case "warn"   : _e = "⚠️"; break
   default       : _e = e
   }
@@ -170,6 +178,134 @@ MiniA.prototype._runCommand = function(args) {
     return args
 }
 
+MiniA.prototype._numberInWords = num => {
+    const words = ["zero","one","two","three","four","five","six","seven","eight","nine","ten",
+                  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
+                  "eighteen","nineteen","twenty"]
+    const tens = { 20: "twenty", 30: "thirty", 40: "forty", 50: "fifty" }
+
+    if (num >= 0 && num <= 20) return words[num]
+    if (num > 20 && num <= 50) {
+        const ten = Math.floor(num / 10) * 10
+        const one = num % 10
+        return one === 0 ? tens[ten] : `${tens[ten]}-${words[one]}`
+    }
+    return num.toString()
+}
+
+MiniA.prototype.init = function(args) {
+  if (this._isInitialized) return
+
+  args = _$(args, "args").isMap().default({})
+
+  args.mcp = _$(args.mcp, "args.mcp").isString().default(__)
+  args.verbose = _$(args.verbose, "args.verbose").isBoolean().default(false)
+  args.rtm = _$(args.rtm, "args.rtm").isNumber().default(__) // rate limit (calls per minute)
+  args.maxsteps = _$(args.maxsteps, "args.maxsteps").isNumber().default(25)
+  args.readwrite = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
+  args.debug = _$(args.debug, "args.debug").isBoolean().default(false)
+  args.useshell = _$(args.useshell, "args.useshell").isBoolean().default(false)
+  args.knowledge = _$(args.knowledge, "args.knowledge").isString().default("")
+  args.outfile = _$(args.outfile, "args.outfile").isString().default(__)
+  args.libs = _$(args.libs, "args.libs").isString().default("")
+  args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
+  args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
+  args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
+
+  // Load additional libraries if specified
+  if (isDef(args.libs) && args.libs.length > 0) {
+    args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
+      this._fnI("libs", `Loading library: ${lib}...`)
+      loadLib(lib)
+    })
+  }
+
+  // Load conversation history if provided
+  if (isDef(args.conversation) && io.fileExists(args.conversation)) {
+    this._fnI("load", `Loading conversation history from ${args.conversation}...`)
+    this.llm.getGPT().setConversation( io.readFileJSON(args.conversation) )
+  }
+
+  // Using MCP (single or multiple connections)
+  var needMCPInit = false
+  if (isUnDef(this.mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
+    needMCPInit = true    
+    this.mcpConnections = []
+    this.mcpTools = []
+    this.mcpToolNames = []
+    this.mcpToolToConnection = {}
+  }
+  if (isDef(args.mcp) && needMCPInit) {
+    var mcpConfigs = af.fromJSSLON(args.mcp)
+    
+    // Handle both single object and array of MCP configurations
+    if (!isArray(mcpConfigs)) {
+      mcpConfigs = [mcpConfigs]
+    }
+
+    this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
+
+    // Initialize each MCP connection
+    mcpConfigs.forEach((mcpConfig, index) => {
+      try {
+        var mcp = $mcp(mcpConfig)
+        mcp.initialize()
+        sleep(100, true)
+        
+        var tools = mcp.listTools()
+        if (isDef(tools) && isDef(tools.tools)) {
+          tools = tools.tools
+        } else {
+          throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
+        }
+        
+        // Store connection and map tools to this connection
+        this.mcpConnections.push(mcp)
+        tools.forEach(tool => {
+          this.mcpTools.push(tool)
+          this.mcpToolNames.push(tool.name)
+          this.mcpToolToConnection[tool.name] = index
+        })
+
+        this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
+      } catch (e) {
+        logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
+        throw e
+      }
+    })
+
+    this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+  }
+
+  // Provide system prompt instructions
+  if (args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
+
+  if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
+    actionsWordNumber: this._numberInWords(1 + this.mcpTools.length),
+    actionsList      : this.mcpTools.map(r => r.name).join(" | "),
+    useshell         : args.useshell,
+    knowledge        : args.knowledge.trim(),
+    actionsdesc      : this.mcpTools,
+    isMachine        : (isDef(args.__format) && args.__format != "md")
+  })
+  llm = this.llm.withInstructions(this._systemInst)
+  this._fnI("size", `System prompt size ${ow.format.toBytesAbbreviation(this._systemInst.length)}`)
+  if (args.debug) {
+    print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
+  }
+
+  this._isInitialized = true
+}
+
+MiniA.prototype.clear = function() {
+  this.llm.getGPT().setConversation([])
+}
+
+MiniA.prototype.set = function(aConversation) {
+  _$(aConversation, "aConversation").isArray().$_()
+  this.llm.getGPT().setConversation(aConversation)
+}
+
 /**
  * <odoc>
  * <key>MinA.start(args) : Object</key>
@@ -206,6 +342,8 @@ MiniA.prototype.start = function(args) {
     args.outfile = _$(args.outfile, "args.outfile").isString().default(__)
     args.libs = _$(args.libs, "args.libs").isString().default("")
     args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
+    args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
+    args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -213,23 +351,7 @@ MiniA.prototype.start = function(args) {
     this._alwaysExec = args.readwrite
     if (isDef(args.outfile) && isUnDef(args.__format)) args.__format = "json"
     if (isUnDef(args.__format)) args.__format = "md"
-    if (args.__format == "md") args.knowledge = "give final answer in markdown\n\n" + args.knowledge
-
-    // Helper to convert numbers to words (0-50)
-    const numberInWords = num => {
-        const words = ["zero","one","two","three","four","five","six","seven","eight","nine","ten",
-                      "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
-                      "eighteen","nineteen","twenty"]
-        const tens = { 20: "twenty", 30: "thirty", 40: "forty", 50: "fifty" }
-
-        if (num >= 0 && num <= 20) return words[num]
-        if (num > 20 && num <= 50) {
-            const ten = Math.floor(num / 10) * 10
-            const one = num % 10
-            return one === 0 ? tens[ten] : `${tens[ten]}-${words[one]}`
-        }
-        return num.toString()
-    }
+    //if (args.__format == "md") args.knowledge = "give final answer in markdown without mentioning it\n\n" + args.knowledge
 
     // Rate limiting helper
     var addCall = () => {
@@ -253,87 +375,11 @@ MiniA.prototype.start = function(args) {
       }
     }
 
-    // Load additional libraries if specified
-    args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-      this._fnI("libs", `Loading library: ${lib}...`)
-      loadLib(lib)
-    })
+    this._fnI("user", `${args.goal}`)
 
-    // Using OAF_MODEL env var for model selection
-    if (isUnDef(getEnv("OAF_MODEL"))) {
-      logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
-      return
-    }
-    var _oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
-    var llm = $llm(_oaf_model)
-    this._fnI("info", `Using model: ${_oaf_model.model} (${_oaf_model.type})`)
+    this.init(args)
 
-    // Load conversation history if provided
-    if (isDef(args.conversation) && io.fileExists(args.conversation)) {
-      this._fnI("load", `Loading conversation history from ${args.conversation}...`)
-      llm.getGPT().setConversation( io.readFileJSON(args.conversation) )
-    }
-
-    // Using MCP (single or multiple connections)
-    var mcpConnections = [], mcpTools = [], mcpToolNames = [], mcpToolToConnection = {}
-    if (isDef(args.mcp)) {
-      var mcpConfigs = af.fromJSSLON(args.mcp)
-      
-      // Handle both single object and array of MCP configurations
-      if (!isArray(mcpConfigs)) {
-        mcpConfigs = [mcpConfigs]
-      }
-
-      this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
-
-      // Initialize each MCP connection
-      mcpConfigs.forEach((mcpConfig, index) => {
-        try {
-          var mcp = $mcp(mcpConfig)
-          mcp.initialize()
-          sleep(100, true)
-          
-          var tools = mcp.listTools()
-          if (isDef(tools) && isDef(tools.tools)) {
-            tools = tools.tools
-          } else {
-            throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
-          }
-          
-          // Store connection and map tools to this connection
-          mcpConnections.push(mcp)
-          tools.forEach(tool => {
-            mcpTools.push(tool)
-            mcpToolNames.push(tool.name)
-            mcpToolToConnection[tool.name] = index
-          })
-
-          this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
-        } catch (e) {
-          logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
-          throw e
-        }
-      })
-
-      this._fnI("done", `Total MCP tools available: ${mcpTools.length}`)
-    }
-
-    // Provide system prompt instructions
-    if (args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
-
-    var _systemInst = $t(this._SYSTEM_PROMPT.trim(), {
-      actionsWordNumber: numberInWords(1 + mcpTools.length),
-      actionsList      : mcpTools.map(r => r.name).join(" | "),
-      useshell         : args.useshell,
-      knowledge        : args.knowledge.trim(),
-      actionsdesc      : mcpTools,
-      isMachine        : (isDef(args.__format))
-    })
-    llm = llm.withInstructions(_systemInst)
-    this._fnI("size", `System prompt size ${ow.format.toBytesAbbreviation(_systemInst.length)}`)
-    if (args.debug) {
-      print( ow.format.withSideLine(">>>\n" + _systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
-    }
+    this._fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
     var context = [], maxSteps = args.maxsteps
     // Context will hold the history of thoughts, actions, and observations
@@ -351,11 +397,11 @@ MiniA.prototype.start = function(args) {
       if (args.debug) {
         print( ow.format.withSideLine(">>>\n" + prompt + ">>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      var rmsg = llm.prompt(prompt)
+      var rmsg = this.llm.prompt(prompt)
       this._fnI("output", "Model responded.")
 
       // Store history
-      if (isDef(args.conversation)) io.writeFileJSON(args.conversation, llm.getGPT().getConversation())
+      if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
       
       var msg
       if (isString(rmsg)) {
@@ -389,16 +435,16 @@ MiniA.prototype.start = function(args) {
         continue
       }
 
-      if (args.verbose) {
+      /*if (args.verbose) {
         this._fnI("", `--- step ${step + 1} ---`)
         this._fnI("", `\n${isObject(msg) ? printTree(msg) : msg}`)
-      }
+      }*/
 
       if (action != "think") {
         if (isMap(msg) || isArray(msg)) {
-          var _msg = thought || msg.think || af.toCSLON(msg) || "(no thought)"
-          if (isObject(_msg)) _msg = af.toCSLON(_msg)
-          this._fnI("thought", `Thought: ${_msg}`)
+          var _msg = thought || msg.think || af.toSLON(msg) || "(no thought)"
+          if (isObject(_msg)) _msg = af.toSLON(_msg)
+          this._fnI("thought", `${_msg}`)
         } else {
           this._fnI("thought", `${msg}`)
         }
@@ -409,7 +455,7 @@ MiniA.prototype.start = function(args) {
 
       // Action 'think': just add thought to context
       if (action == "think") {
-        this._fnI("think", `Thinking: ${thought || "(no thought)"}`)
+        this._fnI("think", `${thought || "(no thought)"}`)
         context.push(`[THOUGHT ${step + 1}] ${thought || "no thought"}`)
         continue
       }
@@ -426,18 +472,18 @@ MiniA.prototype.start = function(args) {
         continue
       }
 
-      if (mcpToolNames.indexOf(origAction) >= 0) {
+      if (this.mcpToolNames.indexOf(origAction) >= 0) {
         if (isDef(msg.params) && !isMap(msg.params)) {
           context.push(`[OBS ${step + 1}] (${origAction}) missing or invalid 'params' from model.`)
           continue
         }
-        this._fnI("exec", `Executing action '${origAction}' with params: ${af.toCSLON(msg.params)}`)
+        this._fnI("exec", `Executing action '${origAction}' with params: ${af.toSLON(msg.params)}`)
         
         // Find the correct MCP connection for this tool
-        var connectionIndex = mcpToolToConnection[origAction]
-        var mcp = mcpConnections[connectionIndex]
-        var tool = mcpTools.find(t => t.name == origAction)
-        
+        var connectionIndex = this.mcpToolToConnection[origAction]
+        var mcp = this.mcpConnections[connectionIndex]
+        //var tool = this.mcpTools.find(t => t.name == origAction)
+
         var toolOutput = mcp.callTool(origAction, msg.params)
         if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
           //toolOutput = toolOutput.content.map(r => jsonParse(r.text, __, __, true))
@@ -450,19 +496,19 @@ MiniA.prototype.start = function(args) {
         } else if (isDef(toolOutput) && isString(toolOutput)) {
           // keep as is
         } else {
-          toolOutput = af.toCSLON(toolOutput)
+          toolOutput = af.toSLON(toolOutput)
         }
         this._fnI("done", `Action '${origAction}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
-        context.push(`[ACT ${step + 1}] ${origAction}: ${af.toCSLON(msg.params)}`)
+        context.push(`[ACT ${step + 1}] ${origAction}: ${af.toSLON(msg.params)}`)
         context.push(`[OBS ${step + 1}] ${stringify(toolOutput, __, "") || "(no output)"}`)
         continue
       }
 
       // Action 'final': print answer and exit
       if (action == "final") {
-        if (args.verbose && thought) {
+        /*if (args.verbose && thought) {
           this._fnI("", `[THOUGHT ${step + 1}] ${thought}`)
-        }
+        }*/
         
         if (answer.trim().startsWith("```") && answer.trim().endsWith("```")) {
           // Remove code block markers if present
@@ -478,7 +524,11 @@ MiniA.prototype.start = function(args) {
             return jsonParse(answer, __, __, true)
           }
           this._fnI("final", `Final answer determined. Goal achieved.`)
-          return $o(answer || "(no answer)", args, __, true)
+          if (args.raw) {
+            return answer || "(no answer)" 
+          } else {
+            return $o(answer || "(no answer)", args, __, true)
+          }
         }
         return
       }
@@ -496,10 +546,10 @@ MiniA.prototype.start = function(args) {
     this._fnI("warn", `Reached max steps. Asking for final answer...`)
     // Get final answer from model
     addCall()
-    var res = jsonParse(llm.prompt(finalPrompt), __, __, true)
+    var res = jsonParse(this.llm.prompt(finalPrompt), __, __, true)
 
     // Store history
-    if (isDef(args.conversation)) io.writeFileJSON(args.conversation, llm.getGPT().getConversation())
+    if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
     
     // Extract final answer
     if (isDef(res.answer) && res.answer.trim().startsWith("```") && res.answer.trim().endsWith("```")) {
@@ -516,6 +566,10 @@ MiniA.prototype.start = function(args) {
       if (isString(res.answer) && res.answer.match(/^(\{|\[).+(\}|\])$/m) && args.__format == "json") {
         return jsonParse(res.answer, __, __, true)
       }
-      return $o(res.answer || "(no final answer)", args, __, true)
+      if (args.raw) {
+        return res.answer || "(no answer)" 
+      } else {
+        return $o(res.answer || "(no final answer)", args, __, true)
+      }
     }
 }
