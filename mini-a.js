@@ -35,7 +35,7 @@ ACTION USAGE:
 
 RULES:
 1. Always include "thought" and "action" fields
-2. Be concise
+2. Always be concise and to the point
 3. Use tools only when necessary
 4. Work incrementally toward your goal
 5. Respond with valid JSON only - no extra text
@@ -65,6 +65,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
     `
 
   this._fnI = this.defaultInteractionFn
+  this.state = "idle"
 }
 
 /**
@@ -94,6 +95,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "info"   : _e = "ℹ️"; break
   case "load"   : _e = "📂"; break
   case "warn"   : _e = "⚠️"; break
+  case "stop"   : _e = "🛑"; break
   default       : _e = e
   }
   log(_e + "  " + m)
@@ -193,7 +195,7 @@ MiniA.prototype.init = function(args) {
   args.mcp = _$(args.mcp, "args.mcp").isString().default(__)
   args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
   args.rtm = _$(args.rtm, "args.rtm").isNumber().default(__) // rate limit (calls per minute)
-  args.maxsteps = _$(args.maxsteps, "args.maxsteps").isNumber().default(25)
+  args.maxsteps = _$(args.maxsteps, "args.maxsteps").isNumber().default(50)
   args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
   args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
   args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
@@ -306,6 +308,10 @@ MiniA.prototype.set = function(aConversation) {
   this.llm.getGPT().setConversation(aConversation)
 }
 
+MiniA.prototype.get = function() {
+  return this.llm.getGPT().getConversation()
+}
+
 /**
  * <odoc>
  * <key>MinA.start(args) : Object</key>
@@ -382,9 +388,10 @@ MiniA.prototype.start = function(args) {
     this._fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
     var context = [], maxSteps = args.maxsteps
+    this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
     // We will iterate up to maxSteps to try to achieve the goal
-    for(var step = 0; step < maxSteps; step++) {
+    for(var step = 0; step < maxSteps && this.state != "stop"; step++) {
       // TODO: Improve by summarizing context to fit in prompt if needed
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
         goal   : args.goal,
@@ -521,9 +528,11 @@ MiniA.prototype.start = function(args) {
         } else {
           if (isString(answer)) answer = answer.trim()
           if (isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m) && args.__format == "json") {
+            this.state = "stop"
             return jsonParse(answer, __, __, true)
           }
           this._fnI("final", `Final answer determined. Goal achieved.`)
+          this.state = "stop"
           if (args.raw) {
             return answer || "(no answer)" 
           } else {
@@ -542,6 +551,12 @@ MiniA.prototype.start = function(args) {
       goal   : args.goal,
       context: context.join("\n")
     })
+
+    // If already in stop state, just exit
+    if (this.state == "stop") {
+      this._fnI("stop", `Agent already in 'stop' state. Exiting...`)
+      return "(no answer)"
+    }
 
     this._fnI("warn", `Reached max steps. Asking for final answer...`)
     // Get final answer from model
@@ -564,11 +579,14 @@ MiniA.prototype.start = function(args) {
     } else {
       if (isString(res.answer)) res.answer = res.answer.trim()
       if (isString(res.answer) && res.answer.match(/^(\{|\[).+(\}|\])$/m) && args.__format == "json") {
+        this.status = "stop"
         return jsonParse(res.answer, __, __, true)
       }
       if (args.raw) {
+        this.state = "stop"
         return res.answer || "(no answer)" 
       } else {
+        this.state = "stop"
         return $o(res.answer || "(no final answer)", args, __, true)
       }
     }

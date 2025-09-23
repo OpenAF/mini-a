@@ -1,4 +1,4 @@
-<script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+<script src="showdown.min.js?raw=true"></script>
 <script>
     document.title = 'Chat Interface';
 </script>
@@ -26,27 +26,28 @@
 
     .input-section {
         display: flex;
-        gap: 10px;
-        margin-bottom: 20px;
+        gap: 1vmin; /* was 10px */
+        margin-bottom: 2vmin; /* was 20px */
     }
 
     #promptInput {
         flex: 1;
-        padding: 10px;
-        border: 1px solid var(--border);
-        border-radius: 4px;
+        padding: 1vmin; /* was 10px */
+        border: 0.1vmin solid var(--border); /* was 1px */
+        border-radius: 0.4vmin; /* was 4px */
         background: transparent;
         color: inherit;
+        font-size: 0.9rem;
     }
 
     #submitBtn {
-        padding: 10px 20px;
+        padding: 1vmin 2vmin; /* was 10px 20px */
         background-color: var(--accent);
         color: white;
         border: none;
-        border-radius: 4px;
+        border-radius: 0.4vmin; /* was 4px */
         cursor: pointer;
-        font-size: 14px;
+        font-size: 1.4vmin; /* was 14px */
     }
 
     #submitBtn:disabled {
@@ -59,13 +60,13 @@
     }
 
     #clearBtn {
-        padding: 10px 20px;
+        padding: 1vmin 2vmin; /* was 10px 20px */
         background-color: var(--border);
         color: var(--text);
         border: none;
-        border-radius: 4px;
+        border-radius: 0.4vmin; /* was 4px */
         cursor: pointer;
-        font-size: 14px;
+        font-size: 1.4vmin; /* was 14px */
     }
 
     #clearBtn:disabled {
@@ -75,19 +76,20 @@
 
     #resultsDiv {
         flex: 1;
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        padding: 20px;
+        border: 0.1vmin solid var(--border); /* was 1px */
+        border-radius: 0.4vmin; /* was 4px */
+        padding: 2vmin; /* was 20px */
         overflow-y: auto;
         background-color: var(--panel-bg);
         color: inherit;
+        zoom: 0.9;
     }
 
     /* Anticipation preview styles */
     .preview {
-        margin-top: 16px;
-        height: 48px;
-        border-radius: 6px;
+        margin-top: 1.6vmin; /* was 16px */
+        height: 4.8vmin; /* was 48px */
+        border-radius: 0.6vmin; /* was 6px */
         position: relative;
         overflow: hidden;
         background: linear-gradient(100deg, var(--preview-1) 10%, var(--preview-2) 40%, var(--preview-1) 70%);
@@ -99,15 +101,15 @@
     .preview::after {
         content: '';
         position: absolute;
-        left: 12px;
-        right: 12px;
-        height: 10px;
+        left: 1.2vmin; /* was 12px */
+        right: 1.2vmin; /* was 12px */
+        height: 1vmin; /* was 10px */
         background: var(--preview-highlight);
-        border-radius: 4px;
+        border-radius: 0.4vmin; /* was 4px */
     }
 
-    .preview::before { top: 10px; width: 65%; }
-    .preview::after { top: 26px; width: 40%; }
+    .preview::before { top: 1vmin; /* was 10px */ width: 65%; }
+    .preview::after { top: 2.6vmin; /* was 26px */ width: 40%; }
     @keyframes shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: -200% 50%; }
@@ -148,12 +150,55 @@
     if (typeof window !== 'undefined') window.mini_a_session_uuid = window.mini_a_session_uuid || null;
     let pollingInterval = null;
     let isProcessing = false;
+    
+    // Auto-scroll management variables
+    let autoScrollEnabled = true;
+    let isScrollingProgrammatically = false;
+    let lastContentUpdateTime = 0;
 
     const promptInput = document.getElementById('promptInput');
     const submitBtn = document.getElementById('submitBtn');
     const clearBtn = document.getElementById('clearBtn');
     const resultsDiv = document.getElementById('resultsDiv');
     const PREVIEW_ID = 'anticipationPreview';
+
+    // Helper function to check if user is at the bottom of the scroll area
+    function isAtBottom() {
+        if (!resultsDiv) return true;
+        const threshold = 50; // Allow some margin for rounding errors
+        return resultsDiv.scrollTop + resultsDiv.clientHeight >= resultsDiv.scrollHeight - threshold;
+    }
+
+    // Helper function to update content and track changes
+    function updateResultsContent(htmlContent) {
+        if (!resultsDiv) return;
+        
+        const wasAtBottom = isAtBottom();
+        resultsDiv.innerHTML = htmlContent;
+        lastContentUpdateTime = Date.now();
+        
+        // If user was at bottom before update, keep them there
+        if (wasAtBottom) {
+            autoScrollEnabled = true;
+            scrollResultsToBottom();
+        }
+    }
+
+    // Add scroll event listener to detect manual scrolling
+    if (resultsDiv) {
+        resultsDiv.addEventListener('scroll', () => {
+            // Ignore scroll events that we triggered programmatically
+            if (isScrollingProgrammatically) return;
+            
+            // Check if user scrolled back to bottom
+            if (isAtBottom()) {
+                autoScrollEnabled = true;
+            } else {
+                // User scrolled away from bottom, disable auto-scroll
+                autoScrollEnabled = false;
+            }
+        });
+    }
 
     // Helper: set submit button icon + tooltip. State: 'send' | 'stop'
     function setSubmitIcon(state) {
@@ -221,7 +266,7 @@
             }
 
         // Reset results area to the default welcome message and remove preview
-        resultsDiv.innerHTML = '<p></p>';
+        updateResultsContent('<p></p>');
         removePreview();
 
         // Clear the in-memory global UUID (fresh restart)
@@ -241,6 +286,8 @@
             currentSessionUuid = null;
         }
 
+        // Reset auto-scroll state
+        autoScrollEnabled = true;
         promptInput.disabled = false;
         setSubmitIcon('send');
         submitBtn.classList.remove('stop');
@@ -264,12 +311,20 @@
     }
 
     function scrollResultsToBottom() {
-        // Ensure we scroll to show the latest additions
+        // Only auto-scroll if enabled and not disabled by user manual scrolling
+        if (!autoScrollEnabled) return;
+        
         try {
+            isScrollingProgrammatically = true;
             resultsDiv.scrollTop = resultsDiv.scrollHeight;
+            // Small delay to ensure the scroll event is processed
+            setTimeout(() => {
+                isScrollingProgrammatically = false;
+            }, 10);
         } catch (e) {
             // ignore in unlikely error cases
             console.error('Scroll error:', e);
+            isScrollingProgrammatically = false;
         }
     }
 
@@ -308,8 +363,7 @@
             
         } catch (error) {
             console.error('Error submitting prompt:', error);
-            resultsDiv.innerHTML = '<p style="color: red;">Error submitting prompt. Please try again.</p>';
-            scrollResultsToBottom();
+            updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
         }
     }
 
@@ -388,6 +442,7 @@
 
     function startProcessing() {
         isProcessing = true;
+        autoScrollEnabled = true; // Enable auto-scroll for new processing
         promptInput.disabled = true;
         promptInput.value = '';
         setSubmitIcon('stop');
@@ -445,23 +500,21 @@
 
                 const data = await response.json();
                 
-                // Convert markdown to HTML
+                // Convert markdown to HTML and update content
                 const htmlContent = converter.makeHtml(data.content || '');
-                resultsDiv.innerHTML = htmlContent;
+                updateResultsContent(htmlContent);
 
                 // Check if finished
                 if (data.status === 'finished') {
                     removePreview();
                     stopProcessing();
-                    scrollResultsToBottom();
                 } else {
                     addPreview(); // keep anticipation while streaming
                 }
                 
             } catch (error) {
                 console.error('Error fetching results:', error);
-                    resultsDiv.innerHTML = '<p style="color: red;">Error fetching results. Please try again.</p>';
-                    scrollResultsToBottom();
+                updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
                 stopProcessing();
             }
         }, 1500);

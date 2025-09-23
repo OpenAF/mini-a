@@ -63,50 +63,63 @@ todo:
 
     if (isUnDef(global.__res[_res.uuid])) {
       global.__res[ _res.uuid ] = [ ]
-      global.__conversations[ _res.uuid ] = []
+      global.__conversations[ _res.uuid ] = __
       global.__lastActivity[ _res.uuid ] = Date.now()
     } else {
       global.__lastActivity[ _res.uuid ] = Date.now()
     }
 
     $doV(() => {
-      var uuid = _res.uuid
-      //if (isUnDef(global.ma)) global.ma = new MiniA()
-      global.ma.setInteractionFn((e, m) => {
-          var _e = ""
-          switch(e) {
-          case "user"   : _e = "👤"; break
-          case "exec"   : _e = "⚙️"; break
-          case "shell"  : _e = "🖥️"; break
-          case "think"  : _e = "💡"; break
-          case "final"  : _e = "🏁"; break
-          case "input"  : _e = "➡️"; break
-          case "output" : _e = "⬅️"; break
-          case "thought": _e = "💭"; break
-          case "think"  : _e = "💡"; break
-          case "size"   : _e = "📏"; break
-          case "rate"   : _e = "⏳"; break
-          case "mcp"    : _e = "🤖"; break
-          case "done"   : _e = "✅"; break
-          case "error"  : _e = "❌"; break
-          case "libs"   : _e = "📚"; break
-          case "info"   : _e = "ℹ️"; break
-          case "load"   : _e = "📂"; break
-          case "mcp"    : _e = "🤖"; break
-          case "warn"   : _e = "⚠️"; break
-          default       : _e = e
-          }
-          
-          global.__res[uuid].push({ event: _e, message: m })
-          log("[" + uuid + "] " + _e + " " + m)
-      })
-      //global.ma.setConversation(global.__conversations[ uuid ])
-      var _rma = global.ma.start(merge(global.global.maArgs, {
-        goal        : postData.prompt,
-        raw         : true
-      }))
-      global.__res[uuid].push( { event: "final", message: _rma } )
-      log("[" + uuid + "] " + _rma)
+      try {
+        var uuid = _res.uuid, lma
+        if (isUnDef(global.__conversations[ uuid ])) {
+          lma = new MiniA()
+          lma.init(global.maArgs)
+          lma.setInteractionFn( (e, m) => {
+              var _e = ""
+              switch(e) {
+              case "user"   : _e = "👤"; break
+              case "exec"   : _e = "⚙️"; break
+              case "shell"  : _e = "🖥️"; break
+              case "think"  : _e = "💡"; break
+              case "final"  : _e = "🏁"; break
+              case "input"  : _e = "➡️"; break
+              case "output" : _e = "⬅️"; break
+              case "thought": _e = "💭"; break
+              case "think"  : _e = "💡"; break
+              case "size"   : _e = "📏"; break
+              case "rate"   : _e = "⏳"; break
+              case "mcp"    : _e = "🤖"; break
+              case "done"   : _e = "✅"; break
+              case "error"  : _e = "❌"; break
+              case "libs"   : _e = "📚"; break
+              case "info"   : _e = "ℹ️"; break
+              case "load"   : _e = "📂"; break
+              case "mcp"    : _e = "🤖"; break
+              case "warn"   : _e = "⚠️"; break
+              case "stop"   : _e = "🛑"; break
+              default       : _e = e
+              }
+              
+              global.__res[uuid].push({ event: _e, message: m })
+              log("[" + uuid + "] " + _e + " " + m)
+          } )
+          global.__conversations[ uuid ] = lma
+        } else {
+          lma = global.__conversations[ uuid ]
+        }
+
+        var _rma = lma.start(merge(global.maArgs, {
+          goal        : postData.prompt,
+          raw         : true
+        }))
+
+        global.__res[uuid].push( { event: "final", message: _rma } )
+        log("[" + uuid + "] " + _rma)
+      } catch(e) {
+        logErr(e)
+        $err(e)
+      }
     })
     //print("prompt: " + postData.prompt)
 
@@ -118,6 +131,9 @@ todo:
     try {
       var postData = jsonParse(request.files.postData)
 
+      if (isDef(postData.request) && postData.request == "stop") {
+        global.__conversations[ postData.uuid ].state = "stop"
+      }
       var _res = { content: "", status: "processing" }
       if (isDef(global.__res[ postData.uuid ])) {
         // Update last activity
