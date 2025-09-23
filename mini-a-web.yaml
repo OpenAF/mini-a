@@ -10,6 +10,10 @@ help:
     desc     : Show executed commands in the interaction
     example  : "false"
     mandatory: false
+  - name     : logPromptHeaders
+    desc     : Log prompt headers to console (for debugging)
+    example  : "origin,referer"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -19,6 +23,7 @@ todo:
 - Periodic cleanup of old sessions
 - (httpdStart     ): "${onport:-8888}"
   ((mapLibs      )): true
+- (httpdHealthz   ): "${onport:-8888}"
 - (httpdFileBrowse): "${onport:-8888}"
   ((uri          )): /
   ((path         )): public
@@ -54,74 +59,88 @@ todo:
   ((uri          )): /prompt
   ((execURI      )): | #js
     var _res = {}
-    var postData = jsonParse(request.files.postData)
-    if (isDef(postData.uuid)) {
-      _res.uuid = postData.uuid
-    } else {
-      _res.uuid = genUUID()
-    }
-
-    if (isUnDef(global.__res[_res.uuid])) {
-      global.__res[ _res.uuid ] = [ ]
-      global.__conversations[ _res.uuid ] = __
-      global.__lastActivity[ _res.uuid ] = Date.now()
-    } else {
-      global.__lastActivity[ _res.uuid ] = Date.now()
-    }
-
-    $doV(() => {
-      try {
-        var uuid = _res.uuid, lma
-        if (isUnDef(global.__conversations[ uuid ])) {
-          lma = new MiniA()
-          lma.init(global.maArgs)
-          lma.setInteractionFn( (e, m) => {
-              var _e = ""
-              switch(e) {
-              case "user"   : _e = "👤"; break
-              case "exec"   : _e = "⚙️"; break
-              case "shell"  : _e = "🖥️"; break
-              case "think"  : _e = "💡"; break
-              case "final"  : _e = "🏁"; break
-              case "input"  : _e = "➡️"; break
-              case "output" : _e = "⬅️"; break
-              case "thought": _e = "💭"; break
-              case "think"  : _e = "💡"; break
-              case "size"   : _e = "📏"; break
-              case "rate"   : _e = "⏳"; break
-              case "mcp"    : _e = "🤖"; break
-              case "done"   : _e = "✅"; break
-              case "error"  : _e = "❌"; break
-              case "libs"   : _e = "📚"; break
-              case "info"   : _e = "ℹ️"; break
-              case "load"   : _e = "📂"; break
-              case "mcp"    : _e = "🤖"; break
-              case "warn"   : _e = "⚠️"; break
-              case "stop"   : _e = "🛑"; break
-              default       : _e = e
-              }
-              
-              global.__res[uuid].push({ event: _e, message: m })
-              log("[" + uuid + "] " + _e + " " + m)
-          } )
-          global.__conversations[ uuid ] = lma
-        } else {
-          lma = global.__conversations[ uuid ]
-        }
-
-        var _rma = lma.start(merge(global.maArgs, {
-          goal        : postData.prompt,
-          raw         : true
-        }))
-
-        global.__res[uuid].push( { event: "final", message: _rma } )
-        log("[" + uuid + "] " + _rma)
-      } catch(e) {
-        logErr(e)
-        $err(e)
+    try {
+      var postData = jsonParse(request.files.postData)
+      if (isDef(postData.uuid)) {
+        _res.uuid = postData.uuid
+      } else {
+        _res.uuid = genUUID()
       }
-    })
-    //print("prompt: " + postData.prompt)
+
+      if (isUnDef(global.__res[_res.uuid])) {
+        global.__res[ _res.uuid ] = [ ]
+        global.__conversations[ _res.uuid ] = __
+        global.__lastActivity[ _res.uuid ] = Date.now()
+      } else {
+        global.__lastActivity[ _res.uuid ] = Date.now()
+      }
+
+      // Prompt header logging
+      if (global.__logPromptHeaders.length > 0) {
+        global.__logPromptHeaders.forEach( h => {
+          if (isDef(request.header[h])) {
+            log("[" + _res.uuid + "] Prompt header " + h + ": " + request.header[h])
+          }
+        })
+      }
+
+      $doV(() => {
+        try {
+          var uuid = _res.uuid, lma
+          if (isUnDef(global.__conversations[ uuid ])) {
+            lma = new MiniA()
+            lma.init(global.maArgs)
+            lma.setInteractionFn( (e, m) => {
+                var _e = ""
+                switch(e) {
+                case "user"   : _e = "👤"; break
+                case "exec"   : _e = "⚙️"; break
+                case "shell"  : _e = "🖥️"; break
+                case "think"  : _e = "💡"; break
+                case "final"  : _e = "🏁"; break
+                case "input"  : _e = "➡️"; break
+                case "output" : _e = "⬅️"; break
+                case "thought": _e = "💭"; break
+                case "think"  : _e = "💡"; break
+                case "size"   : _e = "📏"; break
+                case "rate"   : _e = "⏳"; break
+                case "mcp"    : _e = "🤖"; break
+                case "done"   : _e = "✅"; break
+                case "error"  : _e = "❌"; break
+                case "libs"   : _e = "📚"; break
+                case "info"   : _e = "ℹ️"; break
+                case "load"   : _e = "📂"; break
+                case "mcp"    : _e = "🤖"; break
+                case "warn"   : _e = "⚠️"; break
+                case "stop"   : _e = "🛑"; break
+                default       : _e = e
+                }
+                
+                global.__res[uuid].push({ event: _e, message: m })
+                log("[" + uuid + "] " + _e + " " + m)
+            } )
+            global.__conversations[ uuid ] = lma
+          } else {
+            lma = global.__conversations[ uuid ]
+          }
+
+          var _rma = lma.start(merge(global.maArgs, {
+            goal        : postData.prompt,
+            raw         : true
+          }))
+
+          global.__res[uuid].push( { event: "final", message: _rma } )
+          log("[" + uuid + "] " + _rma)
+        } catch(e) {
+          logErr(e)
+          $err(e)
+        }
+      })
+      //print("prompt: " + postData.prompt)
+    } catch(ee) {
+      logErr(ee)
+      $err(ee)
+    }
 
     return ow.server.httpd.reply(_res)
 
@@ -187,12 +206,14 @@ jobs:
 - name : Init
   check:
     in:
-      showExecs: toBoolean().isBoolean().default(false)
+      showExecs       : toBoolean().isBoolean().default(false)
+      logPromptHeaders: isString().default("")
   exec : | #js
     global.__res = {}
     global.__conversations = {}
     global.__lastActivity = { }
     global.__showExecs = args.showExecs
+    global.__logPromptHeaders = args.logPromptHeaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.maArgs = merge(args, {})
     global.ma = new MiniA()
     global.ma.init( global.maArgs )
