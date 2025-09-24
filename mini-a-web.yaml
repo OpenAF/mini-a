@@ -60,13 +60,16 @@ todo:
   ((execURI      )): | #js
     var _res = {}
     try {
+      // Parse POST data
       var postData = jsonParse(request.files.postData)
+      // Validate UUID or generate a new one
       if (isDef(postData.uuid)) {
         _res.uuid = postData.uuid
       } else {
         _res.uuid = genUUID()
       }
 
+      // Initialize response storage
       if (isUnDef(global.__res[_res.uuid])) {
         global.__res[ _res.uuid ] = [ ]
         global.__conversations[ _res.uuid ] = __
@@ -84,6 +87,7 @@ todo:
         })
       }
 
+      // Start Mini-A interaction in a non-blocking way
       $doV(() => {
         try {
           var uuid = _res.uuid, lma
@@ -93,27 +97,29 @@ todo:
             lma.setInteractionFn( (e, m) => {
                 var _e = ""
                 switch(e) {
-                case "user"   : _e = "👤"; break
-                case "exec"   : _e = "⚙️"; break
-                case "shell"  : _e = "🖥️"; break
-                case "think"  : _e = "💡"; break
-                case "final"  : _e = "🏁"; break
-                case "input"  : _e = "➡️"; break
-                case "output" : _e = "⬅️"; break
-                case "thought": _e = "💭"; break
-                case "think"  : _e = "💡"; break
-                case "size"   : _e = "📏"; break
-                case "rate"   : _e = "⏳"; break
-                case "mcp"    : _e = "🤖"; break
-                case "done"   : _e = "✅"; break
-                case "error"  : _e = "❌"; break
-                case "libs"   : _e = "📚"; break
-                case "info"   : _e = "ℹ️"; break
-                case "load"   : _e = "📂"; break
-                case "mcp"    : _e = "🤖"; break
-                case "warn"   : _e = "⚠️"; break
-                case "stop"   : _e = "🛑"; break
-                default       : _e = e
+                case "user"     : _e = "👤"; break
+                case "exec"     : _e = "⚙️"; break
+                case "shell"    : _e = "🖥️"; break
+                case "think"    : _e = "💡"; break
+                case "final"    : _e = "🏁"; break
+                case "input"    : _e = "➡️"; break
+                case "output"   : _e = "⬅️"; break
+                case "thought"  : _e = "💭"; break
+                case "think"    : _e = "💡"; break
+                case "size"     : _e = "📏"; break
+                case "rate"     : _e = "⏳"; break
+                case "mcp"      : _e = "🤖"; break
+                case "done"     : _e = "✅"; break
+                case "error"    : _e = "❌"; break
+                case "libs"     : _e = "📚"; break
+                case "info"     : _e = "ℹ️"; break
+                case "load"     : _e = "📂"; break
+                case "mcp"      : _e = "🤖"; break
+                case "warn"     : _e = "⚠️"; break
+                case "stop"     : _e = "🛑"; break
+                case "error"    : _e = "❗"; break
+                case "summarize": _e = "📝"; break
+                default         : _e = e
                 }
                 
                 global.__res[uuid].push({ event: _e, message: m })
@@ -136,7 +142,6 @@ todo:
           $err(e)
         }
       })
-      //print("prompt: " + postData.prompt)
     } catch(ee) {
       logErr(ee)
       $err(ee)
@@ -167,7 +172,7 @@ todo:
             //delete global.__res[ postData.uuid ]
             //break
           } else {
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🤖") {
+            if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🤖" || r.event == "📝") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i>\n<br><br></div>"
               } else {

@@ -1,3 +1,5 @@
+var __MiniA_mcpConnections = {}
+
 /**
  * <odoc>
  * <key>MinA</key>
@@ -23,7 +25,7 @@ RESPONSE FORMAT: Always respond with exactly one valid JSON object:
 {{#if actionsList}}
 AVAILABLE ACTIONS:
 {{#each actionsdesc}}
-• {{name}}: {{description}}{{#if inputSchema.properties}}(parameters: {{{$stringifyInLine inputSchema.properties}}}){{/if}}
+• {{name}}: {{{description}}}{{#if inputSchema.properties}}(parameters: {{{$stringifyInLine inputSchema.properties}}}){{/if}}
 {{/each}}
 
 {{/if~}}
@@ -78,25 +80,27 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
 MiniA.prototype.defaultInteractionFn = function(e, m) {
   var _e = ""
   switch(e) {
-  case "user"   : _e = "👤"; break
-  case "exec"   : _e = "⚙️"; break
-  case "shell"  : _e = "🖥️"; break
-  case "think"  : _e = "💡"; break
-  case "final"  : _e = "🏁"; break
-  case "input"  : _e = "➡️"; break
-  case "output" : _e = "⬅️"; break
-  case "thought": _e = "💭"; break
-  case "size"   : _e = "📏"; break
-  case "rate"   : _e = "⏳"; break
-  case "mcp"    : _e = "🤖"; break
-  case "done"   : _e = "✅"; break
-  case "error"  : _e = "❌"; break
-  case "libs"   : _e = "📚"; break
-  case "info"   : _e = "ℹ️"; break
-  case "load"   : _e = "📂"; break
-  case "warn"   : _e = "⚠️"; break
-  case "stop"   : _e = "🛑"; break
-  default       : _e = e
+  case "user"     : _e = "👤"; break
+  case "exec"     : _e = "⚙️"; break
+  case "shell"    : _e = "🖥️"; break
+  case "think"    : _e = "💡"; break
+  case "final"    : _e = "🏁"; break
+  case "input"    : _e = "➡️"; break
+  case "output"   : _e = "⬅️"; break
+  case "thought"  : _e = "💭"; break
+  case "size"     : _e = "📏"; break
+  case "rate"     : _e = "⏳"; break
+  case "mcp"      : _e = "🤖"; break
+  case "done"     : _e = "✅"; break
+  case "error"    : _e = "❌"; break
+  case "libs"     : _e = "📚"; break
+  case "info"     : _e = "ℹ️"; break
+  case "load"     : _e = "📂"; break
+  case "warn"     : _e = "⚠️"; break
+  case "stop"     : _e = "🛑"; break
+  case "error"    : _e = "❗"; break
+  case "summarize": _e = "📝"; break
+  default         : _e = e
   }
   log(_e + "  " + m)
 }
@@ -232,7 +236,7 @@ MiniA.prototype.init = function(args) {
   var needMCPInit = false
   if (isUnDef(this.mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
     needMCPInit = true    
-    this.mcpConnections = []
+    this.mcpConnections = __MiniA_mcpConnections
     this.mcpTools = []
     this.mcpToolNames = []
     this.mcpToolToConnection = {}
@@ -250,9 +254,15 @@ MiniA.prototype.init = function(args) {
     // Initialize each MCP connection
     mcpConfigs.forEach((mcpConfig, index) => {
       try {
-        var mcp = $mcp(mcpConfig)
-        mcp.initialize()
-        sleep(100, true)
+        var mcp
+        if (Object.keys(this.mcpConnections).indexOf(md5(mcpConfig)) >= 0) {
+          mcp = this.mcpConnections[md5(mcpConfig)]
+        } else {
+          mcp = $mcp(mcpConfig)
+          this.mcpConnections[md5(mcpConfig)] = mcp
+          mcp.initialize()
+          sleep(100, true)
+        }
         
         var tools = mcp.listTools()
         if (isDef(tools) && isDef(tools.tools)) {
@@ -262,11 +272,11 @@ MiniA.prototype.init = function(args) {
         }
         
         // Store connection and map tools to this connection
-        this.mcpConnections.push(mcp)
+        //this.mcpConnections.push(mcp)
         tools.forEach(tool => {
           this.mcpTools.push(tool)
           this.mcpToolNames.push(tool.name)
-          this.mcpToolToConnection[tool.name] = index
+          this.mcpToolToConnection[tool.name] = md5(mcpConfig)
         })
 
         this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
@@ -350,6 +360,7 @@ MiniA.prototype.start = function(args) {
     args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
     args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
+    args.maxcontext = _$(args.maxcontext, "args.maxcontext").isNumber().default(0) // max context size in bytes
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -381,11 +392,42 @@ MiniA.prototype.start = function(args) {
       }
     }
 
+    // Summarize context if too long
+    var summarize = ctx => {
+      var _llm = $llm(this._oaf_model)
+      var newCtx = _llm.prompt("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
+      return newCtx
+    }
+
     this._fnI("user", `${args.goal}`)
 
     this.init(args)
 
     this._fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
+
+    // Get model response and parse as JSON
+    // Check context size and summarize if too large
+    if (args.maxcontext > 0) {
+      var _c = this.llm.getGPT().getConversation()
+      var _cl = stringify(_c, __, "").length
+      //print(`maxcontext=${args.maxcontext}, context size=${context.join("").length}`)
+      log(`Current context size: ${ow.format.toBytesAbbreviation(_cl)} (max allowed ${ow.format.toBytesAbbreviation(args.maxcontext)})`)
+      if (_cl > args.maxcontext) {
+        var _sysc = [], _ctx = []
+        _c.forEach(c => {
+          if (isDef(c.role) && (c.role == "system" || c.role == "developer")) {
+            _sysc.push(c)
+          } else {
+            _ctx.push(c)
+          }
+        })
+        this._fnI("summarize", `Summarizing conversation history...`)
+        var _nc = summarize(stringify(_ctx, __, ""))
+        var _ncl = stringify(_nc, __, "").length
+        log(`Context too large (${ow.format.toBytesAbbreviation(_cl)}), summarized to ${ow.format.toBytesAbbreviation(_ncl)} (system #${_sysc.length}).`)
+        this.llm.getGPT().setConversation(_sysc.concat([{ role: "assistant", content: "Summarized conversation: " + _nc }]))
+      }
+    }
 
     var context = [], maxSteps = args.maxsteps
     this.state = "processing"
