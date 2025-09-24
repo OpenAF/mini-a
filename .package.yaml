@@ -40,7 +40,6 @@ files:
 - mini-a-web.yaml
 - mini-a.js
 - mini-a.yaml
-- mini-a.yaml.old
 - public/index.md
 - public/showdown.min.js
 filesHash:
@@ -58,6 +57,5 @@ filesHash:
   mini-a-web.yaml: 13859cd28f4ed72f89ab19991896ba0f31aab076
   mini-a.js: 2c2b1e5897bb03b8259f7d1a3f057accc33720d1
   mini-a.yaml: 0c54999d53d1bccae994a326cc03db9617362d13
-  mini-a.yaml.old: 07258d8c93b223b49def75de2a3ab44c21f2ea5c
   public/index.md: ed7c697581856f19ecaf0741fc0909580cb68dc9
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
