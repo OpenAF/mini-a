@@ -66,18 +66,18 @@ filesHash:
   .odoc.db: 8a8b9ec034ae5def13bebbc0c5633d2cd27c39d6
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: 279d907bcbdcddf93716e208b90b683e53b9f83a
-  EXTERNAL-MCPS.md: 32a2a5492edd5906e6b3b8d443d6f6da29375d44
+  EXTERNAL-MCPS.md: 1478aed7370e6ce21e1f29f8bee1c816a9c4825b
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: b2d827da885e342e4176f0ca8150b63521b42b1d
+  README.md: 797e96bd28d17add3d8244c542271f8485ec63aa
   USAGE.md: 324f5f4c7d15be2ebd3f2d1bd0661dc33bba79ba
   mcps/README.md: 66152fb9bcee901891ae39ac2b399e431aefe29f
   mcps/mcp-db.yaml: d90c78a038fa67b340531f86fdc6fccd47c9ce55
   mcps/mcp-email.yaml: 7d950981f900f390fe6f9cd4d850453b288ec490
   mcps/mcp-notify.yaml: 01743e02dbb9b2873316b4d958c4d1433b6bf25a
-  mini-a-web.sh: f2bed52381e0cb8f7123a67af657ff6a5c2a8c77
-  mini-a-web.yaml: 156712e2ec01e6185ce545511495615761935f3d
-  mini-a.js: 2c2b1e5897bb03b8259f7d1a3f057accc33720d1
+  mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
+  mini-a-web.yaml: 54bfeef62807b27ac168da2d8ffc39314cdc2263
+  mini-a.js: dbbeb18015789c8c19b49b915a787f963a81ae10
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 4ed6a285020a6c63e2617c9a37be7f69561ffa76
-  public/index.md: ed7c697581856f19ecaf0741fc0909580cb68dc9
+  public/index.md: 8f02344f7a42c1e8fd3286a0e1a0545a0267aefc
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f

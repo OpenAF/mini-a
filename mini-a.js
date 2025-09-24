@@ -214,7 +214,26 @@ MiniA.prototype.init = function(args) {
   if (isDef(args.libs) && args.libs.length > 0) {
     args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
       this._fnI("libs", `Loading library: ${lib}...`)
-      loadLib(lib)
+      try {
+        if (lib.startsWith("@")) {
+          if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
+            var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
+            var _path = getOPackPath(_ar[1])
+            var _file = _path + "/" + _ar[2] + ".js"
+            if (io.fileExists(_file)) {
+              loadLib(_file)
+            } else {
+              this._fnI("error", `Library '${lib}' not found.`)
+            }
+          } else {
+            this._fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
+          }
+        } else {
+          loadLib(lib)
+        }
+      } catch(e) {
+        this._fnI("error", `Failed to load library ${lib}: ${e.message}`)
+      }
     })
   }
 
@@ -540,7 +559,8 @@ MiniA.prototype.start = function(args) {
         var toolOutput = mcp.callTool(origAction, msg.params)
         if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
           //toolOutput = toolOutput.content.map(r => jsonParse(r.text, __, __, true))
-          toolOutput = jsonParse(toolOutput.content[0].text, __, __, true)
+          var _t = toolOutput.content.map(r => r.text).join("\n")
+          toolOutput = jsonParse(_t, __, __, true)
           if (args.debug) {
             print( ow.format.withSideLine("<<<\n" + colorify(toolOutput, { bgcolor: "BG(22),BLACK"}) + "\n<<<", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
           }

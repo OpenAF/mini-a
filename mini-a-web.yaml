@@ -220,6 +220,7 @@ jobs:
     global.__lastActivity = { }
     global.__showExecs = args.showExecs
     global.__logPromptHeaders = args.logPromptHeaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
+    args.__format = "md"
     global.maArgs = merge(args, {})
     global.ma = new MiniA()
     global.ma.init( global.maArgs )

@@ -1,6 +1,34 @@
 <script src="showdown.min.js?raw=true"></script>
 <script>
     document.title = 'Chat Interface';
+
+    function __refreshDarkMode() {
+        if (__isDark) {
+            document.body.classList.add('markdown-body-dark')
+            document.body.classList.add('hljs_dark')
+            document.body.classList.add('njsmap_dark')
+            document.body.bgColor = "#000000"
+
+            document.querySelectorAll('pre code').forEach((block) => {
+                block.classList.add('hljs_dark')
+            })
+        } else {
+            document.body.classList.remove('markdown-body-dark')
+            document.body.classList.remove('hljs_dark')
+            document.body.classList.remove('njsmap_dark')
+            document.body.bgColor = "#FFFFFF"
+
+            document.querySelectorAll('pre code').forEach((block) => {
+                block.classList.remove('hljs_dark')
+            })
+        }
+    }
+    var __isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    __refreshDarkMode()
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+        __isDark = event.matches
+        __refreshDarkMode()
+    })
 </script>
 <style>
     :root {
@@ -503,6 +531,8 @@
                 // Convert markdown to HTML and update content
                 const htmlContent = converter.makeHtml(data.content || '');
                 updateResultsContent(htmlContent);
+                hljs.highlightAll();
+                if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
 
                 // Check if finished
                 if (data.status === 'finished') {
@@ -523,7 +553,9 @@
     // Start pinging on initial load using the persisted uuid (if any).
     try { startPing(); } catch (e) { console.error('Failed to start ping on load:', e); }
 </script>
-
+<script src="/js/mdtablesort.js"></script>
+<script>if (__isDark) document.querySelectorAll('pre code').forEach((block) => { block.classList.add('hljs_dark') })</script>
+<script src="/js/mdcodeclip.js"></script>
 <script>
     // Apply dark-mode equivalents when the global __isDark flag is true.
     (function applyDarkModeIfNeeded() {
