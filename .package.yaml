@@ -32,6 +32,7 @@ files:
 - EXTERNAL-MCPS.md
 - LICENSE
 - README.md
+- USAGE.md
 - mcps/README.md
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
@@ -49,6 +50,7 @@ filesHash:
   EXTERNAL-MCPS.md: 32a2a5492edd5906e6b3b8d443d6f6da29375d44
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 96eb82df76fab7475055e92efaeed81bce9bd016
+  USAGE.md: 324f5f4c7d15be2ebd3f2d1bd0661dc33bba79ba
   mcps/README.md: 66152fb9bcee901891ae39ac2b399e431aefe29f
   mcps/mcp-db.yaml: d90c78a038fa67b340531f86fdc6fccd47c9ce55
   mcps/mcp-email.yaml: 7d950981f900f390fe6f9cd4d850453b288ec490
