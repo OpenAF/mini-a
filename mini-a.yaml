@@ -60,6 +60,14 @@ help:
     desc     : Comma-separated list of additional OJob libraries to load (e.g., "lib1,lib2")
     example  : "lib1,lib2"
     mandatory: false
+  - name     : maxcontent
+    desc     : Maximum content length to consider from files (in characters)
+    example  : "200000"
+    mandatory: false
+  - name     : raw
+    desc     : Whether to return raw output without formatting
+    example  : "false"
+    mandatory: false
   - name     : debug
     desc     : Enable debug mode
     example  : "false"

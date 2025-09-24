@@ -213,6 +213,7 @@ jobs:
     in:
       showExecs       : toBoolean().isBoolean().default(false)
       logPromptHeaders: isString().default("")
+      maxcontent      : toNumber().isNumber().default(200000)
   exec : | #js
     global.__res = {}
     global.__conversations = {}
