@@ -25,6 +25,7 @@ version: '20250923'
 dependencies:
   openaf: '>=20250915'
 files:
+- .odoc.db
 - .package.yaml
 - CODE_OF_CONDUCT.md
 - CONTRIBUTING.md
@@ -42,6 +43,7 @@ files:
 - public/index.md
 - public/showdown.min.js
 filesHash:
+  .odoc.db: 8a8b9ec034ae5def13bebbc0c5633d2cd27c39d6
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: 279d907bcbdcddf93716e208b90b683e53b9f83a
   EXTERNAL-MCPS.md: 32a2a5492edd5906e6b3b8d443d6f6da29375d44
@@ -52,7 +54,7 @@ filesHash:
   mcps/mcp-email.yaml: 7d950981f900f390fe6f9cd4d850453b288ec490
   mcps/mcp-notify.yaml: 01743e02dbb9b2873316b4d958c4d1433b6bf25a
   mini-a-web.yaml: 13859cd28f4ed72f89ab19991896ba0f31aab076
-  mini-a.js: a495ab0f0a7e77acb97008847ad0dcd779b7f043
+  mini-a.js: b6070baa2d17649232965893f0cd7645f9ef2ede
   mini-a.yaml: 4c407b5396e744a50cde91581b5a30d228aca8a6
   mini-a.yaml.old: 07258d8c93b223b49def75de2a3ab44c21f2ea5c
   public/index.md: ed7c697581856f19ecaf0741fc0909580cb68dc9

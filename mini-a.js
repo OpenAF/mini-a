@@ -309,6 +309,7 @@ MiniA.prototype.init = function(args) {
   this._isInitialized = true
 }
 
+/*
 MiniA.prototype.clear = function() {
   this.llm.getGPT().setConversation([])
 }
@@ -320,7 +321,7 @@ MiniA.prototype.set = function(aConversation) {
 
 MiniA.prototype.get = function() {
   return this.llm.getGPT().getConversation()
-}
+}*/
 
 /**
  * <odoc>
@@ -339,6 +340,9 @@ MiniA.prototype.get = function() {
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
  * - conversation (string, optional): Path to a file to load/save conversation history.
+ * - raw (boolean, default=false): If true, returns the final answer as a raw string instead of formatted output.
+ * - checkall (boolean, default=false): If true, asks for confirmation before executing any shell command.
+ * - maxcontext (number, optional): Maximum context size in bytes. If the conversation exceeds this size, it will be summarized.
  * - __format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * 
  * Returns:
