@@ -508,8 +508,8 @@ MiniA.prototype.start = function(args) {
 
       // Action 'think': just add thought to context
       if (action == "think") {
-        this._fnI("think", `${thought || "(no thought)"}`)
-        context.push(`[THOUGHT ${step + 1}] ${thought || "no thought"}`)
+        this._fnI("think", `${(isObject(thought) ? stringify(thought, __, "") : thought) || "(no thought)"}`)
+        context.push(`[THOUGHT ${step + 1}] ${(isObject(thought) ? stringify(thought, __, "") : thought) || "no thought"}`)
         continue
       }
 
@@ -582,6 +582,7 @@ MiniA.prototype.start = function(args) {
           if (args.raw) {
             return answer || "(no answer)" 
           } else {
+            if (args.__format == "md") answer += "\n"
             return $o(answer || "(no answer)", args, __, true)
           }
         }
@@ -633,6 +634,7 @@ MiniA.prototype.start = function(args) {
         return res.answer || "(no answer)" 
       } else {
         this.state = "stop"
+        if (args.__format == "md") answer += "\n"
         return $o(res.answer || "(no final answer)", args, __, true)
       }
     }

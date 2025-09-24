@@ -96,4 +96,7 @@ jobs:
       conversation: isString.default(__)
   exec : | #js
     var ma = new MiniA()
-    ow.oJob.output(ma.start(args), args)
+    ma.init(args)
+    if (isDef(args.__format)) args.__format = "md"
+    var _r = ma.start(args)
+    if (isUnDef(args.outfile)) print(_r)
