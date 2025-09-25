@@ -309,7 +309,7 @@ MiniA.prototype.init = function(args) {
   }
 
   // Provide system prompt instructions
-  if (args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
+  if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
 
   if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
     actionsWordNumber: this._numberInWords(1 + this.mcpTools.length),
