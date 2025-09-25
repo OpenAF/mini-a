@@ -4,10 +4,10 @@
 
 | Name       | Description                     | Type        | Location                           |
 |------------|---------------------------------|-------------|------------------------------------|
-| mcp-db     | Database access MCP             | STDIO       | [mcp-db.yaml](mcp-db.yaml)         |
-| mcp-email  | Email sending MCP               | STDIO       | [mcp-email.yaml](mcp-email.yaml)   |
-| mcp-notify | Notification MCP (Pushover)     | STDIO       | [mcp-notify.yaml](mcp-notify.yaml) |
-| mcp-net    | Network utility MCP             | STDIO       | [mcp-net.yaml](mcp-net.yaml)       |
+| mcp-db     | Database access MCP             | STDIO/HTTP       | [mcp-db.yaml](mcp-db.yaml)         |
+| mcp-email  | Email sending MCP               | STDIO/HTTP       | [mcp-email.yaml](mcp-email.yaml)   |
+| mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | [mcp-notify.yaml](mcp-notify.yaml) |
+| mcp-net    | Network utility MCP             | STDIO/HTTP       | [mcp-net.yaml](mcp-net.yaml)       |
 
 ### Examples
 
