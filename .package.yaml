@@ -54,6 +54,7 @@ files:
 - mcps/README.md
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
+- mcps/mcp-net.yaml
 - mcps/mcp-notify.yaml
 - mini-a-web.sh
 - mini-a-web.yaml
@@ -70,14 +71,15 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 797e96bd28d17add3d8244c542271f8485ec63aa
   USAGE.md: 324f5f4c7d15be2ebd3f2d1bd0661dc33bba79ba
-  mcps/README.md: 66152fb9bcee901891ae39ac2b399e431aefe29f
-  mcps/mcp-db.yaml: d90c78a038fa67b340531f86fdc6fccd47c9ce55
-  mcps/mcp-email.yaml: 7d950981f900f390fe6f9cd4d850453b288ec490
-  mcps/mcp-notify.yaml: 01743e02dbb9b2873316b4d958c4d1433b6bf25a
+  mcps/README.md: 7571ff0b0afa221c0e8d7951716b1c952463b8cf
+  mcps/mcp-db.yaml: d2fa8ffe251521e4c4ec42e47fa6ad2de40bc50b
+  mcps/mcp-email.yaml: 79bf26f6686ca0ac0df7ef6416137a94c851ff11
+  mcps/mcp-net.yaml: 7b9263f3746916cf35eca7422c2652ce55e13ae4
+  mcps/mcp-notify.yaml: 4cf7bc2f560712eaba8a78057f1483da152816ba
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 54bfeef62807b27ac168da2d8ffc39314cdc2263
-  mini-a.js: a6430a43c3ca670009d6960409a57f2c45b70af7
+  mini-a.js: d237ed0b2733915715dfbfd241639507cee7b71c
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 4ed6a285020a6c63e2617c9a37be7f69561ffa76
-  public/index.md: 8f02344f7a42c1e8fd3286a0e1a0545a0267aefc
+  mini-a.yaml: 58660229a6450b45f3b85c3ef85be291ab0d08a4
+  public/index.md: 3e16b74a8a75d9986efda20f43051b4886f348a6
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
