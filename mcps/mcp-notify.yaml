@@ -10,10 +10,41 @@ help:
     desc     : Pushover User Key
     example  : "def456"
     mandatory: true
+  - name     : onport
+    desc     : If defined starts a MCP server on the provided port
+    example  : "8888"
+    mandatory: false
 
 todo:
 - Init
-- MCP notification
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdMCP): &MCPSERVER
+      serverInfo:
+        name   : mini-a-notification
+        title  : OpenAF mini-a MCP notification server
+        version: 1.0.0
+    ((fnsMeta)): &MCPFNSMETA
+      sendNotification:
+        name       : sendNotification
+        description: Sends a notification via Pushover.
+        inputSchema:
+          type      : object
+          properties:
+            message:
+              type        : string
+              description : Message to send
+          required: [ message ]
+        annotations:
+          title         : sendNotification
+          readOnlyHint  : true
+          idempotentHint: true
+    ((fns    )): &MCPFNS
+      sendNotification  : Send notification
+  ((else)):
+  - (stdioMCP ): *MCPSERVER
+    ((fnsMeta)): *MCPFNSMETA
+    ((fns    )): *MCPFNS
 
 ojob:
   opacks      :
@@ -31,33 +62,6 @@ include:
 - oJobMCP.yaml
 
 jobs:
-# -----------------------
-- name : MCP notification
-  to   :
-  - (stdioMCP ):
-      serverInfo:
-        name   : mini-a-notification
-        title  : OpenAF mini-a MCP notification server
-        version: 1.0.0
-    ((fnsMeta)):
-      sendNotification:
-        name       : sendNotification
-        description: Sends a notification via Pushover.
-        inputSchema:
-          type      : object
-          properties:
-            message:
-              type        : string
-              description : Message to send
-          required: [ message ]
-        annotations:
-          title         : sendNotification
-          readOnlyHint  : true
-          idempotentHint: true
-
-    ((fns    )):
-      sendNotification  : Send notification
-
 # -----------
 - name : Init
   check:

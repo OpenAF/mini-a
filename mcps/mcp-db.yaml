@@ -18,11 +18,58 @@ help:
     desc     : Allow read/write operations (default is read-only)
     example  : "true"
     mandatory: false
+  - name     : onport
+    desc     : If defined starts a MCP server on the provided port
+    example  : "8888"
+    mandatory: false
 
 todo:
 - Connect to database
 - Close database on exit
-- MCP database
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdMCP): &MCPSERVER
+      serverInfo:
+        name   : mini-a-db
+        title  : OpenAF mini-a MCP database server
+        version: 1.0.0
+    ((fnsMeta)): &MCPFNSMETA
+      dbSQLQuery:
+        name       : dbSQLQuery
+        description: Executes a SQL query against a database using JDBC.
+        inputSchema:
+          type      : object
+          properties:
+            sqlQuery:
+              type        : string
+              description : SQL query to execute.
+          required: [ sqlQuery ]
+        annotations:
+          title         : dbSQLQuery
+          readOnlyHint  : true
+          idempotentHint: true
+
+      dbDMLStatement:
+        name       : dbDMLStatement
+        description: Executes a SQL DML statement (CREATE, INSERT, UPDATE, DELETE, DROP) against a database using JDBC.
+        inputSchema:
+          type      : object
+          properties:
+            sqlDML:
+              type        : string
+              description : SQL DML statement to execute.
+          required: [ sqlDML ]
+        annotations:
+          title         : dbDMLStatement
+          readOnlyHint  : false
+          idempotentHint: false
+    ((fns    )): &MCPFNS
+      dbSQLQuery    : Execute SQL query
+      dbDMLStatement: Execute DML statement
+  ((else)):
+  - (stdioMCP ): *MCPSERVER
+    ((fnsMeta)): *MCPFNSMETA
+    ((fns    )): *MCPFNS
 
 ojob:
   opacks      :
@@ -62,48 +109,6 @@ jobs:
     if (global.db) {
       global.db.close()
     }
-
-# -------------------
-- name : MCP database
-  to   :
-  - (stdioMCP ):
-      serverInfo:
-        name   : mini-a-db
-        title  : OpenAF mini-a MCP database server
-        version: 1.0.0
-    ((fnsMeta)):
-      dbSQLQuery:
-        name       : dbSQLQuery
-        description: Executes a SQL query against a database using JDBC.
-        inputSchema:
-          type      : object
-          properties:
-            sqlQuery:
-              type        : string
-              description : SQL query to execute.
-          required: [ sqlQuery ]
-        annotations:
-          title         : dbSQLQuery
-          readOnlyHint  : true
-          idempotentHint: true
-
-      dbDMLStatement:
-        name       : dbDMLStatement
-        description: Executes a SQL DML statement (CREATE, INSERT, UPDATE, DELETE, DROP) against a database using JDBC.
-        inputSchema:
-          type      : object
-          properties:
-            sqlDML:
-              type        : string
-              description : SQL DML statement to execute.
-          required: [ sqlDML ]
-        annotations:
-          title         : dbDMLStatement
-          readOnlyHint  : false
-          idempotentHint: false
-    ((fns    )):
-      dbSQLQuery    : Execute SQL query
-      dbDMLStatement: Execute DML statement
 
 # ------------------------
 - name : Execute SQL query

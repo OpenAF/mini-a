@@ -1,7 +1,7 @@
 <script src="showdown.min.js?raw=true"></script>
 <script>
     document.title = 'Chat Interface';
-
+    var __isDark;
     function __refreshDarkMode() {
         if (__isDark) {
             document.body.classList.add('markdown-body-dark')
@@ -23,12 +23,12 @@
             })
         }
     }
-    var __isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+    //var __isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
     __refreshDarkMode()
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+    /*window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
         __isDark = event.matches
         __refreshDarkMode()
-    })
+    })*/
 </script>
 <style>
     :root {
@@ -533,6 +533,7 @@
                 updateResultsContent(htmlContent);
                 hljs.highlightAll();
                 if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+                __refreshDarkMode();
 
                 // Check if finished
                 if (data.status === 'finished') {

@@ -40,10 +40,13 @@ RULES:
 2. Always be concise and to the point
 3. Use tools only when necessary
 4. Work incrementally toward your goal
-5. Respond with valid JSON only - no extra text
+5. Respond with valid JSON only - no extra text{{#if markdown}}
+6. The JSON response "answer" property should always be in markdown format{{/if}}{{#each rules}}
+{{{this}}}
+{{/each}}
 
 {{#if knowledge}}
-CONTEXT:
+KNOWLEDGE:
 {{{knowledge}}}
 {{/if}}
     `
@@ -310,11 +313,15 @@ MiniA.prototype.init = function(args) {
 
   // Provide system prompt instructions
   if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
+  var rules = af.fromJSSLON(args.rules)
+  if (!isArray(rules)) rules = [rules]
 
   if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
     actionsWordNumber: this._numberInWords(1 + this.mcpTools.length),
     actionsList      : this.mcpTools.map(r => r.name).join(" | "),
     useshell         : args.useshell,
+    markdown         : args.__format == "md",
+    rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
     knowledge        : args.knowledge.trim(),
     actionsdesc      : this.mcpTools,
     isMachine        : (isDef(args.__format) && args.__format != "md")
@@ -362,6 +369,7 @@ MiniA.prototype.get = function() {
  * - raw (boolean, default=false): If true, returns the final answer as a raw string instead of formatted output.
  * - checkall (boolean, default=false): If true, asks for confirmation before executing any shell command.
  * - maxcontext (number, optional): Maximum context size in bytes. If the conversation exceeds this size, it will be summarized.
+ * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
  * - __format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * 
  * Returns:
@@ -384,6 +392,7 @@ MiniA.prototype.start = function(args) {
     args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
     args.maxcontext = _$(args.maxcontext, "args.maxcontext").isNumber().default(0) // max context size in bytes
+    args.rules = _$(args.rules, "args.rules").isString().default("")
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -583,7 +592,7 @@ MiniA.prototype.start = function(args) {
           this._fnI("", `[THOUGHT ${step + 1}] ${thought}`)
         }*/
         
-        if (answer.trim().startsWith("```") && answer.trim().endsWith("```")) {
+        if ((args.__format != 'md' && args.__format != 'raw') && isString(answer) && answer.trim().startsWith("```") && answer.trim().endsWith("```")) {
           // Remove code block markers if present
           answer = answer.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
         }
@@ -592,17 +601,20 @@ MiniA.prototype.start = function(args) {
           io.writeFileString(args.outfile, answer || "(no answer)")
           this._fnI("done", `Final answer written to ${args.outfile}`)
         } else {
-          if (isString(answer)) answer = answer.trim()
-          if (isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m) && args.__format == "json") {
+          if (isString(answer) && args.__format != "raw") answer = answer.trim()
+          if ((args.__format == "md" && args.__format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
             this.state = "stop"
             return jsonParse(answer, __, __, true)
+          }
+          if ((args.__format == "md" && args.__format != "raw") && isObject(answer)) {
+            return answer
           }
           this._fnI("final", `Final answer determined. Goal achieved.`)
           this.state = "stop"
           if (args.raw) {
             return answer || "(no answer)" 
           } else {
-            if (args.__format == "md") answer += "\n"
+            if (args.__format != "md" && args.__format != "raw" && isString(answer)) answer = jsonParse(answer)
             return $o(answer || "(no answer)", args, __, true)
           }
         }
@@ -644,17 +656,19 @@ MiniA.prototype.start = function(args) {
       this._fnI("final", `Final answer written to ${args.outfile}`)
       return
     } else {
-      if (isString(res.answer)) res.answer = res.answer.trim()
-      if (isString(res.answer) && res.answer.match(/^(\{|\[).+(\}|\])$/m) && args.__format == "json") {
+      if (isString(res.answer) && args.__format != "raw") res.answer = res.answer.trim()
+      if ((args.__format != 'md' && args.__format != 'raw') && isString(res.answer) && res.answer.trim().startsWith("```") && res.answer.trim().endsWith("```")) {
         this.status = "stop"
         return jsonParse(res.answer, __, __, true)
       }
+      if ((args.__format != "md" && args.__format != "raw") && isObject(res.answer)) {
+        return res.answer
+      }
+      this.state = "stop"
       if (args.raw) {
-        this.state = "stop"
         return res.answer || "(no answer)" 
       } else {
-        this.state = "stop"
-        if (args.__format == "md") answer += "\n"
+        if (args.__format != "md" && args.__format != "raw" && isString(res.answer)) res.answer = jsonParse(res.answer)
         return $o(res.answer || "(no final answer)", args, __, true)
       }
     }

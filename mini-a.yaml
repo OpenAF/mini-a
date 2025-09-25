@@ -105,6 +105,11 @@ jobs:
   exec : | #js
     var ma = new MiniA()
     ma.init(args)
-    if (isDef(args.__format)) args.__format = "md"
+    if (isUnDef(args.__format)) args.__format = "md"
     var _r = ma.start(args)
-    if (isUnDef(args.outfile)) print(_r)
+    if (isUnDef(args.outfile)) {
+      if (isObject(_r)) 
+        ow.oJob.output(_r, args)
+      else
+        print(_r)
+    }
