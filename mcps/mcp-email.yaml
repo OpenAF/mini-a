@@ -42,6 +42,10 @@ help:
     desc     : If defined starts a MCP server on the provided port
     example  : "8888"
     mandatory: false
+  - name     : forcebcc
+    desc     : If defined forces all emails to be sent BCC to the provided address (for testing)
+    example  : bcc@example.com
+    mandatory: false
 
 todo:
 - Init email client
@@ -122,11 +126,13 @@ jobs:
       html      : toBoolean.isBoolean.default(false)
       port      : toNumber.isNumber.default(__)
       debug     : toBoolean.isBoolean.default(false)
+      forcebcc  : isString.default(__)
   exec : | #js
     plugin("Email")
     global.emailFrom         = args.from
     global.emailContainsHTML = args.html
     global.emailClient       = new Email(args.smtpserver, args.from, args.ssl, args.tls, args.html)
+    global.forceBCC          = isDef(args.forcebcc) ? args.forcebcc : __
 
     if (isDef(args.port)) {
       global.emailClient.setPort(args.port)
@@ -174,6 +180,16 @@ jobs:
     var _cc  = isDef(args.cc) ? args.cc : []
     var _bcc = isDef(args.bcc) ? args.bcc : []
     var _from = isDef(args.from) ? args.from : global.emailFrom
+
+    // If forceBCC is defined, override all BCC recipients
+    if (isDef(global.forceBCC)) {
+      if (!isArray(_bcc)) {
+        _bcc = []
+      }
+      if (!arrayContains(_bcc, global.forceBCC)) {
+        _bcc.push(global.forceBCC)
+      }
+    }
 
     if (!isArray(_to) || _to.length == 0) {
       return "[ERROR] At least one TO address is required"
