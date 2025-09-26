@@ -7,8 +7,8 @@ help:
     example  : "8888"
     mandatory: false
   - name     : chs
-    desc     : A JSON/SLON array/map of channel name, type and options (depending on channel type)
-    example  : '(_name: my-data, _type: file, file: my-data.json)'
+    desc     : A JSON/SLON array/map of channel name, type, rw (read/write boolean) and options (depending on channel type)
+    example  : '(_name: my-data, _type: file, _rw: true, file: my-data.json)'
     mandatory: false
     
 todo:
@@ -92,11 +92,105 @@ todo:
           title         : ch-get
           readOnlyHint  : true
           idempotentHint: true
+
+      ch-set:
+        name       : ch-set
+        description: Sets a value in a data channel using a key.
+        inputSchema:
+          type      : object
+          properties:
+            dataCh:
+              type        : string
+              description : Name of the data channel.
+            key:
+              type        : object
+              description : Key to set.
+            value:
+              type        : object
+              description : Value to set.
+          required: [ dataCh, key, value ]
+        annotations:
+          title         : ch-set
+          readOnlyHint  : false
+          idempotentHint: false
+
+      ch-unset:
+        name       : ch-unset
+        description: Unsets a value in a data channel using a key.
+        inputSchema:
+          type      : object
+          properties:
+            dataCh:
+              type        : string
+              description : Name of the data channel.
+            key:
+              type        : object
+              description : Key to unset.
+          required: [ dataCh, key ]
+        annotations:
+          title         : ch-unset
+          readOnlyHint  : false
+          idempotentHint: false
+
+      ch-set-all:
+        name       : ch-set-all
+        description: Sets multiple values in a data channel using a list of key fields and values.
+        inputSchema:
+          type      : object
+          properties:
+            dataCh:
+              type        : string
+              description : Name of the data channel.
+            keyFieldsList:
+              type        : array
+              description : List of key fields.
+              items:
+                type: string
+            valuesList:
+              type        : array
+              description : List of values.
+              items:
+                type: object
+          required: [ dataCh, keyFieldsList, valuesList ]
+        annotations:
+          title         : ch-set-all
+          readOnlyHint  : false
+          idempotentHint: false
+
+      ch-unset-all:
+        name       : ch-unset-all
+        description: Unsets multiple values in a data channel using a list of key fields and values.
+        inputSchema:
+          type      : object
+          properties:
+            dataCh: 
+              type        : string
+              description : Name of the data channel.
+            keyFieldsList:
+              type        : array
+              description : List of key fields.
+              items:
+                type: string
+            valuesList:
+              type        : array
+              description : List of values.
+              items:
+                type: object
+          required: [ dataCh, keyFieldsList, valuesList ]
+        annotations:
+          title         : ch-unset-all
+          readOnlyHint  : false
+          idempotentHint: false
+
     ((fns    )): &MCPFNS
-      ch-size   : Channel size
-      ch-keys   : Channel keys
-      ch-values : Channel values
-      ch-get    : Channel get
+      ch-size     : Channel size
+      ch-keys     : Channel keys
+      ch-values   : Channel values
+      ch-get      : Channel get
+      ch-set      : Channel set
+      ch-unset    : Channel unset
+      ch-set-all  : Channel set all
+      ch-unset-all: Channel unset all
   ((else)):
   - (stdioMCP ): *MCPSERVER
     ((fnsMeta)): *MCPFNSMETA
@@ -126,6 +220,8 @@ jobs:
   exec : | #js
     var chs = af.fromJSSLON(args.chs)
     if (isMap(chs)) chs = [chs]
+
+    global.chs = chs
     if (isArray(chs)) {
       for (var i = 0; i < chs.length; i++) {
         $ch(chs[i]._name).create(chs[i]._type || "simple", chs[i])
@@ -167,3 +263,59 @@ jobs:
       value : isMap
   exec : | #js
     return $ch(args.dataCh).get(args.key, args.value)
+
+# ------------------
+- name : Channel set 
+  check:
+    in:
+      dataCh: isString
+      key   : isMap
+      value : isMap
+  exec : | #js
+    if (global.chs.filter(c => c._name === args.dataCh)[0]._rw) {
+      return $ch(args.dataCh).set(args.key, args.value)
+    } else {
+      return "[ERROR] The data channel '" + args.dataCh + "' is read-only"
+    }
+    
+
+# --------------------
+- name : Channel unset
+  check:
+    in:
+      dataCh: isString
+      key   : isMap
+  exec : | #js
+    if (global.chs.filter(c => c._name === args.dataCh)[0]._rw) {
+      return $ch(args.dataCh).unset(args.key)
+    } else {
+      return "[ERROR] The data channel '" + args.dataCh + "' is read-only"
+    }
+
+# ----------------------
+- name : Channel set all
+  check:
+    in:
+      dataCh       : isString
+      keyFieldsList: isArray
+      valuesList   : isArray
+  exec : | #js
+    if (global.chs.filter(c => c._name === args.dataCh)[0]._rw) {
+      return $ch(args.dataCh).setAll(args.keyFieldsList, args.valuesList)
+    } else {
+      return "[ERROR] The data channel '" + args.dataCh + "' is read-only"
+    }
+
+# ------------------------
+- name : Channel unset all
+  check:
+    in:
+      dataCh       : isString
+      keyFieldsList: isArray
+      valuesList   : isArray
+  exec : | #js
+    if (global.chs.filter(c => c._name === args.dataCh)[0]._rw) {
+      return $ch(args.dataCh).unsetAll(args.keyFieldsList, args.valuesList)
+    } else {
+      return "[ERROR] The data channel '" + args.dataCh + "' is read-only"
+    }

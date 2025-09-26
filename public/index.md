@@ -1,7 +1,7 @@
 <script src="showdown.min.js?raw=true"></script>
 <script>
     document.title = 'Chat Interface';
-    var __isDark;
+    var __isDark = (typeof __isDark === 'undefined') ? false : __isDark
     function __refreshDarkMode() {
         if (__isDark) {
             document.body.classList.add('markdown-body-dark')

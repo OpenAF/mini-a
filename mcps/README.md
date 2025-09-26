@@ -8,6 +8,7 @@
 | mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | [mcp-notify.yaml](mcp-notify.yaml) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
+| mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 
 ### Examples
 
@@ -37,6 +38,42 @@ ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'
 
 ```bash
 ojob mini-a.yaml goal="get the public IP address of this machine" mcp="(cmd: 'ojob mcps/mcp-net.yaml tool=public_ip', timeout: 5000)"
+```
+
+#### mcp-ch
+
+This MCP exposes OpenAF data channels over STDIO or as an HTTP remote server. It accepts the following arguments:
+
+- `onport` (optional): start an HTTP MCP server on the specified port.
+- `chs` (optional): a JSON/SLON array or map describing channels. Each channel object may include `_name`, `_type`, `_rw` (boolean read/write) and type-specific options (for example `file: my-data.json`). Example: `( _name: my-data, _type: file, _rw: true, file: my-data.json )` or as an array.
+
+Available tools (functions) exposed by `mcp-ch`:
+
+- `ch-size`     : Returns the size of a data channel (input: `dataCh`).
+- `ch-keys`     : Returns keys of a data channel (input: `dataCh`, optional `extra`).
+- `ch-values`   : Returns all values of a data channel (input: `dataCh`, optional `extra`).
+- `ch-get`      : Get a value from a data channel (input: `dataCh`, `key`, optional `value`).
+- `ch-set`      : Set a value in a data channel (input: `dataCh`, `key`, `value`). Requires channel to be writable.
+- `ch-unset`    : Unset a value in a data channel (input: `dataCh`, `key`). Requires channel to be writable.
+- `ch-set-all`  : Set multiple values using `keyFieldsList` and `valuesList` (requires writable channel).
+- `ch-unset-all`: Unset multiple values using `keyFieldsList` and `valuesList` (requires writable channel).
+
+Example: start as HTTP remote server on port 12345 with two channels (one simple read-only and one file-backed writable):
+
+```bash
+ojob mcps/mcp-ch.yaml onport=12345 chs="[( _name: readonly, _type: simple, _rw: false ), ( _name: my-data, _type: file, _rw: true, file: my-data.json )]"
+```
+
+Call `ch-get` via STDIO MCP (example using `oafp` to call a tool):
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-ch.yaml', tool: ch-get, params: (dataCh: 'my-data', key: (id: 1)))"
+```
+
+Call `ch-keys` remotely against an HTTP MCP server:
+
+```bash
+oafp in=mcp data="(type: remote, url: 'http://localhost:12345/mcp', tool: ch-keys, params: (dataCh: 'my-data'))"
 ```
 ## Using MCPs as STDIO or HTTP Remote Server
 
