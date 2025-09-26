@@ -74,7 +74,7 @@ filesHash:
   mcps/README.md: 6b4d551e3ede049a370857a5dcc598d17d9849e8
   mcps/mcp-ch.yaml: b831478763c36037a61af095c4be0c4ac2464cec
   mcps/mcp-db.yaml: d2fa8ffe251521e4c4ec42e47fa6ad2de40bc50b
-  mcps/mcp-email.yaml: 79bf26f6686ca0ac0df7ef6416137a94c851ff11
+  mcps/mcp-email.yaml: 128fae9e958038e47045242c5752be76da4ec80a
   mcps/mcp-net.yaml: 7b9263f3746916cf35eca7422c2652ce55e13ae4
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 5ee6f18c11879c597c6a54af160e991ef9469977
