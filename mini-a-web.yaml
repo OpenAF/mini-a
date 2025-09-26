@@ -174,9 +174,9 @@ todo:
           } else {
             if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🤖" || r.event == "📝") {
               if (r.event == "👤") {
-                _res.content += "<div style=\"text-align: right;\"><i>" + r.message + " " + r.event + "</i>\n<br><br></div>"
+                _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + r.message.replace(/\n/g, "<br>") + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {
-                _res.content += r.event + " <i>" + r.message + "</i>\n"
+                _res.content += r.event + " <i>" + r.message.replace(/\n/g, "<br>") + "</i>\n"
               }
             }
           }
