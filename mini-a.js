@@ -327,7 +327,8 @@ MiniA.prototype.init = function(args) {
     isMachine        : (isDef(args.__format) && args.__format != "md")
   })
   llm = this.llm.withInstructions(this._systemInst)
-  this._fnI("size", `System prompt size ${ow.format.toBytesAbbreviation(this._systemInst.length)}`)
+  var systemTokens = Math.ceil(this._systemInst.length / 4) // rough token estimate
+  this._fnI("size", `System prompt ~${systemTokens} tokens`)
   if (args.debug) {
     print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
   }
@@ -368,7 +369,7 @@ MiniA.prototype.get = function() {
  * - conversation (string, optional): Path to a file to load/save conversation history.
  * - raw (boolean, default=false): If true, returns the final answer as a raw string instead of formatted output.
  * - checkall (boolean, default=false): If true, asks for confirmation before executing any shell command.
- * - maxcontext (number, optional): Maximum context size in bytes. If the conversation exceeds this size, it will be summarized.
+ * - maxcontext (number, optional): Maximum context size in tokens. If the conversation exceeds this size, it will be summarized.
  * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
  * - __format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * 
@@ -391,7 +392,7 @@ MiniA.prototype.start = function(args) {
     args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
     args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
-    args.maxcontext = _$(args.maxcontext, "args.maxcontext").isNumber().default(0) // max context size in bytes
+    args.maxcontext = _$(args.maxcontext, "args.maxcontext").isNumber().default(0) // max context size in tokens
     args.rules = _$(args.rules, "args.rules").isString().default("")
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
@@ -427,8 +428,51 @@ MiniA.prototype.start = function(args) {
     // Summarize context if too long
     var summarize = ctx => {
       var _llm = $llm(this._oaf_model)
-      var newCtx = _llm.prompt("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
-      return newCtx
+      var summaryResponseWithStats = _llm.promptWithStats("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
+      var summaryStats = summaryResponseWithStats.stats
+      if (isDef(summaryStats)) {
+        var summaryTokenInfo = []
+        if (isDef(summaryStats.prompt_tokens)) summaryTokenInfo.push(`prompt: ${summaryStats.prompt_tokens}`)
+        if (isDef(summaryStats.completion_tokens)) summaryTokenInfo.push(`completion: ${summaryStats.completion_tokens}`)
+        if (isDef(summaryStats.total_tokens)) summaryTokenInfo.push(`total: ${summaryStats.total_tokens}`)
+        this._fnI("output", `Context summarized. ${summaryTokenInfo.length > 0 ? "Summary tokens - " + summaryTokenInfo.join(", ") : ""}`)
+      } else {
+        this._fnI("output", "Context summarized.")
+      }
+      return summaryResponseWithStats.response
+    }
+
+    // Helper function to check and summarize context during execution
+    var checkAndSummarizeContext = () => {
+      if (args.maxcontext > 0) {
+        var contextTokens = Math.ceil(context.join("").length / 4)
+        if (contextTokens > args.maxcontext) {
+          this._fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
+          var recentContext = []
+          var oldContext = []
+          var recentLimit = Math.floor(args.maxcontext * 0.3) // Keep 30% as recent context
+          var currentSize = 0
+          
+          for (var i = context.length - 1; i >= 0; i--) {
+            var entrySize = Math.ceil(context[i].length / 4)
+            if (currentSize + entrySize <= recentLimit) {
+              recentContext.unshift(context[i])
+              currentSize += entrySize
+            } else {
+              oldContext = context.slice(0, i + 1)
+              break
+            }
+          }
+          
+          if (oldContext.length > 0) {
+            this._fnI("summarize", `Summarizing conversation history...`)
+            var summarizedOld = summarize(oldContext.join("\n"))
+            context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
+            var newTokens = Math.ceil(context.join("").length / 4)
+            this._fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
+          }
+        }
+      }
     }
 
     this._fnI("user", `${args.goal}`)
@@ -441,10 +485,11 @@ MiniA.prototype.start = function(args) {
     // Check context size and summarize if too large
     if (args.maxcontext > 0) {
       var _c = this.llm.getGPT().getConversation()
-      var _cl = stringify(_c, __, "").length
-      //print(`maxcontext=${args.maxcontext}, context size=${context.join("").length}`)
-      log(`Current context size: ${ow.format.toBytesAbbreviation(_cl)} (max allowed ${ow.format.toBytesAbbreviation(args.maxcontext)})`)
-      if (_cl > args.maxcontext) {
+      // Rough estimate: ~4 characters per token for most languages
+      var currentTokens = Math.ceil(stringify(_c, __, "").length / 4)
+      
+      this._fnI("size", `Current context tokens: ~${currentTokens} (max allowed: ${args.maxcontext})`)
+      if (currentTokens > args.maxcontext) {
         var _sysc = [], _ctx = []
         _c.forEach(c => {
           if (isDef(c.role) && (c.role == "system" || c.role == "developer")) {
@@ -455,8 +500,8 @@ MiniA.prototype.start = function(args) {
         })
         this._fnI("summarize", `Summarizing conversation history...`)
         var _nc = summarize(stringify(_ctx, __, ""))
-        var _ncl = stringify(_nc, __, "").length
-        log(`Context too large (${ow.format.toBytesAbbreviation(_cl)}), summarized to ${ow.format.toBytesAbbreviation(_ncl)} (system #${_sysc.length}).`)
+        var newTokens = Math.ceil(stringify(_nc, __, "").length / 4) // rough estimate
+        this._fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
         this.llm.getGPT().setConversation(_sysc.concat([{ role: "assistant", content: "Summarized conversation: " + _nc }]))
       }
     }
@@ -472,14 +517,25 @@ MiniA.prototype.start = function(args) {
         context: step == 0 ? "" : context.join("\n")
       })
 
-      this._fnI("input", `Interacting with model (context size ${ow.format.toBytesAbbreviation(context.join("").length)})...`)
+      var contextTokens = Math.ceil(context.join("").length / 4) // rough token estimate
+      this._fnI("input", `Interacting with model (context ~${contextTokens} tokens)...`)
       // Get model response and parse as JSON
       addCall()
       if (args.debug) {
         print( ow.format.withSideLine(">>>\n" + prompt + ">>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      var rmsg = this.llm.prompt(prompt)
-      this._fnI("output", "Model responded.")
+      var responseWithStats = this.llm.promptWithStats(prompt)
+      var rmsg = responseWithStats.response
+      var stats = responseWithStats.stats
+      if (isDef(stats)) {
+        var tokenInfo = []
+        if (isDef(stats.prompt_tokens)) tokenInfo.push(`prompt: ${stats.prompt_tokens}`)
+        if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
+        if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
+        this._fnI("output", `Model responded. ${tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""}`)
+      } else {
+        this._fnI("output", "Model responded.")
+      }
 
       // Store history
       if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
@@ -538,6 +594,7 @@ MiniA.prototype.start = function(args) {
       if (action == "think") {
         this._fnI("think", `${(isObject(thought) ? stringify(thought, __, "") : thought) || "(no thought)"}`)
         context.push(`[THOUGHT ${step + 1}] ${(isObject(thought) ? stringify(thought, __, "") : thought) || "no thought"}`)
+        checkAndSummarizeContext()
         continue
       }
 
@@ -550,6 +607,7 @@ MiniA.prototype.start = function(args) {
         var shellOutput = this._runCommand({ command: command, readwrite: args.readwrite, checkall: args.checkall }).output
         context.push(`[ACT ${step + 1}] shell: ${command}`)
         context.push(`[OBS ${step + 1}] ${shellOutput.trim() || "(no output)"}`)
+        checkAndSummarizeContext()
         continue
       }
 
@@ -583,6 +641,7 @@ MiniA.prototype.start = function(args) {
         this._fnI("done", `Action '${origAction}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
         context.push(`[ACT ${step + 1}] ${origAction}: ${af.toSLON(msg.params)}`)
         context.push(`[OBS ${step + 1}] ${stringify(toolOutput, __, "") || "(no output)"}`)
+        checkAndSummarizeContext()
         continue
       }
 
@@ -623,6 +682,7 @@ MiniA.prototype.start = function(args) {
 
       // Unknown action: just add thought to context
       context.push(`[THOUGHT ${step + 1}] ((unknown action -> think) ${thought || "no thought"})`)
+      checkAndSummarizeContext()
     }
 
     // If max steps hit without final action
@@ -640,7 +700,18 @@ MiniA.prototype.start = function(args) {
     this._fnI("warn", `Reached max steps. Asking for final answer...`)
     // Get final answer from model
     addCall()
-    var res = jsonParse(this.llm.prompt(finalPrompt), __, __, true)
+    var finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
+    var res = jsonParse(finalResponseWithStats.response, __, __, true)
+    var finalStats = finalResponseWithStats.stats
+    if (isDef(finalStats)) {
+      var finalTokenInfo = []
+      if (isDef(finalStats.prompt_tokens)) finalTokenInfo.push(`prompt: ${finalStats.prompt_tokens}`)
+      if (isDef(finalStats.completion_tokens)) finalTokenInfo.push(`completion: ${finalStats.completion_tokens}`)
+      if (isDef(finalStats.total_tokens)) finalTokenInfo.push(`total: ${finalStats.total_tokens}`)
+      this._fnI("output", `Final response received. ${finalTokenInfo.length > 0 ? "Tokens - " + finalTokenInfo.join(", ") : ""}`)
+    } else {
+      this._fnI("output", "Final response received.")
+    }
 
     // Store history
     if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())

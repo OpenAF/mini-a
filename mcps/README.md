@@ -2,12 +2,12 @@
 
 ## Catalog
 
-| Name       | Description                     | Type        | Location                           |
-|------------|---------------------------------|-------------|------------------------------------|
-| mcp-db     | Database access MCP             | STDIO/HTTP       | [mcp-db.yaml](mcp-db.yaml)         |
-| mcp-email  | Email sending MCP               | STDIO/HTTP       | [mcp-email.yaml](mcp-email.yaml)   |
-| mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | [mcp-notify.yaml](mcp-notify.yaml) |
-| mcp-net    | Network utility MCP             | STDIO/HTTP       | [mcp-net.yaml](mcp-net.yaml)       |
+| Name       | Description                     | Type             | oPack      | Location                           |
+|------------|---------------------------------|------------------|------------|------------------------------------|
+| mcp-db     | Database access MCP             | STDIO/HTTP       | (included) | [mcp-db.yaml](mcp-db.yaml)         |
+| mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
+| mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | [mcp-notify.yaml](mcp-notify.yaml) |
+| mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 
 ### Examples
 
