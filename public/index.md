@@ -54,6 +54,7 @@
 
     .input-section {
         display: flex;
+        align-items: flex-start; /* Align buttons to top */
         gap: 1vmin; /* was 10px */
         margin-bottom: 2vmin; /* was 20px */
     }
@@ -66,6 +67,12 @@
         background: transparent;
         color: inherit;
         font-size: 0.9rem;
+        resize: none;
+        overflow: hidden;
+        min-height: calc(1.2em + 2vmin); /* Maintain single-line height initially */
+        max-height: 20vh; /* Limit maximum height */
+        line-height: 1.2;
+        font-family: inherit;
     }
 
     #submitBtn {
@@ -150,7 +157,7 @@
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
     <br>
     <div class="input-section">
-        <input type="text" id="promptInput" placeholder="Enter your prompt..." disabled>
+        <textarea id="promptInput" placeholder="Enter your prompt..." disabled rows="1"></textarea>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
         <button id="clearBtn" title="Clear" aria-label="Clear" type="button"></button>
     </div>
@@ -260,15 +267,43 @@
             </svg>`;
     }
 
+    // Auto-resize textarea function
+    function autoResizeTextarea() {
+        if (!promptInput) return;
+        
+        // Reset height to minimum to get accurate scrollHeight
+        promptInput.style.height = 'auto';
+        
+        // Calculate new height based on content
+        const minHeight = parseFloat(getComputedStyle(promptInput).minHeight);
+        const maxHeight = parseFloat(getComputedStyle(promptInput).maxHeight);
+        let newHeight = Math.max(minHeight, promptInput.scrollHeight);
+        
+        // Enforce max height
+        if (maxHeight && newHeight > maxHeight) {
+            newHeight = maxHeight;
+            promptInput.style.overflowY = 'auto';
+        } else {
+            promptInput.style.overflowY = 'hidden';
+        }
+        
+        promptInput.style.height = newHeight + 'px';
+    }
+
     // Initialize UI
     promptInput.disabled = false;
     // set initial icons and tooltips
     setSubmitIcon('send');
     setClearIcon();
 
+    // Add auto-resize functionality
+    promptInput.addEventListener('input', autoResizeTextarea);
+    promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
+
     submitBtn.addEventListener('click', handleSubmit);
     promptInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !promptInput.disabled) {
+        if (e.key === 'Enter' && !e.shiftKey && !promptInput.disabled) {
+            e.preventDefault();
             handleSubmit();
         }
     });
@@ -473,6 +508,9 @@
         autoScrollEnabled = true; // Enable auto-scroll for new processing
         promptInput.disabled = true;
         promptInput.value = '';
+        // Reset textarea to original single-line size
+        promptInput.style.height = 'auto';
+        promptInput.style.overflowY = 'hidden';
         setSubmitIcon('stop');
         submitBtn.classList.add('stop');
         clearBtn.disabled = true;
