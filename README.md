@@ -95,10 +95,9 @@ mini-a.sh goal="analyze the current directory structure and provide insights" us
 Mini-A is built on the OpenAF platform. To get started:
 
 1. **Install OpenAF** - Download from [openaf.io](https://openaf.io)
-2. **Clone this repository**:
+2. **Install oPack**:
    ```bash
-   git clone https://github.com/openaf/mini-a.git
-   cd mini-a
+   opack install mini-a
    ```
 3. **Set your model configuration** (see [model examples](#setting-the-model) below)
 4. **Start using Mini-A**!
@@ -108,7 +107,7 @@ Mini-A is built on the OpenAF platform. To get started:
 ### Environment Variables
 
 - **`OAF_MODEL`** (required): LLM model configuration
-- **`OPENAF_CONSOLE_REDIRECT`**: Set to `false` to disable console redirection
+- **`OAF_FLAGS="(MD_DARKMODE: 'auto')"**: For setting forced dark mode or automatic
 
 ### Command Line Options
 
