@@ -121,6 +121,111 @@ MiniA.prototype.setInteractionFn = function(fn) {
     this._fnI = fn
 }
 
+
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Estimate token count for text (rough estimate: ~4 characters per token)
+ */
+MiniA.prototype._estimateTokens = function(text) {
+    if (isUnDef(text)) return 0
+    return Math.ceil((isString(text) ? text : stringify(text, __, "")).length / 4)
+}
+
+/**
+ * Format token statistics for display
+ */
+MiniA.prototype._formatTokenStats = function(stats) {
+    if (isUnDef(stats)) return ""
+    var tokenInfo = []
+    if (isDef(stats.prompt_tokens)) tokenInfo.push(`prompt: ${stats.prompt_tokens}`)
+    if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
+    if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
+    return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
+}
+
+/**
+ * Remove code block markers from text if present
+ */
+MiniA.prototype._cleanCodeBlocks = function(text) {
+    if (!isString(text)) return text
+    var trimmed = text.trim()
+    if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+        return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
+    }
+    return text
+}
+
+/**
+ * Validate and set default values for common argument patterns
+ */
+MiniA.prototype._validateArgs = function(args, validations) {
+    validations.forEach(v => {
+        var value = args[v.name]
+        var validated = _$(value, v.path || `args.${v.name}`)
+        
+        if (v.type === "string") validated = validated.isString()
+        else if (v.type === "boolean") validated = validated.isBoolean()
+        else if (v.type === "number") validated = validated.isNumber()
+        
+        args[v.name] = validated.default(v.default)
+    })
+    return args
+}
+
+/**
+ * Process and return final answer based on format requirements
+ */
+MiniA.prototype._processFinalAnswer = function(answer, args) {
+    if (isDef(args.outfile)) {
+        io.writeFileString(args.outfile, answer || "(no answer)")
+        this._fnI("done", `Final answer written to ${args.outfile}`)
+        return
+    }
+    
+    if (isString(answer) && args.__format != "raw") answer = answer.trim()
+    
+    // Handle JSON parsing for markdown format
+    if ((args.__format == "md" && args.__format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
+        this.state = "stop"
+        return jsonParse(answer, __, __, true)
+    }
+    
+    if ((args.__format == "md" && args.__format != "raw") && isObject(answer)) {
+        return answer
+    }
+    
+    this._fnI("final", `Final answer determined. Goal achieved.`)
+    this.state = "stop"
+    
+    if (args.raw) {
+        return answer || "(no answer)" 
+    } else {
+        if (args.__format != "md" && args.__format != "raw" && isString(answer)) {
+            answer = jsonParse(answer)
+        }
+        return $o(answer || "(no answer)", args, __, true)
+    }
+}
+
+MiniA.prototype._numberInWords = num => {
+    const words = ["zero","one","two","three","four","five","six","seven","eight","nine","ten",
+                  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
+                  "eighteen","nineteen","twenty"]
+    const tens = { 20: "twenty", 30: "thirty", 40: "forty", 50: "fifty" }
+
+    if (num >= 0 && num <= 20) return words[num]
+    if (num > 20 && num <= 50) {
+        const ten = Math.floor(num / 10) * 10
+        const one = num % 10
+        return one === 0 ? tens[ten] : `${tens[ten]}-${words[one]}`
+    }
+    return num.toString()
+}
+
 MiniA.prototype._runCommand = function(args) {
     _$(args.command, "args.command").isString().$_()
     args.readwrite = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
@@ -179,37 +284,31 @@ MiniA.prototype._runCommand = function(args) {
     return args
 }
 
-MiniA.prototype._numberInWords = num => {
-    const words = ["zero","one","two","three","four","five","six","seven","eight","nine","ten",
-                  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
-                  "eighteen","nineteen","twenty"]
-    const tens = { 20: "twenty", 30: "thirty", 40: "forty", 50: "fifty" }
-
-    if (num >= 0 && num <= 20) return words[num]
-    if (num > 20 && num <= 50) {
-        const ten = Math.floor(num / 10) * 10
-        const one = num % 10
-        return one === 0 ? tens[ten] : `${tens[ten]}-${words[one]}`
-    }
-    return num.toString()
-}
+// ============================================================================
+// MAIN METHODS
+// ============================================================================
 
 MiniA.prototype.init = function(args) {
   if (this._isInitialized) return
 
   args = _$(args, "args").isMap().default({})
 
-  args.mcp = _$(args.mcp, "args.mcp").isString().default(__)
+  // Validate common arguments
+  this._validateArgs(args, [
+    { name: "mcp", type: "string", default: __ },
+    { name: "rtm", type: "number", default: __ },
+    { name: "maxsteps", type: "number", default: 50 },
+    { name: "knowledge", type: "string", default: "" },
+    { name: "outfile", type: "string", default: __ },
+    { name: "libs", type: "string", default: "" },
+    { name: "conversation", type: "string", default: __ }
+  ])
+
+  // Convert and validate boolean arguments
   args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
-  args.rtm = _$(args.rtm, "args.rtm").isNumber().default(__) // rate limit (calls per minute)
-  args.maxsteps = _$(args.maxsteps, "args.maxsteps").isNumber().default(50)
   args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
   args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
   args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
-  args.knowledge = _$(args.knowledge, "args.knowledge").isString().default("")
-  args.outfile = _$(args.outfile, "args.outfile").isString().default(__)
-  args.libs = _$(args.libs, "args.libs").isString().default("")
-  args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
   args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
   args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
 
@@ -327,7 +426,7 @@ MiniA.prototype.init = function(args) {
     isMachine        : (isDef(args.__format) && args.__format != "md")
   })
   llm = this.llm.withInstructions(this._systemInst)
-  var systemTokens = Math.ceil(this._systemInst.length / 4) // rough token estimate
+  var systemTokens = this._estimateTokens(this._systemInst)
   this._fnI("size", `System prompt ~${systemTokens} tokens`)
   if (args.debug) {
     print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
@@ -379,21 +478,27 @@ MiniA.prototype.get = function() {
  */
 MiniA.prototype.start = function(args) {
     _$(args.goal, "args.goal").isString().$_()
-    args.mcp = _$(args.mcp, "args.mcp").isString().default(__)
+    
+    // Validate common arguments
+    this._validateArgs(args, [
+      { name: "mcp", type: "string", default: __ },
+      { name: "rtm", type: "number", default: __ },
+      { name: "maxsteps", type: "number", default: 25 },
+      { name: "knowledge", type: "string", default: "" },
+      { name: "outfile", type: "string", default: __ },
+      { name: "libs", type: "string", default: "" },
+      { name: "conversation", type: "string", default: __ },
+      { name: "maxcontext", type: "number", default: 0 },
+      { name: "rules", type: "string", default: "" }
+    ])
+
+    // Convert and validate boolean arguments
     args.verbose = _$(args.verbose, "args.verbose").isBoolean().default(false)
-    args.rtm = _$(args.rtm, "args.rtm").isNumber().default(__) // rate limit (calls per minute)
-    args.maxsteps = _$(args.maxsteps, "args.maxsteps").isNumber().default(25)
     args.readwrite = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
     args.debug = _$(args.debug, "args.debug").isBoolean().default(false)
     args.useshell = _$(args.useshell, "args.useshell").isBoolean().default(false)
-    args.knowledge = _$(args.knowledge, "args.knowledge").isString().default("")
-    args.outfile = _$(args.outfile, "args.outfile").isString().default(__)
-    args.libs = _$(args.libs, "args.libs").isString().default("")
-    args.conversation = _$(args.conversation, "args.conversation").isString().default(__)
     args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
-    args.maxcontext = _$(args.maxcontext, "args.maxcontext").isNumber().default(0) // max context size in tokens
-    args.rules = _$(args.rules, "args.rules").isString().default("")
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -430,22 +535,15 @@ MiniA.prototype.start = function(args) {
       var _llm = $llm(this._oaf_model)
       var summaryResponseWithStats = _llm.promptWithStats("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
       var summaryStats = summaryResponseWithStats.stats
-      if (isDef(summaryStats)) {
-        var summaryTokenInfo = []
-        if (isDef(summaryStats.prompt_tokens)) summaryTokenInfo.push(`prompt: ${summaryStats.prompt_tokens}`)
-        if (isDef(summaryStats.completion_tokens)) summaryTokenInfo.push(`completion: ${summaryStats.completion_tokens}`)
-        if (isDef(summaryStats.total_tokens)) summaryTokenInfo.push(`total: ${summaryStats.total_tokens}`)
-        this._fnI("output", `Context summarized. ${summaryTokenInfo.length > 0 ? "Summary tokens - " + summaryTokenInfo.join(", ") : ""}`)
-      } else {
-        this._fnI("output", "Context summarized.")
-      }
+      var tokenStatsMsg = this._formatTokenStats(summaryStats)
+      this._fnI("output", `Context summarized. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
       return summaryResponseWithStats.response
     }
 
     // Helper function to check and summarize context during execution
     var checkAndSummarizeContext = () => {
       if (args.maxcontext > 0) {
-        var contextTokens = Math.ceil(context.join("").length / 4)
+        var contextTokens = this._estimateTokens(context.join(""))
         if (contextTokens > args.maxcontext) {
           this._fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
           var recentContext = []
@@ -454,7 +552,7 @@ MiniA.prototype.start = function(args) {
           var currentSize = 0
           
           for (var i = context.length - 1; i >= 0; i--) {
-            var entrySize = Math.ceil(context[i].length / 4)
+            var entrySize = this._estimateTokens(context[i])
             if (currentSize + entrySize <= recentLimit) {
               recentContext.unshift(context[i])
               currentSize += entrySize
@@ -468,7 +566,7 @@ MiniA.prototype.start = function(args) {
             this._fnI("summarize", `Summarizing conversation history...`)
             var summarizedOld = summarize(oldContext.join("\n"))
             context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
-            var newTokens = Math.ceil(context.join("").length / 4)
+            var newTokens = this._estimateTokens(context.join(""))
             this._fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
           }
         }
@@ -485,8 +583,7 @@ MiniA.prototype.start = function(args) {
     // Check context size and summarize if too large
     if (args.maxcontext > 0) {
       var _c = this.llm.getGPT().getConversation()
-      // Rough estimate: ~4 characters per token for most languages
-      var currentTokens = Math.ceil(stringify(_c, __, "").length / 4)
+      var currentTokens = this._estimateTokens(stringify(_c, __, ""))
       
       this._fnI("size", `Current context tokens: ~${currentTokens} (max allowed: ${args.maxcontext})`)
       if (currentTokens > args.maxcontext) {
@@ -500,7 +597,7 @@ MiniA.prototype.start = function(args) {
         })
         this._fnI("summarize", `Summarizing conversation history...`)
         var _nc = summarize(stringify(_ctx, __, ""))
-        var newTokens = Math.ceil(stringify(_nc, __, "").length / 4) // rough estimate
+        var newTokens = this._estimateTokens(stringify(_nc, __, ""))
         this._fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
         this.llm.getGPT().setConversation(_sysc.concat([{ role: "assistant", content: "Summarized conversation: " + _nc }]))
       }
@@ -517,7 +614,7 @@ MiniA.prototype.start = function(args) {
         context: step == 0 ? "" : context.join("\n")
       })
 
-      var contextTokens = Math.ceil(context.join("").length / 4) // rough token estimate
+      var contextTokens = this._estimateTokens(context.join(""))
       this._fnI("input", `Interacting with model (context ~${contextTokens} tokens)...`)
       // Get model response and parse as JSON
       addCall()
@@ -527,15 +624,8 @@ MiniA.prototype.start = function(args) {
       var responseWithStats = this.llm.promptWithStats(prompt)
       var rmsg = responseWithStats.response
       var stats = responseWithStats.stats
-      if (isDef(stats)) {
-        var tokenInfo = []
-        if (isDef(stats.prompt_tokens)) tokenInfo.push(`prompt: ${stats.prompt_tokens}`)
-        if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
-        if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
-        this._fnI("output", `Model responded. ${tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""}`)
-      } else {
-        this._fnI("output", "Model responded.")
-      }
+      var tokenStatsMsg = this._formatTokenStats(stats)
+      this._fnI("output", `Model responded. ${tokenStatsMsg}`)
 
       // Store history
       if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
@@ -647,37 +737,11 @@ MiniA.prototype.start = function(args) {
 
       // Action 'final': print answer and exit
       if (action == "final") {
-        /*if (args.verbose && thought) {
-          this._fnI("", `[THOUGHT ${step + 1}] ${thought}`)
-        }*/
-        
-        if ((args.__format != 'md' && args.__format != 'raw') && isString(answer) && answer.trim().startsWith("```") && answer.trim().endsWith("```")) {
-          // Remove code block markers if present
-          answer = answer.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
+        if (args.__format != 'md' && args.__format != 'raw') {
+          answer = this._cleanCodeBlocks(answer)
         }
 
-        if (isDef(args.outfile)) {
-          io.writeFileString(args.outfile, answer || "(no answer)")
-          this._fnI("done", `Final answer written to ${args.outfile}`)
-        } else {
-          if (isString(answer) && args.__format != "raw") answer = answer.trim()
-          if ((args.__format == "md" && args.__format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
-            this.state = "stop"
-            return jsonParse(answer, __, __, true)
-          }
-          if ((args.__format == "md" && args.__format != "raw") && isObject(answer)) {
-            return answer
-          }
-          this._fnI("final", `Final answer determined. Goal achieved.`)
-          this.state = "stop"
-          if (args.raw) {
-            return answer || "(no answer)" 
-          } else {
-            if (args.__format != "md" && args.__format != "raw" && isString(answer)) answer = jsonParse(answer)
-            return $o(answer || "(no answer)", args, __, true)
-          }
-        }
-        return
+        return this._processFinalAnswer(answer, args)
       }
 
       // Unknown action: just add thought to context
@@ -703,44 +767,14 @@ MiniA.prototype.start = function(args) {
     var finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
     var res = jsonParse(finalResponseWithStats.response, __, __, true)
     var finalStats = finalResponseWithStats.stats
-    if (isDef(finalStats)) {
-      var finalTokenInfo = []
-      if (isDef(finalStats.prompt_tokens)) finalTokenInfo.push(`prompt: ${finalStats.prompt_tokens}`)
-      if (isDef(finalStats.completion_tokens)) finalTokenInfo.push(`completion: ${finalStats.completion_tokens}`)
-      if (isDef(finalStats.total_tokens)) finalTokenInfo.push(`total: ${finalStats.total_tokens}`)
-      this._fnI("output", `Final response received. ${finalTokenInfo.length > 0 ? "Tokens - " + finalTokenInfo.join(", ") : ""}`)
-    } else {
-      this._fnI("output", "Final response received.")
-    }
+    var finalTokenStatsMsg = this._formatTokenStats(finalStats)
+    this._fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 
     // Store history
     if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
     
     // Extract final answer
-    if (isDef(res.answer) && res.answer.trim().startsWith("```") && res.answer.trim().endsWith("```")) {
-      // Remove code block markers if present
-      res.answer = res.answer.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
-    }
+    res.answer = this._cleanCodeBlocks(res.answer)
 
-    if (isDef(args.outfile)) {
-      io.writeFileString(args.outfile, res.answer || "(no final answer)")
-      this._fnI("final", `Final answer written to ${args.outfile}`)
-      return
-    } else {
-      if (isString(res.answer) && args.__format != "raw") res.answer = res.answer.trim()
-      if ((args.__format != 'md' && args.__format != 'raw') && isString(res.answer) && res.answer.trim().startsWith("```") && res.answer.trim().endsWith("```")) {
-        this.status = "stop"
-        return jsonParse(res.answer, __, __, true)
-      }
-      if ((args.__format != "md" && args.__format != "raw") && isObject(res.answer)) {
-        return res.answer
-      }
-      this.state = "stop"
-      if (args.raw) {
-        return res.answer || "(no answer)" 
-      } else {
-        if (args.__format != "md" && args.__format != "raw" && isString(res.answer)) res.answer = jsonParse(res.answer)
-        return $o(res.answer || "(no final answer)", args, __, true)
-      }
-    }
+    return this._processFinalAnswer(res.answer || "(no final answer)", args)
 }
