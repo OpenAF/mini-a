@@ -1,9 +1,15 @@
 <script src="showdown.min.js?raw=true"></script>
 <script>
     document.title = 'Chat Interface';
-    var __isDark = (typeof __isDark === 'undefined') ? false : __isDark
+    var _isD
     function __refreshDarkMode() {
-        if (__isDark) {
+        if (typeof __isDark === 'undefined') {
+            // if classlist contains markdown-body-dark, then it's dark
+            _isD = document.body.classList.contains('markdown-body-dark')
+        } else {
+            _isD = __isDark
+        }
+        if (_isD) {
             document.body.classList.add('markdown-body-dark')
             document.body.classList.add('hljs_dark')
             document.body.classList.add('njsmap_dark')
@@ -23,12 +29,6 @@
             })
         }
     }
-    //var __isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-    __refreshDarkMode()
-    /*window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
-        __isDark = event.matches
-        __refreshDarkMode()
-    })*/
 </script>
 <style>
     :root {
@@ -54,54 +54,93 @@
 
     .input-section {
         display: flex;
-        align-items: flex-start; /* Align buttons to top */
-        gap: 1vmin; /* was 10px */
-        margin-bottom: 2vmin; /* was 20px */
+        align-items: flex-end;
+        gap: 0.8vmin;
+        margin-bottom: 2vmin;
+        background: var(--panel-bg);
+        border: 1px solid var(--border);
+        border-radius: 1.2vmin;
+        padding: 0.6vmin;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        transition: box-shadow 0.2s ease;
     }
 
     #promptInput {
         flex: 1;
-        padding: 1vmin; /* was 10px */
-        border: 0.1vmin solid var(--border); /* was 1px */
-        border-radius: 0.4vmin; /* was 4px */
-        background: transparent;
+        padding: 1.2vmin;
+        border: none;
+        border-radius: 0.8vmin;
+        background: #ffffff;
         color: inherit;
         font-size: 0.9rem;
         resize: none;
         overflow: hidden;
-        min-height: calc(1.2em + 2vmin); /* Maintain single-line height initially */
-        max-height: 20vh; /* Limit maximum height */
+        min-height: calc(1.2em + 0.5vmin);
+        max-height: 20vh;
         line-height: 1.2;
         font-family: inherit;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        outline: none;
+        transition: box-shadow 0.2s ease;
+    }
+    #promptInput:focus {
+        outline: none;
+        box-shadow: 0 2px 6px rgba(0,123,255,0.15);
     }
 
     #submitBtn {
-        padding: 1vmin 2vmin; /* was 10px 20px */
-        background-color: var(--accent);
+        padding: 1.2vmin 1.8vmin;
+        background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
         color: white;
         border: none;
-        border-radius: 0.4vmin; /* was 4px */
+        border-radius: 0.8vmin;
         cursor: pointer;
-        font-size: 1.4vmin; /* was 14px */
+        font-size: 1.4vmin;
+        height: calc(1.2em + 2.9vmin);
+        box-shadow: 0 2px 6px rgba(0,123,255,0.25);
+        align-self: flex-end;
+        flex-shrink: 0;
+        transition: all 0.2s ease;
+    }
+    #submitBtn:hover:not(:disabled) {
+        background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
+        box-shadow: 0 4px 12px rgba(0,123,255,0.35);
+        transform: translateY(-1px);
     }
 
     #submitBtn:disabled {
-        background-color: var(--accent-disabled);
+        background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
         cursor: not-allowed;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
     #submitBtn.stop {
-        background-color: var(--danger);
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+        box-shadow: 0 2px 6px rgba(220,53,69,0.25);
+    }
+    #submitBtn.stop:hover {
+        background: linear-gradient(135deg, #c82333 0%, #a02027 100%);
+        box-shadow: 0 4px 12px rgba(220,53,69,0.35);
     }
 
     #clearBtn {
-        padding: 1vmin 2vmin; /* was 10px 20px */
-        background-color: var(--border);
+        padding: 1.2vmin 1.8vmin;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
         color: var(--text);
-        border: none;
-        border-radius: 0.4vmin; /* was 4px */
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 0.8vmin;
         cursor: pointer;
-        font-size: 1.4vmin; /* was 14px */
+        font-size: 1.4vmin;
+        height: calc(1.2em + 2.9vmin);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        align-self: flex-end;
+        flex-shrink: 0;
+        transition: all 0.2s ease;
+    }
+    #clearBtn:hover:not(:disabled) {
+        background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        transform: translateY(-1px);
     }
 
     #clearBtn:disabled {
@@ -300,6 +339,8 @@
     promptInput.addEventListener('input', autoResizeTextarea);
     promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
 
+    // ...existing code...
+
     submitBtn.addEventListener('click', handleSubmit);
     promptInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && !promptInput.disabled) {
@@ -331,6 +372,9 @@
         // Reset results area to the default welcome message and remove preview
         updateResultsContent('<p></p>');
         removePreview();
+
+        // Clear prompt input
+        promptInput.value = '';
 
         // Clear the in-memory global UUID (fresh restart)
         try {
@@ -593,12 +637,12 @@
     try { startPing(); } catch (e) { console.error('Failed to start ping on load:', e); }
 </script>
 <script src="/js/mdtablesort.js"></script>
-<script>if (__isDark) document.querySelectorAll('pre code').forEach((block) => { block.classList.add('hljs_dark') })</script>
+<script>if (_isD) document.querySelectorAll('pre code').forEach((block) => { block.classList.add('hljs_dark') })</script>
 <script src="/js/mdcodeclip.js"></script>
 <script>
-    // Apply dark-mode equivalents when the global __isDark flag is true.
-    (function applyDarkModeIfNeeded() {
-        if (typeof __isDark === 'undefined' || !__isDark) return;
+    // Apply dark-mode equivalents when the global _isD flag is true.
+    function __applyDarkModeIfNeeded() {
+        if (typeof _isD === 'undefined' || !_isD) return;
 
         const root = document.documentElement;
         const darkVars = {
@@ -614,7 +658,39 @@
             '--preview-highlight': 'rgba(255,255,255,0.06)'
         };
 
+        // Dark mode specific styles
+        const darkStyles = `
+            #promptInput {
+                background: #1a1d23 !important;
+                color: #e6e6e6 !important;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+            }
+            #promptInput:focus {
+                box-shadow: 0 2px 6px rgba(51,144,255,0.3) !important;
+            }
+            #clearBtn {
+                background: linear-gradient(135deg, #2d3238 0%, #1a1d23 100%) !important;
+                color: #e6e6e6 !important;
+                border: 1px solid rgba(255,255,255,0.1) !important;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+            }
+            #clearBtn:hover:not(:disabled) {
+                background: linear-gradient(135deg, #3a4048 0%, #2d3238 100%) !important;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.4) !important;
+            }
+        `;
+        
+        // Apply dark styles
+        const styleEl = document.createElement('style');
+        styleEl.textContent = darkStyles;
+        document.head.appendChild(styleEl);
+
         Object.entries(darkVars).forEach(([k, v]) => root.style.setProperty(k, v));
-    })();
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        __refreshDarkMode();
+        __applyDarkModeIfNeeded();
+    });
 </script>
 
