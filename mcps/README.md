@@ -10,6 +10,9 @@
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
+| mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
+
+See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contribution guidelines.
 
 ### Examples
 
@@ -105,6 +108,51 @@ Example — call `shell-batch` remotely:
 
 ```bash
 oafp in=mcp data="(type: remote, url: 'http://localhost:8888/mcp', tool: shell-batch, params: (commands: ['echo hello','date']))"
+```
+
+#### mcp-oaf
+
+This MCP serves OpenAF, oJob and oAFp documentation and cli utilities over STDIO or as an HTTP remote server. It exposes tools such as:
+
+- `openaf-doc`     : search and return OpenAF help entries or the full help (cli mode returns oaf -h output)
+- `ojob-doc`       : return oJob help or reference documentation
+- `openaf-version` : return OpenAF version and distribution
+- `oafp-doc`       : return aOFp help/readme topics
+
+Example — run locally and list OpenAF help (stdio mode):
+
+```bash
+ojob mcps/mcp-oaf.yaml
+```
+
+Example — request OpenAF help remotely (HTTP mode on port 8888):
+
+```bash
+oafp in=mcp data="(type: remote, url: 'http://localhost:8888/mcp', tool: openaf-doc, params: (search: 'help'))"
+```
+
+Small excerpt from `mcp-oaf.yaml` showing purpose and tools (truncated):
+
+```yaml
+# Author: Nuno Aguiar
+help:
+	text: A STDIO/HTTP MCP OpenAF tools documentation server
+	expects:
+		- name: onport
+			desc: If defined starts a MCP server on the provided port
+
+jobs:
+- name: OpenAF documentation
+	exec: | #js
+		if (args.cli) {
+			return "```" + $sh(getOpenAFPath() + "oaf -h").get(0).stderr + "```"
+		} else {
+			if (isUnDef(args.search)) {
+				return global.oaf_docs
+			} else {
+				return searchHelp(args.search)
+			}
+		}
 ```
 ## Using MCPs as STDIO or HTTP Remote Server
 
