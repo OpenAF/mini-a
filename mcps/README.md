@@ -38,7 +38,7 @@ ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'
 #### mcp-net
 
 ```bash
-ojob mini-a.yaml goal="get the public IP address of this machine" mcp="(cmd: 'ojob mcps/mcp-net.yaml tool=public_ip', timeout: 5000)"
+ojob mini-a.yaml goal="get the public IP address of this machine" mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)"
 ```
 
 #### mcp-ch
