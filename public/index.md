@@ -2,35 +2,108 @@
 <script>
     document.title = 'Chat Interface';
     var _isD
+    /* ========== DARK MODE THEME SWITCHING ========== */
+    /**
+     * Switches all elements between dark and light mode themes
+     * Updates body classes, code blocks, divs, and form elements
+     */
     function __refreshDarkMode() {
+        // Determine current dark mode state
         if (typeof __isDark === 'undefined') {
-            // if classlist contains markdown-body-dark, then it's dark
-            _isD = document.body.classList.contains('markdown-body-dark')
+            _isD = document.body.classList.contains('markdown-body-dark');
         } else {
-            _isD = __isDark
+            _isD = __isDark;
         }
+
         if (_isD) {
-            document.body.classList.add('markdown-body-dark')
-            document.body.classList.add('hljs_dark')
-            document.body.classList.add('njsmap_dark')
-            document.body.bgColor = "#000000"
+            // Apply dark mode styles
+            document.body.classList.add('markdown-body-dark', 'hljs_dark', 'njsmap_dark');
+            document.body.bgColor = "#000000";
 
+            // Update code blocks
             document.querySelectorAll('pre code').forEach((block) => {
-                block.classList.add('hljs_dark')
-            })
+                block.classList.add('hljs_dark');
+            });
+
+            // Update all divs to dark theme (except chat-container)
+            document.querySelectorAll('div').forEach(div => {
+                if (!div.classList.contains('chat-container')) {
+                    div.style.backgroundColor = '#0f1115';
+                    div.style.color = '#e6e6e6';
+                    if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
+                        div.style.borderColor = '#242629';
+                    }
+                }
+            });
+
+            // Update form elements for dark mode
+            const promptInput = document.getElementById('promptInput');
+            if (promptInput) {
+                promptInput.style.background = '#1a1d23';
+                promptInput.style.color = '#e6e6e6';
+                promptInput.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) {
+                submitBtn.style.background = 'linear-gradient(135deg, #3390ff 0%, #0056b3 100%)';
+                submitBtn.style.color = '#e6e6e6';
+            }
+
+            const clearBtn = document.getElementById('clearBtn');
+            if (clearBtn) {
+                clearBtn.style.background = 'linear-gradient(135deg, #2d3238 0%, #1a1d23 100%)';
+                clearBtn.style.color = '#e6e6e6';
+                clearBtn.style.border = '1px solid rgba(255,255,255,0.1)';
+                clearBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+            }
         } else {
-            document.body.classList.remove('markdown-body-dark')
-            document.body.classList.remove('hljs_dark')
-            document.body.classList.remove('njsmap_dark')
-            document.body.bgColor = "#FFFFFF"
+            // Apply light mode styles
+            document.body.classList.remove('markdown-body-dark', 'hljs_dark', 'njsmap_dark');
+            document.body.bgColor = "#FFFFFF";
 
+            // Update code blocks
             document.querySelectorAll('pre code').forEach((block) => {
-                block.classList.remove('hljs_dark')
-            })
+                block.classList.remove('hljs_dark');
+            });
+
+            // Update all divs to light theme (except chat-container)
+            document.querySelectorAll('div').forEach(div => {
+                if (!div.classList.contains('chat-container')) {
+                    div.style.backgroundColor = '#f8f9fa';
+                    div.style.color = '#000000';
+                    if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
+                        div.style.borderColor = '#cccccc';
+                    }
+                }
+            });
+
+            // Reset form elements for light mode
+            const promptInput = document.getElementById('promptInput');
+            if (promptInput) {
+                promptInput.style.background = '#ffffff';
+                promptInput.style.color = '#000000';
+                promptInput.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) {
+                submitBtn.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
+                submitBtn.style.color = 'white';
+            }
+
+            const clearBtn = document.getElementById('clearBtn');
+            if (clearBtn) {
+                clearBtn.style.background = 'linear-gradient(135deg, #f3f3f3 0%, #e0e0e0 100%)';
+                clearBtn.style.color = '#333';
+                clearBtn.style.border = 'none';
+                clearBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
+            }
         }
     }
 </script>
 <style>
+    /* ========== CSS VARIABLES ========== */
     :root {
         --bg: #ffffff;
         --panel-bg: #f8f9fa;
@@ -44,17 +117,31 @@
         --preview-highlight: rgba(255,255,255,0.6);
     }
 
+    /* ========== LAYOUT COMPONENTS ========== */
     .chat-container {
         display: flex;
         flex-direction: column;
         height: 100%;
-        background: var(--bg);
+        /* background: var(--bg); */
         color: var(--text);
     }
 
+    #resultsDiv {
+        flex: 1;
+        border: 0.1vmin solid var(--border);
+        border-radius: 0.4vmin;
+        padding: 2vmin;
+        overflow-y: auto;
+        background-color: var(--panel-bg);
+        color: inherit;
+        zoom: 0.9;
+        position: relative;
+    }
+
+    /* ========== INPUT SECTION ========== */
     .input-section {
         display: flex;
-        align-items: flex-end;
+        align-items: stretch;
         gap: 0.8vmin;
         margin-bottom: 2vmin;
         background: var(--panel-bg);
@@ -73,97 +160,127 @@
         background: #ffffff;
         color: inherit;
         font-size: 0.9rem;
+        font-family: inherit;
+        line-height: 1.2;
         resize: none;
         overflow: hidden;
-        min-height: calc(1.2em + 0.5vmin);
+        min-height: 2.4em;
         max-height: 20vh;
-        line-height: 1.2;
-        font-family: inherit;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         outline: none;
         transition: box-shadow 0.2s ease;
+        box-sizing: border-box;
     }
+
     #promptInput:focus {
         outline: none;
         box-shadow: 0 2px 6px rgba(0,123,255,0.15);
     }
 
-    #submitBtn {
-        padding: 1.2vmin 1.8vmin;
-        background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-        color: white;
+    /* ========== BUTTONS ========== */
+
+    #submitBtn,
+    #clearBtn {
+        padding: 1.2vmin 2vmin;
         border: none;
         border-radius: 0.8vmin;
         cursor: pointer;
         font-size: 1.4vmin;
-        height: calc(1.2em + 2.9vmin);
-        box-shadow: 0 2px 6px rgba(0,123,255,0.25);
-        align-self: flex-end;
+        min-height: 2.4em;
+        height: auto;
+        min-width: 2.4em;
         flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         transition: all 0.2s ease;
+        box-sizing: border-box;
     }
+
+    #submitBtn {
+        background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+        color: white;
+        box-shadow: 0 2px 6px rgba(0,123,255,0.25);
+    }
+
+    #clearBtn {
+        background: linear-gradient(135deg, #f3f3f3 0%, #e0e0e0 100%);
+        color: #333;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    /* Button hover states */
     #submitBtn:hover:not(:disabled) {
         background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
         box-shadow: 0 4px 12px rgba(0,123,255,0.35);
         transform: translateY(-1px);
     }
 
-    #submitBtn:disabled {
+    #clearBtn:hover:not(:disabled) {
+        background: linear-gradient(135deg, #cccccc 0%, #bdbdbd 100%);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        transform: translateY(-1px);
+    }
+
+    /* Button disabled state */
+    #submitBtn:disabled, #clearBtn:disabled {
         background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
         cursor: not-allowed;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
+    /* Submit button stop state */
     #submitBtn.stop {
         background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
         box-shadow: 0 2px 6px rgba(220,53,69,0.25);
     }
+
     #submitBtn.stop:hover {
         background: linear-gradient(135deg, #c82333 0%, #a02027 100%);
         box-shadow: 0 4px 12px rgba(220,53,69,0.35);
     }
 
-    #clearBtn {
-        padding: 1.2vmin 1.8vmin;
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    /* ========== SCROLL TO BOTTOM BUTTON ========== */
+    #scrollToBottomBtn {
+        position: sticky;
+        bottom: 2vmin;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--panel-bg);
         color: var(--text);
-        border: 1px solid rgba(0,0,0,0.08);
-        border-radius: 0.8vmin;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
         cursor: pointer;
-        font-size: 1.4vmin;
-        height: calc(1.2em + 2.9vmin);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        align-self: flex-end;
-        flex-shrink: 0;
-        transition: all 0.2s ease;
-    }
-    #clearBtn:hover:not(:disabled) {
-        background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        transform: translateY(-1px);
-    }
-
-    #clearBtn:disabled {
-        background-color: var(--accent-disabled);
-        cursor: not-allowed;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        transition: opacity 0.3s ease, box-shadow 0.2s ease;
+        font-size: 16px;
+        margin: 0 auto;
+        opacity: 0;
+        pointer-events: none;
     }
 
-    #resultsDiv {
-        flex: 1;
-        border: 0.1vmin solid var(--border); /* was 1px */
-        border-radius: 0.4vmin; /* was 4px */
-        padding: 2vmin; /* was 20px */
-        overflow-y: auto;
-        background-color: var(--panel-bg);
-        color: inherit;
-        zoom: 0.9;
+    #scrollToBottomBtn:hover {
+        background: var(--border);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25);
     }
 
-    /* Anticipation preview styles */
+    #scrollToBottomBtn.show {
+        display: flex;
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* ========== LOADING PREVIEW ANIMATION ========== */
     .preview {
-        margin-top: 1.6vmin; /* was 16px */
-        height: 4.8vmin; /* was 48px */
-        border-radius: 0.6vmin; /* was 6px */
+        margin-top: 1.5em;
+        height: 4em;
+        border-radius: 0.5em;
         position: relative;
         overflow: hidden;
         background: linear-gradient(100deg, var(--preview-1) 10%, var(--preview-2) 40%, var(--preview-1) 70%);
@@ -175,15 +292,23 @@
     .preview::after {
         content: '';
         position: absolute;
-        left: 1.2vmin; /* was 12px */
-        right: 1.2vmin; /* was 12px */
-        height: 1vmin; /* was 10px */
+        left: 1em;
+        right: 1em;
+        height: 0.8em;
         background: var(--preview-highlight);
-        border-radius: 0.4vmin; /* was 4px */
+        border-radius: 0.3em;
     }
 
-    .preview::before { top: 1vmin; /* was 10px */ width: 65%; }
-    .preview::after { top: 2.6vmin; /* was 26px */ width: 40%; }
+    .preview::before { 
+        top: 0.8em; 
+        width: 65%; 
+    }
+    
+    .preview::after { 
+        top: 2.2em; 
+        width: 40%; 
+    }
+
     @keyframes shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: -200% 50%; }
@@ -192,6 +317,12 @@
 <div class="chat-container">
     <div id="resultsDiv">
         <p></p>
+        <!-- Scroll to bottom button -->
+        <button id="scrollToBottomBtn" title="Scroll to bottom" aria-label="Scroll to bottom">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 13l5 5 5-5M7 6l5 5 5-5"/>
+            </svg>
+        </button>
     </div>
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
     <br>
@@ -203,6 +334,7 @@
 </div>
 
 <script>
+    /* ========== CONSTANTS & INITIALIZATION ========== */
     const converter = new showdown.Converter({
         "customizedHeaderId"      : true,
         "parseImgDimensions"      : true,
@@ -219,65 +351,133 @@
         "ghCompatibleHeaderId"    : true,
         "disableForced4SpacesIndentedSublists": true
     });
+
+    const PREVIEW_ID = 'anticipationPreview';
+    const PING_INTERVAL_MS = 60 * 1000; // 60 seconds
+
+    /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
-    // Store the session uuid in a global, in-memory variable (no localStorage persistence)
-    if (typeof window !== 'undefined') window.mini_a_session_uuid = window.mini_a_session_uuid || null;
     let pollingInterval = null;
+    let pingInterval = null;
     let isProcessing = false;
-    
-    // Auto-scroll management variables
     let autoScrollEnabled = true;
     let isScrollingProgrammatically = false;
     let lastContentUpdateTime = 0;
 
+    // Store session uuid in global in-memory variable (no localStorage persistence)
+    if (typeof window !== 'undefined') {
+        window.mini_a_session_uuid = window.mini_a_session_uuid || null;
+    }
+
+    /* ========== DOM ELEMENT REFERENCES ========== */
     const promptInput = document.getElementById('promptInput');
     const submitBtn = document.getElementById('submitBtn');
     const clearBtn = document.getElementById('clearBtn');
     const resultsDiv = document.getElementById('resultsDiv');
-    const PREVIEW_ID = 'anticipationPreview';
+    const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
 
-    // Helper function to check if user is at the bottom of the scroll area
+    /* ========== UTILITY FUNCTIONS ========== */
     function isAtBottom() {
         if (!resultsDiv) return true;
-        const threshold = 50; // Allow some margin for rounding errors
+        const threshold = 50; // Allow margin for rounding errors
         return resultsDiv.scrollTop + resultsDiv.clientHeight >= resultsDiv.scrollHeight - threshold;
     }
 
-    // Helper function to update content and track changes
+    function getOrCreateSessionUuid() {
+        try {
+            let uuid = (typeof window !== 'undefined') ? window.mini_a_session_uuid : null;
+            if (uuid) return uuid;
+
+            // Prefer crypto.randomUUID if available
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                uuid = crypto.randomUUID();
+            } else {
+                // Fallback to RFC4122 v4-like generator
+                uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            if (typeof window !== 'undefined') window.mini_a_session_uuid = uuid;
+            return uuid;
+        } catch (e) {
+            // Last resort: return non-persistent uuid
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') 
+                return crypto.randomUUID();
+            return 'tmp-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+        }
+    }
+
     function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
         
         const wasAtBottom = isAtBottom();
+        const currentScrollBtn = document.getElementById('scrollToBottomBtn');
+        const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
+        
         resultsDiv.innerHTML = htmlContent;
+        
+        // Re-add scroll button
+        const scrollBtnHTML = `
+            <button id="scrollToBottomBtn" title="Scroll to bottom" aria-label="Scroll to bottom">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M7 13l5 5 5-5M7 6l5 5 5-5"/>
+                </svg>
+            </button>`;
+        resultsDiv.insertAdjacentHTML('beforeend', scrollBtnHTML);
+        
+        // Reattach event listener and restore state
+        const newScrollBtn = document.getElementById('scrollToBottomBtn');
+        if (newScrollBtn) {
+            newScrollBtn.addEventListener('click', () => {
+                autoScrollEnabled = true;
+                scrollResultsToBottom();
+                hideScrollToBottomButton();
+            });
+            
+            if (wasScrollBtnVisible && !wasAtBottom) {
+                newScrollBtn.classList.add('show');
+            }
+        }
+        
         lastContentUpdateTime = Date.now();
         
-        // If user was at bottom before update, keep them there
         if (wasAtBottom) {
             autoScrollEnabled = true;
             scrollResultsToBottom();
         }
     }
 
-    // Add scroll event listener to detect manual scrolling
-    if (resultsDiv) {
-        resultsDiv.addEventListener('scroll', () => {
-            // Ignore scroll events that we triggered programmatically
-            if (isScrollingProgrammatically) return;
-            
-            // Check if user scrolled back to bottom
-            if (isAtBottom()) {
-                autoScrollEnabled = true;
-            } else {
-                // User scrolled away from bottom, disable auto-scroll
-                autoScrollEnabled = false;
-            }
-        });
+    /* ========== UI MANIPULATION FUNCTIONS ========== */
+    function showScrollToBottomButton() {
+        const btn = document.getElementById('scrollToBottomBtn');
+        if (btn) btn.classList.add('show');
     }
 
-    // Helper: set submit button icon + tooltip. State: 'send' | 'stop'
+    function hideScrollToBottomButton() {
+        const btn = document.getElementById('scrollToBottomBtn');
+        if (btn) btn.classList.remove('show');
+    }
+
+    function scrollResultsToBottom() {
+        if (!autoScrollEnabled) return;
+        
+        try {
+            isScrollingProgrammatically = true;
+            resultsDiv.scrollTop = resultsDiv.scrollHeight;
+            setTimeout(() => { isScrollingProgrammatically = false; }, 10);
+        } catch (e) {
+            console.error('Scroll error:', e);
+            isScrollingProgrammatically = false;
+        }
+    }
+
     function setSubmitIcon(state) {
         if (!submitBtn) return;
+        
         submitBtn.classList.toggle('stop', state === 'stop');
+        
         if (state === 'stop') {
             submitBtn.title = 'Stop';
             submitBtn.setAttribute('aria-label', 'Stop');
@@ -295,9 +495,9 @@
         }
     }
 
-    // Helper: set clear button icon + tooltip
     function setClearIcon() {
         if (!clearBtn) return;
+        
         clearBtn.title = 'Clear';
         clearBtn.setAttribute('aria-label', 'Clear');
         clearBtn.innerHTML = `
@@ -306,19 +506,15 @@
             </svg>`;
     }
 
-    // Auto-resize textarea function
     function autoResizeTextarea() {
         if (!promptInput) return;
         
-        // Reset height to minimum to get accurate scrollHeight
         promptInput.style.height = 'auto';
         
-        // Calculate new height based on content
         const minHeight = parseFloat(getComputedStyle(promptInput).minHeight);
         const maxHeight = parseFloat(getComputedStyle(promptInput).maxHeight);
         let newHeight = Math.max(minHeight, promptInput.scrollHeight);
         
-        // Enforce max height
         if (maxHeight && newHeight > maxHeight) {
             newHeight = maxHeight;
             promptInput.style.overflowY = 'auto';
@@ -328,80 +524,6 @@
         
         promptInput.style.height = newHeight + 'px';
     }
-
-    // Initialize UI
-    promptInput.disabled = false;
-    // set initial icons and tooltips
-    setSubmitIcon('send');
-    setClearIcon();
-
-    // Add auto-resize functionality
-    promptInput.addEventListener('input', autoResizeTextarea);
-    promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
-
-    // ...existing code...
-
-    submitBtn.addEventListener('click', handleSubmit);
-    promptInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !promptInput.disabled) {
-            e.preventDefault();
-            handleSubmit();
-        }
-    });
-    
-    // Clear button behavior: send clear request with current session uuid and reset UI
-    clearBtn.addEventListener('click', async () => {
-            // Capture the UUID we'll clear (stopProcessing may null the in-memory uuid).
-            // Use the in-memory global `window.mini_a_session_uuid` instead of localStorage.
-            let uuidToClear = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
-
-            // If processing, stop first (this will also clear polling and preview)
-            if (isProcessing) {
-                await stopProcessing();
-            }
-
-            // Send clear request to server with the captured/persisted uuid if available
-            if (uuidToClear) {
-                fetch('/clear', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ uuid: uuidToClear })
-                }).catch(err => console.error('Error sending clear request:', err));
-            }
-
-        // Reset results area to the default welcome message and remove preview
-        updateResultsContent('<p></p>');
-        removePreview();
-
-        // Clear prompt input
-        promptInput.value = '';
-
-        // Clear the in-memory global UUID (fresh restart)
-        try {
-            if (typeof window !== 'undefined') window.mini_a_session_uuid = null;
-        } catch (e) {
-            // ignore
-        }
-
-        // stop pinging as we've cleared the persisted session
-        try { stopPing(); } catch (e) { /* ignore */ }
-
-        // Create a fresh in-memory UUID for subsequent prompts
-        try {
-            currentSessionUuid = getOrCreateSessionUuid();
-        } catch (e) {
-            currentSessionUuid = null;
-        }
-
-        // Reset auto-scroll state
-        autoScrollEnabled = true;
-        promptInput.disabled = false;
-        setSubmitIcon('send');
-        submitBtn.classList.remove('stop');
-        clearBtn.disabled = false;
-        isProcessing = false;
-        scrollResultsToBottom();
-    });
 
     function addPreview() {
         if (document.getElementById(PREVIEW_ID)) return;
@@ -417,27 +539,48 @@
         if (el) el.remove();
     }
 
-    function scrollResultsToBottom() {
-        // Only auto-scroll if enabled and not disabled by user manual scrolling
-        if (!autoScrollEnabled) return;
-        
-        try {
-            isScrollingProgrammatically = true;
-            resultsDiv.scrollTop = resultsDiv.scrollHeight;
-            // Small delay to ensure the scroll event is processed
-            setTimeout(() => {
-                isScrollingProgrammatically = false;
-            }, 10);
-        } catch (e) {
-            // ignore in unlikely error cases
-            console.error('Scroll error:', e);
-            isScrollingProgrammatically = false;
-        }
+    /* ========== PROCESSING STATE MANAGEMENT ========== */
+    function startProcessing() {
+        isProcessing = true;
+        autoScrollEnabled = true;
+        promptInput.disabled = true;
+        promptInput.value = '';
+        promptInput.style.height = 'auto';
+        promptInput.style.overflowY = 'hidden';
+        setSubmitIcon('stop');
+        submitBtn.classList.add('stop');
+        clearBtn.disabled = true;
+        scrollResultsToBottom();
+        addPreview();
     }
 
+    function stopProcessing() {
+        isProcessing = false;
+        promptInput.disabled = false;
+        setSubmitIcon('send');
+        submitBtn.classList.remove('stop');
+        clearBtn.disabled = false;
+        
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+        
+        if (currentSessionUuid) {
+            fetch('/result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: currentSessionUuid, request: 'stop' })
+            }).catch(error => console.error('Error stopping request:', error));
+        }
+        
+        currentSessionUuid = null;
+        removePreview();
+    }
+
+    /* ========== API FUNCTIONS ========== */
     async function handleSubmit() {
         if (isProcessing) {
-            // Stop button clicked
             await stopProcessing();
             return;
         }
@@ -446,25 +589,17 @@
         if (!prompt) return;
 
         try {
-            // ensure we have a persistent uuid for this client
             if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid();
 
             const response = await fetch('/prompt', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt: prompt, uuid: currentSessionUuid })
             });
 
-            if (!response.ok) {
-                throw new Error('Failed to submit prompt');
-            }
+            if (!response.ok) throw new Error('Failed to submit prompt');
 
-            // If server returns a different uuid, don't overwrite client uuid.
-            // Read response but ignore any uuid the server returns.
             await response.json();
-
             startProcessing();
             startPolling();
             
@@ -474,51 +609,48 @@
         }
     }
 
-    // Create or retrieve a session UUID stored in a global in-memory variable.
-    function getOrCreateSessionUuid() {
-        try {
-            let uuid = (typeof window !== 'undefined') ? window.mini_a_session_uuid : null;
-            if (uuid) return uuid;
-
-            // Prefer crypto.randomUUID if available
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-                uuid = crypto.randomUUID();
-            } else {
-                // Fallback to a simple RFC4122 v4-like generator
-                uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                    return v.toString(16);
+    function startPolling() {
+        pollingInterval = setInterval(async () => {
+            try {
+                const response = await fetch('/result', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uuid: currentSessionUuid })
                 });
-            }
 
-            if (typeof window !== 'undefined') window.mini_a_session_uuid = uuid;
-            return uuid;
-        } catch (e) {
-            // last resort: return a non-persistent uuid
-            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-            return 'tmp-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
-        }
+                if (!response.ok) throw new Error('Failed to fetch results');
+
+                const data = await response.json();
+                const htmlContent = converter.makeHtml(data.content || '');
+                updateResultsContent(htmlContent);
+                
+                hljs.highlightAll();
+                if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+                __refreshDarkMode();
+
+                if (data.status === 'finished') {
+                    removePreview();
+                    stopProcessing();
+                } else {
+                    addPreview();
+                }
+                
+            } catch (error) {
+                console.error('Error fetching results:', error);
+                updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+                stopProcessing();
+            }
+        }, 1500);
     }
 
-    // Ping management: POST `{ uuid }` to `/ping` every 60 seconds using the
-    // persisted `mini_a_session_uuid`. This keeps the server aware of active
-    // clients even across page reloads. Uses a single interval and tolerates
-    // missing localStorage or network errors.
-    let pingInterval = null;
-    const PING_INTERVAL_MS = 60 * 1000; // 60 seconds
-
+    /* ========== PING MANAGEMENT ========== */
     function startPing() {
         try {
-            // avoid multiple intervals
             if (pingInterval) return;
 
-            // Use the global in-memory uuid; create one if missing so pings can start.
             let uuid = (typeof window !== 'undefined') ? window.mini_a_session_uuid : null;
-            if (!uuid) {
-                uuid = getOrCreateSessionUuid();
-            }
+            if (!uuid) uuid = getOrCreateSessionUuid();
 
-            // send an immediate ping, then set the interval
             sendPing(uuid);
             pingInterval = setInterval(() => sendPing(uuid), PING_INTERVAL_MS);
         } catch (e) {
@@ -542,105 +674,113 @@
                 body: JSON.stringify({ uuid })
             });
         } catch (e) {
-            // Don't surface ping failures to the user; log for debugging.
             console.debug('ping error for', uuid, e);
         }
     }
 
-    function startProcessing() {
-        isProcessing = true;
-        autoScrollEnabled = true; // Enable auto-scroll for new processing
-        promptInput.disabled = true;
-        promptInput.value = '';
-        // Reset textarea to original single-line size
-        promptInput.style.height = 'auto';
-        promptInput.style.overflowY = 'hidden';
-        setSubmitIcon('stop');
-        submitBtn.classList.add('stop');
-        clearBtn.disabled = true;
-        //resultsDiv.innerHTML = '<p>Processing your request...</p>';
-        scrollResultsToBottom();
-        addPreview();
-    }
+    /* ========== EVENT HANDLERS ========== */
+    function handleClearClick() {
+        const uuidToClear = currentSessionUuid || 
+            (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
 
-    function stopProcessing() {
-        isProcessing = false;
+        if (isProcessing) {
+            stopProcessing();
+        }
+
+        if (uuidToClear) {
+            fetch('/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: uuidToClear })
+            }).catch(err => console.error('Error sending clear request:', err));
+        }
+
+        updateResultsContent('<p></p>');
+        removePreview();
+        promptInput.value = '';
+
+        try {
+            if (typeof window !== 'undefined') window.mini_a_session_uuid = null;
+        } catch (e) { /* ignore */ }
+
+        try { stopPing(); } catch (e) { /* ignore */ }
+
+        try {
+            currentSessionUuid = getOrCreateSessionUuid();
+        } catch (e) {
+            currentSessionUuid = null;
+        }
+
+        autoScrollEnabled = true;
         promptInput.disabled = false;
         setSubmitIcon('send');
         submitBtn.classList.remove('stop');
         clearBtn.disabled = false;
-        
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-        }
-        
-        // Send stop request if we have an active session
-        if (currentSessionUuid) {
-            fetch('/result', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ uuid: currentSessionUuid, request: 'stop' })
-            }).catch(error => console.error('Error stopping request:', error));
-        }
-        
-        // clear in-memory session but keep persisted uuid for future prompts
-        currentSessionUuid = null;
-        removePreview();
-        // stop pinging while not actively using the UI
-        //try { stopPing(); } catch (e) { /* ignore */ }
+        isProcessing = false;
+        scrollResultsToBottom();
     }
 
-    function startPolling() {
-        pollingInterval = setInterval(async () => {
-            try {
-                const response = await fetch('/result', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ uuid: currentSessionUuid })
-                });
+    function handleScroll() {
+        if (isScrollingProgrammatically) return;
+        
+        if (isAtBottom()) {
+            autoScrollEnabled = true;
+            hideScrollToBottomButton();
+        } else {
+            autoScrollEnabled = false;
+            showScrollToBottomButton();
+        }
+    }
 
-                if (!response.ok) {
-                    throw new Error('Failed to fetch results');
-                }
+    function handleScrollToBottomClick() {
+        autoScrollEnabled = true;
+        scrollResultsToBottom();
+        hideScrollToBottomButton();
+    }
 
-                const data = await response.json();
-                
-                // Convert markdown to HTML and update content
-                const htmlContent = converter.makeHtml(data.content || '');
-                updateResultsContent(htmlContent);
-                hljs.highlightAll();
-                if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
-                __refreshDarkMode();
-
-                // Check if finished
-                if (data.status === 'finished') {
-                    removePreview();
-                    stopProcessing();
-                } else {
-                    addPreview(); // keep anticipation while streaming
-                }
-                
-            } catch (error) {
-                console.error('Error fetching results:', error);
-                updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
-                stopProcessing();
+    /* ========== INITIALIZATION ========== */
+    function initializeUI() {
+        promptInput.disabled = false;
+        setSubmitIcon('send');
+        setClearIcon();
+        
+        // Add event listeners
+        promptInput.addEventListener('input', autoResizeTextarea);
+        promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
+        promptInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !promptInput.disabled) {
+                e.preventDefault();
+                handleSubmit();
             }
-        }, 1500);
+        });
+
+        submitBtn.addEventListener('click', handleSubmit);
+        clearBtn.addEventListener('click', handleClearClick);
+        
+        if (resultsDiv) {
+            resultsDiv.addEventListener('scroll', handleScroll);
+        }
+        
+        if (scrollToBottomBtn) {
+            scrollToBottomBtn.addEventListener('click', handleScrollToBottomClick);
+        }
+
+        // Start ping system
+        try { 
+            startPing(); 
+        } catch (e) { 
+            console.error('Failed to start ping on load:', e); 
+        }
     }
 
-    // Start pinging on initial load using the persisted uuid (if any).
-    try { startPing(); } catch (e) { console.error('Failed to start ping on load:', e); }
+    // Initialize the application
+    initializeUI();
 </script>
 <script src="/js/mdtablesort.js"></script>
 <script>if (_isD) document.querySelectorAll('pre code').forEach((block) => { block.classList.add('hljs_dark') })</script>
 <script src="/js/mdcodeclip.js"></script>
 <script>
-    // Apply dark-mode equivalents when the global _isD flag is true.
+    /* ========== DARK MODE INTEGRATION ========== */
     function __applyDarkModeIfNeeded() {
         if (typeof _isD === 'undefined' || !_isD) return;
 
@@ -658,37 +798,21 @@
             '--preview-highlight': 'rgba(255,255,255,0.06)'
         };
 
-        // Dark mode specific styles
-        const darkStyles = `
-            #promptInput {
-                background: #1a1d23 !important;
-                color: #e6e6e6 !important;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
-            }
-            #promptInput:focus {
-                box-shadow: 0 2px 6px rgba(51,144,255,0.3) !important;
-            }
-            #clearBtn {
-                background: linear-gradient(135deg, #2d3238 0%, #1a1d23 100%) !important;
-                color: #e6e6e6 !important;
-                border: 1px solid rgba(255,255,255,0.1) !important;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
-            }
-            #clearBtn:hover:not(:disabled) {
-                background: linear-gradient(135deg, #3a4048 0%, #2d3238 100%) !important;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.4) !important;
-            }
-        `;
-        
-        // Apply dark styles
-        const styleEl = document.createElement('style');
-        styleEl.textContent = darkStyles;
-        document.head.appendChild(styleEl);
-
         Object.entries(darkVars).forEach(([k, v]) => root.style.setProperty(k, v));
-    };
+    }
 
+    // Initialize dark mode and listen for system preference changes
     document.addEventListener('DOMContentLoaded', function() {
+        __refreshDarkMode();
+        __applyDarkModeIfNeeded();
+    });
+
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        __refreshDarkMode();
+        __applyDarkModeIfNeeded();
+    });
+
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
     });
