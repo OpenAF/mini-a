@@ -6,10 +6,58 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
+- **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
+
+```bash
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
+# Optional: Set a low-cost model for routine operations
+export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+```
+
+## Model Configuration
+
+### Single Model Setup
+
+For basic usage, only set the main model:
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 ```
+
+### Dual-Model Setup (Cost Optimization)
+
+Mini-A supports intelligent dual-model usage to optimize costs while maintaining quality:
+
+```bash
+# High-capability model for complex reasoning and initial planning
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
+
+# Low-cost model for routine operations
+export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+```
+
+**Benefits:**
+- **Cost Savings**: Use cheaper models for routine tasks (summarization, simple actions)
+- **Quality Assurance**: Automatic escalation to the main model for complex scenarios
+- **Transparency**: Clear logging shows which model is being used for each operation
+
+**When Mini-A uses each model:**
+
+| Operation | Model Used | Reason |
+|-----------|------------|--------|
+| Initial planning (Step 0) | Main Model | Critical first step requires best reasoning |
+| Routine operations | Low-Cost Model | Cost-effective for simple tasks |
+| Context summarization | Low-Cost Model | Simple text condensation task |
+| Error recovery | Main Model | After 2+ consecutive errors |
+| Complex reasoning | Main Model | When thinking loops or stuck patterns detected |
+| Invalid JSON fallback | Main Model | When low-cost model produces invalid responses |
+
+**Smart Escalation Triggers:**
+- 2+ consecutive errors
+- 3+ consecutive thoughts without action  
+- 5+ total thoughts (thinking loop detection)
+- 4+ steps without meaningful progress
+- Repeating similar thoughts detected
 
 ## Basic Usage
 
@@ -173,6 +221,57 @@ var result = agent.start({
 })
 ```
 
+### 7. Dual-Model Configuration Examples
+
+#### Cost-Optimized Setup with OpenAI Models
+
+```bash
+# Terminal setup
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
+export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+```
+
+```javascript
+var agent = new MiniA()
+var result = agent.start({
+    goal: "Analyze this codebase and suggest improvements",
+    useshell: true,
+    maxsteps: 30
+})
+// Will use gpt-4 for initial analysis, gpt-3.5-turbo for routine operations
+```
+
+#### Mixed Provider Setup
+
+```bash
+# High-end model for main reasoning
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-openai-key')"
+# Local model for cost-effective operations  
+export OAF_LC_MODEL="(type: ollama, model: 'llama3', url: 'http://localhost:11434')"
+```
+
+#### Google Gemini Dual Setup
+
+```bash
+export OAF_MODEL="(type: gemini, model: gemini-1.5-pro, key: 'your-gemini-key')"
+export OAF_LC_MODEL="(type: gemini, model: gemini-1.5-flash, key: 'your-gemini-key')"
+```
+
+**Log Output Examples:**
+
+When using dual-model configuration, you'll see clear indicators of which model is being used:
+
+```
+ℹ️  Using model: gpt-4 (openai)
+📝  Context summarized using low-cost model. Summary: 15 tokens generated
+⚠️  Escalating to main model: 2 consecutive errors
+ℹ️  Interacting with main model (context ~1250 tokens)...
+ℹ️  Main model responded. Usage: 1250 tokens prompted, 45 tokens generated
+ℹ️  Interacting with low-cost model (context ~890 tokens)...
+ℹ️  Low-cost model responded. Usage: 890 tokens prompted, 23 tokens generated
+⚠️  Low-cost model produced invalid JSON, retrying with main model...
+```
+
 ## Event Handling
 
 Mini-A provides events during execution that you can handle with a custom interaction function:
@@ -292,6 +391,14 @@ Mini-A includes robust error handling:
 6. **Save Conversations**: Use conversation persistence for complex multi-step tasks
 7. **Rate Limit**: Use `rtm` parameter when working with API-limited LLM services
 
+### Dual-Model Best Practices
+
+8. **Choose Complementary Models**: Use a high-capability model (e.g., GPT-4) as main and a fast, cost-effective model (e.g., GPT-3.5-turbo) as low-cost
+9. **Monitor Escalations**: Watch for frequent escalations which may indicate the low-cost model is under-powered for your tasks
+10. **Test Both Models**: Verify both models work independently before using dual-mode
+11. **Provider Consistency**: Consider using the same provider for both models to avoid authentication complexity
+12. **Cost Tracking**: Monitor actual cost savings by reviewing which model handles each operation
+
 ## Troubleshooting
 
 ### Common Issues
@@ -301,6 +408,19 @@ Mini-A includes robust error handling:
 3. **Commands blocked**: Check if commands are in banned list or enable `readwrite`
 4. **Context too large**: Use `maxcontext` parameter to enable auto-summarization
 5. **Goal not achieved**: Increase `maxsteps` or refine goal description
+
+### Dual-Model Specific Issues
+
+6. **OAF_LC_MODEL format error**: Ensure low-cost model configuration uses same format as OAF_MODEL
+7. **Frequent escalations**: If main model is used too often, check low-cost model capabilities
+8. **Invalid JSON from low-cost model**: This triggers automatic fallback - consider using a more capable low-cost model
+9. **Cost not optimized**: Verify OAF_LC_MODEL is set and both models are properly configured
+
+**Example of properly formatted dual-model setup:**
+```bash
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'sk-...')"
+export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'sk-...')"
+```
 
 ### Debug Mode
 

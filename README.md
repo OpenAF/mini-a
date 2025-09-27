@@ -35,6 +35,28 @@ Examples:
 
 > Note: `export OAF_MODEL="..."`
 
+### Dual-Model Configuration (Cost Optimization)
+
+Mini-A supports a dual-model configuration for cost optimization. Set `OAF_LC_MODEL` to use a cheaper model for routine operations, while keeping a more capable model for complex scenarios.
+
+```bash
+# Main model (high-capability, used for complex reasoning and initial planning)
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
+
+# Low-cost model (used for routine operations like summarization and simple tasks)
+export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+```
+
+**How it works:**
+- **Step 0**: Always uses the main model for initial planning
+- **Subsequent steps**: Uses the low-cost model by default
+- **Smart escalation**: Automatically switches to the main model when:
+  - Multiple consecutive errors occur
+  - The agent gets stuck in thinking loops
+  - Complex reasoning is needed
+
+**Cost savings**: This can significantly reduce API costs by using cheaper models for routine tasks while ensuring quality for complex operations.
+
 ### Running the mini agent
 
 #### Single MCP connection
@@ -111,6 +133,7 @@ Mini-A is built on the OpenAF platform. To get started:
 ### Environment Variables
 
 - **`OAF_MODEL`** (required): LLM model configuration
+- **`OAF_LC_MODEL`** (optional): Low-cost LLM model configuration for cost optimization
 - **`OAF_FLAGS="(MD_DARKMODE: 'auto')"**: For setting forced dark mode or automatic
 
 ### Command Line Options
