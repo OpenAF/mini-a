@@ -14,3 +14,17 @@ This is a sample list of external MCPs that you can use with Mini-A.
 > For container based MCPs first pull the corresponding image with `docker pull <image>` before using it.
 
 > Check [Docker MCP Hub](https://hub.docker.com/mcp)
+
+## Using external MCPs as HTTP remote
+
+Some external MCP servers also expose an HTTP endpoint. When available, you can connect to them remotely the same way as Mini‑A’s built‑in MCPs that support `onport`.
+
+Example (replace URL with the MCP’s endpoint):
+
+```bash
+mini-a.sh goal="query the external MCP" \
+	mcp="(type: remote, url: 'http://external.mcp.local:1234/mcp')" \
+	rtm=20 __format=md
+```
+
+Refer to the external MCP’s documentation to confirm whether it exposes an HTTP endpoint and the path (commonly `/mcp`).

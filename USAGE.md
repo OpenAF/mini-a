@@ -59,6 +59,47 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 - 4+ steps without meaningful progress
 - Repeating similar thoughts detected
 
+## Web UI quick start
+
+Mini‑A includes a simple web UI you can use from your browser. The static page lives in `public/index.md` and is served by a small HTTP server defined in `mini-a-web.yaml`.
+
+Quick steps:
+
+1) Export your model config
+
+```bash
+export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
+# Optional: use a cheaper model for routine steps
+export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+```
+
+2) Start the Mini‑A web server
+
+Recommended:
+
+```bash
+./mini-a-web.sh onport=8888
+```
+
+Alternative:
+
+```bash
+ojob mini-a-web.yaml onport=8888
+```
+
+3) Open the UI in your browser
+
+```text
+http://localhost:8888/
+```
+
+Optional flags when starting the server:
+
+- `showExecs=true` to show executed commands in the interaction stream
+- `logPromptHeaders="origin,referer"` to log selected incoming headers for debugging
+
+Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
+
 ## Basic Usage
 
 ### Creating and Starting a Mini-A Agent

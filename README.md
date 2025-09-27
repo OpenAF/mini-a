@@ -112,12 +112,17 @@ mini-a.sh goal="analyze the current directory structure and provide insights" us
 ## Features
 
 - **Multi-Model Support**: Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
+- **Dual-Model Cost Optimization**: Use a low-cost model for routine steps via `OAF_LC_MODEL` with smart escalation to the main model when needed (see [details](#dual-model-configuration-cost-optimization))
 - **MCP Integration**: Seamless integration with Model Context Protocol servers (both local and external)
+- **STDIO or HTTP MCPs**: Use MCPs over STDIO or start them as remote HTTP servers with `onport` (see [MCP docs](mcps/README.md))
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
-- **Built-in MCPs**: Includes database, network, email, and data channel MCP servers
+- **Built-in MCPs**: Includes database, network, email, data channel, and SSH execution MCP servers
+- **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
+- **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
 - **Safety Features**: Command filtering, confirmation prompts, and read-only modes
 - **Conversation Persistence**: Save and resume conversations across sessions
+- **Automatic Context Summarization**: Keeps context within limits with auto-summarize when it grows
 - **Rate Limiting**: Built-in rate limiting for API usage control
 
 ## Installation
