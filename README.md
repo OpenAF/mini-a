@@ -4,6 +4,8 @@
 
 Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP stdio or http(s) servers to achieve user-defined goals. It is designed to be simple, flexible, and easy to use. Can be used as a library, command-line tool, or embedded interface in other applications.
 
+![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
+
 ## Quick Start
 
 Two steps to use:
