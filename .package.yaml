@@ -57,6 +57,7 @@ files:
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
 - mcps/mcp-net.yaml
+- mcps/mcp-oaf.yaml
 - mcps/mcp-ssh.yaml
 - mini-a-web.sh
 - mini-a-web.yaml
@@ -74,15 +75,16 @@ filesHash:
   README.md: 6547dc710e5aa013ea27ceb4192e271a1315f3fa
   USAGE.md: 27bcbfe9bd13841e61e842c2d967d81588480d3d
   mcps/CREATING.md: 8d2e251c409148f2178f84dba0ba1bc36f721857
-  mcps/README.md: 5df89d739435e1fa2968470946bc1f4a2a6e79e9
+  mcps/README.md: 63ae6083a3b0adbe809086b659c2027b0174b1ad
   mcps/mcp-ch.yaml: b831478763c36037a61af095c4be0c4ac2464cec
   mcps/mcp-db.yaml: d2fa8ffe251521e4c4ec42e47fa6ad2de40bc50b
   mcps/mcp-email.yaml: 128fae9e958038e47045242c5752be76da4ec80a
   mcps/mcp-net.yaml: 7b9263f3746916cf35eca7422c2652ce55e13ae4
+  mcps/mcp-oaf.yaml: 1ed1908de8f90b07a66cd83c2483c1955f1a4dd4
   mcps/mcp-ssh.yaml: 9933fa7fcc844cf4ace6da2dd3e76ffd4894830d
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 5ee6f18c11879c597c6a54af160e991ef9469977
-  mini-a.js: 82715c336463d9135dfdc6dbdc63c1bbe95bf445
+  mini-a.js: d19d5fe4359c8197df3c7b7005cbd9ea89f0944d
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 58660229a6450b45f3b85c3ef85be291ab0d08a4
   public/index.md: 3f83517c9105bf0f054f0127590be3613df4796d
