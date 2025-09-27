@@ -9,6 +9,7 @@
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | [mcp-notify.yaml](mcp-notify.yaml) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
+| mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 
 ### Examples
 
@@ -74,6 +75,36 @@ Call `ch-keys` remotely against an HTTP MCP server:
 
 ```bash
 oafp in=mcp data="(type: remote, url: 'http://localhost:12345/mcp', tool: ch-keys, params: (dataCh: 'my-data'))"
+```
+ 
+#### mcp-ssh
+
+This MCP provides a secure SSH-based executor. It exposes two main tools:
+
+- `shell-exec`: execute a single shell command over SSH and receive stdout, stderr and exit code.
+- `shell-batch`: execute a batch of commands over SSH and receive an array of results for each command.
+
+Important notes:
+
+- The `ssh` argument is mandatory and must be an OpenAF SSH URL (for example: `ssh://user:pass@host:22/identKey?timeout=12345`).
+- By default the MCP is read-only; set `readwrite=true` to allow commands that are normally blocked by the security policy.
+
+Example — run a single command via STDIO MCP:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', tool: shell-exec, params: (command: 'uptime'))"
+```
+
+Example — start `mcp-ssh` as a remote HTTP MCP server on port 8888:
+
+```bash
+ojob mcps/mcp-ssh.yaml onport=8888 ssh=ssh://user:pass@host:22/ident readwrite=false
+```
+
+Example — call `shell-batch` remotely:
+
+```bash
+oafp in=mcp data="(type: remote, url: 'http://localhost:8888/mcp', tool: shell-batch, params: (commands: ['echo hello','date']))"
 ```
 ## Using MCPs as STDIO or HTTP Remote Server
 
