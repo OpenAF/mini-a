@@ -855,7 +855,8 @@ MiniA.prototype.start = function(args) {
         if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
           //toolOutput = toolOutput.content.map(r => jsonParse(r.text, __, __, true))
           var _t = toolOutput.content.map(r => r.text).join("\n")
-          toolOutput = jsonParse(_t, __, __, true)
+          toolOutput = jsonParse(_t.trim(), __, __, false)
+          if (isString(toolOutput)) toolOutput = _t
           if (args.debug) {
             print( ow.format.withSideLine("<<<\n" + colorify(toolOutput, { bgcolor: "BG(22),BLACK"}) + "\n<<<", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
           }
