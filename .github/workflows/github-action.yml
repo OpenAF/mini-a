@@ -62,7 +62,7 @@ jobs:
               args: 
                 labelColor: grey3
                 color     : blue
-                icon      : "openaf.svg"
+                icon      : "openaf_grey.svg"
                 label     : "mini-a"
                 file      : ".github/version.svg"
 
