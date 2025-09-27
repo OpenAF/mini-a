@@ -44,6 +44,18 @@ help:
     desc     : "Whether to allow shell commands (default: true)"
     example  : "true"
     mandatory: false
+  - name     : shellallow
+    desc     : Comma-separated list of banned commands to allow explicitly
+    example  : "curl,wget"
+    mandatory: false
+  - name     : shellallowpipes
+    desc     : Allow pipes, redirection and shell control operators
+    example  : "true"
+    mandatory: false
+  - name     : shellbanextra
+    desc     : Additional comma-separated commands to ban
+    example  : "lsblk,ifconfig"
+    mandatory: false
   - name     : outfile
     desc     : Output file path to save the final answer (if not provided, prints to console)
     example  : "/path/to/output.txt"
@@ -102,6 +114,9 @@ jobs:
       outfile     : isString.default(__)
       libs        : isString.default("")
       conversation: isString.default(__)
+      shellallow     : isString.default("")
+      shellbanextra  : isString.default("")
+      shellallowpipes: toBoolean.isBoolean.default(false)
   exec : | #js
     var ma = new MiniA()
     ma.init(args)

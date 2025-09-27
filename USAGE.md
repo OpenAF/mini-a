@@ -136,6 +136,9 @@ The `start()` method accepts various configuration options:
 - **`useshell`** (boolean, default: false): Allow shell command execution
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
+- **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
+- **`shellallowpipes`** (boolean, default: false): Allow pipes, redirection, and shell control operators in commands
+- **`shellbanextra`** (string): Additional comma-separated commands to ban
 
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
@@ -226,7 +229,7 @@ var result = agent.start({
 })
 ```
 
-Be aware of the security defaults: `mcp-ssh` is read-only by default and enforces a banned-commands policy. Use `readwrite=true` cautiously.
+Be aware of the security defaults: `mcp-ssh` is read-only by default and enforces a banned-commands policy. Use `readwrite=true` cautiously and adjust filtering with `shellallow`, `shellbanextra`, or `shellallowpipes` only when you understand the risks.
 
 ### 4. File System Operations
 
@@ -363,6 +366,12 @@ The following commands are restricted by default:
 - System: `sudo`, `shutdown`, `reboot`
 - Package managers: `apt`, `yum`, `brew`, `npm`, `pip`
 - Containers: `docker`, `podman`, `kubectl`
+
+You can adjust this policy using the shell safety options:
+
+- Use **`shellallow`** to explicitly allow specific commands even if banned by default
+- Use **`shellbanextra`** to add additional commands to the banned list
+- Use **`shellallowpipes`** to permit pipes, redirection, and other shell control operators
 
 ### Safety Features
 - Interactive confirmation for potentially dangerous commands
