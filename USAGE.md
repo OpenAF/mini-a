@@ -111,6 +111,34 @@ var result = agent.start({
 })
 ```
 
+### 3.1 Using the mcp-ssh MCP
+
+The `mcp-ssh` MCP exposes SSH execution tools (`shell-exec` and `shell-batch`) that Mini-A can use as an MCP connection. Example usage:
+
+```javascript
+var agent = new MiniA()
+var result = agent.start({
+    goal: "Run 'uptime' on a remote host and return output",
+    mcp: "(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false')",
+    maxsteps: 5
+})
+
+log(result)
+```
+
+When using a remote HTTP MCP server (hosted by `mcp-ssh`), point the `mcp` config to the remote URL, for example:
+
+```javascript
+var agent = new MiniA()
+var result = agent.start({
+    goal: "Run multiple simple commands on a remote host",
+    mcp: "(type: remote, url: 'http://localhost:8888/mcp')",
+    maxsteps: 10
+})
+```
+
+Be aware of the security defaults: `mcp-ssh` is read-only by default and enforces a banned-commands policy. Use `readwrite=true` cautiously.
+
 ### 4. File System Operations
 
 ```javascript

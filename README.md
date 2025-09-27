@@ -59,6 +59,10 @@ Using built-in MCP servers:
 mini-a.sh goal="create a test table with European countries" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" rtm=20
 
 # Network utilities  
+
+# SSH execution (mcp-ssh)
+mini-a.sh goal="run 'uptime' on remote host via SSH MCP" mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', timeout: 5000)" rtm=20
+
 mini-a.sh goal="check if port 80 is open on google.com" mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)" rtm=20
 
 # Email operations
