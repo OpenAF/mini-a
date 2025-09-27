@@ -344,13 +344,23 @@ MiniA.prototype.init = function(args) {
     logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
     return
   }
+  // Check for the low-cost model in OAF_LC_MODEL
+  if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
+    this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
+    this._use_lc = true
+  } else {
+    this._use_lc = false
+  }
+
   if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
   this.llm = $llm(this._oaf_model)
+  if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
 
   // Load conversation history if provided
   if (isDef(args.conversation) && io.fileExists(args.conversation)) {
     this._fnI("load", `Loading conversation history from ${args.conversation}...`)
     this.llm.getGPT().setConversation( io.readFileJSON(args.conversation) )
+    if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation) )
   }
 
   // Using MCP (single or multiple connections)
@@ -425,7 +435,10 @@ MiniA.prototype.init = function(args) {
     actionsdesc      : this.mcpTools,
     isMachine        : (isDef(args.__format) && args.__format != "md")
   })
+
   llm = this.llm.withInstructions(this._systemInst)
+  if (this._use_lc) this.lc_llm = this.lc_llm.withInstructions(this._systemInst)
+
   var systemTokens = this._estimateTokens(this._systemInst)
   this._fnI("size", `System prompt ~${systemTokens} tokens`)
   if (args.debug) {
@@ -434,20 +447,6 @@ MiniA.prototype.init = function(args) {
 
   this._isInitialized = true
 }
-
-/*
-MiniA.prototype.clear = function() {
-  this.llm.getGPT().setConversation([])
-}
-
-MiniA.prototype.set = function(aConversation) {
-  _$(aConversation, "aConversation").isArray().$_()
-  this.llm.getGPT().setConversation(aConversation)
-}
-
-MiniA.prototype.get = function() {
-  return this.llm.getGPT().getConversation()
-}*/
 
 /**
  * <odoc>
@@ -532,11 +531,14 @@ MiniA.prototype.start = function(args) {
 
     // Summarize context if too long
     var summarize = ctx => {
-      var _llm = $llm(this._oaf_model)
-      var summaryResponseWithStats = _llm.promptWithStats("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
+      // Use low-cost LLM for summarization when available, as it's a simple text condensation task
+      var summarizeLLM = this._use_lc ? this.lc_llm : this.llm
+      var llmType = this._use_lc ? "low-cost" : "main"
+      
+      var summaryResponseWithStats = summarizeLLM.promptWithStats("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
       var summaryStats = summaryResponseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(summaryStats)
-      this._fnI("output", `Context summarized. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
+      this._fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
       return summaryResponseWithStats.response
     }
 
@@ -581,6 +583,7 @@ MiniA.prototype.start = function(args) {
 
     // Get model response and parse as JSON
     // Check context size and summarize if too large
+    // Use low-cost LLM for summarization when available
     if (args.maxcontext > 0) {
       var _c = this.llm.getGPT().getConversation()
       var currentTokens = this._estimateTokens(stringify(_c, __, ""))
@@ -603,7 +606,9 @@ MiniA.prototype.start = function(args) {
       }
     }
 
-    var context = [], maxSteps = args.maxsteps
+    var context = [], maxSteps = args.maxsteps, consecutiveErrors = 0
+    var consecutiveThoughts = 0, totalThoughts = 0, stepsWithoutAction = 0
+    var lastActions = [], recentSimilarThoughts = []
     this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
     // We will iterate up to maxSteps to try to achieve the goal
@@ -615,27 +620,102 @@ MiniA.prototype.start = function(args) {
       })
 
       var contextTokens = this._estimateTokens(context.join(""))
-      this._fnI("input", `Interacting with model (context ~${contextTokens} tokens)...`)
+      
+      // Smart escalation logic - use main LLM for complex scenarios
+      var shouldEscalate = false
+      var escalationReason = ""
+      
+      if (this._use_lc && step > 0) {
+        // Escalate for consecutive errors
+        if (consecutiveErrors >= 2) {
+          shouldEscalate = true
+          escalationReason = `${consecutiveErrors} consecutive errors`
+        }
+        // Escalate for too many consecutive thoughts without action
+        else if (consecutiveThoughts >= 3) {
+          shouldEscalate = true
+          escalationReason = `${consecutiveThoughts} consecutive thoughts without action`
+        }
+        // Escalate if too many thoughts overall (thinking loop)
+        else if (totalThoughts >= 5 && step > 0) {
+          shouldEscalate = true  
+          escalationReason = `${totalThoughts} total thoughts indicating thinking loop`
+        }
+        // Escalate if no meaningful actions in recent steps
+        else if (stepsWithoutAction >= 4) {
+          shouldEscalate = true
+          escalationReason = `${stepsWithoutAction} steps without meaningful progress`
+        }
+        // Escalate if similar thoughts are repeating (stuck pattern)
+        else if (recentSimilarThoughts.length >= 3) {
+          var similarCount = 0
+          var lastThought = recentSimilarThoughts[recentSimilarThoughts.length - 1]
+          for (var i = 0; i < recentSimilarThoughts.length - 1; i++) {
+            if (isSimilarThought(lastThought, recentSimilarThoughts[i])) {
+              similarCount++
+            }
+          }
+          if (similarCount >= 2) {
+            shouldEscalate = true
+            escalationReason = `repeating similar thoughts (${similarCount + 1} similar thoughts)`
+          }
+        }
+      }
+      
+      var useLowCost = this._use_lc && step > 0 && !shouldEscalate
+      var currentLLM = useLowCost ? this.lc_llm : this.llm
+      var llmType = useLowCost ? "low-cost" : "main"
+      
+      // Inform about escalation
+      if (this._use_lc && shouldEscalate && step > 0) {
+        this._fnI("warn", `Escalating to main model: ${escalationReason}`)
+      }
+      
+      this._fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
       // Get model response and parse as JSON
       addCall()
       if (args.debug) {
         print( ow.format.withSideLine(">>>\n" + prompt + ">>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      var responseWithStats = this.llm.promptWithStats(prompt)
+      
+      var responseWithStats = currentLLM.promptWithStats(prompt)
       var rmsg = responseWithStats.response
       var stats = responseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(stats)
-      this._fnI("output", `Model responded. ${tokenStatsMsg}`)
+      this._fnI("output", `${llmType.charAt(0).toUpperCase() + llmType.slice(1)} model responded. ${tokenStatsMsg}`)
 
       // Store history
-      if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
+      if (isDef(args.conversation)) {
+        // Always store the main LLM conversation for consistency
+        io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
+      }
       
       var msg
       if (isString(rmsg)) {
         rmsg = rmsg.replace(/.+\n(\{.+)/m, "$1")
         msg = jsonParse(rmsg, __, __, true)
+        
+        // If low-cost LLM produced invalid JSON, retry with main LLM
+        if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
+          this._fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
+          addCall()
+          var fallbackResponseWithStats = this.llm.promptWithStats(prompt)
+          rmsg = fallbackResponseWithStats.response
+          stats = fallbackResponseWithStats.stats
+          tokenStatsMsg = this._formatTokenStats(stats)
+          this._fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
+          
+          if (isString(rmsg)) {
+            rmsg = rmsg.replace(/.+\n(\{.+)/m, "$1")
+            msg = jsonParse(rmsg, __, __, true)
+          } else {
+            msg = rmsg
+          }
+        }
+        
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
           context.push(`[OBS ${step + 1}] (error) invalid JSON from model.`)
+          consecutiveErrors++
           continue
         }
       } else {
@@ -655,11 +735,29 @@ MiniA.prototype.start = function(args) {
 
       if (isUnDef(action) || action.length == 0) {
         context.push(`[OBS ${step + 1}] (error) missing 'action' from model.`)
+        consecutiveErrors++
         continue
       }
       if (isUnDef(thought) || thought.length == 0) {
         context.push(`[OBS ${step + 1}] (error) missing 'thought' from model.`)
+        consecutiveErrors++
         continue
+      }
+      
+      // Reset consecutive errors on successful parsing
+      consecutiveErrors = 0
+      
+      // Helper function to check if thoughts are similar
+      var isSimilarThought = (thought1, thought2) => {
+        if (!thought1 || !thought2) return false
+        var t1 = thought1.toString().toLowerCase().trim()
+        var t2 = thought2.toString().toLowerCase().trim()
+        if (t1 === t2) return true
+        // Check for similar meaning (basic similarity check)
+        var words1 = t1.split(/\s+/).filter(w => w.length > 3)
+        var words2 = t2.split(/\s+/).filter(w => w.length > 3)
+        var commonWords = words1.filter(w => words2.includes(w))
+        return commonWords.length >= Math.min(words1.length, words2.length) * 0.6
       }
 
       /*if (args.verbose) {
@@ -682,8 +780,36 @@ MiniA.prototype.start = function(args) {
 
       // Action 'think': just add thought to context
       if (action == "think") {
-        this._fnI("think", `${(isObject(thought) ? stringify(thought, __, "") : thought) || "(no thought)"}`)
-        context.push(`[THOUGHT ${step + 1}] ${(isObject(thought) ? stringify(thought, __, "") : thought) || "no thought"}`)
+        var thoughtStr = (isObject(thought) ? stringify(thought, __, "") : thought) || "(no thought)"
+        this._fnI("think", `${thoughtStr}`)
+        context.push(`[THOUGHT ${step + 1}] ${thoughtStr}`)
+        
+        // Track thinking patterns for escalation logic
+        consecutiveThoughts++
+        totalThoughts++
+        stepsWithoutAction++
+        
+        // Check for similar thoughts (simplified tracking)
+        recentSimilarThoughts.push(thoughtStr)
+        // Keep only last 4 thoughts for comparison
+        if (recentSimilarThoughts.length > 4) {
+          recentSimilarThoughts.shift()
+        }
+        
+        // Count how many recent thoughts are similar to current one
+        var similarCount = 0
+        if (recentSimilarThoughts.length >= 3) {
+          for (var i = 0; i < recentSimilarThoughts.length - 1; i++) {
+            if (isSimilarThought(thoughtStr, recentSimilarThoughts[i])) {
+              similarCount++
+            }
+          }
+          // Reset array if we don't have enough similar thoughts
+          if (similarCount < 2) {
+            recentSimilarThoughts = [thoughtStr]
+          }
+        }
+        
         checkAndSummarizeContext()
         continue
       }
@@ -692,11 +818,22 @@ MiniA.prototype.start = function(args) {
       if (action == "shell") {
         if (!command) {
           context.push(`[OBS ${step + 1}] (shell) missing 'command' from model.`)
+          consecutiveErrors++
           continue
         }
         var shellOutput = this._runCommand({ command: command, readwrite: args.readwrite, checkall: args.checkall }).output
         context.push(`[ACT ${step + 1}] shell: ${command}`)
         context.push(`[OBS ${step + 1}] ${shellOutput.trim() || "(no output)"}`)
+        
+        // Reset thinking counters on meaningful action
+        consecutiveThoughts = 0
+        stepsWithoutAction = 0
+        totalThoughts = Math.max(0, totalThoughts - 1) // Reduce total thoughts on action
+        recentSimilarThoughts = [] // Clear similar thoughts on action
+        lastActions.push(`shell: ${command}`)
+        // Keep only last 3 actions for tracking
+        if (lastActions.length > 3) lastActions.shift()
+        
         checkAndSummarizeContext()
         continue
       }
@@ -704,6 +841,7 @@ MiniA.prototype.start = function(args) {
       if (this.mcpToolNames.indexOf(origAction) >= 0) {
         if (isDef(msg.params) && !isMap(msg.params)) {
           context.push(`[OBS ${step + 1}] (${origAction}) missing or invalid 'params' from model.`)
+          consecutiveErrors++
           continue
         }
         this._fnI("exec", `Executing action '${origAction}' with params: ${af.toSLON(msg.params)}`)
@@ -731,6 +869,16 @@ MiniA.prototype.start = function(args) {
         this._fnI("done", `Action '${origAction}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
         context.push(`[ACT ${step + 1}] ${origAction}: ${af.toSLON(msg.params)}`)
         context.push(`[OBS ${step + 1}] ${stringify(toolOutput, __, "") || "(no output)"}`)
+        
+        // Reset thinking counters on meaningful action
+        consecutiveThoughts = 0
+        stepsWithoutAction = 0
+        totalThoughts = Math.max(0, totalThoughts - 1) // Reduce total thoughts on action
+        recentSimilarThoughts = [] // Clear similar thoughts on action
+        lastActions.push(`${origAction}: ${af.toSLON(msg.params)}`)
+        // Keep only last 3 actions for tracking
+        if (lastActions.length > 3) lastActions.shift()
+        
         checkAndSummarizeContext()
         continue
       }
@@ -740,12 +888,22 @@ MiniA.prototype.start = function(args) {
         if (args.__format != 'md' && args.__format != 'raw') {
           answer = this._cleanCodeBlocks(answer)
         }
+        
+        // Reset counters as we're finishing
+        consecutiveThoughts = 0
+        stepsWithoutAction = 0
 
         return this._processFinalAnswer(answer, args)
       }
 
-      // Unknown action: just add thought to context
+      // Unknown action: treat as thinking
       context.push(`[THOUGHT ${step + 1}] ((unknown action -> think) ${thought || "no thought"})`)
+      
+      // Track as thinking activity for escalation logic
+      consecutiveThoughts++
+      totalThoughts++
+      stepsWithoutAction++
+      
       checkAndSummarizeContext()
     }
 
