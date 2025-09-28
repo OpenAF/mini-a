@@ -126,7 +126,7 @@ jobs:
       "userdel","groupadd","groupdel","shutdown","reboot","poweroff","halt",
       "systemctl","service","fdisk","sfdisk","parted","losetup","mkswap",
       "swapoff","swapon","iptables","nft","grub-install","update-grub",
-      "curl","wget","perl","python","ruby","node","npm","yarn","pip","pip3","gem"
+      "curl","wget","perl","python","python3","ruby","node","npm","yarn","pip","pip3","gem"
     ]
 
     var exec = false

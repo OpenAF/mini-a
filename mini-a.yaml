@@ -102,26 +102,26 @@ jobs:
 - name : MiniAgent
   check:
     in:
-      goal        : isString
-      mcp         : isString.default(__)
-      verbose     : toBoolean.isBoolean.default(false)
-      rtm         : toNumber.isNumber.default(__)
-      maxsteps    : toNumber.isNumber.default(25)
-      readwrite   : toBoolean.isBoolean.default(false)
-      debug       : toBoolean.isBoolean.default(false)
-      useshell    : toBoolean.isBoolean.default(false)
-      knowledge   : isString.default("")
-      outfile     : isString.default(__)
-      libs        : isString.default("")
-      conversation: isString.default(__)
-      shellallow     : isString.default("")
-      shellbanextra  : isString.default("")
+      goal           : isString
+      mcp            : isString.default(__)
+      verbose        : toBoolean.isBoolean.default(false)
+      rtm            : toNumber.isNumber.default(__)
+      maxsteps       : toNumber.isNumber.default(25)
+      readwrite      : toBoolean.isBoolean.default(false)
+      debug          : toBoolean.isBoolean.default(false)
+      useshell       : toBoolean.isBoolean.default(false)
+      knowledge      : isString.default(__)
+      outfile        : isString.default(__)
+      libs           : isString.default(__)
+      conversation   : isString.default(__)
+      shellallow     : isString.default(__)
+      shellbanextra  : isString.default(__)
       shellallowpipes: toBoolean.isBoolean.default(false)
   exec : | #js
-    var ma = new MiniA()
-    ma.init(args)
+    var _ma = new MiniA()
     if (isUnDef(args.__format)) args.__format = "md"
-    var _r = ma.start(args)
+    _ma.init(args)
+    var _r = _ma.start(args)
     if (isUnDef(args.outfile)) {
       if (isObject(_r)) 
         ow.oJob.output(_r, args)
