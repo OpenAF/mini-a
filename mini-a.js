@@ -259,7 +259,7 @@ MiniA.prototype._runCommand = function(args) {
         "userdel","groupadd","groupdel","shutdown","reboot","poweroff","halt",
         "systemctl","service","fdisk","sfdisk","parted","losetup","mkswap",
         "swapoff","swapon","iptables","nft","grub-install","update-grub",
-        "curl","wget","perl","python","ruby","node","npm","yarn","pip","pip3","gem"
+        "curl","wget","perl","python","python3","ruby","node","npm","yarn","pip","pip3","gem"
     ]
 
     var allowlist = this._parseListOption(allowValue)
@@ -390,6 +390,7 @@ MiniA.prototype.init = function(args) {
   if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
     this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
     this._use_lc = true
+    this._fnI("info", `Low-cost model enabled: ${stringify(this._oaf_lc_model, __, "")}`)
   } else {
     this._use_lc = false
   }
@@ -631,7 +632,7 @@ MiniA.prototype.start = function(args) {
     }
 
     // Check if goal is a string or a file path
-    if (args.goal.indexOf("\n") < 0 && io.fileExists(args.goal)) {
+    if (args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
       this._fnI("load", `Loading goal from file: ${args.goal}...`)
       args.goal = io.readFileString(args.goal)
     }
