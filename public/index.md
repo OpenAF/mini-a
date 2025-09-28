@@ -141,7 +141,7 @@
     /* ========== INPUT SECTION ========== */
     .input-section {
         display: flex;
-        align-items: stretch;
+        align-items: flex-end;
         gap: 0.8vmin;
         margin-bottom: 2vmin;
         background: var(--panel-bg);
@@ -181,14 +181,13 @@
 
     #submitBtn,
     #clearBtn {
-        padding: 1.2vmin 2vmin;
+        padding: 1.2px 2px;
         border: none;
         border-radius: 0.8vmin;
         cursor: pointer;
-        font-size: 1.4vmin;
-        min-height: 2.4em;
-        height: auto;
-        min-width: 2.4em;
+        font-size: 0.9rem;
+        height: 35px;
+        width: 40px;
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -209,8 +208,20 @@
         box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
 
+    /* Submit button stop state */
+    #submitBtn.stop {
+        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+        box-shadow: 0 2px 6px rgba(220,53,69,0.25) !important;
+    }
+
+    #submitBtn.stop:hover {
+        background: linear-gradient(135deg, #c82333 0%, #a02027 100%) !important;
+        box-shadow: 0 4px 12px rgba(220,53,69,0.35) !important;
+        transform: translateY(-1px);
+    }
+
     /* Button hover states */
-    #submitBtn:hover:not(:disabled) {
+    #submitBtn:hover:not(:disabled):not(.stop) {
         background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
         box-shadow: 0 4px 12px rgba(0,123,255,0.35);
         transform: translateY(-1px);
@@ -227,17 +238,6 @@
         background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
         cursor: not-allowed;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-
-    /* Submit button stop state */
-    #submitBtn.stop {
-        background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-        box-shadow: 0 2px 6px rgba(220,53,69,0.25);
-    }
-
-    #submitBtn.stop:hover {
-        background: linear-gradient(135deg, #c82333 0%, #a02027 100%);
-        box-shadow: 0 4px 12px rgba(220,53,69,0.35);
     }
 
     /* ========== SCROLL TO BOTTOM BUTTON ========== */
