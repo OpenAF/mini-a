@@ -587,11 +587,13 @@ MiniA.prototype.start = function(args) {
 
     // Summarize context if too long
     var summarize = ctx => {
-      // Use low-cost LLM for summarization when available, as it's a simple text condensation task
-      var summarizeLLM = this._use_lc ? this.lc_llm : this.llm
-      var llmType = this._use_lc ? "low-cost" : "main"
-      
-      var summaryResponseWithStats = summarizeLLM.promptWithStats("Summarize the following text in a concise manner, keeping all important information:\n\n" + ctx)
+      // Use normal cost LLM for summarization
+      //var summarizeLLM = this._use_lc ? this.lc_llm : this.llm
+      //var llmType = this._use_lc ? "low-cost" : "main"
+      var summarizeLLM = this.llm
+      var llmType = "main"
+
+      var summaryResponseWithStats = summarizeLLM.withInstructions("You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions.").promptWithStats(ctx)
       var summaryStats = summaryResponseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(summaryStats)
       this._fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
