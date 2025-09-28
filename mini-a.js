@@ -390,7 +390,7 @@ MiniA.prototype.init = function(args) {
   if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
     this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
     this._use_lc = true
-    this._fnI("info", `Low-cost model enabled: ${stringify(this._oaf_lc_model, __, "")}`)
+    this._fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
   } else {
     this._use_lc = false
   }
