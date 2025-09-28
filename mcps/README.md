@@ -91,6 +91,7 @@ Important notes:
 
 - The `ssh` argument is mandatory and must be an OpenAF SSH URL (for example: `ssh://user:pass@host:22/identKey?timeout=12345`).
 - By default the MCP is read-only; set `readwrite=true` to allow commands that are normally blocked by the security policy.
+- Fine-tune command filtering with `shellallow` (allow specific commands), `shellbanextra` (add more banned commands), and `shellallowpipes` (permit pipes/redirection).
 
 Example — run a single command via STDIO MCP:
 

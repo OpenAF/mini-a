@@ -15,6 +15,18 @@ help:
     desc     : "If true, allows write operations (default: false)"
     example  : "true"
     mandatory: false
+  - name     : shellallow
+    desc     : Comma-separated list of banned commands to allow explicitly
+    example  : "curl,wget"
+    mandatory: false
+  - name     : shellallowpipes
+    desc     : Allow pipes, redirection and shell control operators
+    example  : "true"
+    mandatory: false
+  - name     : shellbanextra
+    desc     : Additional comma-separated commands to ban
+    example  : "lsblk,ifconfig"
+    mandatory: false
 
 
 todo:
@@ -86,9 +98,20 @@ jobs:
     in:
       ssh      : isString
       readwrite: toBoolean.isBoolean.default(false)
+      shellallow     : isString.default("")
+      shellbanextra  : isString.default("")
+      shellallowpipes: toBoolean.isBoolean.default(false)
   exec : | #js
     global.ssh = args.ssh
     global.readwrite = args.readwrite
+    var parseList = function(value) {
+      if (isUnDef(value) || value === null) return []
+      if (!isString(value)) value = "" + value
+      return value.split(",").map(v => v.trim().toLowerCase()).filter(v => v.length > 0)
+    }
+    global.shellallow = parseList(args.shellallow)
+    global.shellbanextra = parseList(args.shellbanextra)
+    global.shellallowpipes = args.shellallowpipes
 
 # ---------------------
 - name : Validate Command
@@ -96,7 +119,7 @@ jobs:
     in:
       command    : isString
   exec : | #js
-    var banned = [
+    var baseBanned = [
       "rm","sudo","chmod","chown","mv","scp","ssh","docker","podman","kubectl",
       "dd","mkfs","mkfs.ext4","mkfs.xfs","mount","umount","apt","yum","brew",
       "apt-get","apk","rpm","cp","rsync","truncate","ln","passwd","useradd",
@@ -111,17 +134,24 @@ jobs:
     var tokens = lcCmd.split(/\s+/).filter(r => r.length > 0)
     var errorMsg = ""
 
+    var allowlist = isArray(global.shellallow) ? global.shellallow : []
+    var extraBanned = isArray(global.shellbanextra) ? global.shellbanextra : []
+    var banned = baseBanned.concat(extraBanned).filter(b => allowlist.indexOf(b) < 0)
+
+    var isTokenAllowed = function(token) {
+      return allowlist.some(a => token === a || token.startsWith(a + "-") || token.startsWith(a + "."))
+    }
+
     // detect banned tokens or tokens that start with banned entries (e.g., "docker-compose")
-    var hasBannedToken = tokens.some(t => banned.includes(t) || banned.some(b => t === b || t.startsWith(b + "-") || t.startsWith(b + ".")))
+    var bannedTokens = tokens.filter(t => !isTokenAllowed(t) && banned.some(b => t === b || t.startsWith(b + "-") || t.startsWith(b + ".")))
+    var hasBannedToken = bannedTokens.length > 0
 
     // detect redirections, pipes or shell control operators which can perform write/replace operations
-    var hasRedirectionOrPipe = /[<>|&;]/.test(lcCmd)
+    var hasRedirectionOrPipe = !(global.shellallowpipes || false) && /[<>|&;]/.test(lcCmd)
 
     // collect what was detected to show to user
     var detected = []
-    if (hasBannedToken) {
-      detected = detected.concat(tokens.filter(t => banned.includes(t) || banned.some(b => t === b || t.startsWith(b + "-") || t.startsWith(b + "."))))
-    }
+    if (hasBannedToken) detected = detected.concat(bannedTokens)
     if (hasRedirectionOrPipe) detected.push("redirection/pipe")
 
     if (!global.readwrite && (hasBannedToken || hasRedirectionOrPipe)) {

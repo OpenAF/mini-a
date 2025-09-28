@@ -147,6 +147,20 @@ MiniA.prototype._formatTokenStats = function(stats) {
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
 }
 
+MiniA.prototype._parseListOption = function(value) {
+    if (isUnDef(value) || value === null) return []
+    if (isArray(value)) {
+        return value
+            .map(v => (isString(v) ? v : stringify(v, __, "")).toLowerCase().trim())
+            .filter(v => v.length > 0)
+    }
+    if (!isString(value)) value = stringify(value, __, "")
+    return value
+        .split(",")
+        .map(v => v.trim().toLowerCase())
+        .filter(v => v.length > 0)
+}
+
 /**
  * Remove code block markers from text if present
  */
@@ -228,10 +242,17 @@ MiniA.prototype._numberInWords = num => {
 
 MiniA.prototype._runCommand = function(args) {
     _$(args.command, "args.command").isString().$_()
-    args.readwrite = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
-    args.checkall  = _$(args.checkall,  "args.checkall").isBoolean().default(false)
+    args.readwrite  = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
+    args.checkall   = _$(args.checkall,  "args.checkall").isBoolean().default(false)
+    args.shellbatch = _$(args.shellbatch, "args.shellbatch").isBoolean().default(false)
 
-    const banned = [
+    var allowValue = isDef(args.shellallow) ? args.shellallow : this._shellAllowlist
+    var extraBanValue = isDef(args.shellbanextra) ? args.shellbanextra : this._shellExtraBanned
+    var allowPipesValue = isDef(args.shellallowpipes) ? args.shellallowpipes : this._shellAllowPipes
+
+    args.shellallowpipes = _$(toBoolean(allowPipesValue), "args.shellallowpipes").isBoolean().default(false)
+
+    const baseBanned = [
         "rm","sudo","chmod","chown","mv","scp","ssh","docker","podman","kubectl",
         "dd","mkfs","mkfs.ext4","mkfs.xfs","mount","umount","apt","yum","brew",
         "apt-get","apk","rpm","cp","rsync","truncate","ln","passwd","useradd",
@@ -241,26 +262,40 @@ MiniA.prototype._runCommand = function(args) {
         "curl","wget","perl","python","ruby","node","npm","yarn","pip","pip3","gem"
     ]
 
+    var allowlist = this._parseListOption(allowValue)
+    var extraBanned = this._parseListOption(extraBanValue)
+    var banned = baseBanned.concat(extraBanned).filter(b => allowlist.indexOf(b) < 0)
+
     var exec = false
     var lcCmd = (args.command || "").toString().toLowerCase()
     var tokens = lcCmd.split(/\s+/).filter(Boolean)
 
+    var isTokenAllowed = function(token) {
+      return allowlist.some(a => token === a || token.startsWith(a + "-") || token.startsWith(a + "."))
+    }
+
     // detect banned tokens or tokens that start with banned entries (e.g., "docker-compose")
-    var hasBannedToken = tokens.some(t => banned.includes(t) || banned.some(b => t === b || t.startsWith(b + "-") || t.startsWith(b + ".")))
+    var bannedTokens = tokens.filter(t => !isTokenAllowed(t) && banned.some(b => t === b || t.startsWith(b + "-") || t.startsWith(b + ".")))
+    var hasBannedToken = bannedTokens.length > 0
 
     // detect redirections, pipes or shell control operators which can perform write/replace operations
-    var hasRedirectionOrPipe = /[<>|&;]/.test(lcCmd)
+    var hasRedirectionOrPipe = !args.shellallowpipes && /[<>|&;]/.test(lcCmd)
 
     // collect what was detected to show to user
     var detected = []
     if (hasBannedToken) {
-      detected = detected.concat(tokens.filter(t => banned.includes(t) || banned.some(b => t === b || t.startsWith(b + "-") || t.startsWith(b + "."))))
+      detected = detected.concat(bannedTokens)
     }
     if (hasRedirectionOrPipe) detected.push("redirection/pipe")
 
     if (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe || args.checkall)) {
       var note = detected.length ? " Detected: " + detected.join(", ") : ""
-      var _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + ansiColor("faint","(" + note + " )"), ["No", "Yes", "Always"])
+      var _r
+      if (!args.shellbatch) {
+        _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + ansiColor("faint","(" + note + " )"), ["No", "Yes", "Always"])
+      } else {
+        _r == 0 // No prompt in batch mode; default to "No"
+      }
       if (_r == 2) {
         exec = true
         this._alwaysExec = true
@@ -301,7 +336,9 @@ MiniA.prototype.init = function(args) {
     { name: "knowledge", type: "string", default: "" },
     { name: "outfile", type: "string", default: __ },
     { name: "libs", type: "string", default: "" },
-    { name: "conversation", type: "string", default: __ }
+    { name: "conversation", type: "string", default: __ },
+    { name: "shellallow", type: "string", default: "" },
+    { name: "shellbanextra", type: "string", default: "" }
   ])
 
   // Convert and validate boolean arguments
@@ -311,6 +348,11 @@ MiniA.prototype.init = function(args) {
   args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
   args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
   args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
+  args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+
+  this._shellAllowlist = this._parseListOption(args.shellallow)
+  this._shellExtraBanned = this._parseListOption(args.shellbanextra)
+  this._shellAllowPipes = args.shellallowpipes
 
   // Load additional libraries if specified
   if (isDef(args.libs) && args.libs.length > 0) {
@@ -461,6 +503,10 @@ MiniA.prototype.init = function(args) {
  * - readwrite (boolean, default=false): Whether to allow read/write operations on the filesystem.
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
  * - useshell (boolean, default=false): Whether to allow shell command execution.
+ * - shellallow (string, optional): Comma-separated list of commands allowed even if usually banned.
+ * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
+ * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
+ * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
@@ -488,7 +534,9 @@ MiniA.prototype.start = function(args) {
       { name: "libs", type: "string", default: "" },
       { name: "conversation", type: "string", default: __ },
       { name: "maxcontext", type: "number", default: 0 },
-      { name: "rules", type: "string", default: "" }
+      { name: "rules", type: "string", default: "" },
+      { name: "shellallow", type: "string", default: "" },
+      { name: "shellbanextra", type: "string", default: "" }
     ])
 
     // Convert and validate boolean arguments
@@ -498,6 +546,11 @@ MiniA.prototype.start = function(args) {
     args.useshell = _$(args.useshell, "args.useshell").isBoolean().default(false)
     args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
+    args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+
+    this._shellAllowlist = this._parseListOption(args.shellallow)
+    this._shellExtraBanned = this._parseListOption(args.shellbanextra)
+    this._shellAllowPipes = args.shellallowpipes
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -821,7 +874,14 @@ MiniA.prototype.start = function(args) {
           consecutiveErrors++
           continue
         }
-        var shellOutput = this._runCommand({ command: command, readwrite: args.readwrite, checkall: args.checkall }).output
+        var shellOutput = this._runCommand({
+          command        : command,
+          readwrite      : args.readwrite,
+          checkall       : args.checkall,
+          shellallow     : args.shellallow,
+          shellbanextra  : args.shellbanextra,
+          shellallowpipes: args.shellallowpipes
+        }).output
         context.push(`[ACT ${step + 1}] shell: ${command}`)
         context.push(`[OBS ${step + 1}] ${shellOutput.trim() || "(no output)"}`)
         

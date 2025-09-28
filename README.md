@@ -152,6 +152,9 @@ All Mini-A options can be passed as command line arguments:
 - `goal`: The objective for the agent to achieve
 - `mcp`: MCP server configuration (single or array)
 - `useshell`: Allow shell command execution
+- `shellallow`: Comma-separated list of banned commands that should be allowed
+- `shellallowpipes`: Allow use of pipes, redirection, and shell control operators
+- `shellbanextra`: Additional comma-separated commands to ban
 - `readwrite`: Allow file system modifications
 - `maxsteps`: Maximum number of steps (default: 25)
 - `rtm`: Rate limit in calls per minute
@@ -166,6 +169,7 @@ For a complete list of options, see the [Usage Guide](USAGE.md).
 Mini-A includes several security features:
 
 - **Command Filtering**: Dangerous commands are blocked by default
+- **Customizable Shell Controls**: Use `shellallow`, `shellallowpipes`, and `shellbanextra` to fine-tune shell access
 - **Interactive Confirmation**: Use `checkall=true` for command approval
 - **Read-Only Mode**: File system protection enabled by default
 - **Shell Isolation**: Shell access disabled by default
