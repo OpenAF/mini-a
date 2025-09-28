@@ -242,8 +242,9 @@ MiniA.prototype._numberInWords = num => {
 
 MiniA.prototype._runCommand = function(args) {
     _$(args.command, "args.command").isString().$_()
-    args.readwrite = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
-    args.checkall  = _$(args.checkall,  "args.checkall").isBoolean().default(false)
+    args.readwrite  = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
+    args.checkall   = _$(args.checkall,  "args.checkall").isBoolean().default(false)
+    args.shellbatch = _$(args.shellbatch, "args.shellbatch").isBoolean().default(false)
 
     var allowValue = isDef(args.shellallow) ? args.shellallow : this._shellAllowlist
     var extraBanValue = isDef(args.shellbanextra) ? args.shellbanextra : this._shellExtraBanned
@@ -289,7 +290,12 @@ MiniA.prototype._runCommand = function(args) {
 
     if (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe || args.checkall)) {
       var note = detected.length ? " Detected: " + detected.join(", ") : ""
-      var _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + ansiColor("faint","(" + note + " )"), ["No", "Yes", "Always"])
+      var _r
+      if (!args.shellbatch) {
+        _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + ansiColor("faint","(" + note + " )"), ["No", "Yes", "Always"])
+      } else {
+        _r == 0 // No prompt in batch mode; default to "No"
+      }
       if (_r == 2) {
         exec = true
         this._alwaysExec = true
@@ -500,6 +506,7 @@ MiniA.prototype.init = function(args) {
  * - shellallow (string, optional): Comma-separated list of commands allowed even if usually banned.
  * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
+ * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.

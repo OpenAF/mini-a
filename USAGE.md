@@ -139,6 +139,7 @@ The `start()` method accepts various configuration options:
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
 - **`shellallowpipes`** (boolean, default: false): Allow pipes, redirection, and shell control operators in commands
 - **`shellbanextra`** (string): Additional comma-separated commands to ban
+- **`shellbatch`** (boolean, default: false): If true, runs in batch mode without prompting for command execution approval
 
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
