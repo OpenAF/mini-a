@@ -291,7 +291,7 @@ MiniA.prototype._runCommand = function(args) {
     if (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe || args.checkall)) {
       var note = detected.length ? " Detected: " + detected.join(", ") : ""
       var _r
-      if (!args.shellbatch) {
+      if (!this._shellBatch) {
         _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + ansiColor("faint","(" + note + " )"), ["No", "Yes", "Always"])
       } else {
         _r == 0 // No prompt in batch mode; default to "No"
@@ -547,10 +547,12 @@ MiniA.prototype.start = function(args) {
     args.raw = _$(args.raw, "args.raw").isBoolean().default(false)
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+    args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
+    this._shellBatch = args.shellbatch
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -628,6 +630,11 @@ MiniA.prototype.start = function(args) {
       }
     }
 
+    // Check if goal is a string or a file path
+    if (args.goal.indexOf("\n") < 0 && io.fileExists(args.goal)) {
+      this._fnI("load", `Loading goal from file: ${args.goal}...`)
+      args.goal = io.readFileString(args.goal)
+    }
     this._fnI("user", `${args.goal}`)
 
     this.init(args)
