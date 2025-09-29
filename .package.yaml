@@ -39,7 +39,7 @@ name: mini-a
 main: ''
 mainJob: ''
 license: Apache 2.0 license
-version: '20250928'
+version: '20250929'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -83,8 +83,8 @@ filesHash:
   mcps/mcp-oaf.yaml: 1ed1908de8f90b07a66cd83c2483c1955f1a4dd4
   mcps/mcp-ssh.yaml: d47262e5c38b39f2714cb5cf1b4f3d09e92ebed6
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 5ee6f18c11879c597c6a54af160e991ef9469977
-  mini-a.js: bdc241854438c4f6cefacc283ef44347460f14df
+  mini-a-web.yaml: a37326f35ea403a000cf6a8fc872fb5f7dd8a054
+  mini-a.js: 887d3770c918539b5535fba8950fe67ba49b0c41
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 8be80aa9c87f52512ee511442c20e93d2d55197f
   public/index.md: 5270b3f9b85102767d411a8843ad282c91ede323
