@@ -24,6 +24,7 @@ todo:
 - (httpdStart     ): "${onport:-8888}"
   ((mapLibs      )): true
 - (httpdHealthz   ): "${onport:-8888}"
+- (httpdMetrics   ): "${onport:-8888}"
 - (httpdFileBrowse): "${onport:-8888}"
   ((uri          )): /
   ((path         )): public

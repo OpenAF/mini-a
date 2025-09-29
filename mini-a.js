@@ -1,4 +1,5 @@
 var __MiniA_mcpConnections = {}
+ow.loadMetrics()
 
 /**
  * <odoc>
@@ -9,6 +10,49 @@ var __MiniA_mcpConnections = {}
  */
 var MiniA = function() {
   this._isInitialized = false
+  this._id = genUUID()
+
+  if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
+    llm_normal_calls: $atomic(0, "long"),
+    llm_lc_calls: $atomic(0, "long"),
+    goals_achieved: $atomic(0, "long"),
+    goals_failed: $atomic(0, "long"),
+    thoughts_made: $atomic(0, "long"),
+    shell_commands_executed: $atomic(0, "long"),
+    shell_commands_blocked: $atomic(0, "long"),
+    thinks_made: $atomic(0, "long"),
+    finals_made: $atomic(0, "long"),
+    steps_taken: $atomic(0, "long"),
+    escalations: $atomic(0, "long"),
+    retries: $atomic(0, "long"),
+    summaries_made: $atomic(0, "long"),
+    summaries_skipped: $atomic(0, "long"),
+    summaries_forced: $atomic(0, "long"),
+    summaries_tokens_reduced: $atomic(0, "long"),
+    summaries_original_tokens: $atomic(0, "long"),
+    summaries_final_tokens: $atomic(0, "long"),
+    goals_stopped: $atomic(0, "long"),
+    llm_estimated_tokens: $atomic(0, "long"),
+    llm_actual_tokens: $atomic(0, "long"),
+    mcp_actions_executed: $atomic(0, "long"),
+    mcp_actions_failed: $atomic(0, "long"),
+    consecutive_errors: $atomic(0, "long"),
+    consecutive_thoughts: $atomic(0, "long"),
+    json_parse_failures: $atomic(0, "long"),
+    action_loops_detected: $atomic(0, "long"),
+    thinking_loops_detected: $atomic(0, "long"),
+    similar_thoughts_detected: $atomic(0, "long"),
+    context_summarizations: $atomic(0, "long"),
+    total_session_time: $atomic(0, "long"),
+    avg_step_time: $atomic(0, "long"),
+    max_context_tokens: $atomic(0, "long"),
+    shell_commands_approved: $atomic(0, "long"),
+    shell_commands_denied: $atomic(0, "long"),
+    fallback_to_main_llm: $atomic(0, "long"),
+    unknown_actions: $atomic(0, "long"),
+    llm_normal_tokens: $atomic(0, "long"),
+    llm_lc_tokens: $atomic(0, "long")
+  }
 
   this._SYSTEM_PROMPT = `
 You are a goal-oriented agent running in background. Work step-by-step toward your goal. No user interaction or feedback is possible.
@@ -121,6 +165,71 @@ MiniA.prototype.setInteractionFn = function(fn) {
     this._fnI = fn
 }
 
+/**
+ * <odoc>
+ * <key>MinA.getMetrics() : Object</key>
+ * Get all metrics for this Mini-A instance.
+ * Returns an object with all metric values including performance, behavior, error tracking, 
+ * and separate token usage for normal vs low-cost LLM models.
+ * </odoc>
+ */
+MiniA.prototype.getMetrics = function() {
+    return {
+        llm_calls: {
+            normal: global.__mini_a_metrics.llm_normal_calls.get(),
+            low_cost: global.__mini_a_metrics.llm_lc_calls.get(),
+            total: global.__mini_a_metrics.llm_normal_calls.get() + global.__mini_a_metrics.llm_lc_calls.get(),
+            fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get()
+        },
+        goals: {
+            achieved: global.__mini_a_metrics.goals_achieved.get(),
+            failed: global.__mini_a_metrics.goals_failed.get(),
+            stopped: global.__mini_a_metrics.goals_stopped.get()
+        },
+        actions: {
+            thoughts_made: global.__mini_a_metrics.thoughts_made.get(),
+            thinks_made: global.__mini_a_metrics.thinks_made.get(),
+            finals_made: global.__mini_a_metrics.finals_made.get(),
+            mcp_actions_executed: global.__mini_a_metrics.mcp_actions_executed.get(),
+            mcp_actions_failed: global.__mini_a_metrics.mcp_actions_failed.get(),
+            shell_commands_executed: global.__mini_a_metrics.shell_commands_executed.get(),
+            shell_commands_blocked: global.__mini_a_metrics.shell_commands_blocked.get(),
+            shell_commands_approved: global.__mini_a_metrics.shell_commands_approved.get(),
+            shell_commands_denied: global.__mini_a_metrics.shell_commands_denied.get(),
+            unknown_actions: global.__mini_a_metrics.unknown_actions.get()
+        },
+        performance: {
+            steps_taken: global.__mini_a_metrics.steps_taken.get(),
+            total_session_time_ms: global.__mini_a_metrics.total_session_time.get(),
+            avg_step_time_ms: global.__mini_a_metrics.avg_step_time.get(),
+            max_context_tokens: global.__mini_a_metrics.max_context_tokens.get(),
+            llm_estimated_tokens: global.__mini_a_metrics.llm_estimated_tokens.get(),
+            llm_actual_tokens: global.__mini_a_metrics.llm_actual_tokens.get(),
+            llm_normal_tokens: global.__mini_a_metrics.llm_normal_tokens.get(),
+            llm_lc_tokens: global.__mini_a_metrics.llm_lc_tokens.get()
+        },
+        behavior_patterns: {
+            escalations: global.__mini_a_metrics.escalations.get(),
+            retries: global.__mini_a_metrics.retries.get(),
+            consecutive_errors: global.__mini_a_metrics.consecutive_errors.get(),
+            consecutive_thoughts: global.__mini_a_metrics.consecutive_thoughts.get(),
+            json_parse_failures: global.__mini_a_metrics.json_parse_failures.get(),
+            action_loops_detected: global.__mini_a_metrics.action_loops_detected.get(),
+            thinking_loops_detected: global.__mini_a_metrics.thinking_loops_detected.get(),
+            similar_thoughts_detected: global.__mini_a_metrics.similar_thoughts_detected.get()
+        },
+        summarization: {
+            summaries_made: global.__mini_a_metrics.summaries_made.get(),
+            summaries_skipped: global.__mini_a_metrics.summaries_skipped.get(),
+            summaries_forced: global.__mini_a_metrics.summaries_forced.get(),
+            context_summarizations: global.__mini_a_metrics.context_summarizations.get(),
+            summaries_tokens_reduced: global.__mini_a_metrics.summaries_tokens_reduced.get(),
+            summaries_original_tokens: global.__mini_a_metrics.summaries_original_tokens.get(),
+            summaries_final_tokens: global.__mini_a_metrics.summaries_final_tokens.get()
+        }
+    }
+}
+
 
 
 // ============================================================================
@@ -215,6 +324,11 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     this._fnI("final", `Final answer determined. Goal achieved.`)
     this.state = "stop"
     
+    // Mark goal as achieved if not already counted
+    if (global.__mini_a_metrics.goals_achieved.get() === 0 && global.__mini_a_metrics.goals_stopped.get() === 0) {
+      global.__mini_a_metrics.goals_achieved.inc()
+    }
+    
     if (args.raw) {
         return answer || "(no answer)" 
     } else {
@@ -299,11 +413,15 @@ MiniA.prototype._runCommand = function(args) {
       if (_r == 2) {
         exec = true
         this._alwaysExec = true
+        global.__mini_a_metrics.shell_commands_approved.inc()
       } else {
         if (_r == 1) {
           exec = true
+          global.__mini_a_metrics.shell_commands_approved.inc()
         } else {
           args.output = `[blocked] Command contains banned operation${note}: ${args.command}`
+          global.__mini_a_metrics.shell_commands_blocked.inc()
+          global.__mini_a_metrics.shell_commands_denied.inc()
         }
       }
     } else {
@@ -314,6 +432,7 @@ MiniA.prototype._runCommand = function(args) {
       this._fnI("shell", "Executing '" + args.command + "'...")
       var _r = $sh(args.command).get(0)
       args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
+      global.__mini_a_metrics.shell_commands_executed.inc()
     }
 
     return args
@@ -325,6 +444,10 @@ MiniA.prototype._runCommand = function(args) {
 
 MiniA.prototype.init = function(args) {
   if (this._isInitialized) return
+
+  ow.metrics.add("mini-a", () => {
+    return this.getMetrics()
+  })
 
   args = _$(args, "args").isMap().default({})
 
@@ -593,7 +716,19 @@ MiniA.prototype.start = function(args) {
       var summarizeLLM = this.llm
       var llmType = "main"
 
+      var originalTokens = this._estimateTokens(ctx)
+      global.__mini_a_metrics.summaries_original_tokens.getAdd(originalTokens)
+
       var summaryResponseWithStats = summarizeLLM.withInstructions("You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions.").promptWithStats(ctx)
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryResponseWithStats.stats.total_tokens || 0)
+      global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryResponseWithStats.stats.total_tokens || 0)
+      global.__mini_a_metrics.llm_normal_calls.inc()
+      global.__mini_a_metrics.summaries_made.inc()
+      
+      var finalTokens = this._estimateTokens(summaryResponseWithStats.response)
+      global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
+      global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
+      
       var summaryStats = summaryResponseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(summaryStats)
       this._fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
@@ -624,6 +759,7 @@ MiniA.prototype.start = function(args) {
           
           if (oldContext.length > 0) {
             this._fnI("summarize", `Summarizing conversation history...`)
+            global.__mini_a_metrics.context_summarizations.inc()
             var summarizedOld = summarize(oldContext.join("\n"))
             context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
             var newTokens = this._estimateTokens(context.join(""))
@@ -662,6 +798,7 @@ MiniA.prototype.start = function(args) {
           }
         })
         this._fnI("summarize", `Summarizing conversation history...`)
+        global.__mini_a_metrics.summaries_forced.inc()
         var _nc = summarize(stringify(_ctx, __, ""))
         var newTokens = this._estimateTokens(stringify(_nc, __, ""))
         this._fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
@@ -672,10 +809,13 @@ MiniA.prototype.start = function(args) {
     var context = [], maxSteps = args.maxsteps, consecutiveErrors = 0
     var consecutiveThoughts = 0, totalThoughts = 0, stepsWithoutAction = 0
     var lastActions = [], recentSimilarThoughts = []
+    var sessionStartTime = now()
     this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
     // We will iterate up to maxSteps to try to achieve the goal
     for(var step = 0; step < maxSteps && this.state != "stop"; step++) {
+      var stepStartTime = now()
+      global.__mini_a_metrics.steps_taken.inc()
       // TODO: Improve by summarizing context to fit in prompt if needed
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
         goal   : args.goal,
@@ -683,6 +823,7 @@ MiniA.prototype.start = function(args) {
       })
 
       var contextTokens = this._estimateTokens(context.join(""))
+      global.__mini_a_metrics.max_context_tokens.set(Math.max(global.__mini_a_metrics.max_context_tokens.get(), contextTokens))
       
       // Smart escalation logic - use main LLM for complex scenarios
       var shouldEscalate = false
@@ -732,6 +873,7 @@ MiniA.prototype.start = function(args) {
       // Inform about escalation
       if (this._use_lc && shouldEscalate && step > 0) {
         this._fnI("warn", `Escalating to main model: ${escalationReason}`)
+        global.__mini_a_metrics.escalations.inc()
       }
       
       this._fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
@@ -742,6 +884,17 @@ MiniA.prototype.start = function(args) {
       }
       
       var responseWithStats = currentLLM.promptWithStats(prompt)
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(responseWithStats.stats.total_tokens || 0)
+      global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(prompt))
+      
+      if (useLowCost) {
+        global.__mini_a_metrics.llm_lc_calls.inc()
+        global.__mini_a_metrics.llm_lc_tokens.getAdd(responseWithStats.stats.total_tokens || 0)
+      } else {
+        global.__mini_a_metrics.llm_normal_calls.inc()
+        global.__mini_a_metrics.llm_normal_tokens.getAdd(responseWithStats.stats.total_tokens || 0)
+      }
+      
       var rmsg = responseWithStats.response
       var stats = responseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(stats)
@@ -761,8 +914,13 @@ MiniA.prototype.start = function(args) {
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
           this._fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
+          global.__mini_a_metrics.fallback_to_main_llm.inc()
+          global.__mini_a_metrics.json_parse_failures.inc()
           addCall()
           var fallbackResponseWithStats = this.llm.promptWithStats(prompt)
+          global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackResponseWithStats.stats.total_tokens || 0)
+          global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackResponseWithStats.stats.total_tokens || 0)
+          global.__mini_a_metrics.llm_normal_calls.inc()
           rmsg = fallbackResponseWithStats.response
           stats = fallbackResponseWithStats.stats
           tokenStatsMsg = this._formatTokenStats(stats)
@@ -779,6 +937,8 @@ MiniA.prototype.start = function(args) {
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
           context.push(`[OBS ${step + 1}] (error) invalid JSON from model.`)
           consecutiveErrors++
+          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+          global.__mini_a_metrics.json_parse_failures.inc()
           continue
         }
       } else {
@@ -799,16 +959,19 @@ MiniA.prototype.start = function(args) {
       if (isUnDef(action) || action.length == 0) {
         context.push(`[OBS ${step + 1}] (error) missing 'action' from model.`)
         consecutiveErrors++
+        global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
         continue
       }
       if (isUnDef(thought) || thought.length == 0) {
         context.push(`[OBS ${step + 1}] (error) missing 'thought' from model.`)
         consecutiveErrors++
+        global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
         continue
       }
       
       // Reset consecutive errors on successful parsing
       consecutiveErrors = 0
+      global.__mini_a_metrics.consecutive_errors.set(0)
       
       // Helper function to check if thoughts are similar
       var isSimilarThought = (thought1, thought2) => {
@@ -847,10 +1010,19 @@ MiniA.prototype.start = function(args) {
         this._fnI("think", `${thoughtStr}`)
         context.push(`[THOUGHT ${step + 1}] ${thoughtStr}`)
         
+        global.__mini_a_metrics.thinks_made.inc()
+        global.__mini_a_metrics.thoughts_made.inc()
+        
         // Track thinking patterns for escalation logic
         consecutiveThoughts++
         totalThoughts++
         stepsWithoutAction++
+        global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
+        
+        // Detect thinking loops
+        if (consecutiveThoughts >= 5) {
+          global.__mini_a_metrics.thinking_loops_detected.inc()
+        }
         
         // Check for similar thoughts (simplified tracking)
         recentSimilarThoughts.push(thoughtStr)
@@ -870,6 +1042,8 @@ MiniA.prototype.start = function(args) {
           // Reset array if we don't have enough similar thoughts
           if (similarCount < 2) {
             recentSimilarThoughts = [thoughtStr]
+          } else {
+            global.__mini_a_metrics.similar_thoughts_detected.inc()
           }
         }
         
@@ -882,6 +1056,7 @@ MiniA.prototype.start = function(args) {
         if (!command) {
           context.push(`[OBS ${step + 1}] (shell) missing 'command' from model.`)
           consecutiveErrors++
+          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
           continue
         }
         var shellOutput = this._runCommand({
@@ -900,6 +1075,8 @@ MiniA.prototype.start = function(args) {
         stepsWithoutAction = 0
         totalThoughts = Math.max(0, totalThoughts - 1) // Reduce total thoughts on action
         recentSimilarThoughts = [] // Clear similar thoughts on action
+        global.__mini_a_metrics.consecutive_thoughts.set(0)
+        
         lastActions.push(`shell: ${command}`)
         // Keep only last 3 actions for tracking
         if (lastActions.length > 3) lastActions.shift()
@@ -912,6 +1089,8 @@ MiniA.prototype.start = function(args) {
         if (isDef(msg.params) && !isMap(msg.params)) {
           context.push(`[OBS ${step + 1}] (${origAction}) missing or invalid 'params' from model.`)
           consecutiveErrors++
+          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+          global.__mini_a_metrics.mcp_actions_failed.inc()
           continue
         }
         this._fnI("exec", `Executing action '${origAction}' with params: ${af.toSLON(msg.params)}`)
@@ -921,7 +1100,13 @@ MiniA.prototype.start = function(args) {
         var mcp = this.mcpConnections[connectionIndex]
         //var tool = this.mcpTools.find(t => t.name == origAction)
 
-        var toolOutput = mcp.callTool(origAction, msg.params)
+        try {
+          var toolOutput = mcp.callTool(origAction, msg.params)
+          global.__mini_a_metrics.mcp_actions_executed.inc()
+        } catch (e) {
+          global.__mini_a_metrics.mcp_actions_failed.inc()
+          toolOutput = { error: e.message }
+        }
         if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
           //toolOutput = toolOutput.content.map(r => jsonParse(r.text, __, __, true))
           var _t = toolOutput.content.map(r => r.text).join("\n")
@@ -946,9 +1131,23 @@ MiniA.prototype.start = function(args) {
         stepsWithoutAction = 0
         totalThoughts = Math.max(0, totalThoughts - 1) // Reduce total thoughts on action
         recentSimilarThoughts = [] // Clear similar thoughts on action
+        global.__mini_a_metrics.consecutive_thoughts.set(0)
+        
         lastActions.push(`${origAction}: ${af.toSLON(msg.params)}`)
         // Keep only last 3 actions for tracking
         if (lastActions.length > 3) lastActions.shift()
+        
+        // Detect action loops
+        if (lastActions.length >= 3) {
+          var actionCounts = {}
+          lastActions.forEach(a => {
+            var actionType = a.split(':')[0]
+            actionCounts[actionType] = (actionCounts[actionType] || 0) + 1
+          })
+          if (Object.values(actionCounts).some(count => count >= 3)) {
+            global.__mini_a_metrics.action_loops_detected.inc()
+          }
+        }
         
         checkAndSummarizeContext()
         continue
@@ -960,20 +1159,38 @@ MiniA.prototype.start = function(args) {
           answer = this._cleanCodeBlocks(answer)
         }
         
+        global.__mini_a_metrics.finals_made.inc()
+        
         // Reset counters as we're finishing
         consecutiveThoughts = 0
         stepsWithoutAction = 0
+        global.__mini_a_metrics.consecutive_thoughts.set(0)
 
+        // Calculate total session time
+        var totalTime = now() - sessionStartTime
+        global.__mini_a_metrics.total_session_time.set(totalTime)
+        global.__mini_a_metrics.goals_achieved.inc()
+        
         return this._processFinalAnswer(answer, args)
       }
 
       // Unknown action: treat as thinking
       context.push(`[THOUGHT ${step + 1}] ((unknown action -> think) ${thought || "no thought"})`)
       
+      global.__mini_a_metrics.unknown_actions.inc()
+      
       // Track as thinking activity for escalation logic
       consecutiveThoughts++
       totalThoughts++
       stepsWithoutAction++
+      global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
+      
+      // Calculate step timing
+      var stepTime = now() - stepStartTime
+      var currentAvg = global.__mini_a_metrics.avg_step_time.get()
+      var currentSteps = global.__mini_a_metrics.steps_taken.get()
+      var newAvg = currentSteps === 1 ? stepTime : ((currentAvg * (currentSteps - 1)) + stepTime) / currentSteps
+      global.__mini_a_metrics.avg_step_time.set(Math.round(newAvg))
       
       checkAndSummarizeContext()
     }
@@ -994,6 +1211,10 @@ MiniA.prototype.start = function(args) {
     // Get final answer from model
     addCall()
     var finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
+    global.__mini_a_metrics.llm_actual_tokens.getAdd(finalResponseWithStats.stats.total_tokens || 0)
+    global.__mini_a_metrics.llm_normal_tokens.getAdd(finalResponseWithStats.stats.total_tokens || 0)
+    global.__mini_a_metrics.llm_normal_calls.inc()
+    
     var res = jsonParse(finalResponseWithStats.response, __, __, true)
     var finalStats = finalResponseWithStats.stats
     var finalTokenStatsMsg = this._formatTokenStats(finalStats)
@@ -1004,6 +1225,11 @@ MiniA.prototype.start = function(args) {
     
     // Extract final answer
     res.answer = this._cleanCodeBlocks(res.answer)
+
+    // Calculate total session time and mark as completed (potentially failed due to max steps)
+    var totalTime = now() - sessionStartTime
+    global.__mini_a_metrics.total_session_time.set(totalTime)
+    global.__mini_a_metrics.goals_stopped.inc()
 
     return this._processFinalAnswer(res.answer || "(no final answer)", args)
 }
