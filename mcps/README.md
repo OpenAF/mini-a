@@ -6,7 +6,7 @@
 |------------|---------------------------------|------------------|------------|------------------------------------|
 | mcp-db     | Database access MCP             | STDIO/HTTP       | (included) | [mcp-db.yaml](mcp-db.yaml)         |
 | mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
-| mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | [mcp-notify.yaml](mcp-notify.yaml) |
+| mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | Provided by the `notifications` oPack (see its documentation) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
@@ -35,7 +35,8 @@ ojob mini-a.yaml goal="send an email reminding the team about today's standup" m
 #### mcp-notify
 
 ```bash
-ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'" mcp="(cmd: 'ojob mcps/mcp-notify.yaml pushoverkey=<your_pushover_key> userid=<your_user_id>', timeout: 5000)"
+ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'" \
+    mcp="(cmd: 'ojob notifications/mcp-notify.yaml pushoverkey=<your_pushover_key> userid=<your_user_id>', timeout: 5000)"
 ```
 
 #### mcp-net
@@ -200,4 +201,6 @@ Call a tool:
 
 ```bash
 oafp in=mcp data="(type: remote, url: 'http://wikipedia.mcps.local:1234/mcp', tool: extract_key_facts, params: (title: 'Portugal'))"
-``` 
+```
+
+Remember to adjust hostnames, ports, and authentication parameters to match the MCP instance you are testing against.

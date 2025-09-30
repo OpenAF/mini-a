@@ -14,6 +14,16 @@ export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 ```
 
+## Command-Line Execution
+
+Mini-A can be started from the shell in three equivalent ways:
+
+- `./mini-a.sh goal="summarize the logs" useshell=true` — wrapper script that resolves the repository path automatically.
+- `ojob mini-a.yaml goal="summarize the logs" useshell=true` — direct invocation of the oJob definition.
+- `ojob mini-a-web.yaml onport=8888` — launches the HTTP server that powers the browser UI found in `public/`.
+
+All command-line flags documented below work with either `mini-a.sh` or `ojob mini-a.yaml`.
+
 ## Model Configuration
 
 ### Single Model Setup
@@ -490,4 +500,20 @@ This will show:
 - Model inputs/outputs
 - Step-by-step execution
 - Tool responses
-- Context management
+- Context management decisions (including automatic summarization)
+
+## Metrics and Observability
+
+Mini-A records extensive counters that help track behaviour and costs:
+
+- Call `agent.getMetrics()` to obtain a snapshot grouped by LLM usage, outcomes, shell approvals/denials, context management, and summarization activity.
+- OpenAF automatically registers these counters under the `mini-a` namespace via `ow.metrics.add('mini-a', ...)`, so collectors that understand OpenAF metrics can scrape them.
+- Metrics are updated live as the agent progresses, making them ideal for dashboards or alerting when an agent gets stuck.
+
+Example:
+
+```javascript
+var agent = new MiniA()
+agent.start({ goal: "List files", useshell: true })
+log(agent.getMetrics())
+```

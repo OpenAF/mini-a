@@ -10,8 +10,15 @@ Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MC
 
 Two steps to use:
 
-1. Set OAF_MODEL environment variable to the model you want to use.
-2. Run the agent with the `ojob` command.
+1. Set `OAF_MODEL` environment variable to the model you want to use.
+2. Run the agent through one of the provided entry points:
+   - **Shell wrapper:** `./mini-a.sh goal="your goal"` (convenient default that executes `mini-a.yaml`)
+   - **oJob invocation:** `ojob mini-a.yaml goal="your goal"` (explicit oJob execution)
+   - **Library usage:** `loadLib('mini-a.js'); (new MiniA()).start({ goal: '...' })`
+
+These entry points share the same options, so you can switch between them without changing configuration flags.
+
+If you prefer the browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
 ## Documentation
 
@@ -109,6 +116,15 @@ _Analyze project structure:_
 mini-a.sh goal="analyze the current directory structure and provide insights" useshell=true rtm=15 __format=md
 ```
 
+## Project Components
+
+Mini-A ships with three complementary components:
+
+- **`mini-a.yaml`** – Core oJob definition that implements the agent workflow.
+- **`mini-a.sh`** – Shell wrapper that locates the repository directory and runs `mini-a.yaml` with all provided arguments.
+- **`mini-a.js`** – Reusable library so you can embed the agent in other OpenAF jobs or automation scripts.
+- **`mini-a-web.sh` / `mini-a-web.yaml`** – Lightweight HTTP server that serves the browser UI found in `public/`.
+
 ## Features
 
 - **Multi-Model Support**: Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
@@ -124,6 +140,7 @@ mini-a.sh goal="analyze the current directory structure and provide insights" us
 - **Conversation Persistence**: Save and resume conversations across sessions
 - **Automatic Context Summarization**: Keeps context within limits with auto-summarize when it grows
 - **Rate Limiting**: Built-in rate limiting for API usage control
+- **Metrics & Observability**: Built-in counters surfaced via `MiniA.getMetrics()` and OpenAF's `ow.metrics` registry for dashboards.
 
 ## Installation
 
@@ -175,6 +192,15 @@ Mini-A includes several security features:
 - **Shell Isolation**: Shell access disabled by default
 
 See the [Usage Guide](USAGE.md#security-considerations) for detailed security information.
+
+## Monitoring & Metrics
+
+Mini-A tracks detailed runtime metrics (LLM calls, shell approvals, escalation counters, summarization activity, and more). You can access them in two ways:
+
+- From code, call [`MiniA.getMetrics()`](USAGE.md#metrics-and-observability) to obtain a snapshot of counters for the current process.
+- Through OpenAF's metrics registry (`ow.metrics.add('mini-a', ...)`), which exposes the same information to external scrapers or dashboards.
+
+These metrics are useful for tracking costs, diagnosing stuck runs, and creating operational dashboards for long-lived agents.
 
 ## Contributing
 
