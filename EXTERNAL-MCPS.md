@@ -28,3 +28,12 @@ mini-a.sh goal="query the external MCP" \
 ```
 
 Refer to the external MCP’s documentation to confirm whether it exposes an HTTP endpoint and the path (commonly `/mcp`).
+
+When connecting to remote MCPs you may also need to provide credentials or API keys. Use standard oJob argument syntax, for example:
+
+```bash
+mini-a.sh goal="use the private MCP" \
+        mcp="(type: remote, url: 'https://example/mcp', headers: (authorization: 'Bearer ${MY_TOKEN}'))"
+```
+
+Prefer environment variables for sensitive data and confirm the external MCP's rate limits before automating high-frequency calls.
