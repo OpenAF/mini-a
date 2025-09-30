@@ -165,7 +165,6 @@ mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-db.yaml
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Maximum context size in bytes (triggers summarization when exceeded)
-- **`maxcontent`** (number): Maximum number of characters Mini-A will read from a single file when inspecting the filesystem
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load

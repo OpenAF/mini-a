@@ -39,8 +39,6 @@ ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'
     mcp="(cmd: 'ojob notifications/mcp-notify.yaml pushoverkey=<your_pushover_key> userid=<your_user_id>', timeout: 5000)"
 ```
 
-> The exact path depends on the notifications oPack version. Check its documentation after installation.
-
 #### mcp-net
 
 ```bash
