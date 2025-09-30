@@ -39,7 +39,7 @@ name: mini-a
 main: ''
 mainJob: ''
 license: Apache 2.0 license
-version: '20250929'
+version: '20250930'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -70,12 +70,12 @@ filesHash:
   .odoc.db: 3dc919db673f13b80bea6d08e8c48ef4e1c5589d
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: 279d907bcbdcddf93716e208b90b683e53b9f83a
-  EXTERNAL-MCPS.md: 48de0991b571f774795a7bf2feef8ef3c11eb97e
+  EXTERNAL-MCPS.md: 49d0ee395b8fb6f06b59b848665ec34f524697f5
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 42cf5e3c7caaaf159851697184da67081b78951b
-  USAGE.md: 7c58551ee9900de17a13b3f869652bd9f8431bb0
+  README.md: 428e2bfba3d94e32f6d2f2a4ec35c5982084ced3
+  USAGE.md: f7ce7e323f5299bef2bdd80b98fe0582a425eadd
   mcps/CREATING.md: 8d2e251c409148f2178f84dba0ba1bc36f721857
-  mcps/README.md: 7925258efea049fe862b5a79eeac32f1078eb6c6
+  mcps/README.md: 9a74a5fa1885ba353f491aee511978bd77040dec
   mcps/mcp-ch.yaml: b831478763c36037a61af095c4be0c4ac2464cec
   mcps/mcp-db.yaml: d2fa8ffe251521e4c4ec42e47fa6ad2de40bc50b
   mcps/mcp-email.yaml: 128fae9e958038e47045242c5752be76da4ec80a
