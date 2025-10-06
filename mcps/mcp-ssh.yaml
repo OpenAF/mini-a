@@ -33,7 +33,11 @@ todo:
 - Init
 - (if    ): "isDef(args.onport)"
   ((then)):
-  - (httpdMCP): &MCPSERVER
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
       serverInfo:
         name   : mini-a-ssh
         title  : OpenAF mini-a MCP SSH server

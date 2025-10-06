@@ -56,6 +56,7 @@ files:
 - mcps/mcp-ch.yaml
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
+- mcps/mcp-kube.yaml
 - mcps/mcp-net.yaml
 - mcps/mcp-oaf.yaml
 - mcps/mcp-ssh.yaml
@@ -76,14 +77,15 @@ filesHash:
   README.md: 90828dbe7d91100f92abae3bab709dc8127fce7d
   USAGE.md: f7ce7e323f5299bef2bdd80b98fe0582a425eadd
   mcps/CREATING.md: 8d2e251c409148f2178f84dba0ba1bc36f721857
-  mcps/README.md: ea7db1dc031e3e0376ab51fd1149e66ef7a1aa2f
-  mcps/mcp-ch.yaml: b831478763c36037a61af095c4be0c4ac2464cec
-  mcps/mcp-db.yaml: d2fa8ffe251521e4c4ec42e47fa6ad2de40bc50b
-  mcps/mcp-email.yaml: 128fae9e958038e47045242c5752be76da4ec80a
-  mcps/mcp-net.yaml: 7b9263f3746916cf35eca7422c2652ce55e13ae4
-  mcps/mcp-oaf.yaml: 1ed1908de8f90b07a66cd83c2483c1955f1a4dd4
-  mcps/mcp-ssh.yaml: d47262e5c38b39f2714cb5cf1b4f3d09e92ebed6
-  mcps/mcp-time.yaml: 6837e34d43c334a891cf9c8962d12a0a4abb13fd
+  mcps/README.md: da97b1018bf8cc93515a3ab4836ef77e0a4ca4e4
+  mcps/mcp-ch.yaml: 99ae055319e5c99e42cfacead2159b5ed83c1bdc
+  mcps/mcp-db.yaml: aaabdae6846d1a8aa62942ab0257dedd9942544d
+  mcps/mcp-email.yaml: d9dde29b03e7b8873f66a22476dc8ffd6619ce85
+  mcps/mcp-kube.yaml: 21117b08961d5dc55d71dc37c7eb30c989ab88c6
+  mcps/mcp-net.yaml: 2a4b707acef679ae26510842ad9d52d3c9d4f6bf
+  mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
+  mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
+  mcps/mcp-time.yaml: 2c95f429349913ed6d0b506ebfbb48e6c7193db7
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: a37326f35ea403a000cf6a8fc872fb5f7dd8a054
   mini-a.js: 887d3770c918539b5535fba8950fe67ba49b0c41

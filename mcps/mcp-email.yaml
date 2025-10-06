@@ -52,7 +52,11 @@ todo:
 - Cleanup email client
 - (if    ): "isDef(args.onport)"
   ((then)):
-  - (httpdMCP): &MCPSERVER
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
       serverInfo:
         name   : mini-a-email
         title  : OpenAF mini-a MCP email server

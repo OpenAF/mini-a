@@ -40,17 +40,20 @@ help:
     mandatory: false
 
 todo:
-- Load Kube library
 - Initialise Kube client
 - Close Kube client on exit
 - (if    ): "isDef(args.onport)"
-  ((then)):
-  - (httpdMCP): &MCPSERVER
+  ((then)): 
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
       serverInfo:
         name   : mini-a-kube
         title  : OpenAF mini-a MCP Kubernetes server
         version: 1.0.0
-    ((fnsMeta)): &MCPFNSMETA
+    ((fnsMeta    )): &MCPFNSMETA
       list-namespaces:
         name       : list-namespaces
         description: Lists all namespaces available in the Kubernetes cluster.
@@ -195,7 +198,7 @@ todo:
           title         : scale-resource
           readOnlyHint  : false
           idempotentHint: false
-    ((fns    )): &MCPFNS
+    ((fns        )): &MCPFNS
       list-namespaces: List Namespaces
       get-resource   : Get Resource
       get-log        : Get Log
@@ -211,27 +214,19 @@ ojob:
   opacks      :
   - openaf     : 20250915
   - oJob-common: 20250914
+  - Kube       : 20250916
   catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
-  logToConsole: false
+  logToConsole: true
   argsFromEnvs: true
   daemon      : true
+  loadLibs    :
+  - kube.js
 
 include:
 - oJobMCP.yaml
 
 jobs:
-# -------------------
-- name : Load Kube library
-  check:
-    in:
-      kubelib  : isString.default("kube.js")
-  exec : | #js
-    if (isUnDef(global.__kubeLibLoaded__)) {
-      loadLib(args.kubelib)
-      global.__kubeLibLoaded__ = true
-    }
-
-# -----------------------
+# -----------------------------
 - name : Initialise Kube client
   check:
     in:
@@ -258,41 +253,25 @@ jobs:
     })
     global.__kubeDefaultNS__ = args.namespace
     global.__kubeReadWrite__ = args.readwrite
-    global.__kubeClient__ = $kube(kubeParams)
-    if (isDef(args.namespace)) {
-      global.__kubeClient__.ns(args.namespace)
-    }
+    global.__kubeParams__    = kubeParams
 
-# --------------------------
+# --------------------------------
 - name : Close Kube client on exit
   type : shutdown
   exec : | #js
-    if (isDef(global.__kubeClient__)) {
-      try {
-        global.__kubeClient__.close()
-      } catch(e) {
-        // ignore close errors
-      }
-    }
-
-# -------------------
-- name : Ensure client
-  exec : | #js
-    if (!isDef(global.__kubeClient__)) {
-      throw "[ERROR] Kube client not initialised"
+    try {
+      $kube(global.__kubeParams__).close()
+    } catch(e) {
+      // ignore close errors
     }
 
 # -------------------
 - name : List Namespaces
-  deps :
-  - Ensure client
   exec : | #js
-    return global.__kubeClient__.getNS()
+    return $kube(global.__kubeParams__).getNS()
 
-# ---------------
+# -------------------
 - name : Get Resource
-  deps :
-  - Ensure client
   check:
     in:
       resource : isString
@@ -344,7 +323,7 @@ jobs:
 
     var ns = args.namespace
     var full = args.full === true
-    var client = global.__kubeClient__
+    var client = $kube(global.__kubeParams__)
 
     switch (normalized) {
       case "pods":
@@ -415,8 +394,6 @@ jobs:
 
 # ---------------
 - name : Get Log
-  deps :
-  - Ensure client
   check:
     in:
       pod      : isString
@@ -424,12 +401,10 @@ jobs:
       container: isString.default(__)
       stream   : isString.default(__)
   exec : | #js
-    return global.__kubeClient__.getLog(args.namespace, args.pod, args.container, args.stream)
+    return $kube(global.__kubeParams__).getLog(args.namespace, args.pod, args.container, args.stream)
 
 # ---------------------
 - name : Apply Manifest
-  deps :
-  - Ensure client
   check:
     in:
       manifest : isString
@@ -438,12 +413,10 @@ jobs:
     if (!global.__kubeReadWrite__) {
       return "[ERROR] Read-only mode. Set readwrite=true to allow write operations"
     }
-    return global.__kubeClient__.apply(args.manifest, args.namespace)
+    return $kube(global.__kubeParams__).apply(args.manifest, args.namespace)
 
 # ----------------------
 - name : Delete Manifest
-  deps :
-  - Ensure client
   check:
     in:
       manifest : isString
@@ -452,12 +425,10 @@ jobs:
     if (!global.__kubeReadWrite__) {
       return "[ERROR] Read-only mode. Set readwrite=true to allow write operations"
     }
-    return global.__kubeClient__.delete(args.manifest, args.namespace)
+    return $kube(global.__kubeParams__).delete(args.manifest, args.namespace)
 
 # --------------------
 - name : Scale Resource
-  deps :
-  - Ensure client
   check:
     in:
       resourceType: isString
@@ -468,21 +439,21 @@ jobs:
     if (!global.__kubeReadWrite__) {
       return "[ERROR] Read-only mode. Set readwrite=true to allow write operations"
     }
-    var prevNS = global.__kubeClient__._ns
+    var prevNS = $kube(global.__kubeParams__)._ns
     try {
       if (isDef(args.namespace)) {
-        global.__kubeClient__.ns(args.namespace)
+        $kube(global.__kubeParams__).ns(args.namespace)
       }
-      global.__kubeClient__.scale(args.resourceType, args.name, args.replicas)
+      $kube(global.__kubeParams__).scale(args.resourceType, args.name, args.replicas)
       return {
         resourceType: args.resourceType,
         name        : args.name,
         replicas    : args.replicas,
-        namespace   : global.__kubeClient__._ns
+        namespace   : $kube(global.__kubeParams__)._ns
       }
     } finally {
       if (isDef(prevNS)) {
-        global.__kubeClient__.ns(prevNS)
+        $kube(global.__kubeParams__).ns(prevNS)
       }
     }
 
