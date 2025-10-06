@@ -91,7 +91,10 @@ Using built-in MCP servers:
 # Database operations
 mini-a.sh goal="create a test table with European countries" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" rtm=20
 
-# Network utilities  
+# Network utilities
+
+# Time and timezone utilities
+mini-a.sh goal="what time is it in Sydney right now?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)" rtm=20
 
 # SSH execution (mcp-ssh)
 mini-a.sh goal="run 'uptime' on remote host via SSH MCP" mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', timeout: 5000)" rtm=20
@@ -133,7 +136,7 @@ Mini-A ships with three complementary components:
 - **STDIO or HTTP MCPs**: Use MCPs over STDIO or start them as remote HTTP servers with `onport` (see [MCP docs](mcps/README.md))
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
-- **Built-in MCPs**: Includes database, network, email, data channel, and SSH execution MCP servers
+- **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
 - **Safety Features**: Command filtering, confirmation prompts, and read-only modes
