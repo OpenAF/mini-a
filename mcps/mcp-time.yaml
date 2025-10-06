@@ -172,13 +172,13 @@ jobs:
       format  : isString.default(__)
       locale  : isString.default(__)
   exec : | #js
-    var ZoneId = Java.type("java.time.ZoneId")
-    var ZonedDateTime = Java.type("java.time.ZonedDateTime")
-    var DateTimeFormatter = Java.type("java.time.format.DateTimeFormatter")
-    var ChronoUnit = Java.type("java.time.temporal.ChronoUnit")
-    var IsoFields = Java.type("java.time.temporal.IsoFields")
-    var TextStyle = Java.type("java.time.format.TextStyle")
-    var Locale = Java.type("java.util.Locale")
+    var ZoneId = java.time.ZoneId
+    var ZonedDateTime = java.time.ZonedDateTime
+    var DateTimeFormatter = java.time.format.DateTimeFormatter
+    var ChronoUnit = java.time.temporal.ChronoUnit
+    var IsoFields = java.time.temporal.IsoFields
+    var TextStyle = java.time.format.TextStyle
+    var Locale = java.util.Locale
 
     var zone = isDef(args.timezone) ? ZoneId.of(args.timezone) : ZoneId.systemDefault()
     var locale = isDef(args.locale) ? Locale.forLanguageTag(args.locale) : Locale.getDefault()
@@ -227,11 +227,11 @@ jobs:
       outputFormat  : isString.default(__)
       locale        : isString.default(__)
   exec : | #js
-    var ZoneId = Java.type("java.time.ZoneId")
-    var ZonedDateTime = Java.type("java.time.ZonedDateTime")
-    var LocalDateTime = Java.type("java.time.LocalDateTime")
-    var DateTimeFormatter = Java.type("java.time.format.DateTimeFormatter")
-    var Locale = Java.type("java.util.Locale")
+    var ZoneId = java.time.ZoneId
+    var ZonedDateTime = java.time.ZonedDateTime
+    var LocalDateTime = java.time.LocalDateTime
+    var DateTimeFormatter = java.time.format.DateTimeFormatter
+    var Locale = java.util.Locale
 
     var sourceZone = isDef(args.sourceTimezone) ? ZoneId.of(args.sourceTimezone) : ZoneId.systemDefault()
     var targetZone = ZoneId.of(args.targetTimezone)
@@ -284,11 +284,11 @@ jobs:
       inputFormat   : isString.default(__)
       locale        : isString.default(__)
   exec : | #js
-    var ZoneId = Java.type("java.time.ZoneId")
-    var ZonedDateTime = Java.type("java.time.ZonedDateTime")
-    var LocalDateTime = Java.type("java.time.LocalDateTime")
-    var DateTimeFormatter = Java.type("java.time.format.DateTimeFormatter")
-    var Locale = Java.type("java.util.Locale")
+    var ZoneId = java.time.ZoneId
+    var ZonedDateTime = java.time.ZonedDateTime
+    var LocalDateTime = java.time.LocalDateTime
+    var DateTimeFormatter = java.time.format.DateTimeFormatter
+    var Locale = java.util.Locale
 
     var firstZone = ZoneId.of(args.firstTimezone)
     var secondZone = ZoneId.of(args.secondTimezone)
@@ -346,7 +346,7 @@ jobs:
     in:
       search: isString.default(__)
   exec : | #js
-    var ZoneId = Java.type("java.time.ZoneId")
+    var ZoneId = java.time.ZoneId
     var zones = ZoneId.getAvailableZoneIds().iterator()
     var list = []
     while (zones.hasNext()) {
