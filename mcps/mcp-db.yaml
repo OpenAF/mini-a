@@ -28,7 +28,11 @@ todo:
 - Close database on exit
 - (if    ): "isDef(args.onport)"
   ((then)):
-  - (httpdMCP): &MCPSERVER
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
       serverInfo:
         name   : mini-a-db
         title  : OpenAF mini-a MCP database server
