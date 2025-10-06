@@ -8,6 +8,7 @@
 | mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | Provided by the `notifications` oPack (see its documentation) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
+| mcp-kube   | Kubernetes management MCP       | STDIO/HTTP       | (included) | [mcp-kube.yaml](mcp-kube.yaml)     |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
@@ -131,6 +132,34 @@ Example — request OpenAF help remotely (HTTP mode on port 8888):
 
 ```bash
 oafp in=mcp data="(type: remote, url: 'http://localhost:8888/mcp', tool: openaf-doc, params: (search: 'help'))"
+```
+
+#### mcp-kube
+
+`mcp-kube` exposes selected Kubernetes management operations powered by the [`Kube` oPack](https://github.com/OpenAF/openaf-opacks/tree/master/Kube). It works either as a STDIO MCP or as an HTTP remote MCP. Configure connection credentials to your cluster through the startup arguments (`url`, `user`, `pass`, `token`, `namespace`, etc.). Set `readwrite=true` to enable operations that modify cluster resources. Use `kubelib` when you need to point at a specific `kube.js` location.
+
+Available tools include:
+
+- `list-namespaces`  : List all namespaces in the cluster.
+- `get-resource`     : Retrieve Kubernetes objects or metrics via a single tool. Supported `resource` values include `pods`, `deployments`, `statefulsets`, `clusterroles`, `clusterrolebindings`, `roles`, `rolebindings`, `ingresses`, `networkpolicies`, `resourcequotas`, `storageclasses`, `services`, `service-accounts`, `secrets`, `replicasets`, `persistent-volume-claims`, `persistent-volumes`, `nodes`, `configmaps`, `jobs`, `daemonsets`, `cronjobs`, `endpoints`, `pod`, `events`, `pods-metrics`, `nodes-metrics`, and `node-metrics` (with optional `namespace`, `full`, and `name`/`node` parameters as applicable).
+- `get-log`          : Retrieve logs from a pod (optionally container/stream specific).
+- `apply-manifest`   : Apply a manifest (requires `readwrite=true`).
+- `delete-manifest`  : Delete resources described by a manifest (requires `readwrite=true`).
+- `scale-resource`   : Scale a workload resource (requires `readwrite=true`).
+
+Example — list pods in the default namespace using STDIO MCP:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-kube.yaml url=https://k8s.example.com:6443 token=<bearer_token> namespace=default', \
+  tool: get-resource, params: (resource: pods, namespace: default, full: false))"
+```
+
+Example — run as an HTTP MCP server on port 9000 and fetch node metrics remotely:
+
+```bash
+ojob mcps/mcp-kube.yaml onport=9000 url=~/.kube/config readwrite=false
+
+oafp in=mcp data="(type: remote, url: 'http://localhost:9000/mcp', tool: get-resource, params: (resource: nodes-metrics))"
 ```
 
 Small excerpt from `mcp-oaf.yaml` showing purpose and tools (truncated):
