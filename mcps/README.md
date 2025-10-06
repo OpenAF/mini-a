@@ -9,6 +9,7 @@
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | Provided by the `notifications` oPack (see its documentation) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 | mcp-kube   | Kubernetes management MCP       | STDIO/HTTP       | (included) | [mcp-kube.yaml](mcp-kube.yaml)     |
+| mcp-time   | Time and timezone utility MCP   | STDIO/HTTP       | (included) | [mcp-time.yaml](mcp-time.yaml)     |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
@@ -45,6 +46,19 @@ ojob mini-a.yaml goal="send a notification saying 'Hello World from OpenAF MCP!'
 ```bash
 ojob mini-a.yaml goal="get the public IP address of this machine" mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)"
 ```
+
+#### mcp-time
+
+```bash
+ojob mini-a.yaml goal="tell me the current time in Tokyo and convert it to New York time" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)" knowledge="- prefer ISO 8601 timestamps"
+```
+
+Key tools exposed by `mcp-time` include:
+
+- `current-time`: Provides detailed information about the current moment for an optional timezone.
+- `convert-time`: Converts a supplied date/time into a different timezone and format.
+- `timezone-difference`: Calculates the offset difference between two timezones at a given moment.
+- `list-timezones`: Lists available timezone identifiers (with optional filtering).
 
 #### mcp-ch
 
