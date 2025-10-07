@@ -159,14 +159,20 @@ todo:
       if (isDef(postData.request) && postData.request == "stop") {
         global.__conversations[ postData.uuid ].state = "stop"
       }
-      var _res = { content: "", status: "processing" }
+      var _res = { content: "", status: "processing", history: [] }
       if (isDef(global.__res[ postData.uuid ])) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
 
         // Append all messages to content
+        var _history = []
         for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
           var r = global.__res[ postData.uuid ][i]
+          if (isDef(r.event)) {
+            var _h = { event: r.event }
+            if (isDef(r.message)) _h.message = r.message
+            _history.push(_h)
+          }
           if (r.event == "final") {
             if (i == global.__res[ postData.uuid ].length - 1) _res.status = "finished"
             _res.content += "\n" + r.message + "\n"
@@ -182,9 +188,43 @@ todo:
             }
           }
         }
+        _res.history = _history
       }
 
       return ow.server.httpd.reply(_res)
+    } catch(e) {
+      printErr(e)
+      return ow.server.httpd.reply({ error: e.toString() })
+    }
+
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /load-history
+  ((execURI      )): | #js
+    try {
+      var postData = jsonParse(request.files.postData)
+
+      if (isUnDef(postData.uuid)) {
+        return ow.server.httpd.reply({ error: "uuid is required" })
+      }
+
+      if (isUnDef(postData.history) || !Array.isArray(postData.history)) {
+        return ow.server.httpd.reply({ error: "history must be an array" })
+      }
+
+      var sanitized = []
+      for (var i = 0; i < postData.history.length; i++) {
+        var item = postData.history[i]
+        if (isUnDef(item) || isUnDef(item.event)) continue
+        var entry = { event: item.event }
+        if (isDef(item.message)) entry.message = item.message
+        sanitized.push(entry)
+      }
+
+      global.__res[ postData.uuid ] = sanitized
+      delete global.__conversations[ postData.uuid ]
+      global.__lastActivity[ postData.uuid ] = Date.now()
+
+      return ow.server.httpd.reply({ status: "loaded", uuid: postData.uuid, entries: sanitized.length })
     } catch(e) {
       printErr(e)
       return ow.server.httpd.reply({ error: e.toString() })

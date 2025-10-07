@@ -27,7 +27,9 @@
 
             // Update all divs to dark theme (except chat-container)
             document.querySelectorAll('div').forEach(div => {
-                if (!div.classList.contains('chat-container')) {
+                const isChatContainer = div.classList.contains('chat-container');
+                const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
+                if (!isChatContainer && !isHistoryElement) {
                     div.style.backgroundColor = '#0f1115';
                     div.style.color = '#e6e6e6';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -57,6 +59,14 @@
                 clearBtn.style.border = '1px solid rgba(255,255,255,0.1)';
                 clearBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
             }
+
+            const historyBtn = document.getElementById('historyBtn');
+            if (historyBtn) {
+                historyBtn.style.background = 'linear-gradient(135deg, #274472 0%, #1a2f4a 100%)';
+                historyBtn.style.color = '#e6f2ff';
+                historyBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.35)';
+                historyBtn.style.border = '1px solid rgba(255,255,255,0.08)';
+            }
         } else {
             // Apply light mode styles
             document.body.classList.remove('markdown-body-dark', 'hljs_dark', 'njsmap_dark');
@@ -69,7 +79,9 @@
 
             // Update all divs to light theme (except chat-container)
             document.querySelectorAll('div').forEach(div => {
-                if (!div.classList.contains('chat-container')) {
+                const isChatContainer = div.classList.contains('chat-container');
+                const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
+                if (!isChatContainer && !isHistoryElement) {
                     div.style.backgroundColor = '#f8f9fa';
                     div.style.color = '#000000';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -98,6 +110,14 @@
                 clearBtn.style.color = '#333';
                 clearBtn.style.border = 'none';
                 clearBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
+            }
+
+            const historyBtn = document.getElementById('historyBtn');
+            if (historyBtn) {
+                historyBtn.style.background = 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)';
+                historyBtn.style.color = '#0d47a1';
+                historyBtn.style.border = 'none';
+                historyBtn.style.boxShadow = '0 2px 6px rgba(13,71,161,0.15)';
             }
         }
     }
@@ -180,7 +200,8 @@
     /* ========== BUTTONS ========== */
 
     #submitBtn,
-    #clearBtn {
+    #clearBtn,
+    #historyBtn {
         padding: 1.2px 2px;
         border: none;
         border-radius: 0.8vmin;
@@ -208,6 +229,12 @@
         box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
 
+    #historyBtn {
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        color: #0d47a1;
+        box-shadow: 0 2px 6px rgba(13,71,161,0.15);
+    }
+
     /* Submit button stop state */
     #submitBtn.stop {
         background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
@@ -233,11 +260,205 @@
         transform: translateY(-1px);
     }
 
+    #historyBtn:hover:not(:disabled) {
+        background: linear-gradient(135deg, #bbdefb 0%, #90caf9 100%);
+        box-shadow: 0 4px 12px rgba(13,71,161,0.2);
+        transform: translateY(-1px);
+    }
+
     /* Button disabled state */
-    #submitBtn:disabled, #clearBtn:disabled {
+    #submitBtn:disabled, #clearBtn:disabled, #historyBtn:disabled {
         background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
         cursor: not-allowed;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* ========== HISTORY PANEL ========== */
+    #historyOverlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(2px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+        z-index: 999;
+    }
+
+    #historyOverlay.show {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    #historyPanel {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        width: min(360px, 85vw);
+        background: var(--panel-bg);
+        color: var(--text);
+        border-right: 1px solid var(--border);
+        box-shadow: 6px 0 18px rgba(0,0,0,0.15);
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        padding: 1.5rem 1rem;
+        box-sizing: border-box;
+        gap: 1rem;
+    }
+
+    #historyPanel.open {
+        transform: translateX(0);
+    }
+
+    .history-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .history-header h2 {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    .history-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .history-actions button {
+        flex: 1 1 45%;
+        padding: 0.6rem 0.8rem;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        background: var(--panel-bg);
+        color: inherit;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease;
+        font-size: 0.85rem;
+    }
+
+    .history-actions button:hover {
+        background: var(--accent);
+        color: #fff;
+    }
+
+    #closeHistoryBtn {
+        background: transparent;
+        border: none;
+        color: inherit;
+        cursor: pointer;
+        font-size: 1.1rem;
+        line-height: 1;
+        padding: 0.2rem;
+        border-radius: 0.4rem;
+        transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    #closeHistoryBtn:hover {
+        background: rgba(51,144,255,0.1);
+        color: var(--accent);
+    }
+
+    .history-list {
+        flex: 1;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 0.8rem;
+        padding: 0.5rem;
+        background: var(--panel-bg);
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .history-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        align-items: flex-start;
+        padding: 0.6rem 0.8rem;
+        border-radius: 0.7rem;
+        border: 1px solid transparent;
+        background: rgba(255,255,255,0.6);
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: border 0.2s ease, background 0.2s ease, transform 0.2s ease;
+    }
+
+    .history-item:hover {
+        border-color: var(--accent);
+        background: rgba(51,144,255,0.08);
+        transform: translateX(4px);
+    }
+
+    .history-item.active {
+        border-color: var(--accent);
+        background: rgba(51,144,255,0.15);
+    }
+
+    .history-item-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        line-height: 1.2;
+    }
+
+    .history-item-time {
+        font-size: 0.75rem;
+        opacity: 0.7;
+    }
+
+    .history-empty {
+        text-align: center;
+        opacity: 0.7;
+        padding: 1rem 0;
+    }
+
+    body.markdown-body-dark #historyPanel {
+        background: #0f1115;
+        color: #e6e6e6;
+        border-color: #242629;
+    }
+
+    body.markdown-body-dark #historyOverlay {
+        background: rgba(0, 0, 0, 0.6);
+    }
+
+    body.markdown-body-dark .history-list {
+        background: #0f1115;
+        border-color: #242629;
+    }
+
+    body.markdown-body-dark .history-item {
+        background: rgba(255,255,255,0.08);
+        border-color: rgba(255,255,255,0.05);
+    }
+
+    body.markdown-body-dark .history-item:hover {
+        background: rgba(51,144,255,0.2);
+    }
+
+    body.markdown-body-dark .history-item.active {
+        background: rgba(51,144,255,0.25);
+        border-color: var(--accent);
+    }
+
+    body.markdown-body-dark .history-actions button {
+        background: rgba(255,255,255,0.05);
+        border-color: #242629;
+    }
+
+    body.markdown-body-dark #closeHistoryBtn:hover {
+        background: rgba(51,144,255,0.25);
+        color: var(--accent);
     }
 
     /* ========== SCROLL TO BOTTOM BUTTON ========== */
@@ -330,7 +551,21 @@
         <textarea id="promptInput" placeholder="Enter your prompt..." disabled rows="1"></textarea>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
         <button id="clearBtn" title="Clear" aria-label="Clear" type="button"></button>
+        <button id="historyBtn" title="History" aria-label="History" type="button"></button>
     </div>
+</div>
+
+<div id="historyOverlay" aria-hidden="true"></div>
+<div id="historyPanel" aria-hidden="true">
+    <div class="history-header">
+        <h2>Conversation History</h2>
+        <button id="closeHistoryBtn" type="button" title="Close history" aria-label="Close history">✕</button>
+    </div>
+    <div class="history-actions">
+        <button id="resumeHistoryBtn" type="button">Return to Current</button>
+        <button id="clearHistoryBtn" type="button">Clear History</button>
+    </div>
+    <div id="historyList" class="history-list" role="list"></div>
 </div>
 
 <script>
@@ -354,6 +589,8 @@
 
     const PREVIEW_ID = 'anticipationPreview';
     const PING_INTERVAL_MS = 60 * 1000; // 60 seconds
+    const HISTORY_STORAGE_KEY = 'mini_a_history';
+    const HISTORY_TITLE_MAX_LENGTH = 80;
 
     /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
@@ -363,6 +600,8 @@
     let autoScrollEnabled = true;
     let isScrollingProgrammatically = false;
     let lastContentUpdateTime = 0;
+    let lastSubmittedPrompt = '';
+    let activeHistoryId = null;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -373,8 +612,15 @@
     const promptInput = document.getElementById('promptInput');
     const submitBtn = document.getElementById('submitBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const historyBtn = document.getElementById('historyBtn');
     const resultsDiv = document.getElementById('resultsDiv');
     const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+    const historyPanel = document.getElementById('historyPanel');
+    const historyOverlay = document.getElementById('historyOverlay');
+    const historyList = document.getElementById('historyList');
+    const closeHistoryBtn = document.getElementById('closeHistoryBtn');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    const resumeHistoryBtn = document.getElementById('resumeHistoryBtn');
 
     /* ========== UTILITY FUNCTIONS ========== */
     function isAtBottom() {
@@ -411,7 +657,7 @@
 
     function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
-        
+
         const wasAtBottom = isAtBottom();
         const currentScrollBtn = document.getElementById('scrollToBottomBtn');
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
@@ -446,6 +692,297 @@
         if (wasAtBottom) {
             autoScrollEnabled = true;
             scrollResultsToBottom();
+        }
+    }
+
+    function escapeHtml(str) {
+        if (typeof str !== 'string') {
+            if (str === undefined || str === null) return '';
+            str = String(str);
+        }
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function loadStoredHistory() {
+        if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return [];
+        try {
+            const stored = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+            if (!stored) return [];
+            const parsed = JSON.parse(stored);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            console.error('Failed to load stored history:', error);
+            return [];
+        }
+    }
+
+    function persistHistory(entries) {
+        if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return;
+        try {
+            window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries));
+        } catch (error) {
+            console.error('Failed to persist history:', error);
+        }
+    }
+
+    function formatHistoryTitle(prompt, fallback = 'Conversation') {
+        const base = (prompt || '').split('\n').map(line => line.trim()).find(Boolean) || fallback;
+        if (base.length > HISTORY_TITLE_MAX_LENGTH) {
+            return base.slice(0, HISTORY_TITLE_MAX_LENGTH - 3) + '...';
+        }
+        return base || fallback;
+    }
+
+    function formatHistoryTime(timestamp) {
+        try {
+            return new Date(timestamp).toLocaleString();
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function refreshHistoryPanel() {
+        if (!historyList) return;
+
+        const entries = loadStoredHistory().slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const activeUuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
+        if (!activeHistoryId && activeUuid) {
+            const activeEntry = entries.find(entry => entry.uuid === activeUuid);
+            if (activeEntry) activeHistoryId = activeEntry.id;
+        }
+
+        if (entries.length === 0) {
+            historyList.innerHTML = '<div class="history-empty">No saved conversations yet.</div>';
+            return;
+        }
+
+        const rendered = entries.map(entry => {
+            const isActive = entry.id === activeHistoryId;
+            const title = escapeHtml(entry.title || formatHistoryTitle(entry.prompt));
+            const timestamp = escapeHtml(formatHistoryTime(entry.timestamp));
+            return `
+                <button class="history-item${isActive ? ' active' : ''}" type="button" data-history-id="${escapeHtml(entry.id || '')}" role="listitem">
+                    <span class="history-item-title">${title}</span>
+                    <span class="history-item-time">${timestamp}</span>
+                </button>`;
+        }).join('');
+
+        historyList.innerHTML = rendered;
+    }
+
+    function openHistoryPanel() {
+        if (historyPanel) {
+            historyPanel.classList.add('open');
+            historyPanel.setAttribute('aria-hidden', 'false');
+        }
+        if (historyOverlay) {
+            historyOverlay.classList.add('show');
+            historyOverlay.setAttribute('aria-hidden', 'false');
+        }
+    }
+
+    function closeHistoryPanel() {
+        if (historyPanel) {
+            historyPanel.classList.remove('open');
+            historyPanel.setAttribute('aria-hidden', 'true');
+        }
+        if (historyOverlay) {
+            historyOverlay.classList.remove('show');
+            historyOverlay.setAttribute('aria-hidden', 'true');
+        }
+    }
+
+    function handleHistoryButtonClick() {
+        if (!historyPanel) return;
+        if (historyPanel.classList.contains('open')) {
+            closeHistoryPanel();
+        } else {
+            refreshHistoryPanel();
+            openHistoryPanel();
+        }
+    }
+
+    function handleClearHistoryStorage() {
+        if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return;
+        if (typeof window.confirm === 'function') {
+            const shouldClear = window.confirm('Clear all stored conversations?');
+            if (!shouldClear) return;
+        }
+        window.localStorage.removeItem(HISTORY_STORAGE_KEY);
+        activeHistoryId = null;
+        refreshHistoryPanel();
+    }
+
+    function handleHistoryEntryClick(entryId) {
+        if (!entryId) return;
+        const entries = loadStoredHistory();
+        const entry = entries.find(item => item.id === entryId);
+        if (!entry) return;
+        loadConversationEntry(entry);
+    }
+
+    function addConversationToHistory(sessionUuid, prompt, data) {
+        if (typeof window === 'undefined' || !sessionUuid) return null;
+
+        const entries = loadStoredHistory();
+        const existingIndex = entries.findIndex(item => item.uuid === sessionUuid);
+        const existing = existingIndex >= 0 ? entries[existingIndex] : {};
+
+        const id = existing.id || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : 'hist-' + Date.now() + '-' + Math.floor(Math.random() * 1000));
+
+        const hasHistoryArray = data && Array.isArray(data.history);
+        const sourceEvents = hasHistoryArray
+            ? data.history
+            : (Array.isArray(existing.events) ? existing.events : []);
+
+        const sanitizedEvents = sourceEvents
+            .map(ev => {
+                if (!ev || !ev.event) return null;
+                const sanitized = { event: ev.event };
+                if (typeof ev.message !== 'undefined' && ev.message !== null) {
+                    sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
+                }
+                return sanitized;
+            })
+            .filter(Boolean);
+
+        const promptValue = prompt || existing.prompt || '';
+        const titleSource = prompt || existing.title || existing.prompt || '';
+        const contentValue = (data && typeof data.content === 'string') ? data.content : (existing.content || '');
+        const statusValue = (data && typeof data.status !== 'undefined') ? data.status : (existing.status || 'finished');
+
+        const entry = {
+            id,
+            uuid: sessionUuid,
+            prompt: promptValue,
+            title: formatHistoryTitle(titleSource),
+            content: contentValue,
+            events: sanitizedEvents,
+            status: statusValue,
+            timestamp: Date.now()
+        };
+
+        if ((!entry.events || entry.events.length === 0) && entry.prompt) {
+            entry.events = [{ event: '👤', message: entry.prompt }];
+        }
+
+        if (entry.content && (!entry.events || !entry.events.some(ev => ev.event === 'final'))) {
+            entry.events = entry.events || [];
+            entry.events.push({ event: 'final', message: entry.content });
+        }
+
+        if (existingIndex >= 0) {
+            entries[existingIndex] = entry;
+        } else {
+            entries.push(entry);
+        }
+
+        persistHistory(entries);
+        activeHistoryId = entry.id;
+        refreshHistoryPanel();
+        return entry;
+    }
+
+    async function sendHistoryToServer(entry) {
+        if (!entry || !entry.uuid) return;
+        const payload = {
+            uuid: entry.uuid,
+            history: Array.isArray(entry.events) ? entry.events.map(ev => {
+                const sanitized = { event: ev.event };
+                if (typeof ev.message !== 'undefined' && ev.message !== null) {
+                    sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
+                }
+                return sanitized;
+            }) : []
+        };
+
+        if (payload.history.length === 0) {
+            if (entry.prompt) payload.history.push({ event: '👤', message: entry.prompt });
+            if (entry.content) payload.history.push({ event: 'final', message: entry.content });
+        }
+
+        try {
+            const response = await fetch('/load-history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to communicate with history endpoint');
+            }
+
+            await response.json().catch(() => ({}));
+        } catch (error) {
+            console.error('Error sending history to server:', error);
+        }
+    }
+
+    async function loadConversationEntry(entry) {
+        if (!entry) return;
+
+        if (isProcessing) {
+            stopProcessing();
+        }
+
+        activeHistoryId = entry.id;
+        await sendHistoryToServer(entry);
+
+        if (typeof window !== 'undefined') {
+            window.mini_a_session_uuid = entry.uuid;
+        }
+
+        currentSessionUuid = entry.uuid;
+
+        const htmlContent = converter.makeHtml(entry.content || '');
+        updateResultsContent(htmlContent);
+        try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+        if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+        __refreshDarkMode();
+        refreshHistoryPanel();
+        closeHistoryPanel();
+    }
+
+    async function refreshCurrentConversationView() {
+        const uuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
+        if (!uuid) {
+            closeHistoryPanel();
+            return;
+        }
+
+        if (typeof window !== 'undefined' && !activeHistoryId) {
+            const entries = loadStoredHistory();
+            const entry = entries.find(item => item.uuid === uuid);
+            if (entry) activeHistoryId = entry.id;
+        }
+
+        try {
+            const response = await fetch('/result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid })
+            });
+
+            if (!response.ok) throw new Error('Failed to load current conversation');
+
+            const data = await response.json();
+            const htmlContent = converter.makeHtml(data.content || '');
+            updateResultsContent(htmlContent);
+            try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+            if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+            __refreshDarkMode();
+            refreshHistoryPanel();
+        } catch (error) {
+            console.error('Error refreshing conversation view:', error);
+        } finally {
+            closeHistoryPanel();
         }
     }
 
@@ -497,12 +1034,25 @@
 
     function setClearIcon() {
         if (!clearBtn) return;
-        
+
         clearBtn.title = 'Clear';
         clearBtn.setAttribute('aria-label', 'Clear');
         clearBtn.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path d="M19 13H13v6h-2v-6H5v-2h6V5h2v6h6v2z" />
+            </svg>`;
+    }
+
+    function setHistoryIcon() {
+        if (!historyBtn) return;
+
+        historyBtn.title = 'History';
+        historyBtn.setAttribute('aria-label', 'History');
+        historyBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 1 9 9" />
+                <polyline points="3 12 3 7 8 7" />
+                <line x1="12" y1="12" x2="16" y2="14" />
             </svg>`;
     }
 
@@ -588,6 +1138,9 @@
         const prompt = promptInput.value.trim();
         if (!prompt) return;
 
+        lastSubmittedPrompt = prompt;
+        activeHistoryId = null;
+
         try {
             if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid();
 
@@ -629,6 +1182,13 @@
                 __refreshDarkMode();
 
                 if (data.status === 'finished') {
+                    if (currentSessionUuid) {
+                        const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, data);
+                        if (savedEntry) {
+                            activeHistoryId = savedEntry.id;
+                        }
+                    }
+                    lastSubmittedPrompt = '';
                     removePreview();
                     stopProcessing();
                 } else {
@@ -718,6 +1278,8 @@
         clearBtn.disabled = false;
         isProcessing = false;
         scrollResultsToBottom();
+        activeHistoryId = null;
+        refreshHistoryPanel();
     }
 
     function handleScroll() {
@@ -743,7 +1305,8 @@
         promptInput.disabled = false;
         setSubmitIcon('send');
         setClearIcon();
-        
+        setHistoryIcon();
+
         // Add event listeners
         promptInput.addEventListener('input', autoResizeTextarea);
         promptInput.addEventListener('paste', () => setTimeout(autoResizeTextarea, 0));
@@ -756,21 +1319,52 @@
 
         submitBtn.addEventListener('click', handleSubmit);
         clearBtn.addEventListener('click', handleClearClick);
-        
+
+        if (historyBtn) {
+            historyBtn.addEventListener('click', handleHistoryButtonClick);
+        }
+
+        if (historyOverlay) {
+            historyOverlay.addEventListener('click', closeHistoryPanel);
+        }
+
+        if (closeHistoryBtn) {
+            closeHistoryBtn.addEventListener('click', closeHistoryPanel);
+        }
+
+        if (clearHistoryBtn) {
+            clearHistoryBtn.addEventListener('click', handleClearHistoryStorage);
+        }
+
+        if (resumeHistoryBtn) {
+            resumeHistoryBtn.addEventListener('click', refreshCurrentConversationView);
+        }
+
+        if (historyList) {
+            historyList.addEventListener('click', (event) => {
+                const item = event.target.closest('[data-history-id]');
+                if (!item) return;
+                const entryId = item.getAttribute('data-history-id');
+                handleHistoryEntryClick(entryId);
+            });
+        }
+
         if (resultsDiv) {
             resultsDiv.addEventListener('scroll', handleScroll);
         }
-        
+
         if (scrollToBottomBtn) {
             scrollToBottomBtn.addEventListener('click', handleScrollToBottomClick);
         }
 
         // Start ping system
-        try { 
-            startPing(); 
-        } catch (e) { 
-            console.error('Failed to start ping on load:', e); 
+        try {
+            startPing();
+        } catch (e) {
+            console.error('Failed to start ping on load:', e);
         }
+
+        refreshHistoryPanel();
     }
 
     // Initialize the application
