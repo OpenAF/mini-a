@@ -4,7 +4,7 @@ scripts:
   posterase: ''
   preinstall: ''
   postinstall: |
-    var path = getOPackPath("mini-a")
+    var path = args.OPACK_PATH
 
     $sh(`chmod +x ${path}/mini-a.sh`)
     .sh(`chmod +x ${path}/mini-a-web.sh`)
