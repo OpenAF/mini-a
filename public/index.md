@@ -602,6 +602,7 @@
     let lastContentUpdateTime = 0;
     let lastSubmittedPrompt = '';
     let activeHistoryId = null;
+    let historyEnabled = true;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -747,7 +748,7 @@
     }
 
     function refreshHistoryPanel() {
-        if (!historyList) return;
+        if (!historyList || historyEnabled === false) return;
 
         const entries = loadStoredHistory().slice().sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         const activeUuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
@@ -797,7 +798,58 @@
         }
     }
 
+    function applyHistoryAvailability(enabled) {
+        historyEnabled = !!enabled;
+
+        if (historyBtn) {
+            historyBtn.style.display = historyEnabled ? '' : 'none';
+            historyBtn.disabled = !historyEnabled;
+        }
+
+        if (historyPanel) {
+            historyPanel.style.display = historyEnabled ? '' : 'none';
+        }
+
+        if (historyOverlay) {
+            historyOverlay.style.display = historyEnabled ? '' : 'none';
+        }
+
+        if (!historyEnabled) {
+            closeHistoryPanel();
+        }
+    }
+
+    async function configureHistoryAvailability() {
+        let shouldEnable = true;
+
+        try {
+            const response = await fetch('/info', {
+                headers: { 'Accept': 'application/json' }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to load server info');
+            }
+
+            const data = await response.json();
+            if (typeof data.usehistory === 'boolean') {
+                shouldEnable = data.usehistory;
+            }
+        } catch (error) {
+            console.error('Unable to determine history availability:', error);
+        }
+
+        applyHistoryAvailability(shouldEnable);
+
+        if (historyEnabled) {
+            refreshHistoryPanel();
+        } else if (historyList) {
+            historyList.innerHTML = '';
+        }
+    }
+
     function handleHistoryButtonClick() {
+        if (historyEnabled === false) return;
         if (!historyPanel) return;
         if (historyPanel.classList.contains('open')) {
             closeHistoryPanel();
@@ -1364,6 +1416,7 @@
             console.error('Failed to start ping on load:', e);
         }
 
+        configureHistoryAvailability();
         refreshHistoryPanel();
     }
 

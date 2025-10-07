@@ -14,6 +14,22 @@ help:
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
     mandatory: false
+  - name     : usehistory
+    desc     : "Boolean to enable/disable history (default: false)"
+    example  : "true"
+    mandatory: false
+  - name     : historypath
+    desc     : "Path to store history files (default: .)"
+    example  : "."
+    mandatory: false
+  - name     : historyretention
+    desc     : "History retention period in seconds (default: 600)"
+    example  : "600"
+    mandatory: false
+  - name     : historykeep
+    desc     : "Boolean to keep history files (default: false)"
+    example  : "true"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -36,19 +52,42 @@ todo:
   ((execURI      )): | #js
     return ow.server.httpd.reply({ status: "ok" })
 
+# Info about the server
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /info
+  ((execURI      )): | #js
+    try {
+      var _res = { status: "ok", usehistory: global.__usehistory, historyretention: args.historyretention }
+      return ow.server.httpd.reply(_res)
+    } catch(e) {
+      printErr(e)
+      return ow.server.httpd.reply({ error: e.toString() })
+    }
+
+# Clear a session
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /clear
   ((execURI      )): | #js
     try {
       var postData = jsonParse(request.files.postData)
-      if (isDef(global.__res[ postData.uuid ])) {
-        delete global.__res[ postData.uuid ]
-      }
-      if (isDef(global.__conversations[ postData.uuid ])) {
-        delete global.__conversations[ postData.uuid ]
-      }
-      if (isDef(global.__lastActivity[ postData.uuid ])) {
-        delete global.__lastActivity[ postData.uuid ]
+      // postData.force - to be used from the history pane to delete a specific session
+      // __useHistory - if no history is being used, always clear
+      if (!global.__usehistory || postData.force) {
+        if (isDef(global.__res[ postData.uuid ])) {
+          delete global.__res[ postData.uuid ]
+        }
+        if (isDef(global.__conversations[ postData.uuid ])) {
+          delete global.__conversations[ postData.uuid ]
+        }
+        if (isDef(global.__lastActivity[ postData.uuid ])) {
+          delete global.__lastActivity[ postData.uuid ]
+        }
+        if (global.__usehistory && !global.__historykeep) {
+          var _hfile = global.__historypath + "/c-" + postData.uuid + ".json"
+          if (io.fileExists(_hfile)) {
+            io.rm(_hfile)
+          }
+        }
       }
       return ow.server.httpd.reply({ status: "cleared" })
     } catch(e) {
@@ -56,6 +95,7 @@ todo:
       return ow.server.httpd.reply({ error: e.toString() })
     }
 
+# Submit a prompt
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /prompt
   ((execURI      )): | #js
@@ -92,9 +132,36 @@ todo:
       $doV(() => {
         try {
           var uuid = _res.uuid, lma
+          // If history is enabled, set the history file
+          var _hfile = global.__usehistory ? global.__historypath + "/c-" + uuid + ".json" : __
+
+          // If conversation does not exist, create it
           if (isUnDef(global.__conversations[ uuid ])) {
+            // If history file does not exist but we have history in memory, rebuild it
+            if (global.__usehistory && !io.fileExists(_hfile) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
+              // Try rebuilding
+              var _data = []
+              for (var i = 0; i < global.__res[ uuid ].length; i++) {
+                var r = global.__res[ uuid ][i]
+                if (r.event == "👤") {
+                  _data.push( { role: "user", content: r.message } )
+                } else if (r.event == "🤖" || r.event == "⬅️") {
+                  _data.push( { role: "assistant", content: r.message } )
+                } else if (r.event == "⚙️" || r.event == "🖥️") {
+                  _data.push( { role: "system", content: r.message } )
+                }
+              }
+              if (_data.length > 0) {
+                io.writeFileJSON(_hfile, { u: new Date(), c: _data }, "")
+                log("[" + uuid + "] Rebuilt history file " + _hfile)
+              }
+            }
+
+            // Initialize MiniA
             lma = new MiniA()
-            lma.init(global.maArgs)
+            lma.init(merge(global.maArgs, {
+              conversation: _hfile
+            }))
             lma.setInteractionFn( (e, m) => {
                 var _e = ""
                 switch(e) {
@@ -133,7 +200,8 @@ todo:
 
           var _rma = lma.start(merge(global.maArgs, {
             goal        : postData.prompt,
-            raw         : true
+            raw         : true,
+            conversation: _hfile
           }))
 
           global.__res[uuid].push( { event: "final", message: _rma } )
@@ -150,6 +218,7 @@ todo:
 
     return ow.server.httpd.reply(_res)
 
+# Get results of a prompt
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /result
   ((execURI      )): | #js
@@ -197,6 +266,7 @@ todo:
       return ow.server.httpd.reply({ error: e.toString() })
     }
 
+# Load history for a session
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /load-history
   ((execURI      )): | #js
@@ -209,6 +279,14 @@ todo:
 
       if (isUnDef(postData.history) || !Array.isArray(postData.history)) {
         return ow.server.httpd.reply({ error: "history must be an array" })
+      }
+
+      // If already stored no need to load again
+      if (isDef(global.__res[ postData.uuid ])) {
+        logWarn("History for " + postData.uuid + " already loaded")
+        return ow.server.httpd.reply({ status: "loaded", uuid: postData.uuid, entries: global.__res[ postData.uuid ].length })
+      } else {
+        logWarn("History for " + postData.uuid + " not found. Rebuilding from provided history with " + postData.history.length + " entries")
       }
 
       var sanitized = []
@@ -255,8 +333,14 @@ jobs:
       showExecs       : toBoolean().isBoolean().default(false)
       logPromptHeaders: isString().default("")
       maxcontent      : toNumber().isNumber().default(200000)
+      usehistory      : toBoolean().isBoolean().default(false)
+      historypath     : isString().default(".")
+      historykeep     : toBoolean().isBoolean().default(false)
   exec : | #js
     global.__res = {}
+    global.__usehistory = args.usehistory
+    global.__historypath = args.historypath
+    global.__historykeep = args.historykeep
     global.__conversations = {}
     global.__lastActivity = { }
     global.__showExecs = args.showExecs
@@ -271,12 +355,14 @@ jobs:
   type : periodic
   typeArgs:
     interval: 300000  # every 5 minutes
+  args :
+    historyretention: toNumber().isNumber().default(600)  # 10 minutes
   exec : | #js
     var now = Date.now()
     var toDelete = []
     for (var uuid in global.__lastActivity) {
       // If no activity for more than 5 minutes, delete session
-      if (now - global.__lastActivity[ uuid ] > 300000) {
+      if (now - global.__lastActivity[ uuid ] > args.historyretention * 1000) {
         toDelete.push(uuid)
       }
     }
