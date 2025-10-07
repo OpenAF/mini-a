@@ -525,8 +525,8 @@ MiniA.prototype.init = function(args) {
   // Load conversation history if provided
   if (isDef(args.conversation) && io.fileExists(args.conversation)) {
     this._fnI("load", `Loading conversation history from ${args.conversation}...`)
-    this.llm.getGPT().setConversation( io.readFileJSON(args.conversation) )
-    if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation) )
+    this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
+    if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
   }
 
   // Using MCP (single or multiple connections)
@@ -903,7 +903,7 @@ MiniA.prototype.start = function(args) {
       // Store history
       if (isDef(args.conversation)) {
         // Always store the main LLM conversation for consistency
-        io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
+        io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
       }
       
       var msg
@@ -1221,7 +1221,7 @@ MiniA.prototype.start = function(args) {
     this._fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 
     // Store history
-    if (isDef(args.conversation)) io.writeFileJSON(args.conversation, this.llm.getGPT().getConversation())
+    if (isDef(args.conversation)) io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
     
     // Extract final answer
     res.answer = this._cleanCodeBlocks(res.answer)
