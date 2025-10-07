@@ -81,7 +81,7 @@ filesHash:
   mcps/mcp-ch.yaml: 99ae055319e5c99e42cfacead2159b5ed83c1bdc
   mcps/mcp-db.yaml: aaabdae6846d1a8aa62942ab0257dedd9942544d
   mcps/mcp-email.yaml: d9dde29b03e7b8873f66a22476dc8ffd6619ce85
-  mcps/mcp-kube.yaml: 21117b08961d5dc55d71dc37c7eb30c989ab88c6
+  mcps/mcp-kube.yaml: d9268fd33f64db8afc6a7012540a72a358ccc021
   mcps/mcp-net.yaml: 2a4b707acef679ae26510842ad9d52d3c9d4f6bf
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
