@@ -164,7 +164,8 @@ mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-db.yaml
 
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
-- **`maxcontext`** (number): Maximum context size in bytes (triggers summarization when exceeded)
+- **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
+- **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
@@ -408,8 +409,20 @@ agent.start({
 var agent = new MiniA()
 agent.start({
     goal: "Analyze large codebase",
-    maxcontext: 50000,  // Auto-summarize if context exceeds 50KB
+    maxcontext: 8000,  // Auto-summarize when the working context exceeds ~8k tokens
     maxsteps: 50
+})
+```
+
+### Custom Rules and Guardrails
+
+Provide extra numbered rules to the system prompt using the `rules` parameter. Supply them as a JSON or SLON array so they are injected verbatim.
+
+```javascript
+var agent = new MiniA()
+agent.start({
+    goal: "Review generated SQL queries",
+    rules: "[ 'Never run destructive DDL statements', 'Use markdown tables for final summaries' ]"
 })
 ```
 

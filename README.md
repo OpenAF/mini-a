@@ -18,6 +18,8 @@ Two steps to use:
 
 These entry points share the same options, so you can switch between them without changing configuration flags.
 
+Shell access is disabled by default for safety; add `useshell=true` when you explicitly want the agent to run commands.
+
 If you prefer the browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
 ## Documentation
@@ -169,18 +171,25 @@ Mini-A is built on the OpenAF platform. To get started:
 
 All Mini-A options can be passed as command line arguments:
 
-- `goal`: The objective for the agent to achieve
-- `mcp`: MCP server configuration (single or array)
-- `useshell`: Allow shell command execution
-- `shellallow`: Comma-separated list of banned commands that should be allowed
-- `shellallowpipes`: Allow use of pipes, redirection, and shell control operators
-- `shellbanextra`: Additional comma-separated commands to ban
-- `readwrite`: Allow file system modifications
-- `maxsteps`: Maximum number of steps (default: 25)
-- `rtm`: Rate limit in calls per minute
-- `debug`: Enable debug mode
-- `verbose`: Enable verbose logging
-- `__format`: Output format (json, md, etc.)
+- `goal` – Objective the agent should achieve (required for `MiniA.start` / `mini-a.yaml`)
+- `mcp` – MCP server configuration (single object or array, in JSON/SLON)
+- `useshell` – Allow shell command execution (default `false`)
+- `readwrite` – Allow file system modifications without confirmation prompts (default `false`)
+- `checkall` – Prompt before running every shell command (default `false`)
+- `shellallow`, `shellbanextra` – Override the default banned command lists
+- `shellallowpipes` – Permit pipes/redirection/control operators when executing shell commands (default `false`)
+- `shellbatch` – Skip interactive confirmations when `checkall` is active (default `false`)
+- `knowledge` – Extra instructions or the path to a text file to append to the system prompt
+- `rules` – Additional numbered rules (JSON/SLON array) injected into the system prompt
+- `conversation` – Path to a conversation JSON file to load/save chat history
+- `libs` – Comma-separated list of extra OpenAF libraries to load before starting
+- `maxsteps` – Maximum number of agent steps (default `25`)
+- `maxcontext` – Approximate token budget for context before auto-summarization kicks in (default disabled)
+- `rtm` – Rate limit in LLM calls per minute
+- `verbose`, `debug` – Enable progressively richer logging
+- `raw` – Return the final response exactly as produced instead of formatted output
+- `outfile` – Path to write the final answer (implies JSON output unless `__format` is provided)
+- `__format` – Output format (e.g. `md`, `json`)
 
 For a complete list of options, see the [Usage Guide](USAGE.md).
 
