@@ -380,11 +380,13 @@
     }
 
     .history-item {
+        position: relative;
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
         align-items: flex-start;
         padding: 0.6rem 0.8rem;
+        padding-right: 2.6rem;
         border-radius: 0.7rem;
         border: 1px solid transparent;
         background: rgba(255,255,255,0.6);
@@ -416,6 +418,36 @@
         opacity: 0.7;
     }
 
+    .history-item-delete {
+        position: absolute;
+        top: 0.35rem;
+        right: 0.35rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.9rem;
+        height: 1.9rem;
+        border-radius: 999px;
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        opacity: 0.65;
+        transition: background 0.2s ease, opacity 0.2s ease, color 0.2s ease;
+    }
+
+    .history-item-delete:hover,
+    .history-item-delete:focus-visible {
+        opacity: 1;
+        color: var(--danger);
+        background: rgba(0,0,0,0.05);
+    }
+
+    .history-item-delete svg {
+        width: 1rem;
+        height: 1rem;
+    }
+
     .history-empty {
         text-align: center;
         opacity: 0.7;
@@ -440,6 +472,11 @@
     body.markdown-body-dark .history-item {
         background: rgba(255,255,255,0.08);
         border-color: rgba(255,255,255,0.05);
+    }
+
+    body.markdown-body-dark .history-item-delete:hover,
+    body.markdown-body-dark .history-item-delete:focus-visible {
+        background: rgba(255,255,255,0.08);
     }
 
     body.markdown-body-dark .history-item:hover {
@@ -764,13 +801,20 @@
 
         const rendered = entries.map(entry => {
             const isActive = entry.id === activeHistoryId;
-            const title = escapeHtml(entry.title || formatHistoryTitle(entry.prompt));
+            const entryId = escapeHtml(entry.id || '');
+            const titleSource = entry.title || formatHistoryTitle(entry.prompt);
+            const title = escapeHtml(titleSource);
             const timestamp = escapeHtml(formatHistoryTime(entry.timestamp));
             return `
-                <button class="history-item${isActive ? ' active' : ''}" type="button" data-history-id="${escapeHtml(entry.id || '')}" role="listitem">
+                <div class="history-item${isActive ? ' active' : ''}" role="listitem" data-history-id="${entryId}" tabindex="0">
                     <span class="history-item-title">${title}</span>
                     <span class="history-item-time">${timestamp}</span>
-                </button>`;
+                    <button class="history-item-delete" type="button" title="Delete conversation" aria-label="Delete ${title}" data-history-delete="${entryId}">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M3 6h18M10 11v7m4-7v7M5 6l1 14h12l1-14M9 6l1-2h4l1 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>`;
         }).join('');
 
         historyList.innerHTML = rendered;
@@ -859,15 +903,32 @@
         }
     }
 
-    function handleClearHistoryStorage() {
+    async function handleClearHistoryStorage() {
         if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return;
         if (typeof window.confirm === 'function') {
             const shouldClear = window.confirm('Clear all stored conversations?');
             if (!shouldClear) return;
         }
+
+        const entries = loadStoredHistory();
+
         window.localStorage.removeItem(HISTORY_STORAGE_KEY);
         activeHistoryId = null;
         refreshHistoryPanel();
+
+        const uuidsToClear = entries
+            .map(entry => entry && entry.uuid)
+            .filter(uuid => typeof uuid === 'string' && uuid.length > 0);
+
+        await Promise.allSettled(uuidsToClear.map(uuid => {
+            return fetch('/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid, force: true })
+            }).catch(error => {
+                console.error('Failed to clear conversation on server:', uuid, error);
+            });
+        }));
     }
 
     function handleHistoryEntryClick(entryId) {
@@ -876,6 +937,41 @@
         const entry = entries.find(item => item.id === entryId);
         if (!entry) return;
         loadConversationEntry(entry);
+    }
+
+    async function handleHistoryEntryDelete(entryId) {
+        if (!entryId) return;
+
+        const entries = loadStoredHistory();
+        const index = entries.findIndex(item => item.id === entryId);
+        if (index < 0) return;
+
+        const entry = entries[index];
+        if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+            const shouldDelete = window.confirm('Delete this conversation from history?');
+            if (!shouldDelete) return;
+        }
+
+        entries.splice(index, 1);
+        persistHistory(entries);
+
+        if (activeHistoryId === entryId) {
+            activeHistoryId = null;
+        }
+
+        refreshHistoryPanel();
+
+        if (entry && entry.uuid) {
+            try {
+                await fetch('/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ uuid: entry.uuid, force: true })
+                });
+            } catch (error) {
+                console.error('Failed to clear conversation on server:', error);
+            }
+        }
     }
 
     function addConversationToHistory(sessionUuid, prompt, data) {
@@ -1394,8 +1490,31 @@
 
         if (historyList) {
             historyList.addEventListener('click', (event) => {
+                const deleteBtn = event.target.closest('[data-history-delete]');
+                if (deleteBtn) {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    const entryId = deleteBtn.getAttribute('data-history-delete');
+                    handleHistoryEntryDelete(entryId);
+                    return;
+                }
+
                 const item = event.target.closest('[data-history-id]');
                 if (!item) return;
+                const entryId = item.getAttribute('data-history-id');
+                handleHistoryEntryClick(entryId);
+            });
+
+            historyList.addEventListener('keydown', (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+
+                if (event.target.closest('[data-history-delete]')) {
+                    return;
+                }
+
+                const item = event.target.closest('[data-history-id]');
+                if (!item) return;
+                event.preventDefault();
                 const entryId = item.getAttribute('data-history-id');
                 handleHistoryEntryClick(entryId);
             });
@@ -1464,4 +1583,3 @@
         __applyDarkModeIfNeeded();
     });
 </script>
-

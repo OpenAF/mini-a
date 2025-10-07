@@ -73,6 +73,7 @@ todo:
       // postData.force - to be used from the history pane to delete a specific session
       // __useHistory - if no history is being used, always clear
       if (!global.__usehistory || postData.force) {
+        log("Clearing session " + postData.uuid)
         if (isDef(global.__res[ postData.uuid ])) {
           delete global.__res[ postData.uuid ]
         }
@@ -83,6 +84,7 @@ todo:
           delete global.__lastActivity[ postData.uuid ]
         }
         if (global.__usehistory && !global.__historykeep) {
+          log("Deleting history file for session " + postData.uuid)
           var _hfile = global.__historypath + "/c-" + postData.uuid + ".json"
           if (io.fileExists(_hfile)) {
             io.rm(_hfile)
