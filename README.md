@@ -165,7 +165,7 @@ Mini-A is built on the OpenAF platform. To get started:
 
 - **`OAF_MODEL`** (required): LLM model configuration
 - **`OAF_LC_MODEL`** (optional): Low-cost LLM model configuration for cost optimization
-- **`OAF_FLAGS="(MD_DARKMODE: 'auto')"**: For setting forced dark mode or automatic
+- **`OAF_FLAGS="(MD_DARKMODE: 'auto')"`**: For setting forced dark mode or automatic
 
 ### Command Line Options
 
