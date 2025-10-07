@@ -60,10 +60,11 @@ You are a goal-oriented agent running in background. Work step-by-step toward yo
 RESPONSE FORMAT: Always respond with exactly one valid JSON object:
 {
     "thought": "your reasoning for this step",
-    "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final",{{#if useshell}}
-    "command": "required when action=shell: POSIX command to execute",{{/if}}
-    "answer": "required when action=final: your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}",
-    "params": "required when action={{#if actionsList}}{{actionsList}}{{/if}}: JSON object with action parameters"
+    "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
+    "command": "required when action=shell or action entry uses shell: POSIX command to execute",{{/if}}
+    "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}",
+    "params": "required when action={{#if actionsList}}{{actionsList}}{{/if}} (or action entry uses these actions): JSON object with action parameters",
+    "state": {"optional": "persist structured data for future steps"}
 }
 
 {{#if actionsList}}
@@ -78,6 +79,20 @@ ACTION USAGE:
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 • "final" - Provide your complete answer when goal is achieved
+
+MULTI-ACTION SUPPORT:
+• You may set "action" to an array of action objects to chain tools sequentially in one step
+• Each action object must include at least an "action" field and any required fields (e.g., command, params, answer)
+
+{{#if usetools}}
+TOOL REGISTRATION:
+• {{toolCount}} MCP tools are registered directly with the model; invoke them by naming the tool in "action" and supply the required params.
+• Tool schemas are provided via the tool interface, so keep prompts concise.
+
+{{/if}}
+STATE MANAGEMENT:
+• You can persist and update structured state in the `state` object at each step.
+• To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
 RULES:
 1. Always include "thought" and "action" fields
@@ -98,14 +113,20 @@ KNOWLEDGE:
   this._STEP_PROMPT_TEMPLATE = `
 GOAL: {{{goal}}}
 
-{{#if context}}PROGRESS SO FAR:
-{{{context}}}
+CURRENT STATE:
+{{{state}}}
 
-{{/if}}What's your next step? Respond with a single JSON object following the schema.
+{{#if progress}}PROGRESS SO FAR:
+{{{progress}}}
+
+{{/if}}What's your next step? Respond with a JSON object following the schema ("action" may be a string or an array of action objects).
     `
 
   this._FINAL_PROMPT = `
 GOAL: {{{goal}}}
+
+CURRENT STATE:
+{{{state}}}
 
 PROGRESS: {{{context}}}
 
@@ -115,6 +136,8 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
 
   this._fnI = this.defaultInteractionFn
   this.state = "idle"
+  this._agentState = {}
+  this._useTools = false
 }
 
 /**
@@ -472,10 +495,12 @@ MiniA.prototype.init = function(args) {
   args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
   args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
   args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+  args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
 
   this._shellAllowlist = this._parseListOption(args.shellallow)
   this._shellExtraBanned = this._parseListOption(args.shellbanextra)
   this._shellAllowPipes = args.shellallowpipes
+  this._useTools = args.usetools
 
   // Load additional libraries if specified
   if (isDef(args.libs) && args.libs.length > 0) {
@@ -586,20 +611,57 @@ MiniA.prototype.init = function(args) {
     this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
   }
 
+  if (this._useTools && this.mcpTools.length > 0) {
+    var registerMcpTools = llmInstance => {
+      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
+
+      var updated = llmInstance
+      Object.keys(this.mcpConnections).forEach(connectionId => {
+        var client = this.mcpConnections[connectionId]
+        if (isUnDef(client)) return
+
+        try {
+          var result = updated.withMcpTools(client)
+          if (isDef(result)) updated = result
+        } catch (e) {
+          var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+          this._fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+        }
+      })
+      return updated
+    }
+
+    var updatedMainLLM = registerMcpTools(this.llm)
+    if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+
+    if (this._use_lc) {
+      var updatedLowCostLLM = registerMcpTools(this.lc_llm)
+      if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+    }
+
+    this._fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+  }
+
   // Provide system prompt instructions
   if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
   var rules = af.fromJSSLON(args.rules)
   if (!isArray(rules)) rules = [rules]
 
+  var promptActionsDesc = this._useTools ? [] : this.mcpTools
+  var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
+  var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+
   if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
-    actionsWordNumber: this._numberInWords(1 + this.mcpTools.length),
-    actionsList      : this.mcpTools.map(r => r.name).join(" | "),
+    actionsWordNumber: actionsWordNumber,
+    actionsList      : promptActionsList,
     useshell         : args.useshell,
     markdown         : args.__format == "md",
     rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
     knowledge        : args.knowledge.trim(),
-    actionsdesc      : this.mcpTools,
-    isMachine        : (isDef(args.__format) && args.__format != "md")
+    actionsdesc      : promptActionsDesc,
+    isMachine        : (isDef(args.__format) && args.__format != "md"),
+    usetools         : this._useTools,
+    toolCount        : this.mcpTools.length
   })
 
   llm = this.llm.withInstructions(this._systemInst)
@@ -631,6 +693,7 @@ MiniA.prototype.init = function(args) {
  * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
+ * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
@@ -672,11 +735,13 @@ MiniA.prototype.start = function(args) {
     args.checkall = _$(args.checkall, "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
+    args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
+    this._useTools = args.usetools
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -778,6 +843,20 @@ MiniA.prototype.start = function(args) {
 
     this.init(args)
 
+    var initialState = {}
+    if (isDef(args.state)) {
+      var providedState = args.state
+      if (isString(providedState)) {
+        var parsedState = jsonParse(providedState, __, __, true)
+        if (isObject(parsedState)) providedState = parsedState
+      }
+      if (isObject(providedState)) {
+        var clonedState = jsonParse(stringify(providedState, __, ""), __, __, true)
+        initialState = isObject(clonedState) ? clonedState : providedState
+      }
+    }
+    this._agentState = isObject(initialState) ? initialState : {}
+
     this._fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
     // Get model response and parse as JSON
@@ -806,6 +885,16 @@ MiniA.prototype.start = function(args) {
       }
     }
 
+    var parseStatePayload = value => {
+      if (isUnDef(value) || value === null) return __
+      if (isObject(value)) return value
+      if (isString(value)) {
+        var parsed = jsonParse(value, __, __, true)
+        if (isObject(parsed)) return parsed
+      }
+      return __
+    }
+
     var context = [], maxSteps = args.maxsteps, consecutiveErrors = 0
     var consecutiveThoughts = 0, totalThoughts = 0, stepsWithoutAction = 0
     var lastActions = [], recentSimilarThoughts = []
@@ -816,10 +905,17 @@ MiniA.prototype.start = function(args) {
     for(var step = 0; step < maxSteps && this.state != "stop"; step++) {
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
+      var stateSnapshot = stringify(this._agentState, __, "")
+      if (args.debug || args.verbose) {
+        this._fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
+      }
       // TODO: Improve by summarizing context to fit in prompt if needed
+      var progressEntries = context.slice()
+      progressEntries.unshift(`[STATE] ${stateSnapshot}`)
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
         goal   : args.goal,
-        context: step == 0 ? "" : context.join("\n")
+        progress: progressEntries.join("\n"),
+        state  : stateSnapshot
       })
 
       var contextTokens = this._estimateTokens(context.join(""))
@@ -939,6 +1035,9 @@ MiniA.prototype.start = function(args) {
           consecutiveErrors++
           global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
           global.__mini_a_metrics.json_parse_failures.inc()
+          if (args.debug || args.verbose) {
+            this._fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+          }
           continue
         }
       } else {
@@ -949,30 +1048,60 @@ MiniA.prototype.start = function(args) {
         print( ow.format.withSideLine("<<<\n" + colorify(msg, { bgcolor: "BG(230),BLACK"}) + "\n<<<", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
 
-      // Extract fields from model response
-      origAction = (msg.action || msg.think || "").trim()
-      action  = (msg.action || msg.think || "").trim().toLowerCase()
-      thought = jsonParse((msg.thought || "").trim())
-      command = (msg.command || "").trim()
-      answer  = ((isObject(msg.answer) ? stringify(msg.answer,__,"") : msg.answer) || "")
+      // Normalize model response into a sequence of action requests
+      var baseMsg = msg
+      var stateUpdatedThisStep = false
+      var stateRecordedInContext = false
+      var updatedStateSnapshot = stateSnapshot
+      if (isMap(baseMsg) && isDef(baseMsg.state)) {
+        var extractedState = parseStatePayload(baseMsg.state)
+        if (isObject(extractedState)) {
+          this._agentState = extractedState
+          updatedStateSnapshot = stringify(this._agentState, __, "")
+          stateUpdatedThisStep = true
+        }
+      }
+      var actionMessages = []
+      var addActionMessage = entry => {
+        if (isUnDef(entry)) return
+        var normalized = isMap(entry) ? Object.assign({}, entry) : {}
+        if (!isMap(entry)) {
+          normalized.action = entry
+        }
+        if (isMap(baseMsg) && baseMsg !== entry) {
+          if (isUnDef(normalized.thought) && isDef(baseMsg.thought)) normalized.thought = baseMsg.thought
+          if (isUnDef(normalized.command) && isDef(baseMsg.command)) normalized.command = baseMsg.command
+          if (isUnDef(normalized.answer) && isDef(baseMsg.answer)) normalized.answer = baseMsg.answer
+          if (isUnDef(normalized.params) && isDef(baseMsg.params)) normalized.params = baseMsg.params
+        }
+        actionMessages.push(normalized)
+      }
 
-      if (isUnDef(action) || action.length == 0) {
+      if (isArray(baseMsg)) {
+        baseMsg.forEach(addActionMessage)
+      } else if (isMap(baseMsg) && isArray(baseMsg.action)) {
+        baseMsg.action.forEach(addActionMessage)
+      } else {
+        addActionMessage(baseMsg)
+      }
+
+      if (actionMessages.length === 0) {
         context.push(`[OBS ${step + 1}] (error) missing 'action' from model.`)
         consecutiveErrors++
         global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+        if (stateUpdatedThisStep && !stateRecordedInContext) {
+          context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
+          stateRecordedInContext = true
+        }
+        if (args.debug || args.verbose) {
+          this._fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+        }
         continue
       }
-      if (isUnDef(thought) || thought.length == 0) {
-        context.push(`[OBS ${step + 1}] (error) missing 'thought' from model.`)
-        consecutiveErrors++
-        global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
-        continue
-      }
-      
-      // Reset consecutive errors on successful parsing
-      consecutiveErrors = 0
-      global.__mini_a_metrics.consecutive_errors.set(0)
-      
+
+      var clearedConsecutiveErrors = false
+      var hadErrorThisStep = false
+
       // Helper function to check if thoughts are similar
       var isSimilarThought = (thought1, thought2) => {
         if (!thought1 || !thought2) return false
@@ -986,219 +1115,245 @@ MiniA.prototype.start = function(args) {
         return commonWords.length >= Math.min(words1.length, words2.length) * 0.6
       }
 
-      /*if (args.verbose) {
-        this._fnI("", `--- step ${step + 1} ---`)
-        this._fnI("", `\n${isObject(msg) ? printTree(msg) : msg}`)
-      }*/
+      for (var actionIndex = 0; actionIndex < actionMessages.length; actionIndex++) {
+        var currentMsg = actionMessages[actionIndex]
+        var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
+        var action = origActionRaw.toLowerCase()
+        var thoughtValue = jsonParse(((currentMsg.thought || "") + "").trim())
+        var commandValue = ((currentMsg.command || "") + "").trim()
+        var answerValue = ((isObject(currentMsg.answer) ? stringify(currentMsg.answer,__,"") : currentMsg.answer) || "")
+        var paramsValue = currentMsg.params
 
-      if (action != "think") {
-        if (isMap(msg) || isArray(msg)) {
-          var _msg = thought || msg.think || af.toSLON(msg) || "(no thought)"
-          if (isObject(_msg)) _msg = af.toSLON(_msg)
-          this._fnI("thought", `${_msg}`)
-        } else {
-          this._fnI("thought", `${msg}`)
+        if (origActionRaw.length == 0) {
+          context.push(`[OBS ${step + 1}] (error) missing 'action' from model.`)
+          consecutiveErrors++
+          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+          hadErrorThisStep = true
+          break
         }
-      }
+        if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
+          context.push(`[OBS ${step + 1}] (error) missing 'thought' from model.`)
+          consecutiveErrors++
+          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+          hadErrorThisStep = true
+          break
+        }
 
-      // Handle actions
-      // --------------
+        if (!clearedConsecutiveErrors) {
+          consecutiveErrors = 0
+          global.__mini_a_metrics.consecutive_errors.set(0)
+          clearedConsecutiveErrors = true
+        }
 
-      // Action 'think': just add thought to context
-      if (action == "think") {
-        var thoughtStr = (isObject(thought) ? stringify(thought, __, "") : thought) || "(no thought)"
-        this._fnI("think", `${thoughtStr}`)
-        context.push(`[THOUGHT ${step + 1}] ${thoughtStr}`)
-        
-        global.__mini_a_metrics.thinks_made.inc()
-        global.__mini_a_metrics.thoughts_made.inc()
-        
-        // Track thinking patterns for escalation logic
+        var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
+        var stepLabel = `${step + 1}${stepSuffix}`
+
+        if (action != "think") {
+          var logMsg = thoughtValue || currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
+          if (isObject(logMsg)) logMsg = af.toSLON(logMsg)
+          this._fnI("thought", `${logMsg}`)
+        }
+
+        var thoughtStr = (isObject(thoughtValue) ? stringify(thoughtValue, __, "") : thoughtValue) || "(no thought)"
+
+        if (action == "think") {
+          this._fnI("think", `${thoughtStr}`)
+          context.push(`[THOUGHT ${stepLabel}] ${thoughtStr}`)
+
+          global.__mini_a_metrics.thinks_made.inc()
+          global.__mini_a_metrics.thoughts_made.inc()
+
+          consecutiveThoughts++
+          totalThoughts++
+          stepsWithoutAction++
+          global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
+
+          if (consecutiveThoughts >= 5) {
+            global.__mini_a_metrics.thinking_loops_detected.inc()
+          }
+
+          recentSimilarThoughts.push(thoughtStr)
+          if (recentSimilarThoughts.length > 4) {
+            recentSimilarThoughts.shift()
+          }
+
+          var similarCount = 0
+          if (recentSimilarThoughts.length >= 3) {
+            for (var i = 0; i < recentSimilarThoughts.length - 1; i++) {
+              if (isSimilarThought(thoughtStr, recentSimilarThoughts[i])) {
+                similarCount++
+              }
+            }
+            if (similarCount < 2) {
+              recentSimilarThoughts = [thoughtStr]
+            } else {
+              global.__mini_a_metrics.similar_thoughts_detected.inc()
+            }
+          }
+
+          checkAndSummarizeContext()
+          continue
+        }
+
+        if (action == "shell") {
+          if (!commandValue) {
+            context.push(`[OBS ${stepLabel}] (shell) missing 'command' from model.`)
+            consecutiveErrors++
+            global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+            hadErrorThisStep = true
+            break
+          }
+          var shellOutput = this._runCommand({
+            command        : commandValue,
+            readwrite      : args.readwrite,
+            checkall       : args.checkall,
+            shellallow     : args.shellallow,
+            shellbanextra  : args.shellbanextra,
+            shellallowpipes: args.shellallowpipes
+          }).output
+          context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
+          context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
+
+          consecutiveThoughts = 0
+          stepsWithoutAction = 0
+          totalThoughts = Math.max(0, totalThoughts - 1)
+          recentSimilarThoughts = []
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+
+          lastActions.push(`shell: ${commandValue}`)
+          if (lastActions.length > 3) lastActions.shift()
+
+          checkAndSummarizeContext()
+          continue
+        }
+
+        if (this.mcpToolNames.indexOf(origActionRaw) >= 0) {
+          if (isDef(paramsValue) && !isMap(paramsValue)) {
+            context.push(`[OBS ${stepLabel}] (${origActionRaw}) missing or invalid 'params' from model.`)
+            consecutiveErrors++
+            global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+            global.__mini_a_metrics.mcp_actions_failed.inc()
+            hadErrorThisStep = true
+            break
+          }
+          this._fnI("exec", `Executing action '${origActionRaw}' with params: ${af.toSLON(paramsValue)}`)
+
+          var connectionIndex = this.mcpToolToConnection[origActionRaw]
+          var mcp = this.mcpConnections[connectionIndex]
+
+          try {
+            var toolOutput = mcp.callTool(origActionRaw, paramsValue)
+            global.__mini_a_metrics.mcp_actions_executed.inc()
+          } catch (e) {
+            global.__mini_a_metrics.mcp_actions_failed.inc()
+            toolOutput = { error: e.message }
+          }
+          if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
+            var _t = toolOutput.content.map(r => r.text).join("\n")
+            toolOutput = jsonParse(_t.trim(), __, __, false)
+            if (isString(toolOutput)) toolOutput = _t
+            if (args.debug) {
+              print( ow.format.withSideLine("<<<\n" + colorify(toolOutput, { bgcolor: "BG(22),BLACK"}) + "\n<<<", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+            }
+          } else if (isDef(toolOutput) && isMap(toolOutput) && isDef(toolOutput.text)) {
+            toolOutput = toolOutput.text
+          } else if (isDef(toolOutput) && isString(toolOutput)) {
+            // keep as is
+          } else {
+            toolOutput = af.toSLON(toolOutput)
+          }
+          this._fnI("done", `Action '${origActionRaw}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
+          context.push(`[ACT ${stepLabel}] ${origActionRaw}: ${af.toSLON(paramsValue)}`)
+          context.push(`[OBS ${stepLabel}] ${stringify(toolOutput, __, "") || "(no output)"}`)
+
+          consecutiveThoughts = 0
+          stepsWithoutAction = 0
+          totalThoughts = Math.max(0, totalThoughts - 1)
+          recentSimilarThoughts = []
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+
+          lastActions.push(`${origActionRaw}: ${af.toSLON(paramsValue)}`)
+          if (lastActions.length > 3) lastActions.shift()
+
+          if (lastActions.length >= 3) {
+            var actionCounts = {}
+            lastActions.forEach(a => {
+              var actionType = a.split(':')[0]
+              actionCounts[actionType] = (actionCounts[actionType] || 0) + 1
+            })
+            if (Object.values(actionCounts).some(count => count >= 3)) {
+              global.__mini_a_metrics.action_loops_detected.inc()
+            }
+          }
+
+          checkAndSummarizeContext()
+          continue
+        }
+
+        if (action == "final") {
+          if (args.__format != 'md' && args.__format != 'raw') {
+            answerValue = this._cleanCodeBlocks(answerValue)
+          }
+
+          global.__mini_a_metrics.finals_made.inc()
+
+          consecutiveThoughts = 0
+          stepsWithoutAction = 0
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+
+          var totalTime = now() - sessionStartTime
+          global.__mini_a_metrics.total_session_time.set(totalTime)
+          global.__mini_a_metrics.goals_achieved.inc()
+
+          if (stateUpdatedThisStep && !stateRecordedInContext) {
+            context.push(`[STATE ${stepLabel}] ${updatedStateSnapshot}`)
+            stateRecordedInContext = true
+          }
+          if (args.debug || args.verbose) {
+            this._fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+          }
+
+          return this._processFinalAnswer(answerValue, args)
+        }
+
+        context.push(`[THOUGHT ${stepLabel}] ((unknown action -> think) ${thoughtStr || "no thought"})`)
+
+        global.__mini_a_metrics.unknown_actions.inc()
+
         consecutiveThoughts++
         totalThoughts++
         stepsWithoutAction++
         global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
-        
-        // Detect thinking loops
-        if (consecutiveThoughts >= 5) {
-          global.__mini_a_metrics.thinking_loops_detected.inc()
-        }
-        
-        // Check for similar thoughts (simplified tracking)
-        recentSimilarThoughts.push(thoughtStr)
-        // Keep only last 4 thoughts for comparison
-        if (recentSimilarThoughts.length > 4) {
-          recentSimilarThoughts.shift()
-        }
-        
-        // Count how many recent thoughts are similar to current one
-        var similarCount = 0
-        if (recentSimilarThoughts.length >= 3) {
-          for (var i = 0; i < recentSimilarThoughts.length - 1; i++) {
-            if (isSimilarThought(thoughtStr, recentSimilarThoughts[i])) {
-              similarCount++
-            }
-          }
-          // Reset array if we don't have enough similar thoughts
-          if (similarCount < 2) {
-            recentSimilarThoughts = [thoughtStr]
-          } else {
-            global.__mini_a_metrics.similar_thoughts_detected.inc()
-          }
-        }
-        
+
         checkAndSummarizeContext()
+      }
+
+      if (stateUpdatedThisStep && !stateRecordedInContext) {
+        context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
+        stateRecordedInContext = true
+      }
+      if (args.debug || args.verbose) {
+        this._fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+      }
+
+      if (hadErrorThisStep) {
         continue
       }
 
-      // Action 'shell': run command and add observation to context
-      if (action == "shell") {
-        if (!command) {
-          context.push(`[OBS ${step + 1}] (shell) missing 'command' from model.`)
-          consecutiveErrors++
-          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
-          continue
-        }
-        var shellOutput = this._runCommand({
-          command        : command,
-          readwrite      : args.readwrite,
-          checkall       : args.checkall,
-          shellallow     : args.shellallow,
-          shellbanextra  : args.shellbanextra,
-          shellallowpipes: args.shellallowpipes
-        }).output
-        context.push(`[ACT ${step + 1}] shell: ${command}`)
-        context.push(`[OBS ${step + 1}] ${shellOutput.trim() || "(no output)"}`)
-        
-        // Reset thinking counters on meaningful action
-        consecutiveThoughts = 0
-        stepsWithoutAction = 0
-        totalThoughts = Math.max(0, totalThoughts - 1) // Reduce total thoughts on action
-        recentSimilarThoughts = [] // Clear similar thoughts on action
-        global.__mini_a_metrics.consecutive_thoughts.set(0)
-        
-        lastActions.push(`shell: ${command}`)
-        // Keep only last 3 actions for tracking
-        if (lastActions.length > 3) lastActions.shift()
-        
-        checkAndSummarizeContext()
-        continue
-      }
-
-      if (this.mcpToolNames.indexOf(origAction) >= 0) {
-        if (isDef(msg.params) && !isMap(msg.params)) {
-          context.push(`[OBS ${step + 1}] (${origAction}) missing or invalid 'params' from model.`)
-          consecutiveErrors++
-          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
-          global.__mini_a_metrics.mcp_actions_failed.inc()
-          continue
-        }
-        this._fnI("exec", `Executing action '${origAction}' with params: ${af.toSLON(msg.params)}`)
-        
-        // Find the correct MCP connection for this tool
-        var connectionIndex = this.mcpToolToConnection[origAction]
-        var mcp = this.mcpConnections[connectionIndex]
-        //var tool = this.mcpTools.find(t => t.name == origAction)
-
-        try {
-          var toolOutput = mcp.callTool(origAction, msg.params)
-          global.__mini_a_metrics.mcp_actions_executed.inc()
-        } catch (e) {
-          global.__mini_a_metrics.mcp_actions_failed.inc()
-          toolOutput = { error: e.message }
-        }
-        if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
-          //toolOutput = toolOutput.content.map(r => jsonParse(r.text, __, __, true))
-          var _t = toolOutput.content.map(r => r.text).join("\n")
-          toolOutput = jsonParse(_t.trim(), __, __, false)
-          if (isString(toolOutput)) toolOutput = _t
-          if (args.debug) {
-            print( ow.format.withSideLine("<<<\n" + colorify(toolOutput, { bgcolor: "BG(22),BLACK"}) + "\n<<<", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
-          }
-        } else if (isDef(toolOutput) && isMap(toolOutput) && isDef(toolOutput.text)) {
-          toolOutput = toolOutput.text
-        } else if (isDef(toolOutput) && isString(toolOutput)) {
-          // keep as is
-        } else {
-          toolOutput = af.toSLON(toolOutput)
-        }
-        this._fnI("done", `Action '${origAction}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
-        context.push(`[ACT ${step + 1}] ${origAction}: ${af.toSLON(msg.params)}`)
-        context.push(`[OBS ${step + 1}] ${stringify(toolOutput, __, "") || "(no output)"}`)
-        
-        // Reset thinking counters on meaningful action
-        consecutiveThoughts = 0
-        stepsWithoutAction = 0
-        totalThoughts = Math.max(0, totalThoughts - 1) // Reduce total thoughts on action
-        recentSimilarThoughts = [] // Clear similar thoughts on action
-        global.__mini_a_metrics.consecutive_thoughts.set(0)
-        
-        lastActions.push(`${origAction}: ${af.toSLON(msg.params)}`)
-        // Keep only last 3 actions for tracking
-        if (lastActions.length > 3) lastActions.shift()
-        
-        // Detect action loops
-        if (lastActions.length >= 3) {
-          var actionCounts = {}
-          lastActions.forEach(a => {
-            var actionType = a.split(':')[0]
-            actionCounts[actionType] = (actionCounts[actionType] || 0) + 1
-          })
-          if (Object.values(actionCounts).some(count => count >= 3)) {
-            global.__mini_a_metrics.action_loops_detected.inc()
-          }
-        }
-        
-        checkAndSummarizeContext()
-        continue
-      }
-
-      // Action 'final': print answer and exit
-      if (action == "final") {
-        if (args.__format != 'md' && args.__format != 'raw') {
-          answer = this._cleanCodeBlocks(answer)
-        }
-        
-        global.__mini_a_metrics.finals_made.inc()
-        
-        // Reset counters as we're finishing
-        consecutiveThoughts = 0
-        stepsWithoutAction = 0
-        global.__mini_a_metrics.consecutive_thoughts.set(0)
-
-        // Calculate total session time
-        var totalTime = now() - sessionStartTime
-        global.__mini_a_metrics.total_session_time.set(totalTime)
-        global.__mini_a_metrics.goals_achieved.inc()
-        
-        return this._processFinalAnswer(answer, args)
-      }
-
-      // Unknown action: treat as thinking
-      context.push(`[THOUGHT ${step + 1}] ((unknown action -> think) ${thought || "no thought"})`)
-      
-      global.__mini_a_metrics.unknown_actions.inc()
-      
-      // Track as thinking activity for escalation logic
-      consecutiveThoughts++
-      totalThoughts++
-      stepsWithoutAction++
-      global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
-      
-      // Calculate step timing
       var stepTime = now() - stepStartTime
       var currentAvg = global.__mini_a_metrics.avg_step_time.get()
       var currentSteps = global.__mini_a_metrics.steps_taken.get()
       var newAvg = currentSteps === 1 ? stepTime : ((currentAvg * (currentSteps - 1)) + stepTime) / currentSteps
       global.__mini_a_metrics.avg_step_time.set(Math.round(newAvg))
-      
-      checkAndSummarizeContext()
+
+      continue
     }
 
     // If max steps hit without final action
     var finalPrompt = $t(this._FINAL_PROMPT.trim(), {
       goal   : args.goal,
-      context: context.join("\n")
+      context: context.join("\n"),
+      state  : stringify(this._agentState, __, "")
     })
 
     // If already in stop state, just exit
