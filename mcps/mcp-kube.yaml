@@ -216,7 +216,7 @@ ojob:
   - oJob-common: 20250914
   - Kube       : 20250916
   catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
-  logToConsole: true
+  logToConsole: false
   argsFromEnvs: true
   daemon      : true
   loadLibs    :
