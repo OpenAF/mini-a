@@ -72,8 +72,8 @@ help:
     desc     : Comma-separated list of additional OJob libraries to load (e.g., "lib1,lib2")
     example  : "lib1,lib2"
     mandatory: false
-  - name     : maxcontent
-    desc     : Maximum content length to consider from files (in characters)
+  - name     : maxcontext
+    desc     : Maximum context size in tokens (if exceeded, conversation will be summarized)
     example  : "200000"
     mandatory: false
   - name     : raw
@@ -83,6 +83,22 @@ help:
   - name     : debug
     desc     : Enable debug mode
     example  : "false"
+    mandatory: false
+  - name     : shellbatch
+    desc     : Run in batch mode without prompting for command execution approval
+    example  : "false"
+    mandatory: false
+  - name     : usetools
+    desc     : Register MCP tools directly on the model instead of expanding the prompt with schemas
+    example  : "false"
+    mandatory: false
+  - name     : rules
+    desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
+    example  : '["Always provide detailed explanations", "Use concise language"]'
+    mandatory: false
+  - name     : state
+    desc     : Initial state data to provide to the agent as structured JSON/SLON
+    example  : '{"current_task": "analysis", "progress": 0}'
     mandatory: false
 
 todo:

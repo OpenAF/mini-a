@@ -91,7 +91,7 @@ TOOL REGISTRATION:
 
 {{/if}}
 STATE MANAGEMENT:
-• You can persist and update structured state in the `state` object at each step.
+• You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
 RULES:
