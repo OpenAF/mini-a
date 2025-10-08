@@ -583,13 +583,32 @@ MiniA.prototype.init = function(args) {
     this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
 
     // Initialize each MCP connection
+    var parent = this
     mcpConfigs.forEach((mcpConfig, index) => {
       try {
         var mcp
         if (Object.keys(this.mcpConnections).indexOf(md5(stringify(mcpConfig, __, ""))) >= 0) {
           mcp = this.mcpConnections[md5(stringify(mcpConfig, __, ""))]
         } else {
-          mcp = $mcp(mcpConfig)
+          mcp = $mcp(merge(mcpConfig, {
+            preFn: (t, a) => {
+              parent._fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+            },
+            posFn: (t, a, r) => {
+              //try {
+              if (isMap(r) && r.error) {
+                logWarn(`Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
+                global.__mini_a_metrics.mcp_actions_failed.inc()
+              } else {
+                log(`Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
+                global.__mini_a_metrics.mcp_actions_executed.inc()
+              }
+              if (args.debug) {
+                print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+              }
+              //} catch(eee) { $err(eee) }
+            }
+          }))
           this.mcpConnections[md5(stringify(mcpConfig, __, ""))] = mcp
           mcp.initialize()
           sleep(100, true)
@@ -1267,25 +1286,25 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             hadErrorThisStep = true
             break
           }
-          this._fnI("exec", `Executing action '${origActionRaw}' with params: ${af.toSLON(paramsValue)}`)
+          //this._fnI("exec", `Executing action '${origActionRaw}' with params: ${af.toSLON(paramsValue)}`)
 
           var connectionIndex = this.mcpToolToConnection[origActionRaw]
           var mcp = this.mcpConnections[connectionIndex]
 
           try {
             var toolOutput = mcp.callTool(origActionRaw, paramsValue)
-            global.__mini_a_metrics.mcp_actions_executed.inc()
+            //global.__mini_a_metrics.mcp_actions_executed.inc()
           } catch (e) {
-            global.__mini_a_metrics.mcp_actions_failed.inc()
+            //global.__mini_a_metrics.mcp_actions_failed.inc()
             toolOutput = { error: e.message }
           }
           if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
             var _t = toolOutput.content.map(r => r.text).join("\n")
             toolOutput = jsonParse(_t.trim(), __, __, false)
             if (isString(toolOutput)) toolOutput = _t
-            if (args.debug) {
+            /*if (args.debug) {
               print( ow.format.withSideLine("<<<\n" + colorify(toolOutput, { bgcolor: "BG(22),BLACK"}) + "\n<<<", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
-            }
+            }*/
           } else if (isDef(toolOutput) && isMap(toolOutput) && isDef(toolOutput.text)) {
             toolOutput = toolOutput.text
           } else if (isDef(toolOutput) && isString(toolOutput)) {
