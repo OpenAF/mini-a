@@ -348,7 +348,7 @@ When using dual-model configuration, you'll see clear indicators of which model 
 
 ```
 ℹ️  Using model: gpt-4 (openai)
-📝  Context summarized using low-cost model. Summary: 15 tokens generated
+🌀  Context summarized using low-cost model. Summary: 15 tokens generated
 ⚠️  Escalating to main model: 2 consecutive errors
 ℹ️  Interacting with main model (context ~1250 tokens)...
 ℹ️  Main model responded. Usage: 1250 tokens prompted, 45 tokens generated
