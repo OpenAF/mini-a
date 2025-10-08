@@ -477,232 +477,235 @@ MiniA.prototype.init = function(args) {
     this._isInitializing = true
   }
 
-  ow.metrics.add("mini-a", () => {
-    return this.getMetrics()
-  })
+  try {
+    ow.metrics.add("mini-a", () => {
+      return this.getMetrics()
+    })
 
-  args = _$(args, "args").isMap().default({})
+    args = _$(args, "args").isMap().default({})
 
-  // Validate common arguments
-  this._validateArgs(args, [
-    { name: "mcp", type: "string", default: __ },
-    { name: "rtm", type: "number", default: __ },
-    { name: "maxsteps", type: "number", default: 50 },
-    { name: "knowledge", type: "string", default: "" },
-    { name: "outfile", type: "string", default: __ },
-    { name: "libs", type: "string", default: "" },
-    { name: "conversation", type: "string", default: __ },
-    { name: "shellallow", type: "string", default: "" },
-    { name: "shellbanextra", type: "string", default: "" }
-  ])
+    // Validate common arguments
+    this._validateArgs(args, [
+      { name: "mcp", type: "string", default: __ },
+      { name: "rtm", type: "number", default: __ },
+      { name: "maxsteps", type: "number", default: 50 },
+      { name: "knowledge", type: "string", default: "" },
+      { name: "outfile", type: "string", default: __ },
+      { name: "libs", type: "string", default: "" },
+      { name: "conversation", type: "string", default: __ },
+      { name: "shellallow", type: "string", default: "" },
+      { name: "shellbanextra", type: "string", default: "" }
+    ])
 
-  // Convert and validate boolean arguments
-  args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
-  args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
-  args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
-  args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
-  args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
-  args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
-  args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
-  args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    // Convert and validate boolean arguments
+    args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
+    args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
+    args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
+    args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
+    args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
+    args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
+    args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+    args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
 
-  this._shellAllowlist = this._parseListOption(args.shellallow)
-  this._shellExtraBanned = this._parseListOption(args.shellbanextra)
-  this._shellAllowPipes = args.shellallowpipes
-  this._useTools = args.usetools
+    this._shellAllowlist = this._parseListOption(args.shellallow)
+    this._shellExtraBanned = this._parseListOption(args.shellbanextra)
+    this._shellAllowPipes = args.shellallowpipes
+    this._useTools = args.usetools
 
-  // Load additional libraries if specified
-  if (isDef(args.libs) && args.libs.length > 0) {
-    args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-      this._fnI("libs", `Loading library: ${lib}...`)
-      try {
-        if (lib.startsWith("@")) {
-          if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
-            var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
-            var _path = getOPackPath(_ar[1])
-            var _file = _path + "/" + _ar[2] + ".js"
-            if (io.fileExists(_file)) {
-              loadLib(_file)
+    // Load additional libraries if specified
+    if (isDef(args.libs) && args.libs.length > 0) {
+      args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
+        this._fnI("libs", `Loading library: ${lib}...`)
+        try {
+          if (lib.startsWith("@")) {
+            if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
+              var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
+              var _path = getOPackPath(_ar[1])
+              var _file = _path + "/" + _ar[2] + ".js"
+              if (io.fileExists(_file)) {
+                loadLib(_file)
+              } else {
+                this._fnI("error", `Library '${lib}' not found.`)
+              }
             } else {
-              this._fnI("error", `Library '${lib}' not found.`)
+              this._fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
             }
           } else {
-            this._fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
+            loadLib(lib)
           }
-        } else {
-          loadLib(lib)
-        }
-      } catch(e) {
-        this._fnI("error", `Failed to load library ${lib}: ${e.message}`)
-      }
-    })
-  }
-
-  // Using OAF_MODEL env var for model selection
-  if (isUnDef(getEnv("OAF_MODEL"))) {
-    logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
-    return
-  }
-  // Check for the low-cost model in OAF_LC_MODEL
-  if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
-    this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
-    this._use_lc = true
-    this._fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
-  } else {
-    this._use_lc = false
-  }
-
-  if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
-  this.llm = $llm(this._oaf_model)
-  if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
-
-  // Load conversation history if provided
-  if (isDef(args.conversation) && io.fileExists(args.conversation)) {
-    this._fnI("load", `Loading conversation history from ${args.conversation}...`)
-    this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
-    if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
-  }
-
-  // Using MCP (single or multiple connections)
-  var needMCPInit = false
-  if (isUnDef(this.mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
-    needMCPInit = true    
-    this.mcpConnections = __MiniA_mcpConnections
-    this.mcpTools = []
-    this.mcpToolNames = []
-    this.mcpToolToConnection = {}
-  }
-  if (isDef(args.mcp) && needMCPInit) {
-    var mcpConfigs = af.fromJSSLON(args.mcp)
-    
-    // Handle both single object and array of MCP configurations
-    if (!isArray(mcpConfigs)) {
-      mcpConfigs = [mcpConfigs]
-    }
-
-    this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
-
-    // Initialize each MCP connection
-    var parent = this
-    mcpConfigs.forEach((mcpConfig, index) => {
-      try {
-        var mcp
-        if (Object.keys(this.mcpConnections).indexOf(md5(stringify(mcpConfig, __, ""))) >= 0) {
-          mcp = this.mcpConnections[md5(stringify(mcpConfig, __, ""))]
-        } else {
-          mcp = $mcp(merge(mcpConfig, {
-            preFn: (t, a) => {
-              parent._fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
-            },
-            posFn: (t, a, r) => {
-              //try {
-              if (isMap(r) && r.error) {
-                logWarn(`Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
-                global.__mini_a_metrics.mcp_actions_failed.inc()
-              } else {
-                log(`Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
-                global.__mini_a_metrics.mcp_actions_executed.inc()
-              }
-              if (args.debug) {
-                print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
-              }
-              //} catch(eee) { $err(eee) }
-            }
-          }))
-          this.mcpConnections[md5(stringify(mcpConfig, __, ""))] = mcp
-          mcp.initialize()
-          sleep(100, true)
-        }
-        
-        var tools = mcp.listTools()
-        if (isDef(tools) && isDef(tools.tools)) {
-          tools = tools.tools
-        } else {
-          throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
-        }
-        
-        // Store connection and map tools to this connection
-        //this.mcpConnections.push(mcp)
-        tools.forEach(tool => {
-          this.mcpTools.push(tool)
-          this.mcpToolNames.push(tool.name)
-          this.mcpToolToConnection[tool.name] = md5(stringify(mcpConfig, __, ""))
-        })
-
-        this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
-      } catch (e) {
-        logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
-        throw e
-      }
-    })
-
-    this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
-  }
-
-  if (this._useTools && this.mcpTools.length > 0) {
-    var registerMcpTools = llmInstance => {
-      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
-
-      var updated = llmInstance
-      Object.keys(this.mcpConnections).forEach(connectionId => {
-        var client = this.mcpConnections[connectionId]
-        if (isUnDef(client)) return
-
-        try {
-          var result = updated.withMcpTools(client)
-          if (isDef(result)) updated = result
-        } catch (e) {
-          var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
-          this._fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+        } catch(e) {
+          this._fnI("error", `Failed to load library ${lib}: ${e.message}`)
         }
       })
-      return updated
     }
 
-    var updatedMainLLM = registerMcpTools(this.llm)
-    if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
-
-    if (this._use_lc) {
-      var updatedLowCostLLM = registerMcpTools(this.lc_llm)
-      if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+    // Using OAF_MODEL env var for model selection
+    if (isUnDef(getEnv("OAF_MODEL"))) {
+      logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
+      return
+    }
+    // Check for the low-cost model in OAF_LC_MODEL
+    if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
+      this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
+      this._use_lc = true
+      this._fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
+    } else {
+      this._use_lc = false
     }
 
-    this._fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
-  }
+    if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
+    this.llm = $llm(this._oaf_model)
+    if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
 
-  // Provide system prompt instructions
-  if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
-  var rules = af.fromJSSLON(args.rules)
-  if (!isArray(rules)) rules = [rules]
+    // Load conversation history if provided
+    if (isDef(args.conversation) && io.fileExists(args.conversation)) {
+      this._fnI("load", `Loading conversation history from ${args.conversation}...`)
+      this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
+      if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
+    }
 
-  var promptActionsDesc = this._useTools ? [] : this.mcpTools
-  var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
-  var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+    // Using MCP (single or multiple connections)
+    var needMCPInit = false
+    if (isUnDef(this.mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
+      needMCPInit = true    
+      this.mcpConnections = __MiniA_mcpConnections
+      this.mcpTools = []
+      this.mcpToolNames = []
+      this.mcpToolToConnection = {}
+    }
+    if (isDef(args.mcp) && needMCPInit) {
+      var mcpConfigs = af.fromJSSLON(args.mcp)
+      
+      // Handle both single object and array of MCP configurations
+      if (!isArray(mcpConfigs)) {
+        mcpConfigs = [mcpConfigs]
+      }
 
-  if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
-    actionsWordNumber: actionsWordNumber,
-    actionsList      : promptActionsList,
-    useshell         : args.useshell,
-    markdown         : args.__format == "md",
-    rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
-    knowledge        : args.knowledge.trim(),
-    actionsdesc      : promptActionsDesc,
-    isMachine        : (isDef(args.__format) && args.__format != "md"),
-    usetools         : this._useTools,
-    toolCount        : this.mcpTools.length
-  })
+      this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
 
-  llm = this.llm.withInstructions(this._systemInst)
-  if (this._use_lc) this.lc_llm = this.lc_llm.withInstructions(this._systemInst)
+      // Initialize each MCP connection
+      var parent = this
+      mcpConfigs.forEach((mcpConfig, index) => {
+        try {
+          var mcp
+          if (Object.keys(this.mcpConnections).indexOf(md5(stringify(mcpConfig, __, ""))) >= 0) {
+            mcp = this.mcpConnections[md5(stringify(mcpConfig, __, ""))]
+          } else {
+            mcp = $mcp(merge(mcpConfig, {
+              preFn: (t, a) => {
+                parent._fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+              },
+              posFn: (t, a, r) => {
+                //try {
+                if (isMap(r) && r.error) {
+                  logWarn(`Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
+                  global.__mini_a_metrics.mcp_actions_failed.inc()
+                } else {
+                  log(`Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
+                  global.__mini_a_metrics.mcp_actions_executed.inc()
+                }
+                if (args.debug) {
+                  print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+                }
+                //} catch(eee) { $err(eee) }
+              }
+            }))
+            this.mcpConnections[md5(stringify(mcpConfig, __, ""))] = mcp
+            mcp.initialize()
+            sleep(100, true)
+          }
+          
+          var tools = mcp.listTools()
+          if (isDef(tools) && isDef(tools.tools)) {
+            tools = tools.tools
+          } else {
+            throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
+          }
+          
+          // Store connection and map tools to this connection
+          //this.mcpConnections.push(mcp)
+          tools.forEach(tool => {
+            this.mcpTools.push(tool)
+            this.mcpToolNames.push(tool.name)
+            this.mcpToolToConnection[tool.name] = md5(stringify(mcpConfig, __, ""))
+          })
 
-  var systemTokens = this._estimateTokens(this._systemInst)
-  this._fnI("size", `System prompt ~${systemTokens} tokens`)
-  if (args.debug) {
-    print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
-  }
+          this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
+        } catch (e) {
+          logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
+          throw e
+        }
+      })
 
-  this._isInitialized = true
-  this._isInitializing = false
+      this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+    }
+
+    if (this._useTools && this.mcpTools.length > 0) {
+      var registerMcpTools = llmInstance => {
+        if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
+
+        var updated = llmInstance
+        Object.keys(this.mcpConnections).forEach(connectionId => {
+          var client = this.mcpConnections[connectionId]
+          if (isUnDef(client)) return
+
+          try {
+            var result = updated.withMcpTools(client)
+            if (isDef(result)) updated = result
+          } catch (e) {
+            var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+            this._fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+          }
+        })
+        return updated
+      }
+
+      var updatedMainLLM = registerMcpTools(this.llm)
+      if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+
+      if (this._use_lc) {
+        var updatedLowCostLLM = registerMcpTools(this.lc_llm)
+        if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+      }
+
+      this._fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+    }
+
+    // Provide system prompt instructions
+    if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
+    var rules = af.fromJSSLON(args.rules)
+    if (!isArray(rules)) rules = [rules]
+
+    var promptActionsDesc = this._useTools ? [] : this.mcpTools
+    var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
+    var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+
+    if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
+      actionsWordNumber: actionsWordNumber,
+      actionsList      : promptActionsList,
+      useshell         : args.useshell,
+      markdown         : args.__format == "md",
+      rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
+      knowledge        : args.knowledge.trim(),
+      actionsdesc      : promptActionsDesc,
+      isMachine        : (isDef(args.__format) && args.__format != "md"),
+      usetools         : this._useTools,
+      toolCount        : this.mcpTools.length
+    })
+
+    llm = this.llm.withInstructions(this._systemInst)
+    if (this._use_lc) this.lc_llm = this.lc_llm.withInstructions(this._systemInst)
+
+    var systemTokens = this._estimateTokens(this._systemInst)
+    this._fnI("size", `System prompt ~${systemTokens} tokens`)
+    if (args.debug) {
+      print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
+    }
+  } catch(ee) {
+    this._isInitialized = true
+  } finally {
+    this._isInitializing = false
+  } 
 }
 
 /**
