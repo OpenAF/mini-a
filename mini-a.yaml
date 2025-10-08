@@ -41,7 +41,7 @@ help:
     example  : "true"
     mandatory: false
   - name     : useshell
-    desc     : "Whether to allow shell commands (default: true)"
+    desc     : "Whether to allow shell commands (default: false)"
     example  : "true"
     mandatory: false
   - name     : shellallow
@@ -133,6 +133,10 @@ jobs:
       shellallow     : isString.default(__)
       shellbanextra  : isString.default(__)
       shellallowpipes: toBoolean.isBoolean.default(false)
+      shellbatch     : toBoolean.isBoolean.default(false)
+      usetools       : toBoolean.isBoolean.default(false)
+      rules          : isString.default(__)
+      state          : isString.default(__)
   exec : | #js
     var _ma = new MiniA()
     if (isUnDef(args.__format)) args.__format = "md"

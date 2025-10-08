@@ -30,6 +30,10 @@ help:
     desc     : "Boolean to keep history files (default: false)"
     example  : "true"
     mandatory: false
+  - name     : maxcontext
+    desc     : "Maximum conversation tokens before Mini-A summarizes context (default: 200000)"
+    example  : "200000"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -334,7 +338,7 @@ jobs:
     in:
       showExecs       : toBoolean().isBoolean().default(false)
       logPromptHeaders: isString().default("")
-      maxcontent      : toNumber().isNumber().default(200000)
+      maxcontext      : toNumber().isNumber().default(200000)
       usehistory      : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)

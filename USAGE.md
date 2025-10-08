@@ -153,6 +153,7 @@ The `start()` method accepts various configuration options:
 
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
+- **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
 
 ```javascript
 // Single MCP connection
@@ -172,6 +173,7 @@ mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-db.yaml
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
+- **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Output Configuration
 - **`outfile`** (string): Path to file where final answer will be written
@@ -243,6 +245,20 @@ var result = agent.start({
 
 Be aware of the security defaults: `mcp-ssh` is read-only by default and enforces a banned-commands policy. Use `readwrite=true` cautiously and adjust filtering with `shellallow`, `shellbanextra`, or `shellallowpipes` only when you understand the risks.
 
+### 3.2 Registering MCP tools on the model
+
+```javascript
+var agent = new MiniA()
+var result = agent.start({
+    goal: "Pull the latest Docker image metadata",
+    mcp: "(cmd: 'docker run --rm -i mcp/dockerhub')",
+    usetools: true,   // Ask the LLM to invoke MCP tools directly via the tool interface
+    maxsteps: 8
+})
+```
+
+Setting `usetools: true` registers the MCP tool schemas directly with the model so the prompt stays compact. Leave it `false` when a model lacks tool support or you'd rather expose schemas via the system prompt.
+
 ### 4. File System Operations
 
 ```javascript
@@ -276,6 +292,19 @@ var result = agent.start({
     useshell: true
 })
 ```
+
+### 6.1 Seeding Agent State
+
+```javascript
+var agent = new MiniA()
+var result = agent.start({
+    goal: "Track the status of remediation tasks",
+    state: { backlog: [], completed: [] },
+    useshell: true
+})
+```
+
+The `state` object (or JSON string) is cloned into the agent before the first step and persists across every iteration, so you can pre-populate checklists, counters, or in-memory caches that the agent should maintain.
 
 ### 7. Dual-Model Configuration Examples
 
