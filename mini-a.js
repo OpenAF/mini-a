@@ -10,6 +10,7 @@ ow.loadMetrics()
  */
 var MiniA = function() {
   this._isInitialized = false
+  this._isInitializing = false
   this._id = genUUID()
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
@@ -467,6 +468,14 @@ MiniA.prototype._runCommand = function(args) {
 
 MiniA.prototype.init = function(args) {
   if (this._isInitialized) return
+  if (this._isInitializing) {
+    do {
+      sleep(100, true)
+    } while(this._isInitializing)
+    return
+  } else {
+    this._isInitializing = true
+  }
 
   ow.metrics.add("mini-a", () => {
     return this.getMetrics()
@@ -577,11 +586,11 @@ MiniA.prototype.init = function(args) {
     mcpConfigs.forEach((mcpConfig, index) => {
       try {
         var mcp
-        if (Object.keys(this.mcpConnections).indexOf(md5(mcpConfig)) >= 0) {
-          mcp = this.mcpConnections[md5(mcpConfig)]
+        if (Object.keys(this.mcpConnections).indexOf(md5(stringify(mcpConfig, __, ""))) >= 0) {
+          mcp = this.mcpConnections[md5(stringify(mcpConfig, __, ""))]
         } else {
           mcp = $mcp(mcpConfig)
-          this.mcpConnections[md5(mcpConfig)] = mcp
+          this.mcpConnections[md5(stringify(mcpConfig, __, ""))] = mcp
           mcp.initialize()
           sleep(100, true)
         }
@@ -598,7 +607,7 @@ MiniA.prototype.init = function(args) {
         tools.forEach(tool => {
           this.mcpTools.push(tool)
           this.mcpToolNames.push(tool.name)
-          this.mcpToolToConnection[tool.name] = md5(mcpConfig)
+          this.mcpToolToConnection[tool.name] = md5(stringify(mcpConfig, __, ""))
         })
 
         this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
@@ -674,6 +683,7 @@ MiniA.prototype.init = function(args) {
   }
 
   this._isInitialized = true
+  this._isInitializing = false
 }
 
 /**
