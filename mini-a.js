@@ -719,6 +719,20 @@ MiniA.prototype.init = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    var sessionStartTime = now()
+    try {
+        return this._startInternal(args, sessionStartTime)
+    } catch (e) {
+        global.__mini_a_metrics.goals_failed.inc()
+        global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
+        this.state = "stop"
+        var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+        this._fnI("error", `Agent failed: ${errMsg}`)
+        throw e
+    }
+}
+
+MiniA.prototype._startInternal = function(args, sessionStartTime) {
     _$(args.goal, "args.goal").isString().$_()
     
     // Validate common arguments
@@ -752,6 +766,7 @@ MiniA.prototype.start = function(args) {
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
     this._useTools = args.usetools
+    sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -839,6 +854,8 @@ MiniA.prototype.start = function(args) {
             context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
             var newTokens = this._estimateTokens(context.join(""))
             this._fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
+          } else {
+            global.__mini_a_metrics.summaries_skipped.inc()
           }
         }
       }
@@ -892,6 +909,8 @@ MiniA.prototype.start = function(args) {
         var newTokens = this._estimateTokens(stringify(_nc, __, ""))
         this._fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
         this.llm.getGPT().setConversation(_sysc.concat([{ role: "assistant", content: "Summarized conversation: " + _nc }]))
+      } else {
+        global.__mini_a_metrics.summaries_skipped.inc()
       }
     }
 
@@ -908,7 +927,7 @@ MiniA.prototype.start = function(args) {
     var context = [], maxSteps = args.maxsteps, consecutiveErrors = 0
     var consecutiveThoughts = 0, totalThoughts = 0, stepsWithoutAction = 0
     var lastActions = [], recentSimilarThoughts = []
-    var sessionStartTime = now()
+    sessionStartTime = now()
     this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
     // We will iterate up to maxSteps to try to achieve the goal
@@ -1022,6 +1041,7 @@ MiniA.prototype.start = function(args) {
           this._fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.json_parse_failures.inc()
+          global.__mini_a_metrics.retries.inc()
           addCall()
           var fallbackResponseWithStats = this.llm.promptWithStats(prompt)
           global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackResponseWithStats.stats.total_tokens || 0)
@@ -1158,6 +1178,8 @@ MiniA.prototype.start = function(args) {
         var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
         var stepLabel = `${step + 1}${stepSuffix}`
 
+        global.__mini_a_metrics.thoughts_made.inc()
+
         if (action != "think") {
           var logMsg = thoughtValue || currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
           if (isObject(logMsg)) logMsg = af.toSLON(logMsg)
@@ -1171,7 +1193,6 @@ MiniA.prototype.start = function(args) {
           context.push(`[THOUGHT ${stepLabel}] ${thoughtStr}`)
 
           global.__mini_a_metrics.thinks_made.inc()
-          global.__mini_a_metrics.thoughts_made.inc()
 
           consecutiveThoughts++
           totalThoughts++
