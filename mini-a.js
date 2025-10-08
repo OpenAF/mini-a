@@ -587,9 +587,9 @@ MiniA.prototype.init = function(args) {
       var parent = this
       mcpConfigs.forEach((mcpConfig, index) => {
         try {
-          var mcp
-          if (Object.keys(this.mcpConnections).indexOf(md5(stringify(mcpConfig, __, ""))) >= 0) {
-            mcp = this.mcpConnections[md5(stringify(mcpConfig, __, ""))]
+          var mcp, id = md5(stringify(mcpConfig, __, ""))
+          if (Object.keys(this.mcpConnections).indexOf(id) >= 0) {
+            mcp = this.mcpConnections[id]
           } else {
             mcp = $mcp(merge(mcpConfig, {
               preFn: (t, a) => {
@@ -610,7 +610,7 @@ MiniA.prototype.init = function(args) {
                 //} catch(eee) { $err(eee) }
               }
             }))
-            this.mcpConnections[md5(stringify(mcpConfig, __, ""))] = mcp
+            this.mcpConnections[id] = mcp
             mcp.initialize()
             sleep(100, true)
           }
@@ -627,7 +627,7 @@ MiniA.prototype.init = function(args) {
           tools.forEach(tool => {
             this.mcpTools.push(tool)
             this.mcpToolNames.push(tool.name)
-            this.mcpToolToConnection[tool.name] = md5(stringify(mcpConfig, __, ""))
+            this.mcpToolToConnection[tool.name] = id
           })
 
           this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
