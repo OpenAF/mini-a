@@ -173,6 +173,7 @@ All Mini-A options can be passed as command line arguments:
 
 - `goal` – Objective the agent should achieve (required for `MiniA.start` / `mini-a.yaml`)
 - `mcp` – MCP server configuration (single object or array, in JSON/SLON)
+- `usetools` – Register MCP tools directly with the model instead of expanding the prompt with tool schemas
 - `useshell` – Allow shell command execution (default `false`)
 - `readwrite` – Allow file system modifications without confirmation prompts (default `false`)
 - `checkall` – Prompt before running every shell command (default `false`)
@@ -181,6 +182,7 @@ All Mini-A options can be passed as command line arguments:
 - `shellbatch` – Skip interactive confirmations when `checkall` is active (default `false`)
 - `knowledge` – Extra instructions or the path to a text file to append to the system prompt
 - `rules` – Additional numbered rules (JSON/SLON array) injected into the system prompt
+- `state` – Initial agent state payload (JSON/SLON string or object) preserved between steps
 - `conversation` – Path to a conversation JSON file to load/save chat history
 - `libs` – Comma-separated list of extra OpenAF libraries to load before starting
 - `maxsteps` – Maximum number of agent steps (default `25`)

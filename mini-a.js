@@ -10,6 +10,7 @@ ow.loadMetrics()
  */
 var MiniA = function() {
   this._isInitialized = false
+  this._isInitializing = false
   this._id = genUUID()
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
@@ -78,6 +79,20 @@ ACTION USAGE:
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 • "final" - Provide your complete answer when goal is achieved
+
+MULTI-ACTION SUPPORT:
+• You may set "action" to an array of action objects to chain tools sequentially in one step
+• Each action object must include at least an "action" field and any required fields (e.g., command, params, answer)
+
+{{#if usetools}}
+TOOL REGISTRATION:
+• {{toolCount}} MCP tools are registered directly with the model; invoke them by naming the tool in "action" and supply the required params.
+• Tool schemas are provided via the tool interface, so keep prompts concise.
+
+{{/if}}
+STATE MANAGEMENT:
+• You can persist and update structured state in the 'state' object at each step.
+• To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
 RULES:
 1. Always include "thought" and "action" fields
@@ -444,174 +459,244 @@ MiniA.prototype._runCommand = function(args) {
 
 MiniA.prototype.init = function(args) {
   if (this._isInitialized) return
+  if (this._isInitializing) {
+    do {
+      sleep(100, true)
+    } while(this._isInitializing)
+    return
+  } else {
+    this._isInitializing = true
+  }
 
-  ow.metrics.add("mini-a", () => {
-    return this.getMetrics()
-  })
+  try {
+    ow.metrics.add("mini-a", () => {
+      return this.getMetrics()
+    })
 
-  args = _$(args, "args").isMap().default({})
+    args = _$(args, "args").isMap().default({})
 
-  // Validate common arguments
-  this._validateArgs(args, [
-    { name: "mcp", type: "string", default: __ },
-    { name: "rtm", type: "number", default: __ },
-    { name: "maxsteps", type: "number", default: 50 },
-    { name: "knowledge", type: "string", default: "" },
-    { name: "outfile", type: "string", default: __ },
-    { name: "libs", type: "string", default: "" },
-    { name: "conversation", type: "string", default: __ },
-    { name: "shellallow", type: "string", default: "" },
-    { name: "shellbanextra", type: "string", default: "" }
-  ])
+    // Validate common arguments
+    this._validateArgs(args, [
+      { name: "mcp", type: "string", default: __ },
+      { name: "rtm", type: "number", default: __ },
+      { name: "maxsteps", type: "number", default: 50 },
+      { name: "knowledge", type: "string", default: "" },
+      { name: "outfile", type: "string", default: __ },
+      { name: "libs", type: "string", default: "" },
+      { name: "conversation", type: "string", default: __ },
+      { name: "shellallow", type: "string", default: "" },
+      { name: "shellbanextra", type: "string", default: "" }
+    ])
 
-  // Convert and validate boolean arguments
-  args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
-  args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
-  args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
-  args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
-  args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
-  args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
-  args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+    // Convert and validate boolean arguments
+    args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
+    args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
+    args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
+    args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
+    args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
+    args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
+    args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
+    args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
 
-  this._shellAllowlist = this._parseListOption(args.shellallow)
-  this._shellExtraBanned = this._parseListOption(args.shellbanextra)
-  this._shellAllowPipes = args.shellallowpipes
+    this._shellAllowlist = this._parseListOption(args.shellallow)
+    this._shellExtraBanned = this._parseListOption(args.shellbanextra)
+    this._shellAllowPipes = args.shellallowpipes
+    this._useTools = args.usetools
 
-  // Load additional libraries if specified
-  if (isDef(args.libs) && args.libs.length > 0) {
-    args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-      this._fnI("libs", `Loading library: ${lib}...`)
-      try {
-        if (lib.startsWith("@")) {
-          if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
-            var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
-            var _path = getOPackPath(_ar[1])
-            var _file = _path + "/" + _ar[2] + ".js"
-            if (io.fileExists(_file)) {
-              loadLib(_file)
+    // Load additional libraries if specified
+    if (isDef(args.libs) && args.libs.length > 0) {
+      args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
+        this._fnI("libs", `Loading library: ${lib}...`)
+        try {
+          if (lib.startsWith("@")) {
+            if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
+              var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
+              var _path = getOPackPath(_ar[1])
+              var _file = _path + "/" + _ar[2] + ".js"
+              if (io.fileExists(_file)) {
+                loadLib(_file)
+              } else {
+                this._fnI("error", `Library '${lib}' not found.`)
+              }
             } else {
-              this._fnI("error", `Library '${lib}' not found.`)
+              this._fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
             }
           } else {
-            this._fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
+            loadLib(lib)
           }
-        } else {
-          loadLib(lib)
+        } catch(e) {
+          this._fnI("error", `Failed to load library ${lib}: ${e.message}`)
         }
-      } catch(e) {
-        this._fnI("error", `Failed to load library ${lib}: ${e.message}`)
-      }
-    })
-  }
-
-  // Using OAF_MODEL env var for model selection
-  if (isUnDef(getEnv("OAF_MODEL"))) {
-    logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
-    return
-  }
-  // Check for the low-cost model in OAF_LC_MODEL
-  if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
-    this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
-    this._use_lc = true
-    this._fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
-  } else {
-    this._use_lc = false
-  }
-
-  if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
-  this.llm = $llm(this._oaf_model)
-  if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
-
-  // Load conversation history if provided
-  if (isDef(args.conversation) && io.fileExists(args.conversation)) {
-    this._fnI("load", `Loading conversation history from ${args.conversation}...`)
-    this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
-    if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
-  }
-
-  // Using MCP (single or multiple connections)
-  var needMCPInit = false
-  if (isUnDef(this.mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
-    needMCPInit = true    
-    this.mcpConnections = __MiniA_mcpConnections
-    this.mcpTools = []
-    this.mcpToolNames = []
-    this.mcpToolToConnection = {}
-  }
-  if (isDef(args.mcp) && needMCPInit) {
-    var mcpConfigs = af.fromJSSLON(args.mcp)
-    
-    // Handle both single object and array of MCP configurations
-    if (!isArray(mcpConfigs)) {
-      mcpConfigs = [mcpConfigs]
+      })
     }
 
-    this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
+    // Using OAF_MODEL env var for model selection
+    if (isUnDef(getEnv("OAF_MODEL"))) {
+      logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
+      return
+    }
+    // Check for the low-cost model in OAF_LC_MODEL
+    if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
+      this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
+      this._use_lc = true
+      this._fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
+    } else {
+      this._use_lc = false
+    }
 
-    // Initialize each MCP connection
-    mcpConfigs.forEach((mcpConfig, index) => {
-      try {
-        var mcp
-        if (Object.keys(this.mcpConnections).indexOf(md5(mcpConfig)) >= 0) {
-          mcp = this.mcpConnections[md5(mcpConfig)]
-        } else {
-          mcp = $mcp(mcpConfig)
-          this.mcpConnections[md5(mcpConfig)] = mcp
-          mcp.initialize()
-          sleep(100, true)
-        }
-        
-        var tools = mcp.listTools()
-        if (isDef(tools) && isDef(tools.tools)) {
-          tools = tools.tools
-        } else {
-          throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
-        }
-        
-        // Store connection and map tools to this connection
-        //this.mcpConnections.push(mcp)
-        tools.forEach(tool => {
-          this.mcpTools.push(tool)
-          this.mcpToolNames.push(tool.name)
-          this.mcpToolToConnection[tool.name] = md5(mcpConfig)
-        })
+    if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
+    this.llm = $llm(this._oaf_model)
+    if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
 
-        this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
-      } catch (e) {
-        logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
-        throw e
+    // Load conversation history if provided
+    if (isDef(args.conversation) && io.fileExists(args.conversation)) {
+      this._fnI("load", `Loading conversation history from ${args.conversation}...`)
+      this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
+      if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
+    }
+
+    // Using MCP (single or multiple connections)
+    var needMCPInit = false
+    if (isUnDef(this.mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
+      needMCPInit = true    
+      this.mcpConnections = __MiniA_mcpConnections
+      this.mcpTools = []
+      this.mcpToolNames = []
+      this.mcpToolToConnection = {}
+    }
+    if (isDef(args.mcp) && needMCPInit) {
+      var mcpConfigs = af.fromJSSLON(args.mcp)
+      
+      // Handle both single object and array of MCP configurations
+      if (!isArray(mcpConfigs)) {
+        mcpConfigs = [mcpConfigs]
       }
+
+      this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
+
+      // Initialize each MCP connection
+      var parent = this
+      mcpConfigs.forEach((mcpConfig, index) => {
+        try {
+          var mcp, id = md5(stringify(mcpConfig, __, ""))
+          if (Object.keys(this.mcpConnections).indexOf(id) >= 0) {
+            mcp = this.mcpConnections[id]
+          } else {
+            mcp = $mcp(merge(mcpConfig, {
+              preFn: (t, a) => {
+                parent._fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+              },
+              posFn: (t, a, r) => {
+                //try {
+                if (isMap(r) && r.error) {
+                  logWarn(`Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
+                  global.__mini_a_metrics.mcp_actions_failed.inc()
+                } else {
+                  log(`Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
+                  global.__mini_a_metrics.mcp_actions_executed.inc()
+                }
+                if (args.debug) {
+                  print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+                }
+                //} catch(eee) { $err(eee) }
+              }
+            }))
+            this.mcpConnections[id] = mcp
+            mcp.initialize()
+            sleep(100, true)
+          }
+          
+          var tools = mcp.listTools()
+          if (isDef(tools) && isDef(tools.tools)) {
+            tools = tools.tools
+          } else {
+            throw new Error(`MCP connection ${index + 1} failed or returned no tools.`)
+          }
+          
+          // Store connection and map tools to this connection
+          //this.mcpConnections.push(mcp)
+          tools.forEach(tool => {
+            this.mcpTools.push(tool)
+            this.mcpToolNames.push(tool.name)
+            this.mcpToolToConnection[tool.name] = id
+          })
+
+          this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
+        } catch (e) {
+          logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
+          throw e
+        }
+      })
+
+      this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+    }
+
+    if (this._useTools && this.mcpTools.length > 0) {
+      var registerMcpTools = llmInstance => {
+        if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
+
+        var updated = llmInstance
+        Object.keys(this.mcpConnections).forEach(connectionId => {
+          var client = this.mcpConnections[connectionId]
+          if (isUnDef(client)) return
+
+          try {
+            var result = updated.withMcpTools(client)
+            if (isDef(result)) updated = result
+          } catch (e) {
+            var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+            this._fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+          }
+        })
+        return updated
+      }
+
+      var updatedMainLLM = registerMcpTools(this.llm)
+      if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+
+      if (this._use_lc) {
+        var updatedLowCostLLM = registerMcpTools(this.lc_llm)
+        if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+      }
+
+      this._fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+    }
+
+    // Provide system prompt instructions
+    if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
+    var rules = af.fromJSSLON(args.rules)
+    if (!isArray(rules)) rules = [rules]
+
+    var promptActionsDesc = this._useTools ? [] : this.mcpTools
+    var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
+    var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+
+    if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
+      actionsWordNumber: actionsWordNumber,
+      actionsList      : promptActionsList,
+      useshell         : args.useshell,
+      markdown         : args.__format == "md",
+      rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
+      knowledge        : args.knowledge.trim(),
+      actionsdesc      : promptActionsDesc,
+      isMachine        : (isDef(args.__format) && args.__format != "md"),
+      usetools         : this._useTools,
+      toolCount        : this.mcpTools.length
     })
 
-    this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
-  }
+    llm = this.llm.withInstructions(this._systemInst)
+    if (this._use_lc) this.lc_llm = this.lc_llm.withInstructions(this._systemInst)
 
-  // Provide system prompt instructions
-  if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
-  var rules = af.fromJSSLON(args.rules)
-  if (!isArray(rules)) rules = [rules]
-
-  if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
-    actionsWordNumber: this._numberInWords(1 + this.mcpTools.length),
-    actionsList      : this.mcpTools.map(r => r.name).join(" | "),
-    useshell         : args.useshell,
-    markdown         : args.__format == "md",
-    rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
-    knowledge        : args.knowledge.trim(),
-    actionsdesc      : this.mcpTools,
-    isMachine        : (isDef(args.__format) && args.__format != "md")
-  })
-
-  llm = this.llm.withInstructions(this._systemInst)
-  if (this._use_lc) this.lc_llm = this.lc_llm.withInstructions(this._systemInst)
-
-  var systemTokens = this._estimateTokens(this._systemInst)
-  this._fnI("size", `System prompt ~${systemTokens} tokens`)
-  if (args.debug) {
-    print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
-  }
-
-  this._isInitialized = true
+    var systemTokens = this._estimateTokens(this._systemInst)
+    this._fnI("size", `System prompt ~${systemTokens} tokens`)
+    if (args.debug) {
+      print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
+    }
+  } catch(ee) {
+    this._isInitialized = true
+  } finally {
+    this._isInitializing = false
+  } 
 }
 
 /**
@@ -646,6 +731,20 @@ MiniA.prototype.init = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    var sessionStartTime = now()
+    try {
+        return this._startInternal(args, sessionStartTime)
+    } catch (e) {
+        global.__mini_a_metrics.goals_failed.inc()
+        global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
+        this.state = "stop"
+        var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+        this._fnI("error", `Agent failed: ${errMsg}`)
+        throw e
+    }
+}
+
+MiniA.prototype._startInternal = function(args, sessionStartTime) {
     _$(args.goal, "args.goal").isString().$_()
     
     // Validate common arguments
@@ -677,6 +776,8 @@ MiniA.prototype.start = function(args) {
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
+    this._useTools = args.usetools
+    sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
     var calls = 0, startTime 
@@ -764,6 +865,8 @@ MiniA.prototype.start = function(args) {
             context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
             var newTokens = this._estimateTokens(context.join(""))
             this._fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
+          } else {
+            global.__mini_a_metrics.summaries_skipped.inc()
           }
         }
       }
@@ -803,13 +906,15 @@ MiniA.prototype.start = function(args) {
         var newTokens = this._estimateTokens(stringify(_nc, __, ""))
         this._fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
         this.llm.getGPT().setConversation(_sysc.concat([{ role: "assistant", content: "Summarized conversation: " + _nc }]))
+      } else {
+        global.__mini_a_metrics.summaries_skipped.inc()
       }
     }
 
     var context = [], maxSteps = args.maxsteps, consecutiveErrors = 0
     var consecutiveThoughts = 0, totalThoughts = 0, stepsWithoutAction = 0
     var lastActions = [], recentSimilarThoughts = []
-    var sessionStartTime = now()
+    sessionStartTime = now()
     this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
     // We will iterate up to maxSteps to try to achieve the goal
@@ -916,6 +1021,7 @@ MiniA.prototype.start = function(args) {
           this._fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.json_parse_failures.inc()
+          global.__mini_a_metrics.retries.inc()
           addCall()
           var fallbackResponseWithStats = this.llm.promptWithStats(prompt)
           global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackResponseWithStats.stats.total_tokens || 0)
@@ -1004,39 +1110,47 @@ MiniA.prototype.start = function(args) {
       // Handle actions
       // --------------
 
-      // Action 'think': just add thought to context
-      if (action == "think") {
-        var thoughtStr = (isObject(thought) ? stringify(thought, __, "") : thought) || "(no thought)"
-        this._fnI("think", `${thoughtStr}`)
-        context.push(`[THOUGHT ${step + 1}] ${thoughtStr}`)
-        
-        global.__mini_a_metrics.thinks_made.inc()
         global.__mini_a_metrics.thoughts_made.inc()
-        
-        // Track thinking patterns for escalation logic
-        consecutiveThoughts++
-        totalThoughts++
-        stepsWithoutAction++
-        global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
-        
-        // Detect thinking loops
-        if (consecutiveThoughts >= 5) {
-          global.__mini_a_metrics.thinking_loops_detected.inc()
+
+        if (action != "think") {
+          var logMsg = thoughtValue || currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
+          if (isObject(logMsg)) logMsg = af.toSLON(logMsg)
+          this._fnI("thought", `${logMsg}`)
         }
-        
-        // Check for similar thoughts (simplified tracking)
-        recentSimilarThoughts.push(thoughtStr)
-        // Keep only last 4 thoughts for comparison
-        if (recentSimilarThoughts.length > 4) {
-          recentSimilarThoughts.shift()
-        }
-        
-        // Count how many recent thoughts are similar to current one
-        var similarCount = 0
-        if (recentSimilarThoughts.length >= 3) {
-          for (var i = 0; i < recentSimilarThoughts.length - 1; i++) {
-            if (isSimilarThought(thoughtStr, recentSimilarThoughts[i])) {
-              similarCount++
+
+        var thoughtStr = (isObject(thoughtValue) ? stringify(thoughtValue, __, "") : thoughtValue) || "(no thought)"
+
+        if (action == "think") {
+          this._fnI("think", `${thoughtStr}`)
+          context.push(`[THOUGHT ${stepLabel}] ${thoughtStr}`)
+
+          global.__mini_a_metrics.thinks_made.inc()
+
+          consecutiveThoughts++
+          totalThoughts++
+          stepsWithoutAction++
+          global.__mini_a_metrics.consecutive_thoughts.set(consecutiveThoughts)
+
+          if (consecutiveThoughts >= 5) {
+            global.__mini_a_metrics.thinking_loops_detected.inc()
+          }
+
+          recentSimilarThoughts.push(thoughtStr)
+          if (recentSimilarThoughts.length > 4) {
+            recentSimilarThoughts.shift()
+          }
+
+          var similarCount = 0
+          if (recentSimilarThoughts.length >= 3) {
+            for (var i = 0; i < recentSimilarThoughts.length - 1; i++) {
+              if (isSimilarThought(thoughtStr, recentSimilarThoughts[i])) {
+                similarCount++
+              }
+            }
+            if (similarCount < 2) {
+              recentSimilarThoughts = [thoughtStr]
+            } else {
+              global.__mini_a_metrics.similar_thoughts_detected.inc()
             }
           }
           // Reset array if we don't have enough similar thoughts
@@ -1085,12 +1199,66 @@ MiniA.prototype.start = function(args) {
         continue
       }
 
-      if (this.mcpToolNames.indexOf(origAction) >= 0) {
-        if (isDef(msg.params) && !isMap(msg.params)) {
-          context.push(`[OBS ${step + 1}] (${origAction}) missing or invalid 'params' from model.`)
-          consecutiveErrors++
-          global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
-          global.__mini_a_metrics.mcp_actions_failed.inc()
+        if (this.mcpToolNames.indexOf(origActionRaw) >= 0) {
+          if (isDef(paramsValue) && !isMap(paramsValue)) {
+            context.push(`[OBS ${stepLabel}] (${origActionRaw}) missing or invalid 'params' from model.`)
+            consecutiveErrors++
+            global.__mini_a_metrics.consecutive_errors.set(consecutiveErrors)
+            global.__mini_a_metrics.mcp_actions_failed.inc()
+            hadErrorThisStep = true
+            break
+          }
+          //this._fnI("exec", `Executing action '${origActionRaw}' with params: ${af.toSLON(paramsValue)}`)
+
+          var connectionIndex = this.mcpToolToConnection[origActionRaw]
+          var mcp = this.mcpConnections[connectionIndex]
+
+          try {
+            var toolOutput = mcp.callTool(origActionRaw, paramsValue)
+            //global.__mini_a_metrics.mcp_actions_executed.inc()
+          } catch (e) {
+            //global.__mini_a_metrics.mcp_actions_failed.inc()
+            toolOutput = { error: e.message }
+          }
+          if (isDef(toolOutput) && isArray(toolOutput.content) && isDef(toolOutput.content[0]) && isDef(toolOutput.content[0].text)) {
+            var _t = toolOutput.content.map(r => r.text).join("\n")
+            toolOutput = jsonParse(_t.trim(), __, __, false)
+            if (isString(toolOutput)) toolOutput = _t
+            /*if (args.debug) {
+              print( ow.format.withSideLine("<<<\n" + colorify(toolOutput, { bgcolor: "BG(22),BLACK"}) + "\n<<<", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+            }*/
+          } else if (isDef(toolOutput) && isMap(toolOutput) && isDef(toolOutput.text)) {
+            toolOutput = toolOutput.text
+          } else if (isDef(toolOutput) && isString(toolOutput)) {
+            // keep as is
+          } else {
+            toolOutput = af.toSLON(toolOutput)
+          }
+          this._fnI("done", `Action '${origActionRaw}' completed (${ow.format.toBytesAbbreviation(stringify(toolOutput, __, "").length)}).`)
+          context.push(`[ACT ${stepLabel}] ${origActionRaw}: ${af.toSLON(paramsValue)}`)
+          context.push(`[OBS ${stepLabel}] ${stringify(toolOutput, __, "") || "(no output)"}`)
+
+          consecutiveThoughts = 0
+          stepsWithoutAction = 0
+          totalThoughts = Math.max(0, totalThoughts - 1)
+          recentSimilarThoughts = []
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+
+          lastActions.push(`${origActionRaw}: ${af.toSLON(paramsValue)}`)
+          if (lastActions.length > 3) lastActions.shift()
+
+          if (lastActions.length >= 3) {
+            var actionCounts = {}
+            lastActions.forEach(a => {
+              var actionType = a.split(':')[0]
+              actionCounts[actionType] = (actionCounts[actionType] || 0) + 1
+            })
+            if (Object.values(actionCounts).some(count => count >= 3)) {
+              global.__mini_a_metrics.action_loops_detected.inc()
+            }
+          }
+
+          checkAndSummarizeContext()
           continue
         }
         this._fnI("exec", `Executing action '${origAction}' with params: ${af.toSLON(msg.params)}`)
