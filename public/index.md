@@ -760,7 +760,7 @@
     }
 
     function persistHistory(entries) {
-        if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') return;
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined' || historyEnabled === false) return;
         try {
             window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(entries));
         } catch (error) {
@@ -975,7 +975,7 @@
     }
 
     function addConversationToHistory(sessionUuid, prompt, data) {
-        if (typeof window === 'undefined' || !sessionUuid) return null;
+    if (typeof window === 'undefined' || !sessionUuid || historyEnabled === false) return null;
 
         const entries = loadStoredHistory();
         const existingIndex = entries.findIndex(item => item.uuid === sessionUuid);
@@ -1330,7 +1330,7 @@
                 __refreshDarkMode();
 
                 if (data.status === 'finished') {
-                    if (currentSessionUuid) {
+                    if (currentSessionUuid && historyEnabled !== false) {
                         const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, data);
                         if (savedEntry) {
                             activeHistoryId = savedEntry.id;
