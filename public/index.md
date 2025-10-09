@@ -923,7 +923,7 @@
         await Promise.allSettled(uuidsToClear.map(uuid => {
             return fetch('/clear', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid, force: true })
             }).catch(error => {
                 console.error('Failed to clear conversation on server:', uuid, error);
@@ -965,7 +965,7 @@
             try {
                 await fetch('/clear', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
                     body: JSON.stringify({ uuid: entry.uuid, force: true })
                 });
             } catch (error) {
@@ -1059,7 +1059,7 @@
         try {
             const response = await fetch('/load-history', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify(payload)
             });
 
@@ -1114,7 +1114,7 @@
         try {
             const response = await fetch('/result', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid })
             });
 
@@ -1267,7 +1267,7 @@
         if (currentSessionUuid) {
             fetch('/result', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid: currentSessionUuid, request: 'stop' })
             }).catch(error => console.error('Error stopping request:', error));
         }
@@ -1294,7 +1294,7 @@
 
             const response = await fetch('/prompt', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ prompt: prompt, uuid: currentSessionUuid })
             });
 
@@ -1315,7 +1315,7 @@
             try {
                 const response = await fetch('/result', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
                     body: JSON.stringify({ uuid: currentSessionUuid })
                 });
 
@@ -1378,7 +1378,7 @@
         try {
             await fetch('/ping', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid })
             });
         } catch (e) {
@@ -1398,7 +1398,7 @@
         if (uuidToClear) {
             fetch('/clear', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid: uuidToClear })
             }).catch(err => console.error('Error sending clear request:', err));
         }
