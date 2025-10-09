@@ -84,13 +84,13 @@ filesHash:
   mcps/mcp-db.yaml: aaabdae6846d1a8aa62942ab0257dedd9942544d
   mcps/mcp-email.yaml: d9dde29b03e7b8873f66a22476dc8ffd6619ce85
   mcps/mcp-kube.yaml: d9268fd33f64db8afc6a7012540a72a358ccc021
-  mcps/mcp-net.yaml: e8fb65fd88862dc4704049f95d1a48f5dffd2251
+  mcps/mcp-net.yaml: 36b0e8ef74274819422453d6e76df4426f37a187
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
   mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 371733efa9e858952c67a668a52c195f09b18d4d
-  mini-a.js: fe2c7a4fba57c4b6a3e7333a82f420ea8f8745a8
+  mini-a.js: dbea559d48d2cd4587353d090ad621c25cb92304
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: d95feb44dc8f816d02be99cdce4d1fc4328a9426
   public/index.md: a4276f3b6f45e265dfd12cfa92c59a8668ab0925
