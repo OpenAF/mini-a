@@ -58,44 +58,65 @@ var MiniA = function() {
   this._SYSTEM_PROMPT = `
 You are a goal-oriented agent running in background. Work step-by-step toward your goal. No user interaction or feedback is possible.
 
-RESPONSE FORMAT: Always respond with exactly one valid JSON object:
+## RESPONSE FORMAT
+Always respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
 {
     "thought": "your reasoning for this step",
     "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
     "command": "required when action=shell or action entry uses shell: POSIX command to execute",{{/if}}
-    "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}",
-    "params": "required when action={{#if actionsList}}({{actionsList}}){{/if}} (or action entry uses these actions): JSON object with action parameters",
+    "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}{{#if actionsList}}",
+    "params": "required when action=({{actionsList}}) (or action entry uses these actions): JSON object with action parameters{{/if}}",
     "state": {"optional": "persist structured data for future steps"}
 }
 
 {{#if actionsList}}
-AVAILABLE ACTIONS:
+## AVAILABLE ACTIONS:
 {{#each actionsdesc}}
 • {{name}}: {{{description}}}{{#if inputSchema.properties}}(parameters: {{{$stringifyInLine inputSchema.properties}}}){{/if}}
 {{/each}}
 
 {{/if~}}
-ACTION USAGE:
+## ACTION USAGE:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
 
-MULTI-ACTION SUPPORT:
+## MULTI-ACTION SUPPORT:
 • You may set "action" to an array of action objects to chain tools sequentially in one step
 • Each action object must include at least an "action" field and any required fields (e.g., command, params, answer)
 
 {{#if usetools}}
-TOOL REGISTRATION:
+## TOOL REGISTRATION:
 • {{toolCount}} MCP tools are registered directly with the model; invoke them by naming the tool in "action" and supply the required params.
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
 {{/if}}
-STATE MANAGEMENT:
+## STATE MANAGEMENT:
 • You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
-RULES:
+## EXAMPLE:
+ 
+### Prompt
+\`\`\`
+GOAL: what is the capital of France?
+
+CURRENT_STATE:
+{}
+
+PROGRESS SO FAR:
+[STATE] {}
+
+What's your next step? Respond with a JSON object following the schema ("action" may be a string or an array of action objects). 
+\`\`\`
+
+### Answer
+\`\`\`
+{ "thought": "The user is asking for the capital of France. I know this information directly. The goal is achieved and I should provide the final answer.", "action": "final", "answer": "The capital of France is Paris." }
+\`\`\`
+
+## RULES:
 1. Always include "thought" and "action" fields
 2. Always be concise and to the point
 3. Use tools only when necessary
@@ -106,7 +127,7 @@ RULES:
 {{/each}}
 
 {{#if knowledge}}
-KNOWLEDGE:
+## KNOWLEDGE:
 {{{knowledge}}}
 {{/if}}
     `
@@ -299,7 +320,7 @@ MiniA.prototype._parseListOption = function(value) {
  */
 MiniA.prototype._cleanCodeBlocks = function(text) {
     if (!isString(text)) return text
-    var trimmed = text.trim()
+    var trimmed = String(text).trim()
     if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
         return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
     }
@@ -1302,13 +1323,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       } else if (isMap(baseMsg) && isArray(baseMsg.action)) {
         baseMsg.action.forEach(addActionMessage)
       } else if (isMap(baseMsg) && !isString(baseMsg.action)) {
-        runtime.context.push(`[OBS ${step + 1}] (error) invalid 'action' from model (needs to be a valid string from ${this._actionsList} with 'params' on the JSON object).`)
+        runtime.context.push(`[OBS ${step + 1}] (error) invalid top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
       } else {
         addActionMessage(baseMsg)
       }
 
       if (actionMessages.length === 0) {
-        runtime.context.push(`[OBS ${step + 1}] (error) missing 'action' from model (needs to be a valid string from ${this._actionsList} with 'params' on the JSON object).`)
+        runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
         runtime.consecutiveErrors++
         global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
         if (stateUpdatedThisStep && !stateRecordedInContext) {
@@ -1347,18 +1368,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var paramsValue = currentMsg.params
 
         if (origActionRaw.length == 0) {
-          runtime.context.push(`[OBS ${step + 1}] (error) missing 'action' from model.`)
+          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
           runtime.consecutiveErrors++
           global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
           runtime.hadErrorThisStep = true
           break
         }
         if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
-          runtime.context.push(`[OBS ${step + 1}] (error) missing 'thought' from model.`)
+          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'thought' from model.`)
           runtime.consecutiveErrors++
           global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
           runtime.hadErrorThisStep = true
           break
+        }
+        if (isDef(currentMsg.action) && currentMsg.action == "final" && isDef(currentMsg.params)) {
+          runtime.context.push(`[OBS ${step + 1}] (error) 'final' action cannot have 'params', use 'answer' instead.`)
         }
 
         if (!runtime.clearedConsecutiveErrors) {
@@ -1502,10 +1526,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         if (action == "final") {
           if (args.__format != 'md' && args.__format != 'raw') {
             answerValue = this._cleanCodeBlocks(answerValue)
+            if (!isString(answerValue)) {
+              runtime.context.push(`[OBS ${stepLabel}] (error) invalid top-level 'answer' from model for final action. Needs to be a string.`)
+            }
           }
 
           if (answerValue.trim().length == 0) {
-            runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' in the one valid JSON object from model for final action.`)
+            runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action.`)
             runtime.consecutiveErrors++
             global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
             runtime.hadErrorThisStep = true
