@@ -131,6 +131,59 @@ What's your next step? Respond with a JSON object following the schema ("action"
 {{{knowledge}}}
 {{/if}}
     `
+  this._CHATBOT_SYSTEM_PROMPT = `
+You are a helpful conversational AI assistant. Engage in natural dialogue while staying accurate and concise. Respond in plain language unless you explicitly need to call a tool.
+
+{{#if hasTools}}
+## TOOL ACCESS
+You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through the host runtime. Use tools only when they materially improve the answer and always summarize tool results for the user.
+• Available tools: {{toolsList}}
+
+{{#if hasToolDetails}}
+### TOOL REFERENCE
+{{#each toolDetails}}
+• {{name}} — {{{description}}}
+{{#if hasParams}}  Parameters:
+{{#each params}}
+  - {{name}} ({{type}}{{#if required}}, required{{/if}}){{#if hasDescription}}: {{{description}}}{{/if}}
+{{/each}}
+{{/if}}
+
+{{/each}}
+{{/if}}
+
+### TOOL CALLING STEPS
+• If you truly need a tool, reply with a single JSON object following this schema: {"thought":"why the tool is needed","action":"<tool name>","params":{...}}.
+• The "action" must match one of the available tool names exactly; "params" must be a JSON object with the required fields.
+• After you receive the tool result, continue answering in natural language (use JSON again only if you need another tool).
+{{/if}}
+{{#if useshell}}
+### SHELL ACCESS
+• You may request shell commands by setting "action":"shell" and providing the POSIX command via "command" (or params.command).
+• Keep commands minimal, avoid destructive operations, and remember pipes/redirection may be blocked unless explicitly allowed.
+{{/if}}
+
+### MULTI-ACTION SUPPORT
+• You can reply with an array of action objects (or set "action" to an array) to run several steps in sequence.
+• Actions execute from top to bottom; include a clear "thought" for each step so the runtime understands your plan.
+
+{{#if hasKnowledge}}
+## ADDITIONAL CONTEXT
+{{{knowledge}}}
+{{/if}}
+{{#if hasRules}}
+## EXTRA RULES
+{{#each rules}}
+• {{{this}}}
+{{/each}}
+
+{{/if}}
+### RESPONSE GUIDELINES
+• Keep replies focused on the user request{{#if markdown}} and format them in markdown when helpful{{/if}}.
+• Ask clarifying questions when the goal is ambiguous.
+• Be transparent about limitations or missing information.
+• Decline gracefully if a request conflicts with instructions or policies.
+    `
 
   this._STEP_PROMPT_TEMPLATE = `
 GOAL: {{{goal}}}
@@ -160,6 +213,34 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this.state = "idle"
   this._agentState = {}
   this._useTools = false
+  this._lastThoughtMessage = ""
+  this._lastThinkMessage = ""
+  this._thoughtCounter = 0
+  this._thinkCounter = 0
+}
+
+/**
+ * Helper function to log thought or think messages with counter for repeated messages
+ */
+MiniA.prototype._logMessageWithCounter = function(type, message) {
+  if (type !== "thought" && type !== "think") {
+    this._fnI(type, message)
+    return
+  }
+  
+  var cleanMessage = (message || "").toString().trim()
+  var lastMessageProp = type === "thought" ? "_lastThoughtMessage" : "_lastThinkMessage"
+  var counterProp = type === "thought" ? "_thoughtCounter" : "_thinkCounter"
+  
+  if (cleanMessage === this[lastMessageProp] && cleanMessage.length > 0) {
+    this[counterProp]++
+    var displayMessage = `${cleanMessage} #${this[counterProp] + 1}`
+    this._fnI(type, displayMessage)
+  } else {
+    this[lastMessageProp] = cleanMessage
+    this[counterProp] = 0
+    this._fnI(type, cleanMessage)
+  }
 }
 
 /**
@@ -381,6 +462,83 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
             answer = jsonParse(answer)
         }
         return $o(answer || "(no answer)", args, __, true)
+    }
+}
+
+MiniA.prototype._normalizeToolResult = function(original) {
+    var processed = original
+    if (isDef(processed) && isArray(processed.content) && isDef(processed.content[0]) && isDef(processed.content[0].text)) {
+        var combined = processed.content.map(r => r.text).join("\n")
+        var parsed = jsonParse(combined.trim(), __, __, false)
+        processed = isString(parsed) ? parsed : parsed || combined
+    } else if (isDef(processed) && isMap(processed) && isDef(processed.text)) {
+        processed = processed.text
+    } else if (isDef(processed) && isString(processed)) {
+        // keep as string
+    } else if (isUnDef(processed)) {
+        processed = "(no output)"
+    } else {
+        processed = af.toSLON(processed)
+    }
+
+    var display = "(no output)"
+    if (isString(processed)) {
+        display = processed.length > 0 ? processed : "(no output)"
+    } else {
+        display = stringify(processed, __, "") || "(no output)"
+    }
+
+    return {
+        raw       : original,
+        processed : processed,
+        display   : display,
+        hasError  : isObject(original) && isDef(original.error)
+    }
+}
+
+MiniA.prototype._callMcpTool = function(toolName, params) {
+    var connectionId = isObject(this.mcpToolToConnection) ? this.mcpToolToConnection[toolName] : __
+    if (isUnDef(connectionId)) {
+        var unknownMsg = `Unknown tool '${toolName}'.`
+        this._fnI("warn", unknownMsg)
+        return {
+            rawResult : { error: unknownMsg },
+            normalized: { display: unknownMsg, hasError: true },
+            error     : true
+        }
+    }
+
+    var client = __MiniA_mcpConnections[connectionId]
+    if (isUnDef(client)) {
+        var missingMsg = `MCP client for tool '${toolName}' not available.`
+        this._fnI("warn", missingMsg)
+        return {
+            rawResult : { error: missingMsg },
+            normalized: { display: missingMsg, hasError: true },
+            error     : true
+        }
+    }
+
+    var rawResult
+    var toolCallError = false
+    try {
+        rawResult = client.callTool(toolName, params)
+    } catch (e) {
+        rawResult = { error: e.message }
+        toolCallError = true
+    }
+
+    var normalized = this._normalizeToolResult(rawResult)
+    var displayText = isObject(normalized) && isString(normalized.display)
+        ? normalized.display
+        : stringify(normalized, __, "") || "(no output)"
+
+    this._fnI("done", `Action '${toolName}' completed (${ow.format.toBytesAbbreviation(displayText.length)}).`)
+
+    return {
+        rawResult : rawResult,
+        normalized: isObject(normalized) ? normalized : { display: displayText, hasError: toolCallError },
+        error     : toolCallError || (isObject(normalized) && normalized.hasError === true)
     }
 }
 
@@ -731,30 +889,98 @@ MiniA.prototype.init = function(args) {
     var rules = af.fromJSSLON(args.rules)
     if (!isArray(rules)) rules = [rules]
 
-    var promptActionsDesc = this._useTools ? [] : this.mcpTools
-    var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
-    var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+    var trimmedKnowledge = args.knowledge.trim()
+    var baseRules = rules
+      .map(r => isDef(r) ? String(r).trim() : "")
+      .filter(r => r.length > 0)
 
-    this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
-      actionsList: promptActionsList,
-      useshell   : args.useshell
-    })
+    if (args.chatbotmode) {
+      var chatActions = []
+      if (args.useshell) chatActions.push("shell")
+      var chatToolsList = this.mcpToolNames.join(", ")
+      var chatbotToolDetails = []
+      if (this.mcpTools.length > 0) {
+        chatbotToolDetails = this.mcpTools.map(tool => {
+          var description = isString(tool.description) && tool.description.length > 0
+            ? tool.description
+            : "No description provided."
+          var params = []
+          var schema = isObject(tool.inputSchema) ? tool.inputSchema : {}
+          var properties = isObject(schema.properties) ? schema.properties : {}
+          var requiredList = isArray(schema.required) ? schema.required : []
 
-    if (isUnDef(this._systemInst)) this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
-      actionsWordNumber: actionsWordNumber,
-      actionsList      : promptActionsList,
-      useshell         : args.useshell,
-      markdown         : args.__format == "md",
-      rules            : rules.filter(r => isDef(r) && r.length > 0).map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule),
-      knowledge        : args.knowledge.trim(),
-      actionsdesc      : promptActionsDesc,
-      isMachine        : (isDef(args.__format) && args.__format != "md"),
-      usetools         : this._useTools,
-      toolCount        : this.mcpTools.length
-    })
+          Object.keys(properties).forEach(paramName => {
+            var paramInfo = properties[paramName] || {}
+            var paramDescription = isString(paramInfo.description) && paramInfo.description.length > 0
+              ? paramInfo.description
+              : ""
+            params.push({
+              name          : paramName,
+              type          : isString(paramInfo.type) && paramInfo.type.length > 0 ? paramInfo.type : "any",
+              description   : paramDescription,
+              hasDescription: paramDescription.length > 0,
+              required      : requiredList.indexOf(paramName) >= 0
+            })
+          })
 
-    llm = this.llm.withInstructions(this._systemInst)
-    if (this._use_lc) this.lc_llm = this.lc_llm.withInstructions(this._systemInst)
+          return {
+            name       : tool.name,
+            description: description,
+            params     : params,
+            hasParams  : params.length > 0
+          }
+        })
+      }
+
+      this._actionsList = chatActions.concat(this.mcpToolNames).join(" | ")
+      this._systemInst = $t(this._CHATBOT_SYSTEM_PROMPT.trim(), {
+        knowledge   : trimmedKnowledge,
+        hasKnowledge: trimmedKnowledge.length > 0,
+        hasRules    : baseRules.length > 0,
+        rules       : baseRules,
+        hasTools    : this.mcpTools.length > 0,
+        toolCount   : this.mcpTools.length,
+        toolsPlural : this.mcpTools.length !== 1,
+        toolsList   : chatToolsList,
+        hasToolDetails: chatbotToolDetails.length > 0,
+        toolDetails : chatbotToolDetails,
+        markdown    : args.__format == "md",
+        useshell    : args.useshell
+      })
+    } else {
+      var promptActionsDesc = this._useTools ? [] : this.mcpTools
+      var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
+      var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
+        actionsList: promptActionsList,
+        useshell   : args.useshell
+      })
+
+      var numberedRules = baseRules.map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule)
+
+      this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
+        actionsWordNumber: actionsWordNumber,
+        actionsList      : promptActionsList,
+        useshell         : args.useshell,
+        markdown         : args.__format == "md",
+        rules            : numberedRules,
+        knowledge        : trimmedKnowledge,
+        actionsdesc      : promptActionsDesc,
+        isMachine        : (isDef(args.__format) && args.__format != "md"),
+        usetools         : this._useTools,
+        toolCount        : this.mcpTools.length
+      })
+    }
+
+    this._currentMode = args.chatbotmode ? "chatbot" : "agent"
+
+    var updatedMainLLM = this.llm.withInstructions(this._systemInst)
+    if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+    if (this._use_lc) {
+      var updatedLowCostLLM = this.lc_llm.withInstructions(this._systemInst)
+      if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+    }
 
     var systemTokens = this._estimateTokens(this._systemInst)
     this._fnI("size", `System prompt ~${systemTokens} tokens`)
@@ -793,6 +1019,7 @@ MiniA.prototype.init = function(args) {
  * - checkall (boolean, default=false): If true, asks for confirmation before executing any shell command.
  * - maxcontext (number, optional): Maximum context size in tokens. If the conversation exceeds this size, it will be summarized.
  * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
+ * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
  * - __format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * 
  * Returns:
@@ -841,6 +1068,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -998,6 +1226,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    if (args.chatbotmode) {
+      return this._runChatbotMode({
+        args            : args,
+        addCall         : addCall,
+        sessionStartTime: sessionStartTime
+      })
+    }
+
     var parseStatePayload = value => {
       if (isUnDef(value) || value === null) return __
       if (isObject(value)) return value
@@ -1032,38 +1268,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       runtime.currentTool = currentToolContext
     }
 
-    var normalizeToolResult = original => {
-      var processed = original
-      if (isDef(processed) && isArray(processed.content) && isDef(processed.content[0]) && isDef(processed.content[0].text)) {
-        var combined = processed.content.map(r => r.text).join("\n")
-        var parsed = jsonParse(combined.trim(), __, __, false)
-        processed = isString(parsed) ? parsed : parsed || combined
-      } else if (isDef(processed) && isMap(processed) && isDef(processed.text)) {
-        processed = processed.text
-      } else if (isDef(processed) && isString(processed)) {
-        // keep as string
-      } else if (isUnDef(processed)) {
-        processed = "(no output)"
-      } else {
-        processed = af.toSLON(processed)
-      }
-
-      var display = "(no output)"
-      if (isString(processed)) {
-        display = processed.length > 0 ? processed : "(no output)"
-      } else {
-        display = stringify(processed, __, "") || "(no output)"
-      }
-
-      return {
-        raw       : original,
-        processed : processed,
-        display   : display,
-        hasError  : isObject(original) && isDef(original.error)
-      }
-    }
-    this._normalizeToolResult = normalizeToolResult
-
     var finalizeToolExecution = payload => {
       if (!isObject(runtime)) return
       var details = isObject(payload) ? payload : {}
@@ -1077,7 +1281,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       // Normalize observation for context entries when not provided
       if (isUnDef(observation) && isDef(rawResult)) {
-        var normalized = normalizeToolResult(rawResult)
+        var normalized = this._normalizeToolResult(rawResult)
         observation = normalized.display
       }
 
@@ -1402,13 +1606,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             logMsg = af.toSLON(logMsg)
             if (logMsg == "()") logMsg = "(no thought)"
           }
-          if (logMsg != "(no thought)") this._fnI("thought", `${logMsg}`)
+          if (logMsg != "(no thought)") this._logMessageWithCounter("thought", `${logMsg}`)
         }
 
         var thoughtStr = (isObject(thoughtValue) ? stringify(thoughtValue, __, "") : thoughtValue) || "(no thought)"
 
         if (action == "think") {
-          this._fnI("think", `${thoughtStr}`)
+          this._logMessageWithCounter("think", `${thoughtStr}`)
           runtime.context.push(`[THOUGHT ${stepLabel}] ${thoughtStr}`)
 
           global.__mini_a_metrics.thinks_made.inc()
@@ -1506,7 +1710,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             toolCallError = true
           }
 
-          var normalizedResult = normalizeToolResult(rawToolResult)
+          var normalizedResult = this._normalizeToolResult(rawToolResult)
           var resultDisplay = normalizedResult.display || "(no output)"
           this._fnI("done", `Action '${origActionRaw}' completed (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
 
@@ -1635,4 +1839,252 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     global.__mini_a_metrics.goals_stopped.inc()
 
     return this._processFinalAnswer(res.answer || "(no final answer)", args)
+}
+
+MiniA.prototype._runChatbotMode = function(options) {
+    var opts = isObject(options) ? options : {}
+    var args = opts.args || {}
+    var addCall = typeof opts.addCall === "function" ? opts.addCall : function() {}
+    var sessionStartTime = isNumber(opts.sessionStartTime) ? opts.sessionStartTime : now()
+
+    this._fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}.`)
+    this.state = "processing"
+
+    var maxSteps = Math.max(1, args.maxsteps || 10)
+    var pendingPrompt = isString(args.goal) ? args.goal : stringify(args.goal, __, "")
+    var finalAnswer
+    var toolNames = this.mcpToolNames.slice()
+
+    for (var step = 0; step < maxSteps && this.state != "stop"; step++) {
+      var stepStartTime = now()
+      global.__mini_a_metrics.steps_taken.inc()
+
+      var conversationTokens = 0
+      try {
+        conversationTokens = this._estimateTokens(stringify(this.llm.getGPT().getConversation(), __, ""))
+      } catch (e) {
+        conversationTokens = 0
+      }
+      var promptTokens = this._estimateTokens(pendingPrompt)
+      global.__mini_a_metrics.llm_estimated_tokens.getAdd(promptTokens)
+
+      var contextEstimate = conversationTokens + promptTokens
+      this._fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
+
+      addCall()
+      if (args.debug) {
+        print( ow.format.withSideLine(">>>\n" + pendingPrompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+      }
+
+      var responseWithStats = this.llm.promptWithStats(pendingPrompt)
+      if (args.debug) {
+        print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+      }
+      var stats = responseWithStats.stats || {}
+
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(stats.total_tokens || 0)
+      global.__mini_a_metrics.llm_normal_tokens.getAdd(stats.total_tokens || 0)
+      global.__mini_a_metrics.llm_normal_calls.inc()
+
+      var tokenStatsMsg = this._formatTokenStats(stats)
+      this._fnI("output", `Chatbot model responded. ${tokenStatsMsg}`)
+
+      if (isDef(args.conversation)) {
+        io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
+      }
+
+      var rawResponse = responseWithStats.response
+      var handled = false
+      var parsedResponse = __
+
+      if (isMap(rawResponse) || isArray(rawResponse)) {
+        parsedResponse = rawResponse
+      } else if (isString(rawResponse)) {
+        var trimmedResponse = rawResponse.replace(/^```+(?:json)?\s*(.+)```+$/gs, "$1").trim()
+        var jsonCandidate = trimmedResponse
+        if (!jsonCandidate.startsWith("{") && jsonCandidate.indexOf("\n{") >= 0) {
+          var match = jsonCandidate.match(/\{[\s\S]*\}/g)
+          if (match) jsonCandidate = match[match.length - 1]
+        }
+        if (jsonCandidate.startsWith("{") || jsonCandidate.startsWith("[")) {
+          parsedResponse = jsonParse(jsonCandidate, __, __, true)
+        }
+      }
+
+      var canUseShell = args.useshell === true
+      var topLevelMap = isMap(parsedResponse) ? parsedResponse : __
+      var actionEntries = []
+      var addActionEntry = entry => {
+        if (isUnDef(entry)) return
+        var normalized = isMap(entry) ? Object.assign({}, entry) : {}
+        if (!isMap(entry)) normalized = { action: entry }
+        if (isUnDef(normalized.action) && isString(entry)) normalized.action = entry
+        if (isMap(topLevelMap) && entry !== topLevelMap) {
+          if (isUnDef(normalized.thought) && isDef(topLevelMap.thought)) normalized.thought = topLevelMap.thought
+          if (isUnDef(normalized.command) && isDef(topLevelMap.command)) normalized.command = topLevelMap.command
+          if (isUnDef(normalized.params) && isDef(topLevelMap.params)) normalized.params = topLevelMap.params
+          if (isUnDef(normalized.answer) && isDef(topLevelMap.answer)) normalized.answer = topLevelMap.answer
+        }
+        actionEntries.push(normalized)
+      }
+
+      if (isArray(parsedResponse)) {
+        parsedResponse.forEach(addActionEntry)
+      } else if (isMap(parsedResponse) && isArray(parsedResponse.action)) {
+        parsedResponse.action.forEach(addActionEntry)
+      } else if (isMap(parsedResponse) && isString(parsedResponse.action)) {
+        addActionEntry(parsedResponse)
+      }
+
+      if (actionEntries.length > 0) {
+        for (var actionIndex = 0; actionIndex < actionEntries.length; actionIndex++) {
+          var currentMsg = actionEntries[actionIndex]
+          var actionName = isString(currentMsg.action) ? currentMsg.action.trim() : ""
+          var lowerAction = actionName.toLowerCase()
+          var thoughtValue = currentMsg.thought
+
+          if (isString(thoughtValue) && thoughtValue.length > 0) {
+            this._logMessageWithCounter("thought", thoughtValue)
+            global.__mini_a_metrics.thoughts_made.inc()
+          }
+
+          if (actionName.length === 0) {
+            pendingPrompt = `Missing 'action' entry in the JSON object. Use one of: ${this._actionsList || (toolNames.join(" | ") || "think | final")}.`
+            handled = true
+            break
+          }
+
+          if (toolNames.indexOf(actionName) >= 0) {
+            var paramsValue = currentMsg.params
+            if (isUnDef(paramsValue) || !isMap(paramsValue)) {
+              pendingPrompt = `Tool request for '${actionName}' is missing a valid 'params' object. Reply with JSON including proper params or continue without that tool.`
+              handled = true
+              break
+            }
+            var execution = this._callMcpTool(actionName, paramsValue)
+            var observation = execution && execution.normalized && isString(execution.normalized.display)
+              ? execution.normalized.display
+              : "(no output)"
+            if (observation.length > 4000) observation = observation.substring(0, 4000) + "\n[truncated]"
+            pendingPrompt = execution.error
+              ? `Tool '${actionName}' returned an error:\n${observation}\nPlease adjust and continue (use another tool or provide the answer).`
+              : `Tool '${actionName}' result:\n${observation}\nUse this information to continue helping the user. Provide any remaining actions or the final answer.`
+            handled = true
+            break
+          }
+
+          if (lowerAction === "shell") {
+            if (!canUseShell) {
+              pendingPrompt = "Shell commands are not enabled in this session. Continue with tools or provide the answer."
+              handled = true
+              break
+            }
+            var commandValue = ""
+            if (isString(currentMsg.command)) commandValue = currentMsg.command.trim()
+            if (commandValue.length === 0 && isMap(currentMsg.params) && isString(currentMsg.params.command)) {
+              commandValue = currentMsg.params.command.trim()
+            }
+            if (commandValue.length === 0) {
+              pendingPrompt = `Shell action requires a 'command' string. Please provide it or continue without shell access.`
+              handled = true
+              break
+            }
+            var shellResult = this._runCommand({
+              command        : commandValue,
+              readwrite      : args.readwrite,
+              checkall       : args.checkall,
+              shellbatch     : args.shellbatch,
+              shellallow     : args.shellallow,
+              shellbanextra  : args.shellbanextra,
+              shellallowpipes: args.shellallowpipes
+            })
+            var shellOutput = isDef(shellResult) && isString(shellResult.output) ? shellResult.output : ""
+            if (!isString(shellOutput) || shellOutput.length === 0) shellOutput = "(no output)"
+            if (shellOutput.length > 4000) shellOutput = shellOutput.substring(0, 4000) + "\n[truncated]"
+            pendingPrompt = `Shell command '${commandValue}' output:\n${shellOutput}\nUse this result to determine your next action or final answer.`
+            handled = true
+            break
+          }
+
+          if (lowerAction === "think") {
+            global.__mini_a_metrics.thinks_made.inc()
+            var thinkMsg = isString(thoughtValue) && thoughtValue.length > 0 ? thoughtValue : "(no thought)"
+            this._logMessageWithCounter("think", thinkMsg)
+            continue
+          }
+
+          if (lowerAction === "final") {
+            var answerValue = currentMsg.answer
+            if (isUnDef(answerValue)) answerValue = currentMsg.result || currentMsg.response || topLevelMap && topLevelMap.answer || ""
+            if (isString(answerValue)) answerValue = answerValue.trim()
+            finalAnswer = answerValue
+            handled = false
+            var stepTimeFinal = now() - stepStartTime
+            var currentAvgFinal = global.__mini_a_metrics.avg_step_time.get()
+            var currentStepsFinal = global.__mini_a_metrics.steps_taken.get()
+            var newAvgFinal = currentStepsFinal === 1 ? stepTimeFinal : ((currentAvgFinal * (currentStepsFinal - 1)) + stepTimeFinal) / currentStepsFinal
+            global.__mini_a_metrics.avg_step_time.set(Math.round(newAvgFinal))
+            break
+          }
+
+          var knownActions = this._actionsList && this._actionsList.length > 0
+            ? this._actionsList
+            : (toolNames.length > 0 ? toolNames.join(" | ") : "think | final")
+          pendingPrompt = `Unknown action '${actionName}'. Use one of: ${knownActions}.`
+          handled = true
+          break
+        }
+      }
+
+      var stepTime = now() - stepStartTime
+      var currentAvg = global.__mini_a_metrics.avg_step_time.get()
+      var currentSteps = global.__mini_a_metrics.steps_taken.get()
+      var newAvg = currentSteps === 1 ? stepTime : ((currentAvg * (currentSteps - 1)) + stepTime) / currentSteps
+      global.__mini_a_metrics.avg_step_time.set(Math.round(newAvg))
+
+      if (handled) {
+        continue
+      }
+
+      if (isUnDef(finalAnswer)) {
+        if (isString(rawResponse)) {
+          finalAnswer = rawResponse.trim()
+        } else if (isMap(rawResponse) && isString(rawResponse.answer)) {
+          finalAnswer = rawResponse.answer.trim()
+        } else {
+          finalAnswer = stringify(rawResponse, __, "")
+        }
+      }
+      break
+    }
+
+    if (isUnDef(finalAnswer)) {
+      this._fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
+      var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
+      addCall()
+      var fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
+      if (args.debug) {
+        print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+      }
+      var fallbackStats = fallbackResponseWithStats.stats || {}
+      global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(fallbackPrompt))
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackStats.total_tokens || 0)
+      global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackStats.total_tokens || 0)
+      global.__mini_a_metrics.llm_normal_calls.inc()
+      var fallbackTokenStatsMsg = this._formatTokenStats(fallbackStats)
+      this._fnI("output", `Fallback response received. ${fallbackTokenStatsMsg}`)
+      var fallbackAnswer = fallbackResponseWithStats.response
+      finalAnswer = isString(fallbackAnswer) ? fallbackAnswer.trim() : stringify(fallbackAnswer, __, "")
+      global.__mini_a_metrics.goals_stopped.inc()
+    } else {
+      global.__mini_a_metrics.finals_made.inc()
+      global.__mini_a_metrics.goals_achieved.inc()
+    }
+
+    var totalTime = now() - sessionStartTime
+    global.__mini_a_metrics.total_session_time.set(totalTime)
+
+    this.state = "stop"
+
+    return this._processFinalAnswer(finalAnswer, args)
 }
