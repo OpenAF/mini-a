@@ -113,6 +113,50 @@ Optional flags when starting the server:
 
 Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
 
+### Web UI via Docker
+
+Run the Mini‑A browser UI inside a container by passing the proper `OAF_MODEL` configuration for your LLM provider and exposing port `12345`. The following examples mount a `history/` directory from the host so conversation transcripts persist across runs.
+
+> **Tip:** Replace secrets like API keys or session tokens with values from your shell environment or a secure secret manager. The `OPACKS` and `libs` flags load the provider- and Mini‑A-specific OpenAF packs and helper scripts.
+
+#### AWS Bedrock (Mistral 7B Instruct)
+
+```bash
+docker run --rm -ti \
+  -e OPACKS=aws,mini-a \
+  -e OAF_MODEL="(type: bedrock, timeout: 900000, options: (model: 'mistral.mistral-7b-instruct-v0:2', region: eu-west-1, temperature: 0.7, params: ('top_p': 0.9, 'max_tokens': 8192)))" \
+  -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+  -v $(pwd)/history:/tmp/history \
+  -e OJOB=mini-a/mini-a-web.yaml \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345 chatbotmode=true \
+  usehistory=true historykeep=true historypath=/tmp/history \
+  useattach=true \
+  libs="@AWS/aws.js"
+```
+
+#### OpenAI (GPT‑5 Mini)
+
+```bash
+docker run --rm -ti \
+  -e OPACKS=aws,mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-openai-key', temperature: 1, timeout: 900000)" \
+  -v $(pwd)/history:/tmp/history \
+  -e OJOB=mini-a/mini-a-web.yaml \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345 chatbotmode=true \
+  usehistory=true historykeep=true historypath=/tmp/history \
+  useattach=true
+```
+
+#### Custom Providers
+
+Adapt the examples above by changing the `OAF_MODEL` tuple to match your provider (e.g., Anthropic, Azure OpenAI, Together). If the provider requires extra SDKs or credentials, extend the `OPACKS` list, add new `libs`, and export the relevant environment variables as `-e` flags.
+
 ### Attaching files in the browser UI
 
 > **Prerequisite:** start the web server with `useattach=true` to display the paperclip control.
