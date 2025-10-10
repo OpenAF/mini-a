@@ -142,7 +142,7 @@ docker run --rm -ti \
 
 ```bash
 docker run --rm -ti \
-  -e OPACKS=aws,mini-a \
+  -e OPACKS=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-openai-key', temperature: 1, timeout: 900000)" \
   -v $(pwd)/history:/tmp/history \
   -e OJOB=mini-a/mini-a-web.yaml \
