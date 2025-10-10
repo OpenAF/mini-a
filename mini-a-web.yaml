@@ -10,6 +10,7 @@ help:
     desc     : Show executed commands in the interaction
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : logPromptHeaders
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
@@ -18,6 +19,12 @@ help:
     desc     : "Boolean to enable/disable history (default: false)"
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
+  - name     : useattach
+    desc     : "Boolean to enable/disable file attachments (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historypath
     desc     : "Path to store history files (default: .)"
     example  : "."
@@ -30,6 +37,7 @@ help:
     desc     : "Boolean to keep history files (default: false)"
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : maxcontext
     desc     : "Maximum conversation tokens before Mini-A summarizes context (default: 200000)"
     example  : "200000"
@@ -61,7 +69,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, historyretention: args.historyretention }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -166,7 +174,7 @@ todo:
             // Initialize MiniA
             lma = new MiniA()
             lma.init(merge(global.maArgs, {
-              conversation: _hfile
+              conversation: global._mini_a_web_loadFile(_hfile)
             }))
             lma.setInteractionFn( (e, m) => {
                 var _e = ""
@@ -207,7 +215,7 @@ todo:
           var _rma = lma.start(merge(global.maArgs, {
             goal        : postData.prompt,
             raw         : true,
-            conversation: _hfile
+            conversation: global._mini_a_web_loadFile(_hfile)
           }))
 
           global.__res[uuid].push( { event: "final", message: _rma } )
@@ -235,6 +243,66 @@ todo:
         global.__conversations[ postData.uuid ].state = "stop"
       }
       var _res = { content: "", status: "processing", history: [] }
+      var __attachmentLangMap = {
+        md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
+        csv: 'csv', tsv: 'tsv', xml: 'xml', html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
+        js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript', jsx: 'jsx', tsx: 'tsx',
+        py: 'python', rb: 'ruby', go: 'go', java: 'java', kt: 'kotlin', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cs: 'csharp',
+        rs: 'rust', php: 'php', sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', sql: 'sql', toml: 'toml', ini: 'ini', cfg: 'ini', conf: 'ini', env: 'ini',
+        properties: 'ini', gradle: 'groovy', dockerfile: 'dockerfile', makefile: 'makefile', cmake: 'cmake', r: 'r', lua: 'lua', swift: 'swift', scala: 'scala'
+      }
+
+      function __escapeHtml(str) {
+        if (isUnDef(str)) return ''
+        return ('' + str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;')
+      }
+
+      function __escapeAttr(str) {
+        return __escapeHtml(str).replace(/[\r\n]+/g, ' ')
+      }
+
+      function __detectAttachmentLang(name) {
+        if (isUnDef(name)) return 'text'
+        var lowered = ('' + name).toLowerCase()
+        if (lowered == 'dockerfile') return 'dockerfile'
+        if (lowered.indexOf('makefile') == 0) return 'makefile'
+        var parts = lowered.split('.')
+        var ext = parts.length > 1 ? parts.pop() : ''
+        if (isDef(__attachmentLangMap[ext])) return __attachmentLangMap[ext]
+        return 'text'
+      }
+
+      function __formatUserMessage(message) {
+        if (isUnDef(message)) return ''
+        var text = '' + message
+        var attachments = []
+        text = text.replace(/```attachment\s+([^\n]+)\n([\s\S]*?)```/gm, function(_, name, content) {
+          var cleanName = ('' + name).replace(/[\r\n]+/g, ' ').trim()
+          var cleanContent = ('' + content).replace(/\r\n/g, '\n')
+          attachments.push({ name: cleanName, content: cleanContent })
+          return '§§ATTACHMENT_' + (attachments.length - 1) + '§§'
+        })
+
+        var html = __escapeHtml(text).replace(/\n/g, '<br>')
+        for (var j = 0; j < attachments.length; j++) {
+          var att = attachments[j]
+          var placeholder = '§§ATTACHMENT_' + j + '§§'
+          var safeName = att.name && att.name.length > 0 ? att.name : 'attachment.txt'
+          var safeNameHtml = __escapeHtml(safeName)
+          var attrName = __escapeAttr(safeName)
+          var encoded = af.fromBytes2String(af.toBase64Bytes(att.content || ''))
+          var language = __detectAttachmentLang(att.name)
+          var button = '<button class="user-attachment" type="button" data-name="' + attrName + '" data-language="' + __escapeAttr(language) + '" data-content="' + __escapeAttr(encoded) + '">📎 ' + safeNameHtml + '</button>'
+          html = html.replace(placeholder, button)
+        }
+
+        return html
+      }
       if (isDef(global.__res[ postData.uuid ])) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
@@ -256,7 +324,7 @@ todo:
           } else {
             if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀") {
               if (r.event == "👤") {
-                _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + r.message.replace(/\n/g, "<br>") + "</div> " + r.event + "</i>\n<br><br></div>"
+                _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {
                 _res.content += r.event + " <i>" + r.message.replace(/\n/g, "<br>") + "</i>\n"
               }
@@ -340,6 +408,7 @@ jobs:
       logPromptHeaders: isString().default("")
       maxcontext      : toNumber().isNumber().default(200000)
       usehistory      : toBoolean().isBoolean().default(false)
+      useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
   exec : | #js
@@ -351,10 +420,20 @@ jobs:
     global.__lastActivity = { }
     global.__showExecs = args.showExecs
     global.__logPromptHeaders = args.logPromptHeaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
+    global.__useattach = args.useattach
     args.__format = "md"
     global.maArgs = merge(args, {})
     global.ma = new MiniA()
     global.ma.init( global.maArgs )
+
+    global._mini_a_web_saveFile = (aFile, aMap) => {
+      io.writeFileJSON(aFile, aMap, "")
+    }
+
+    global._mini_a_web_loadFile = (aFile) => {
+      // Can be __
+      return aFile
+    }
 
 # ---------------------------------------
 - name : Periodic cleanup of old sessions

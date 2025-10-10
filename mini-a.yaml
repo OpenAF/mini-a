@@ -24,6 +24,7 @@ help:
     desc     : Whether to print detailed logs
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : maxsteps
     desc     : Maximum number of steps to take
     example  : "25"
@@ -36,14 +37,17 @@ help:
     desc     : Allow read-write commands without confirmation (dangerous)
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : checkall
     desc     : Check all commands for banned operations (may ask for confirmation)
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : useshell
     desc     : "Whether to allow shell commands (default: false)"
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : shellallow
     desc     : Comma-separated list of banned commands to allow explicitly
     example  : "curl,wget"
@@ -52,6 +56,7 @@ help:
     desc     : Allow pipes, redirection and shell control operators
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : shellbanextra
     desc     : Additional comma-separated commands to ban
     example  : "lsblk,ifconfig"
@@ -80,18 +85,22 @@ help:
     desc     : Whether to return raw output without formatting
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : debug
     desc     : Enable debug mode
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : shellbatch
     desc     : Run in batch mode without prompting for command execution approval
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : usetools
     desc     : Register MCP tools directly on the model instead of expanding the prompt with schemas
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : rules
     desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
