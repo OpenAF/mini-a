@@ -22,6 +22,8 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 
 If you prefer the browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
+**Need to share supporting text?** Launch the web server with `useattach=true` to reveal the paperclip button beside the prompt box. You can attach multiple text-based files (up to 512 KB each) before submitting, review them as removable chips, and open the full contents from the conversation stream.
+
 ## Documentation
 
 - **[Detailed Usage Guide](USAGE.md)** - Comprehensive guide covering all configuration options, examples, and best practices
@@ -142,6 +144,7 @@ Mini-A ships with three complementary components:
 - **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
+- **Text Attachments in the Web UI**: When started with `useattach=true`, upload and review text files alongside your prompt with collapsible previews in the conversation log
 - **Safety Features**: Command filtering, confirmation prompts, and read-only modes
 - **Conversation Persistence**: Save and resume conversations across sessions
 - **Automatic Context Summarization**: Keeps context within limits with auto-summarize when it grows

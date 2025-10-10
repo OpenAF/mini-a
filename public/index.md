@@ -52,6 +52,14 @@
                 submitBtn.style.color = '#e6e6e6';
             }
 
+            const attachBtn = document.getElementById('attachBtn');
+            if (attachBtn) {
+                attachBtn.style.background = 'linear-gradient(135deg, #2d3238 0%, #1a1d23 100%)';
+                attachBtn.style.color = '#e6e6e6';
+                attachBtn.style.border = '1px solid rgba(255,255,255,0.1)';
+                attachBtn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+            }
+
             const clearBtn = document.getElementById('clearBtn');
             if (clearBtn) {
                 clearBtn.style.background = 'linear-gradient(135deg, #2d3238 0%, #1a1d23 100%)';
@@ -102,6 +110,14 @@
             if (submitBtn) {
                 submitBtn.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
                 submitBtn.style.color = 'white';
+            }
+
+            const attachBtn = document.getElementById('attachBtn');
+            if (attachBtn) {
+                attachBtn.style.background = 'linear-gradient(135deg, #f3f3f3 0%, #e0e0e0 100%)';
+                attachBtn.style.color = '#333';
+                attachBtn.style.border = 'none';
+                attachBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
             }
 
             const clearBtn = document.getElementById('clearBtn');
@@ -172,6 +188,66 @@
         transition: box-shadow 0.2s ease;
     }
 
+    .prompt-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4vmin;
+        min-height: 2.4em;
+    }
+
+    .attachments-container {
+        display: none;
+        flex-wrap: wrap;
+        gap: 0.4vmin;
+        align-items: center;
+    }
+
+    .attachments-container.visible {
+        display: flex;
+    }
+
+    .attachment-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5em;
+        padding: 0.35em 0.6em;
+        background: rgba(0,123,255,0.12);
+        border: 1px solid rgba(0,123,255,0.35);
+        border-radius: 999px;
+        font-size: 0.8rem;
+        color: inherit;
+        max-width: 100%;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+
+    .attachment-chip span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .attachment-chip button {
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.8rem;
+        width: 1.4em;
+        height: 1.4em;
+        border-radius: 50%;
+        transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    .attachment-chip button:hover,
+    .attachment-chip button:focus-visible {
+        background: rgba(0,0,0,0.08);
+        color: var(--danger);
+    }
+
     #promptInput {
         flex: 1;
         padding: 1.2vmin;
@@ -199,6 +275,7 @@
 
     /* ========== BUTTONS ========== */
 
+    #attachBtn,
     #submitBtn,
     #clearBtn,
     #historyBtn {
@@ -221,6 +298,12 @@
         background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
         color: white;
         box-shadow: 0 2px 6px rgba(0,123,255,0.25);
+    }
+
+    #attachBtn {
+        background: linear-gradient(135deg, #f3f3f3 0%, #e0e0e0 100%);
+        color: #333;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
 
     #clearBtn {
@@ -254,6 +337,7 @@
         transform: translateY(-1px);
     }
 
+    #attachBtn:hover:not(:disabled),
     #clearBtn:hover:not(:disabled) {
         background: linear-gradient(135deg, #cccccc 0%, #bdbdbd 100%);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
@@ -267,10 +351,113 @@
     }
 
     /* Button disabled state */
-    #submitBtn:disabled, #clearBtn:disabled, #historyBtn:disabled {
+    #submitBtn:disabled, #attachBtn:disabled, #clearBtn:disabled, #historyBtn:disabled {
         background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
         cursor: not-allowed;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .user-attachment {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        margin: 0.2em 0;
+        padding: 0.3em 0.7em;
+        border-radius: 999px;
+        border: 1px solid rgba(0,123,255,0.35);
+        background: rgba(0,123,255,0.1);
+        color: inherit;
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .user-attachment:hover,
+    .user-attachment:focus-visible {
+        background: rgba(0,123,255,0.2);
+        box-shadow: 0 3px 8px rgba(0,123,255,0.25);
+    }
+
+    .attachment-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.45);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        z-index: 2000;
+    }
+
+    .attachment-modal.open {
+        display: flex;
+    }
+
+    .attachment-modal-content {
+        width: min(90vw, 720px);
+        max-height: 80vh;
+        background: var(--panel-bg);
+        color: inherit;
+        border-radius: 1rem;
+        border: 1px solid var(--border);
+        box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    .attachment-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.2rem;
+        border-bottom: 1px solid var(--border);
+        gap: 1rem;
+    }
+
+    .attachment-modal-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .attachment-modal-close {
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        font-size: 1rem;
+        display: inline-flex;
+        width: 2rem;
+        height: 2rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    .attachment-modal-close:hover,
+    .attachment-modal-close:focus-visible {
+        background: rgba(0,0,0,0.08);
+        color: var(--danger);
+    }
+
+    .attachment-modal-body {
+        padding: 1rem 1.2rem 1.2rem 1.2rem;
+        overflow: auto;
+    }
+
+    .attachment-modal-body pre {
+        margin: 0;
+        max-height: 60vh;
+        overflow: auto;
+        border-radius: 0.8rem;
+        border: 1px solid var(--border);
+        background: rgba(0,0,0,0.04);
+        padding: 1rem;
     }
 
     /* ========== HISTORY PANEL ========== */
@@ -488,6 +675,44 @@
         border-color: var(--accent);
     }
 
+    body.markdown-body-dark .attachment-chip {
+        background: rgba(51,144,255,0.18);
+        border-color: rgba(51,144,255,0.4);
+        box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+
+    body.markdown-body-dark .attachment-chip button:hover,
+    body.markdown-body-dark .attachment-chip button:focus-visible {
+        background: rgba(255,255,255,0.12);
+    }
+
+    body.markdown-body-dark .user-attachment {
+        background: rgba(51,144,255,0.18);
+        border-color: rgba(51,144,255,0.4);
+        box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+    }
+
+    body.markdown-body-dark .user-attachment:hover,
+    body.markdown-body-dark .user-attachment:focus-visible {
+        background: rgba(51,144,255,0.25);
+    }
+
+    body.markdown-body-dark .attachment-modal-content {
+        background: #0f1115;
+        border-color: #242629;
+        box-shadow: 0 18px 40px rgba(0,0,0,0.65);
+    }
+
+    body.markdown-body-dark .attachment-modal-body pre {
+        background: rgba(255,255,255,0.05);
+        border-color: #242629;
+    }
+
+    body.markdown-body-dark .attachment-modal-close:hover,
+    body.markdown-body-dark .attachment-modal-close:focus-visible {
+        background: rgba(255,255,255,0.12);
+    }
+
     body.markdown-body-dark .history-actions button {
         background: rgba(255,255,255,0.05);
         border-color: #242629;
@@ -585,10 +810,27 @@
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
     <br>
     <div class="input-section">
-        <textarea id="promptInput" placeholder="Enter your prompt..." disabled rows="1"></textarea>
+        <button id="attachBtn" title="Attach files" aria-label="Attach files" type="button"></button>
+        <input type="file" id="fileInput" accept="text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
+        <div class="prompt-wrapper">
+            <div id="attachmentsContainer" class="attachments-container" aria-live="polite"></div>
+            <textarea id="promptInput" placeholder="Enter your prompt..." disabled rows="1"></textarea>
+        </div>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
         <button id="clearBtn" title="Clear" aria-label="Clear" type="button"></button>
         <button id="historyBtn" title="History" aria-label="History" type="button"></button>
+    </div>
+</div>
+
+<div id="attachmentModal" class="attachment-modal" aria-hidden="true">
+    <div class="attachment-modal-content" role="dialog" aria-modal="true" aria-labelledby="attachmentModalTitle">
+        <div class="attachment-modal-header">
+            <h3 id="attachmentModalTitle"></h3>
+            <button id="attachmentModalClose" class="attachment-modal-close" type="button" aria-label="Close attachment preview">✕</button>
+        </div>
+        <div class="attachment-modal-body">
+            <pre><code id="attachmentModalCode" class="hljs"></code></pre>
+        </div>
     </div>
 </div>
 
@@ -628,6 +870,18 @@
     const PING_INTERVAL_MS = 60 * 1000; // 60 seconds
     const HISTORY_STORAGE_KEY = 'mini_a_history';
     const HISTORY_TITLE_MAX_LENGTH = 80;
+    const MAX_ATTACHMENT_SIZE = 512 * 1024; // 512 KB per file
+    const TEXT_FILE_EXTENSIONS = new Set([
+        'txt','md','markdown','json','yaml','yml','csv','tsv','xml','html','htm','css','scss','less','js','mjs','cjs','ts','jsx','tsx','py','rb','go','java','kt','c','h','cpp','cc','hpp','cs','rs','php','sh','bash','zsh','fish','sql','toml','ini','cfg','conf','env','properties','gradle','dockerfile','makefile','cmake','r','lua','swift','scala'
+    ]);
+    const ATTACHMENT_LANGUAGE_MAP = {
+        md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
+        csv: 'csv', tsv: 'tsv', xml: 'xml', html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
+        js: 'javascript', mjs: 'javascript', cjs: 'javascript', ts: 'typescript', jsx: 'jsx', tsx: 'tsx',
+        py: 'python', rb: 'ruby', go: 'go', java: 'java', kt: 'kotlin', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp', cs: 'csharp',
+        rs: 'rust', php: 'php', sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', sql: 'sql', toml: 'toml', ini: 'ini', cfg: 'ini', conf: 'ini', env: 'ini',
+        properties: 'ini', gradle: 'groovy', dockerfile: 'dockerfile', makefile: 'makefile', cmake: 'cmake', r: 'r', lua: 'lua', swift: 'swift', scala: 'scala'
+    };
 
     /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
@@ -640,6 +894,9 @@
     let lastSubmittedPrompt = '';
     let activeHistoryId = null;
     let historyEnabled = true;
+    let attachmentsEnabled = false;
+    let attachments = [];
+    let attachmentModalKeyListenerBound = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -648,6 +905,8 @@
 
     /* ========== DOM ELEMENT REFERENCES ========== */
     const promptInput = document.getElementById('promptInput');
+    const attachBtn = document.getElementById('attachBtn');
+    const fileInput = document.getElementById('fileInput');
     const submitBtn = document.getElementById('submitBtn');
     const clearBtn = document.getElementById('clearBtn');
     const historyBtn = document.getElementById('historyBtn');
@@ -659,6 +918,13 @@
     const closeHistoryBtn = document.getElementById('closeHistoryBtn');
     const clearHistoryBtn = document.getElementById('clearHistoryBtn');
     const resumeHistoryBtn = document.getElementById('resumeHistoryBtn');
+    const attachmentsContainer = document.getElementById('attachmentsContainer');
+    const attachmentModal = document.getElementById('attachmentModal');
+    const attachmentModalTitle = document.getElementById('attachmentModalTitle');
+    const attachmentModalCode = document.getElementById('attachmentModalCode');
+    const attachmentModalClose = document.getElementById('attachmentModalClose');
+
+    applyAttachmentAvailability(false);
 
     /* ========== UTILITY FUNCTIONS ========== */
     function isAtBottom() {
@@ -719,14 +985,16 @@
                 scrollResultsToBottom();
                 hideScrollToBottomButton();
             });
-            
+
             if (wasScrollBtnVisible && !wasAtBottom) {
                 newScrollBtn.classList.add('show');
             }
         }
-        
+
+        bindUserAttachmentPreviews();
+
         lastContentUpdateTime = Date.now();
-        
+
         if (wasAtBottom) {
             autoScrollEnabled = true;
             scrollResultsToBottom();
@@ -744,6 +1012,264 @@
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
+    }
+
+    function sanitizeAttachmentName(name) {
+        const trimmed = (name || '').replace(/[\r\n]+/g, ' ').trim();
+        if (!trimmed) return 'attachment.txt';
+        return trimmed;
+    }
+
+    function detectAttachmentLanguage(name) {
+        if (!name) return 'text';
+        const lowered = name.toLowerCase();
+        if (lowered === 'dockerfile') return 'dockerfile';
+        if (lowered.startsWith('makefile')) return 'makefile';
+        const parts = lowered.split('.');
+        const ext = parts.length > 1 ? parts.pop() : '';
+        return ATTACHMENT_LANGUAGE_MAP[ext] || 'text';
+    }
+
+    function isAllowedTextFile(file) {
+        if (!file) return false;
+        if (file.type && file.type.startsWith('text/')) return true;
+        const allowedMimes = [
+            'application/json', 'application/xml', 'application/javascript', 'application/x-javascript',
+            'application/x-sh', 'application/sql', 'application/x-yaml'
+        ];
+        if (file.type && allowedMimes.includes(file.type)) return true;
+        const name = file.name || '';
+        const lowered = name.toLowerCase();
+        if (lowered === 'dockerfile' || lowered.startsWith('makefile')) return true;
+        const parts = lowered.split('.');
+        const ext = parts.length > 1 ? parts.pop() : '';
+        if (ext && TEXT_FILE_EXTENSIONS.has(ext)) return true;
+        return false;
+    }
+
+    function renderAttachments() {
+        if (!attachmentsContainer) return;
+        attachmentsContainer.innerHTML = '';
+
+        if (!attachmentsEnabled) {
+            attachmentsContainer.classList.remove('visible');
+            autoResizeTextarea();
+            return;
+        }
+
+        if (!attachments || attachments.length === 0) {
+            attachmentsContainer.classList.remove('visible');
+            autoResizeTextarea();
+            return;
+        }
+
+        attachmentsContainer.classList.add('visible');
+
+        attachments.forEach(item => {
+            const chip = document.createElement('div');
+            chip.className = 'attachment-chip';
+
+            const label = document.createElement('span');
+            label.textContent = item.name;
+            chip.appendChild(label);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.setAttribute('aria-label', 'Remove ' + item.name);
+            removeBtn.innerHTML = '✕';
+            removeBtn.addEventListener('click', () => removeAttachment(item.id));
+            chip.appendChild(removeBtn);
+
+            attachmentsContainer.appendChild(chip);
+        });
+
+        autoResizeTextarea();
+    }
+
+    function removeAttachment(id) {
+        attachments = attachments.filter(item => item.id !== id);
+        renderAttachments();
+    }
+
+    function clearAttachments() {
+        attachments = [];
+        renderAttachments();
+        if (fileInput) fileInput.value = '';
+    }
+
+    async function handleFileInputChange(event) {
+        if (attachmentsEnabled === false) return;
+        if (!event || !event.target) return;
+        const files = Array.from(event.target.files || []);
+        if (files.length === 0) return;
+
+        for (const file of files) {
+            if (!isAllowedTextFile(file)) {
+                notifyAttachmentWarning('Only text-based files can be attached. Skipping "' + (file.name || 'file') + '".');
+                continue;
+            }
+            if (file.size > MAX_ATTACHMENT_SIZE) {
+                notifyAttachmentWarning('"' + (file.name || 'file') + '" exceeds the 512 KB size limit and will be skipped.');
+                continue;
+            }
+
+            try {
+                const text = await file.text();
+                attachments.push({
+                    id: 'att-' + Date.now() + '-' + Math.random().toString(16).slice(2),
+                    name: sanitizeAttachmentName(file.name || 'attachment.txt'),
+                    content: (text || '').replace(/\r\n/g, '\n'),
+                    language: detectAttachmentLanguage(file.name)
+                });
+            } catch (error) {
+                console.error('Failed to read attachment', file.name, error);
+            }
+        }
+
+        renderAttachments();
+        event.target.value = '';
+    }
+
+    function handleAttachClick() {
+        if (attachmentsEnabled === false) return;
+        if (!fileInput || (attachBtn && attachBtn.disabled)) return;
+        try {
+            fileInput.click();
+        } catch (error) {
+            console.error('Failed to open file picker:', error);
+        }
+    }
+
+    function notifyAttachmentWarning(message) {
+        if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+            window.alert(message);
+        } else {
+            console.warn(message);
+        }
+    }
+
+    function buildPromptWithAttachments(basePrompt, items) {
+        const normalized = (basePrompt || '').replace(/\r\n/g, '\n');
+        if (!items || items.length === 0) return normalized;
+
+        let output = normalized;
+        if (output.trim().length > 0) {
+            if (!output.endsWith('\n')) output += '\n';
+            output += '\n';
+        } else {
+            output = '';
+        }
+
+        const blocks = items.map(item => {
+            const safeName = sanitizeAttachmentName(item.name).replace(/```/g, '`');
+            const cleanContent = (item.content || '').replace(/\r\n/g, '\n');
+            return '```attachment ' + safeName + '\n' + cleanContent + '\n```';
+        });
+
+        return output + blocks.join('\n\n');
+    }
+
+    function stripAttachmentBlocks(text) {
+        if (!text) return '';
+        return text.replace(/```attachment[^\n]*\n[\s\S]*?```/g, '').trim();
+    }
+
+    function sanitizeLanguageToken(lang) {
+        if (!lang) return 'text';
+        return lang.replace(/[^a-z0-9\-+]+/gi, '').toLowerCase() || 'text';
+    }
+
+    function decodeAttachmentContent(encoded) {
+        if (!encoded) return '';
+        try {
+            const binary = atob(encoded);
+            if (typeof TextDecoder !== 'undefined') {
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    bytes[i] = binary.charCodeAt(i);
+                }
+                const decoder = new TextDecoder();
+                return decoder.decode(bytes);
+            }
+            let result = '';
+            for (let i = 0; i < binary.length; i++) {
+                const hex = binary.charCodeAt(i).toString(16).padStart(2, '0');
+                result += '%' + hex;
+            }
+            return decodeURIComponent(result);
+        } catch (error) {
+            console.error('Failed to decode attachment content:', error);
+            return '';
+        }
+    }
+
+    function openAttachmentModal(name, content, language) {
+        if (!attachmentModal || !attachmentModalTitle || !attachmentModalCode) return;
+
+        attachmentModalTitle.textContent = sanitizeAttachmentName(name);
+        attachmentModalCode.textContent = content || '';
+        attachmentModalCode.className = 'hljs';
+
+        const safeLanguage = sanitizeLanguageToken(language);
+        if (safeLanguage && safeLanguage !== 'text') {
+            attachmentModalCode.classList.add('language-' + safeLanguage);
+        }
+
+        attachmentModal.classList.add('open');
+        attachmentModal.setAttribute('aria-hidden', 'false');
+
+        setTimeout(() => {
+            try { hljs.highlightElement(attachmentModalCode); } catch (e) { /* ignore */ }
+        }, 0);
+    }
+
+    function closeAttachmentModal() {
+        if (!attachmentModal || !attachmentModalCode) return;
+        attachmentModal.classList.remove('open');
+        attachmentModal.setAttribute('aria-hidden', 'true');
+        attachmentModalCode.textContent = '';
+        attachmentModalCode.className = 'hljs';
+    }
+
+    function bindUserAttachmentPreviews() {
+        if (!resultsDiv) return;
+        const nodes = resultsDiv.querySelectorAll('.user-attachment');
+        nodes.forEach(node => {
+            if (node.dataset.bound === 'true') return;
+            node.dataset.bound = 'true';
+            node.addEventListener('click', () => {
+                const encoded = node.getAttribute('data-content') || '';
+                const name = node.getAttribute('data-name') || 'Attachment';
+                const language = node.getAttribute('data-language') || 'text';
+                const content = decodeAttachmentContent(encoded);
+                openAttachmentModal(name, content, language);
+            });
+        });
+    }
+
+    function bindAttachmentModalHandlers() {
+        if (attachmentModalClose && attachmentModalClose.dataset.bound !== 'true') {
+            attachmentModalClose.addEventListener('click', closeAttachmentModal);
+            attachmentModalClose.dataset.bound = 'true';
+        }
+
+        if (attachmentModal && attachmentModal.dataset.bound !== 'true') {
+            attachmentModal.addEventListener('click', (event) => {
+                if (event.target === attachmentModal) {
+                    closeAttachmentModal();
+                }
+            });
+            attachmentModal.dataset.bound = 'true';
+        }
+
+        if (!attachmentModalKeyListenerBound) {
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && attachmentModal && attachmentModal.classList.contains('open')) {
+                    closeAttachmentModal();
+                }
+            });
+            attachmentModalKeyListenerBound = true;
+        }
     }
 
     function loadStoredHistory() {
@@ -769,7 +1295,8 @@
     }
 
     function formatHistoryTitle(prompt, fallback = 'Conversation') {
-        const base = (prompt || '').split('\n').map(line => line.trim()).find(Boolean) || fallback;
+        const sanitized = stripAttachmentBlocks(prompt || '');
+        const base = sanitized.split('\n').map(line => line.trim()).find(Boolean) || fallback;
         if (base.length > HISTORY_TITLE_MAX_LENGTH) {
             return base.slice(0, HISTORY_TITLE_MAX_LENGTH - 3) + '...';
         }
@@ -863,8 +1390,33 @@
         }
     }
 
-    async function configureHistoryAvailability() {
-        let shouldEnable = true;
+    function applyAttachmentAvailability(enabled) {
+        attachmentsEnabled = !!enabled;
+
+        if (attachBtn) {
+            attachBtn.style.display = attachmentsEnabled ? '' : 'none';
+            attachBtn.disabled = !attachmentsEnabled || isProcessing;
+        }
+
+        if (attachmentsContainer) {
+            attachmentsContainer.style.display = attachmentsEnabled ? '' : 'none';
+        }
+
+        if (fileInput) {
+            fileInput.disabled = !attachmentsEnabled || isProcessing;
+            if (!attachmentsEnabled) fileInput.value = '';
+        }
+
+        if (!attachmentsEnabled) {
+            clearAttachments();
+        } else {
+            renderAttachments();
+        }
+    }
+
+    async function configureFeatureAvailability() {
+        let shouldEnableHistory = true;
+        let shouldEnableAttachments = false;
 
         try {
             const response = await fetch('/info', {
@@ -877,13 +1429,17 @@
 
             const data = await response.json();
             if (typeof data.usehistory === 'boolean') {
-                shouldEnable = data.usehistory;
+                shouldEnableHistory = data.usehistory;
+            }
+            if (typeof data.useattach === 'boolean') {
+                shouldEnableAttachments = data.useattach;
             }
         } catch (error) {
-            console.error('Unable to determine history availability:', error);
+            console.error('Unable to determine feature availability:', error);
         }
 
-        applyHistoryAvailability(shouldEnable);
+        applyHistoryAvailability(shouldEnableHistory);
+        applyAttachmentAvailability(shouldEnableAttachments);
 
         if (historyEnabled) {
             refreshHistoryPanel();
@@ -1160,9 +1716,9 @@
 
     function setSubmitIcon(state) {
         if (!submitBtn) return;
-        
+
         submitBtn.classList.toggle('stop', state === 'stop');
-        
+
         if (state === 'stop') {
             submitBtn.title = 'Stop';
             submitBtn.setAttribute('aria-label', 'Stop');
@@ -1178,6 +1734,17 @@
                     <path d="M12 19V5m-7 7l7-7 7 7" />
                 </svg>`;
         }
+    }
+
+    function setAttachIcon() {
+        if (!attachBtn) return;
+
+        attachBtn.title = 'Attach files';
+        attachBtn.setAttribute('aria-label', 'Attach files');
+        attachBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24L9.62 17.41a1 1 0 0 1-1.41-1.41l8.48-8.48" />
+            </svg>`;
     }
 
     function setClearIcon() {
@@ -1248,8 +1815,11 @@
         setSubmitIcon('stop');
         submitBtn.classList.add('stop');
         clearBtn.disabled = true;
+        if (attachBtn) attachBtn.disabled = true;
+        if (fileInput) fileInput.disabled = true;
         scrollResultsToBottom();
         addPreview();
+        clearAttachments();
     }
 
     function stopProcessing() {
@@ -1258,7 +1828,9 @@
         setSubmitIcon('send');
         submitBtn.classList.remove('stop');
         clearBtn.disabled = false;
-        
+        if (attachBtn) attachBtn.disabled = !attachmentsEnabled;
+        if (fileInput) fileInput.disabled = !attachmentsEnabled;
+
         if (pollingInterval) {
             clearInterval(pollingInterval);
             pollingInterval = null;
@@ -1283,10 +1855,11 @@
             return;
         }
 
-        const prompt = promptInput.value.trim();
-        if (!prompt) return;
+        const rawPrompt = promptInput.value || '';
+        const finalPrompt = buildPromptWithAttachments(rawPrompt, attachmentsEnabled ? attachments : []);
+        if (!finalPrompt.trim()) return;
 
-        lastSubmittedPrompt = prompt;
+        lastSubmittedPrompt = finalPrompt;
         activeHistoryId = null;
 
         try {
@@ -1295,7 +1868,7 @@
             const response = await fetch('/prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: prompt, uuid: currentSessionUuid })
+                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid })
             });
 
             if (!response.ok) throw new Error('Failed to submit prompt');
@@ -1406,6 +1979,7 @@
         updateResultsContent('<p></p>');
         removePreview();
         promptInput.value = '';
+        clearAttachments();
 
         try {
             if (typeof window !== 'undefined') window.mini_a_session_uuid = null;
@@ -1421,6 +1995,8 @@
 
         autoScrollEnabled = true;
         promptInput.disabled = false;
+        if (attachBtn) attachBtn.disabled = !attachmentsEnabled;
+        if (fileInput) fileInput.disabled = !attachmentsEnabled;
         setSubmitIcon('send');
         submitBtn.classList.remove('stop');
         clearBtn.disabled = false;
@@ -1451,9 +2027,14 @@
     /* ========== INITIALIZATION ========== */
     function initializeUI() {
         promptInput.disabled = false;
+        if (attachBtn) attachBtn.disabled = false;
+        if (fileInput) fileInput.disabled = false;
         setSubmitIcon('send');
+        setAttachIcon();
         setClearIcon();
         setHistoryIcon();
+        renderAttachments();
+        bindAttachmentModalHandlers();
 
         // Add event listeners
         promptInput.addEventListener('input', autoResizeTextarea);
@@ -1464,6 +2045,14 @@
                 handleSubmit();
             }
         });
+
+        if (attachBtn) {
+            attachBtn.addEventListener('click', handleAttachClick);
+        }
+
+        if (fileInput) {
+            fileInput.addEventListener('change', handleFileInputChange);
+        }
 
         submitBtn.addEventListener('click', handleSubmit);
         clearBtn.addEventListener('click', handleClearClick);
@@ -1535,7 +2124,7 @@
             console.error('Failed to start ping on load:', e);
         }
 
-        configureHistoryAvailability();
+        configureFeatureAvailability();
         refreshHistoryPanel();
     }
 

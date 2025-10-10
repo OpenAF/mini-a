@@ -107,8 +107,20 @@ Optional flags when starting the server:
 
 - `showExecs=true` to show executed commands in the interaction stream
 - `logPromptHeaders="origin,referer"` to log selected incoming headers for debugging
+- `usehistory=true` to expose the history side panel and persist conversations on disk
+- `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
+- `useattach=true` to enable the file attachment button in the browser UI (disabled by default)
 
 Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
+
+### Attaching files in the browser UI
+
+> **Prerequisite:** start the web server with `useattach=true` to display the paperclip control.
+
+- Click the paperclip button to the left of the prompt to choose one or more text-based files (Markdown, source code, CSV, JSON, etc.). Each file can be up to **512 KB**.
+- Every attachment appears above the prompt as a rounded chip showing the file name; remove any file before sending by selecting the **✕** icon.
+- When you submit the prompt, Mini-A automatically appends the file name and contents as Markdown code blocks. In the conversation stream the files show up as collapsible buttons—click one to open a preview modal with syntax highlighting.
+- Non-text files or oversized attachments are skipped with a warning so you always know what was sent.
 
 ## Basic Usage
 
