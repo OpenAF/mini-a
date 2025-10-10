@@ -96,6 +96,13 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
+{{#if planning}}
+## PLANNING:
+• Maintain a concise "plan" array inside the state with 3-5 high-level steps (each step should include a short title and a status such as pending, in_progress, done, or blocked).
+• Update the plan statuses as you make progress (mark finished work as done and reflect any blockers).
+• Revise the plan if the goal changes or new information appears so it always reflects the current approach.
+{{/if}}
+
 ## EXAMPLE:
  
 ### Prompt
@@ -215,23 +222,38 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._useTools = false
   this._lastThoughtMessage = ""
   this._lastThinkMessage = ""
+  this._lastPlanMessage = ""
   this._thoughtCounter = 0
   this._thinkCounter = 0
+  this._planCounter = 0
+  this._lastPlanSnapshot = ""
+  this._enablePlanning = false
 }
 
 /**
  * Helper function to log thought or think messages with counter for repeated messages
  */
 MiniA.prototype._logMessageWithCounter = function(type, message) {
-  if (type !== "thought" && type !== "think") {
+  if (type !== "thought" && type !== "think" && type !== "plan") {
     this._fnI(type, message)
     return
   }
-  
+
   var cleanMessage = (message || "").toString().trim()
-  var lastMessageProp = type === "thought" ? "_lastThoughtMessage" : "_lastThinkMessage"
-  var counterProp = type === "thought" ? "_thoughtCounter" : "_thinkCounter"
-  
+  var lastMessageProp
+  var counterProp
+
+  if (type === "thought") {
+    lastMessageProp = "_lastThoughtMessage"
+    counterProp = "_thoughtCounter"
+  } else if (type === "think") {
+    lastMessageProp = "_lastThinkMessage"
+    counterProp = "_thinkCounter"
+  } else {
+    lastMessageProp = "_lastPlanMessage"
+    counterProp = "_planCounter"
+  }
+
   if (cleanMessage === this[lastMessageProp] && cleanMessage.length > 0) {
     this[counterProp]++
     var displayMessage = `${cleanMessage} #${this[counterProp] + 1}`
@@ -264,6 +286,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "size"     : _e = "📏"; break
   case "rate"     : _e = "⏳"; break
   case "mcp"      : _e = "🤖"; break
+  case "plan"     : _e = "🗺️"; break
   case "done"     : _e = "✅"; break
   case "error"    : _e = "❌"; break
   case "libs"     : _e = "📚"; break
@@ -394,6 +417,126 @@ MiniA.prototype._parseListOption = function(value) {
         .split(",")
         .map(v => v.trim().toLowerCase())
         .filter(v => v.length > 0)
+}
+
+MiniA.prototype._normalizePlanItems = function(plan) {
+    if (isUnDef(plan) || plan === null) return []
+
+    var extractItems = value => {
+        if (isArray(value)) return value
+        if (isMap(value)) {
+            if (isArray(value.items)) return value.items
+            if (isArray(value.steps)) return value.steps
+            return Object.keys(value).map(k => value[k])
+        }
+        return [value]
+    }
+
+    var items = extractItems(plan)
+    if (!isArray(items)) return []
+
+    var normalized = []
+    items.forEach(item => {
+        if (isUnDef(item)) return
+        if (isString(item)) {
+            normalized.push({ title: item.trim(), status: "pending", rawStatus: "pending" })
+            return
+        }
+        if (isMap(item)) {
+            var title = item.title || item.name || item.step || item.task || item.description || item.summary || ""
+            if (isObject(title)) title = stringify(title, __, "")
+            if (isString(title)) title = title.trim()
+            var statusValue = __
+            if (isDef(item.status)) statusValue = item.status
+            else if (isDef(item.state)) statusValue = item.state
+            else if (isDef(item.phase)) statusValue = item.phase
+            else if (isDef(item.progress)) statusValue = item.progress
+            else if (item.done === true || item.complete === true || item.completed === true) statusValue = "done"
+            else if (item.done === false || item.complete === false || item.completed === false) statusValue = "pending"
+
+            if (isUnDef(statusValue) && isNumber(item.remaining) && item.remaining === 0) statusValue = "done"
+            if (isUnDef(statusValue) && isNumber(item.percent) && item.percent >= 100) statusValue = "done"
+            if (isUnDef(statusValue) && isNumber(item.progress) && item.progress >= 1) statusValue = "done"
+
+            if (isString(statusValue)) {
+                statusValue = statusValue.trim().toLowerCase()
+            } else if (isNumber(statusValue)) {
+                statusValue = statusValue >= 1 ? "done" : "pending"
+            } else if (statusValue === true) {
+                statusValue = "done"
+            } else if (statusValue === false) {
+                statusValue = "pending"
+            } else {
+                statusValue = "pending"
+            }
+
+            statusValue = statusValue.replace(/[^a-z_\-\s]/g, "").replace(/[\s-]+/g, "_")
+
+            if (!isString(title) || title.length === 0) {
+                title = stringify(item, __, "")
+            }
+
+            normalized.push({ title: title, status: statusValue.length > 0 ? statusValue : "pending", rawStatus: statusValue })
+        }
+    })
+
+    return normalized.filter(entry => isString(entry.title) && entry.title.length > 0)
+}
+
+MiniA.prototype._handlePlanUpdate = function() {
+    if (!this._enablePlanning) return
+    if (!isObject(this._agentState)) return
+
+    var planItems = this._normalizePlanItems(this._agentState.plan)
+    if (planItems.length === 0) {
+        if (this._lastPlanSnapshot.length > 0) {
+            this._logMessageWithCounter("plan", "Plan cleared (no active tasks)")
+        }
+        this._lastPlanSnapshot = ""
+        return
+    }
+
+    var snapshot = stringify(planItems, __, "")
+    if (snapshot === this._lastPlanSnapshot) return
+
+    var statusIcons = {
+        pending     : { icon: "⏳", label: "pending" },
+        todo        : { icon: "⏳", label: "to do" },
+        not_started : { icon: "⏳", label: "not started" },
+        ready       : { icon: "⏳", label: "ready" },
+        in_progress : { icon: "⚙️", label: "in progress" },
+        progressing : { icon: "⚙️", label: "in progress" },
+        working     : { icon: "⚙️", label: "working" },
+        running     : { icon: "⚙️", label: "running" },
+        active      : { icon: "⚙️", label: "active" },
+        done        : { icon: "✅", label: "done" },
+        complete    : { icon: "✅", label: "complete" },
+        completed   : { icon: "✅", label: "completed" },
+        finished    : { icon: "✅", label: "finished" },
+        success     : { icon: "✅", label: "success" },
+        blocked     : { icon: "🛑", label: "blocked" },
+        stuck       : { icon: "🛑", label: "stuck" },
+        paused      : { icon: "⏸️", label: "paused" },
+        waiting     : { icon: "⏳", label: "waiting" },
+        failed      : { icon: "❌", label: "failed" },
+        cancelled   : { icon: "🚫", label: "cancelled" },
+        canceled    : { icon: "🚫", label: "cancelled" }
+    }
+
+    var lines = []
+    for (var i = 0; i < planItems.length; i++) {
+        var entry = planItems[i]
+        var statusInfo = statusIcons[entry.status] || statusIcons[entry.rawStatus] || { icon: "•", label: entry.status || "pending" }
+        var text = `${i + 1}. ${statusInfo.icon} ${entry.title}`
+        if (isString(statusInfo.label) && statusInfo.label.length > 0) {
+            text += ` – ${statusInfo.label}`
+        }
+        lines.push(text)
+    }
+
+    var message = lines.join("\n")
+    this._logMessageWithCounter("plan", message)
+    this._lastPlanSnapshot = snapshot
 }
 
 /**
@@ -646,6 +789,12 @@ MiniA.prototype._runCommand = function(args) {
 // ============================================================================
 
 MiniA.prototype.init = function(args) {
+  args = _$(args, "args").isMap().default({})
+  var initChatbotMode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+  var initUsePlanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+  this._enablePlanning = (!initChatbotMode && initUsePlanning)
+  args.chatbotmode = initChatbotMode
+  args.useplanning = initUsePlanning
   if (this._isInitialized) return
   /*if (this._isInitializing) {
     do {
@@ -660,8 +809,6 @@ MiniA.prototype.init = function(args) {
     ow.metrics.add("mini-a", () => {
       return this.getMetrics()
     })
-
-    args = _$(args, "args").isMap().default({})
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -685,6 +832,8 @@ MiniA.prototype.init = function(args) {
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
+    args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -969,7 +1118,8 @@ MiniA.prototype.init = function(args) {
         actionsdesc      : promptActionsDesc,
         isMachine        : (isDef(args.__format) && args.__format != "md"),
         usetools         : this._useTools,
-        toolCount        : this.mcpTools.length
+        toolCount        : this.mcpTools.length,
+        planning         : this._enablePlanning
       })
     }
 
@@ -1069,6 +1219,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+    args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+
+    this._enablePlanning = (!args.chatbotmode && args.useplanning)
+    this._lastPlanMessage = ""
+    this._planCounter = 0
+    this._lastPlanSnapshot = ""
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -1195,6 +1351,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
     this._agentState = isObject(initialState) ? initialState : {}
+    if (this._enablePlanning && isObject(this._agentState) && isUnDef(this._agentState.plan)) this._agentState.plan = []
+    if (this._enablePlanning) this._handlePlanUpdate()
 
     this._fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
@@ -1504,6 +1662,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._agentState = extractedState
           updatedStateSnapshot = stringify(this._agentState, __, "")
           stateUpdatedThisStep = true
+          if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
+          if (this._enablePlanning) this._handlePlanUpdate()
         }
       }
       var actionMessages = []

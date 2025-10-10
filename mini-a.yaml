@@ -101,6 +101,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useplanning
+    desc     : Enable task planning updates (agent mode only)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : rules
     desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
@@ -144,6 +149,7 @@ jobs:
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
       usetools       : toBoolean.isBoolean.default(false)
+      useplanning    : toBoolean.isBoolean.default(false)
       rules          : isString.default(__)
       state          : isString.default(__)
   exec : | #js
