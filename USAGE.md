@@ -153,6 +153,7 @@ The `start()` method accepts various configuration options:
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
+- **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
@@ -193,6 +194,25 @@ mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-db.yaml
 
 #### Rate Limiting
 - **`rtm`** (number): Rate limit in calls per minute
+
+## Chatbot Mode
+
+Set `chatbotmode=true` when you want Mini-A to behave like a straightforward conversational assistant instead of a structured agent. In this mode the runtime swaps in the dedicated chatbot system prompt, omits the agent-style tool instructions, and keeps responses aligned with natural dialogue while still allowing MCP tools, shell access, and other options you enable.
+
+CLI example:
+
+```bash
+ojob mini-a.yaml goal="brainstorm three lunch ideas" chatbotmode=true
+```
+
+Library example:
+
+```javascript
+var mini = new MiniA()
+mini.start({ goal: "Draft a friendly release note", chatbotmode: true })
+```
+
+Switching back to the default agent mode is as simple as omitting the flag (or setting it to `false`).
 
 ## Examples
 
