@@ -29,7 +29,9 @@
             document.querySelectorAll('div').forEach(div => {
                 const isChatContainer = div.classList.contains('chat-container');
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
-                if (!isChatContainer && !isHistoryElement) {
+                const isAttachmentModal = div.id === 'attachmentModal';
+
+                if (!isChatContainer && !isHistoryElement && !isAttachmentModal) {
                     div.style.backgroundColor = '#0f1115';
                     div.style.color = '#e6e6e6';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -41,9 +43,17 @@
             // Update form elements for dark mode
             const promptInput = document.getElementById('promptInput');
             if (promptInput) {
-                promptInput.style.background = '#1a1d23';
+                //promptInput.style.background = '#1a1d23';
+                promptInput.style.background = 'transparent';
                 promptInput.style.color = '#e6e6e6';
                 promptInput.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+                promptInput.style.height = 'auto'
+            }
+
+            const inputSection = document.getElementById('inputSection');
+            if (inputSection) {
+                inputSection.style.background = '#1a1d23';
+                inputSection.style.border = '1px solid #242629';
             }
 
             const submitBtn = document.getElementById('submitBtn');
@@ -89,7 +99,8 @@
             document.querySelectorAll('div').forEach(div => {
                 const isChatContainer = div.classList.contains('chat-container');
                 const isHistoryElement = div.id === 'historyPanel' || div.id === 'historyOverlay' || (typeof div.closest === 'function' && div.closest('#historyPanel'));
-                if (!isChatContainer && !isHistoryElement) {
+                const isAttachmentModal = div.id === 'attachmentModal';
+                if (!isChatContainer && !isHistoryElement && !isAttachmentModal) {
                     div.style.backgroundColor = '#f8f9fa';
                     div.style.color = '#000000';
                     if (div.style.borderColor || getComputedStyle(div).borderColor !== 'rgba(0, 0, 0, 0)') {
@@ -101,9 +112,17 @@
             // Reset form elements for light mode
             const promptInput = document.getElementById('promptInput');
             if (promptInput) {
-                promptInput.style.background = '#ffffff';
+                /*promptInput.style.background = '#ffffff';*/
+                promptInput.style.background = 'transparent';
                 promptInput.style.color = '#000000';
                 promptInput.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                promptInput.style.height = 'auto'
+            }
+
+            const inputSection = document.getElementById('inputSection');
+            if (inputSection) {
+                inputSection.style.background = 'white';
+                inputSection.style.border = '1px solid #cccccc';
             }
 
             const submitBtn = document.getElementById('submitBtn');
@@ -180,7 +199,7 @@
         align-items: flex-end;
         gap: 0.8vmin;
         margin-bottom: 2vmin;
-        background: var(--panel-bg);
+        background: white;
         border: 1px solid var(--border);
         border-radius: 1.2vmin;
         padding: 0.6vmin;
@@ -190,10 +209,10 @@
 
     .prompt-wrapper {
         flex: 1;
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        /*flex-direction: column;*/
         gap: 0.4vmin;
-        min-height: 2.4em;
+    /* min-height removed to allow textarea to grow */
     }
 
     .attachments-container {
@@ -250,22 +269,24 @@
 
     #promptInput {
         flex: 1;
-        padding: 1.2vmin;
+        padding: 0.7vmin;
         border: none;
         border-radius: 0.8vmin;
-        background: #ffffff;
+        background: transparent;
         color: inherit;
         font-size: 0.9rem;
         font-family: inherit;
-        line-height: 1.2;
+        line-height: 1.5;
         resize: none;
-        overflow: hidden;
+        overflow-y: auto;
         min-height: 2.4em;
         max-height: 20vh;
+        height: auto;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         outline: none;
         transition: box-shadow 0.2s ease;
         box-sizing: border-box;
+        /*zoom: 0.9;*/
     }
 
     #promptInput:focus {
@@ -398,17 +419,16 @@
     }
 
     .attachment-modal-content {
-        width: min(90vw, 720px);
-        max-height: 80vh;
-        /* Use very translucent background to show backdrop blur */
-        background: rgba(248, 249, 250, 0.15);
-        backdrop-filter: blur(20px) saturate(2.0) brightness(1.1);
-        -webkit-backdrop-filter: blur(20px) saturate(2.0) brightness(1.1);
-        /* Fallback for browsers that don't support backdrop-filter */
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        width: min(95vw, 1200px);
+        max-height: 90vh;
+        /* Semi-transparent background for frosted glass effect */
+        background: rgba(255, 255, 255, 0.4);
+        backdrop-filter: blur(40px) saturate(1.8);
+        -webkit-backdrop-filter: blur(40px) saturate(1.8);
+        border: 1px solid rgba(0, 0, 0, 0.1);
         box-shadow: 
             0 12px 32px rgba(0,0,0,0.35),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            inset 0 1px 0 rgba(255, 255, 255, 0.5);
         color: inherit;
         border-radius: 1rem;
         display: flex;
@@ -421,8 +441,8 @@
         justify-content: space-between;
         align-items: center;
         padding: 1rem 1.2rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
-        background: rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+        background: transparent;
         gap: 1rem;
     }
 
@@ -459,16 +479,16 @@
     .attachment-modal-body {
         padding: 1rem 1.2rem 1.2rem 1.2rem;
         overflow: auto;
-        background: rgba(255, 255, 255, 0.02);
+        background: transparent;
     }
 
     .attachment-modal-body pre {
         margin: 0;
-        max-height: 60vh;
+        max-height: 75vh;
         overflow: auto;
         border-radius: 0.8rem;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(0, 0, 0, 0.15);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        background: rgba(255, 255, 255, 0.3);
         padding: 1rem;
     }
 
@@ -708,12 +728,19 @@
     body.markdown-body-dark .user-attachment:focus-visible {
         background: rgba(51,144,255,0.25);
     }
+    body.markdown-body-dark #attachBtn,
+    body.markdown-body-dark #clearBtn {
+        background: linear-gradient(135deg, #23262b 0%, #181a1d 100%) !important;
+        color: #e6e6e6 !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+        border: 1.5px solid rgba(255,255,255,0.08) !important;
+    }
 
     body.markdown-body-dark .attachment-modal-content {
-        /* Dark theme frosted glass effect with very low opacity */
-        background: rgba(15, 17, 21, 0.1);
-        backdrop-filter: blur(20px) saturate(2.0) brightness(0.8);
-        -webkit-backdrop-filter: blur(20px) saturate(2.0) brightness(0.8);
+        /* Dark theme frosted glass effect */
+        background: rgba(15, 17, 21, 0.4);
+        backdrop-filter: blur(40px) saturate(1.8);
+        -webkit-backdrop-filter: blur(40px) saturate(1.8);
         border: 1px solid rgba(255, 255, 255, 0.08);
         box-shadow: 
             0 18px 40px rgba(0,0,0,0.65),
@@ -721,12 +748,12 @@
     }
 
     body.markdown-body-dark .attachment-modal-header {
-        background: rgba(255, 255, 255, 0.02);
+        background: transparent;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
 
     body.markdown-body-dark .attachment-modal-body {
-        background: rgba(255, 255, 255, 0.01);
+        background: transparent;
     }
 
     /* Dark mode overlay tweaks for modal */
@@ -737,7 +764,7 @@
     }
 
     body.markdown-body-dark .attachment-modal-body pre {
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(0, 0, 0, 0.3);
         border-color: rgba(255, 255, 255, 0.08);
     }
 
@@ -842,12 +869,12 @@
     </div>
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
     <br>
-    <div class="input-section">
+    <div id="inputSection" class="input-section">
         <button id="attachBtn" title="Attach files" aria-label="Attach files" type="button"></button>
         <input type="file" id="fileInput" accept="text/*,.md,.markdown,.txt,.json,.yaml,.yml,.csv,.tsv,.xml,.html,.css,.scss,.less,.js,.ts,.jsx,.tsx,.py,.rb,.go,.java,.kt,.c,.cpp,.cs,.rs,.php,.sh,.bash,.zsh,.fish,.sql,.toml,.ini,.env" multiple style="display:none" />
         <div class="prompt-wrapper">
             <div id="attachmentsContainer" class="attachments-container" aria-live="polite"></div>
-            <textarea id="promptInput" placeholder="Enter your prompt..." disabled rows="1"></textarea>
+            <textarea id="promptInput" placeholder="Enter your prompt..." rows="1" disabled></textarea>
         </div>
         <button id="submitBtn" title="Send" aria-label="Send" type="button"></button>
         <button id="clearBtn" title="Clear" aria-label="Clear" type="button"></button>
@@ -1817,13 +1844,18 @@
     function autoResizeTextarea() {
         if (!promptInput) return;
         
-        promptInput.style.height = 'auto';
+        // Reset height to get accurate scrollHeight
+        promptInput.style.height = '1px';
+
+        promptInput.style.background = 'transparent';
         
-        const minHeight = parseFloat(getComputedStyle(promptInput).minHeight);
-        const maxHeight = parseFloat(getComputedStyle(promptInput).maxHeight);
+        const minHeight = parseFloat(getComputedStyle(promptInput).minHeight) || 0;
+        const maxHeight = parseFloat(getComputedStyle(promptInput).maxHeight) || Infinity;
+        
+        // Use scrollHeight for the actual content height
         let newHeight = Math.max(minHeight, promptInput.scrollHeight);
         
-        if (maxHeight && newHeight > maxHeight) {
+        if (maxHeight && maxHeight > 0 && newHeight > maxHeight) {
             newHeight = maxHeight;
             promptInput.style.overflowY = 'auto';
         } else {
@@ -2078,6 +2110,7 @@
         setHistoryIcon();
         renderAttachments();
         bindAttachmentModalHandlers();
+        autoResizeTextarea();
 
         // Add event listeners
         promptInput.addEventListener('input', autoResizeTextarea);
@@ -2088,6 +2121,9 @@
                 handleSubmit();
             }
         });
+
+        // Initialize textarea height
+        autoResizeTextarea();
 
         if (attachBtn) {
             attachBtn.addEventListener('click', handleAttachClick);

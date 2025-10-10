@@ -174,7 +174,7 @@ todo:
             // Initialize MiniA
             lma = new MiniA()
             lma.init(merge(global.maArgs, {
-              conversation: _hfile
+              conversation: global._mini_a_web_loadFile(_hfile)
             }))
             lma.setInteractionFn( (e, m) => {
                 var _e = ""
@@ -215,7 +215,7 @@ todo:
           var _rma = lma.start(merge(global.maArgs, {
             goal        : postData.prompt,
             raw         : true,
-            conversation: _hfile
+            conversation: global._mini_a_web_loadFile(_hfile)
           }))
 
           global.__res[uuid].push( { event: "final", message: _rma } )
@@ -425,6 +425,15 @@ jobs:
     global.maArgs = merge(args, {})
     global.ma = new MiniA()
     global.ma.init( global.maArgs )
+
+    global._mini_a_web_saveFile = (aFile, aMap) => {
+      io.writeFileJSON(aFile, aMap, "")
+    }
+
+    global._mini_a_web_loadFile = (aFile) => {
+      // Can be __
+      return aFile
+    }
 
 # ---------------------------------------
 - name : Periodic cleanup of old sessions
