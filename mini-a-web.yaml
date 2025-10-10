@@ -10,6 +10,7 @@ help:
     desc     : Show executed commands in the interaction
     example  : "false"
     mandatory: false
+    options  : ["true", "false"]
   - name     : logPromptHeaders
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
@@ -18,10 +19,12 @@ help:
     desc     : "Boolean to enable/disable history (default: false)"
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : useattach
     desc     : "Boolean to enable/disable file attachments (default: false)"
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : historypath
     desc     : "Path to store history files (default: .)"
     example  : "."
@@ -34,6 +37,7 @@ help:
     desc     : "Boolean to keep history files (default: false)"
     example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : maxcontext
     desc     : "Maximum conversation tokens before Mini-A summarizes context (default: 200000)"
     example  : "200000"
@@ -291,7 +295,7 @@ todo:
           var safeName = att.name && att.name.length > 0 ? att.name : 'attachment.txt'
           var safeNameHtml = __escapeHtml(safeName)
           var attrName = __escapeAttr(safeName)
-          var encoded = ow.binary.base64.encode(att.content || '')
+          var encoded = af.fromBytes2String(af.toBase64Bytes(att.content || ''))
           var language = __detectAttachmentLang(att.name)
           var button = '<button class="user-attachment" type="button" data-name="' + attrName + '" data-language="' + __escapeAttr(language) + '" data-content="' + __escapeAttr(encoded) + '">📎 ' + safeNameHtml + '</button>'
           html = html.replace(placeholder, button)

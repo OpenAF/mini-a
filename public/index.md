@@ -214,7 +214,7 @@
         padding: 0.35em 0.6em;
         background: rgba(0,123,255,0.12);
         border: 1px solid rgba(0,123,255,0.35);
-        border-radius: 999px;
+        border-radius: 0.25rem;
         font-size: 0.8rem;
         color: inherit;
         max-width: 100%;
@@ -363,7 +363,7 @@
         gap: 0.4em;
         margin: 0.2em 0;
         padding: 0.3em 0.7em;
-        border-radius: 999px;
+        border-radius: 0.25rem;
         border: 1px solid rgba(0,123,255,0.35);
         background: rgba(0,123,255,0.1);
         color: inherit;
@@ -382,6 +382,10 @@
         position: fixed;
         inset: 0;
         background: rgba(0,0,0,0.45);
+        /* Blur content underneath the modal */
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        transition: backdrop-filter 0.2s ease, background 0.2s ease;
         display: none;
         align-items: center;
         justify-content: center;
@@ -396,11 +400,17 @@
     .attachment-modal-content {
         width: min(90vw, 720px);
         max-height: 80vh;
-        background: var(--panel-bg);
+        /* Use very translucent background to show backdrop blur */
+        background: rgba(248, 249, 250, 0.15);
+        backdrop-filter: blur(20px) saturate(2.0) brightness(1.1);
+        -webkit-backdrop-filter: blur(20px) saturate(2.0) brightness(1.1);
+        /* Fallback for browsers that don't support backdrop-filter */
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 
+            0 12px 32px rgba(0,0,0,0.35),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
         color: inherit;
         border-radius: 1rem;
-        border: 1px solid var(--border);
-        box-shadow: 0 12px 32px rgba(0,0,0,0.35);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -411,7 +421,8 @@
         justify-content: space-between;
         align-items: center;
         padding: 1rem 1.2rem;
-        border-bottom: 1px solid var(--border);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.05);
         gap: 1rem;
     }
 
@@ -435,7 +446,7 @@
         height: 2rem;
         align-items: center;
         justify-content: center;
-        border-radius: 999px;
+        border-radius: 0.25rem;
         transition: background 0.2s ease, color 0.2s ease;
     }
 
@@ -448,6 +459,7 @@
     .attachment-modal-body {
         padding: 1rem 1.2rem 1.2rem 1.2rem;
         overflow: auto;
+        background: rgba(255, 255, 255, 0.02);
     }
 
     .attachment-modal-body pre {
@@ -455,8 +467,8 @@
         max-height: 60vh;
         overflow: auto;
         border-radius: 0.8rem;
-        border: 1px solid var(--border);
-        background: rgba(0,0,0,0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(0, 0, 0, 0.15);
         padding: 1rem;
     }
 
@@ -614,7 +626,7 @@
         justify-content: center;
         width: 1.9rem;
         height: 1.9rem;
-        border-radius: 999px;
+        border-radius: 0.25rem;
         border: none;
         background: transparent;
         color: inherit;
@@ -698,14 +710,35 @@
     }
 
     body.markdown-body-dark .attachment-modal-content {
-        background: #0f1115;
-        border-color: #242629;
-        box-shadow: 0 18px 40px rgba(0,0,0,0.65);
+        /* Dark theme frosted glass effect with very low opacity */
+        background: rgba(15, 17, 21, 0.1);
+        backdrop-filter: blur(20px) saturate(2.0) brightness(0.8);
+        -webkit-backdrop-filter: blur(20px) saturate(2.0) brightness(0.8);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 
+            0 18px 40px rgba(0,0,0,0.65),
+            inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    body.markdown-body-dark .attachment-modal-header {
+        background: rgba(255, 255, 255, 0.02);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    body.markdown-body-dark .attachment-modal-body {
+        background: rgba(255, 255, 255, 0.01);
+    }
+
+    /* Dark mode overlay tweaks for modal */
+    body.markdown-body-dark .attachment-modal {
+        background: rgba(0,0,0,0.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
     }
 
     body.markdown-body-dark .attachment-modal-body pre {
-        background: rgba(255,255,255,0.05);
-        border-color: #242629;
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(255, 255, 255, 0.08);
     }
 
     body.markdown-body-dark .attachment-modal-close:hover,
@@ -1214,6 +1247,16 @@
         if (safeLanguage && safeLanguage !== 'text') {
             attachmentModalCode.classList.add('language-' + safeLanguage);
         }
+
+        // Ensure syntax highlighting matches current theme
+        try {
+            const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+            if (isDark) {
+                attachmentModalCode.classList.add('hljs_dark');
+            } else {
+                attachmentModalCode.classList.remove('hljs_dark');
+            }
+        } catch (e) { /* ignore */ }
 
         attachmentModal.classList.add('open');
         attachmentModal.setAttribute('aria-hidden', 'false');
@@ -2136,6 +2179,19 @@
 <script src="/js/mdcodeclip.js"></script>
 <script>
     /* ========== DARK MODE INTEGRATION ========== */
+    function __syncAttachmentModalTheme() {
+        try {
+            const codeEl = document.getElementById('attachmentModalCode');
+            if (!codeEl) return;
+            const isDark = document.body.classList.contains('markdown-body-dark') || (typeof _isD !== 'undefined' && _isD === true) || (typeof __isDark !== 'undefined' && __isDark);
+            if (isDark) {
+                codeEl.classList.add('hljs_dark');
+            } else {
+                codeEl.classList.remove('hljs_dark');
+            }
+        } catch (e) { /* ignore */ }
+    }
+
     function __applyDarkModeIfNeeded() {
         if (typeof _isD === 'undefined' || !_isD) return;
 
@@ -2160,15 +2216,18 @@
     document.addEventListener('DOMContentLoaded', function() {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
+        __syncAttachmentModalTheme();
     });
 
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
+        __syncAttachmentModalTheme();
     });
 
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
+        __syncAttachmentModalTheme();
     });
 </script>
