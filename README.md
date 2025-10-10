@@ -141,15 +141,15 @@ mini.start({ goal: "Summarize today's standup", chatbotmode: true })
 
 All other flags (MCP connections, attachments, shell access, etc.) continue to work—you simply choose between the agent-style prompt or a conversational one based on the task.
 
-### Task planning updates (agent mode)
+### Task planning updates (agent mode, opt-in)
 
-With `chatbotmode=false` the agent now keeps a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`).
+Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`). Leave `useplanning` unset/false and Mini-A will skip the planning instructions entirely.
 
-- **CLI / oJob output**: Planning updates appear with the 🗺️ icon, just like thought (`💭`) messages.
-- **Web UI**: The transcript shows the same 🗺️ entries and the header highlights that icon as the task plan indicator.
-- **Custom integrations**: The plan is available in the state payload passed back on each step so downstream automation can react to it.
+- **CLI / oJob output**: Planning updates appear with the 🗺️ icon, alongside thought (`💭`) messages.
+- **Web UI**: When an active plan exists the transcript keeps the 🗺️ entries and the interface surfaces an expandable progress card that summarizes completed vs. total steps and renders the plan as a numbered checklist with completed items struck through.
+- **Custom integrations**: The current plan continues to flow through the state payload passed back on each step, enabling downstream automation.
 
-The agent revises the plan as it makes progress, so you always see the current set of steps even if requirements shift mid-run.
+The agent revises the plan whenever progress changes, so the summary always reflects the latest approach. When no plan is active the web UI hides 🗺️ updates and the progress card stays collapsed.
 
 ## Project Components
 
@@ -168,7 +168,7 @@ Mini-A ships with three complementary components:
 - **STDIO or HTTP MCPs**: Use MCPs over STDIO or start them as remote HTTP servers with `onport` (see [MCP docs](mcps/README.md))
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
-- **Dynamic Planning View**: In agent mode Mini-A keeps a live plan (🗺️) of the current task, updating each step as progress is made
+- **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) of the current task, complete with web UI progress tracking
 - **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)

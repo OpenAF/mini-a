@@ -847,14 +847,155 @@
         width: 65%; 
     }
     
-    .preview::after { 
-        top: 2.2em; 
-        width: 40%; 
+    .preview::after {
+        top: 2.2em;
+        width: 40%;
     }
 
     @keyframes shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: -200% 50%; }
+    }
+
+    /* ========== PLAN PANEL ========== */
+    .plan-panel {
+        margin-top: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: var(--panel-bg);
+        color: var(--text);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        overflow: hidden;
+    }
+
+    .plan-panel[hidden] {
+        display: none;
+    }
+
+    .plan-panel[open] {
+        box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+        border-color: rgba(51,144,255,0.35);
+    }
+
+    .plan-panel summary {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.9rem 1rem;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .plan-panel summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .plan-panel summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 4px;
+        border-radius: 0.75rem;
+    }
+
+    .plan-summary-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .plan-summary-text {
+        font-size: 0.95rem;
+        letter-spacing: 0.01em;
+    }
+
+    .plan-summary-icon {
+        font-size: 1.1rem;
+        opacity: 0.8;
+    }
+
+    .plan-progress-ring {
+        width: 32px;
+        height: 32px;
+    }
+
+    .plan-progress-ring-bg {
+        fill: none;
+        stroke: var(--border);
+        stroke-width: 2.5;
+        opacity: 0.45;
+    }
+
+    .plan-progress-ring-value {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-dasharray: 100;
+        stroke-dashoffset: 100;
+        transition: stroke-dashoffset 0.4s ease;
+    }
+
+    .plan-panel-body {
+        padding: 0.25rem 1.25rem 1.1rem 1.4rem;
+        border-top: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
+    }
+
+    .plan-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        counter-reset: plan-step;
+    }
+
+    .plan-item {
+        display: grid;
+        grid-template-columns: min-content min-content 1fr auto;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+
+    .plan-item:last-child {
+        border-bottom: none;
+    }
+
+    .plan-item::before {
+        counter-increment: plan-step;
+        content: counter(plan-step) '.';
+        font-weight: 600;
+        color: var(--text);
+        opacity: 0.8;
+    }
+
+    .plan-item-icon {
+        font-size: 1rem;
+        line-height: 1;
+    }
+
+    .plan-item-text {
+        font-size: 0.95rem;
+        line-height: 1.35;
+    }
+
+    .plan-item-text.completed {
+        text-decoration: line-through;
+        opacity: 0.6;
+    }
+
+    .plan-item-status {
+        justify-self: end;
+        font-size: 0.75rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        background: rgba(51,144,255,0.12);
+        color: var(--accent);
+        text-transform: capitalize;
+        letter-spacing: 0.03em;
+        font-weight: 600;
     }
 </style>
 <div class="chat-container">
@@ -867,8 +1008,22 @@
             </svg>
         </button>
     </div>
+    <details id="planPanel" class="plan-panel" hidden>
+        <summary>
+            <span class="plan-summary-left">
+                <svg class="plan-progress-ring" viewBox="0 0 36 36" aria-hidden="true">
+                    <path class="plan-progress-ring-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831" />
+                    <path id="planProgressValue" class="plan-progress-ring-value" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831" stroke-dasharray="100" stroke-dashoffset="100" />
+                </svg>
+                <span id="planSummaryText" class="plan-summary-text">0/0 tasks completed</span>
+            </span>
+            <span class="plan-summary-icon" aria-hidden="true">🗺️</span>
+        </summary>
+        <div class="plan-panel-body">
+            <ol id="planList" class="plan-list"></ol>
+        </div>
+    </details>
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
-    <small style="font-size:0.8rem; display:block; margin-top:0.2rem;"><em>🗺️ Plan updates show the agent’s current task breakdown.</em></small>
     <br>
     <div id="inputSection" class="input-section">
         <button id="attachBtn" title="Attach files" aria-label="Attach files" type="button"></button>
@@ -943,6 +1098,7 @@
         rs: 'rust', php: 'php', sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', sql: 'sql', toml: 'toml', ini: 'ini', cfg: 'ini', conf: 'ini', env: 'ini',
         properties: 'ini', gradle: 'groovy', dockerfile: 'dockerfile', makefile: 'makefile', cmake: 'cmake', r: 'r', lua: 'lua', swift: 'swift', scala: 'scala'
     };
+    const PLAN_DONE_STATUSES = new Set(['done', 'complete', 'completed', 'finished', 'success']);
 
     /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
@@ -958,6 +1114,7 @@
     let attachmentsEnabled = false;
     let attachments = [];
     let attachmentModalKeyListenerBound = false;
+    let lastPlanDigest = '';
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -984,6 +1141,10 @@
     const attachmentModalTitle = document.getElementById('attachmentModalTitle');
     const attachmentModalCode = document.getElementById('attachmentModalCode');
     const attachmentModalClose = document.getElementById('attachmentModalClose');
+    const planPanel = document.getElementById('planPanel');
+    const planSummaryText = document.getElementById('planSummaryText');
+    const planList = document.getElementById('planList');
+    const planProgressValue = document.getElementById('planProgressValue');
 
     applyAttachmentAvailability(false);
 
@@ -1718,6 +1879,7 @@
 
         const htmlContent = converter.makeHtml(entry.content || '');
         updateResultsContent(htmlContent);
+        resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
@@ -1748,6 +1910,7 @@
             if (!response.ok) throw new Error('Failed to load current conversation');
 
             const data = await response.json();
+            updatePlanPanel(data.plan);
             const htmlContent = converter.makeHtml(data.content || '');
             updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -1880,6 +2043,84 @@
         if (el) el.remove();
     }
 
+    /* ========== PLAN PANEL HELPERS ========== */
+    function resetPlanPanel(clearDigest = true) {
+        if (!planPanel) return;
+        if (clearDigest) lastPlanDigest = '';
+        planPanel.setAttribute('hidden', 'hidden');
+        planPanel.removeAttribute('open');
+        if (planList) planList.innerHTML = '';
+        if (planSummaryText) planSummaryText.textContent = '0/0 tasks completed';
+        if (planProgressValue) planProgressValue.style.strokeDashoffset = '100';
+    }
+
+    function updatePlanPanel(planPayload) {
+        if (!planPanel) return;
+
+        const digest = JSON.stringify(planPayload || {});
+        if (digest === lastPlanDigest) return;
+        lastPlanDigest = digest;
+
+        const hasItems = planPayload && planPayload.active === true && Array.isArray(planPayload.items) && planPayload.items.length > 0;
+        if (!hasItems) {
+            resetPlanPanel(false);
+            return;
+        }
+
+        const items = planPayload.items || [];
+        const total = planPayload.total && planPayload.total > 0 ? planPayload.total : items.length;
+        let completed = planPayload.completed;
+        if (typeof completed !== 'number' || completed < 0) {
+            completed = items.filter(item => {
+                const status = (item && item.status ? String(item.status).toLowerCase() : '');
+                return item && item.done === true || PLAN_DONE_STATUSES.has(status);
+            }).length;
+        }
+
+        planPanel.removeAttribute('hidden');
+        if (planSummaryText) {
+            planSummaryText.textContent = `${completed}/${total} tasks completed`;
+        }
+
+        if (planProgressValue) {
+            const ratio = total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
+            const offset = (100 - ratio * 100).toFixed(2);
+            planProgressValue.style.strokeDashoffset = offset;
+        }
+
+        if (planList) {
+            planList.innerHTML = '';
+            items.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = 'plan-item';
+
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'plan-item-icon';
+                iconSpan.textContent = (item && item.icon) ? item.icon : '•';
+                li.appendChild(iconSpan);
+
+                const textSpan = document.createElement('span');
+                textSpan.className = 'plan-item-text';
+                textSpan.textContent = item && item.title ? item.title : `Step ${index + 1}`;
+
+                const statusKey = item && item.status ? String(item.status).toLowerCase() : '';
+                if ((item && item.done === true) || PLAN_DONE_STATUSES.has(statusKey)) {
+                    textSpan.classList.add('completed');
+                }
+                li.appendChild(textSpan);
+
+                if (item && item.label) {
+                    const badge = document.createElement('span');
+                    badge.className = 'plan-item-status';
+                    badge.textContent = item.label;
+                    li.appendChild(badge);
+                }
+
+                planList.appendChild(li);
+            });
+        }
+    }
+
     /* ========== PROCESSING STATE MANAGEMENT ========== */
     function startProcessing() {
         isProcessing = true;
@@ -1896,6 +2137,7 @@
         scrollResultsToBottom();
         addPreview();
         clearAttachments();
+        resetPlanPanel();
     }
 
     function stopProcessing() {
@@ -1971,6 +2213,7 @@
                 if (!response.ok) throw new Error('Failed to fetch results');
 
                 const data = await response.json();
+                updatePlanPanel(data.plan);
                 const htmlContent = converter.makeHtml(data.content || '');
                 updateResultsContent(htmlContent);
                 
@@ -2053,6 +2296,7 @@
         }
 
         updateResultsContent('<p></p>');
+        resetPlanPanel();
         removePreview();
         promptInput.value = '';
         clearAttachments();

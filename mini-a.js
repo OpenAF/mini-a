@@ -96,10 +96,12 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
+{{#if planning}}
 ## PLANNING:
 • Maintain a concise "plan" array inside the state with 3-5 high-level steps (each step should include a short title and a status such as pending, in_progress, done, or blocked).
 • Update the plan statuses as you make progress (mark finished work as done and reflect any blockers).
 • Revise the plan if the goal changes or new information appears so it always reflects the current approach.
+{{/if}}
 
 ## EXAMPLE:
  
@@ -225,7 +227,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._thinkCounter = 0
   this._planCounter = 0
   this._lastPlanSnapshot = ""
-  this._enablePlanning = true
+  this._enablePlanning = false
 }
 
 /**
@@ -487,6 +489,9 @@ MiniA.prototype._handlePlanUpdate = function() {
 
     var planItems = this._normalizePlanItems(this._agentState.plan)
     if (planItems.length === 0) {
+        if (this._lastPlanSnapshot.length > 0) {
+            this._logMessageWithCounter("plan", "Plan cleared (no active tasks)")
+        }
         this._lastPlanSnapshot = ""
         return
     }
@@ -784,6 +789,12 @@ MiniA.prototype._runCommand = function(args) {
 // ============================================================================
 
 MiniA.prototype.init = function(args) {
+  args = _$(args, "args").isMap().default({})
+  var initChatbotMode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+  var initUsePlanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+  this._enablePlanning = (!initChatbotMode && initUsePlanning)
+  args.chatbotmode = initChatbotMode
+  args.useplanning = initUsePlanning
   if (this._isInitialized) return
   /*if (this._isInitializing) {
     do {
@@ -798,8 +809,6 @@ MiniA.prototype.init = function(args) {
     ow.metrics.add("mini-a", () => {
       return this.getMetrics()
     })
-
-    args = _$(args, "args").isMap().default({})
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -823,6 +832,8 @@ MiniA.prototype.init = function(args) {
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
+    args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -1107,7 +1118,8 @@ MiniA.prototype.init = function(args) {
         actionsdesc      : promptActionsDesc,
         isMachine        : (isDef(args.__format) && args.__format != "md"),
         usetools         : this._useTools,
-        toolCount        : this.mcpTools.length
+        toolCount        : this.mcpTools.length,
+        planning         : this._enablePlanning
       })
     }
 
@@ -1207,8 +1219,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+    args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
 
-    this._enablePlanning = !args.chatbotmode
+    this._enablePlanning = (!args.chatbotmode && args.useplanning)
     this._lastPlanMessage = ""
     this._planCounter = 0
     this._lastPlanSnapshot = ""

@@ -42,6 +42,11 @@ help:
     desc     : "Maximum conversation tokens before Mini-A summarizes context (default: 200000)"
     example  : "200000"
     mandatory: false
+  - name     : useplanning
+    desc     : "Boolean to enable/disable task planning (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
 
 include:
 - oJobHTTPd.yaml
@@ -89,6 +94,9 @@ todo:
         }
         if (isDef(global.__lastActivity[ postData.uuid ])) {
           delete global.__lastActivity[ postData.uuid ]
+        }
+        if (isDef(global.__planState) && isDef(global.__planState[ postData.uuid ])) {
+          delete global.__planState[ postData.uuid ]
         }
         if (global.__usehistory && !global.__historykeep) {
           log("Deleting history file for session " + postData.uuid)
@@ -141,6 +149,9 @@ todo:
       $doV(() => {
         try {
           var uuid = _res.uuid, lma
+          if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
+            delete global.__planState[ uuid ]
+          }
           // If history is enabled, set the history file
           var _hfile = global.__usehistory ? global.__historypath + "/c-" + uuid + ".json" : __
 
@@ -199,7 +210,77 @@ todo:
                 case "summarize": _e = "🌀"; break
                 default         : _e = e
                 }
-                
+
+                if (_e == "🗺️") {
+                  try {
+                    if (isFunction(lma._normalizePlanItems)) {
+                      var planItems = lma._normalizePlanItems(isObject(lma._agentState) ? lma._agentState.plan : __)
+                      if (isArray(planItems) && planItems.length > 0) {
+                        var statusIcons = {
+                          pending     : { icon: "⏳", label: "pending" },
+                          todo        : { icon: "⏳", label: "to do" },
+                          not_started : { icon: "⏳", label: "not started" },
+                          ready       : { icon: "⏳", label: "ready" },
+                          in_progress : { icon: "⚙️", label: "in progress" },
+                          progressing : { icon: "⚙️", label: "in progress" },
+                          working     : { icon: "⚙️", label: "working" },
+                          running     : { icon: "⚙️", label: "running" },
+                          active      : { icon: "⚙️", label: "active" },
+                          done        : { icon: "✅", label: "done" },
+                          complete    : { icon: "✅", label: "complete" },
+                          completed   : { icon: "✅", label: "completed" },
+                          finished    : { icon: "✅", label: "finished" },
+                          success     : { icon: "✅", label: "success" },
+                          blocked     : { icon: "🛑", label: "blocked" },
+                          stuck       : { icon: "🛑", label: "stuck" },
+                          paused      : { icon: "⏸️", label: "paused" },
+                          waiting     : { icon: "⏳", label: "waiting" },
+                          failed      : { icon: "❌", label: "failed" },
+                          cancelled   : { icon: "🚫", label: "cancelled" },
+                          canceled    : { icon: "🚫", label: "cancelled" }
+                        }
+                        var doneStatuses = {
+                          done: true,
+                          complete: true,
+                          completed: true,
+                          finished: true,
+                          success: true
+                        }
+                        var normalized = []
+                        for (var i = 0; i < planItems.length; i++) {
+                          var entry = planItems[i] || {}
+                          var statusKey = (entry.status || entry.rawStatus || "").toString()
+                          var statusInfo = statusIcons[statusKey] || { icon: "•", label: statusKey || "pending" }
+                          var isDone = doneStatuses[statusKey] === true || statusInfo.icon == "✅"
+                          normalized.push({
+                            title   : entry.title || ("Step " + (i + 1)),
+                            status  : statusKey,
+                            icon    : statusInfo.icon,
+                            label   : statusInfo.label,
+                            done    : isDone === true,
+                            rawStatus: entry.rawStatus
+                          })
+                        }
+                        var completedCount = 0
+                        normalized.forEach(item => { if (item.done === true) completedCount++ })
+                        global.__planState[uuid] = {
+                          items    : normalized,
+                          total    : normalized.length,
+                          completed: completedCount,
+                          active   : normalized.length > 0,
+                          updated  : Date.now()
+                        }
+                      } else {
+                        if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
+                      }
+                    }
+                  } catch(planErr) {
+                    logErr(planErr)
+                  }
+                } else if (_e == "🏁" || _e == "✅" || _e == "❌") {
+                  if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
+                }
+
                 global.__res[uuid].push({ event: _e, message: m })
                 log("[" + uuid + "] " + _e + " " + m)
             } )
@@ -302,6 +383,8 @@ todo:
       if (isDef(global.__res[ postData.uuid ])) {
         // Update last activity
         global.__lastActivity[ postData.uuid ] = Date.now()
+        var planState = isDef(global.__planState) ? global.__planState[ postData.uuid ] : __
+        var hasActivePlan = isDef(planState) && isArray(planState.items) && planState.items.length > 0
 
         // Append all messages to content
         var _history = []
@@ -318,6 +401,9 @@ todo:
             //delete global.__res[ postData.uuid ]
             //break
           } else {
+            if (r.event == "🗺️" && !hasActivePlan) {
+              continue
+            }
             if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🗺️") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
@@ -328,6 +414,17 @@ todo:
           }
         }
         _res.history = _history
+        if (hasActivePlan) {
+          _res.plan = {
+            active   : true,
+            items    : planState.items,
+            total    : planState.total,
+            completed: planState.completed,
+            updated  : planState.updated
+          }
+        } else {
+          _res.plan = { active: false, items: [], total: 0, completed: 0 }
+        }
       }
 
       return ow.server.httpd.reply(_res)
@@ -419,6 +516,7 @@ jobs:
       useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
+      useplanning     : toBoolean().isBoolean().default(false)
   exec : | #js
     global.__res = {}
     global.__usehistory = args.usehistory
@@ -429,6 +527,7 @@ jobs:
     global.__showExecs = args.showExecs
     global.__logPromptHeaders = args.logPromptHeaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
+    global.__planState = {}
     args.__format = "md"
     global.maArgs = merge(args, {})
     global.ma = new MiniA()
@@ -463,5 +562,6 @@ jobs:
       delete global.__lastActivity[ uuid ]
       delete global.__res[ uuid ]
       delete global.__conversations[ uuid ]
+      if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
       log("Cleaned up session " + uuid)
     }
