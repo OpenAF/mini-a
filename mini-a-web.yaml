@@ -53,12 +53,7 @@ todo:
   ((mapLibs      )): true
 - (httpdHealthz   ): "${onport:-8888}"
 - (httpdMetrics   ): "${onport:-8888}"
-- (httpdFileBrowse): "${onport:-8888}"
-  ((uri          )): /
-  ((path         )): public
-  ((browse       )): false
-  ((default      )): index.md
-
+- Static content
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /ping
   ((execURI      )): | #js
@@ -400,6 +395,18 @@ ojob:
     - name: results
 
 jobs:
+# ---------------------
+- name : Static content
+  exec : | #js
+    args.path = getOPackPath("mini-a") + "/public"
+    print(args.path)
+  to   :
+  - (httpdFileBrowse): "${onport:-8888}"
+    ((uri          )): /
+    #((path         )): public
+    ((browse       )): false
+    ((default      )): index.md
+
 # -----------
 - name : Init
   check:
