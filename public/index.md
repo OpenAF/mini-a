@@ -868,6 +868,7 @@
         </button>
     </div>
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
+    <small style="font-size:0.8rem; display:block; margin-top:0.2rem;"><em>🗺️ Plan updates show the agent’s current task breakdown.</em></small>
     <br>
     <div id="inputSection" class="input-section">
         <button id="attachBtn" title="Attach files" aria-label="Attach files" type="button"></button>

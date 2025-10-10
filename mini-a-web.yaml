@@ -186,6 +186,7 @@ todo:
                 case "size"     : _e = "📏"; break
                 case "rate"     : _e = "⏳"; break
                 case "mcp"      : _e = "🤖"; break
+                case "plan"     : _e = "🗺️"; break
                 case "done"     : _e = "✅"; break
                 case "error"    : _e = "❌"; break
                 case "libs"     : _e = "📚"; break
@@ -317,7 +318,7 @@ todo:
             //delete global.__res[ postData.uuid ]
             //break
           } else {
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀") {
+            if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🗺️") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {

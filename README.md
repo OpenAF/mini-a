@@ -141,6 +141,16 @@ mini.start({ goal: "Summarize today's standup", chatbotmode: true })
 
 All other flags (MCP connections, attachments, shell access, etc.) continue to work—you simply choose between the agent-style prompt or a conversational one based on the task.
 
+### Task planning updates (agent mode)
+
+With `chatbotmode=false` the agent now keeps a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`).
+
+- **CLI / oJob output**: Planning updates appear with the 🗺️ icon, just like thought (`💭`) messages.
+- **Web UI**: The transcript shows the same 🗺️ entries and the header highlights that icon as the task plan indicator.
+- **Custom integrations**: The plan is available in the state payload passed back on each step so downstream automation can react to it.
+
+The agent revises the plan as it makes progress, so you always see the current set of steps even if requirements shift mid-run.
+
 ## Project Components
 
 Mini-A ships with three complementary components:
@@ -158,6 +168,7 @@ Mini-A ships with three complementary components:
 - **STDIO or HTTP MCPs**: Use MCPs over STDIO or start them as remote HTTP servers with `onport` (see [MCP docs](mcps/README.md))
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
+- **Dynamic Planning View**: In agent mode Mini-A keeps a live plan (🗺️) of the current task, updating each step as progress is made
 - **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
