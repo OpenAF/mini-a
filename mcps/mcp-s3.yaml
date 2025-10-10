@@ -280,7 +280,7 @@ jobs:
   check:
     in:
       bucket   : isString.default(__)
-      prefix   : isString.default(__)
+      prefix   : isString.default("")
       recursive: toBoolean.isBoolean.default(false)
       details  : toBoolean.isBoolean.default(false)
   exec : | #js
