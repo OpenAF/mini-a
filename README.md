@@ -120,9 +120,26 @@ mini-a.sh goal="help me remove docker images that are older than 1 year" rtm=20 
 
 _Analyze project structure:_
 
-```bash  
+```bash
 mini-a.sh goal="analyze the current directory structure and provide insights" useshell=true rtm=15 __format=md
 ```
+
+### Chatbot-style conversations
+
+When you just need an assistant-style exchange without the agent workflow, pass `chatbotmode=true`. Mini-A will swap in a lighter system prompt geared for natural dialogue, skip tool descriptions in the instructions, and stream replies just like a regular chat bot. You can combine this with the web UI or CLI entry points:
+
+```bash
+./mini-a.sh goal="help me plan a vacation in Lisbon" chatbotmode=true
+```
+
+From code you can opt into the same behavior:
+
+```javascript
+var mini = new MiniA()
+mini.start({ goal: "Summarize today's standup", chatbotmode: true })
+```
+
+All other flags (MCP connections, attachments, shell access, etc.) continue to work—you simply choose between the agent-style prompt or a conversational one based on the task.
 
 ## Project Components
 
@@ -145,6 +162,7 @@ Mini-A ships with three complementary components:
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
 - **Text Attachments in the Web UI**: When started with `useattach=true`, upload and review text files alongside your prompt with collapsible previews in the conversation log
+- **Chatbot Mode**: Toggle `chatbotmode=true` to strip agent-style instructions and chat with the model in a lightweight assistant mode
 - **Safety Features**: Command filtering, confirmation prompts, and read-only modes
 - **Conversation Persistence**: Save and resume conversations across sessions
 - **Automatic Context Summarization**: Keeps context within limits with auto-summarize when it grows
@@ -196,6 +214,7 @@ All Mini-A options can be passed as command line arguments:
 - `raw` – Return the final response exactly as produced instead of formatted output
 - `outfile` – Path to write the final answer (implies JSON output unless `__format` is provided)
 - `__format` – Output format (e.g. `md`, `json`)
+- `chatbotmode` – Skip the agent workflow and respond like a regular chat assistant (default `false`)
 
 For a complete list of options, see the [Usage Guide](USAGE.md).
 
