@@ -859,12 +859,12 @@
 
     /* ========== PLAN PANEL ========== */
     .plan-panel {
-        margin-top: 1rem;
+        margin-top: 0.6rem;
         border: 1px solid var(--border);
-        border-radius: 0.75rem;
+        border-radius: 0.6rem;
         background: var(--panel-bg);
         color: var(--text);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
         overflow: hidden;
     }
@@ -874,7 +874,7 @@
     }
 
     .plan-panel[open] {
-        box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.12);
         border-color: rgba(51,144,255,0.35);
     }
 
@@ -883,8 +883,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 0.75rem;
-        padding: 0.9rem 1rem;
+        gap: 0.6rem;
+        padding: 0.6rem 0.7rem;
         cursor: pointer;
         font-weight: 600;
     }
@@ -906,18 +906,18 @@
     }
 
     .plan-summary-text {
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         letter-spacing: 0.01em;
     }
 
     .plan-summary-icon {
-        font-size: 1.1rem;
+        font-size: 1rem;
         opacity: 0.8;
     }
 
     .plan-progress-ring {
-        width: 32px;
-        height: 32px;
+        width: 24px;
+        height: 24px;
     }
 
     .plan-progress-ring-bg {
@@ -938,7 +938,7 @@
     }
 
     .plan-panel-body {
-        padding: 0.25rem 1.25rem 1.1rem 1.4rem;
+        padding: 0.3rem 0.9rem 0.6rem 0.9rem;
         border-top: 1px solid var(--border);
         background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
     }
@@ -954,8 +954,8 @@
         display: grid;
         grid-template-columns: min-content min-content 1fr auto;
         align-items: center;
-        gap: 0.65rem;
-        padding: 0.5rem 0;
+        gap: 0.5rem;
+        padding: 0.3rem 0;
         border-bottom: 1px solid rgba(255,255,255,0.04);
     }
 
@@ -977,7 +977,7 @@
     }
 
     .plan-item-text {
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         line-height: 1.35;
     }
 
@@ -988,8 +988,8 @@
 
     .plan-item-status {
         justify-self: end;
-        font-size: 0.75rem;
-        padding: 0.2rem 0.6rem;
+        font-size: 0.72rem;
+        padding: 0.15rem 0.5rem;
         border-radius: 999px;
         background: rgba(51,144,255,0.12);
         color: var(--accent);
@@ -1158,6 +1158,18 @@
     function getOrCreateSessionUuid() {
         try {
             let uuid = (typeof window !== 'undefined') ? window.mini_a_session_uuid : null;
+
+            // If URL has ?uuid=... prefer and persist it
+            if (typeof window !== 'undefined' && window.location && window.location.search) {
+                const params = new URLSearchParams(window.location.search);
+                const urlUuid = params.get('uuid');
+                if (urlUuid && typeof urlUuid === 'string' && urlUuid.length > 0) {
+                    uuid = urlUuid;
+                    window.mini_a_session_uuid = uuid;
+                    return uuid;
+                }
+            }
+
             if (uuid) return uuid;
 
             // Prefer crypto.randomUUID if available
@@ -1917,6 +1929,20 @@
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
             refreshHistoryPanel();
+
+            // If the conversation hasn't finished and has actual content, resume live polling and set processing UI state
+            if (data && data.status !== 'finished' && data.content && data.content.trim().length > 0) {
+                currentSessionUuid = uuid;
+                isProcessing = true;
+                if (promptInput) promptInput.disabled = true;
+                setSubmitIcon('stop');
+                if (submitBtn) submitBtn.classList.add('stop');
+                if (clearBtn) clearBtn.disabled = true;
+                if (attachBtn) attachBtn.disabled = true;
+                if (fileInput) fileInput.disabled = true;
+                addPreview();
+                if (!pollingInterval) startPolling();
+            }
         } catch (error) {
             console.error('Error refreshing conversation view:', error);
         } finally {
@@ -2347,6 +2373,12 @@
     /* ========== INITIALIZATION ========== */
     function initializeUI() {
         promptInput.disabled = false;
+        // If uuid exists in URL or session, set it and refresh current view
+        const uuid = getOrCreateSessionUuid();
+        if (uuid) {
+            currentSessionUuid = uuid;
+            refreshCurrentConversationView();
+        }
         if (attachBtn) attachBtn.disabled = false;
         if (fileInput) fileInput.disabled = false;
         setSubmitIcon('send');
