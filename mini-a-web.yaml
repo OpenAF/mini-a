@@ -6,12 +6,12 @@ help:
     desc     : Port to run the HTTP server on
     example  : "8888"
     mandatory: false
-  - name     : showExecs
+  - name     : showexecs
     desc     : Show executed commands in the interaction
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
-  - name     : logPromptHeaders
+  - name     : logpromptheaders
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
     mandatory: false
@@ -69,7 +69,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -116,8 +116,9 @@ todo:
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /prompt
   ((execURI      )): | #js
-    var _res = {}
+    var _res = { error: "check server logs" }
     try {
+      
       // Parse POST data
       var postData = jsonParse(request.files.postData)
       // Validate UUID or generate a new one
@@ -126,7 +127,7 @@ todo:
       } else {
         _res.uuid = genUUID()
       }
-
+      
       // Initialize response storage
       if (isUnDef(global.__res[_res.uuid])) {
         global.__res[ _res.uuid ] = [ ]
@@ -135,172 +136,179 @@ todo:
       } else {
         global.__lastActivity[ _res.uuid ] = Date.now()
       }
-
+      
       // Prompt header logging
-      if (global.__logPromptHeaders.length > 0) {
-        global.__logPromptHeaders.forEach( h => {
+      if (global.__logpromptheaders.length > 0) {
+        global.__logpromptheaders.forEach( h => {
           if (isDef(request.header[h])) {
             log("[" + _res.uuid + "] Prompt header " + h + ": " + request.header[h])
           }
         })
       }
-
       // Start Mini-A interaction in a non-blocking way
       $doV(() => {
-        try {
-          var uuid = _res.uuid, lma
-          if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
-            delete global.__planState[ uuid ]
-          }
-          // If history is enabled, set the history file
-          var _hfile = global.__usehistory ? global.__historypath + "/c-" + uuid + ".json" : __
+        var uuid = _res.uuid, lma
+        if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
+          delete global.__planState[ uuid ]
+        }
 
-          // If conversation does not exist, create it
-          if (isUnDef(global.__conversations[ uuid ])) {
-            // If history file does not exist but we have history in memory, rebuild it
-            if (global.__usehistory && !io.fileExists(_hfile) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
-              // Try rebuilding
-              var _data = []
-              for (var i = 0; i < global.__res[ uuid ].length; i++) {
-                var r = global.__res[ uuid ][i]
-                if (r.event == "👤") {
-                  _data.push( { role: "user", content: r.message } )
-                } else if (r.event == "🤖" || r.event == "⬅️") {
-                  _data.push( { role: "assistant", content: r.message } )
-                } else if (r.event == "⚙️" || r.event == "🖥️") {
-                  _data.push( { role: "system", content: r.message } )
-                }
-              }
-              if (_data.length > 0) {
-                io.writeFileJSON(_hfile, { u: new Date(), c: _data }, "")
-                log("[" + uuid + "] Rebuilt history file " + _hfile)
+        // If history is enabled, set the history file
+        var _hfile = global.__usehistory ? global.__historypath + "/c-" + uuid + ".json" : __
+
+        // If conversation does not exist, create it
+        if (isUnDef(global.__conversations[ uuid ])) {
+          // If history file does not exist but we have history in memory, rebuild it
+          if (global.__usehistory && !io.fileExists(_hfile) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
+            // Try rebuilding
+            var _data = []
+            for (var i = 0; i < global.__res[ uuid ].length; i++) {
+              var r = global.__res[ uuid ][i]
+              if (r.event == "👤") {
+                _data.push( { role: "user", content: r.message } )
+              } else if (r.event == "🤖" || r.event == "⬅️") {
+                _data.push( { role: "assistant", content: r.message } )
+              } else if (r.event == "⚙️" || r.event == "🖥️") {
+                _data.push( { role: "system", content: r.message } )
               }
             }
-
-            // Initialize MiniA
-            lma = new MiniA()
-            lma.init(merge(global.maArgs, {
-              conversation: global._mini_a_web_loadFile(_hfile)
-            }))
-            lma.setInteractionFn( (e, m) => {
-                var _e = ""
-                switch(e) {
-                case "user"     : _e = "👤"; break
-                case "exec"     : _e = "⚙️"; break
-                case "shell"    : _e = "🖥️"; break
-                case "think"    : _e = "💡"; break
-                case "final"    : _e = "🏁"; break
-                case "input"    : _e = "➡️"; break
-                case "output"   : _e = "⬅️"; break
-                case "thought"  : _e = "💭"; break
-                case "think"    : _e = "💡"; break
-                case "size"     : _e = "📏"; break
-                case "rate"     : _e = "⏳"; break
-                case "mcp"      : _e = "🤖"; break
-                case "plan"     : _e = "🗺️"; break
-                case "done"     : _e = "✅"; break
-                case "error"    : _e = "❌"; break
-                case "libs"     : _e = "📚"; break
-                case "info"     : _e = "ℹ️"; break
-                case "load"     : _e = "📂"; break
-                case "mcp"      : _e = "🤖"; break
-                case "warn"     : _e = "⚠️"; break
-                case "stop"     : _e = "🛑"; break
-                case "error"    : _e = "❗"; break
-                case "summarize": _e = "🌀"; break
-                default         : _e = e
-                }
-
-                if (_e == "🗺️") {
-                  try {
-                    if (isFunction(lma._normalizePlanItems)) {
-                      var planItems = lma._normalizePlanItems(isObject(lma._agentState) ? lma._agentState.plan : __)
-                      if (isArray(planItems) && planItems.length > 0) {
-                        var statusIcons = {
-                          pending     : { icon: "⏳", label: "pending" },
-                          todo        : { icon: "⏳", label: "to do" },
-                          not_started : { icon: "⏳", label: "not started" },
-                          ready       : { icon: "⏳", label: "ready" },
-                          in_progress : { icon: "⚙️", label: "in progress" },
-                          progressing : { icon: "⚙️", label: "in progress" },
-                          working     : { icon: "⚙️", label: "working" },
-                          running     : { icon: "⚙️", label: "running" },
-                          active      : { icon: "⚙️", label: "active" },
-                          done        : { icon: "✅", label: "done" },
-                          complete    : { icon: "✅", label: "complete" },
-                          completed   : { icon: "✅", label: "completed" },
-                          finished    : { icon: "✅", label: "finished" },
-                          success     : { icon: "✅", label: "success" },
-                          blocked     : { icon: "🛑", label: "blocked" },
-                          stuck       : { icon: "🛑", label: "stuck" },
-                          paused      : { icon: "⏸️", label: "paused" },
-                          waiting     : { icon: "⏳", label: "waiting" },
-                          failed      : { icon: "❌", label: "failed" },
-                          cancelled   : { icon: "🚫", label: "cancelled" },
-                          canceled    : { icon: "🚫", label: "cancelled" }
-                        }
-                        var doneStatuses = {
-                          done: true,
-                          complete: true,
-                          completed: true,
-                          finished: true,
-                          success: true
-                        }
-                        var normalized = []
-                        for (var i = 0; i < planItems.length; i++) {
-                          var entry = planItems[i] || {}
-                          var statusKey = (entry.status || entry.rawStatus || "").toString()
-                          var statusInfo = statusIcons[statusKey] || { icon: "•", label: statusKey || "pending" }
-                          var isDone = doneStatuses[statusKey] === true || statusInfo.icon == "✅"
-                          normalized.push({
-                            title   : entry.title || ("Step " + (i + 1)),
-                            status  : statusKey,
-                            icon    : statusInfo.icon,
-                            label   : statusInfo.label,
-                            done    : isDone === true,
-                            rawStatus: entry.rawStatus
-                          })
-                        }
-                        var completedCount = 0
-                        normalized.forEach(item => { if (item.done === true) completedCount++ })
-                        global.__planState[uuid] = {
-                          items    : normalized,
-                          total    : normalized.length,
-                          completed: completedCount,
-                          active   : normalized.length > 0,
-                          updated  : Date.now()
-                        }
-                      } else {
-                        if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
-                      }
-                    }
-                  } catch(planErr) {
-                    logErr(planErr)
-                  }
-                } else if (_e == "🏁" || _e == "✅" || _e == "❌") {
-                  if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
-                }
-
-                global.__res[uuid].push({ event: _e, message: m })
-                log("[" + uuid + "] " + _e + " " + m)
-            } )
-            global.__conversations[ uuid ] = lma
-          } else {
-            lma = global.__conversations[ uuid ]
+            if (_data.length > 0) {
+              io.writeFileJSON(_hfile, { u: new Date(), c: _data }, "")
+              log("[" + uuid + "] Rebuilt history file " + _hfile)
+            }
           }
-
-          var _rma = lma.start(merge(global.maArgs, {
-            goal        : postData.prompt,
-            raw         : true,
+      
+          // Initialize MiniA
+          lma = new MiniA()
+          lma.init(merge(global.maArgs, {
             conversation: global._mini_a_web_loadFile(_hfile)
           }))
+          lma.setInteractionFn( (e, m) => {
+            try {
+              var _e = ""
+              switch(e) {
+              case "user"     : _e = "👤"; break
+              case "exec"     : _e = "⚙️"; break
+              case "shell"    : _e = "🖥️"; break
+              case "think"    : _e = "💡"; break
+              case "final"    : _e = "🏁"; break
+              case "input"    : _e = "➡️"; break
+              case "output"   : _e = "⬅️"; break
+              case "thought"  : _e = "💭"; break
+              case "think"    : _e = "💡"; break
+              case "size"     : _e = "📏"; break
+              case "rate"     : _e = "⏳"; break
+              case "mcp"      : _e = "🤖"; break
+              case "plan"     : _e = "🗺️"; break
+              case "done"     : _e = "✅"; break
+              case "error"    : _e = "❌"; break
+              case "libs"     : _e = "📚"; break
+              case "info"     : _e = "ℹ️"; break
+              case "load"     : _e = "📂"; break
+              case "mcp"      : _e = "🤖"; break
+              case "warn"     : _e = "⚠️"; break
+              case "stop"     : _e = "🛑"; break
+              case "error"    : _e = "❗"; break
+              case "summarize": _e = "🌀"; break
+              default         : _e = e
+              }
 
-          global.__res[uuid].push( { event: "final", message: _rma } )
-          log("[" + uuid + "] " + _rma)
-        } catch(e) {
-          logErr(e)
-          $err(e)
+              if (_e == "🗺️") {
+                try {
+                  if (isFunction(lma._normalizePlanItems)) {
+                    var planItems = lma._normalizePlanItems(isObject(lma._agentState) ? lma._agentState.plan : __)
+                    if (isArray(planItems) && planItems.length > 0) {
+                      var statusIcons = {
+                        pending     : { icon: "⏳", label: "pending" },
+                        todo        : { icon: "⏳", label: "to do" },
+                        not_started : { icon: "⏳", label: "not started" },
+                        ready       : { icon: "⏳", label: "ready" },
+                        in_progress : { icon: "⚙️", label: "in progress" },
+                        progressing : { icon: "⚙️", label: "in progress" },
+                        working     : { icon: "⚙️", label: "working" },
+                        running     : { icon: "⚙️", label: "running" },
+                        active      : { icon: "⚙️", label: "active" },
+                        done        : { icon: "✅", label: "done" },
+                        complete    : { icon: "✅", label: "complete" },
+                        completed   : { icon: "✅", label: "completed" },
+                        finished    : { icon: "✅", label: "finished" },
+                        success     : { icon: "✅", label: "success" },
+                        blocked     : { icon: "🛑", label: "blocked" },
+                        stuck       : { icon: "🛑", label: "stuck" },
+                        paused      : { icon: "⏸️", label: "paused" },
+                        waiting     : { icon: "⏳", label: "waiting" },
+                        failed      : { icon: "❌", label: "failed" },
+                        cancelled   : { icon: "🚫", label: "cancelled" },
+                        canceled    : { icon: "🚫", label: "cancelled" }
+                      }
+                      var doneStatuses = {
+                        done: true,
+                        complete: true,
+                        completed: true,
+                        finished: true,
+                        success: true
+                      }
+                      var normalized = []
+                      for (var i = 0; i < planItems.length; i++) {
+                        var entry = planItems[i] || {}
+                        var statusKey = (entry.status || entry.rawStatus || "").toString()
+                        var statusInfo = statusIcons[statusKey] || { icon: "•", label: statusKey || "pending" }
+                        var isDone = doneStatuses[statusKey] === true || statusInfo.icon == "✅"
+                        normalized.push({
+                          title   : entry.title || ("Step " + (i + 1)),
+                          status  : statusKey,
+                          icon    : statusInfo.icon,
+                          label   : statusInfo.label,
+                          done    : isDone === true,
+                          rawStatus: entry.rawStatus
+                        })
+                      }
+                      var completedCount = 0
+                      normalized.forEach(item => { if (item.done === true) completedCount++ })
+                      global.__planState[uuid] = {
+                        items    : normalized,
+                        total    : normalized.length,
+                        completed: completedCount,
+                        active   : normalized.length > 0,
+                        updated  : Date.now()
+                      }
+                    } else {
+                      if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
+                    }
+                  }
+                } catch(planErr) {
+                  logErr(planErr)
+                }
+              //} else if (_e == "🏁" || _e == "✅" || _e == "❌") {
+              } else if (_e == "🏁" || _e == "🛑") {
+                if (isDef(global.__planState[uuid])) {
+                  log(`[${uuid}] ${_e} Plan closed`)
+                  delete global.__planState[uuid]
+                }
+              }
+              global.__res[uuid].push({ event: _e, message: m })
+              log("[" + uuid + "] " + _e + " " + m)
+            } catch(eee) {
+              $err(eee)
+              logWarn(`[${uuid}] Plan closed`)
+              delete global.__planState[uuid]
+            }
+          })
+          global.__conversations[ uuid ] = lma
+        } else {
+          lma = global.__conversations[ uuid ]
         }
+
+        var _rma = lma.start(merge(global.maArgs, {
+          goal        : postData.prompt,
+          raw         : true,
+          conversation: global._mini_a_web_loadFile(_hfile)
+        }))
+
+        global.__res[uuid].push( { event: "final", message: _rma } )
+        log("[" + uuid + "] " + _rma)
+      }).catch((eee) => {
+        logErr(eee)
+        $err(eee)
       })
     } catch(ee) {
       logErr(ee)
@@ -401,14 +409,12 @@ todo:
             //delete global.__res[ postData.uuid ]
             //break
           } else {
-            if (r.event == "🗺️" && !hasActivePlan) {
-              continue
-            }
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showExecs) || (r.event == "🖥️" && global.__showExecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🗺️") {
+            // Exclude planning (🗺️) messages from the content log; plan panel remains driven by __planState
+            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {
-                _res.content += r.event + " <i>" + r.message.replace(/\n/g, "<br>") + "</i>\n"
+                _res.content += r.event + " <i><span style=\"color: var(--text); opacity: 0.60;\">" + r.message.replace(/\n/g, "<br>") + "</span></i>\n"
               }
             }
           }
@@ -509,8 +515,8 @@ jobs:
 - name : Init
   check:
     in:
-      showExecs       : toBoolean().isBoolean().default(false)
-      logPromptHeaders: isString().default("")
+      showexecs       : toBoolean().isBoolean().default(false)
+      logpromptheaders: isString().default("")
       maxcontext      : toNumber().isNumber().default(200000)
       usehistory      : toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)
@@ -524,14 +530,15 @@ jobs:
     global.__historykeep = args.historykeep
     global.__conversations = {}
     global.__lastActivity = { }
-    global.__showExecs = args.showExecs
-    global.__logPromptHeaders = args.logPromptHeaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
+    global.__showexecs = args.showexecs
+    global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
     global.__planState = {}
     args.__format = "md"
     global.maArgs = merge(args, {})
-    global.ma = new MiniA()
-    global.ma.init( global.maArgs )
+    //global.ma = new MiniA()
+    //global.ma.init( global.maArgs )
+    //global.ma = __
 
     global._mini_a_web_saveFile = (aFile, aMap) => {
       io.writeFileJSON(aFile, aMap, "")
