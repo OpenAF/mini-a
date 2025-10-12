@@ -1252,6 +1252,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+    args.format = _$(args.format, "args.format").isString().default(__)
+
+    if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
+    if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
 
     this._enablePlanning = (!args.chatbotmode && args.useplanning)
     this._lastPlanMessage = ""
