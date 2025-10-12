@@ -1,4 +1,3 @@
-var __MiniA_mcpConnections = {}
 ow.loadMetrics()
 
 /**
@@ -12,6 +11,7 @@ var MiniA = function() {
   this._isInitialized = false
   this._isInitializing = false
   this._id = genUUID()
+  this._mcpConnections = {}
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -95,6 +95,13 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 ## STATE MANAGEMENT:
 • You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
+
+{{#if planning}}
+## PLANNING:
+• Maintain a concise "plan" array inside the state with 3-5 high-level steps (each step should include a short title and a status such as pending, in_progress, done, or blocked).
+• Update the plan statuses as you make progress (mark finished work as done and reflect any blockers).
+• Revise the plan if the goal changes or new information appears so it always reflects the current approach.
+{{/if}}
 
 ## EXAMPLE:
  
@@ -209,37 +216,52 @@ Maximum steps reached. Provide your best final answer now.
 Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete answer"}
     `
 
-  this._fnI = this.defaultInteractionFn
+  this.setInteractionFn(this.defaultInteractionFn)
   this.state = "idle"
   this._agentState = {}
   this._useTools = false
   this._lastThoughtMessage = ""
   this._lastThinkMessage = ""
+  this._lastPlanMessage = ""
   this._thoughtCounter = 0
   this._thinkCounter = 0
+  this._planCounter = 0
+  this._lastPlanSnapshot = ""
+  this._enablePlanning = false
 }
 
 /**
  * Helper function to log thought or think messages with counter for repeated messages
  */
 MiniA.prototype._logMessageWithCounter = function(type, message) {
-  if (type !== "thought" && type !== "think") {
-    this._fnI(type, message)
+  if (type !== "thought" && type !== "think" && type !== "plan") {
+    this.fnI(type, message)
     return
   }
-  
+
   var cleanMessage = (message || "").toString().trim()
-  var lastMessageProp = type === "thought" ? "_lastThoughtMessage" : "_lastThinkMessage"
-  var counterProp = type === "thought" ? "_thoughtCounter" : "_thinkCounter"
-  
+  var lastMessageProp
+  var counterProp
+
+  if (type === "thought") {
+    lastMessageProp = "_lastThoughtMessage"
+    counterProp = "_thoughtCounter"
+  } else if (type === "think") {
+    lastMessageProp = "_lastThinkMessage"
+    counterProp = "_thinkCounter"
+  } else {
+    lastMessageProp = "_lastPlanMessage"
+    counterProp = "_planCounter"
+  }
+
   if (cleanMessage === this[lastMessageProp] && cleanMessage.length > 0) {
     this[counterProp]++
     var displayMessage = `${cleanMessage} #${this[counterProp] + 1}`
-    this._fnI(type, displayMessage)
+    this.fnI(type, displayMessage)
   } else {
     this[lastMessageProp] = cleanMessage
     this[counterProp] = 0
-    this._fnI(type, cleanMessage)
+    this.fnI(type, cleanMessage)
   }
 }
 
@@ -264,6 +286,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "size"     : _e = "📏"; break
   case "rate"     : _e = "⏳"; break
   case "mcp"      : _e = "🤖"; break
+  case "plan"     : _e = "🗺️"; break
   case "done"     : _e = "✅"; break
   case "error"    : _e = "❌"; break
   case "libs"     : _e = "📚"; break
@@ -286,9 +309,19 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
  * Event types: exec, shell, think, final, input, output, thought, size, rate, mcp, done, error, libs, info, load, warn
  * </odoc>
  */
-MiniA.prototype.setInteractionFn = function(fn) {
-    _$(fn, "fn").isFunction().$_()
-    this._fnI = fn
+MiniA.prototype.setInteractionFn = function(afn) {
+  _$(afn, "fn").isFunction().$_()
+  this._fnI = afn
+}
+
+/**
+ * <odoc>
+ * <key>MinA.fnI(event, message) : Function</key>
+ * Call the current interaction function.
+ * </odoc>
+ */
+MiniA.prototype.fnI = function(event, message) {
+  return this._fnI(event, message)
 }
 
 /**
@@ -396,6 +429,126 @@ MiniA.prototype._parseListOption = function(value) {
         .filter(v => v.length > 0)
 }
 
+MiniA.prototype._normalizePlanItems = function(plan) {
+    if (isUnDef(plan) || plan === null) return []
+
+    var extractItems = value => {
+        if (isArray(value)) return value
+        if (isMap(value)) {
+            if (isArray(value.items)) return value.items
+            if (isArray(value.steps)) return value.steps
+            return Object.keys(value).map(k => value[k])
+        }
+        return [value]
+    }
+
+    var items = extractItems(plan)
+    if (!isArray(items)) return []
+
+    var normalized = []
+    items.forEach(item => {
+        if (isUnDef(item)) return
+        if (isString(item)) {
+            normalized.push({ title: item.trim(), status: "pending", rawStatus: "pending" })
+            return
+        }
+        if (isMap(item)) {
+            var title = item.title || item.name || item.step || item.task || item.description || item.summary || ""
+            if (isObject(title)) title = stringify(title, __, "")
+            if (isString(title)) title = title.trim()
+            var statusValue = __
+            if (isDef(item.status)) statusValue = item.status
+            else if (isDef(item.state)) statusValue = item.state
+            else if (isDef(item.phase)) statusValue = item.phase
+            else if (isDef(item.progress)) statusValue = item.progress
+            else if (item.done === true || item.complete === true || item.completed === true) statusValue = "done"
+            else if (item.done === false || item.complete === false || item.completed === false) statusValue = "pending"
+
+            if (isUnDef(statusValue) && isNumber(item.remaining) && item.remaining === 0) statusValue = "done"
+            if (isUnDef(statusValue) && isNumber(item.percent) && item.percent >= 100) statusValue = "done"
+            if (isUnDef(statusValue) && isNumber(item.progress) && item.progress >= 1) statusValue = "done"
+
+            if (isString(statusValue)) {
+                statusValue = statusValue.trim().toLowerCase()
+            } else if (isNumber(statusValue)) {
+                statusValue = statusValue >= 1 ? "done" : "pending"
+            } else if (statusValue === true) {
+                statusValue = "done"
+            } else if (statusValue === false) {
+                statusValue = "pending"
+            } else {
+                statusValue = "pending"
+            }
+
+            statusValue = statusValue.replace(/[^a-z_\-\s]/g, "").replace(/[\s-]+/g, "_")
+
+            if (!isString(title) || title.length === 0) {
+                title = stringify(item, __, "")
+            }
+
+            normalized.push({ title: title, status: statusValue.length > 0 ? statusValue : "pending", rawStatus: statusValue })
+        }
+    })
+
+    return normalized.filter(entry => isString(entry.title) && entry.title.length > 0)
+}
+
+MiniA.prototype._handlePlanUpdate = function() {
+    if (!this._enablePlanning) return
+    if (!isObject(this._agentState)) return
+
+    var planItems = this._normalizePlanItems(this._agentState.plan)
+    if (planItems.length === 0) {
+        if (this._lastPlanSnapshot.length > 0) {
+            this._logMessageWithCounter("plan", "Plan cleared (no active tasks)")
+        }
+        this._lastPlanSnapshot = ""
+        return
+    }
+
+    var snapshot = stringify(planItems, __, "")
+    if (snapshot === this._lastPlanSnapshot) return
+
+    var statusIcons = {
+        pending     : { icon: "⏳", label: "pending" },
+        todo        : { icon: "⏳", label: "to do" },
+        not_started : { icon: "⏳", label: "not started" },
+        ready       : { icon: "⏳", label: "ready" },
+        in_progress : { icon: "⚙️", label: "in progress" },
+        progressing : { icon: "⚙️", label: "in progress" },
+        working     : { icon: "⚙️", label: "working" },
+        running     : { icon: "⚙️", label: "running" },
+        active      : { icon: "⚙️", label: "active" },
+        done        : { icon: "✅", label: "done" },
+        complete    : { icon: "✅", label: "complete" },
+        completed   : { icon: "✅", label: "completed" },
+        finished    : { icon: "✅", label: "finished" },
+        success     : { icon: "✅", label: "success" },
+        blocked     : { icon: "🛑", label: "blocked" },
+        stuck       : { icon: "🛑", label: "stuck" },
+        paused      : { icon: "⏸️", label: "paused" },
+        waiting     : { icon: "⏳", label: "waiting" },
+        failed      : { icon: "❌", label: "failed" },
+        cancelled   : { icon: "🚫", label: "cancelled" },
+        canceled    : { icon: "🚫", label: "cancelled" }
+    }
+
+    var lines = []
+    for (var i = 0; i < planItems.length; i++) {
+        var entry = planItems[i]
+        var statusInfo = statusIcons[entry.status] || statusIcons[entry.rawStatus] || { icon: "•", label: entry.status || "pending" }
+        var text = `${i + 1}. ${statusInfo.icon} ${entry.title}`
+        if (isString(statusInfo.label) && statusInfo.label.length > 0) {
+            text += ` – ${statusInfo.label}`
+        }
+        lines.push(text)
+    }
+
+    var message = lines.join("\n")
+    this._logMessageWithCounter("plan", message)
+    this._lastPlanSnapshot = snapshot
+}
+
 /**
  * Remove code block markers from text if present
  */
@@ -431,7 +584,7 @@ MiniA.prototype._validateArgs = function(args, validations) {
 MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (isDef(args.outfile)) {
         io.writeFileString(args.outfile, answer || "(no answer)")
-        this._fnI("done", `Final answer written to ${args.outfile}`)
+        this.fnI("done", `Final answer written to ${args.outfile}`)
         return
     }
     
@@ -447,7 +600,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
         return answer
     }
     
-    this._fnI("final", `Final answer determined. Goal achieved.`)
+    this.fnI("final", `Final answer determined. Goal achieved.`)
     this.state = "stop"
     
     // Mark goal as achieved if not already counted
@@ -500,7 +653,7 @@ MiniA.prototype._callMcpTool = function(toolName, params) {
     var connectionId = isObject(this.mcpToolToConnection) ? this.mcpToolToConnection[toolName] : __
     if (isUnDef(connectionId)) {
         var unknownMsg = `Unknown tool '${toolName}'.`
-        this._fnI("warn", unknownMsg)
+        this.fnI("warn", unknownMsg)
         return {
             rawResult : { error: unknownMsg },
             normalized: { display: unknownMsg, hasError: true },
@@ -508,10 +661,10 @@ MiniA.prototype._callMcpTool = function(toolName, params) {
         }
     }
 
-    var client = __MiniA_mcpConnections[connectionId]
+    var client = this._mcpConnections[connectionId]
     if (isUnDef(client)) {
         var missingMsg = `MCP client for tool '${toolName}' not available.`
-        this._fnI("warn", missingMsg)
+        this.fnI("warn", missingMsg)
         return {
             rawResult : { error: missingMsg },
             normalized: { display: missingMsg, hasError: true },
@@ -533,7 +686,7 @@ MiniA.prototype._callMcpTool = function(toolName, params) {
         ? normalized.display
         : stringify(normalized, __, "") || "(no output)"
 
-    this._fnI("done", `Action '${toolName}' completed (${ow.format.toBytesAbbreviation(displayText.length)}).`)
+    this.fnI("done", `Action '${toolName}' completed (${ow.format.toBytesAbbreviation(displayText.length)}).`)
 
     return {
         rawResult : rawResult,
@@ -632,7 +785,7 @@ MiniA.prototype._runCommand = function(args) {
     }
 
     if (exec) {
-      this._fnI("shell", "Executing '" + args.command + "'...")
+      this.fnI("shell", "Executing '" + args.command + "'...")
       var _r = $sh(args.command).get(0)
       args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
       global.__mini_a_metrics.shell_commands_executed.inc()
@@ -646,6 +799,12 @@ MiniA.prototype._runCommand = function(args) {
 // ============================================================================
 
 MiniA.prototype.init = function(args) {
+  args = _$(args, "args").isMap().default({})
+  var initChatbotMode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+  var initUsePlanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+  this._enablePlanning = (!initChatbotMode && initUsePlanning)
+  args.chatbotmode = initChatbotMode
+  args.useplanning = initUsePlanning
   if (this._isInitialized) return
   /*if (this._isInitializing) {
     do {
@@ -655,13 +814,12 @@ MiniA.prototype.init = function(args) {
   } else {
     this._isInitializing = true
   }*/
+  var parent = this
 
   try {
     ow.metrics.add("mini-a", () => {
       return this.getMetrics()
     })
-
-    args = _$(args, "args").isMap().default({})
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -685,6 +843,8 @@ MiniA.prototype.init = function(args) {
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
+    args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -694,7 +854,7 @@ MiniA.prototype.init = function(args) {
     // Load additional libraries if specified
     if (isDef(args.libs) && args.libs.length > 0) {
       args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-        this._fnI("libs", `Loading library: ${lib}...`)
+        this.fnI("libs", `Loading library: ${lib}...`)
         try {
           if (lib.startsWith("@")) {
             if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
@@ -704,16 +864,16 @@ MiniA.prototype.init = function(args) {
               if (io.fileExists(_file)) {
                 loadLib(_file)
               } else {
-                this._fnI("error", `Library '${lib}' not found.`)
+                this.fnI("error", `Library '${lib}' not found.`)
               }
             } else {
-              this._fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
+              this.fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
             }
           } else {
             loadLib(lib)
           }
         } catch(e) {
-          this._fnI("error", `Failed to load library ${lib}: ${e.message}`)
+          this.fnI("error", `Failed to load library ${lib}: ${e.message}`)
         }
       })
     }
@@ -727,7 +887,7 @@ MiniA.prototype.init = function(args) {
     if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
       this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
       this._use_lc = true
-      this._fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
+      this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
     } else {
       this._use_lc = false
     }
@@ -738,14 +898,14 @@ MiniA.prototype.init = function(args) {
 
     // Load conversation history if provided
     if (isDef(args.conversation) && io.fileExists(args.conversation)) {
-      this._fnI("load", `Loading conversation history from ${args.conversation}...`)
+      this.fnI("load", `Loading conversation history from ${args.conversation}...`)
       this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
       if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
     }
 
     // Using MCP (single or multiple connections)
     var needMCPInit = false
-    if (isUnDef(__MiniA_mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
+    if (isUnDef(this._mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
       needMCPInit = true    
       this.mcpTools = []
       this.mcpToolNames = []
@@ -759,19 +919,19 @@ MiniA.prototype.init = function(args) {
         mcpConfigs = [mcpConfigs]
       }
 
-      this._fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
+      this.fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
 
       // Initialize each MCP connection
-      var parent = this
       mcpConfigs.forEach((mcpConfig, index) => {
         try {
           var mcp, id = md5(stringify(mcpConfig, __, ""))
-          if (Object.keys(__MiniA_mcpConnections).indexOf(id) >= 0) {
-            mcp = __MiniA_mcpConnections[id]
+          if (Object.keys(this._mcpConnections).indexOf(id) >= 0) {
+            mcp = this._mcpConnections[id]
           } else {
             mcp = $mcp(merge(mcpConfig, {
-              preFn: (t, a) => {
-                parent._fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+              shared: true,
+              preFn : (t, a) => {
+                parent.fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
                 if (typeof parent._prepareToolExecution === "function") {
                   var currentCtx = parent._runtime && parent._runtime.currentTool
                   var shouldPrepare = parent._useTools || isUnDef(currentCtx) || isUnDef(currentCtx.stepLabel)
@@ -783,7 +943,7 @@ MiniA.prototype.init = function(args) {
                   }
                 }
               },
-              posFn: (t, a, r) => {
+              posFn : (t, a, r) => {
                 var hasError = isMap(r) && isDef(r.error)
                 if (hasError) {
                   logWarn(`Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
@@ -805,7 +965,7 @@ MiniA.prototype.init = function(args) {
                     ? normalized.display
                     : (stringify(r, __, "") || "(no output)")
 
-                  parent._fnI("done", `Action '${t}' completed (${ow.format.toBytesAbbreviation(displayText.length)}).`)
+                  parent.fnI("done", `Action '${t}' completed (${ow.format.toBytesAbbreviation(displayText.length)}).`)
                   parent._finalizeToolExecution({
                     toolName     : t,
                     params       : a,
@@ -817,7 +977,7 @@ MiniA.prototype.init = function(args) {
                 }
               }
             }))
-            __MiniA_mcpConnections[id] = mcp
+            this._mcpConnections[id] = mcp
             mcp.initialize()
             sleep(100, true)
           }
@@ -830,21 +990,21 @@ MiniA.prototype.init = function(args) {
           }
           
           // Store connection and map tools to this connection
-          //__MiniA_mcpConnections.push(mcp)
+          //this._mcpConnections.push(mcp)
           tools.forEach(tool => {
             this.mcpTools.push(tool)
             this.mcpToolNames.push(tool.name)
             this.mcpToolToConnection[tool.name] = id
           })
 
-          this._fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
+          this.fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
         } catch (e) {
           logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
           throw e
         }
       })
 
-      this._fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+      this.fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
     }
 
     if (this._useTools && this.mcpTools.length > 0) {
@@ -852,8 +1012,8 @@ MiniA.prototype.init = function(args) {
         if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
 
         var updated = llmInstance
-        Object.keys(__MiniA_mcpConnections).forEach(connectionId => {
-          var client = __MiniA_mcpConnections[connectionId]
+        Object.keys(this._mcpConnections).forEach(connectionId => {
+          var client = this._mcpConnections[connectionId]
           if (isUnDef(client)) return
 
           try {
@@ -861,7 +1021,7 @@ MiniA.prototype.init = function(args) {
             if (isDef(result)) updated = result
           } catch (e) {
             var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
-            this._fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+            this.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
           }
         })
         return updated
@@ -875,7 +1035,7 @@ MiniA.prototype.init = function(args) {
         if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
       }
 
-      this._fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+      this.fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
     }
 
     // Provide system prompt instructions
@@ -969,7 +1129,8 @@ MiniA.prototype.init = function(args) {
         actionsdesc      : promptActionsDesc,
         isMachine        : (isDef(args.__format) && args.__format != "md"),
         usetools         : this._useTools,
-        toolCount        : this.mcpTools.length
+        toolCount        : this.mcpTools.length,
+        planning         : this._enablePlanning
       })
     }
 
@@ -983,7 +1144,7 @@ MiniA.prototype.init = function(args) {
     }
 
     var systemTokens = this._estimateTokens(this._systemInst)
-    this._fnI("size", `System prompt ~${systemTokens} tokens`)
+    this.fnI("size", `System prompt ~${systemTokens} tokens`)
     if (args.debug) {
       print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
     }
@@ -1035,7 +1196,7 @@ MiniA.prototype.start = function(args) {
         global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
         this.state = "stop"
         var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
-        this._fnI("error", `Agent failed: ${errMsg}`)
+        this.fnI("error", `Agent failed: ${errMsg}`)
         throw e
     }
 }
@@ -1069,6 +1230,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+    args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+
+    this._enablePlanning = (!args.chatbotmode && args.useplanning)
+    this._lastPlanMessage = ""
+    this._planCounter = 0
+    this._lastPlanSnapshot = ""
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -1094,7 +1261,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       } else {
         if (calls >= args.rtm) {
           var wait = Math.ceil((60 / args.rtm) * 1000)
-          this._fnI("rate", `Rate limit: waiting ${wait}ms before next LLM call...`)
+          this.fnI("rate", `Rate limit: waiting ${wait}ms before next LLM call...`)
           sleep(wait, true)
           calls = 1
           startTime = now()
@@ -1133,7 +1300,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       
       var summaryStats = summaryResponseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(summaryStats)
-      this._fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
+      this.fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
       return summaryResponseWithStats.response
     }
 
@@ -1142,7 +1309,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (args.maxcontext > 0) {
         var contextTokens = this._estimateTokens(runtime.context.join(""))
         if (contextTokens > args.maxcontext) {
-          this._fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
+          this.fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
           var recentContext = []
           var oldContext = []
           var recentLimit = Math.floor(args.maxcontext * 0.3) // Keep 30% as recent context
@@ -1160,12 +1327,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
           
           if (oldContext.length > 0) {
-            this._fnI("summarize", `Summarizing conversation history...`)
+            this.fnI("summarize", `Summarizing conversation history...`)
             global.__mini_a_metrics.context_summarizations.inc()
             var summarizedOld = summarize(oldContext.join("\n"))
             runtime.context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
             var newTokens = this._estimateTokens(runtime.context.join(""))
-            this._fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
+            this.fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
           } else {
             global.__mini_a_metrics.summaries_skipped.inc()
           }
@@ -1175,10 +1342,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Check if goal is a string or a file path
     if (args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
-      this._fnI("load", `Loading goal from file: ${args.goal}...`)
+      this.fnI("load", `Loading goal from file: ${args.goal}...`)
       args.goal = io.readFileString(args.goal)
     }
-    this._fnI("user", `${args.goal}`)
+    this.fnI("user", `${args.goal}`)
 
     this.init(args)
 
@@ -1195,8 +1362,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
     this._agentState = isObject(initialState) ? initialState : {}
+    if (this._enablePlanning && isObject(this._agentState) && isUnDef(this._agentState.plan)) this._agentState.plan = []
+    if (this._enablePlanning) this._handlePlanUpdate()
 
-    this._fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
+    this.fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
     // Get model response and parse as JSON
     // Check context size and summarize if too large
@@ -1205,7 +1374,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var _c = this.llm.getGPT().getConversation()
       var currentTokens = this._estimateTokens(stringify(_c, __, ""))
       
-      this._fnI("size", `Current context tokens: ~${currentTokens} (max allowed: ${args.maxcontext})`)
+      this.fnI("size", `Current context tokens: ~${currentTokens} (max allowed: ${args.maxcontext})`)
       if (currentTokens > args.maxcontext) {
         var _sysc = [], _ctx = []
         _c.forEach(c => {
@@ -1215,11 +1384,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             _ctx.push(c)
           }
         })
-        this._fnI("summarize", `Summarizing conversation history...`)
+        this.fnI("summarize", `Summarizing conversation history...`)
         global.__mini_a_metrics.summaries_forced.inc()
         var _nc = summarize(stringify(_ctx, __, ""))
         var newTokens = this._estimateTokens(stringify(_nc, __, ""))
-        this._fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
+        this.fnI("size", `Context too large (~${currentTokens} tokens), summarized to ~${newTokens} tokens (system #${_sysc.length}).`)
         this.llm.getGPT().setConversation(_sysc.concat([{ role: "assistant", content: "Summarized conversation: " + _nc }]))
       } else {
         global.__mini_a_metrics.summaries_skipped.inc()
@@ -1345,7 +1514,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       global.__mini_a_metrics.steps_taken.inc()
       var stateSnapshot = stringify(this._agentState, __, "")
       if (args.debug || args.verbose) {
-        this._fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
+        this.fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
       }
       // TODO: Improve by summarizing context to fit in prompt if needed
       var progressEntries = runtime.context.slice()
@@ -1406,11 +1575,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       
       // Inform about escalation
       if (this._use_lc && shouldEscalate && step > 0) {
-        this._fnI("warn", `Escalating to main model: ${escalationReason}`)
+        this.fnI("warn", `Escalating to main model: ${escalationReason}`)
         global.__mini_a_metrics.escalations.inc()
       }
       
-      this._fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
+      this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
       // Get model response and parse as JSON
       addCall()
       if (args.debug) {
@@ -1435,7 +1604,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var rmsg = responseWithStats.response
       var stats = responseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(stats)
-      this._fnI("output", `${llmType.charAt(0).toUpperCase() + llmType.slice(1)} model responded. ${tokenStatsMsg}`)
+      this.fnI("output", `${llmType.charAt(0).toUpperCase() + llmType.slice(1)} model responded. ${tokenStatsMsg}`)
 
       // Store history
       if (isDef(args.conversation)) {
@@ -1450,7 +1619,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
-          this._fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
+          this.fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.json_parse_failures.inc()
           global.__mini_a_metrics.retries.inc()
@@ -1465,7 +1634,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           rmsg = fallbackResponseWithStats.response
           stats = fallbackResponseWithStats.stats
           tokenStatsMsg = this._formatTokenStats(stats)
-          this._fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
+          this.fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
           
           if (isString(rmsg)) {
             rmsg = rmsg.replace(/.+\n(\{.+)/m, "$1")
@@ -1481,7 +1650,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
           global.__mini_a_metrics.json_parse_failures.inc()
           if (args.debug || args.verbose) {
-            this._fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+            this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
           }
           continue
         }
@@ -1504,6 +1673,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._agentState = extractedState
           updatedStateSnapshot = stringify(this._agentState, __, "")
           stateUpdatedThisStep = true
+          if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
+          if (this._enablePlanning) this._handlePlanUpdate()
         }
       }
       var actionMessages = []
@@ -1541,7 +1712,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           stateRecordedInContext = true
         }
         if (args.debug || args.verbose) {
-          this._fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+          this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
         }
         continue
       }
@@ -1699,7 +1870,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           })
 
           var connectionIndex = this.mcpToolToConnection[origActionRaw]
-          var mcp = __MiniA_mcpConnections[connectionIndex]
+          var mcp = this._mcpConnections[connectionIndex]
           var rawToolResult
           var toolCallError = false
 
@@ -1712,7 +1883,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
           var normalizedResult = this._normalizeToolResult(rawToolResult)
           var resultDisplay = normalizedResult.display || "(no output)"
-          this._fnI("done", `Action '${origActionRaw}' completed (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
+          this.fnI("done", `Action '${origActionRaw}' completed (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
 
           this._finalizeToolExecution({
             toolName     : origActionRaw,
@@ -1758,7 +1929,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             stateRecordedInContext = true
           }
           if (args.debug || args.verbose) {
-            this._fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+            this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
           }
 
           return this._processFinalAnswer(answerValue, args)
@@ -1782,7 +1953,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         stateRecordedInContext = true
       }
       if (args.debug || args.verbose) {
-        this._fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+        this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
       }
 
       if (runtime.hadErrorThisStep) {
@@ -1807,11 +1978,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // If already in stop state, just exit
     if (this.state == "stop") {
-      this._fnI("stop", `Agent already in 'stop' state. Exiting...`)
+      this.fnI("stop", `Agent already in 'stop' state. Exiting...`)
       return "(no answer)"
     }
 
-    this._fnI("warn", `Reached max steps. Asking for final answer...`)
+    this.fnI("warn", `Reached max steps. Asking for final answer...`)
     // Get final answer from model
     addCall()
     var finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
@@ -1825,7 +1996,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var res = jsonParse(finalResponseWithStats.response, __, __, true)
     var finalStats = finalResponseWithStats.stats
     var finalTokenStatsMsg = this._formatTokenStats(finalStats)
-    this._fnI("output", `Final response received. ${finalTokenStatsMsg}`)
+    this.fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 
     // Store history
     if (isDef(args.conversation)) io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
@@ -1847,7 +2018,7 @@ MiniA.prototype._runChatbotMode = function(options) {
     var addCall = typeof opts.addCall === "function" ? opts.addCall : function() {}
     var sessionStartTime = isNumber(opts.sessionStartTime) ? opts.sessionStartTime : now()
 
-    this._fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}.`)
+    this.fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}.`)
     this.state = "processing"
 
     var maxSteps = Math.max(1, args.maxsteps || 10)
@@ -1869,7 +2040,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(promptTokens)
 
       var contextEstimate = conversationTokens + promptTokens
-      this._fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
+      this.fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
 
       addCall()
       if (args.debug) {
@@ -1887,7 +2058,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       global.__mini_a_metrics.llm_normal_calls.inc()
 
       var tokenStatsMsg = this._formatTokenStats(stats)
-      this._fnI("output", `Chatbot model responded. ${tokenStatsMsg}`)
+      this.fnI("output", `Chatbot model responded. ${tokenStatsMsg}`)
 
       if (isDef(args.conversation)) {
         io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
@@ -2059,7 +2230,7 @@ MiniA.prototype._runChatbotMode = function(options) {
     }
 
     if (isUnDef(finalAnswer)) {
-      this._fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
+      this.fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       addCall()
       var fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
@@ -2072,7 +2243,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackStats.total_tokens || 0)
       global.__mini_a_metrics.llm_normal_calls.inc()
       var fallbackTokenStatsMsg = this._formatTokenStats(fallbackStats)
-      this._fnI("output", `Fallback response received. ${fallbackTokenStatsMsg}`)
+      this.fnI("output", `Fallback response received. ${fallbackTokenStatsMsg}`)
       var fallbackAnswer = fallbackResponseWithStats.response
       finalAnswer = isString(fallbackAnswer) ? fallbackAnswer.trim() : stringify(fallbackAnswer, __, "")
       global.__mini_a_metrics.goals_stopped.inc()
