@@ -267,12 +267,14 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
 
 /**
  * <odoc>
- * <key>MinA.defaultInteractionFn(event, message)</key>
+ * <key>MinA.defaultInteractionFn(event, message, cFn)</key>
  * Default interaction function that logs events to the console with emojis.
  * Event types: exec, shell, think, final, input, output, thought, size, rate, mcp, done, error, libs, info, load, warn
  * </odoc>
  */
-MiniA.prototype.defaultInteractionFn = function(e, m) {
+MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
+  cFn = _$(cFn, "cFn").or().isFunction().default((_e, _m) => log("[" + this._id + "] " + _e + " " + _m))
+
   var _e = ""
   switch(e) {
   case "user"     : _e = "👤"; break
@@ -298,7 +300,17 @@ MiniA.prototype.defaultInteractionFn = function(e, m) {
   case "summarize": _e = "🌀"; break
   default         : _e = e
   }
-  log(_e + "  " + m)
+  cFn(_e, m, this._id)
+}
+
+/**
+ * <odoc>
+ * <key>MinA.getId() : String</key>
+ * Get the unique ID of this Mini-A instance.
+ * </odoc>
+ */
+MiniA.prototype.getId = function() {
+  return this._id
 }
 
 /**
@@ -413,6 +425,15 @@ MiniA.prototype._formatTokenStats = function(stats) {
     if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
     if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
+}
+
+MiniA.prototype._getTotalTokens = function(stats) {
+    if (!isObject(stats)) return 0
+    if (isNumber(stats.total_tokens)) return stats.total_tokens
+    var prompt = isNumber(stats.prompt_tokens) ? stats.prompt_tokens : 0
+    var completion = isNumber(stats.completion_tokens) ? stats.completion_tokens : 0
+    var derived = prompt + completion
+    return derived > 0 ? derived : 0
 }
 
 MiniA.prototype._parseListOption = function(value) {
@@ -1289,8 +1310,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryResponseWithStats.stats.total_tokens || 0)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryResponseWithStats.stats.total_tokens || 0)
+      var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
+      var summaryTokenTotal = this._getTotalTokens(summaryStats)
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
+      global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
       global.__mini_a_metrics.llm_normal_calls.inc()
       global.__mini_a_metrics.summaries_made.inc()
       
@@ -1298,7 +1321,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
       global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
       
-      var summaryStats = summaryResponseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(summaryStats)
       this.fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
       return summaryResponseWithStats.response
@@ -1590,19 +1612,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(responseWithStats.stats.total_tokens || 0)
+      var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+      var responseTokenTotal = this._getTotalTokens(stats)
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(responseTokenTotal)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(prompt))
       
       if (useLowCost) {
         global.__mini_a_metrics.llm_lc_calls.inc()
-        global.__mini_a_metrics.llm_lc_tokens.getAdd(responseWithStats.stats.total_tokens || 0)
+        global.__mini_a_metrics.llm_lc_tokens.getAdd(responseTokenTotal)
       } else {
         global.__mini_a_metrics.llm_normal_calls.inc()
-        global.__mini_a_metrics.llm_normal_tokens.getAdd(responseWithStats.stats.total_tokens || 0)
+        global.__mini_a_metrics.llm_normal_tokens.getAdd(responseTokenTotal)
       }
       
       var rmsg = responseWithStats.response
-      var stats = responseWithStats.stats
       var tokenStatsMsg = this._formatTokenStats(stats)
       this.fnI("output", `${llmType.charAt(0).toUpperCase() + llmType.slice(1)} model responded. ${tokenStatsMsg}`)
 
@@ -1628,11 +1651,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (args.debug) {
             print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
           }
-          global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackResponseWithStats.stats.total_tokens || 0)
-          global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackResponseWithStats.stats.total_tokens || 0)
+          var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
+          var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
+          global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
+          global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
           global.__mini_a_metrics.llm_normal_calls.inc()
           rmsg = fallbackResponseWithStats.response
-          stats = fallbackResponseWithStats.stats
+          stats = fallbackStats
           tokenStatsMsg = this._formatTokenStats(stats)
           this.fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
           
@@ -1989,12 +2014,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.debug) {
       print( ow.format.withSideLine("<--\n" + stringify(finalResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
     }
-    global.__mini_a_metrics.llm_actual_tokens.getAdd(finalResponseWithStats.stats.total_tokens || 0)
-    global.__mini_a_metrics.llm_normal_tokens.getAdd(finalResponseWithStats.stats.total_tokens || 0)
+    var finalStats = isObject(finalResponseWithStats) ? finalResponseWithStats.stats : {}
+    var finalTokenTotal = this._getTotalTokens(finalStats)
+    global.__mini_a_metrics.llm_actual_tokens.getAdd(finalTokenTotal)
+    global.__mini_a_metrics.llm_normal_tokens.getAdd(finalTokenTotal)
     global.__mini_a_metrics.llm_normal_calls.inc()
     
     var res = jsonParse(finalResponseWithStats.response, __, __, true)
-    var finalStats = finalResponseWithStats.stats
     var finalTokenStatsMsg = this._formatTokenStats(finalStats)
     this.fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 
@@ -2051,10 +2077,11 @@ MiniA.prototype._runChatbotMode = function(options) {
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      var stats = responseWithStats.stats || {}
+      var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+      var chatbotTokenTotal = this._getTotalTokens(stats)
 
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(stats.total_tokens || 0)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(stats.total_tokens || 0)
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(chatbotTokenTotal)
+      global.__mini_a_metrics.llm_normal_tokens.getAdd(chatbotTokenTotal)
       global.__mini_a_metrics.llm_normal_calls.inc()
 
       var tokenStatsMsg = this._formatTokenStats(stats)
@@ -2237,10 +2264,11 @@ MiniA.prototype._runChatbotMode = function(options) {
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      var fallbackStats = fallbackResponseWithStats.stats || {}
+      var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
+      var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(fallbackPrompt))
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackStats.total_tokens || 0)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackStats.total_tokens || 0)
+      global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
+      global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
       global.__mini_a_metrics.llm_normal_calls.inc()
       var fallbackTokenStatsMsg = this._formatTokenStats(fallbackStats)
       this.fnI("output", `Fallback response received. ${fallbackTokenStatsMsg}`)
