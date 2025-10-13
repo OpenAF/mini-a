@@ -503,7 +503,6 @@ jobs:
 - name : Static content
   exec : | #js
     args.path = getOPackPath("mini-a") + "/public"
-    print(args.path)
   to   :
   - (httpdFileBrowse): "${onport:-8888}"
     ((uri          )): /
