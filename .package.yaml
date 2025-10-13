@@ -77,9 +77,9 @@ filesHash:
   AGENTS.md: 7b6df1520b27dc3ef4e025a084452c62d0e1c1f9
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: 279d907bcbdcddf93716e208b90b683e53b9f83a
-  EXTERNAL-MCPS.md: c81bc046298f54da3b3143e592c4db34548e4c2a
+  EXTERNAL-MCPS.md: 6b0e52f59e26f3f16ba8a89338c792f3a763f0b7
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: d77ae7b111bfbcd0980799501d98c544ffd31e02
+  README.md: eb0cc9ad7bdedaa479aa83c32621fa0d3e33fd8f
   USAGE.md: ac0c732e4dfb7a33f3e1c54c2306981d196afa3a
   mcps/CREATING.md: 8d2e251c409148f2178f84dba0ba1bc36f721857
   mcps/README.md: da97b1018bf8cc93515a3ab4836ef77e0a4ca4e4
@@ -93,11 +93,11 @@ filesHash:
   mcps/mcp-shell.yaml: ce8b702efa515b704720f0d4e73a0093c1e4b699
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
   mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
-  mini-a-main.yaml: 05c4446a1cbc110a0cec198c3c8296c3e02e715c
+  mini-a-main.yaml: eb36f5a6749500c7bef073059abf461916174aed
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 01f74f6fad19ee3f279998c42c19f2c9e8fa27a1
-  mini-a.js: 009f9e6f7b35bab281129009da6c6e2ef603e681
+  mini-a-web.yaml: 40b2ae2f04a8b18325d2c0089d947a9cc2490678
+  mini-a.js: 69227611e687e80b12410bd67a201d27877ef11d
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 264112db6c28976fbd55e1fd89ad265b21c81868
+  mini-a.yaml: e342bfff8ea3db81aa9d59c3d1dde5eb1505e197
   public/index.md: eeaa95a2118e93de419e316f81c6e9b372ccaea9
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
