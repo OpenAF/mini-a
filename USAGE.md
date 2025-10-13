@@ -201,6 +201,7 @@ The `start()` method accepts various configuration options:
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
+- **`shell`** (string): Prefix applied to every shell command (use with `useshell=true`)
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
@@ -495,6 +496,56 @@ You can adjust this policy using the shell safety options:
 - Read-only mode by default
 - Shell access disabled by default
 - Command validation and filtering
+
+### Shell Prefix Strategies by Operating System
+
+Use `shell=...` together with `useshell=true` when you want Mini-A to execute every command through an external sandbox or container runtime. The command filter continues to evaluate the original command string, and the prefix is appended immediately before execution.
+
+#### macOS (sandbox-exec)
+- **Use the built-in restriction flags when:** you only need to block specific binaries (e.g. combine `shellallow`, `shellbanextra`, `shellallowpipes`, and `checkall=true`). This keeps commands on the host without additional tooling.
+- **Use `shell=` when:** you want the macOS sandbox to enforce file/network rules defined in a `.sb` profile.
+- **Pros:** native isolation, no additional daemons required, works on Intel and Apple Silicon.
+- **Cons:** sandbox profiles can be verbose; access to developer tools may require profile tweaks.
+- **Example:**
+  ```bash
+  ./mini-a.sh goal="catalog ~/Projects" useshell=true \
+    shell="sandbox-exec -f /usr/share/sandbox/default.sb"
+  ```
+
+#### macOS Sequoia (container CLI)
+- **Use the restriction flags when:** you trust the host environment and just need confirmation prompts or per-command allowlists.
+- **Use `shell=` when:** you prefer to run the agent inside an isolated macOS container started with Apple's `container` CLI.
+- **Pros:** lightweight sandbox with full POSIX tooling, easy to reuse across sessions (`container exec`).
+- **Cons:** requires macOS 15+ and the Container feature, container lifecycle must be managed separately.
+- **Example:**
+  ```bash
+  container run --detach --name mini-a --image docker.io/library/ubuntu:24.04 sleep infinity
+  ./mini-a.sh goal="inspect /work" useshell=true shell="container exec mini-a"
+  ```
+
+#### Linux / macOS / Windows WSL (Docker)
+- **Use the restriction flags when:** you are confident with host-level execution but still want Mini-A to stop on risky commands.
+- **Use `shell=` when:** you want every command to run inside a long-lived Docker container (ideal for destructive or dependency-heavy workloads).
+- **Pros:** mature isolation, bind mounts for controlled file access, easy to snapshot/destroy containers.
+- **Cons:** Docker daemon required; manage image updates separately; host files must be mounted explicitly.
+- **Example:**
+  ```bash
+  docker run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work ubuntu:24.04 sleep infinity
+  ./mini-a.sh goal="summarize git status" useshell=true shell="docker exec mini-a-sandbox"
+  ```
+
+#### Linux / macOS / Windows WSL (Podman)
+- **Use the restriction flags when:** rootless execution plus Mini-A's confirmation prompts are sufficient.
+- **Use `shell=` when:** you prefer Podman's daemonless containers or want rootless isolation without Docker.
+- **Pros:** rootless-friendly, integrates with systemd socket activation, shares the Docker CLI syntax.
+- **Cons:** rootless volumes may need additional SELinux/AppArmor policy; ensure the container stays running.
+- **Example:**
+  ```bash
+  podman run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work docker.io/library/fedora:latest sleep infinity
+  ./mini-a.sh goal="list source files" useshell=true shell="podman exec mini-a-sandbox"
+  ```
+
+> **Tip:** Mix and match strategies. You can still require confirmations (`checkall=true`) or tweak allowlists (`shellallow=...`) even when commands are routed through Docker, Podman, or sandbox-exec.
 
 ## Advanced Features
 

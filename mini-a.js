@@ -12,6 +12,7 @@ var MiniA = function() {
   this._isInitializing = false
   this._id = genUUID()
   this._mcpConnections = {}
+  this._shellPrefix = ""
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -450,6 +451,52 @@ MiniA.prototype._parseListOption = function(value) {
         .filter(v => v.length > 0)
 }
 
+MiniA.prototype._splitShellPrefix = function(value) {
+    if (!isString(value)) return []
+    var prefix = value.trim()
+    if (prefix.length === 0) return []
+
+    var result = []
+    var current = ""
+    var inSingle = false
+    var inDouble = false
+
+    for (var i = 0; i < prefix.length; i++) {
+        var ch = prefix.charAt(i)
+
+        if (ch === "\\" && i + 1 < prefix.length) {
+            i++
+            current += prefix.charAt(i)
+            continue
+        }
+
+        if (ch === "'" && !inDouble) {
+            inSingle = !inSingle
+            continue
+        }
+
+        if (ch === '"' && !inSingle) {
+            inDouble = !inDouble
+            continue
+        }
+
+        if (!inSingle && !inDouble && /\s/.test(ch)) {
+            if (current.length > 0) {
+                result.push(current)
+                current = ""
+            }
+            continue
+        }
+
+        current += ch
+    }
+
+    if (inSingle || inDouble) return [prefix]
+    if (current.length > 0) result.push(current)
+
+    return result.length > 0 ? result : [prefix]
+}
+
 MiniA.prototype._normalizePlanItems = function(plan) {
     if (isUnDef(plan) || plan === null) return []
 
@@ -806,9 +853,31 @@ MiniA.prototype._runCommand = function(args) {
     }
 
     if (exec) {
-      this.fnI("shell", "Executing '" + args.command + "'...")
-      var _r = $sh(args.command).get(0)
+      var originalCommand = args.command
+      var shellPrefix = ""
+      if (isString(this._shellPrefix)) shellPrefix = this._shellPrefix.trim()
+      if (isString(args.shellprefix)) {
+        var overridePrefix = String(args.shellprefix).trim()
+        if (overridePrefix.length > 0) shellPrefix = overridePrefix
+      }
+      var finalCommand = originalCommand
+      var shInput = originalCommand
+      if (isString(shellPrefix) && shellPrefix.length > 0) {
+        var needsSpace = /\s$/.test(shellPrefix)
+        finalCommand = shellPrefix + (needsSpace ? "" : " ") + originalCommand
+        var prefixParts = this._splitShellPrefix(shellPrefix)
+        if (!isArray(prefixParts) || prefixParts.length === 0) prefixParts = [shellPrefix]
+        var commandParts = prefixParts.slice()
+        commandParts.push(originalCommand)
+        shInput = commandParts
+      }
+      this.fnI("shell", shellPrefix.length > 0
+        ? `Executing '${finalCommand}' (original: '${originalCommand}').`
+        : `Executing '${finalCommand}'...`
+      )
+      var _r = $sh(shInput).get(0)
       args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
+      args.executedCommand = finalCommand
       global.__mini_a_metrics.shell_commands_executed.inc()
     }
 
@@ -851,6 +920,7 @@ MiniA.prototype.init = function(args) {
       { name: "outfile", type: "string", default: __ },
       { name: "libs", type: "string", default: "" },
       { name: "conversation", type: "string", default: __ },
+      { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" }
     ])
@@ -870,6 +940,7 @@ MiniA.prototype.init = function(args) {
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
+    this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
     this._useTools = args.usetools
 
     // Load additional libraries if specified
@@ -1188,6 +1259,7 @@ MiniA.prototype.init = function(args) {
  * - readwrite (boolean, default=false): Whether to allow read/write operations on the filesystem.
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
  * - useshell (boolean, default=false): Whether to allow shell command execution.
+ * - shell (string, optional): Prefix to add before each shell command when useshell=true.
  * - shellallow (string, optional): Comma-separated list of commands allowed even if usually banned.
  * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
@@ -1236,6 +1308,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "conversation", type: "string", default: __ },
       { name: "maxcontext", type: "number", default: 0 },
       { name: "rules", type: "string", default: "" },
+      { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" }
     ])
@@ -1266,6 +1339,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
+    this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
     this._useTools = args.usetools
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
