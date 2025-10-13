@@ -10,6 +10,7 @@ This is a sample list of external MCPs that you can use with Mini-A.
 | mcp/fetch | Fetch URLs | ```(cmd: 'docker run --rm -i mcp/fetch')``` |
 | mcp/openweather | Interact with OpenWeather API | ```(cmd: 'docker run --rm -i mcp/openweather')``` |
 | mcp/aws-documentation | Search AWS Documentation | ```(cmd: 'docker run --rm -i mcp/aws-documentation')``` |
+| public.ecr.aws/awslabs-mcp/awslabs/aws-api-mcp-server | AWS API MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/aws-api-mcp-server')``` | 
 
 > For container based MCPs first pull the corresponding image with `docker pull <image>` before using it.
 
