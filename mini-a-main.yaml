@@ -22,7 +22,7 @@ help:
   - name     : goal
     desc     : Goal for the agent to achieve (CLI mode)
     example  : aValueExample
-    mandatory: true
+    mandatory: false
   - name     : mcp
     desc     : MCP connection object (or array) using OpenAF's $mcp() in SLON or JSON format (CLI mode)
     example  : "(url: 'http://127.0.0.1:17879/mcp', type: remote, debug: false)"
@@ -143,7 +143,7 @@ ojob:
 
 todo:
 - (if    ): |
-    toBoolean(args.web) == true
+    toBoolean(args.web) || toBoolean(args.onport) == true
   ((then)):
   - start-web
   ((else)):
