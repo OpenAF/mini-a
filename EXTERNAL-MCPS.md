@@ -11,10 +11,16 @@ This is a sample list of external MCPs that you can use with Mini-A.
 | mcp/openweather | Interact with OpenWeather API | ```(cmd: 'docker run --rm -i mcp/openweather')``` |
 | mcp/aws-documentation | Search AWS Documentation | ```(cmd: 'docker run --rm -i mcp/aws-documentation')``` |
 | public.ecr.aws/awslabs-mcp/awslabs/aws-api-mcp-server | AWS API MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/aws-api-mcp-server')``` | 
+| public.ecr.aws/awslabs-mcp/awslabs/cost-analysis-mcp-server | AWS Cost Analysis MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/cost-analysis-mcp-server')``` |
+| public.ecr.aws/awslabs-mcp/awslabs/cost-explorer-mcp-server | AWS Cost Explorer MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/cost-explorer-mcp-server')``` |
+| public.ecr.aws/awslabs-mcp/awslabs/eks-mcp-server | AWS EKS MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/eks-mcp-server')``` |
+| public.ecr.aws/awslabs-mcp/awslabs/aws-pricing-mcp-server | AWS Pricing MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/aws-pricing-mcp-server')``` |
+| public.ecr.aws/awslabs-mcp/awslabs/dynamodb-mcp-server | AWS DynamoDB MCP Server | ```(cmd: 'docker run --rm -i -e AWS_REGION=some-region -e AWS_ACCESS_KEY_ID=xxx -e AWS_SECRET_ACCESS_KEY=yyy public.ecr.aws/awslabs-mcp/awslabs/dynamodb-mcp-server')``` |
 
 > For container based MCPs first pull the corresponding image with `docker pull <image>` before using it.
 
 > Check [Docker MCP Hub](https://hub.docker.com/mcp)
+> Check [AWS MCP Servers](https://gallery.ecr.aws/awslabs-mcp)
 
 ## Using external MCPs as HTTP remote
 
