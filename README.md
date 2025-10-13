@@ -46,6 +46,7 @@ Examples:
 | GitHub | gpt-5-nano | ```(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')``` | |
 | AWS | nova-pro | ```(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))``` | After installing OpenAF's oPack "AWS" add to mini-a calls ```libs="aws.js"``` |
 | AWS | claude-sonnet-4.5 | ```(type: bedrock, timeout: 900000, options: (model: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', region: eu-west-1, temperature: 0, params:(max_tokens: 200000)))``` | After installing OpenAF's oPack "AWS" add to mini-a calls ```libs="aws.js"``` |
+| Groq | gpt-oss-20b | ```(type: openai, model: 'openai/gpt-oss-20b', key: '...', url: 'https://api.groq.com/openai', timeout: 900000, temperature: 0)``` |
 | Ollama | gemma3n | ```(type: ollama, model: 'gemma3', url: 'http://ollama.local', timeout: 900000)``` | |
 | Ollama | mistral | ```(type: ollama, model: 'mistral', url: 'http://ollama.local', timeout: 900000)``` | |
 
