@@ -158,6 +158,7 @@ jobs:
       rules          : isString.default(__)
       state          : isString.default(__)
   exec : | #js
+    log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
     if (isUnDef(args.__format)) args.__format = "md"
     _ma.init(args)
