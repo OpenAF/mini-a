@@ -1151,7 +1151,7 @@ MiniA.prototype.init = function(args) {
       if (args.useshell) chatActions.push("shell")
       var chatToolsList = this.mcpToolNames.join(", ")
       var chatbotToolDetails = []
-      if (this.mcpTools.length > 0) {
+      if (this.mcpTools.length > 0 && !this._useTools) {
         chatbotToolDetails = this.mcpTools.map(tool => {
           var description = isString(tool.description) && tool.description.length > 0
             ? tool.description
