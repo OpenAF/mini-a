@@ -78,14 +78,15 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 #### Single MCP connection
 
 ```bash
-mini-a.sh goal="list all nmaguiar/imgutils image tags" mcp="(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000)" rtm=20
-mini-a.sh goal="..." mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)" rtm=20 __format=md
+mini-a.sh goal="list all nmaguiar/imgutils image tags" mcp="(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000)" rpm=20
+mini-a.sh goal="..." mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)" rpm=20 __format=md
 ```
+`rpm` caps model requests per minute; add `tpm=<tokens>` to limit combined prompt and completion tokens when needed.
 
 #### Multiple MCP connections
 
 ```bash
-mini-a.sh goal="get the latest top 20 tags used by the library/ubuntu, cross-check those tag names with the list of Ubuntu releases in Wikipedia, and produce a table with ubuntu release, tag name and latest push date" mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000), (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rtm=20 __format=md
+mini-a.sh goal="get the latest top 20 tags used by the library/ubuntu, cross-check those tag names with the list of Ubuntu releases in Wikipedia, and produce a table with ubuntu release, tag name and latest push date" mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000), (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rpm=20 tpm=80000 __format=md
 ```
 
 #### Local MCP servers
@@ -94,20 +95,20 @@ Using built-in MCP servers:
 
 ```bash
 # Database operations
-mini-a.sh goal="create a test table with European countries" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" rtm=20
+mini-a.sh goal="create a test table with European countries" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" rpm=20
 
 # Network utilities
 
 # Time and timezone utilities
-mini-a.sh goal="what time is it in Sydney right now?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)" rtm=20
+mini-a.sh goal="what time is it in Sydney right now?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)" rpm=20
 
 # SSH execution (mcp-ssh)
-mini-a.sh goal="run 'uptime' on remote host via SSH MCP" mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', timeout: 5000)" rtm=20
+mini-a.sh goal="run 'uptime' on remote host via SSH MCP" mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', timeout: 5000)" rpm=20
 
-mini-a.sh goal="check if port 80 is open on google.com" mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)" rtm=20
+mini-a.sh goal="check if port 80 is open on google.com" mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)" rpm=20
 
 # Email operations
-mini-a.sh goal="send a test email" mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=test@example.com', timeout: 5000)" rtm=20
+mini-a.sh goal="send a test email" mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=test@example.com', timeout: 5000)" rpm=20
 ```
 
 #### Shell operations
@@ -115,13 +116,13 @@ mini-a.sh goal="send a test email" mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserv
 _Remove docker images older than 1 year:_
 
 ```bash
-mini-a.sh goal="help me remove docker images that are older than 1 year" rtm=20 knowledge="give a final answer with a summary of changes in markdown" useshell=true
+mini-a.sh goal="help me remove docker images that are older than 1 year" rpm=20 knowledge="give a final answer with a summary of changes in markdown" useshell=true
 ```
 
 _Analyze project structure:_
 
 ```bash
-mini-a.sh goal="analyze the current directory structure and provide insights" useshell=true rtm=15 __format=md
+mini-a.sh goal="analyze the current directory structure and provide insights" useshell=true rpm=15 __format=md
 ```
 
 ### Chatbot-style conversations
@@ -221,7 +222,8 @@ All Mini-A options can be passed as command line arguments:
 - `libs` – Comma-separated list of extra OpenAF libraries to load before starting
 - `maxsteps` – Maximum number of agent steps (default `25`)
 - `maxcontext` – Approximate token budget for context before auto-summarization kicks in (default disabled)
-- `rtm` – Rate limit in LLM calls per minute
+- `rpm` – Maximum LLM requests per minute (waits automatically)
+- `tpm` – Maximum combined prompt/completion tokens per minute
 - `verbose`, `debug` – Enable progressively richer logging
 - `raw` – Return the final response exactly as produced instead of formatted output
 - `outfile` – Path to write the final answer (implies JSON output unless `__format` is provided)

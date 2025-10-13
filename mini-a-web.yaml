@@ -304,8 +304,8 @@ todo:
           conversation: global._mini_a_web_loadFile(_hfile)
         }))
 
-        global.__res[uuid].push( { event: "final", message: _rma } )
-        log("[" + uuid + "] " + _rma)
+        global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
       }).catch((eee) => {
         logErr(eee)
         $err(eee)
@@ -410,7 +410,7 @@ todo:
             //break
           } else {
             // Exclude planning (🗺️) messages from the content log; plan panel remains driven by __planState
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑") {
+            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {

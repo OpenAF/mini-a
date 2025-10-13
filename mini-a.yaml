@@ -5,11 +5,11 @@ help:
 
     Examples:
       # Single MCP connection
-      ojob mini-a.yaml goal="..." mcp="(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000)" rtm=20
-      ojob mini-a.yaml goal="..." mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)" rtm=20 knowledge="give final answer in markdown"
+      ojob mini-a.yaml goal="..." mcp="(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000)" rpm=20
+      ojob mini-a.yaml goal="..." mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)" rpm=20 knowledge="give final answer in markdown"
       
       # Multiple MCP connections
-      ojob mini-a.yaml goal="..." mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000) | (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rtm=20
+      ojob mini-a.yaml goal="..." mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000) | (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" rpm=20
       
   expects: 
   - name     : goal
@@ -29,9 +29,13 @@ help:
     desc     : Maximum number of steps to take
     example  : "25"
     mandatory: false
-  - name     : rtm
-    desc     : Rate of messages per minute
+  - name     : rpm
+    desc     : Maximum number of LLM requests per minute
     example  : "20"
+    mandatory: false
+  - name     : tpm
+    desc     : Maximum number of LLM tokens per minute across prompt and completion
+    example  : "80000"
     mandatory: false
   - name     : readwrite
     desc     : Allow read-write commands without confirmation (dangerous)

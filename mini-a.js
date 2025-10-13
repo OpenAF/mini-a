@@ -647,6 +647,84 @@ MiniA.prototype._validateArgs = function(args, validations) {
 }
 
 /**
+ * Create a rate limiter that enforces requests-per-minute (rpm) and tokens-per-minute (tpm) caps.
+ */
+MiniA.prototype._createRateLimiter = function(args) {
+    var requestLimit = (isNumber(args.rpm) && args.rpm > 0) ? Math.max(1, Math.floor(args.rpm)) : null
+    var tokenLimit = (isNumber(args.tpm) && args.tpm > 0) ? Math.max(1, Math.floor(args.tpm)) : null
+
+    if (requestLimit === null && tokenLimit === null) {
+        return {
+            beforeCall: function() {},
+            afterCall : function() {}
+        }
+    }
+
+    var parent = this
+    var requestTimestamps = []
+    var tokenEntries = []
+
+    var prune = function(referenceTime) {
+        var cutoff = referenceTime - 60000
+        if (requestLimit !== null) {
+            while (requestTimestamps.length > 0 && requestTimestamps[0] <= cutoff) requestTimestamps.shift()
+        }
+        if (tokenLimit !== null) {
+            while (tokenEntries.length > 0 && tokenEntries[0].time <= cutoff) tokenEntries.shift()
+        }
+    }
+
+    var computeWait = function(referenceTime) {
+        var waitMs = 0
+        if (requestLimit !== null && requestTimestamps.length >= requestLimit) {
+            var earliest = requestTimestamps[0]
+            var elapsed = referenceTime - earliest
+            if (elapsed < 60000) waitMs = Math.max(waitMs, 60000 - elapsed)
+        }
+        if (tokenLimit !== null && tokenEntries.length > 0) {
+            var totalTokens = 0
+            for (var i = 0; i < tokenEntries.length; i++) totalTokens += tokenEntries[i].tokens
+            if (totalTokens >= tokenLimit) {
+                var remaining = totalTokens
+                for (var j = 0; j < tokenEntries.length; j++) {
+                    var entry = tokenEntries[j]
+                    remaining -= entry.tokens
+                    var expiresIn = (entry.time + 60000) - referenceTime
+                    if (expiresIn <= 0) continue
+                    waitMs = Math.max(waitMs, expiresIn)
+                    if (remaining < tokenLimit) break
+                }
+            }
+        }
+        return waitMs
+    }
+
+    return {
+        beforeCall: function() {
+            if (requestLimit === null && tokenLimit === null) return
+            while (true) {
+                var nowTime = now()
+                prune(nowTime)
+                var waitMs = computeWait(nowTime)
+                if (!isNumber(waitMs) || waitMs <= 0) break
+                var delay = Math.max(1, Math.ceil(waitMs))
+                parent.fnI("rate", `Rate limit reached: waiting ${delay}ms before next LLM call...`)
+                sleep(delay, true)
+            }
+        },
+        afterCall: function(tokensUsed) {
+            var nowTime = now()
+            prune(nowTime)
+            if (requestLimit !== null) requestTimestamps.push(nowTime)
+            if (tokenLimit !== null) {
+                var numericTokens = isNumber(tokensUsed) && !isNaN(tokensUsed) ? Math.max(0, Math.round(tokensUsed)) : 0
+                tokenEntries.push({ time: nowTime, tokens: numericTokens })
+            }
+        }
+    }
+}
+
+/**
  * Process and return final answer based on format requirements
  */
 MiniA.prototype._processFinalAnswer = function(answer, args) {
@@ -914,7 +992,8 @@ MiniA.prototype.init = function(args) {
     // Validate common arguments
     this._validateArgs(args, [
       { name: "mcp", type: "string", default: __ },
-      { name: "rtm", type: "number", default: __ },
+      { name: "rpm", type: "number", default: __ },
+      { name: "tpm", type: "number", default: __ },
       { name: "maxsteps", type: "number", default: 50 },
       { name: "knowledge", type: "string", default: "" },
       { name: "outfile", type: "string", default: __ },
@@ -1254,7 +1333,8 @@ MiniA.prototype.init = function(args) {
  * - goal (string, required): The goal the agent should achieve.
  * - mcp (string, optional): MCP configuration in JSON format. Can be a single object or an array of objects for multiple connections.
  * - verbose (boolean, default=false): Whether to enable verbose logging.
- * - rtm (number, optional): Rate limit in calls per minute. If not set, no rate limiting is applied.
+ * - rpm (number, optional): Maximum LLM requests per minute. The agent waits between calls when this limit is reached.
+ * - tpm (number, optional): Maximum LLM tokens per minute. Prompt and completion tokens count toward the limit and will trigger waits when exceeded.
  * - maxsteps (number, default=25): Maximum number of steps the agent will take to achieve the goal.
  * - readwrite (boolean, default=false): Whether to allow read/write operations on the filesystem.
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
@@ -1300,7 +1380,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Validate common arguments
     this._validateArgs(args, [
       { name: "mcp", type: "string", default: __ },
-      { name: "rtm", type: "number", default: __ },
+      { name: "rpm", type: "number", default: __ },
+      { name: "tpm", type: "number", default: __ },
       { name: "maxsteps", type: "number", default: 25 },
       { name: "knowledge", type: "string", default: "" },
       { name: "outfile", type: "string", default: __ },
@@ -1343,35 +1424,24 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._useTools = args.usetools
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
+    if (isDef(args.rtm) && isUnDef(args.rpm)) {
+      var legacyRpm = Number(args.rtm)
+      if (!isNaN(legacyRpm)) args.rpm = legacyRpm
+      this.fnI("warn", `Argument 'rtm' is deprecated; use 'rpm' instead.`)
+      delete args.rtm
+    }
+    args.rpm = _$(args.rpm, "args.rpm").isNumber().default(__)
+    args.tpm = _$(args.tpm, "args.tpm").isNumber().default(__)
+
     // Mini autonomous agent to achieve a goal using an LLM and shell commands
-    var calls = 0, startTime 
+    var rateLimiter = this._createRateLimiter(args)
+    var addCall = () => rateLimiter.beforeCall()
+    var registerCallUsage = tokens => rateLimiter.afterCall(tokens)
 
     this._alwaysExec = args.readwrite
     if (isDef(args.outfile) && isUnDef(args.__format)) args.__format = "json"
     if (isUnDef(args.__format)) args.__format = "md"
     //if (args.__format == "md") args.knowledge = "give final answer in markdown without mentioning it\n\n" + args.knowledge
-
-    // Rate limiting helper
-    var addCall = () => {
-      if (isUnDef(args.rtm)) return
-      if (calls == 0) {
-        startTime = now()
-        calls++
-      } else {
-        if (calls >= args.rtm) {
-          var wait = Math.ceil((60 / args.rtm) * 1000)
-          this.fnI("rate", `Rate limit: waiting ${wait}ms before next LLM call...`)
-          sleep(wait, true)
-          calls = 1
-          startTime = now()
-        } else if (calls < args.rtm && (now() - startTime) < 60000) {
-          startTime = now()
-          calls = 1
-        } else {
-          calls++
-        }
-      }
-    }
 
     // Summarize context if too long
     var summarize = ctx => {
@@ -1384,12 +1454,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var originalTokens = this._estimateTokens(ctx)
       global.__mini_a_metrics.summaries_original_tokens.getAdd(originalTokens)
 
+      addCall()
       var summaryResponseWithStats = summarizeLLM.withInstructions("You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions.").promptWithStats(ctx)
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
       var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
       var summaryTokenTotal = this._getTotalTokens(summaryStats)
+      registerCallUsage(summaryTokenTotal)
       global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
       global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
       global.__mini_a_metrics.llm_normal_calls.inc()
@@ -1498,7 +1570,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.chatbotmode) {
       return this._runChatbotMode({
         args            : args,
-        addCall         : addCall,
+        beforeCall      : addCall,
+        afterCall       : registerCallUsage,
         sessionStartTime: sessionStartTime
       })
     }
@@ -1692,6 +1765,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var responseTokenTotal = this._getTotalTokens(stats)
+      registerCallUsage(responseTokenTotal)
       global.__mini_a_metrics.llm_actual_tokens.getAdd(responseTokenTotal)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(prompt))
       
@@ -1731,6 +1805,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
+          registerCallUsage(fallbackTokenTotal)
           global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
           global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
           global.__mini_a_metrics.llm_normal_calls.inc()
@@ -2094,6 +2169,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     var finalStats = isObject(finalResponseWithStats) ? finalResponseWithStats.stats : {}
     var finalTokenTotal = this._getTotalTokens(finalStats)
+    registerCallUsage(finalTokenTotal)
     global.__mini_a_metrics.llm_actual_tokens.getAdd(finalTokenTotal)
     global.__mini_a_metrics.llm_normal_tokens.getAdd(finalTokenTotal)
     global.__mini_a_metrics.llm_normal_calls.inc()
@@ -2119,7 +2195,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 MiniA.prototype._runChatbotMode = function(options) {
     var opts = isObject(options) ? options : {}
     var args = opts.args || {}
-    var addCall = typeof opts.addCall === "function" ? opts.addCall : function() {}
+    var beforeCall = typeof opts.beforeCall === "function"
+        ? opts.beforeCall
+        : (typeof opts.addCall === "function" ? opts.addCall : function() {})
+    var afterCall = typeof opts.afterCall === "function" ? opts.afterCall : function() {}
     var sessionStartTime = isNumber(opts.sessionStartTime) ? opts.sessionStartTime : now()
 
     this.fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}.`)
@@ -2146,7 +2225,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var contextEstimate = conversationTokens + promptTokens
       this.fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
 
-      addCall()
+      beforeCall()
       if (args.debug) {
         print( ow.format.withSideLine(">>>\n" + pendingPrompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
@@ -2157,6 +2236,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var chatbotTokenTotal = this._getTotalTokens(stats)
+      afterCall(chatbotTokenTotal)
 
       global.__mini_a_metrics.llm_actual_tokens.getAdd(chatbotTokenTotal)
       global.__mini_a_metrics.llm_normal_tokens.getAdd(chatbotTokenTotal)
@@ -2337,13 +2417,14 @@ MiniA.prototype._runChatbotMode = function(options) {
     if (isUnDef(finalAnswer)) {
       this.fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
-      addCall()
+      beforeCall()
       var fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
       var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
       var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
+      afterCall(fallbackTokenTotal)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(fallbackPrompt))
       global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
       global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)

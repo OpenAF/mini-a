@@ -31,8 +31,9 @@ Example (replace URL with the MCP’s endpoint):
 ```bash
 mini-a.sh goal="query the external MCP" \
 	mcp="(type: remote, url: 'http://external.mcp.local:1234/mcp')" \
-	rtm=20 __format=md
+	rpm=20 tpm=80000 __format=md
 ```
+Adjust `rpm` and `tpm` to stay within the MCP server's published limits.
 
 Refer to the external MCP’s documentation to confirm whether it exposes an HTTP endpoint and the path (commonly `/mcp`).
 
