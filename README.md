@@ -208,6 +208,7 @@ All Mini-A options can be passed as command line arguments:
 - `mcp` – MCP server configuration (single object or array, in JSON/SLON)
 - `usetools` – Register MCP tools directly with the model instead of expanding the prompt with tool schemas
 - `useshell` – Allow shell command execution (default `false`)
+- `shell` – Prefix every shell command (requires `useshell=true`; ideal for sandboxing with `sandbox-exec`, `container exec`, `docker exec`, etc.)
 - `readwrite` – Allow file system modifications without confirmation prompts (default `false`)
 - `checkall` – Prompt before running every shell command (default `false`)
 - `shellallow`, `shellbanextra` – Override the default banned command lists
@@ -238,6 +239,33 @@ Mini-A includes several security features:
 - **Interactive Confirmation**: Use `checkall=true` for command approval
 - **Read-Only Mode**: File system protection enabled by default
 - **Shell Isolation**: Shell access disabled by default
+
+### Shell Prefix Examples
+
+Combine `useshell=true` with the new `shell=...` option to route every command through an OS sandbox or container runtime. The prefix is prepended to the command before execution (the safety filters still inspect the original command text).
+
+- **macOS (sandbox-exec)** – Constrain the agent with a sandbox profile:
+  ```bash
+  ./mini-a.sh goal="catalog ~/Projects" useshell=true \
+    shell="sandbox-exec -f /usr/share/sandbox/default.sb"
+  ```
+- **macOS Sequoia (container)** – Use Apple's `container` CLI after starting an instance:
+  ```bash
+  container run --detach --name mini-a --image docker.io/library/ubuntu:24.04 sleep infinity
+  ./mini-a.sh goal="inspect /work" useshell=true shell="container exec mini-a"
+  ```
+- **Linux / macOS / Windows WSL (Docker)** – Exec into an existing sandbox container:
+  ```bash
+  docker run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work ubuntu:24.04 sleep infinity
+  ./mini-a.sh goal="summarize git status" useshell=true shell="docker exec mini-a-sandbox"
+  ```
+- **Linux / macOS / Windows WSL (Podman)** – Same pattern with Podman:
+  ```bash
+  podman run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work docker.io/library/fedora:latest sleep infinity
+  ./mini-a.sh goal="list source files" useshell=true shell="podman exec mini-a-sandbox"
+  ```
+
+See the [Usage Guide](USAGE.md#shell-prefix-strategies-by-operating-system) for trade-offs and when to choose shell prefixes versus the built-in restriction flags.
 
 See the [Usage Guide](USAGE.md#security-considerations) for detailed security information.
 
