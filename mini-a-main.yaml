@@ -152,12 +152,10 @@ todo:
 jobs:
 # ---------------
 - name: start-web
-  type: jobs
-  typeArgs:
-    file: mini-a-web.yaml
+  exec: | #js
+    oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
 
 # ---------------
 - name: start-cli
-  type: jobs
-  typeArgs:
-    file: mini-a.yaml
+  exec: | #js
+    oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
