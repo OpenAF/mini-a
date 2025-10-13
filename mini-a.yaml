@@ -48,6 +48,10 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : shell
+    desc     : Prefix applied to every shell command (requires useshell=true)
+    example  : "sandbox-exec -f /path/to/profile.sb"
+    mandatory: false
   - name     : shellallow
     desc     : Comma-separated list of banned commands to allow explicitly
     example  : "curl,wget"
@@ -140,6 +144,7 @@ jobs:
       readwrite      : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)
+      shell          : isString.default(__)
       knowledge      : isString.default(__)
       outfile        : isString.default(__)
       libs           : isString.default(__)
