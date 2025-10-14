@@ -141,7 +141,6 @@ jobs:
   check:
     in:
       goal           : isString
-      mcp            : isString.default(__)
       verbose        : toBoolean.isBoolean.default(false)
       rtm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(25)

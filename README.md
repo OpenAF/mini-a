@@ -44,13 +44,20 @@ Examples:
 | OpenAI | gpt-5-mini | ```(type: openai, model: gpt-5-mini, key: ..., timeout: 900000, temperature: 1)``` | |
 | Google | gemini | ```(type: gemini, model: gemini-2.5-flash-lite, key: ..., timeout: 900000, temperature: 0)``` | |
 | GitHub | gpt-5-nano | ```(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')``` | |
-| AWS | nova-pro | ```(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))``` | After installing OpenAF's oPack "AWS" add to mini-a calls ```libs="aws.js"``` |
-| AWS | claude-sonnet-4.5 | ```(type: bedrock, timeout: 900000, options: (model: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', region: eu-west-1, temperature: 0, params:(max_tokens: 200000)))``` | After installing OpenAF's oPack "AWS" add to mini-a calls ```libs="aws.js"``` |
+| AWS Bedrock | nova-pro | ```(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))``` | After installing OpenAF's oPack "AWS" add to mini-a calls ```libs="aws.js"``` |
+| AWS Bedrock | claude-sonnet-4.5 | ```(type: bedrock, timeout: 900000, options: (model: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', region: eu-west-1, temperature: 0, params:(max_tokens: 200000)))``` | After installing OpenAF's oPack "AWS" add to mini-a calls ```libs="aws.js"``` |
 | Groq | gpt-oss-20b | ```(type: openai, model: 'openai/gpt-oss-20b', key: '...', url: 'https://api.groq.com/openai', timeout: 900000, temperature: 0)``` |
-| Ollama | gemma3n | ```(type: ollama, model: 'gemma3', url: 'http://ollama.local', timeout: 900000)``` | |
+| Ollama | gemma3 | ```(type: ollama, model: 'gemma3', url: 'http://ollama.local', timeout: 900000)``` | |
 | Ollama | mistral | ```(type: ollama, model: 'mistral', url: 'http://ollama.local', timeout: 900000)``` | |
 
 > Note: `export OAF_MODEL="..."`
+
+#### Recommended model tiers
+
+- **All uses (best)**: Claude Sonnet 4.5, OpenAI GPT-5, Google Gemini 2.5, OpenAI OSS 120B
+- **Low cost (best)**: OpenAI GPT-5 mini, Amazon Nova Pro/Mini, OpenAI OSS 20B
+- **Simple agent shell tool**: Gemma 3, Phi 4
+- **Chatbot**: Mistral 7B, Llama 3.2 8B
 
 ### Dual-Model Configuration (Cost Optimization)
 

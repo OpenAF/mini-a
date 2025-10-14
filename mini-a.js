@@ -991,7 +991,6 @@ MiniA.prototype.init = function(args) {
 
     // Validate common arguments
     this._validateArgs(args, [
-      { name: "mcp", type: "string", default: __ },
       { name: "rpm", type: "number", default: __ },
       { name: "tpm", type: "number", default: __ },
       { name: "maxsteps", type: "number", default: 50 },
@@ -1379,7 +1378,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     
     // Validate common arguments
     this._validateArgs(args, [
-      { name: "mcp", type: "string", default: __ },
       { name: "rpm", type: "number", default: __ },
       { name: "tpm", type: "number", default: __ },
       { name: "maxsteps", type: "number", default: 25 },
