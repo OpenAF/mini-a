@@ -11,6 +11,7 @@ Using just shell commands without any tooling APIs both in agent and chatbot mod
 | gpt-5-nano | ✅       | ✅         | ✅         | ✅              |
 | gpt-5-mini | ✅       | ✅         | ✅         | ✅              |
 | gpt-5      | ✅       | ✅         | ✅         | ✅              |
+| claude-3-haiku | ✅ | ✅ | ✅ | ✅ |    
 | openai/gpt-oss-20b | ✅ | ✅ | ❌ | ❌ |
 | openai/gpt-oss-120b | ✅ | ✅ | ✅ | ❌ |
 | llama-3.1-8b | ❌ | ❌ | ❌ | ❌ |
@@ -35,6 +36,7 @@ Using just shell commands without any tooling APIs both in agent and chatbot mod
 | gpt-5-nano | ✅       | ✅         | ❌         | ✅            |
 | gpt-5-mini | ✅ | ✅ | ✅ | ✅ |
 | gpt-5      | ✅ | ✅ | ✅ | ✅ |
+| claude-3-haiku | ✅ | ❌ | ✅ | ✅ |
 | openai/gpt-oss-20b | ✅ | ✅ | ❌ | ✅ |
 | openai/gpt-oss-120b | ✅ | ✅ | ❌ | ❌ |
 | amazon nova pro   | ✅ | ❌ | ❌ | ❌ |
