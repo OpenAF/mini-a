@@ -1,5 +1,12 @@
 # Tests
 
+This document expands on the [model compatibility overview](README.md#model-compatibility--tests) in the main README. Each matrix captures how popular language models behave when Mini-A runs through two repeatable scenarios:
+
+- **"Files"** – strictly shell-based operations that inspect the repository layout.
+- **"Tools"** – MCP-backed tasks that probe the network utility descriptors.
+
+We execute both suites in agent and chatbot mode to highlight differences in planning-heavy runs versus conversational shortcuts. Smaller or older models often miss steps, produce malformed tool payloads, or time out when juggling multi-step reasoning, which is why you see more ❌ entries compared to larger, more recent releases. Newer frontier models typically offer stronger tool grounding, higher context windows, and better adherence to the agent protocol, so they pass the same flows consistently.
+
 ## "Files" test
 
 Using just shell commands without any tooling APIs both in agent and chatbot mode.
@@ -17,7 +24,9 @@ Using just shell commands without any tooling APIs both in agent and chatbot mod
 | openai/gpt-oss-120b | ✅ | ✅ | ✅ | ❌ |
 | llama-3.1-8b | ❌ | ❌ | ❌ | ❌ |
 | amazon nova pro | ✅ | ✅ | ❌ | ❌ |
-| amazon nova micro | ❌ | ❌ | ❌ | ❌ | 
+| amazon nova micro | ❌ | ❌ | ❌ | ❌ |
+
+Consistent ✅ rows indicate the model can gather filesystem context, summarize it in Markdown, and adapt the answer to both agent-style and chatbot prompts without deviating from the requested format.
 
 ### Tests
 
@@ -43,6 +52,8 @@ Using just shell commands without any tooling APIs both in agent and chatbot mod
 | openai/gpt-oss-120b | ✅ | ✅ | ❌ | ❌ |
 | amazon nova pro   | ✅ | ❌ | ❌ | ❌ |
 | amazon nova micro | ❌ | ❌ | ❌ | ❌ |
+
+Tool-centric flows stress whether a model can interpret MCP tool schemas, wait for execution results, and weave them into the final answer. Larger models tend to excel at the structured request/response patterns, while smaller models often hallucinate parameters or ignore the results entirely.
 
 ### Tests
 
