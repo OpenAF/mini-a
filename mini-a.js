@@ -734,15 +734,15 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
         return
     }
     
-    if (isString(answer) && args.__format != "raw") answer = answer.trim()
+    if (isString(answer) && args.format != "raw") answer = answer.trim()
     
     // Handle JSON parsing for markdown format
-    if ((args.__format == "md" && args.__format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
+    if ((args.format == "md" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
         this.state = "stop"
         return jsonParse(answer, __, __, true)
     }
     
-    if ((args.__format == "md" && args.__format != "raw") && isObject(answer)) {
+    if ((args.format == "md" && args.format != "raw") && isObject(answer)) {
         return answer
     }
     
@@ -757,7 +757,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (args.raw) {
         return answer || "(no answer)" 
     } else {
-        if (args.__format != "md" && args.__format != "raw" && isString(answer)) {
+        if (args.format != "md" && args.format != "raw" && isString(answer)) {
             answer = jsonParse(answer)
         }
         return $o(answer || "(no answer)", args, __, true)
@@ -1021,6 +1021,10 @@ MiniA.prototype.init = function(args) {
     this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
     this._useTools = args.usetools
 
+    // Normalize format argument based on outfile
+    if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
+    if (isUnDef(args.format)) args.format = "md"
+
     // Load additional libraries if specified
     if (isDef(args.libs) && args.libs.length > 0) {
       args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
@@ -1219,6 +1223,8 @@ MiniA.prototype.init = function(args) {
     var rules = af.fromJSSLON(args.rules)
     if (!isArray(rules)) rules = [rules]
 
+    if (args.format == "json") rules.push("When you provide the final answer, it must be a valid JSON object or array.")
+
     var trimmedKnowledge = args.knowledge.trim()
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
@@ -1274,7 +1280,7 @@ MiniA.prototype.init = function(args) {
         toolsList   : chatToolsList,
         hasToolDetails: chatbotToolDetails.length > 0,
         toolDetails : chatbotToolDetails,
-        markdown    : args.__format == "md",
+        markdown    : args.format == "md",
         useshell    : args.useshell
       })
     } else {
@@ -1287,17 +1293,17 @@ MiniA.prototype.init = function(args) {
         useshell   : args.useshell
       })
 
-      var numberedRules = baseRules.map((rule, idx) => idx + (args.__format == "md" ? 7 : 6) + ". " + rule)
+      var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
 
       this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
         actionsWordNumber: actionsWordNumber,
         actionsList      : promptActionsList,
         useshell         : args.useshell,
-        markdown         : args.__format == "md",
+        markdown         : args.format == "md",
         rules            : numberedRules,
         knowledge        : trimmedKnowledge,
         actionsdesc      : promptActionsDesc,
-        isMachine        : (isDef(args.__format) && args.__format != "md"),
+        isMachine        : (isDef(args.format) && args.format != "md"),
         usetools         : this._useTools,
         toolCount        : this.mcpTools.length,
         planning         : this._enablePlanning
@@ -1353,10 +1359,10 @@ MiniA.prototype.init = function(args) {
  * - maxcontext (number, optional): Maximum context size in tokens. If the conversation exceeds this size, it will be summarized.
  * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
  * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
- * - __format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
+ * - format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * 
  * Returns:
- * - The final answer as a string or parsed JSON object if __format is "json" and the answer is valid JSON.
+ * - The final answer as a string or parsed JSON object if format is "json" and the answer is valid JSON.
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
@@ -1437,8 +1443,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var registerCallUsage = tokens => rateLimiter.afterCall(tokens)
 
     this._alwaysExec = args.readwrite
-    if (isDef(args.outfile) && isUnDef(args.__format)) args.__format = "json"
-    if (isUnDef(args.__format)) args.__format = "md"
+    if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
+    if (isUnDef(args.format)) args.format = "md"
     //if (args.__format == "md") args.knowledge = "give final answer in markdown without mentioning it\n\n" + args.knowledge
 
     // Summarize context if too long
@@ -1757,7 +1763,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
       
-      var responseWithStats = currentLLM.promptWithStats(prompt)
+      var responseWithStats
+      // Use new promptJSONWithStats if available
+      if (isDef(currentLLM.promptJSONWithStats)) {
+        responseWithStats = currentLLM.promptJSONWithStats(prompt)
+      } else {
+        responseWithStats = currentLLM.promptWithStats(prompt)
+      }
+
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
@@ -1797,7 +1810,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           global.__mini_a_metrics.json_parse_failures.inc()
           global.__mini_a_metrics.retries.inc()
           addCall()
-          var fallbackResponseWithStats = this.llm.promptWithStats(prompt)
+          var fallbackResponseWithStats
+          // Use new promptWithStats if available
+          if (isDef(this.llm.promptJSONWithStats)) {
+            fallbackResponseWithStats = this.llm.promptJSONWithStats(prompt)
+          } else {
+            fallbackResponseWithStats = this.llm.promptWithStats(prompt)
+          }
           if (args.debug) {
             print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
           }
@@ -2075,7 +2094,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (action == "final") {
-          if (args.__format != 'md' && args.__format != 'raw') {
+          if (args.format != 'md' && args.format != 'raw') {
             answerValue = this._cleanCodeBlocks(answerValue)
             if (!isString(answerValue)) {
               runtime.context.push(`[OBS ${stepLabel}] (error) invalid top-level 'answer' from model for final action. Needs to be a string.`)
@@ -2161,7 +2180,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this.fnI("warn", `Reached max steps. Asking for final answer...`)
     // Get final answer from model
     addCall()
-    var finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
+    var finalResponseWithStats
+    // Use new promptJSONWithStats if available
+    if (isDef(this.llm.promptJSONWithStats)) {
+      finalResponseWithStats = this.llm.promptJSONWithStats(finalPrompt)
+    } else {
+      finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
+    }
     if (args.debug) {
       print( ow.format.withSideLine("<--\n" + stringify(finalResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
     }
@@ -2228,7 +2253,13 @@ MiniA.prototype._runChatbotMode = function(options) {
         print( ow.format.withSideLine(">>>\n" + pendingPrompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
 
-      var responseWithStats = this.llm.promptWithStats(pendingPrompt)
+      var responseWithStats
+      // Use new promptJSONWithStats if available
+      if (isDef(this.llm.promptJSONWithStats)) {
+        responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
+      } else {
+        responseWithStats = this.llm.promptWithStats(pendingPrompt)
+      }
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
@@ -2254,7 +2285,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       if (isMap(rawResponse) || isArray(rawResponse)) {
         parsedResponse = rawResponse
       } else if (isString(rawResponse)) {
-        var trimmedResponse = rawResponse.replace(/^```+(?:json)?\s*(.+)```+$/gs, "$1").trim()
+        var trimmedResponse = rawResponse.replace(/^```+(?:json)?\s*\n?([\s\S]+?)\n?```+$/g, "$1").trim()
         var jsonCandidate = trimmedResponse
         if (!jsonCandidate.startsWith("{") && jsonCandidate.indexOf("\n{") >= 0) {
           var match = jsonCandidate.match(/\{[\s\S]*\}/g)
@@ -2416,7 +2447,12 @@ MiniA.prototype._runChatbotMode = function(options) {
       this.fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       beforeCall()
-      var fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
+      var fallbackResponseWithStats
+      if (isDef(this.llm.promptJSONWithStats)) {
+        fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
+      } else {
+        fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
+      }
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
