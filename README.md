@@ -4,6 +4,39 @@
 
 Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MCP stdio or http(s) servers to achieve user-defined goals. It is designed to be simple, flexible, and easy to use. Can be used as a library, command-line tool, or embedded interface in other applications.
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration Overview](#configuration-overview)
+  - [Essential environment variables](#essential-environment-variables)
+  - [Recommended model tiers](#recommended-model-tiers)
+  - [Dual-model configuration (cost optimization)](#dual-model-configuration-cost-optimization)
+  - [Common CLI parameters](#common-cli-parameters)
+- [Running the agent](#running-the-agent)
+- [Documentation](#documentation)
+- [Model Compatibility & Tests](#model-compatibility--tests)
+
+## Installation
+
+1. [Install OpenAF](https://openaf.io/) (Mini-A runs as an OpenAF job).
+2. Clone the repository and switch into it:
+
+   ```bash
+   git clone https://github.com/openaf/mini-a.git
+   cd mini-a
+   ```
+
+   Prefer installing the packaged oPack instead? Run `opack install mini-a` from any OpenAF shell to fetch the latest release.
+
+3. Ensure the shell helpers are executable if required by your platform:
+
+   ```bash
+   chmod +x mini-a.sh mini-a-web.sh
+   ```
+
+4. Export the `OAF_MODEL` environment variable with the model configuration you plan to use. The [Configuration Overview](#configuration-overview) section highlights common values and points to the full parameter reference.
+
 ![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
 
 ## Quick Start
@@ -24,18 +57,11 @@ If you prefer the browser UI, start `./mini-a-web.sh onport=8888` after exportin
 
 **Need to share supporting text?** Launch the web server with `useattach=true` to reveal the paperclip button beside the prompt box. You can attach multiple text-based files (up to 512 KB each) before submitting, review them as removable chips, and open the full contents from the conversation stream.
 
-## Documentation
+## Configuration Overview
 
-- **[Detailed Usage Guide](USAGE.md)** - Comprehensive guide covering all configuration options, examples, and best practices
-- **[MCP Documentation](mcps/README.md)** - Catalog of available Model Context Protocol servers
-- **[Creating MCPs](mcps/CREATING.md)** - Step-by-step guide for creating custom MCP servers
-- **[External MCPs](EXTERNAL-MCPS.md)** - List of external MCP servers you can use with Mini-A
-- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
-- **[Code of Conduct](CODE_OF_CONDUCT.md)** - Community guidelines and standards
+Consult [USAGE.md](USAGE.md) for the comprehensive configuration and flag reference. The subsections below surface the most common environment variables and runtime parameters so you can move from installation to a working configuration quickly.
 
-## Basic Usage
-
-### Setting the model
+### Essential environment variables
 
 Examples:
 
@@ -52,14 +78,18 @@ Examples:
 
 > Note: `export OAF_MODEL="..."`
 
-#### Recommended model tiers
+Optional environment tweaks:
+
+- `OAF_FLAGS="(MD_DARKMODE: 'auto')"` – toggle the Markdown renderer theme when using the web UI
+
+### Recommended model tiers
 
 - **All uses (best)**: Claude Sonnet 4.5, OpenAI GPT-5, Google Gemini 2.5, OpenAI OSS 120B
 - **Low cost (best)**: OpenAI GPT-5 mini, Amazon Nova Pro/Mini, OpenAI OSS 20B
 - **Simple agent shell tool**: Gemma 3, Phi 4
 - **Chatbot**: Mistral 7B, Llama 3.2 8B
 
-### Dual-Model Configuration (Cost Optimization)
+### Dual-model configuration (cost optimization)
 
 Mini-A supports a dual-model configuration for cost optimization. Set `OAF_LC_MODEL` to use a cheaper model for routine operations, while keeping a more capable model for complex scenarios.
 
@@ -81,7 +111,20 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 **Cost savings**: This can significantly reduce API costs by using cheaper models for routine tasks while ensuring quality for complex operations.
 
-### Running the mini agent
+### Common CLI parameters
+
+| Parameter | Purpose | Example |
+|-----------|---------|---------|
+| `goal` | Natural-language instruction that the agent will satisfy. | `goal="summarize the error logs"` |
+| `useshell` | Enables shell execution (disabled by default for safety). | `useshell=true` |
+| `mcp` | Connects MCP servers. Accepts a single descriptor or an array. | `mcp="(cmd: 'ojob mcps/mcp-net.yaml')"` |
+| `rpm` / `tpm` | Rate-limit requests per minute or total tokens processed. | `rpm=20 tpm=80000` |
+| `__format` | Controls the output format requested from the model. | `__format=md` |
+| `usetools` | Forces the agent to call a tool even if the model hesitates. | `usetools=true` |
+| `chatbotmode` | Switches to a lighter prompt for conversational use. | `chatbotmode=true` |
+| `useplanning` | Maintains a lightweight plan across steps in agent mode. | `useplanning=true` |
+
+## Running the agent
 
 #### Single MCP connection
 
@@ -160,6 +203,20 @@ Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain
 
 The agent revises the plan whenever progress changes, so the summary always reflects the latest approach. When no plan is active the web UI hides 🗺️ updates and the progress card stays collapsed.
 
+## Documentation
+
+- **[Detailed Usage Guide](USAGE.md)** – Comprehensive guide covering all configuration options, examples, and best practices
+- **[MCP Documentation](mcps/README.md)** – Catalog of available Model Context Protocol servers
+- **[Creating MCPs](mcps/CREATING.md)** – Step-by-step guide for creating custom MCP servers
+- **[External MCPs](EXTERNAL-MCPS.md)** – List of external MCP servers you can use with Mini-A
+- **[Model tests and compatibility matrix](TESTS_MODELS.md)** – Baseline scenarios that highlight how different LLMs perform with Mini-A
+- **[Contributing Guide](CONTRIBUTING.md)** – How to contribute to the project
+- **[Code of Conduct](CODE_OF_CONDUCT.md)** – Community guidelines and standards
+
+## Model Compatibility & Tests
+
+Mini-A exercises shell access, MCP integrations, and chatbot mode differently depending on the language model. The [TESTS_MODELS.md](TESTS_MODELS.md) document walks through the repeatable scenarios we run—file inspection and network-tool flows—and records how popular models behave. In general, larger or more recent models have the reasoning ability and tool-handling reliability needed to pass every test, while smaller models may fail to follow multi-step instructions or produce valid tool payloads. Consult the matrix before adopting a new model so you can anticipate feature gaps and adjust expectations.
+
 ## Project Components
 
 Mini-A ships with three complementary components:
@@ -188,57 +245,6 @@ Mini-A ships with three complementary components:
 - **Automatic Context Summarization**: Keeps context within limits with auto-summarize when it grows
 - **Rate Limiting**: Built-in rate limiting for API usage control
 - **Metrics & Observability**: Built-in counters surfaced via `MiniA.getMetrics()` and OpenAF's `ow.metrics` registry for dashboards.
-
-## Installation
-
-Mini-A is built on the OpenAF platform. To get started:
-
-1. **Install OpenAF** - Download from [openaf.io](https://openaf.io)
-2. **Install oPack**:
-   ```bash
-   opack install mini-a
-   ```
-3. **Set your model configuration** (see [model examples](#setting-the-model) below)
-4. **Start using Mini-A**!
-
-## Configuration
-
-### Environment Variables
-
-- **`OAF_MODEL`** (required): LLM model configuration
-- **`OAF_LC_MODEL`** (optional): Low-cost LLM model configuration for cost optimization
-- **`OAF_FLAGS="(MD_DARKMODE: 'auto')"`**: For setting forced dark mode or automatic
-
-### Command Line Options
-
-All Mini-A options can be passed as command line arguments:
-
-- `goal` – Objective the agent should achieve (required for `MiniA.start` / `mini-a.yaml`)
-- `mcp` – MCP server configuration (single object or array, in JSON/SLON)
-- `usetools` – Register MCP tools directly with the model instead of expanding the prompt with tool schemas
-- `useshell` – Allow shell command execution (default `false`)
-- `shell` – Prefix every shell command (requires `useshell=true`; ideal for sandboxing with `sandbox-exec`, `container exec`, `docker exec`, etc.)
-- `readwrite` – Allow file system modifications without confirmation prompts (default `false`)
-- `checkall` – Prompt before running every shell command (default `false`)
-- `shellallow`, `shellbanextra` – Override the default banned command lists
-- `shellallowpipes` – Permit pipes/redirection/control operators when executing shell commands (default `false`)
-- `shellbatch` – Skip interactive confirmations when `checkall` is active (default `false`)
-- `knowledge` – Extra instructions or the path to a text file to append to the system prompt
-- `rules` – Additional numbered rules (JSON/SLON array) injected into the system prompt
-- `state` – Initial agent state payload (JSON/SLON string or object) preserved between steps
-- `conversation` – Path to a conversation JSON file to load/save chat history
-- `libs` – Comma-separated list of extra OpenAF libraries to load before starting
-- `maxsteps` – Maximum number of agent steps (default `25`)
-- `maxcontext` – Approximate token budget for context before auto-summarization kicks in (default disabled)
-- `rpm` – Maximum LLM requests per minute (waits automatically)
-- `tpm` – Maximum combined prompt/completion tokens per minute
-- `verbose`, `debug` – Enable progressively richer logging
-- `raw` – Return the final response exactly as produced instead of formatted output
-- `outfile` – Path to write the final answer (implies JSON output unless `__format` is provided)
-- `__format` – Output format (e.g. `md`, `json`)
-- `chatbotmode` – Skip the agent workflow and respond like a regular chat assistant (default `false`)
-
-For a complete list of options, see the [Usage Guide](USAGE.md).
 
 ## Security
 
