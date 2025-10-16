@@ -111,8 +111,10 @@ jobs:
       jdbc: isString
       user: isString.default(__)
       pass: isString.default(__) 
+      rw  : toBoolean.isBoolean.default(false)
   exec : | #js
     global.db = new DB(args.jdbc, args.user, args.pass)
+    global._dbrw = args.rw
 
 # -----------------------------
 - name : Close database on exit
@@ -192,10 +194,9 @@ jobs:
   check:
     in:
       sql: isString.default(__)
-      rw : toBoolean.isBoolean.default(false)
   exec : | #js
     if (isUnDef(args.sql)) return "[ERROR] No SQL query provided in 'sql' argument"
-    if (!args.rw) {
+    if (!global._dbrw) {
       return "[ERROR] Read-only mode. Set rw=true to allow write operations"
     }
     if (!global.db) {
