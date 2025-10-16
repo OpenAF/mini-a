@@ -18,7 +18,8 @@ Using just shell commands without any tooling APIs both in agent and chatbot mod
 | gpt-5-nano | ✅       | ✅         | ✅         | ✅              |
 | gpt-5-mini | ✅       | ✅         | ✅         | ✅              |
 | gpt-5      | ✅       | ✅         | ✅         | ✅              |
-| claude-haiku-3 | ✅ | ✅ | ✅ | ✅ |    
+| claude-haiku-3 | ✅ | ✅ | ❌ | ✅ |    
+| claude-haiku-4.5 | ✅ | ✅ | ❌ | ✅ |
 | claude-sonnet-4.5 | ✅ | ✅ | ✅ | ✅ |  
 | openai/gpt-oss-20b | ✅ | ✅ | ❌ | ❌ |
 | openai/gpt-oss-120b | ✅ | ✅ | ✅ | ❌ |
@@ -47,6 +48,7 @@ Consistent ✅ rows indicate the model can gather filesystem context, summarize 
 | gpt-5-mini | ✅ | ✅ | ✅ | ✅ |
 | gpt-5      | ✅ | ✅ | ✅ | ✅ |
 | claude-3-haiku | ✅ | ❌ | ✅ | ✅ |
+| claude-haiku-4.5 | ✅ | ✅ | ❌ | ❌ |
 | claude-sonnet-4.5 | ✅ | ✅ | ✅ | ✅ |   
 | openai/gpt-oss-20b | ✅ | ✅ | ❌ | ✅ |
 | openai/gpt-oss-120b | ✅ | ✅ | ❌ | ❌ |
