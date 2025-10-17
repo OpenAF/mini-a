@@ -1,0 +1,286 @@
+# Author: OpenAI Assistant
+help:
+  text   : A STDIO/HTTP MCP server for exploring and executing ojob.io catalog jobs
+  expects:
+  - name     : onport
+    desc     : If defined starts a MCP server on the provided port
+    example  : "8891"
+    mandatory: false
+  - name     : category
+    desc     : Optional catalog category to scope listings
+    example  : "ai"
+    mandatory: false
+  - name     : job
+    desc     : Job URL or relative path under https://ojob.io/
+    example  : "ai/prompt.yaml"
+    mandatory: false
+  - name     : canexec
+    desc     : When true allows remote execution of catalog jobs
+    example  : true
+    mandatory: false
+
+todo:
+- Init
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
+      serverInfo:
+        name   : mini-a-ojobio
+        title  : OpenAF mini-a MCP ojob.io discovery server
+        version: 1.0.0
+    ((fnsMeta)): &MCPFNSMETA
+      list-categories:
+        name       : list-categories
+        description: Lists catalog categories available at https://ojob.io with job counts.
+        inputSchema:
+          type      : object
+          properties:
+            refresh:
+              type       : boolean
+              description: If true forces reloading the catalog index.
+              default    : false
+          required: [ ]
+        annotations:
+          title         : list-categories
+          readOnlyHint  : true
+          idempotentHint: true
+      list-jobs:
+        name       : list-jobs
+        description: Lists jobs available on ojob.io optionally filtered by category or search term.
+        inputSchema:
+          type      : object
+          properties:
+            category:
+              type       : string
+              description: Optional category to filter.
+            search:
+              type       : string
+              description: Case-insensitive substring to match against job names or URLs.
+            refresh:
+              type       : boolean
+              description: Force reloading the catalog index.
+              default    : false
+          required: [ ]
+        annotations:
+          title         : list-jobs
+          readOnlyHint  : true
+          idempotentHint: true
+      get-job-details:
+        name       : get-job-details
+        description: Fetches the remote oJob YAML, returning help text and parameter metadata.
+        inputSchema:
+          type      : object
+          properties:
+            job:
+              type       : string
+              description: Job URL or relative path under https://ojob.io/.
+            refresh:
+              type       : boolean
+              description: Force refetching the job definition.
+              default    : false
+          required: [ job ]
+        annotations:
+          title         : get-job-details
+          readOnlyHint  : true
+          idempotentHint: true
+      execute-job:
+        name       : execute-job
+        description: Executes a remote ojob.io job when canexec=true and returns its result payload.
+        inputSchema:
+          type      : object
+          properties:
+            job:
+              type       : string
+              description: Job URL or relative path under https://ojob.io/.
+            params:
+              type       : object
+              description: Map of parameters to pass to the job.
+            canexec:
+              type       : boolean
+              description: Must be true to allow execution.
+              default    : false
+          required: [ job, canexec ]
+        annotations:
+          title         : execute-job
+          readOnlyHint  : false
+          idempotentHint: false
+    ((fns    )): &MCPFNS
+      list-categories: List catalog categories
+      list-jobs      : List ojob.io jobs
+      get-job-details: Get oJob details
+      execute-job    : Execute ojob.io job
+  ((else)):
+  - (stdioMCP ): *MCPSERVER
+    ((fnsMeta)): *MCPFNSMETA
+    ((fns    )): *MCPFNS
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mcp-ojobio.pid
+    killPrevious: true
+
+include:
+- oJobMCP.yaml
+
+jobs:
+# -----------
+- name : Init
+  exec : | #js
+    if (isUnDef(global.ensureOjobCatalog)) {
+      global.ensureOjobCatalog = function(refresh) {
+        if (!refresh && isDef(global.ojobCatalog) && Date.now() - global.ojobCatalog.timestamp < 3600000) {
+          return global.ojobCatalog.index
+        }
+        var data = $rest({ requestHeaders: { "User-Agent": "mini-a-mcp-ojobio" } }).get("https://ojob.io/index.json")
+        if (isString(data)) data = af.fromJSON(data)
+        global.ojobCatalog = { timestamp: Date.now(), index: data }
+        return data
+      }
+    }
+
+    if (isUnDef(global.resolveOjobUrl)) {
+      global.resolveOjobUrl = function(job) {
+        var url = String(job || "")
+        if (url.startsWith("http")) return url
+        if (url.startsWith("/")) url = url.substring(1)
+        return "https://ojob.io/" + url
+      }
+    }
+
+    if (isUnDef(global.fetchOjobDefinition)) {
+      global.fetchOjobDefinition = function(job, refresh) {
+        var url = global.resolveOjobUrl(job)
+        if (!refresh && isDef(global.ojobDefinitions) && isDef(global.ojobDefinitions[url])) {
+          return global.ojobDefinitions[url]
+        }
+        if (isUnDef(global.ojobDefinitions)) global.ojobDefinitions = {}
+        var raw = $rest().get(url)
+        var parsed = af.fromYAML(raw)
+        var info = { url: url, raw: raw, parsed: parsed }
+        global.ojobDefinitions[url] = info
+        return info
+      }
+    }
+
+# -----------------------
+- name : List categories
+  check:
+    in:
+      refresh: toBoolean.isBoolean.default(false)
+  exec : | #js
+    global.ensureOjobCatalog(args.refresh)
+    var index = global.ojobCatalog.index
+    var out = []
+    Object.keys(index).forEach(function(category) {
+      if (isDef(index[category]) && isArray(index[category].l)) {
+        out.push({ category: category, count: index[category].l.length })
+      }
+    })
+    return out.sort(function(a, b) { return String(a.category).localeCompare(String(b.category)) })
+
+# ----------------
+- name : List jobs
+  check:
+    in:
+      category: isString.default(__)
+      search  : isString.default(__)
+      refresh : toBoolean.isBoolean.default(false)
+  exec : | #js
+    global.ensureOjobCatalog(args.refresh)
+    var index = global.ojobCatalog.index
+    var categories = []
+    if (isDef(args.category)) {
+      categories = [ args.category ]
+    } else {
+      categories = Object.keys(index)
+    }
+
+    var term = isDef(args.search) ? args.search.toLowerCase() : __
+    var results = []
+    categories.forEach(function(cat) {
+      if (isDef(index[cat]) && isArray(index[cat].l)) {
+        index[cat].l.forEach(function(url) {
+          var name = String(url).split("/").pop().replace(/\.yaml$/, "")
+          var entry = { category: cat, name: name, url: url }
+          if (isUnDef(term) || entry.name.toLowerCase().indexOf(term) >= 0 || String(url).toLowerCase().indexOf(term) >= 0) {
+            results.push(entry)
+          }
+        })
+      }
+    })
+    return results.sort(function(a, b) { return String(a.url).localeCompare(String(b.url)) })
+
+# ---------------------
+- name : Get job details
+  check:
+    in:
+      job    : isString
+      refresh: toBoolean.isBoolean.default(false)
+  exec : | #js
+    global.ensureOjobCatalog(false)
+    var info = global.fetchOjobDefinition(args.job, args.refresh)
+    var parsed = info.parsed
+
+    var expects = []
+    if (isMap(parsed.help) && isArray(parsed.help.expects)) {
+      parsed.help.expects.forEach(function(item) {
+        expects.push({
+          name     : item.name,
+          desc     : item.desc,
+          example  : item.example,
+          mandatory: item.mandatory
+        })
+      })
+    }
+
+    return {
+      url   : info.url,
+      help  : isMap(parsed.help) ? parsed.help.text : __,
+      expects: expects,
+      raw   : info.raw
+    }
+
+# -------------------
+- name : Execute job
+  check:
+    in:
+      job    : isString
+      params : isMap.default({})
+      canexec: toBoolean.isBoolean
+  exec : | #js
+    if (!args.canexec) {
+      return {
+        error  : "Execution disabled. Set canexec=true to run catalog jobs.",
+        command: "ojob " + global.resolveOjobUrl(args.job)
+      }
+    }
+
+    global.ensureOjobCatalog(false)
+    var info = global.fetchOjobDefinition(args.job, true)
+    var tmpFile = io.createTempFile("mcp-ojob", ".yaml")
+    io.writeFileString(tmpFile, info.raw)
+
+    var previous = $get("res")
+    try {
+      oJobRunFile(tmpFile, args.params, __, { shareArgs: true })
+      var result = $get("res")
+      return { url: info.url, result: result }
+    } finally {
+      io.rm(tmpFile)
+      if (isDef(previous)) {
+        $set("res", previous)
+      } else {
+        $set("res", __)
+      }
+    }

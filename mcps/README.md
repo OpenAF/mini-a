@@ -13,6 +13,10 @@
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
+| mcp-oafp   | OpenAF processor (oafp) runner & docs MCP | STDIO/HTTP | (included) | [mcp-oafp.yaml](mcp-oafp.yaml)   |
+| mcp-oJobIO | ojob.io catalog discovery & execution MCP | STDIO/HTTP | (included) | [mcp-oJobIO.yaml](mcp-oJobIO.yaml) |
+| mcp-rss    | RSS/Atom aggregation MCP                 | STDIO/HTTP | (included) | [mcp-rss.yaml](mcp-rss.yaml)     |
+| mcp-weather| Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
 
 See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contribution guidelines.
 
@@ -199,6 +203,81 @@ jobs:
 			}
 		}
 ```
+
+#### mcp-oafp
+
+`mcp-oafp` wraps the OpenAF processor (oafp) so that you can both execute transformations and inspect the embedded documentation. Key tools include:
+
+- `run-oafp`: invoke the `oafp` function directly with arbitrary parameters and optional inline data.
+- `list-commands`: parse the usage table into structured option metadata (supports filtering).
+- `get-doc`: retrieve the usage, filters, template helper or examples markdown.
+- `search-doc`: perform keyword searches across all documentation sections.
+- `discover-capabilities`: expose the dynamic inputs/transforms/outputs list (respecting optional `libs`).
+
+Example — call oafp to convert CSV into JSON:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-oafp.yaml', tool: run-oafp, params: (params: (in: csv, out: json), data: 'name\\nage\\nJohn,42'))"
+```
+
+Example — search for filters documentation mentioning SQL:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-oafp.yaml', tool: search-doc, params: (query: 'sql'))"
+```
+
+#### mcp-oJobIO
+
+`mcp-oJobIO` indexes the public [ojob.io](https://ojob.io) catalog so that agents can discover available jobs, inspect required parameters, and—when explicitly authorised—execute them. Tools:
+
+- `list-categories`: list catalog categories with job counts.
+- `list-jobs`: enumerate jobs (optionally filtered by category or search string).
+- `get-job-details`: fetch remote YAML and summarise `help.expects` metadata.
+- `execute-job`: run a remote job when `canexec=true`, returning its output payload.
+
+Example — enumerate AI-related jobs:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-oJobIO.yaml', tool: list-jobs, params: (category: 'ai'))"
+```
+
+Example — execute `https://ojob.io/echo.yaml` after opting-in to remote execution:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-oJobIO.yaml', tool: execute-job, params: (job: 'echo.yaml', params: (text: 'hello from MCP'), canexec: true))"
+```
+
+> ⚠️ Remote execution is opt-in. Calls to `execute-job` must set `canexec=true`; otherwise the MCP returns a descriptive error with the suggested CLI command.
+
+#### mcp-rss
+
+`mcp-rss` offers RSS/Atom aggregation. It scrapes the `openaf/ojob.io` news collection to build a catalog of known feeds while still allowing arbitrary URLs.
+
+Tools:
+
+- `list-known-feeds`: return the cached feed catalog (set `refresh=true` to force a GitHub update).
+- `fetch-feed`: resolve a `source` alias or `url` and normalise item metadata (with optional `nodesc` flag).
+
+Example — fetch Hacker News headlines via the catalog:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-rss.yaml', tool: fetch-feed, params: (source: 'hackernews', nodesc: true))"
+```
+
+#### mcp-weather
+
+`mcp-weather` fronts [wttr.in](https://wttr.in) to provide structured weather data (or ANSI forecasts when desired).
+
+Available tool:
+
+- `get-weather`: request weather data for a location with optional `ansi`, `oneline`, `format`, or `options` tweaks.
+
+Example — retrieve the JSON forecast for Lisbon:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-weather.yaml', tool: get-weather, params: (location: 'Lisbon, Portugal'))"
+```
+
 ## Using MCPs as STDIO or HTTP Remote Server
 
 All MCPs in this catalog can be used in two modes:

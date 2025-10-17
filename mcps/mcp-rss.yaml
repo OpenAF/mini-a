@@ -1,0 +1,222 @@
+# Author: OpenAI Assistant
+help:
+  text   : A STDIO/HTTP MCP server that retrieves and normalises RSS/Atom feeds
+  expects:
+  - name     : onport
+    desc     : If defined starts a MCP server on the provided port
+    example  : "9000"
+    mandatory: false
+  - name     : source
+    desc     : Optional known feed identifier from ojob.io/news
+    example  : "hackernews"
+    mandatory: false
+  - name     : url
+    desc     : Direct RSS/Atom URL (overrides source)
+    example  : "https://example.com/feed.xml"
+    mandatory: false
+  - name     : nodesc
+    desc     : If true omits descriptions from the resulting items
+    example  : false
+    mandatory: false
+  - name     : path
+    desc     : Optional JSONPath-like expression to the items array
+    example  : "rss.channel.item"
+    mandatory: false
+
+todo:
+- Init
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
+      serverInfo:
+        name   : mini-a-rss
+        title  : OpenAF mini-a MCP RSS server
+        version: 1.0.0
+    ((fnsMeta)): &MCPFNSMETA
+      list-known-feeds:
+        name       : list-known-feeds
+        description: Lists the known RSS feeds published under https://github.com/openaf/ojob.io/news.
+        inputSchema:
+          type      : object
+          properties:
+            refresh:
+              type       : boolean
+              description: If true forces reloading the catalog from GitHub.
+              default    : false
+          required: [ ]
+        annotations:
+          title         : list-known-feeds
+          readOnlyHint  : true
+          idempotentHint: true
+      fetch-feed:
+        name       : fetch-feed
+        description: Downloads and normalises RSS/Atom items either from a known source or a provided URL.
+        inputSchema:
+          type      : object
+          properties:
+            source:
+              type       : string
+              description: Optional identifier from the known feeds catalog.
+            url:
+              type       : string
+              description: Direct RSS/Atom URL. Overrides source when provided.
+            nodesc:
+              type       : boolean
+              description: If true removes descriptions from the response.
+              default    : false
+            path:
+              type       : string
+              description: Optional path to the items array (defaults based on feed type).
+          required: [ ]
+        annotations:
+          title         : fetch-feed
+          readOnlyHint  : true
+          idempotentHint: true
+    ((fns    )): &MCPFNS
+      list-known-feeds: List known RSS feeds
+      fetch-feed      : Fetch RSS/Atom feed
+  ((else)):
+  - (stdioMCP ): *MCPSERVER
+    ((fnsMeta)): *MCPFNSMETA
+    ((fns    )): *MCPFNS
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mcp-rss.pid
+    killPrevious: true
+
+include:
+- oJobMCP.yaml
+
+jobs:
+# -----------------
+  exec : | #js
+    if (isUnDef(global.mcpRSSCatalog)) {
+      global.mcpRSSCatalog = {}
+    }
+
+    if (isUnDef(global.loadRSSCatalog)) {
+      global.loadRSSCatalog = function(refresh) {
+        if (!refresh && isDef(global.mcpRSSCatalog.feeds) && Date.now() - global.mcpRSSCatalog.timestamp < 3600000) {
+          return global.mcpRSSCatalog
+        }
+
+        var headers = { "User-Agent": "mini-a-mcp-rss" }
+        var rest = $rest({ requestHeaders: headers })
+        var listing = rest.get("https://api.github.com/repos/openaf/ojob.io/contents/news")
+        if (isString(listing)) listing = af.fromJSON(listing)
+
+        var feeds = []
+        listing.forEach(function(item) {
+          if (item.name.endsWith(".yaml") && item.name != "rss.yaml") {
+            try {
+              var raw = rest.get(item.download_url)
+              var doc = af.fromYAML(raw)
+              var helpText = isMap(doc.help) && isDef(doc.help.text) ? doc.help.text : __
+              if (isArray(doc.jobs)) {
+                doc.jobs.forEach(function(j) {
+                  if (isMap(j.args) && isDef(j.args.url)) {
+                    feeds.push({
+                      id   : item.name.replace(/\.yaml$/, ""),
+                      name : isDef(j.name) ? j.name : item.name.replace(/\.yaml$/, ""),
+                      title: helpText || j.name || item.name,
+                      url  : j.args.url
+                    })
+                  }
+                })
+              }
+            } catch(e) {
+              logErr("Failed to parse " + item.name + ": " + e)
+            }
+          }
+        })
+
+        feeds = feeds.sort(function(a, b) {
+          return String(a.id).localeCompare(String(b.id))
+        })
+
+        global.mcpRSSCatalog = { timestamp: Date.now(), feeds: feeds }
+        return global.mcpRSSCatalog
+      }
+    }
+
+# ---------------------------
+- name : List known feeds
+  check:
+    in:
+      refresh: toBoolean.isBoolean.default(false)
+  exec : | #js
+    var catalog = global.loadRSSCatalog(args.refresh)
+    return catalog.feeds
+
+# --------------------
+- name : Fetch RSS
+  check:
+    in:
+      source: isString.default(__)
+      url   : isString.default(__)
+      nodesc: toBoolean.isBoolean.default(false)
+      path  : isString.default(__)
+  exec : | #js
+    var target = args.url
+    if (isUnDef(target) && isDef(args.source)) {
+      var catalog = global.loadRSSCatalog(false)
+      var match = catalog.feeds.filter(function(f) {
+        return f.id == args.source || f.name == args.source
+      })[0]
+      if (isDef(match)) target = match.url
+    }
+    _$(target, "url").isString()
+
+    var fnClean = function(h) {
+      if (isMap(h) && isDef(h.null)) h = h.null
+      return String(h).replace(/<.+?>/g, "").replace(/(( |\n)( |\n))+/g, "$1").trim()
+    }
+
+    var normalize = function(r) {
+      if (isUnDef(r.date) && isDef(r.published)) r.date = new Date(r.published)
+      if (isUnDef(r.description) && isDef(r.content)) r.description = r.content.replace(/<[^>]+>/g, "").trim()
+      if (isDef(r.id) && isUnDef(r.link) && String(r.id).startsWith("http")) r.link = r.id
+      return r
+    }
+
+    var rssData = $rest().get(target)
+    var xmlObj = af.fromXML2Obj(rssData)
+    var path = isDef(args.path) ? args.path : (isDef(xmlObj.rss) ? "rss.channel.item" : (isDef(xmlObj.feed) ? "feed.entry" : "RDF.item"))
+    var items = $$(xmlObj).get(path)
+    if (!isArray(items)) items = []
+    items = items.map(normalize)
+
+    var result
+    if (args.nodesc) {
+      result = items.map(function(r) {
+        return {
+          title: fnClean(r.title),
+          date : new Date(isDef(r.date) ? r.date : r.pubDate),
+          link : r.link
+        }
+      })
+    } else {
+      result = items.map(function(r) {
+        return {
+          title      : fnClean(r.title),
+          description: fnClean(r.description),
+          date       : new Date(isDef(r.date) ? r.date : r.pubDate),
+          link       : r.link
+        }
+      })
+    }
+
+    return result
+
