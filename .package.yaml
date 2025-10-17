@@ -39,7 +39,7 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251016'
+version: '20251017'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -61,10 +61,12 @@ files:
 - mcps/mcp-kube.yaml
 - mcps/mcp-net.yaml
 - mcps/mcp-oaf.yaml
+- mcps/mcp-oafp.yaml
 - mcps/mcp-s3.yaml
 - mcps/mcp-shell.yaml
 - mcps/mcp-ssh.yaml
 - mcps/mcp-time.yaml
+- mcps/mcp-weather.yaml
 - mini-a-main.yaml
 - mini-a-web.sh
 - mini-a-web.yaml
@@ -84,21 +86,23 @@ filesHash:
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
   USAGE.md: ac0c732e4dfb7a33f3e1c54c2306981d196afa3a
   mcps/CREATING.md: 8d2e251c409148f2178f84dba0ba1bc36f721857
-  mcps/README.md: da97b1018bf8cc93515a3ab4836ef77e0a4ca4e4
+  mcps/README.md: 2ce0e2c2f34d7401edbb1f3edcdaad138aa4eac6
   mcps/mcp-ch.yaml: 99ae055319e5c99e42cfacead2159b5ed83c1bdc
   mcps/mcp-db.yaml: 2e3784bc59d925217936410deec6bc7ed9537e85
   mcps/mcp-email.yaml: d9dde29b03e7b8873f66a22476dc8ffd6619ce85
   mcps/mcp-kube.yaml: d9268fd33f64db8afc6a7012540a72a358ccc021
   mcps/mcp-net.yaml: 36b0e8ef74274819422453d6e76df4426f37a187
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
+  mcps/mcp-oafp.yaml: 4e7ba7a9ca5cb3dc9faa456f0f58225c7a41602a
   mcps/mcp-s3.yaml: 845a363c5ca9d291a1ab24dad80972b6651b1a29
   mcps/mcp-shell.yaml: ce8b702efa515b704720f0d4e73a0093c1e4b699
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
   mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
+  mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mini-a-main.yaml: eb36f5a6749500c7bef073059abf461916174aed
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 40b2ae2f04a8b18325d2c0089d947a9cc2490678
-  mini-a.js: a082c57777b7b9e4cb7f70ceb02c53a18410fc8a
+  mini-a.js: 423e7c54e9f2262dd7e175b9412f6d511670b528
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: b2ec9e50fb384b660375faee14beb76ab1e7149b
   public/index.md: eeaa95a2118e93de419e316f81c6e9b372ccaea9
