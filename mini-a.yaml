@@ -163,7 +163,8 @@ jobs:
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
-    if (isUnDef(args.__format)) args.__format = "md"
+    if (isUnDef(args.format)) args.format = "md"
+    if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     _ma.init(args)
     var _r = _ma.start(args)
     if (isUnDef(args.outfile)) {

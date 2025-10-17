@@ -728,8 +728,12 @@ MiniA.prototype._createRateLimiter = function(args) {
  * Process and return final answer based on format requirements
  */
 MiniA.prototype._processFinalAnswer = function(answer, args) {
+  var textAnswer = answer
   if (isDef(args.outfile)) {
-    io.writeFileString(args.outfile, answer || "(no answer)")
+    if (isDef(args.__format)) {
+      textAnswer = _$o(answer, args, __, true)
+    }
+    io.writeFileString(args.outfile, textAnswer || "(no answer)")
     this.fnI("done", `Final answer written to ${args.outfile}`)
     return
   }
@@ -745,12 +749,12 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 
   // Handle JSON parsing for markdown format
-  if ((args.format == "md" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
+  if ((args.format == "json" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
     this.state = "stop"
     return jsonParse(answer, __, __, true)
   }
 
-  if ((args.format == "md" && args.format != "raw") && isObject(answer)) {
+  if ((args.format == "json" && args.format != "raw") && isObject(answer)) {
     return answer
   }
 
@@ -768,6 +772,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (args.format != "md" && args.format != "raw" && isString(answer)) {
       answer = jsonParse(answer)
     }
+    if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     return $o(answer || "(no answer)", args, __, true)
   }
 }
@@ -976,6 +981,13 @@ MiniA.prototype._runCommand = function(args) {
 
 MiniA.prototype.init = function(args) {
   args = _$(args, "args").isMap().default({})
+  // Set default format before any other logic
+  if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
+  if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
+
+  if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
+  if (isUnDef(args.format)) args.format = "md"
+
   var initChatbotMode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
   var initUsePlanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
   this._enablePlanning = (!initChatbotMode && initUsePlanning)
@@ -2263,7 +2275,7 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       var responseWithStats
       // Use new promptJSONWithStats if available
-      if (isDef(this.llm.promptJSONWithStats)) {
+      if (isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
@@ -2456,7 +2468,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       beforeCall()
       var fallbackResponseWithStats
-      if (isDef(this.llm.promptJSONWithStats)) {
+      if (isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
       } else {
         fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
