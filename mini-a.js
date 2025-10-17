@@ -728,40 +728,48 @@ MiniA.prototype._createRateLimiter = function(args) {
  * Process and return final answer based on format requirements
  */
 MiniA.prototype._processFinalAnswer = function(answer, args) {
-    if (isDef(args.outfile)) {
-        io.writeFileString(args.outfile, answer || "(no answer)")
-        this.fnI("done", `Final answer written to ${args.outfile}`)
-        return
-    }
-    
-    if (isString(answer) && args.format != "raw") answer = answer.trim()
-    
-    // Handle JSON parsing for markdown format
-    if ((args.format == "md" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
-        this.state = "stop"
-        return jsonParse(answer, __, __, true)
-    }
-    
-    if ((args.format == "md" && args.format != "raw") && isObject(answer)) {
-        return answer
-    }
-    
-    this.fnI("final", `Final answer determined. Goal achieved.`)
+  if (isDef(args.outfile)) {
+    io.writeFileString(args.outfile, answer || "(no answer)")
+    this.fnI("done", `Final answer written to ${args.outfile}`)
+    return
+  }
+
+  if (isString(answer) && args.format != "raw") answer = answer.trim()
+
+  // Remove markdown code block if format=md and answer is just a code block
+  if ((args.format == "md" && args.format != "raw") && isString(answer)) {
+    var trimmed = answer.trim()
+    // Match code block: starts with ```[language]\n, ends with ``` and nothing else
+    var codeBlockMatch = trimmed.match(/^```[a-zA-Z0-9]+\n[\s\S]*\n```$/)
+    if (codeBlockMatch && trimmed === codeBlockMatch[0]) return ""
+  }
+
+  // Handle JSON parsing for markdown format
+  if ((args.format == "md" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
     this.state = "stop"
-    
-    // Mark goal as achieved if not already counted
-    if (global.__mini_a_metrics.goals_achieved.get() === 0 && global.__mini_a_metrics.goals_stopped.get() === 0) {
-      global.__mini_a_metrics.goals_achieved.inc()
+    return jsonParse(answer, __, __, true)
+  }
+
+  if ((args.format == "md" && args.format != "raw") && isObject(answer)) {
+    return answer
+  }
+
+  this.fnI("final", `Final answer determined. Goal achieved.`)
+  this.state = "stop"
+
+  // Mark goal as achieved if not already counted
+  if (global.__mini_a_metrics.goals_achieved.get() === 0 && global.__mini_a_metrics.goals_stopped.get() === 0) {
+    global.__mini_a_metrics.goals_achieved.inc()
+  }
+
+  if (args.raw) {
+    return answer || "(no answer)"
+  } else {
+    if (args.format != "md" && args.format != "raw" && isString(answer)) {
+      answer = jsonParse(answer)
     }
-    
-    if (args.raw) {
-        return answer || "(no answer)" 
-    } else {
-        if (args.format != "md" && args.format != "raw" && isString(answer)) {
-            answer = jsonParse(answer)
-        }
-        return $o(answer || "(no answer)", args, __, true)
-    }
+    return $o(answer || "(no answer)", args, __, true)
+  }
 }
 
 MiniA.prototype._normalizeToolResult = function(original) {

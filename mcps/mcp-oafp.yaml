@@ -29,6 +29,7 @@ todo:
         title  : OpenAF mini-a MCP oafp server
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
+
       run-oafp:
         name       : run-oafp
         description: Executes the oafp processor with the provided parameters.
@@ -52,6 +53,7 @@ todo:
           title         : run-oafp
           readOnlyHint  : false
           idempotentHint: false
+
       list-commands:
         name       : list-commands
         description: Returns the list of oafp command line options parsed from the embedded documentation.
@@ -69,6 +71,7 @@ todo:
           title         : list-commands
           readOnlyHint  : true
           idempotentHint: true
+
       get-doc:
         name       : get-doc
         description: Returns one of the built-in oafp documentation sections (usage, filters, template, examples).
@@ -87,6 +90,7 @@ todo:
           title         : get-doc
           readOnlyHint  : true
           idempotentHint: true
+
       search-doc:
         name       : search-doc
         description: Performs a keyword search across all loaded oafp documentation sections.
@@ -101,6 +105,7 @@ todo:
           title         : search-doc
           readOnlyHint  : true
           idempotentHint: true
+
       discover-capabilities:
         name       : discover-capabilities
         description: Returns dynamic oafp capability information (inputs, transforms, outputs, version) honouring optional libs.
@@ -115,12 +120,14 @@ todo:
           title         : discover-capabilities
           readOnlyHint  : true
           idempotentHint: true
+
     ((fns    )): &MCPFNS
       run-oafp             : Run oafp command
       list-commands        : List oafp options
       get-doc              : Get oafp documentation section
       search-doc           : Search oafp documentation
       discover-capabilities: Discover dynamic oafp capabilities
+      
   ((else)):
   - (stdioMCP ): *MCPSERVER
     ((fnsMeta)): *MCPFNSMETA
@@ -143,12 +150,13 @@ include:
 
 jobs:
 # -----------
+- name : Init
   exec : | #js
     if (isUnDef(global.ensureOafpInit)) {
       global.ensureOafpInit = function(libs) {
         loadOAFP()
         if (isDef(libs)) {
-          oafp({ libs: libs, ____ojob: true, out: "raw", help: "readme" })
+          oafp({ libs: libs, out: "raw", help: "readme" })
         }
 
         if (isUnDef(global.oafpDocs)) {
@@ -166,8 +174,8 @@ jobs:
 
     global.ensureOafpInit(args.libs)
 
-# -------------------
-- name : Parse commands
+# ------------------------
+- name : List oafp options
   check:
     in:
       search: isString.default(__)
@@ -210,8 +218,8 @@ jobs:
     }
     return result
 
-# ------------------
-- name : Run oafp
+# -----------------------
+- name : Run oafp command
   check:
     in:
       params   : isMap.default({})
@@ -229,12 +237,20 @@ jobs:
     if (isDef(args.libs)) options.libs = args.libs
     if (isDef(args.helpTopic)) options.help = args.helpTopic
 
-    options.____ojob = true
+    var _i = "out-" + genUUID()
+    options.pipe = {
+      in   : "raw",
+      out  : "key",
+      __key: _i
+    }
 
-    return oafp(options)
+    oafp(options)
+    var _r = $get(_i)
+    $unset(_i)
+    return _r
 
-# -----------------------
-- name : Get documentation
+# -------------------------------------
+- name : Get oafp documentation section
   check:
     in:
       section: isString.default("usage")
@@ -242,11 +258,11 @@ jobs:
   exec : | #js
     global.ensureOafpInit(args.libs)
     var key = String(args.section || "usage").toLowerCase()
-    if (!['usage','filters','template','examples'].contains(key)) key = 'usage'
+    if (!['usage','filters','template','examples'].indexOf(key) >= 0) key = 'usage'
     return global.oafpDocs[key]
 
-# ---------------------
-- name : Search documentation
+# --------------------------------
+- name : Search oafp documentation
   check:
     in:
       query: isString
@@ -267,12 +283,15 @@ jobs:
     })
     return out
 
-# ---------------------------
-- name : Discover capabilities
+# -----------------------------------------
+- name : Discover dynamic oafp capabilities
   check:
     in:
       libs: isString.default(__)
   exec : | #js
     global.ensureOafpInit(args.libs)
-    var info = oafp({ version: true, libs: args.libs, ____ojob: true })
+    var _i = "out-" + genUUID()
+    oafp({ version: true, libs: args.libs, out: "key", __key: _i })
+    var info = $get(_i)
+    $unset(_i)
     return info
