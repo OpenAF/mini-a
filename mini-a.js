@@ -23,6 +23,9 @@ var MiniA = function() {
   this._ensureCache(this._systemPromptCacheName, { ttl: 600000, maxSize: 128 })
   this._ensureCache(this._toolSchemaCacheName, { ttl: 3600000, maxSize: 512 })
   this._ensureCache(this._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
+  this._mcpCircuitState = {}
+  this._lastCheckpoint = null
+  this._errorHistory = []
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -895,6 +898,212 @@ MiniA.prototype._storeToolResultInCache = function(cacheKey, result, ttl) {
   $cache(this._toolResultCacheName).set(cacheKey, { value: result, expiresAt: expiresAt })
 }
 
+MiniA.prototype._categorizeError = function(error, context) {
+  var err = isObject(error) ? error : {}
+  if (isString(error)) err = { message: error }
+  var category = { type: "permanent", reason: "unknown" }
+  if (!isObject(err)) return category
+
+  if (err.permanent === true) return { type: "permanent", reason: err.message || "permanent" }
+  if (err.transient === true) return { type: "transient", reason: err.message || "transient" }
+
+  var message = isString(err.message) ? err.message : isString(err.error) ? err.error : stringify(err, __, "")
+  var normalized = isString(message) ? message.toLowerCase() : ""
+  if (normalized.length === 0 && isString(err.code)) normalized = err.code.toLowerCase()
+
+  var transientSignals = [
+    "timeout", "temporar", "rate limit", "throttle", "econnreset", "econnrefused", "unreachable",
+    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open"
+  ]
+  var permanentSignals = ["invalid", "syntax", "parse", "unknown action", "not found", "missing", "denied"]
+
+  if (normalized.length > 0) {
+    for (var i = 0; i < transientSignals.length; i++) {
+      if (normalized.indexOf(transientSignals[i]) >= 0) {
+        return { type: "transient", reason: message }
+      }
+    }
+    for (var j = 0; j < permanentSignals.length; j++) {
+      if (normalized.indexOf(permanentSignals[j]) >= 0) {
+        return { type: "permanent", reason: message }
+      }
+    }
+  }
+
+  if (isObject(context) && context.forceCategory === "transient") {
+    return { type: "transient", reason: message }
+  }
+  if (isObject(context) && context.forceCategory === "permanent") {
+    return { type: "permanent", reason: message }
+  }
+
+  return { type: category.type, reason: message }
+}
+
+MiniA.prototype._withExponentialBackoff = function(operation, options) {
+  var opts = isObject(options) ? options : {}
+  var maxAttempts = isNumber(opts.maxAttempts) ? Math.max(1, Math.floor(opts.maxAttempts)) : 3
+  var baseDelay = isNumber(opts.initialDelay) ? Math.max(1, Math.floor(opts.initialDelay)) : 250
+  var maxDelay = isNumber(opts.maxDelay) ? Math.max(baseDelay, Math.floor(opts.maxDelay)) : 8000
+  var attempts = 0
+  var lastError
+  var lastCategory
+
+  while (attempts < maxAttempts) {
+    attempts++
+    try {
+      if (isFunction(opts.beforeAttempt)) opts.beforeAttempt(attempts)
+      var result = operation(attempts)
+      if (isFunction(opts.afterSuccess)) opts.afterSuccess(result, attempts)
+      return result
+    } catch (e) {
+      lastError = e
+      lastCategory = this._categorizeError(e, opts.context)
+      if (isFunction(opts.onError)) opts.onError(e, attempts, lastCategory)
+      if (lastCategory.type !== "transient" || attempts >= maxAttempts) break
+
+      var wait = baseDelay
+      if (attempts > 1) {
+        var factor = Math.pow(2, attempts - 1)
+        wait = Math.min(baseDelay * factor, maxDelay)
+      }
+      if (isFunction(opts.onRetry)) opts.onRetry(e, attempts, wait, lastCategory)
+      sleep(wait, true)
+    }
+  }
+
+  if (isFunction(opts.onFailure)) opts.onFailure(lastError, attempts, lastCategory)
+  throw lastError
+}
+
+MiniA.prototype._updateErrorHistory = function(runtime, entry) {
+  var target = isObject(runtime) ? runtime : {}
+  if (!isArray(target.errorHistory)) target.errorHistory = []
+  var payload = isObject(entry) ? entry : {}
+  var record = {
+    time    : now(),
+    category: payload.category || "unknown",
+    message : payload.message || "",
+    context : payload.context
+  }
+  target.errorHistory.push(record)
+  while (target.errorHistory.length > 10) target.errorHistory.shift()
+  this._errorHistory = target.errorHistory.slice()
+}
+
+MiniA.prototype._setCheckpoint = function(label, runtime) {
+  if (!isObject(runtime)) return
+  var snapshot = {
+    label    : isString(label) ? label : "step",
+    timestamp: now(),
+    agentState: jsonParse(stringify(this._agentState, __, ""), __, __, true),
+    runtime  : jsonParse(stringify({
+      context            : runtime.context,
+      consecutiveErrors  : runtime.consecutiveErrors,
+      consecutiveThoughts: runtime.consecutiveThoughts,
+      totalThoughts      : runtime.totalThoughts,
+      stepsWithoutAction : runtime.stepsWithoutAction,
+      lastActions        : runtime.lastActions,
+      recentSimilarThoughts: runtime.recentSimilarThoughts,
+      toolContexts       : runtime.toolContexts,
+      errorHistory       : runtime.errorHistory,
+      restoredFromCheckpoint: false
+    }, __, ""), __, __, true)
+  }
+  this._lastCheckpoint = snapshot
+}
+
+MiniA.prototype._restoreCheckpoint = function(runtime, reason) {
+  if (!isObject(runtime)) return false
+  if (!isObject(this._lastCheckpoint) || !isObject(this._lastCheckpoint.runtime)) return false
+
+  var snapshot = jsonParse(stringify(this._lastCheckpoint, __, ""), __, __, true)
+  if (!isObject(snapshot.runtime)) return false
+
+  this._agentState = snapshot.agentState || {}
+  runtime.context = isArray(snapshot.runtime.context) ? snapshot.runtime.context.slice() : []
+  runtime.consecutiveErrors = snapshot.runtime.consecutiveErrors || 0
+  runtime.consecutiveThoughts = snapshot.runtime.consecutiveThoughts || 0
+  runtime.totalThoughts = snapshot.runtime.totalThoughts || 0
+  runtime.stepsWithoutAction = snapshot.runtime.stepsWithoutAction || 0
+  runtime.lastActions = isArray(snapshot.runtime.lastActions) ? snapshot.runtime.lastActions.slice() : []
+  runtime.recentSimilarThoughts = isArray(snapshot.runtime.recentSimilarThoughts) ? snapshot.runtime.recentSimilarThoughts.slice() : []
+  runtime.toolContexts = isObject(snapshot.runtime.toolContexts) ? snapshot.runtime.toolContexts : {}
+  runtime.errorHistory = isArray(snapshot.runtime.errorHistory) ? snapshot.runtime.errorHistory.slice() : []
+  runtime.restoredFromCheckpoint = true
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.consecutive_errors)) {
+    global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
+  }
+  var reasonText = isString(reason) && reason.length > 0 ? ` (${reason})` : ""
+  this.fnI("recover", `Checkpoint restored${reasonText}.`)
+  return true
+}
+
+MiniA.prototype._renderErrorHistory = function(runtime) {
+  if (!isObject(runtime) || !isArray(runtime.errorHistory) || runtime.errorHistory.length === 0) return ""
+  var recent = runtime.errorHistory.slice(-5)
+  var parts = []
+  for (var i = 0; i < recent.length; i++) {
+    var entry = recent[i] || {}
+    var cat = entry.category || "unknown"
+    var msg = entry.message || ""
+    parts.push(`${cat}: ${msg}`.trim())
+  }
+  return parts.length > 0 ? `[ERROR HISTORY] ${parts.join(" | ")}` : ""
+}
+
+MiniA.prototype._isCircuitOpen = function(connectionId) {
+  if (!isString(connectionId) || connectionId.length === 0) return false
+  var state = this._mcpCircuitState[connectionId]
+  if (!isObject(state)) return false
+  if (!isNumber(state.openUntil)) return false
+  if (now() < state.openUntil) return true
+  delete this._mcpCircuitState[connectionId].openUntil
+  this._mcpCircuitState[connectionId].failures = 0
+  return false
+}
+
+MiniA.prototype._recordCircuitFailure = function(connectionId, errorInfo) {
+  if (!isString(connectionId) || connectionId.length === 0) return
+  if (!isObject(this._mcpCircuitState[connectionId])) this._mcpCircuitState[connectionId] = { failures: 0 }
+  var state = this._mcpCircuitState[connectionId]
+  state.failures = (state.failures || 0) + 1
+  state.lastError = errorInfo
+  if (state.failures >= 3) {
+    var cooldown = 10000
+    state.openUntil = now() + cooldown
+    this.fnI("warn", `Circuit opened for connection '${connectionId}' after repeated failures. Cooling down for ${cooldown}ms.`)
+  }
+}
+
+MiniA.prototype._recordCircuitSuccess = function(connectionId) {
+  if (!isString(connectionId) || connectionId.length === 0) return
+  if (!isObject(this._mcpCircuitState[connectionId])) return
+  this._mcpCircuitState[connectionId].failures = 0
+  delete this._mcpCircuitState[connectionId].openUntil
+  delete this._mcpCircuitState[connectionId].lastError
+}
+
+MiniA.prototype._registerRuntimeError = function(runtime, details) {
+  if (!isObject(runtime)) return
+  var info = isObject(details) ? details : {}
+  runtime.consecutiveErrors = (runtime.consecutiveErrors || 0) + 1
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.consecutive_errors)) {
+    global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
+  }
+  this._updateErrorHistory(runtime, {
+    category: info.category || "unknown",
+    message : info.message || "",
+    context : info.context
+  })
+
+  var shouldRestore = info.category === "transient" && runtime.restoredFromCheckpoint !== true
+  if (shouldRestore && this._restoreCheckpoint(runtime, info.message || "transient error")) {
+    runtime.context.push(`[RECOVERY] Restored from checkpoint due to transient error${isString(info.message) && info.message.length > 0 ? `: ${info.message}` : ""}.`)
+  }
+  runtime.hadErrorThisStep = true
+}
+
 MiniA.prototype._resolveToolInfo = function(toolName) {
   if (!isString(toolName)) return __
   if (isObject(this._toolInfoByName) && isObject(this._toolInfoByName[toolName])) return this._toolInfoByName[toolName]
@@ -992,9 +1201,35 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
     }
   }
 
-  this._ensureConnectionInitialized(connectionId)
+  if (this._isCircuitOpen(connectionId)) {
+    var circuitError = new Error(`Circuit open for connection '${connectionId}'. Skipping MCP call.`)
+    circuitError.transient = true
+    throw circuitError
+  }
 
-  var result = client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, params) : client.callTool(toolName, params)
+  var parent = this
+  var result = this._withExponentialBackoff(function() {
+    parent._ensureConnectionInitialized(connectionId)
+    return client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, params) : client.callTool(toolName, params)
+  }, {
+    maxAttempts : 3,
+    initialDelay: 250,
+    maxDelay    : 4000,
+    context     : { source: "mcp", connectionId: connectionId, toolName: toolName },
+    onRetry     : function(err, attempt, wait, category) {
+      parent.fnI("retry", `MCP '${toolName}' attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+        global.__mini_a_metrics.retries.inc()
+      }
+    },
+    onFailure   : function(err, attempts, category) {
+      if (isObject(category) && category.type === "transient") {
+        parent._recordCircuitFailure(connectionId, { tool: toolName, message: err && err.message })
+      }
+    }
+  })
+
+  parent._recordCircuitSuccess(connectionId)
 
   if (shouldCache) {
     this._storeToolResultInCache(cacheKey, result, cacheConfig.ttl)
@@ -1864,8 +2099,34 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var originalTokens = this._estimateTokens(ctx)
       global.__mini_a_metrics.summaries_original_tokens.getAdd(originalTokens)
 
-      addCall()
-      var summaryResponseWithStats = summarizeLLM.withInstructions("You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions.").promptWithStats(ctx)
+      var instructionText = "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
+      var summaryResponseWithStats
+      try {
+        summaryResponseWithStats = this._withExponentialBackoff(function() {
+          addCall()
+          var summarizer = summarizeLLM.withInstructions(instructionText)
+          if (isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(ctx)
+          return summarizer.promptWithStats(ctx)
+        }, {
+          maxAttempts : 3,
+          initialDelay: 250,
+          maxDelay    : 4000,
+          context     : { source: "llm", operation: "summarize" },
+          onRetry     : (err, attempt, wait, category) => {
+            this.fnI("retry", `Summarization attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+              global.__mini_a_metrics.retries.inc()
+            }
+          }
+        })
+      } catch (e) {
+        var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
+        this.fnI("warn", `Summarization failed: ${summaryError.reason || e}`)
+        if (isObject(runtime)) {
+          this._updateErrorHistory(runtime, { category: summaryError.type, message: `summarize: ${summaryError.reason}`, context: { operation: "summarize" } })
+        }
+        return ctx
+      }
       if (args.debug) {
         print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
@@ -1913,6 +2174,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             global.__mini_a_metrics.context_summarizations.inc()
             var summarizedOld = summarize(oldContext.join("\n"))
             runtime.context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
+            var errorSummaryEntry = this._renderErrorHistory(runtime)
+            if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
+              if (runtime.context.length === 0 || runtime.context[0].indexOf("[ERROR HISTORY]") !== 0) {
+                runtime.context.unshift(errorSummaryEntry)
+              } else {
+                runtime.context[0] = errorSummaryEntry
+              }
+            }
             var newTokens = this._estimateTokens(runtime.context.join(""))
             this.fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
           } else {
@@ -2007,10 +2276,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       hadErrorThisStep    : false,
       clearedConsecutiveErrors: false,
       currentTool         : null,
-      toolContexts        : {}
+      toolContexts        : {},
+      errorHistory        : [],
+      restoredFromCheckpoint: false
     }
     var maxSteps = args.maxsteps
     var currentToolContext = {}
+    this._setCheckpoint("initial", runtime)
     this._prepareToolExecution = info => {
       var baseInfo = isObject(info) ? info : {}
       var contextId = isString(baseInfo.contextId) && baseInfo.contextId.length > 0 ? baseInfo.contextId : genUUID()
@@ -2066,9 +2338,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       if (hasError) {
-        runtime.consecutiveErrors++
-        global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
-        runtime.hadErrorThisStep = true
+        var errorMessage = isString(details.error) && details.error.length > 0
+          ? details.error
+          : isObject(rawResult) && isString(rawResult.error)
+            ? rawResult.error
+            : `Tool '${toolName}' reported an error`
+        var categorized = this._categorizeError(rawResult, { source: "tool", toolName: toolName })
+        this._registerRuntimeError(runtime, {
+          category: categorized.type,
+          message : errorMessage,
+          context : { toolName: toolName, stepLabel: stepLabel }
+        })
       }
 
       if (isDef(toolName) && toolName.length > 0) {
@@ -2184,17 +2464,43 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       
       this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
       // Get model response and parse as JSON
-      addCall()
       if (args.debug) {
         print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
-      
+
       var responseWithStats
-      // Use new promptJSONWithStats if available
-      if (isDef(currentLLM.promptJSONWithStats)) {
-        responseWithStats = currentLLM.promptJSONWithStats(prompt)
-      } else {
-        responseWithStats = currentLLM.promptWithStats(prompt)
+      try {
+        responseWithStats = this._withExponentialBackoff(() => {
+          addCall()
+          if (isDef(currentLLM.promptJSONWithStats)) {
+            return currentLLM.promptJSONWithStats(prompt)
+          }
+          return currentLLM.promptWithStats(prompt)
+        }, {
+          maxAttempts : 3,
+          initialDelay: 250,
+          maxDelay    : 6000,
+          context     : { source: "llm", llmType: llmType, step: step + 1 },
+          onRetry     : (err, attempt, wait, category) => {
+            this.fnI("retry", `${llmType} model attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+              global.__mini_a_metrics.retries.inc()
+            }
+          },
+          onFailure   : (err, attempts, category) => {
+            if (isObject(category) && category.type === "transient") {
+              this.fnI("warn", `${llmType} model failed after ${attempts} attempts due to transient error: ${err && err.message}`)
+            }
+          }
+        })
+      } catch (e) {
+        var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
+        runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
+        this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
+        if (args.debug || args.verbose) {
+          this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+        }
+        continue
       }
 
       if (args.debug) {
@@ -2235,13 +2541,38 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.json_parse_failures.inc()
           global.__mini_a_metrics.retries.inc()
-          addCall()
           var fallbackResponseWithStats
-          // Use new promptWithStats if available
-          if (isDef(this.llm.promptJSONWithStats)) {
-            fallbackResponseWithStats = this.llm.promptJSONWithStats(prompt)
-          } else {
-            fallbackResponseWithStats = this.llm.promptWithStats(prompt)
+          try {
+            fallbackResponseWithStats = this._withExponentialBackoff(() => {
+              addCall()
+              if (isDef(this.llm.promptJSONWithStats)) {
+                return this.llm.promptJSONWithStats(prompt)
+              }
+              return this.llm.promptWithStats(prompt)
+            }, {
+              maxAttempts : 3,
+              initialDelay: 250,
+              maxDelay    : 6000,
+              context     : { source: "llm", llmType: "main", reason: "fallback" },
+              onRetry     : (err, attempt, wait, category) => {
+                this.fnI("retry", `Main fallback model attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+                  global.__mini_a_metrics.retries.inc()
+                }
+              }
+            })
+          } catch (fallbackErr) {
+            var fallbackErrorInfo = this._categorizeError(fallbackErr, { source: "llm", llmType: "main", reason: "fallback" })
+            runtime.context.push(`[OBS ${step + 1}] (error) main fallback model failed: ${fallbackErrorInfo.reason}`)
+            this._registerRuntimeError(runtime, {
+              category: fallbackErrorInfo.type,
+              message : fallbackErrorInfo.reason,
+              context : { step: step + 1, llmType: "main" }
+            })
+            if (args.debug || args.verbose) {
+              this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+            }
+            continue
           }
           if (args.debug) {
             print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
@@ -2264,11 +2595,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             msg = rmsg
           }
         }
-        
+
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
           runtime.context.push(`[OBS ${step + 1}] (error) invalid JSON from model.`)
-          runtime.consecutiveErrors++
-          global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
+          this._registerRuntimeError(runtime, {
+            category: "permanent",
+            message : "invalid JSON from model",
+            context : { step: step + 1, llmType: llmType }
+          })
           global.__mini_a_metrics.json_parse_failures.inc()
           if (args.debug || args.verbose) {
             this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
@@ -2326,8 +2660,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       if (actionMessages.length === 0) {
         runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
-        runtime.consecutiveErrors++
-        global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
+        this._registerRuntimeError(runtime, {
+          category: "permanent",
+          message : "missing action from model",
+          context : { step: step + 1 }
+        })
         if (stateUpdatedThisStep && !stateRecordedInContext) {
           runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
           stateRecordedInContext = true
@@ -2375,16 +2712,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         if (origActionRaw.length == 0) {
           runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
-          runtime.consecutiveErrors++
-          global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
-          runtime.hadErrorThisStep = true
+          this._registerRuntimeError(runtime, {
+            category: "permanent",
+            message : "missing action in multi-action entry",
+            context : { step: step + 1 }
+          })
           break
         }
         if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
           runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'thought' from model.`)
-          runtime.consecutiveErrors++
-          global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
-          runtime.hadErrorThisStep = true
+          this._registerRuntimeError(runtime, {
+            category: "permanent",
+            message : "missing thought from model",
+            context : { step: step + 1 }
+          })
           break
         }
         if (isDef(currentMsg.action) && currentMsg.action == "final" && isDef(currentMsg.params)) {
@@ -2456,9 +2797,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         if (action == "shell") {
           if (!commandValue) {
             runtime.context.push(`[OBS ${stepLabel}] (shell) missing 'command' from model.`)
-            runtime.consecutiveErrors++
-            global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
-            runtime.hadErrorThisStep = true
+            this._registerRuntimeError(runtime, {
+              category: "permanent",
+              message : "missing shell command",
+              context : { step: stepLabel }
+            })
             flushToolActions()
             break
           }
@@ -2491,10 +2834,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (isDef(paramsValue) && !isMap(paramsValue)) {
             flushToolActions()
             runtime.context.push(`[OBS ${stepLabel}] (${origActionRaw}) missing or invalid 'params' from model.`)
-            runtime.consecutiveErrors++
-            global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
+            this._registerRuntimeError(runtime, {
+              category: "permanent",
+              message : `${origActionRaw} missing params`,
+              context : { step: stepLabel, tool: origActionRaw }
+            })
             global.__mini_a_metrics.mcp_actions_failed.inc()
-            runtime.hadErrorThisStep = true
             break
           }
 
@@ -2519,9 +2864,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
           if (answerValue.trim().length == 0) {
             runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action.`)
-            runtime.consecutiveErrors++
-            global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
-            runtime.hadErrorThisStep = true
+            this._registerRuntimeError(runtime, {
+              category: "permanent",
+              message : "missing final answer",
+              context : { step: stepLabel }
+            })
             break
           }
 
@@ -2573,6 +2920,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         continue
       }
 
+      runtime.restoredFromCheckpoint = false
+      this._setCheckpoint(`step-${step + 1}`, runtime)
+
       var stepTime = now() - stepStartTime
       var currentAvg = global.__mini_a_metrics.avg_step_time.get()
       var currentSteps = global.__mini_a_metrics.steps_taken.get()
@@ -2597,13 +2947,35 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     this.fnI("warn", `Reached max steps. Asking for final answer...`)
     // Get final answer from model
-    addCall()
     var finalResponseWithStats
-    // Use new promptJSONWithStats if available
-    if (isDef(this.llm.promptJSONWithStats)) {
-      finalResponseWithStats = this.llm.promptJSONWithStats(finalPrompt)
-    } else {
-      finalResponseWithStats = this.llm.promptWithStats(finalPrompt)
+    try {
+      finalResponseWithStats = this._withExponentialBackoff(() => {
+        addCall()
+        if (isDef(this.llm.promptJSONWithStats)) {
+          return this.llm.promptJSONWithStats(finalPrompt)
+        }
+        return this.llm.promptWithStats(finalPrompt)
+      }, {
+        maxAttempts : 3,
+        initialDelay: 250,
+        maxDelay    : 6000,
+        context     : { source: "llm", operation: "final" },
+        onRetry     : (err, attempt, wait, category) => {
+          this.fnI("retry", `Final answer attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+            global.__mini_a_metrics.retries.inc()
+          }
+        }
+      })
+    } catch (finalErr) {
+      var finalErrorInfo = this._categorizeError(finalErr, { source: "llm", operation: "final" })
+      runtime.context.push(`[OBS FINAL] (error) final answer request failed: ${finalErrorInfo.reason}`)
+      this._registerRuntimeError(runtime, {
+        category: finalErrorInfo.type,
+        message : finalErrorInfo.reason,
+        context : { operation: "final" }
+      })
+      return "(no answer)"
     }
     if (args.debug) {
       print( ow.format.withSideLine("<--\n" + stringify(finalResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
