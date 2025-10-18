@@ -102,8 +102,9 @@ mini-a.sh goal="get the latest top 20 tags used by the library/ubuntu, cross-che
 Using built-in MCP servers:
 
 ```bash
-# Database operations
-mini-a.sh goal="create a test table with European countries" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" rpm=20
+# Database operations (preload optional helpers via libs=... if needed)
+mini-a.sh goal="create a test table with European countries" \
+  mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa libs=db/helpers.js', timeout: 5000)" rpm=20
 
 # Network utilities
 

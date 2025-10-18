@@ -18,6 +18,10 @@ help:
     desc     : Allow read/write operations (default is read-only)
     example  : "true"
     mandatory: false
+  - name     : libs
+    desc     : Optional comma separated libraries or @oPack/library.js references to preload
+    example  : "@mini-a/utils.js,lib/sql-helpers.js"
+    mandatory: false
   - name     : onport
     desc     : If defined starts a MCP server on the provided port
     example  : "8888"
@@ -112,7 +116,36 @@ jobs:
       user: isString.default(__)
       pass: isString.default(__) 
       rw  : toBoolean.isBoolean.default(false)
+      libs: isString.default("")
   exec : | #js
+    if (isDef(args.libs) && args.libs.length > 0) {
+      args.libs.split(",")
+        .map(function(lib) { return lib.trim() })
+        .filter(function(lib) { return lib.length > 0 })
+        .forEach(function(lib) {
+          log("[mcp-db] Loading library: " + lib + "...")
+          try {
+            if (lib.startsWith("@")) {
+              if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
+                var match = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
+                var packPath = getOPackPath(match[1])
+                var filePath = packPath + "/" + match[2] + ".js"
+                if (io.fileExists(filePath)) {
+                  loadLib(filePath)
+                } else {
+                  logErr("[ERROR] Library '" + lib + "' not found.")
+                }
+              } else {
+                logErr("[ERROR] Library '" + lib + "' does not have the correct format (@oPack/library.js).")
+              }
+            } else {
+              loadLib(lib)
+            }
+          } catch(e) {
+            logErr("[ERROR] Failed to load library " + lib + ": " + e.message)
+          }
+        })
+    }
     global.db = new DB(args.jdbc, args.user, args.pass)
     global._dbrw = args.rw
 

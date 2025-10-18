@@ -22,12 +22,24 @@ See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contrib
 
 #### mcp-db
 
+`mcp-db` provides JDBC-backed database access over STDIO or HTTP. Configure it with the following arguments:
+
+- `jdbc` (required): JDBC connection string.
+- `user` / `pass` (optional): credentials to authenticate with the database.
+- `rw` (optional): set to `true` to allow write operations; defaults to read-only.
+- `libs` (optional): comma-separated libraries or `@oPack/library.js` references to preload before creating the connection (useful for helper functions or vendor drivers already available on disk).
+- `onport` (optional): start an HTTP MCP server on the specified port.
+
 ```bash
-ojob mini-a.yaml goal="create a 'test' table with all union european countries and cities" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- generate H2 compatible SQL"
+ojob mini-a.yaml goal="create a 'test' table with all union european countries and cities" \
+  mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa libs=db/helpers.js', timeout: 5000)" \
+  knowledge="- generate H2 compatible SQL"
 ```
 
 ```bash
-ojob mini-a.yaml goal="build a markdown table with the contents of the 'test' table" mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)" knowledge="- generate H2 compatible SQL" debug=true
+ojob mini-a.yaml goal="build a markdown table with the contents of the 'test' table" \
+  mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa libs=db/helpers.js', timeout: 5000)" \
+  knowledge="- generate H2 compatible SQL" debug=true
 ```
 
 #### mcp-email
@@ -68,6 +80,7 @@ This MCP exposes OpenAF data channels over STDIO or as an HTTP remote server. It
 
 - `onport` (optional): start an HTTP MCP server on the specified port.
 - `chs` (optional): a JSON/SLON array or map describing channels. Each channel object may include `_name`, `_type`, `_rw` (boolean read/write) and type-specific options (for example `file: my-data.json`). Example: `( _name: my-data, _type: file, _rw: true, file: my-data.json )` or as an array.
+- `libs` (optional): comma-separated libraries or `@oPack/library.js` references to preload before channel initialization; use it to bring additional helpers into scope.
 
 Available tools (functions) exposed by `mcp-ch`:
 
@@ -83,7 +96,8 @@ Available tools (functions) exposed by `mcp-ch`:
 Example: start as HTTP remote server on port 12345 with two channels (one simple read-only and one file-backed writable):
 
 ```bash
-ojob mcps/mcp-ch.yaml onport=12345 chs="[( _name: readonly, _type: simple, _rw: false ), ( _name: my-data, _type: file, _rw: true, file: my-data.json )]"
+ojob mcps/mcp-ch.yaml onport=12345 libs="@mini-a/utils.js" \
+  chs="[( _name: readonly, _type: simple, _rw: false ), ( _name: my-data, _type: file, _rw: true, file: my-data.json )]"
 ```
 
 Call `ch-get` via STDIO MCP (example using `oafp` to call a tool):

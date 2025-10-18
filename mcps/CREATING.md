@@ -102,8 +102,14 @@ help:
     desc     : [Detailed description of what this parameter does]
     example  : [Concrete example value]
     mandatory: [true/false]
+  - name     : libs
+    desc     : Optional comma separated libraries or @oPack/library.js references to preload
+    example  : "@openaf/helpers.js,lib/custom.js"
+    mandatory: false
   # Add more parameters as needed
 ```
+
+Tip: include a `libs` parameter when your MCP may need to preload optional helpers or oPack modules at runtime, mirroring how built-in MCPs expose this flexibility.
 
 ### Step 3: Define MCP Tool Metadata
 
@@ -154,6 +160,35 @@ jobs:
       param1: isString
       param2: isString.default(__)  # Optional parameter with default
   exec : | #js
+    // Optional: preload helper libraries or oPack modules
+    if (isDef(args.libs) && args.libs.length > 0) {
+      args.libs.split(",")
+        .map(function(lib) { return lib.trim() })
+        .filter(function(lib) { return lib.length > 0 })
+        .forEach(function(lib) {
+          log("Loading library: " + lib + "...")
+          try {
+            if (lib.startsWith("@")) {
+              if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
+                var match = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
+                var packPath = getOPackPath(match[1])
+                var filePath = packPath + "/" + match[2] + ".js"
+                if (io.fileExists(filePath)) {
+                  loadLib(filePath)
+                } else {
+                  logErr("[ERROR] Library '" + lib + "' not found.")
+                }
+              } else {
+                logErr("[ERROR] Library '" + lib + "' does not have the correct format (@oPack/library.js).")
+              }
+            } else {
+              loadLib(lib)
+            }
+          } catch(e) {
+            logErr("[ERROR] Failed to load library " + lib + ": " + e.message)
+          }
+        })
+    }
     // Initialize your service here
     // Store global state in global.* variables
     global.yourServiceClient = // Your initialization code
