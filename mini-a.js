@@ -13,6 +13,16 @@ var MiniA = function() {
   this._id = genUUID()
   this._mcpConnections = {}
   this._shellPrefix = ""
+  this._toolCacheSettings = {}
+  this._toolInfoByName = {}
+  this._lazyMcpConnections = {}
+  this._toolCacheDefaultTtl = 300000
+  this._systemPromptCacheName = "mini-a.systemPrompts"
+  this._toolSchemaCacheName = "mini-a.toolSchemas"
+  this._toolResultCacheName = "mini-a.toolResults"
+  this._ensureCache(this._systemPromptCacheName, { ttl: 600000, maxSize: 128 })
+  this._ensureCache(this._toolSchemaCacheName, { ttl: 3600000, maxSize: 512 })
+  this._ensureCache(this._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -808,6 +818,355 @@ MiniA.prototype._normalizeToolResult = function(original) {
     }
 }
 
+MiniA.prototype._ensureCache = function(name, options) {
+  if (!isString(name) || name.length === 0) return $cache("mini-a.fallback")
+
+  var opts = isObject(options) ? options : {}
+  var exists = $ch().list().indexOf(name) >= 0
+  var builder = $cache(name)
+
+  if (!exists) {
+    if (isNumber(opts.ttl) && opts.ttl > 0) builder.ttl(opts.ttl)
+    if (isNumber(opts.maxSize) && opts.maxSize > 0) builder.maxSize(opts.maxSize)
+    if (opts.popularity === true) builder.byPopularity()
+    builder.fn(() => __).create()
+  }
+
+  return builder
+}
+
+MiniA.prototype._stableStringify = function(value) {
+  if (isUnDef(value) || value === null) return "null"
+  if (isDate(value)) return new Date(value).toISOString()
+  if (isArray(value)) {
+    return "[" + value.map(v => this._stableStringify(v)).join(",") + "]"
+  }
+  if (isMap(value)) {
+    var keys = Object.keys(value).sort()
+    var parts = keys.map(k => stringify(k) + ":" + this._stableStringify(value[k]))
+    return "{" + parts.join(",") + "}"
+  }
+  if (isObject(value)) {
+    return this._stableStringify(ow.obj.fromObj(value))
+  }
+  if (isNumber(value) || isBoolean(value)) return String(value)
+  return stringify(value, __, "")
+}
+
+MiniA.prototype._buildToolCacheKey = function(toolName, params) {
+  var baseName = isString(toolName) ? toolName : stringify(toolName, __, "")
+  var config = this._toolCacheSettings[toolName] || {}
+  var keyParams = params
+
+  if (isMap(config) && isArray(config.keyFields) && config.keyFields.length > 0 && isMap(params)) {
+    keyParams = {}
+    config.keyFields.forEach(field => {
+      if (!isString(field)) return
+      var trimmed = field.trim()
+      if (trimmed.length === 0) return
+      if (isDef(params[trimmed])) keyParams[trimmed] = params[trimmed]
+    })
+  }
+
+  var serializedParams = this._stableStringify(keyParams)
+  return md5(`${baseName}::${serializedParams}`)
+}
+
+MiniA.prototype._getToolResultFromCache = function(cacheKey) {
+  if (!isString(cacheKey) || cacheKey.length === 0) return { hit: false }
+
+  var entry = $cache(this._toolResultCacheName).get(cacheKey)
+  if (isObject(entry) && isDef(entry.value)) {
+    if (!isNumber(entry.expiresAt) || entry.expiresAt >= now()) {
+      return { hit: true, value: entry.value }
+    }
+    $cache(this._toolResultCacheName).unset(cacheKey)
+  }
+
+  return { hit: false }
+}
+
+MiniA.prototype._storeToolResultInCache = function(cacheKey, result, ttl) {
+  if (!isString(cacheKey) || cacheKey.length === 0) return
+  if (isObject(result) && isDef(result.error)) return
+
+  var ttlMs = isNumber(ttl) && ttl > 0 ? ttl : this._toolCacheDefaultTtl
+  var expiresAt = now() + ttlMs
+  $cache(this._toolResultCacheName).set(cacheKey, { value: result, expiresAt: expiresAt })
+}
+
+MiniA.prototype._resolveToolInfo = function(toolName) {
+  if (!isString(toolName)) return __
+  if (isObject(this._toolInfoByName) && isObject(this._toolInfoByName[toolName])) return this._toolInfoByName[toolName]
+
+  if (isArray(this.mcpTools)) {
+    for (var i = 0; i < this.mcpTools.length; i++) {
+      var tool = this.mcpTools[i]
+      if (isObject(tool) && tool.name === toolName) {
+        this._toolInfoByName[toolName] = tool
+        return tool
+      }
+    }
+  }
+  return __
+}
+
+MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
+  var info = isObject(tool) ? tool : {}
+  var annotations = isObject(info.annotations) ? info.annotations : {}
+  var metadata = isObject(info.metadata) ? info.metadata : {}
+
+  var candidateTtl = defaultTtl
+  var ttlCandidates = [
+    annotations.cacheTtl,
+    annotations.cacheTTL,
+    annotations.cache_ttl,
+    metadata.cacheTtl,
+    metadata.cacheTTL,
+    metadata.cache_ttl
+  ]
+
+  for (var i = 0; i < ttlCandidates.length; i++) {
+    var val = ttlCandidates[i]
+    if (isNumber(val) && val > 0) {
+      candidateTtl = val
+      break
+    }
+    if (isString(val) && val.trim().length > 0 && !isNaN(Number(val))) {
+      candidateTtl = Number(val)
+      break
+    }
+  }
+
+  if ((!isNumber(candidateTtl) || candidateTtl <= 0) && (isNumber(annotations.cacheSeconds) || isString(annotations.cacheSeconds))) {
+    var seconds = Number(annotations.cacheSeconds)
+    if (!isNaN(seconds) && seconds > 0) candidateTtl = seconds * 1000
+  }
+  if ((!isNumber(candidateTtl) || candidateTtl <= 0) && (isNumber(metadata.cacheSeconds) || isString(metadata.cacheSeconds))) {
+    var metaSeconds = Number(metadata.cacheSeconds)
+    if (!isNaN(metaSeconds) && metaSeconds > 0) candidateTtl = metaSeconds * 1000
+  }
+
+  var deterministicHints = [
+    annotations.deterministic,
+    metadata.deterministic,
+    annotations.cacheable,
+    metadata.cacheable,
+    annotations.readOnlyHint,
+    annotations.idempotentHint,
+    metadata.readOnlyHint,
+    metadata.idempotentHint
+  ]
+
+  var enabled = deterministicHints.some(hint => toBoolean(hint) === true)
+  var keyFields = []
+  var keyCandidates = annotations.cacheKeyFields || metadata.cacheKeyFields
+  if (isArray(keyCandidates)) {
+    keyFields = keyCandidates.filter(k => isString(k) && k.trim().length > 0).map(k => k.trim())
+  } else if (isString(keyCandidates) && keyCandidates.trim().length > 0) {
+    keyFields = keyCandidates.split(",").map(k => k.trim()).filter(k => k.length > 0)
+  }
+
+  return {
+    enabled : enabled,
+    ttl     : (isNumber(candidateTtl) && candidateTtl > 0) ? candidateTtl : defaultTtl,
+    keyFields: keyFields
+  }
+}
+
+MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params, callContext) {
+  var client = isObject(this._mcpConnections) ? this._mcpConnections[connectionId] : __
+  if (isUnDef(client) || !isFunction(client.callTool)) {
+    throw new Error(`MCP client for tool '${toolName}' not available.`)
+  }
+
+  var cacheConfig = this._toolCacheSettings[toolName]
+  var shouldCache = isObject(cacheConfig) && cacheConfig.enabled === true
+  var cacheKey = shouldCache ? this._buildToolCacheKey(toolName, params) : ""
+
+  if (shouldCache) {
+    var cached = this._getToolResultFromCache(cacheKey)
+    if (cached.hit) {
+      if (isObject(callContext)) callContext.fromCache = true
+      return cached.value
+    }
+  }
+
+  this._ensureConnectionInitialized(connectionId)
+
+  var result = client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, params) : client.callTool(toolName, params)
+
+  if (shouldCache) {
+    this._storeToolResultInCache(cacheKey, result, cacheConfig.ttl)
+  }
+
+  if (isObject(callContext)) callContext.fromCache = false
+  return result
+}
+
+MiniA.prototype._ensureConnectionInitialized = function(connectionId) {
+  if (!isString(connectionId) || connectionId.length === 0) return
+  if (!isObject(this._lazyMcpConnections)) return
+
+  if (this._lazyMcpConnections[connectionId] !== true) return
+
+  var client = this._mcpConnections[connectionId]
+  if (isUnDef(client) || !isFunction(client.initialize)) {
+    this._lazyMcpConnections[connectionId] = false
+    return
+  }
+
+  try {
+    client.initialize()
+    this._lazyMcpConnections[connectionId] = false
+  } catch (e) {
+    this.fnI("warn", `Lazy initialization for MCP connection failed: ${e.message}`)
+    this._lazyMcpConnections[connectionId] = false
+    throw e
+  }
+}
+
+MiniA.prototype._getToolSchemaSummary = function(tool) {
+  var info = isString(tool) ? this._resolveToolInfo(tool) : tool
+  if (!isObject(info)) {
+    return {
+      description: "No description provided.",
+      params     : [],
+      hasParams  : false
+    }
+  }
+
+  var schema = isObject(info.inputSchema) ? info.inputSchema : {}
+  var cacheKey = md5(`${info.name || "unknown"}::${this._stableStringify(schema)}::${info.description || ""}`)
+  var cached = $cache(this._toolSchemaCacheName).get(cacheKey)
+  if (isObject(cached) && isObject(cached.value)) {
+    return cached.value
+  }
+
+  var description = isString(info.description) && info.description.length > 0
+    ? info.description
+    : "No description provided."
+  var properties = isObject(schema.properties) ? schema.properties : {}
+  var requiredList = isArray(schema.required) ? schema.required : []
+  var params = []
+
+  Object.keys(properties).sort().forEach(paramName => {
+    var paramInfo = properties[paramName] || {}
+    var paramDescription = isString(paramInfo.description) && paramInfo.description.length > 0
+      ? paramInfo.description
+      : ""
+    params.push({
+      name          : paramName,
+      type          : isString(paramInfo.type) && paramInfo.type.length > 0 ? paramInfo.type : "any",
+      description   : paramDescription,
+      hasDescription: paramDescription.length > 0,
+      required      : requiredList.indexOf(paramName) >= 0
+    })
+  })
+
+  var summary = {
+    name       : info.name,
+    description: description,
+    params     : params,
+    hasParams  : params.length > 0
+  }
+
+  $cache(this._toolSchemaCacheName).set(cacheKey, { value: summary, expiresAt: now() + 3600000 })
+  return summary
+}
+
+MiniA.prototype._getCachedSystemPrompt = function(templateKey, payload, template) {
+  var serialized = this._stableStringify(payload)
+  var cacheKey = md5(`${templateKey}::${serialized}`)
+  var cached = $cache(this._systemPromptCacheName).get(cacheKey)
+  if (isObject(cached) && isDef(cached.value)) {
+    return cached.value
+  }
+
+  var prompt = $t(template.trim(), payload)
+  $cache(this._systemPromptCacheName).set(cacheKey, { value: prompt, expiresAt: now() + 600000 })
+  return prompt
+}
+
+MiniA.prototype._executeParallelToolBatch = function(batch, options) {
+  var entries = isArray(batch) ? batch : []
+  if (entries.length === 0) return []
+
+  var parent = this
+  var results = []
+
+  var execFn = function(entry, index) {
+    var toolName = entry.toolName
+    var params = entry.params
+    var stepLabel = entry.stepLabel
+    var updateContext = entry.updateContext
+    var context = parent._prepareToolExecution({
+      action      : toolName,
+      params      : params,
+      stepLabel   : stepLabel,
+      updateContext: isBoolean(updateContext) ? updateContext : !parent._useTools
+    })
+
+    var connectionId = parent.mcpToolToConnection && parent.mcpToolToConnection[toolName]
+    if (isUnDef(connectionId)) {
+      var unknownMsg = `Unknown tool '${toolName}'.`
+      parent.fnI("warn", unknownMsg)
+      parent._finalizeToolExecution({
+        toolName     : toolName,
+        params       : params,
+        observation  : unknownMsg,
+        stepLabel    : stepLabel,
+        error        : true,
+        context      : context,
+        contextId    : context.contextId
+      })
+      return { toolName: toolName, result: { error: unknownMsg }, error: true }
+    }
+
+    var rawToolResult
+    var toolCallError = false
+    try {
+      rawToolResult = parent._executeToolWithCache(connectionId, toolName, params, context)
+    } catch (e) {
+      rawToolResult = { error: e.message }
+      toolCallError = true
+    }
+
+    var normalized = parent._normalizeToolResult(rawToolResult)
+    var resultDisplay = normalized.display || "(no output)"
+    var cacheNote = context.fromCache === true ? " (cached)" : ""
+    parent.fnI("done", `Action '${toolName}' completed${cacheNote} (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
+
+    parent._finalizeToolExecution({
+      toolName     : toolName,
+      params       : params,
+      result       : rawToolResult,
+      observation  : resultDisplay,
+      stepLabel    : stepLabel,
+      updateContext: context.updateContext,
+      error        : toolCallError || normalized.hasError,
+      context      : context,
+      contextId    : context.contextId
+    })
+
+    return {
+      toolName : toolName,
+      result   : rawToolResult,
+      error    : toolCallError || normalized.hasError,
+      fromCache: context.fromCache === true,
+      contextId: context.contextId
+    }
+  }
+
+  var errFn = function(err) {
+    parent.fnI("warn", `Parallel MCP execution error: ${err}`)
+  }
+
+  var seq = entries.length <= 1
+  results = pForEach(entries, execFn, errFn, seq)
+  return results
+}
+
 MiniA.prototype._callMcpTool = function(toolName, params) {
     var connectionId = isObject(this.mcpToolToConnection) ? this.mcpToolToConnection[toolName] : __
     if (isUnDef(connectionId)) {
@@ -831,10 +1190,19 @@ MiniA.prototype._callMcpTool = function(toolName, params) {
         }
     }
 
+    var callContext = {
+        action      : toolName,
+        params      : params,
+        stepLabel   : __,
+        updateContext: false,
+        contextId   : genUUID(),
+        fromCache   : false
+    }
+
     var rawResult
     var toolCallError = false
     try {
-        rawResult = client.callTool(toolName, params)
+        rawResult = this._executeToolWithCache(connectionId, toolName, params, callContext)
     } catch (e) {
         rawResult = { error: e.message }
         toolCallError = true
@@ -845,7 +1213,8 @@ MiniA.prototype._callMcpTool = function(toolName, params) {
         ? normalized.display
         : stringify(normalized, __, "") || "(no output)"
 
-    this.fnI("done", `Action '${toolName}' completed (${ow.format.toBytesAbbreviation(displayText.length)}).`)
+    var cacheSuffix = callContext.fromCache === true ? " (cached)" : ""
+    this.fnI("done", `Action '${toolName}' completed${cacheSuffix} (${ow.format.toBytesAbbreviation(displayText.length)}).`)
 
     return {
         rawResult : rawResult,
@@ -1020,7 +1389,9 @@ MiniA.prototype.init = function(args) {
       { name: "conversation", type: "string", default: __ },
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
-      { name: "shellbanextra", type: "string", default: "" }
+      { name: "shellbanextra", type: "string", default: "" },
+      { name: "toolcachettl", type: "number", default: __ },
+      { name: "mcplazy", type: "boolean", default: false }
     ])
 
     // Convert and validate boolean arguments
@@ -1034,10 +1405,15 @@ MiniA.prototype.init = function(args) {
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
+    args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
+
+    if (isNumber(args.toolcachettl) && args.toolcachettl > 0) {
+      this._toolCacheDefaultTtl = args.toolcachettl
+    }
     this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
     this._useTools = args.usetools
 
@@ -1113,13 +1489,14 @@ MiniA.prototype.init = function(args) {
         mcpConfigs = [mcpConfigs]
       }
 
-      this.fnI("mcp", `Initializing ${mcpConfigs.length} MCP connection(s)...`)
+      this.fnI("mcp", `${args.mcplazy ? "Preparing" : "Initializing"} ${mcpConfigs.length} MCP connection(s)...`)
 
       // Initialize each MCP connection
       mcpConfigs.forEach((mcpConfig, index) => {
         try {
           var mcp, id = md5(stringify(mcpConfig, __, ""))
-          if (Object.keys(this._mcpConnections).indexOf(id) >= 0) {
+          var isExisting = Object.keys(this._mcpConnections).indexOf(id) >= 0
+          if (isExisting) {
             mcp = this._mcpConnections[id]
           } else {
             mcp = $mcp(merge(mcpConfig, {
@@ -1172,10 +1549,36 @@ MiniA.prototype.init = function(args) {
               }
             }))
             this._mcpConnections[id] = mcp
-            mcp.initialize()
-            sleep(100, true)
+            if (args.mcplazy === true) {
+              this._lazyMcpConnections[id] = true
+            } else {
+              mcp.initialize()
+              this._lazyMcpConnections[id] = false
+              sleep(100, true)
+            }
+            if (!isFunction(mcp.__miniAOriginalCallTool)) {
+              mcp.__miniAOriginalCallTool = mcp.callTool.bind(mcp)
+              mcp.callTool = (toolName, params, meta) => {
+                var ctx = __
+                if (isObject(meta) && isObject(meta.__miniACallContext)) ctx = meta.__miniACallContext
+                return parent._executeToolWithCache(id, toolName, params, ctx)
+              }
+            }
           }
-          
+
+          if (args.mcplazy === true && this._lazyMcpConnections[id] !== true && !isExisting) {
+            this._lazyMcpConnections[id] = false
+          }
+
+          if (isExisting && !isFunction(mcp.__miniAOriginalCallTool)) {
+            mcp.__miniAOriginalCallTool = mcp.callTool.bind(mcp)
+            mcp.callTool = (toolName, params, meta) => {
+              var ctx = __
+              if (isObject(meta) && isObject(meta.__miniACallContext)) ctx = meta.__miniACallContext
+              return parent._executeToolWithCache(id, toolName, params, ctx)
+            }
+          }
+
           var tools = mcp.listTools()
           if (isDef(tools) && isDef(tools.tools)) {
             tools = tools.tools
@@ -1189,6 +1592,8 @@ MiniA.prototype.init = function(args) {
             this.mcpTools.push(tool)
             this.mcpToolNames.push(tool.name)
             this.mcpToolToConnection[tool.name] = id
+            this._toolInfoByName[tool.name] = tool
+            this._toolCacheSettings[tool.name] = this._computeToolCacheSettings(tool, this._toolCacheDefaultTtl)
           })
 
           this.fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
@@ -1257,54 +1662,34 @@ MiniA.prototype.init = function(args) {
       var chatbotToolDetails = []
       if (this.mcpTools.length > 0 && !this._useTools) {
         chatbotToolDetails = this.mcpTools.map(tool => {
-          var description = isString(tool.description) && tool.description.length > 0
-            ? tool.description
-            : "No description provided."
-          var params = []
-          var schema = isObject(tool.inputSchema) ? tool.inputSchema : {}
-          var properties = isObject(schema.properties) ? schema.properties : {}
-          var requiredList = isArray(schema.required) ? schema.required : []
-
-          Object.keys(properties).forEach(paramName => {
-            var paramInfo = properties[paramName] || {}
-            var paramDescription = isString(paramInfo.description) && paramInfo.description.length > 0
-              ? paramInfo.description
-              : ""
-            params.push({
-              name          : paramName,
-              type          : isString(paramInfo.type) && paramInfo.type.length > 0 ? paramInfo.type : "any",
-              description   : paramDescription,
-              hasDescription: paramDescription.length > 0,
-              required      : requiredList.indexOf(paramName) >= 0
-            })
-          })
-
+          var summary = this._getToolSchemaSummary(tool)
           return {
-            name       : tool.name,
-            description: description,
-            params     : params,
-            hasParams  : params.length > 0
+            name       : summary.name,
+            description: summary.description,
+            params     : summary.params,
+            hasParams  : summary.hasParams
           }
         })
       }
 
       this._actionsList = chatActions.concat(this.mcpToolNames).join(" | ")
-      this._systemInst = $t(this._CHATBOT_SYSTEM_PROMPT.trim(), {
-        knowledge   : trimmedKnowledge,
-        hasKnowledge: trimmedKnowledge.length > 0,
-        hasRules    : baseRules.length > 0,
-        rules       : baseRules,
-        hasTools    : this.mcpTools.length > 0,
-        toolCount   : this.mcpTools.length,
-        toolsPlural : this.mcpTools.length !== 1,
-        toolsList   : chatToolsList,
+      var chatbotPayload = {
+        knowledge     : trimmedKnowledge,
+        hasKnowledge  : trimmedKnowledge.length > 0,
+        hasRules      : baseRules.length > 0,
+        rules         : baseRules,
+        hasTools      : this.mcpTools.length > 0,
+        toolCount     : this.mcpTools.length,
+        toolsPlural   : this.mcpTools.length !== 1,
+        toolsList     : chatToolsList,
         hasToolDetails: chatbotToolDetails.length > 0,
-        toolDetails : chatbotToolDetails,
-        markdown    : args.format == "md",
-        useshell    : args.useshell
-      })
+        toolDetails   : chatbotToolDetails,
+        markdown      : args.format == "md",
+        useshell      : args.useshell
+      }
+      this._systemInst = this._getCachedSystemPrompt("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT)
     } else {
-      var promptActionsDesc = this._useTools ? [] : this.mcpTools
+      var promptActionsDesc = this._useTools ? [] : this.mcpTools.map(tool => this._getToolSchemaSummary(tool))
       var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
       var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
 
@@ -1315,7 +1700,7 @@ MiniA.prototype.init = function(args) {
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
 
-      this._systemInst = $t(this._SYSTEM_PROMPT.trim(), {
+      var agentPayload = {
         actionsWordNumber: actionsWordNumber,
         actionsList      : promptActionsList,
         useshell         : args.useshell,
@@ -1327,7 +1712,8 @@ MiniA.prototype.init = function(args) {
         usetools         : this._useTools,
         toolCount        : this.mcpTools.length,
         planning         : this._enablePlanning
-      })
+      }
+      this._systemInst = this._getCachedSystemPrompt("agent", agentPayload, this._SYSTEM_PROMPT)
     }
 
     this._currentMode = args.chatbotmode ? "chatbot" : "agent"
@@ -1620,24 +2006,39 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       recentSimilarThoughts: [],
       hadErrorThisStep    : false,
       clearedConsecutiveErrors: false,
-      currentTool         : null
+      currentTool         : null,
+      toolContexts        : {}
     }
     var maxSteps = args.maxsteps
     var currentToolContext = {}
     this._prepareToolExecution = info => {
+      var baseInfo = isObject(info) ? info : {}
+      var contextId = isString(baseInfo.contextId) && baseInfo.contextId.length > 0 ? baseInfo.contextId : genUUID()
       currentToolContext = Object.assign({
         updateContext: !this._useTools,
         stepLabel    : __,
         action       : __,
-        params       : __
-      }, isObject(info) ? info : {})
+        params       : __,
+        contextId    : contextId,
+        fromCache    : false
+      }, baseInfo)
+      runtime.toolContexts[contextId] = currentToolContext
       runtime.currentTool = currentToolContext
+      return currentToolContext
     }
 
     var finalizeToolExecution = payload => {
       if (!isObject(runtime)) return
       var details = isObject(payload) ? payload : {}
-      var toolCtx = runtime.currentTool || currentToolContext || {}
+      var contextId = isString(details.contextId) ? details.contextId : __
+      var toolCtx
+      if (isString(contextId) && isObject(runtime.toolContexts[contextId])) {
+        toolCtx = runtime.toolContexts[contextId]
+      } else if (isObject(details.context) && isString(details.context.contextId)) {
+        toolCtx = details.context
+      } else {
+        toolCtx = runtime.currentTool || currentToolContext || {}
+      }
       var toolName = details.toolName || toolCtx.action || ""
       var params = isDef(details.params) ? details.params : toolCtx.params
       var stepLabel = details.stepLabel || toolCtx.stepLabel
@@ -1699,6 +2100,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       runtime.currentTool = null
       currentToolContext = {}
+      if (isString(contextId) && isObject(runtime.toolContexts[contextId])) {
+        delete runtime.toolContexts[contextId]
+      } else if (isString(toolCtx.contextId) && isObject(runtime.toolContexts[toolCtx.contextId])) {
+        delete runtime.toolContexts[toolCtx.contextId]
+      }
     }
     this._finalizeToolExecution = finalizeToolExecution
 
@@ -1948,6 +2354,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         return commonWords.length >= Math.min(words1.length, words2.length) * 0.6
       }
 
+      var pendingToolActions = []
+      var flushToolActions = () => {
+        if (pendingToolActions.length === 0) return
+        var batchResults = this._executeParallelToolBatch(pendingToolActions)
+        if (isArray(batchResults) && batchResults.some(r => isObject(r) && r.error === true)) {
+          runtime.hadErrorThisStep = true
+        }
+        pendingToolActions = []
+      }
+
       for (var actionIndex = 0; actionIndex < actionMessages.length; actionIndex++) {
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
@@ -1983,12 +2399,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
         var stepLabel = `${step + 1}${stepSuffix}`
+        var isKnownTool = this.mcpToolToConnection && isDef(this.mcpToolToConnection[origActionRaw])
 
         global.__mini_a_metrics.thoughts_made.inc()
 
         if (action != "think") {
           var logMsg = thoughtValue || currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
-          if (isObject(logMsg)) { 
+          if (isObject(logMsg)) {
             logMsg = af.toSLON(logMsg)
             if (logMsg == "()") logMsg = "(no thought)"
           }
@@ -2031,6 +2448,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
           }
 
+          flushToolActions()
           checkAndSummarizeContext()
           continue
         }
@@ -2041,8 +2459,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             runtime.consecutiveErrors++
             global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
             runtime.hadErrorThisStep = true
+            flushToolActions()
             break
           }
+          flushToolActions()
           var shellOutput = this._runCommand({
             command        : commandValue,
             readwrite      : args.readwrite,
@@ -2067,8 +2487,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           continue
         }
 
-        if (this.mcpToolNames.indexOf(origActionRaw) >= 0) {
+        if (isKnownTool && action != "final") {
           if (isDef(paramsValue) && !isMap(paramsValue)) {
+            flushToolActions()
             runtime.context.push(`[OBS ${stepLabel}] (${origActionRaw}) missing or invalid 'params' from model.`)
             runtime.consecutiveErrors++
             global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
@@ -2077,41 +2498,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
 
-          this._prepareToolExecution({
-            action      : origActionRaw,
-            params      : paramsValue,
-            stepLabel   : stepLabel,
-            updateContext: true
-          })
-
-          var connectionIndex = this.mcpToolToConnection[origActionRaw]
-          var mcp = this._mcpConnections[connectionIndex]
-          var rawToolResult
-          var toolCallError = false
-
-          try {
-            rawToolResult = mcp.callTool(origActionRaw, paramsValue)
-          } catch (e) {
-            rawToolResult = { error: e.message }
-            toolCallError = true
-          }
-
-          var normalizedResult = this._normalizeToolResult(rawToolResult)
-          var resultDisplay = normalizedResult.display || "(no output)"
-          this.fnI("done", `Action '${origActionRaw}' completed (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
-
-          this._finalizeToolExecution({
+          pendingToolActions.push({
             toolName     : origActionRaw,
             params       : paramsValue,
-            result       : rawToolResult,
-            observation  : resultDisplay,
             stepLabel    : stepLabel,
-            updateContext: true,
-            error        : toolCallError || normalizedResult.hasError
+            updateContext: !this._useTools
           })
-
           continue
         }
+
+        flushToolActions()
 
         if (action == "final") {
           if (args.format != 'md' && args.format != 'raw') {
@@ -2162,6 +2558,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         checkAndSummarizeContext()
       }
+
+      flushToolActions()
 
       if (stateUpdatedThisStep && !stateRecordedInContext) {
         runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
