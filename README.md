@@ -81,6 +81,17 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 **Cost savings**: This can significantly reduce API costs by using cheaper models for routine tasks while ensuring quality for complex operations.
 
+### Tool orchestration enhancements
+
+Recent updates focus on performance and resiliency when working with MCP tools:
+
+- **Parallel tool execution** – When the model responds with multiple independent tool calls in the same step, Mini-A executes them concurrently, reducing overall latency for long-running MCP operations.
+- **Smart context caching** – System prompts and tool schema summaries are cached across sessions, minimizing repeated token overhead and keeping instructions consistent even as the tool roster grows.
+- **Deterministic tool result caching** – Tools marked with `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit caching metadata reuse previous results for the same parameters. Configure the default cache window with `toolcachettl=<ms>` or override it per tool via metadata.
+- **Lazy MCP initialization** – Pass `mcplazy=true` to defer establishing MCP connections until a tool is actually needed. This shortens startup times when many optional integrations are configured.
+
+These improvements work out of the box and can be tuned per environment; see [USAGE.md](USAGE.md) for option details.
+
 ### Running the mini agent
 
 #### Single MCP connection

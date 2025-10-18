@@ -1,0 +1,62 @@
+loadLib('mini-a.js')
+
+var agent = new MiniA()
+agent.fnI = function() {}
+agent._useTools = false
+agent._mcpConnections = {}
+agent.mcpToolToConnection = {}
+agent._lazyMcpConnections = {}
+agent._toolCacheSettings = {}
+agent._toolInfoByName = {}
+agent._ensureCache(agent._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
+
+var connectionId = 'conn1'
+var callLog = []
+var executionDelay = 600
+
+var client = {
+  __miniAOriginalCallTool: function(name, params) {
+    callLog.push({ name: name, params: params, ts: now() })
+    java.lang.Thread.sleep(executionDelay)
+    return { ok: true, tool: name, params: params }
+  },
+  callTool: function(name, params) {
+    return this.__miniAOriginalCallTool(name, params)
+  },
+  initialize: function() {}
+}
+
+agent._mcpConnections[connectionId] = client
+agent._lazyMcpConnections[connectionId] = false
+agent.mcpToolToConnection.toolA = connectionId
+agent.mcpToolToConnection.toolB = connectionId
+agent._toolCacheSettings.toolA = { enabled: true, ttl: 120000, keyFields: [] }
+agent._toolCacheSettings.toolB = { enabled: false }
+
+agent._prepareToolExecution = function(info) {
+  var base = isMap(info) ? info : {}
+  base.contextId = base.contextId || genUUID()
+  base.fromCache = false
+  return base
+}
+agent._finalizeToolExecution = function() {}
+
+var start = now()
+var parallelResults = agent._executeParallelToolBatch([
+  { toolName: 'toolA', params: { value: 1 }, stepLabel: '1.1', updateContext: true },
+  { toolName: 'toolB', params: { value: 2 }, stepLabel: '1.2', updateContext: true }
+])
+var elapsed = now() - start
+if (elapsed > (executionDelay * 2)) throw 'Parallel execution took too long: ' + elapsed
+if (parallelResults.length != 2) throw 'Unexpected parallel results length: ' + parallelResults.length
+
+var callsAfterFirst = callLog.length
+var cachedResults = agent._executeParallelToolBatch([
+  { toolName: 'toolA', params: { value: 1 }, stepLabel: '2.1', updateContext: true }
+])
+var callsAfterSecond = callLog.length
+if (callsAfterSecond != callsAfterFirst) throw 'Tool result was not served from cache'
+if (!(cachedResults[0] && cachedResults[0].fromCache === true)) throw 'Cached result did not report cache hit'
+
+print('Parallel execution elapsed: ' + elapsed)
+print('Cache reuse validated for toolA')
