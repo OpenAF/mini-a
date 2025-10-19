@@ -176,6 +176,14 @@ All other flags (MCP connections, attachments, shell access, etc.) continue to w
 
 Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`). Leave `useplanning` unset/false and Mini-A will skip the planning instructions entirely.
 
+With advanced planning enabled Mini-A now:
+
+- Builds a task decomposition tree (`planTree`) before work begins, complete with numbered checkpoints beneath each high-level step.
+- Validates the draft plan against available tools and shell access, surfacing issues under `planMeta.validation.issues` and in the 🗺️ stream.
+- Tracks execution context in `planMeta.history` so obstacles automatically trigger a replanning node that becomes the new active step.
+- Keeps a running `planProgress` object (`{ total, completed, percent }`) used to render a progress banner above every plan update.
+
+Downstream automation can inspect `planMeta.activeNodeId` to see which node is currently targeted, or replay `planMeta.history` to understand when and why Mini-A replanned.
 - **CLI / oJob output**: Planning updates appear with the 🗺️ icon, alongside thought (`💭`) messages.
 - **Web UI**: When an active plan exists the transcript keeps the 🗺️ entries and the interface surfaces an expandable progress card that summarizes completed vs. total steps and renders the plan as a numbered checklist with completed items struck through.
 - **Custom integrations**: The current plan continues to flow through the state payload passed back on each step, enabling downstream automation.

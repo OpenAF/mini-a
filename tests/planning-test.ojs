@@ -1,0 +1,88 @@
+loadLib('mini-a.js')
+
+var agent = new MiniA()
+agent.fnI = function() {}
+agent._enablePlanning = true
+agent._useTools = false
+agent._agentState = {}
+agent.mcpToolNames = ['docsSearch', 'runCommand']
+agent._initializePlanningContext({ goal: 'Research new release features, draft summary, and verify outputs', useshell: true, tools: agent.mcpToolNames })
+
+var tree = agent._agentState.planTree
+if (!isObject(tree)) throw 'Expected plan tree to be initialized'
+if (!isArray(tree.children) || tree.children.length === 0) throw 'Expected plan tree to include child tasks'
+
+var hasCheckpoints = false
+for (var i = 0; i < tree.children.length; i++) {
+  var child = tree.children[i]
+  if (isArray(child.children) && child.children.length > 0) {
+    hasCheckpoints = true
+    break
+  }
+}
+if (!hasCheckpoints) throw 'Expected at least one checkpoint node in plan tree'
+
+var progress = agent._agentState.planProgress
+if (!isObject(progress)) throw 'Plan progress missing'
+if (progress.total <= 0) throw 'Plan progress missing total count'
+if (progress.completed !== 0) throw 'Initial completed count should be zero'
+if (progress.percent !== 0) throw 'Initial percent should be zero'
+
+var validation = agent._agentState.planMeta.validation
+if (!isObject(validation) || validation.ok !== true) throw 'Expected plan validation to succeed for shell-enabled scenario'
+
+if (!isArray(agent._planSequence) || agent._planSequence.length === 0) throw 'Plan sequence not initialized'
+
+var failingAgent = new MiniA()
+failingAgent.fnI = function() {}
+failingAgent._enablePlanning = true
+failingAgent._agentState = {}
+failingAgent.mcpToolNames = []
+failingAgent._initializePlanningContext({ goal: 'Run shell command to list files and use tool:missingTool for reporting', useshell: false, tools: [] })
+var failingValidation = failingAgent._agentState.planMeta.validation
+if (!isObject(failingValidation) || failingValidation.ok !== false) throw 'Expected validation to fail when requirements missing'
+if (!isArray(failingValidation.issues) || failingValidation.issues.length < 2) throw 'Expected multiple validation issues to be reported'
+
+var runtime = {
+  context                : [],
+  consecutiveErrors      : 0,
+  consecutiveThoughts    : 0,
+  totalThoughts          : 0,
+  stepsWithoutAction     : 0,
+  lastActions            : [],
+  recentSimilarThoughts  : [],
+  toolContexts           : {},
+  errorHistory           : [],
+  restoredFromCheckpoint : false,
+  hadErrorThisStep       : false
+}
+
+agent._registerRuntimeError(runtime, { category: 'transient', message: 'network failure' })
+
+var history = agent._agentState.planMeta.history
+if (!isArray(history) || history.length === 0) throw 'Expected obstacle history to be recorded'
+var lastEntry = history[history.length - 1]
+if (!isObject(lastEntry) || lastEntry.type !== 'replan') throw 'Last history entry should record replanning'
+
+var activeId = agent._agentState.planMeta.activeNodeId
+if (!isString(activeId) || activeId.length === 0) throw 'Active plan node not tracked after replanning'
+var activeNode = agent._findPlanNode(activeId)
+if (!isObject(activeNode) || activeNode.kind !== 'replan') throw 'Active node should be the replanned step'
+
+var planTitles = agent._agentState.plan.map(function(entry) { return entry.title })
+var sawReplan = false
+for (var j = 0; j < planTitles.length; j++) {
+  if (String(planTitles[j]).indexOf('Replan:') >= 0) {
+    sawReplan = true
+    break
+  }
+}
+if (!sawReplan) throw 'Plan summary should include replanning step'
+
+var firstNodeId = agent._planSequence[0]
+if (!agent._updatePlanNodeStatus(firstNodeId, 'done')) throw 'Unable to mark first node done'
+var updatedProgress = agent._agentState.planProgress
+if (updatedProgress.completed <= 0) throw 'Progress not updated after completing a node'
+if (updatedProgress.percent <= 0) throw 'Progress percent not updated'
+
+print('Advanced planning tests completed successfully.')
