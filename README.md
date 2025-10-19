@@ -92,6 +92,16 @@ Recent updates focus on performance and resiliency when working with MCP tools:
 
 These improvements work out of the box and can be tuned per environment; see [USAGE.md](USAGE.md) for option details.
 
+### Reliability & recovery upgrades
+
+Mini-A now bounces back from flaky infrastructure faster and with richer diagnostics:
+
+- **Exponential backoff on LLM and MCP calls** automatically spaces out retries to absorb transient rate limits, timeouts, and network hiccups before escalating failures.
+- **Automatic checkpoints and restoration** capture the agent state at the end of each healthy step, allowing seamless recovery after transient errors without losing context or progress.
+- **Error categorization** distinguishes between transient and permanent faults so the agent can retry, escalate, or halt with clear messaging instead of blindly reissuing requests.
+- **Circuit breakers for MCP connections** temporarily pause repeatedly failing integrations, protecting the session from hammering unhealthy backends.
+- **Preserved error context across summaries** keeps the latest recovery notes at the top of the conversation even when the working memory is compressed.
+
 ### Running the mini agent
 
 #### Single MCP connection

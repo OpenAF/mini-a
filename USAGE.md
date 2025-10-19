@@ -64,10 +64,22 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 **Smart Escalation Triggers:**
 - 2+ consecutive errors
-- 3+ consecutive thoughts without action  
+- 3+ consecutive thoughts without action
 - 5+ total thoughts (thinking loop detection)
 - 4+ steps without meaningful progress
 - Repeating similar thoughts detected
+
+## Reliability features
+
+Mini-A now includes resilience primitives so long-running sessions can absorb transient failures without manual babysitting:
+
+- **Exponential backoff on every LLM and MCP call** smooths over throttling and flaky network hops by spacing retries with an increasing delay.
+- **Automatic checkpoints** snapshot the agent state after each successful step; if a transient error strikes, Mini-A restores the last checkpoint and keeps working instead of abandoning the goal.
+- **Error categorization** separates transient hiccups (network, rate limits, timeouts) from permanent problems (invalid tool payloads, unsupported actions) so retries are only attempted when they make sense.
+- **MCP circuit breakers** pause connections that repeatedly fail and log a warning, preventing noisy integrations from derailing the rest of the plan. Mini-A will automatically retry after the cooldown expires.
+- **Persistent error summaries** prepend the latest recovery notes to the context whenever it is summarized, keeping operators informed about what went wrong and how it was resolved.
+
+All of these behaviors are enabled by default. Use verbose or debug logging (`verbose=true` or `debug=true`) to watch the retry, recovery, and circuit-breaker messages in real time.
 
 ## Web UI quick start
 
