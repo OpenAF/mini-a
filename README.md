@@ -174,13 +174,20 @@ All other flags (MCP connections, attachments, shell access, etc.) continue to w
 
 ### Task planning updates (agent mode, opt-in)
 
-Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`). Leave `useplanning` unset/false and Mini-A will skip the planning instructions entirely.
+Set `useplanning=true` (and keep `chatbotmode=false`) to promote Mini-A’s planner into “advanced” mode. Instead of a flat list, the agent now:
 
-- **CLI / oJob output**: Planning updates appear with the 🗺️ icon, alongside thought (`💭`) messages.
-- **Web UI**: When an active plan exists the transcript keeps the 🗺️ entries and the interface surfaces an expandable progress card that summarizes completed vs. total steps and renders the plan as a numbered checklist with completed items struck through.
-- **Custom integrations**: The current plan continues to flow through the state payload passed back on each step, enabling downstream automation.
+- Generates a hierarchical task tree with intermediate checkpoints **before** the first step (using the main model and caching the result via OpenAF’s `$cache`).
+- Validates each step against currently enabled tools/shell access and marks anything infeasible as `blocked` with a warning before execution starts.
+- Tracks progress with a live percentage/ASCII bar (🗺️ logs) and mirrors the data under `state.planning` so downstream automation can monitor `progress.percent`, `assumptions`, `risks`, and `checkpoints`.
+- Automatically triggers **dynamic replanning** whenever repeated errors occur or a step becomes blocked—Mini-A regenerates the plan tree in-place and keeps history in the transcript.
 
-The agent revises the plan whenever progress changes, so the summary always reflects the latest approach. When no plan is active the web UI hides 🗺️ updates and the progress card stays collapsed.
+Leave `useplanning` unset/false and Mini-A will skip this planner entirely.
+
+- **CLI / oJob output**: Planning updates appear with the 🗺️ icon, alongside thought (`💭`) messages. Nested tasks are numbered (e.g., `1.2 Write tests`) and progress bars are logged after every change.
+- **Web UI**: When an active plan exists the transcript keeps the 🗺️ entries and the interface surfaces an expandable progress card summarizing percent complete, blocked steps, and outstanding checkpoints.
+- **Custom integrations**: The hierarchical plan is exposed in `state.plan` (with `children`, `requiredTools`, and `checkpoints`) and summarized metadata lives in `state.planning` for easy consumption.
+
+The agent revises the plan whenever progress changes or obstacles appear, so the summary always reflects the latest approach. When no plan is active the web UI hides 🗺️ updates and the progress card stays collapsed.
 
 ## Project Components
 
