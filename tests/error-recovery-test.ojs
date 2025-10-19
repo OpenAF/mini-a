@@ -1,0 +1,108 @@
+loadLib('mini-a.js')
+
+var agent = new MiniA()
+agent.fnI = function() {}
+agent._useTools = false
+agent._mcpConnections = {}
+agent._lazyMcpConnections = {}
+agent.mcpToolToConnection = {}
+agent._toolCacheSettings = {}
+agent._toolInfoByName = {}
+agent._ensureCache(agent._toolResultCacheName, { ttl: 60000, maxSize: 32 })
+
+var connectionId = 'retryConn'
+var retryAttempts = 0
+var retryClient = {
+  __miniAOriginalCallTool: function(name, params) {
+    retryAttempts++
+    if (retryAttempts < 3) {
+      throw new Error('timeout while calling tool')
+    }
+    return { ok: true, attempts: retryAttempts }
+  },
+  callTool: function(name, params) {
+    return this.__miniAOriginalCallTool(name, params)
+  },
+  initialize: function() {}
+}
+
+agent._mcpConnections[connectionId] = retryClient
+agent._lazyMcpConnections[connectionId] = false
+agent.mcpToolToConnection.retryTool = connectionId
+agent._toolCacheSettings.retryTool = { enabled: false }
+
+var retryContext = {}
+var retryStart = now()
+var retryResult = agent._executeToolWithCache(connectionId, 'retryTool', { value: 1 }, retryContext)
+var retryElapsed = now() - retryStart
+if (retryAttempts != 3) throw 'Expected 3 attempts but saw ' + retryAttempts
+if (!(isObject(retryResult) && retryResult.ok === true)) throw 'Retry result missing success payload'
+if (retryContext.fromCache !== false) throw 'Retry context should mark non-cached execution'
+print('Retry backoff elapsed: ' + retryElapsed + 'ms')
+
+var failingConn = 'circuitConn'
+var failingAttempts = 0
+var failingClient = {
+  __miniAOriginalCallTool: function(name, params) {
+    failingAttempts++
+    throw new Error('timeout contacting upstream service')
+  },
+  callTool: function(name, params) {
+    return this.__miniAOriginalCallTool(name, params)
+  },
+  initialize: function() {}
+}
+
+agent._mcpConnections[failingConn] = failingClient
+agent._lazyMcpConnections[failingConn] = false
+agent.mcpToolToConnection.failTool = failingConn
+agent._toolCacheSettings.failTool = { enabled: false }
+
+for (var i = 0; i < 3; i++) {
+  try {
+    agent._executeToolWithCache(failingConn, 'failTool', {}, {})
+    throw 'Expected failure for attempt ' + i
+  } catch (e) {
+    if (String(e).indexOf('timeout') < 0 && String(e).indexOf('Circuit open') < 0) throw 'Unexpected failure reason: ' + e
+  }
+}
+var circuitData = agent._mcpCircuitState[failingConn]
+if (!isObject(circuitData) || circuitData.failures < 3 || !isNumber(circuitData.openUntil)) throw 'Circuit breaker state missing after repeated failures'
+try {
+  agent._executeToolWithCache(failingConn, 'failTool', {}, {})
+  throw 'Expected circuit-open short circuit'
+} catch (e) {
+  if (String(e).indexOf('Circuit open') < 0) throw 'Circuit breaker did not short circuit calls: ' + e
+}
+print('Circuit breaker state: ' + stringify(circuitData, __, ''))
+
+var runtime = {
+  context                : ['[THOUGHT 1] start'],
+  consecutiveErrors      : 0,
+  consecutiveThoughts    : 0,
+  totalThoughts          : 0,
+  stepsWithoutAction     : 0,
+  lastActions            : [],
+  recentSimilarThoughts  : [],
+  hadErrorThisStep       : false,
+  clearedConsecutiveErrors: false,
+  currentTool            : null,
+  toolContexts           : {},
+  errorHistory           : [],
+  restoredFromCheckpoint : false
+}
+agent._runtime = runtime
+agent._agentState = { foo: 'bar' }
+agent._setCheckpoint('unit', runtime)
+runtime.context.push('[OBS 1] something happened')
+agent._registerRuntimeError(runtime, { category: 'transient', message: 'network hiccup', context: { test: true } })
+if (!runtime.restoredFromCheckpoint) throw 'Checkpoint restore flag missing'
+if (runtime.consecutiveErrors != 1) throw 'Consecutive errors not incremented on register'
+var recoveryNotes = runtime.context.filter(line => line.indexOf('[RECOVERY]') === 0)
+if (recoveryNotes.length === 0) throw 'Recovery note missing from context'
+if (!isArray(runtime.errorHistory) || runtime.errorHistory.length === 0) throw 'Error history not updated'
+
+var historyLine = agent._renderErrorHistory(runtime)
+if (historyLine.indexOf('[ERROR HISTORY]') != 0) throw 'Error summary prefix missing'
+print('Recovery line: ' + recoveryNotes[0])
+print('Error summary: ' + historyLine)
