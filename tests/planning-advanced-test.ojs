@@ -1,0 +1,96 @@
+loadLib('mini-a.js')
+ow.loadTest()
+
+(function() {
+  function createAgent() {
+    var agent = new MiniA()
+    agent.fnI = function() {}
+    agent._enablePlanning = true
+    return agent
+  }
+
+  function buildSamplePlan(agent) {
+    var raw = {
+      plan: {
+        title : 'Ship feature',
+        summary: 'Plan the work before execution',
+        steps : [
+          {
+            title        : 'Research APIs',
+            requiredTools: ['docsTool'],
+            checkpoints : ['Docs reviewed'],
+            steps       : [
+              { title: 'Read documentation', status: 'done' },
+              { title: 'Summarize findings', requiresShell: true }
+            ]
+          },
+          {
+            title : 'Update implementation',
+            steps : [
+              { title: 'Apply code changes' }
+            ]
+          }
+        ]
+      },
+      assumptions: ['Access to repository'],
+      risks      : ['Tight deadline']
+    }
+    return agent._sanitizePlanTree(raw)
+  }
+
+  exports.testSanitizeAndFlattenPlanning = function() {
+    var agent = createAgent()
+    var sanitized = buildSamplePlan(agent)
+    ow.test.assert(sanitized.steps.length, 2, 'Expected two top-level steps')
+    ow.test.assert(sanitized.steps[0].children.length, 2, 'Nested subtasks should be preserved')
+    ow.test.assert(sanitized.steps[0].children[1].requiresShell, true, 'Requires-shell flag should persist')
+    var flattened = agent._flattenPlanTreeForState(sanitized)
+    ow.test.assert(flattened.length >= 4, true, 'Flattened view should include nested tasks')
+  }
+
+  exports.testPlanValidationFlagsMissingCapabilities = function() {
+    var agent = createAgent()
+    var sanitized = buildSamplePlan(agent)
+    var capabilities = agent._describeToolCapabilities({ useshell: false, readwrite: false })
+    var validation = agent._validatePlanFeasibility(sanitized, capabilities)
+    ow.test.assert(validation.feasible, false, 'Plan should be infeasible without shell/docsTool')
+    ow.test.assert(validation.issues.length >= 1, true, 'Validation should report at least one issue')
+    var reasons = validation.issues.map(function(issue) { return issue.reason }).join(' | ')
+    ow.test.assert(reasons.indexOf('shell') >= 0, true, 'Validation should mention missing shell access')
+    ow.test.assert(reasons.indexOf('docsTool') >= 0, true, 'Validation should mention missing tool')
+    ow.test.assert(sanitized.steps[0].children[1].status, 'blocked', 'Infeasible step should be marked blocked')
+  }
+
+  exports.testProgressAndReplanScheduling = function() {
+    var agent = createAgent()
+    var sanitized = buildSamplePlan(agent)
+    sanitized.steps[0].status = 'done'
+    sanitized.steps[0].children[0].status = 'done'
+    sanitized.steps[0].children[1].status = 'blocked'
+    sanitized.steps[1].status = 'in_progress'
+    sanitized.steps[1].children = sanitized.steps[1].children || sanitized.steps[1].steps || []
+    if (sanitized.steps[1].children.length === 0) {
+      sanitized.steps[1].children = [{ title: 'Run tests', status: 'pending' }]
+    }
+    delete sanitized.steps[1].steps
+
+    agent._agentState = { plan: sanitized.steps, planning: {} }
+    agent._planningTree = sanitized
+    agent._planningMetadata = {}
+    agent._planProgressSnapshot = ''
+    agent._lastPlanSnapshot = ''
+    agent._shouldReplan = false
+
+    var planLogs = []
+    agent.fnI = function(type, message) {
+      if (type === 'plan') planLogs.push(message)
+    }
+
+    agent._handlePlanUpdate()
+
+    ow.test.assert(agent._shouldReplan, true, 'Blocked steps should schedule replanning')
+    ow.test.assert(isObject(agent._agentState.planning.progress), true, 'Progress data should be recorded in state')
+    ow.test.assert(agent._agentState.planning.progress.percent, 40, 'Progress percent should reflect completed work')
+    ow.test.assert(planLogs.filter(function(msg) { return msg.indexOf('Progress') >= 0 }).length > 0, true, 'Progress log should be emitted')
+  }
+})()

@@ -23,9 +23,16 @@ var MiniA = function() {
   this._ensureCache(this._systemPromptCacheName, { ttl: 600000, maxSize: 128 })
   this._ensureCache(this._toolSchemaCacheName, { ttl: 3600000, maxSize: 512 })
   this._ensureCache(this._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
+  this._planCacheName = "mini-a.planSnapshots"
+  this._planCacheTtl = 600000
+  this._ensureCache(this._planCacheName, { ttl: this._planCacheTtl, maxSize: 64, popularity: true })
   this._mcpCircuitState = {}
   this._lastCheckpoint = null
   this._errorHistory = []
+  this._planningTree = null
+  this._planningMetadata = {}
+  this._planProgressSnapshot = ""
+  this._shouldReplan = false
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -510,73 +517,186 @@ MiniA.prototype._splitShellPrefix = function(value) {
     return result.length > 0 ? result : [prefix]
 }
 
+MiniA.prototype._normalizePlanStatusValue = function(value) {
+    var raw = value
+    var statusValue = value
+
+    if (isString(statusValue)) {
+        statusValue = statusValue.trim().toLowerCase()
+    } else if (isNumber(statusValue)) {
+        statusValue = statusValue >= 1 ? "done" : "pending"
+    } else if (statusValue === true) {
+        statusValue = "done"
+    } else if (statusValue === false || isUnDef(statusValue)) {
+        statusValue = "pending"
+    } else {
+        statusValue = stringify(statusValue, __, "")
+        statusValue = isString(statusValue) ? statusValue.trim().toLowerCase() : "pending"
+    }
+
+    statusValue = statusValue.replace(/[^a-z_\-\s]/g, "").replace(/[\s-]+/g, "_")
+    if (statusValue.length === 0) statusValue = "pending"
+
+    return {
+        status   : statusValue,
+        rawStatus: raw
+    }
+}
+
 MiniA.prototype._normalizePlanItems = function(plan) {
+    if (!this._enablePlanning) return []
     if (isUnDef(plan) || plan === null) return []
 
-    var extractItems = value => {
+    var parent = this
+
+    var toArray = function(value) {
         if (isArray(value)) return value
         if (isMap(value)) {
             if (isArray(value.items)) return value.items
             if (isArray(value.steps)) return value.steps
-            return Object.keys(value).map(k => value[k])
+            if (isArray(value.children)) return value.children
+            return Object.keys(value).map(function(k) { return value[k] })
         }
         return [value]
     }
 
-    var items = extractItems(plan)
-    if (!isArray(items)) return []
+    var sanitizeList = function(candidate) {
+        if (isUnDef(candidate)) return []
+        if (isArray(candidate)) {
+            return candidate
+                .map(function(entry) {
+                    if (isString(entry)) return entry.trim()
+                    if (isObject(entry)) return stringify(entry, __, "")
+                    if (isNumber(entry) || isBoolean(entry)) return String(entry)
+                    return ""
+                })
+                .filter(function(entry) { return isString(entry) && entry.length > 0 })
+        }
+        if (isString(candidate)) {
+            return candidate
+                .split(/[,\n]/)
+                .map(function(entry) { return entry.trim() })
+                .filter(function(entry) { return entry.length > 0 })
+        }
+        return []
+    }
 
     var normalized = []
-    items.forEach(item => {
-        if (isUnDef(item)) return
-        if (isString(item)) {
-            normalized.push({ title: item.trim(), status: "pending", rawStatus: "pending" })
-            return
-        }
-        if (isMap(item)) {
-            var title = item.title || item.name || item.step || item.task || item.description || item.summary || ""
-            if (isObject(title)) title = stringify(title, __, "")
-            if (isString(title)) title = title.trim()
-            var statusValue = __
-            if (isDef(item.status)) statusValue = item.status
-            else if (isDef(item.state)) statusValue = item.state
-            else if (isDef(item.phase)) statusValue = item.phase
-            else if (isDef(item.progress)) statusValue = item.progress
-            else if (item.done === true || item.complete === true || item.completed === true) statusValue = "done"
-            else if (item.done === false || item.complete === false || item.completed === false) statusValue = "pending"
 
-            if (isUnDef(statusValue) && isNumber(item.remaining) && item.remaining === 0) statusValue = "done"
-            if (isUnDef(statusValue) && isNumber(item.percent) && item.percent >= 100) statusValue = "done"
-            if (isUnDef(statusValue) && isNumber(item.progress) && item.progress >= 1) statusValue = "done"
+    var traverse = function(items, pathParts, depth) {
+        var list = toArray(items)
+        if (!isArray(list)) return
 
-            if (isString(statusValue)) {
-                statusValue = statusValue.trim().toLowerCase()
-            } else if (isNumber(statusValue)) {
-                statusValue = statusValue >= 1 ? "done" : "pending"
-            } else if (statusValue === true) {
-                statusValue = "done"
-            } else if (statusValue === false) {
-                statusValue = "pending"
-            } else {
-                statusValue = "pending"
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i]
+            if (isUnDef(item)) continue
+
+            var currentPathParts = pathParts.slice()
+            currentPathParts.push(i + 1)
+            var currentPath = currentPathParts.join(".")
+            var indent = ""
+            for (var j = 0; j < depth; j++) indent += "  "
+
+            if (isString(item)) {
+                var titleOnly = item.trim()
+                if (titleOnly.length === 0) continue
+                normalized.push({
+                    title        : titleOnly,
+                    status       : "pending",
+                    rawStatus    : "pending",
+                    depth        : depth,
+                    path         : currentPath,
+                    display      : indent + titleOnly,
+                    id           : `step-${currentPath.replace(/\./g, '-')}`,
+                    checkpoints  : [],
+                    requiresShell: false,
+                    requiredTools: []
+                })
+                continue
             }
 
-            statusValue = statusValue.replace(/[^a-z_\-\s]/g, "").replace(/[\s-]+/g, "_")
+            if (isMap(item)) {
+                var title = item.title || item.name || item.step || item.task || item.description || item.summary || ""
+                if (isObject(title)) title = stringify(title, __, "")
+                if (!isString(title) || title.trim().length === 0) title = stringify(item, __, "")
+                title = String(title).trim()
 
-            if (!isString(title) || title.length === 0) {
-                title = stringify(item, __, "")
+                var statusCandidate = __
+                if (isDef(item.status)) statusCandidate = item.status
+                else if (isDef(item.state)) statusCandidate = item.state
+                else if (isDef(item.phase)) statusCandidate = item.phase
+                else if (isDef(item.progress)) statusCandidate = item.progress
+                else if (item.done === true || item.complete === true || item.completed === true) statusCandidate = "done"
+                else if (item.done === false || item.complete === false || item.completed === false) statusCandidate = "pending"
+
+                if (isUnDef(statusCandidate) && isNumber(item.remaining) && item.remaining === 0) statusCandidate = "done"
+                if (isUnDef(statusCandidate) && isNumber(item.percent) && item.percent >= 100) statusCandidate = "done"
+                if (isUnDef(statusCandidate) && isNumber(item.progress) && item.progress >= 1) statusCandidate = "done"
+
+                var statusInfo = parent._normalizePlanStatusValue(statusCandidate)
+                item.status = statusInfo.status
+
+                var checkpoints = sanitizeList(item.checkpoints || item.milestones || item.outputs)
+                var toolHints = sanitizeList(item.requiredTools || item.tools || item.resources)
+                var requiresShell = toBoolean(item.requiresShell || item.shell || item.needsShell)
+
+                normalized.push({
+                    title        : title,
+                    status       : statusInfo.status,
+                    rawStatus    : statusInfo.rawStatus,
+                    depth        : depth,
+                    path         : currentPath,
+                    display      : indent + title,
+                    id           : isString(item.id) && item.id.trim().length > 0 ? item.id.trim() : `step-${currentPath.replace(/\./g, '-')}`,
+                    checkpoints  : checkpoints,
+                    requiresShell: requiresShell,
+                    requiredTools: toolHints
+                })
+
+                var childSources = []
+                if (isArray(item.children)) childSources = item.children
+                else if (isArray(item.subtasks)) childSources = item.subtasks
+                else if (isArray(item.steps)) childSources = item.steps
+                if (childSources.length > 0) traverse(childSources, currentPathParts, depth + 1)
+                continue
             }
 
-            normalized.push({ title: title, status: statusValue.length > 0 ? statusValue : "pending", rawStatus: statusValue })
+            var fallbackTitle = stringify(item, __, "")
+            if (fallbackTitle.length === 0) continue
+            normalized.push({
+                title        : fallbackTitle,
+                status       : "pending",
+                rawStatus    : "pending",
+                depth        : depth,
+                path         : currentPath,
+                display      : indent + fallbackTitle,
+                id           : `step-${currentPath.replace(/\./g, '-')}`,
+                checkpoints  : [],
+                requiresShell: false,
+                requiredTools: []
+            })
         }
+    }
+
+    traverse(plan, [], 0)
+
+    return normalized.filter(function(entry) {
+        return isString(entry.title) && entry.title.length > 0
     })
-
-    return normalized.filter(entry => isString(entry.title) && entry.title.length > 0)
 }
 
 MiniA.prototype._handlePlanUpdate = function() {
     if (!this._enablePlanning) return
     if (!isObject(this._agentState)) return
+
+    if (isObject(this._planningTree)) {
+        var sourcePlan = this._agentState.plan
+        if (isArray(sourcePlan)) {
+            this._planningTree.steps = jsonParse(stringify(sourcePlan, __, ""), __, __, true) || []
+        } else if (isObject(sourcePlan) && isArray(sourcePlan.steps)) {
+            this._planningTree.steps = jsonParse(stringify(sourcePlan.steps, __, ""), __, __, true) || []
+        }
+    }
 
     var planItems = this._normalizePlanItems(this._agentState.plan)
     if (planItems.length === 0) {
@@ -584,11 +704,13 @@ MiniA.prototype._handlePlanUpdate = function() {
             this._logMessageWithCounter("plan", "Plan cleared (no active tasks)")
         }
         this._lastPlanSnapshot = ""
+        this._planProgressSnapshot = ""
+        if (isObject(this._planningMetadata)) this._planningMetadata.lastBlockedSignature = ""
         return
     }
 
     var snapshot = stringify(planItems, __, "")
-    if (snapshot === this._lastPlanSnapshot) return
+    var hasChanges = snapshot !== this._lastPlanSnapshot
 
     var statusIcons = {
         pending     : { icon: "⏳", label: "pending" },
@@ -618,16 +740,593 @@ MiniA.prototype._handlePlanUpdate = function() {
     for (var i = 0; i < planItems.length; i++) {
         var entry = planItems[i]
         var statusInfo = statusIcons[entry.status] || statusIcons[entry.rawStatus] || { icon: "•", label: entry.status || "pending" }
-        var text = `${i + 1}. ${statusInfo.icon} ${entry.title}`
+        var label = entry.display || entry.title
+        if (isString(entry.path) && entry.path.length > 0) label = `${entry.path} ${label}`
+        var text = `${statusInfo.icon} ${label}`
         if (isString(statusInfo.label) && statusInfo.label.length > 0) {
             text += ` – ${statusInfo.label}`
         }
         lines.push(text)
     }
 
-    var message = lines.join("\n")
-    this._logMessageWithCounter("plan", message)
-    this._lastPlanSnapshot = snapshot
+    if (hasChanges) {
+        var message = lines.join("\n")
+        this._logMessageWithCounter("plan", message)
+        this._lastPlanSnapshot = snapshot
+    }
+
+    var progress = this._computePlanProgress(planItems)
+    if (isObject(this._agentState.planning)) {
+        this._agentState.planning.progress = progress
+        this._agentState.planning.updatedAt = now()
+    }
+    if (isObject(this._planningMetadata)) {
+        this._planningMetadata.progress = progress
+    }
+
+    var progressSignature = `${progress.done}/${progress.total}/${progress.blocked}/${progress.percent}`
+    if (progressSignature !== this._planProgressSnapshot) {
+        var segments = 10
+        var filledSegments = progress.total > 0 ? Math.round((progress.percent / 100) * segments) : 0
+        if (filledSegments > segments) filledSegments = segments
+        if (filledSegments < 0) filledSegments = 0
+        var bar = ""
+        for (var b = 0; b < segments; b++) bar += b < filledSegments ? "█" : "░"
+        var progressText = `Progress ${bar} ${progress.percent}% (${progress.done}/${progress.total} done${progress.blocked > 0 ? `, ${progress.blocked} blocked` : ""})`
+        this._logMessageWithCounter("plan", progressText)
+        this._planProgressSnapshot = progressSignature
+    }
+
+    var blockedEntries = planItems.filter(function(entry) {
+        var status = entry.status || ""
+        return status === "blocked" || status === "stuck" || status === "failed"
+    })
+
+    if (blockedEntries.length > 0) {
+        var blockedSignature = blockedEntries.map(function(entry) { return entry.path || entry.title }).join("|")
+        if (!isObject(this._planningMetadata)) this._planningMetadata = {}
+        if (this._planningMetadata.lastBlockedSignature !== blockedSignature) {
+            var blockedSummary = blockedEntries.map(function(entry) {
+                return (entry.path ? entry.path + " " : "") + entry.title
+            }).join(", ")
+            this._logMessageWithCounter("plan", `Blocked steps detected: ${blockedSummary}`)
+            this._planningMetadata.lastBlockedSignature = blockedSignature
+            this._scheduleReplan(blockedSummary.length > 0 ? `blocked steps: ${blockedEntries[0].title}` : "blocked step")
+        }
+    } else if (isObject(this._planningMetadata)) {
+        this._planningMetadata.lastBlockedSignature = ""
+    }
+}
+
+MiniA.prototype._computePlanProgress = function(planItems) {
+    var entries = isArray(planItems) ? planItems : []
+    var total = 0
+    var done = 0
+    var blocked = 0
+    var inProgress = 0
+
+    var doneStatuses = { done: true, complete: true, completed: true, success: true, finished: true }
+    var blockedStatuses = { blocked: true, stuck: true, failed: true, cancelled: true, canceled: true }
+    var activeStatuses = { in_progress: true, progressing: true, working: true, running: true, active: true }
+
+    for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i] || {}
+        var status = isString(entry.status) ? entry.status : "pending"
+        if (status === "") status = "pending"
+        total++
+        if (doneStatuses[status]) done++
+        else if (blockedStatuses[status]) blocked++
+        else if (activeStatuses[status]) inProgress++
+    }
+
+    var percent = total > 0 ? Math.round((done / total) * 100) : 0
+    if (percent < 0) percent = 0
+    if (percent > 100) percent = 100
+
+    return {
+        total     : total,
+        done      : done,
+        blocked   : blocked,
+        inProgress: inProgress,
+        percent   : percent
+    }
+}
+
+MiniA.prototype._describeToolCapabilities = function(args) {
+    var opts = isObject(args) ? args : {}
+    var capability = {
+        usesShell      : toBoolean(opts.useshell),
+        shellPrefix    : this._shellPrefix || "",
+        shellAllowPipes: this._shellAllowPipes === true,
+        readWrite      : toBoolean(opts.readwrite),
+        actions        : [],
+        tools          : [],
+        toolDetails    : []
+    }
+
+    var actions = ["think", "final"]
+    if (capability.usesShell) actions.push("shell")
+    capability.actions = actions
+
+    if (isArray(this.mcpToolNames)) capability.tools = this.mcpToolNames.slice()
+    if (isArray(this.mcpTools)) {
+        for (var i = 0; i < this.mcpTools.length; i++) {
+            var tool = this.mcpTools[i]
+            if (!isObject(tool)) continue
+            capability.toolDetails.push({
+                name       : tool.name || "unknown",
+                description: isString(tool.description) ? tool.description : "",
+                annotations: isObject(tool.annotations) ? tool.annotations : {}
+            })
+        }
+    }
+
+    return capability
+}
+
+MiniA.prototype._flattenPlanTreeForState = function(tree) {
+    var planTree = isObject(tree) ? tree : {}
+    var steps = []
+
+    var traverse = function(nodes, pathParts, depth) {
+        if (!isArray(nodes)) return
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i]
+            if (!isObject(node) && !isString(node)) continue
+            var currentPathParts = pathParts.slice()
+            currentPathParts.push(i + 1)
+            var path = currentPathParts.join(".")
+            var entry = {}
+
+            if (isString(node)) {
+                entry = {
+                    id           : `step-${path.replace(/\./g, '-')}`,
+                    title        : node.trim(),
+                    status       : "pending",
+                    description  : "",
+                    requiredTools: [],
+                    requiresShell: false,
+                    checkpoints  : [],
+                    depth        : depth,
+                    path         : path
+                }
+            } else {
+                entry = {
+                    id           : isString(node.id) && node.id.trim().length > 0 ? node.id.trim() : `step-${path.replace(/\./g, '-')}`,
+                    title        : isString(node.title) ? node.title : "",
+                    status       : isString(node.status) ? node.status : "pending",
+                    description  : isString(node.description) ? node.description : "",
+                    requiredTools: isArray(node.requiredTools) ? node.requiredTools.slice() : [],
+                    requiresShell: toBoolean(node.requiresShell),
+                    checkpoints  : isArray(node.checkpoints) ? node.checkpoints.slice() : [],
+                    depth        : depth,
+                    path         : path
+                }
+            }
+
+            steps.push(entry)
+
+            var childNodes = []
+            if (isObject(node)) {
+                if (isArray(node.children)) childNodes = node.children
+                else if (isArray(node.subtasks)) childNodes = node.subtasks
+                else if (isArray(node.steps)) childNodes = node.steps
+            }
+            if (childNodes.length > 0) traverse(childNodes, currentPathParts, depth + 1)
+        }
+    }
+
+    var rootSteps = isArray(planTree.steps) ? planTree.steps : []
+    traverse(rootSteps, [], 0)
+    return steps
+}
+
+MiniA.prototype._sanitizePlanTree = function(rawPlan) {
+    var source = isObject(rawPlan) ? rawPlan : {}
+    var plan = isObject(source.plan) ? source.plan : source
+    var parent = this
+
+    var sanitizeList = function(value) {
+        if (isUnDef(value)) return []
+        if (isArray(value)) {
+            return value
+                .map(function(entry) {
+                    if (isString(entry)) return entry.trim()
+                    if (isObject(entry)) return stringify(entry, __, "")
+                    if (isNumber(entry) || isBoolean(entry)) return String(entry)
+                    return ""
+                })
+                .filter(function(entry) { return isString(entry) && entry.length > 0 })
+        }
+        if (isString(value)) {
+            return value
+                .split(/[,\n]/)
+                .map(function(entry) { return entry.trim() })
+                .filter(function(entry) { return entry.length > 0 })
+        }
+        return []
+    }
+
+    var sanitizeStep = function(step, pathParts) {
+        var currentPathParts = isArray(pathParts) ? pathParts : []
+        var path = currentPathParts.join(".")
+
+        if (isString(step)) {
+            return {
+                id           : `step-${path.replace(/\./g, '-')}`,
+                title        : step.trim(),
+                status       : "pending",
+                description  : "",
+                requiredTools: [],
+                requiresShell: false,
+                checkpoints  : [],
+                children     : []
+            }
+        }
+
+        var obj = isObject(step) ? step : {}
+        var title = obj.title || obj.name || obj.task || obj.step || obj.description || obj.summary || ""
+        if (isObject(title)) title = stringify(title, __, "")
+        title = String(title).trim()
+
+        var statusCandidate = __
+        if (isDef(obj.status)) statusCandidate = obj.status
+        else if (isDef(obj.state)) statusCandidate = obj.state
+        else if (isDef(obj.phase)) statusCandidate = obj.phase
+        else if (isDef(obj.progress)) statusCandidate = obj.progress
+        else if (obj.done === true || obj.complete === true || obj.completed === true) statusCandidate = "done"
+        else if (obj.done === false || obj.complete === false || obj.completed === false) statusCandidate = "pending"
+
+        var statusInfo = parent._normalizePlanStatusValue(statusCandidate)
+
+        var description = obj.description || obj.detail || obj.notes || ""
+        if (isObject(description)) description = stringify(description, __, "")
+        description = String(description).trim()
+
+        var checkpoints = sanitizeList(obj.checkpoints || obj.milestones || obj.outputs)
+        var requiredTools = sanitizeList(obj.requiredTools || obj.tools || obj.resources)
+        var requiresShell = toBoolean(obj.requiresShell || obj.shell || obj.needsShell)
+
+        var childrenSource = []
+        if (isArray(obj.children)) childrenSource = obj.children
+        else if (isArray(obj.subtasks)) childrenSource = obj.subtasks
+        else if (isArray(obj.steps)) childrenSource = obj.steps
+
+        var children = []
+        for (var i = 0; i < childrenSource.length; i++) {
+            var childPath = currentPathParts.slice()
+            childPath.push(i + 1)
+            children.push(sanitizeStep(childrenSource[i], childPath))
+        }
+
+        return {
+            id           : isString(obj.id) && obj.id.trim().length > 0 ? obj.id.trim() : `step-${path.replace(/\./g, '-')}`,
+            title        : title,
+            status       : statusInfo.status,
+            description  : description,
+            requiredTools: requiredTools,
+            requiresShell: requiresShell,
+            checkpoints  : checkpoints,
+            children     : children
+        }
+    }
+
+    var topLevelSteps = isArray(plan.steps) ? plan.steps : []
+    if (topLevelSteps.length === 0 && isArray(source.steps)) topLevelSteps = source.steps
+
+    var sanitizedSteps = []
+    for (var s = 0; s < topLevelSteps.length; s++) {
+        sanitizedSteps.push(sanitizeStep(topLevelSteps[s], [s + 1]))
+    }
+
+    var aggregateCheckpoints = []
+    for (var j = 0; j < sanitizedSteps.length; j++) {
+        var node = sanitizedSteps[j]
+        if (isArray(node.checkpoints)) {
+            aggregateCheckpoints = aggregateCheckpoints.concat(node.checkpoints)
+        }
+    }
+
+    return {
+        title      : isString(plan.title) && plan.title.trim().length > 0 ? plan.title.trim() : "Execution plan",
+        summary    : isString(plan.summary) ? plan.summary.trim() : "",
+        steps      : sanitizedSteps,
+        assumptions: sanitizeList(source.assumptions || plan.assumptions),
+        risks      : sanitizeList(source.risks || plan.risks),
+        checkpoints: sanitizeList(source.checkpoints || plan.checkpoints).concat(aggregateCheckpoints).filter(function(entry, index, arr) { return arr.indexOf(entry) === index }),
+        generatedAt: now()
+    }
+}
+
+MiniA.prototype._validatePlanFeasibility = function(tree, capabilities) {
+    var planTree = isObject(tree) ? tree : { steps: [] }
+    var caps = isObject(capabilities) ? capabilities : {}
+    var availableTools = {}
+
+    if (caps.usesShell === true) availableTools.shell = true
+    if (isArray(caps.tools)) {
+        for (var i = 0; i < caps.tools.length; i++) {
+            var toolName = caps.tools[i]
+            if (!isString(toolName)) continue
+            availableTools[toolName] = true
+        }
+    }
+
+    var result = {
+        feasible: true,
+        issues  : []
+    }
+
+    var walk = function(node, path) {
+        if (!isObject(node)) return
+        var entryPath = path || node.id || node.title
+
+        if (node.requiresShell === true && availableTools.shell !== true) {
+            result.feasible = false
+            result.issues.push({ id: node.id, title: node.title, reason: "shell access disabled" })
+            if (node.status === "pending") node.status = "blocked"
+        }
+
+        if (isArray(node.requiredTools) && node.requiredTools.length > 0) {
+            var missing = []
+            for (var t = 0; t < node.requiredTools.length; t++) {
+                var required = node.requiredTools[t]
+                if (!isString(required)) continue
+                if (!availableTools[required]) missing.push(required)
+            }
+            if (missing.length > 0) {
+                result.feasible = false
+                result.issues.push({ id: node.id, title: node.title, reason: `missing tools: ${missing.join(", ")}` })
+                if (node.status === "pending") node.status = "blocked"
+            }
+        }
+
+        if (isArray(node.children)) {
+            for (var c = 0; c < node.children.length; c++) {
+                walk(node.children[c], entryPath + "." + (c + 1))
+            }
+        }
+    }
+
+    if (isArray(planTree.steps)) {
+        for (var s = 0; s < planTree.steps.length; s++) {
+            walk(planTree.steps[s], String(s + 1))
+        }
+    }
+
+    return result
+}
+
+MiniA.prototype._scheduleReplan = function(reason) {
+    if (!this._enablePlanning) return
+    var text = isString(reason) ? reason.trim() : ""
+    if (text.length === 0) text = "obstacle"
+    if (!isObject(this._planningMetadata)) this._planningMetadata = {}
+
+    if (this._planningMetadata.pendingReplanReason === text && this._shouldReplan) return
+
+    this._planningMetadata.pendingReplanReason = text
+    this._planningMetadata.lastReplanRequestAt = now()
+    this._shouldReplan = true
+}
+
+MiniA.prototype._applyPlanningTree = function(tree, context) {
+    var sanitized = isObject(tree) ? jsonParse(stringify(tree, __, ""), __, __, true) : { title: "Execution plan", summary: "", steps: [] }
+    if (!isObject(this._agentState)) this._agentState = {}
+
+    var planSteps = isArray(sanitized.steps) ? jsonParse(stringify(sanitized.steps, __, ""), __, __, true) : []
+    this._planningTree = sanitized
+    this._agentState.plan = planSteps
+
+    if (!isObject(this._agentState.planning)) this._agentState.planning = {}
+    var metadata = this._agentState.planning
+    metadata.title = sanitized.title
+    metadata.summary = sanitized.summary
+    metadata.checkpoints = sanitized.checkpoints
+    metadata.assumptions = sanitized.assumptions
+    metadata.risks = sanitized.risks
+    metadata.generatedAt = sanitized.generatedAt || now()
+    metadata.reason = isObject(context) && isString(context.reason) ? context.reason : (metadata.reason || "initial")
+    metadata.fromCache = isObject(context) && context.fromCache === true
+    metadata.cacheKey = isObject(context) && isString(context.cacheKey) ? context.cacheKey : metadata.cacheKey
+    if (isObject(context) && isObject(context.validation)) metadata.validation = context.validation
+    metadata.updatedAt = now()
+
+    if (!isObject(this._planningMetadata)) this._planningMetadata = {}
+    this._planningMetadata.cacheKey = metadata.cacheKey
+    this._planningMetadata.lastGeneratedAt = metadata.generatedAt
+    this._planningMetadata.pendingReplanReason = ""
+    this._shouldReplan = false
+    this._lastPlanSnapshot = ""
+    this._planProgressSnapshot = ""
+
+    this._handlePlanUpdate()
+}
+
+MiniA.prototype._buildPlanningPrompt = function(payload) {
+    var data = isObject(payload) ? payload : {}
+    var goalText = isString(data.goal) ? data.goal : stringify(data.goal, __, "")
+    var capabilitiesText = stringify(data.capabilities || {}, __, "")
+    var stateText = stringify(data.state || {}, __, "")
+
+    var obstacleLines = []
+    if (isArray(data.obstacles)) {
+        for (var i = 0; i < data.obstacles.length; i++) {
+            var obs = data.obstacles[i]
+            if (isString(obs)) obstacleLines.push(`- ${obs}`)
+            else if (isObject(obs) && isString(obs.message)) obstacleLines.push(`- ${obs.message}`)
+        }
+    }
+
+    var promptParts = []
+    promptParts.push("You are the planning module for an autonomous OpenAF agent.")
+    promptParts.push("Craft a hierarchical execution plan before the agent begins acting.")
+    promptParts.push("")
+    promptParts.push(`GOAL:\n${goalText}`)
+    promptParts.push("")
+    promptParts.push(`AVAILABLE CAPABILITIES (JSON): ${capabilitiesText}`)
+    promptParts.push("")
+    promptParts.push(`CURRENT STATE (JSON): ${stateText}`)
+    if (obstacleLines.length > 0) {
+        promptParts.push("")
+        promptParts.push("RECENT OBSTACLES:")
+        promptParts.push(obstacleLines.join("\n"))
+    }
+    if (isString(data.reason) && data.reason.length > 0) {
+        promptParts.push("")
+        promptParts.push(`REPLAN REASON: ${data.reason}`)
+    }
+    promptParts.push("")
+    promptParts.push("REQUIREMENTS:")
+    promptParts.push("- Propose 3-5 top-level steps. Each may include nested children (max depth 3).")
+    promptParts.push("- Include descriptive checkpoints for long-running steps.")
+    promptParts.push("- Each step must include: id, title, description, status, requiredTools (array), requiresShell (boolean), checkpoints (array), children (array).")
+    promptParts.push("- Status values must be one of: pending, in_progress, done, blocked.")
+    promptParts.push("- Mark steps as blocked when required tools or shell access are unavailable.")
+    promptParts.push("- Use concise titles (<90 chars) and practical descriptions (<240 chars).")
+    promptParts.push("")
+    promptParts.push("Respond ONLY with JSON:")
+    promptParts.push('{"plan":{"title":"...","summary":"...","steps":[{"id":"S1","title":"...","description":"...","status":"pending","requiredTools":["tool"],"requiresShell":false,"checkpoints":["..."],"children":[]}]},"assumptions":[],"risks":[],"checkpoints":[]}')
+
+    return promptParts.join("\n")
+}
+
+MiniA.prototype._generatePlanSnapshot = function(args, options) {
+    if (!this._enablePlanning) return { generated: false }
+
+    var opts = isObject(options) ? options : {}
+    var capabilities = this._describeToolCapabilities(args || {})
+    var goalText = isString(args.goal) ? args.goal : stringify(args.goal, __, "")
+    var stateClone = jsonParse(stringify(this._agentState || {}, __, ""), __, __, true) || {}
+    if (isObject(stateClone)) delete stateClone.plan
+
+    var obstacles = []
+    if (isObject(opts.runtime) && isArray(opts.runtime.errorHistory)) {
+        var recent = opts.runtime.errorHistory.slice(-3)
+        for (var i = 0; i < recent.length; i++) {
+            var entry = recent[i] || {}
+            var message = entry.message || entry.category || "obstacle"
+            obstacles.push(message)
+        }
+    }
+
+    var cacheKeyBase = `${goalText}::${this._stableStringify({ capabilities: capabilities })}`
+    var cacheKey = md5(cacheKeyBase)
+    var fromCache = false
+    var snapshot = __
+
+    if (opts.force !== true) {
+        var cached = $cache(this._planCacheName).get(cacheKey)
+        if (isObject(cached) && isObject(cached.value)) {
+            snapshot = jsonParse(stringify(cached.value, __, ""), __, __, true)
+            fromCache = true
+        }
+    }
+
+    if (!isObject(snapshot)) {
+        var prompt = this._buildPlanningPrompt({
+            goal       : goalText,
+            state      : stateClone,
+            capabilities: capabilities,
+            obstacles  : obstacles,
+            reason     : opts.reason
+        })
+
+        if (toBoolean(args.debug)) {
+            print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
+
+        var parent = this
+        var responseWithStats = this._withExponentialBackoff(function() {
+            if (isFunction(opts.addCall)) opts.addCall()
+            if (isDef(parent.llm.promptJSONWithStats)) return parent.llm.promptJSONWithStats(prompt)
+            return parent.llm.promptWithStats(prompt)
+        }, {
+            maxAttempts : 3,
+            initialDelay: 250,
+            maxDelay    : 4000,
+            context     : { source: "llm", operation: "plan" },
+            onRetry     : function(err, attempt, wait) {
+                parent.fnI("retry", `Planning attempt ${attempt} failed. Retrying in ${wait}ms...`)
+                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) global.__mini_a_metrics.retries.inc()
+            }
+        })
+
+        if (toBoolean(args.debug)) {
+            print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
+
+        var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+        var tokenTotal = this._getTotalTokens(stats)
+        if (isFunction(opts.registerCallUsage)) opts.registerCallUsage(tokenTotal)
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_actual_tokens)) {
+            global.__mini_a_metrics.llm_actual_tokens.getAdd(tokenTotal)
+            global.__mini_a_metrics.llm_normal_tokens.getAdd(tokenTotal)
+            global.__mini_a_metrics.llm_normal_calls.inc()
+        }
+
+        var rawResponse = responseWithStats.response
+        if (isString(rawResponse)) rawResponse = this._cleanCodeBlocks(rawResponse)
+        var parsedResponse = isMap(rawResponse) ? rawResponse : jsonParse(rawResponse, __, __, true)
+        if (!isObject(parsedResponse)) parsedResponse = {}
+
+        snapshot = this._sanitizePlanTree(parsedResponse)
+        $cache(this._planCacheName).set(cacheKey, { value: snapshot, expiresAt: now() + this._planCacheTtl })
+    }
+
+    var validation = this._validatePlanFeasibility(snapshot, capabilities)
+    if (validation.issues.length > 0) {
+        var issueSummary = validation.issues.map(function(issue) {
+            return `${issue.title}: ${issue.reason}`
+        }).join(" | ")
+        this.fnI("warn", `Plan validation issues: ${issueSummary}`)
+    }
+
+    this._applyPlanningTree(snapshot, {
+        reason    : isString(opts.reason) && opts.reason.length > 0 ? opts.reason : (fromCache ? "cached-plan" : "initial-plan"),
+        fromCache : fromCache,
+        cacheKey  : cacheKey,
+        validation: validation
+    })
+
+    var flattened = this._flattenPlanTreeForState(snapshot)
+    return {
+        generated : true,
+        fromCache : fromCache,
+        stepCount : flattened.length,
+        validation: validation
+    }
+}
+
+MiniA.prototype._initializePlanningWorkflow = function(options) {
+    if (!this._enablePlanning) return
+
+    var opts = isObject(options) ? options : {}
+    var args = opts.args || {}
+
+    var existingPlanItems = this._normalizePlanItems(this._agentState.plan)
+    if (existingPlanItems.length > 0) {
+        var sanitized = this._sanitizePlanTree({
+            plan: {
+                title : "Existing plan",
+                steps : this._agentState.plan,
+                summary: "Imported plan"
+            }
+        })
+        var validation = this._validatePlanFeasibility(sanitized, this._describeToolCapabilities(args))
+        this._applyPlanningTree(sanitized, { reason: "provided", fromCache: false, cacheKey: "external", validation: validation })
+        return
+    }
+
+    try {
+        var result = this._generatePlanSnapshot(args, opts)
+        if (isObject(result) && result.generated) {
+            var note = `Initial plan generated with ${result.stepCount} tasks${result.fromCache ? " (from cache)" : ""}.`
+            this._logMessageWithCounter("plan", note)
+        }
+    } catch (e) {
+        this.fnI("warn", `Failed to generate planning snapshot: ${e}`)
+    }
 }
 
 /**
@@ -1096,6 +1795,16 @@ MiniA.prototype._registerRuntimeError = function(runtime, details) {
     message : info.message || "",
     context : info.context
   })
+
+  if (this._enablePlanning) {
+    var replanThresholdMet = runtime.consecutiveErrors >= 2
+    if (isString(info.category) && info.category !== "transient") replanThresholdMet = true
+    if (isString(info.message) && info.message.toLowerCase().indexOf("blocked") >= 0) replanThresholdMet = true
+    if (replanThresholdMet) {
+      var scheduleReason = isString(info.message) && info.message.length > 0 ? info.message : (info.category || "runtime error")
+      this._scheduleReplan(scheduleReason)
+    }
+  }
 
   var shouldRestore = info.category === "transient" && runtime.restoredFromCheckpoint !== true
   if (shouldRestore && this._restoreCheckpoint(runtime, info.message || "transient error")) {
@@ -2214,7 +2923,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     this._agentState = isObject(initialState) ? initialState : {}
     if (this._enablePlanning && isObject(this._agentState) && isUnDef(this._agentState.plan)) this._agentState.plan = []
-    if (this._enablePlanning) this._handlePlanUpdate()
+    if (this._enablePlanning) {
+      this._initializePlanningWorkflow({
+        args            : args,
+        addCall         : addCall,
+        registerCallUsage: registerCallUsage
+      })
+    }
 
     this.fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
@@ -2395,6 +3110,26 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     for(var step = 0; step < maxSteps && this.state != "stop"; step++) {
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
+      if (this._enablePlanning && this._shouldReplan) {
+        var replanReason = "new obstacles"
+        if (isObject(this._planningMetadata) && isString(this._planningMetadata.pendingReplanReason) && this._planningMetadata.pendingReplanReason.length > 0) {
+          replanReason = this._planningMetadata.pendingReplanReason
+        }
+        this.fnI("plan", `Replanning due to ${replanReason}...`)
+        try {
+          this._generatePlanSnapshot(args, {
+            addCall          : addCall,
+            registerCallUsage: registerCallUsage,
+            force            : true,
+            reason           : `replan:${replanReason}`,
+            runtime          : runtime
+          })
+        } catch (replanErr) {
+          this.fnI("warn", `Replanning failed: ${replanErr}`)
+        }
+        this._shouldReplan = false
+        if (isObject(this._planningMetadata)) this._planningMetadata.pendingReplanReason = ""
+      }
       var stateSnapshot = stringify(this._agentState, __, "")
       if (args.debug || args.verbose) {
         this.fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
