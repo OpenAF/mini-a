@@ -10,7 +10,7 @@ ow.loadMetrics()
 var MiniA = function() {
   this._isInitialized = false
   this._isInitializing = false
-  this._id = genUUID()
+  this._id = sha384(nowNano()).substr(0, 8)
   this._mcpConnections = {}
   this._shellPrefix = ""
   this._toolCacheSettings = {}
