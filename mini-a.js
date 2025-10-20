@@ -73,7 +73,20 @@ var MiniA = function() {
     fallback_to_main_llm: $atomic(0, "long"),
     unknown_actions: $atomic(0, "long"),
     llm_normal_tokens: $atomic(0, "long"),
-    llm_lc_tokens: $atomic(0, "long")
+    llm_lc_tokens: $atomic(0, "long"),
+    plans_generated: $atomic(0, "long"),
+    plans_loaded_from_cache: $atomic(0, "long"),
+    plan_cache_hits: $atomic(0, "long"),
+    plan_cache_misses: $atomic(0, "long"),
+    plan_cache_stores: $atomic(0, "long"),
+    plan_replans_requested: $atomic(0, "long"),
+    plan_replans_executed: $atomic(0, "long"),
+    plan_validation_issues: $atomic(0, "long"),
+    plan_validation_issue_count: $atomic(0, "long"),
+    tool_cache_hits: $atomic(0, "long"),
+    tool_cache_misses: $atomic(0, "long"),
+    tool_cache_stores: $atomic(0, "long"),
+    tool_cache_evictions: $atomic(0, "long")
   }
 
   this._SYSTEM_PROMPT = `
@@ -418,6 +431,23 @@ MiniA.prototype.getMetrics = function() {
             summaries_tokens_reduced: global.__mini_a_metrics.summaries_tokens_reduced.get(),
             summaries_original_tokens: global.__mini_a_metrics.summaries_original_tokens.get(),
             summaries_final_tokens: global.__mini_a_metrics.summaries_final_tokens.get()
+        },
+        planning: {
+            plans_generated: global.__mini_a_metrics.plans_generated.get(),
+            plans_loaded_from_cache: global.__mini_a_metrics.plans_loaded_from_cache.get(),
+            plan_cache_hits: global.__mini_a_metrics.plan_cache_hits.get(),
+            plan_cache_misses: global.__mini_a_metrics.plan_cache_misses.get(),
+            plan_cache_stores: global.__mini_a_metrics.plan_cache_stores.get(),
+            replan_requests: global.__mini_a_metrics.plan_replans_requested.get(),
+            replan_executions: global.__mini_a_metrics.plan_replans_executed.get(),
+            validation_runs_with_issues: global.__mini_a_metrics.plan_validation_issues.get(),
+            validation_issue_count: global.__mini_a_metrics.plan_validation_issue_count.get()
+        },
+        tool_cache: {
+            hits: global.__mini_a_metrics.tool_cache_hits.get(),
+            misses: global.__mini_a_metrics.tool_cache_misses.get(),
+            stores: global.__mini_a_metrics.tool_cache_stores.get(),
+            evictions: global.__mini_a_metrics.tool_cache_evictions.get()
         }
     }
 }
@@ -1108,6 +1138,7 @@ MiniA.prototype._scheduleReplan = function(reason) {
     this._planningMetadata.pendingReplanReason = text
     this._planningMetadata.lastReplanRequestAt = now()
     this._shouldReplan = true
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_replans_requested)) global.__mini_a_metrics.plan_replans_requested.inc()
 }
 
 MiniA.prototype._applyPlanningTree = function(tree, context) {
@@ -1220,10 +1251,13 @@ MiniA.prototype._generatePlanSnapshot = function(args, options) {
         if (isObject(cached) && isObject(cached.value)) {
             snapshot = jsonParse(stringify(cached.value, __, ""), __, __, true)
             fromCache = true
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_cache_hits)) global.__mini_a_metrics.plan_cache_hits.inc()
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_loaded_from_cache)) global.__mini_a_metrics.plans_loaded_from_cache.inc()
         }
     }
 
     if (!isObject(snapshot)) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_cache_misses)) global.__mini_a_metrics.plan_cache_misses.inc()
         var prompt = this._buildPlanningPrompt({
             goal       : goalText,
             state      : stateClone,
@@ -1272,6 +1306,8 @@ MiniA.prototype._generatePlanSnapshot = function(args, options) {
 
         snapshot = this._sanitizePlanTree(parsedResponse)
         $cache(this._planCacheName).set(cacheKey, { value: snapshot, expiresAt: now() + this._planCacheTtl })
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_generated)) global.__mini_a_metrics.plans_generated.inc()
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_cache_stores)) global.__mini_a_metrics.plan_cache_stores.inc()
     }
 
     var validation = this._validatePlanFeasibility(snapshot, capabilities)
@@ -1280,6 +1316,8 @@ MiniA.prototype._generatePlanSnapshot = function(args, options) {
             return `${issue.title}: ${issue.reason}`
         }).join(" | ")
         this.fnI("warn", `Plan validation issues: ${issueSummary}`)
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_validation_issues)) global.__mini_a_metrics.plan_validation_issues.inc()
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_validation_issue_count)) global.__mini_a_metrics.plan_validation_issue_count.getAdd(validation.issues.length)
     }
 
     this._applyPlanningTree(snapshot, {
@@ -1577,14 +1615,18 @@ MiniA.prototype._buildToolCacheKey = function(toolName, params) {
 MiniA.prototype._getToolResultFromCache = function(cacheKey) {
   if (!isString(cacheKey) || cacheKey.length === 0) return { hit: false }
 
+  var metrics = isObject(global.__mini_a_metrics) ? global.__mini_a_metrics : null
   var entry = $cache(this._toolResultCacheName).get(cacheKey)
   if (isObject(entry) && isDef(entry.value)) {
     if (!isNumber(entry.expiresAt) || entry.expiresAt >= now()) {
+      if (isObject(metrics) && isObject(metrics.tool_cache_hits)) metrics.tool_cache_hits.inc()
       return { hit: true, value: entry.value }
     }
     $cache(this._toolResultCacheName).unset(cacheKey)
+    if (isObject(metrics) && isObject(metrics.tool_cache_evictions)) metrics.tool_cache_evictions.inc()
   }
 
+  if (isObject(metrics) && isObject(metrics.tool_cache_misses)) metrics.tool_cache_misses.inc()
   return { hit: false }
 }
 
@@ -1595,6 +1637,7 @@ MiniA.prototype._storeToolResultInCache = function(cacheKey, result, ttl) {
   var ttlMs = isNumber(ttl) && ttl > 0 ? ttl : this._toolCacheDefaultTtl
   var expiresAt = now() + ttlMs
   $cache(this._toolResultCacheName).set(cacheKey, { value: result, expiresAt: expiresAt })
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_stores)) global.__mini_a_metrics.tool_cache_stores.inc()
 }
 
 MiniA.prototype._categorizeError = function(error, context) {
@@ -3117,13 +3160,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         this.fnI("plan", `Replanning due to ${replanReason}...`)
         try {
-          this._generatePlanSnapshot(args, {
+          var replanResult = this._generatePlanSnapshot(args, {
             addCall          : addCall,
             registerCallUsage: registerCallUsage,
             force            : true,
             reason           : `replan:${replanReason}`,
             runtime          : runtime
           })
+          if (isObject(replanResult) && replanResult.generated && isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plan_replans_executed)) global.__mini_a_metrics.plan_replans_executed.inc()
         } catch (replanErr) {
           this.fnI("warn", `Replanning failed: ${replanErr}`)
         }
