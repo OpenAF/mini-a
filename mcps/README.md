@@ -10,6 +10,7 @@
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 | mcp-kube   | Kubernetes management MCP       | STDIO/HTTP       | (included) | [mcp-kube.yaml](mcp-kube.yaml)     |
 | mcp-time   | Time and timezone utility MCP   | STDIO/HTTP       | (included) | [mcp-time.yaml](mcp-time.yaml)     |
+| mcp-random | Random data generation MCP      | STDIO/HTTP       | (included) | [mcp-random.yaml](mcp-random.yaml) |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
@@ -73,6 +74,21 @@ Key tools exposed by `mcp-time` include:
 - `convert-time`: Converts a supplied date/time into a different timezone and format.
 - `timezone-difference`: Calculates the offset difference between two timezones at a given moment.
 - `list-timezones`: Lists available timezone identifiers (with optional filtering).
+
+#### mcp-random
+
+`mcp-random` offers a collection of reproducible-friendly random data helpers covering integers, sequences, fractions, selections and Gaussian sampling. All tools accept an optional numeric `seed` to generate deterministic output when desired.
+
+Key tools include:
+
+- `random-integer`: Returns a random integer within an inclusive range.
+- `random-sequence`: Produces a shuffled range of integers, optionally truncated to a requested length.
+- `random-integer-set`: Generates a sorted set of unique integers drawn from a range.
+- `gaussian-sample`: Creates normally distributed samples using `java.util.Random#nextGaussian` with configurable mean and standard deviation.
+- `random-fraction`: Emits fractions between 0 and 1 rounded to configurable decimal places.
+- `random-choice`: Picks one or more elements from a provided array, with optional uniqueness guarantees.
+- `random-boolean`: Generates booleans with an optional bias probability for `true`.
+- `random-hex`: Builds hexadecimal strings of a specific length.
 
 #### mcp-ch
 
