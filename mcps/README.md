@@ -300,3 +300,15 @@ oafp in=mcp data="(type: remote, url: 'http://wikipedia.mcps.local:1234/mcp', to
 ```
 
 Remember to adjust hostnames, ports, and authentication parameters to match the MCP instance you are testing against.
+
+## Repository tests
+
+To execute the full Mini‑A test suite, run the following from the main repository folder:
+
+```
+ojob tests/autoTestAll.yaml
+```
+
+This uses oJob to orchestrate all tests; running from the repo root ensures relative paths resolve correctly.
+
+The test run will produce an `autoTestAll.results.json` file in the repository. Review it for outcomes and remove it before your final commit.

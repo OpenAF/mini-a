@@ -331,6 +331,18 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - Pull request guidelines
 - Community standards
 
+### Running tests
+
+Run the test suite from the repository root using oJob:
+
+```
+ojob tests/autoTestAll.yaml
+```
+
+Be sure to execute this in the main repo folder so relative paths used by the tests resolve correctly. You need OpenAF installed so the `ojob` command is available.
+
+The run generates an `autoTestAll.results.json` file with detailed results—inspect it locally and delete it before your final commit.
+
 ## Community
 
 - **Issues**: [GitHub Issues](https://github.com/openaf/mini-a/issues)

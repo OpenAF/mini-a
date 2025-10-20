@@ -1,11 +1,9 @@
 (function() {
   load("mini-a.js")
 
-  var assert = function(condition, message, value) {
-    if (!condition) {
-      var extra = isDef(value) ? " => " + stringify(value, __, "") : ""
-      throw new Error(message + extra)
-    }
+  // Use OpenAF's ow.test.assert instead of custom assert
+  var assert = function(aResult, errorMessage, checkValue) {
+    ow.test.assert(checkValue, errorMessage, aResult)
   }
 
   var createAgent = function() {
@@ -18,10 +16,10 @@
   exports.testGoalAssessment = function() {
     var agent = createAgent()
     var simple = agent._assessGoalComplexity("List two colors")
-    assert(["trivial", "easy"].indexOf(simple.level) >= 0, "Simple goal should be trivial or easy", simple.level)
+    ow.test.assert(["trivial", "easy"].indexOf(simple.level) >= 0, true, "Simple goal should be trivial or easy")
     var complexGoal = "Design, implement, and validate a data pipeline with error handling and documentation"
     var complex = agent._assessGoalComplexity(complexGoal)
-    assert(["complex", "very_complex"].indexOf(complex.level) >= 0, "Complex goal should be flagged", complex.level)
+    ow.test.assert(["complex", "very_complex"].indexOf(complex.level) >= 0, true, "Complex goal should be flagged")
   }
 
   exports.testSimplePlanGeneration = function() {
@@ -29,10 +27,10 @@
     var goal = "Summarize repository README"
     agent._planningAssessment = agent._assessGoalComplexity(goal)
     var plan = agent._generateInitialPlan(goal, "simple", { useshell: false })
-    assert(plan.strategy === "simple", "Should build simple strategy plan", plan.strategy)
-    assert(isArray(plan.steps) && plan.steps.length >= 3, "Simple plan should have steps", plan.steps)
+    ow.test.assert(plan.strategy === "simple", true, "Should build simple strategy plan")
+    ow.test.assert(isArray(plan.steps) && plan.steps.length >= 3, true, "Simple plan should have steps")
     var hasChildren = plan.steps.some(s => isArray(s.children) && s.children.length > 0)
-    assert(hasChildren === false, "Simple plan should not have nested children", plan.steps)
+    ow.test.assert(hasChildren === false, true, "Simple plan should not have nested children")
   }
 
   exports.testTreePlanGeneration = function() {
@@ -40,10 +38,10 @@
     var goal = "Implement feature toggle and write integration tests, then document rollout procedure"
     agent._planningAssessment = agent._assessGoalComplexity(goal)
     var plan = agent._generateInitialPlan(goal, "tree", { useshell: false })
-    assert(plan.strategy === "tree", "Should build decomposed plan", plan.strategy)
-    assert(isArray(plan.steps) && plan.steps.length > 0, "Tree plan should have steps", plan.steps)
+    ow.test.assert(plan.strategy === "tree", true, "Should build decomposed plan")
+    ow.test.assert(isArray(plan.steps) && plan.steps.length > 0, true, "Tree plan should have steps")
     var first = plan.steps[0]
-    assert(isArray(first.children) && first.children.length >= 2, "Tree plan should include sub-steps", first)
+    ow.test.assert(isArray(first.children) && first.children.length >= 2, true, "Tree plan should include sub-steps")
   }
 
   exports.testPlanValidation = function() {
@@ -52,7 +50,7 @@
     agent._planningAssessment = agent._assessGoalComplexity(goal)
     var plan = agent._buildDecomposedPlan(goal, {})
     var result = agent._validatePlanStructure(plan, { useshell: false })
-    assert(result.valid === false, "Validation should detect missing shell access", result)
+    ow.test.assert(result.valid === false, true, "Validation should detect missing shell access")
     var blocked = false
     plan.steps.forEach(function(step) {
       if (step.status === "blocked") blocked = true
@@ -62,7 +60,7 @@
         })
       }
     })
-    assert(blocked === true, "Validation should block unavailable steps", plan)
+    ow.test.assert(blocked === true, true, "Validation should block unavailable steps")
   }
 
   exports.testDynamicReplanning = function() {
@@ -71,12 +69,12 @@
     agent._planningAssessment = agent._assessGoalComplexity(goal)
     agent._agentState = { plan: agent._buildSimplePlan(goal, {}) }
     agent._handlePlanningObstacle({ category: "permanent", message: "test obstacle" })
-    assert(agent._agentState.plan.meta.needsReplan === true, "Obstacle should mark plan for replanning", agent._agentState.plan.meta)
+    ow.test.assert(agent._agentState.plan.meta.needsReplan === true, true, "Obstacle should mark plan for replanning")
     var blocked = agent._agentState.plan.steps.some(function(step) {
       if (step.status === "blocked") return true
       if (isArray(step.children)) return step.children.some(function(child) { return child.status === "blocked" })
       return false
     })
-    assert(blocked === true, "A step should be blocked after obstacle handling", agent._agentState.plan)
+    ow.test.assert(blocked === true, true, "A step should be blocked after obstacle handling")
   }
 })()
