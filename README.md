@@ -174,13 +174,15 @@ All other flags (MCP connections, attachments, shell access, etc.) continue to w
 
 ### Task planning updates (agent mode, opt-in)
 
-Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`). Leave `useplanning` unset/false and Mini-A will skip the planning instructions entirely.
+Set `useplanning=true` (and keep `chatbotmode=false`) to enable Mini-A's advanced planning engine. The agent now pre-computes a task decomposition tree (`planTree`) with checkpointed milestones, validates the plan against the currently available tools/shell permissions (`planValidation`), and keeps a running progress summary (`planProgress`). The flattened view of the checkpoints remains available under the traditional `plan` array for compatibility. Leave `useplanning` unset/false and Mini-A will skip these instructions entirely.
 
-- **CLI / oJob output**: Planning updates appear with the 🗺️ icon, alongside thought (`💭`) messages.
-- **Web UI**: When an active plan exists the transcript keeps the 🗺️ entries and the interface surfaces an expandable progress card that summarizes completed vs. total steps and renders the plan as a numbered checklist with completed items struck through.
-- **Custom integrations**: The current plan continues to flow through the state payload passed back on each step, enabling downstream automation.
+- **Multi-step decomposition**: A hierarchical tree of sub-goals is generated before the first step, with intermediate checkpoints and nested subtasks captured in the state.
+- **Plan validation**: Every session checks feasibility (e.g., shell-required steps while `useshell=false`, missing MCP tools). Issues surface in the 🗺️ log and under `state.planValidation.issues` so you can alert operators or adjust tooling.
+- **Dynamic replanning**: When runtime errors bubble up Mini-A automatically adds recovery checkpoints and marks the affected branch as blocked, ensuring the model receives up-to-date guidance.
+- **Visual progress**: Plan updates now include a percentage complete line (based on all tasks in the tree), so CLI/web consumers can glance at momentum.
+- **Custom integrations**: Downstream code can consume `planTree`, `planProgress`, and `planValidation` alongside the legacy `plan` array to power dashboards or automations.
 
-The agent revises the plan whenever progress changes, so the summary always reflects the latest approach. When no plan is active the web UI hides 🗺️ updates and the progress card stays collapsed.
+The agent revises the plan whenever progress changes (or a recovery checkpoint is added), so the summary always reflects the latest approach. When no plan is active the web UI hides 🗺️ updates and the progress card stays collapsed.
 
 ## Project Components
 
@@ -199,7 +201,7 @@ Mini-A ships with three complementary components:
 - **STDIO or HTTP MCPs**: Use MCPs over STDIO or start them as remote HTTP servers with `onport` (see [MCP docs](mcps/README.md))
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
-- **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) of the current task, complete with web UI progress tracking
+- **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) with multi-step decomposition, validation, replanning, and progress tracking
 - **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
@@ -309,6 +311,8 @@ Mini-A tracks detailed runtime metrics (LLM calls, shell approvals, escalation c
 - Through OpenAF's metrics registry (`ow.metrics.add('mini-a', ...)`), which exposes the same information to external scrapers or dashboards.
 
 These metrics are useful for tracking costs, diagnosing stuck runs, and creating operational dashboards for long-lived agents.
+
+Planning-specific counters (`plans_generated`, `plans_validated`, `plan_validation_failures`, `plans_replanned`, `plan_progress_updates`) surface alongside the existing metrics so you can monitor decomposition quality, validation coverage, and replanning frequency.
 
 ## Contributing
 

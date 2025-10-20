@@ -1,0 +1,46 @@
+loadLib('mini-a.js')
+
+var agent = new MiniA()
+agent.fnI = function() {}
+agent._useTools = false
+agent._enablePlanning = true
+agent.mcpTools = []
+agent.mcpToolNames = ['search']
+
+var goal = 'Research modern data frameworks and summarise findings'
+agent._preparePlanningSession(goal, { goal: goal, useshell: false })
+
+if (!isObject(agent._agentState.planTree)) throw 'Expected planning tree to be generated'
+if (!isArray(agent._agentState.planTree.children) || agent._agentState.planTree.children.length == 0) throw 'Planning tree missing child checkpoints'
+if (!isArray(agent._agentState.plan) || agent._agentState.plan.length == 0) throw 'Flattened plan array missing entries'
+if (!isObject(agent._agentState.planProgress) || !isNumber(agent._agentState.planProgress.total) || agent._agentState.planProgress.total == 0) throw 'Plan progress missing totals'
+if (!isObject(agent._agentState.planValidation) || agent._agentState.planValidation.valid !== true) throw 'Plan validation expected to pass with search tool available'
+
+var initialProgress = agent._agentState.planProgress.percent
+agent._agentState.plan[0].status = 'done'
+agent._handlePlanUpdate()
+if (!isObject(agent._agentState.planProgress) || agent._agentState.planProgress.percent <= initialProgress) throw 'Progress percentage did not increase after marking a task done'
+
+var replansBefore = global.__mini_a_metrics.plans_replanned.get()
+agent._handleDynamicReplan({ message: 'API timeout while fetching dataset' })
+var replansAfter = global.__mini_a_metrics.plans_replanned.get()
+if (replansAfter <= replansBefore) throw 'Dynamic replanning metric did not increment'
+var planTitles = agent._agentState.plan.map(p => p.title)
+var hasRecovery = planTitles.some(t => String(t).indexOf('Recover') >= 0)
+if (!hasRecovery) throw 'Replanning did not add a recovery checkpoint'
+
+var shellAgent = new MiniA()
+shellAgent.fnI = function() {}
+shellAgent._useTools = false
+shellAgent._enablePlanning = true
+shellAgent.mcpTools = []
+shellAgent.mcpToolNames = []
+
+var shellGoal = 'Execute shell commands to deploy the service'
+shellAgent._preparePlanningSession(shellGoal, { goal: shellGoal, useshell: false })
+if (!isObject(shellAgent._agentState.planValidation) || shellAgent._agentState.planValidation.valid !== false) throw 'Shell validation should fail when shell access is disabled'
+if (!isArray(shellAgent._agentState.planValidation.issues) || shellAgent._agentState.planValidation.issues.length == 0) throw 'Validation issues should describe missing shell access'
+
+print('Advanced planning tree checkpoints: ' + agent._agentState.planTree.children.length)
+print('Progress after completion: ' + agent._agentState.planProgress.percent + '%')
+print('Replanning issues tracked: ' + shellAgent._agentState.planValidation.issues.join(' | '))
