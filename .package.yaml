@@ -76,18 +76,24 @@ files:
 - mini-a.yaml
 - public/index.md
 - public/showdown.min.js
+- tests/advancedPlanning.js
+- tests/advancedPlanning.yaml
+- tests/autoTestAll.allJobs.yaml
+- tests/autoTestAll.yaml
+- tests/coreFunctionality.js
+- tests/coreFunctionality.yaml
 filesHash:
   .odoc.db: 3dc919db673f13b80bea6d08e8c48ef4e1c5589d
   AGENTS.md: 7b6df1520b27dc3ef4e025a084452c62d0e1c1f9
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
-  CONTRIBUTING.md: 279d907bcbdcddf93716e208b90b683e53b9f83a
+  CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: 6b0e52f59e26f3f16ba8a89338c792f3a763f0b7
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 865743230138cc4692a73bed277d348c56a82d3f
+  README.md: a238c3ce025f99283c2adab73533a49bb9c7df28
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
   USAGE.md: dabd5781f195694e1f43f9175d2fbb4592fd6770
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
-  mcps/README.md: eb9d4526a478a4939d718772a9c7193353890a02
+  mcps/README.md: 92ebc6e54ac4177a2d7bc8cc95ef28b6bafe4078
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: d9dde29b03e7b8873f66a22476dc8ffd6619ce85
@@ -104,8 +110,14 @@ filesHash:
   mini-a-main.yaml: eb36f5a6749500c7bef073059abf461916174aed
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 40b2ae2f04a8b18325d2c0089d947a9cc2490678
-  mini-a.js: 17a39b11bbef9ff8d453baedcccff77e9f463f27
+  mini-a.js: f4e675a4e83b7cf18c0a1f158a28d9aaef3089b0
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: c02780a1cec62b76c9fd6d6dcd92c15e4de49cc9
   public/index.md: eeaa95a2118e93de419e316f81c6e9b372ccaea9
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
+  tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
+  tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
+  tests/autoTestAll.allJobs.yaml: 628921dcb7e35c58e8807cfcbaece93b60ce93ff
+  tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
+  tests/coreFunctionality.js: b10c42a85394f0ad6f72cebcef540497349080d8
+  tests/coreFunctionality.yaml: 0a656733b02a5a4f77139766e42eabddfc4a39ca
