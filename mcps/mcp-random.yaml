@@ -227,15 +227,40 @@ todo:
           title         : random-hex
           readOnlyHint  : true
           idempotentHint: false
+
+      random-password:
+        name       : random-password
+        description: Generates a random password with configurable character sets.
+        inputSchema:
+          type      : object
+          properties:
+            size:
+              type       : number
+              description: Length of the password to generate.
+              example    : 12
+            sets:
+              type       : string
+              description: Comma-separated list of character sets to include (lowercase, uppercase, numbers, symbols, symbols2).
+              example    : "lowercase,uppercase,numbers,symbols"
+            exclude:
+              type       : string
+              description: Characters to exclude from the generated password.
+              example    : "#$"
+          required  : []
+        annotations:
+          title         : random-password
+          readOnlyHint  : true
+          idempotentHint: false
     ((fns    )): &MCPFNS
-      random-integer     : Random integer in range
-      random-sequence    : Random integer sequence
-      random-integer-set : Random integer set
-      gaussian-sample    : Gaussian sample generator
-      random-fraction    : Random fraction generator
-      random-choice      : Random choice
-      random-boolean     : Random boolean generator
-      random-hex         : Random hex generator
+      random-integer     : Generate random integer
+      random-sequence    : Generate random sequence
+      random-integer-set : Generate random integer set
+      gaussian-sample    : Generate gaussian sample
+      random-fraction    : Generate random fractions
+      random-choice      : Generate random choice
+      random-boolean     : Generate random booleans
+      random-hex         : Generate random hex string
+      random-password    : Generate random password
   ((else)):
   - (stdioMCP ): *MCPSERVER
     ((fnsMeta)): *MCPFNSMETA
@@ -257,7 +282,7 @@ include:
 - oJobMCP.yaml
 
 jobs:
-# -------------------------
+# ------------------------------
 - name : Generate random integer
   check:
     in:
@@ -285,7 +310,7 @@ jobs:
       seed   : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# -------------------------------
 - name : Generate random sequence
   check:
     in:
@@ -323,7 +348,7 @@ jobs:
       seed    : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# ----------------------------------
 - name : Generate random integer set
   check:
     in:
@@ -366,7 +391,7 @@ jobs:
       seed  : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# -------------------------------
 - name : Generate gaussian sample
   check:
     in:
@@ -398,7 +423,7 @@ jobs:
       seed    : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# --------------------------------
 - name : Generate random fractions
   check:
     in:
@@ -430,7 +455,7 @@ jobs:
       seed         : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# -----------------------------
 - name : Generate random choice
   check:
     in:
@@ -478,7 +503,7 @@ jobs:
       seed  : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# -------------------------------
 - name : Generate random booleans
   check:
     in:
@@ -505,7 +530,7 @@ jobs:
       seed           : isDef(args.seed) ? Number(args.seed) : null
     }
 
-# -------------------------
+# ---------------------------------
 - name : Generate random hex string
   check:
     in:
@@ -531,4 +556,114 @@ jobs:
       uppercase: uppercase,
       value    : String(builder.toString()),
       seed     : isDef(args.seed) ? Number(args.seed) : null
+    }
+
+# -------------------------------
+- name : Generate random password
+  check:
+    in:
+      size: toNumber.isNumber.default(12)
+  exec : | #js
+    var size = Math.max(1, Math.floor(Number(args.size)))
+
+    var defaultSets = "lowercase,uppercase,numbers,symbols"
+    var rawSets = defaultSets
+    if (isDef(args.sets)) {
+      if (Array.isArray(args.sets)) {
+        rawSets = args.sets.join(",")
+      } else {
+        rawSets = String(args.sets)
+      }
+    }
+    if (rawSets.trim().length === 0) rawSets = defaultSets
+
+    var exclude = isDef(args.exclude) ? String(args.exclude) : ""
+
+    var catalog = {
+      lowercase: "abcdefghijklmnopqrstuvwxyz",
+      uppercase: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      numbers  : "1234567890",
+      symbols  : "!@#$%*+_-?",
+      symbols2 : "\",./:;'<=>(){}?@[\\]^`~&"
+    }
+    var weights = {
+      lowercase: 40,
+      uppercase: 36,
+      numbers  : 15,
+      symbols  : 9,
+      symbols2 : 9
+    }
+
+    var parts = rawSets.split(",").map(function(value) {
+      return String(value).toLowerCase().trim()
+    }).filter(function(value) {
+      return value.length > 0
+    })
+
+    var unique = []
+    var seen = {}
+    for (var i = 0; i < parts.length; i++) {
+      var name = parts[i]
+      if (!seen[name]) {
+        seen[name] = true
+        unique.push(name)
+      }
+    }
+
+    if (unique.length === 0) throw "no valid character sets provided"
+
+    var pools = []
+    var totalWeight = 0
+    for (var i = 0; i < unique.length; i++) {
+      var setName = unique[i]
+      if (!catalog.hasOwnProperty(setName)) throw "unknown character set: " + setName
+
+      var source = catalog[setName]
+      var filtered = ""
+      for (var j = 0; j < source.length; j++) {
+        var ch = source.charAt(j)
+        if (exclude.indexOf(ch) < 0) filtered += ch
+      }
+      if (filtered.length === 0) continue
+
+      var weight = weights.hasOwnProperty(setName) ? Number(weights[setName]) : 1
+      if (!isFinite(weight) || weight <= 0) weight = 1
+      weight = Math.max(1, Math.floor(weight))
+
+      pools.push({ name: setName, chars: filtered, weight: weight })
+      totalWeight += weight
+    }
+
+    if (pools.length === 0 || totalWeight <= 0) throw "no usable character sets available"
+
+    var rng = new java.security.SecureRandom()
+    var builder = new java.lang.StringBuilder()
+
+    while (builder.length() < size) {
+      var pick = rng.nextInt(totalWeight)
+      var cumulative = 0
+      var chosen = pools[0]
+      for (var k = 0; k < pools.length; k++) {
+        cumulative += pools[k].weight
+        if (pick < cumulative) {
+          chosen = pools[k]
+          break
+        }
+      }
+
+      var chars = chosen.chars
+      if (chars.length === 0) continue
+
+      var index = rng.nextInt(chars.length)
+      var candidate = chars.charAt(index)
+      builder.append(candidate)
+    }
+
+    var activeSets = pools.map(function(pool) { return pool.name })
+
+    return {
+      size    : size,
+      sets    : activeSets,
+      exclude : exclude,
+      password: String(builder.toString())
     }
