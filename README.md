@@ -102,6 +102,18 @@ Mini-A now bounces back from flaky infrastructure faster and with richer diagnos
 - **Circuit breakers for MCP connections** temporarily pause repeatedly failing integrations, protecting the session from hammering unhealthy backends.
 - **Preserved error context across summaries** keeps the latest recovery notes at the top of the conversation even when the working memory is compressed.
 
+### Advanced planning upgrades
+
+Enable `useplanning=true` to activate a richer planning workflow that now adapts to task complexity:
+
+- **Goal-aware strategy selection** inspects the goal upfront and disables planning for trivial requests, keeps a short linear task list for moderate work, and creates a nested plan tree for complex missions.
+- **Automatic decomposition & checkpoints** seeds `state.plan` with structured steps, intermediate checkpoints, and progress percentages so the LLM can track execution without handcrafting the scaffold from scratch.
+- **Feasibility validation** pre-checks each step against available shell access and registered MCP tools, blocking impossible tasks and surfacing actionable warnings in the log.
+- **Dynamic replanning hooks** mark the active step as `blocked` whenever the runtime raises an error, flagging `state.plan.meta.needsReplan=true` so the model knows to adjust its strategy.
+- **Progress metrics & logging** record overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_replanned`, etc.) that show up in `getMetrics()`.
+
+The new planning helpers live entirely in `state.plan`, so existing prompts and transcripts remain compatible while gaining richer telemetry.
+
 ### Running the mini agent
 
 #### Single MCP connection
@@ -318,6 +330,18 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - Development setup
 - Pull request guidelines
 - Community standards
+
+### Running tests
+
+Run the test suite from the repository root using oJob:
+
+```
+ojob tests/autoTestAll.yaml
+```
+
+Be sure to execute this in the main repo folder so relative paths used by the tests resolve correctly. You need OpenAF installed so the `ojob` command is available.
+
+The run generates an `autoTestAll.results.json` file with detailed results—inspect it locally and delete it before your final commit.
 
 ## Community
 

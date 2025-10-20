@@ -1,0 +1,42 @@
+jobs:
+- name: MiniA Tests::Init
+  exec: args.tests = require("tests/advancedPlanning.js")
+
+- name: MiniA Tests::GoalAssessment
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGoalAssessment
+
+- name: MiniA Tests::SimplePlan
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSimplePlanGeneration
+
+- name: MiniA Tests::TreePlan
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTreePlanGeneration
+
+- name: MiniA Tests::Validation
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPlanValidation
+
+- name: MiniA Tests::DynamicReplan
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDynamicReplanning
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Tests::GoalAssessment
+- MiniA Tests::SimplePlan
+- MiniA Tests::TreePlan
+- MiniA Tests::Validation
+- MiniA Tests::DynamicReplan

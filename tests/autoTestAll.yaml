@@ -1,0 +1,72 @@
+# Copyright 2025 Nuno Aguiar
+
+include:
+- oJobTest.yaml
+
+ojob:
+   sequential: false
+   async     : true
+   opacks    :
+   - oJob-common
+   channels  :
+     expose : true
+     port   : 17878
+     log    : true
+     list:
+     - oJob::log
+     - oJob::jobs
+     - oJob::todo
+     - oJob::oJob
+     - __owTest::tests
+
+jobs:
+# RUN TESTS
+# ---------
+- name    : Run Tests
+  type    : jobs
+  typeArgs:
+    file: tests/autoTestAll.allJobs.yaml
+
+# FINAL TEST RESULTS
+# ------------------
+- name: Results
+  from: oJob Test Results
+  deps:
+    - Run Tests
+  args: 
+    quiet: true
+  exec: | #js
+    args.results.asserts = ow.test.getCountAssert()
+    tprint("Tests PASSED : {{pass}}/{{count}}", args.results);
+    tprint("Tests FAILED : {{fail}}/{{count}}", args.results);
+    tprint("Count asserts: {{asserts}}", args.results)
+    if (args.results.fail > 0) printErr("There are failed tests");
+
+    // Write a simple json result file
+    io.writeFile("autoTestAll.results.json", {
+      pass: args.results.pass,
+      fail: args.results.fail,
+      count: args.results.count,
+      asserts: args.results.asserts
+    })
+
+# ---------
+- name: End
+  deps:
+    - Run Tests
+    - Results
+    - JUnit results
+  exec: | #js
+    sleep(1000)
+    exit(0)
+
+todo:
+# Run tests
+# ---------
+- Run Tests
+
+# Final results
+# -------------
+- Results
+
+- End

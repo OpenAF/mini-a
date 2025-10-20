@@ -1,0 +1,5 @@
+# Copyright 2025 Nuno Aguiar
+
+include:
+- tests/advancedPlanning.yaml
+- tests/coreFunctionality.yaml

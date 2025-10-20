@@ -1,0 +1,48 @@
+jobs:
+- name: MiniA Core Tests::Init
+  exec: args.tests = require("tests/coreFunctionality.js")
+
+- name: MiniA Core Tests::CleanCodeBlocks
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCleanCodeBlocks
+
+- name: MiniA Core Tests::ExtractFinalAction
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testExtractEmbeddedFinalAction
+
+- name: MiniA Core Tests::ToolCacheKeys
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBuildToolCacheKeyRespectsKeyFields
+
+- name: MiniA Core Tests::CategorizeError
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCategorizeErrorDetection
+
+- name: MiniA Core Tests::ErrorHistory
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUpdateErrorHistoryRetention
+
+- name: MiniA Core Tests::NormalizeToolResult
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testNormalizeToolResultVariants
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Core Tests::CleanCodeBlocks
+- MiniA Core Tests::ExtractFinalAction
+- MiniA Core Tests::ToolCacheKeys
+- MiniA Core Tests::CategorizeError
+- MiniA Core Tests::ErrorHistory
+- MiniA Core Tests::NormalizeToolResult
