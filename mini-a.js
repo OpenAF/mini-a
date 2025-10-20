@@ -643,6 +643,47 @@ MiniA.prototype._cleanCodeBlocks = function(text) {
 }
 
 /**
+ * Extract an embedded final action payload from an answer field when present.
+ */
+MiniA.prototype._extractEmbeddedFinalAction = function(answerPayload) {
+    if (isUnDef(answerPayload)) return null
+
+    var embedded = answerPayload
+    if (isString(embedded)) {
+        var cleaned = this._cleanCodeBlocks(embedded).trim()
+        if (cleaned.length === 0) return null
+        if (!cleaned.match(/^(\{|\[)/)) return null
+        try {
+            embedded = jsonParse(cleaned, __, __, true)
+        } catch (e) {
+            return null
+        }
+    }
+
+    if (!isMap(embedded)) return null
+
+    var embeddedActionRaw = ((embedded.action || embedded.type || embedded.name || embedded.tool || embedded.think || "") + "").trim()
+    if (embeddedActionRaw.toLowerCase() !== "final") return null
+    if (isUnDef(embedded.answer)) return null
+
+    var hasEmbeddedThought = isDef(embedded.thought) || isDef(embedded.think)
+    if (!hasEmbeddedThought) return null
+
+    var normalized = {
+        action: "final",
+        answer: embedded.answer
+    }
+
+    if (isDef(embedded.thought)) normalized.thought = embedded.thought
+    else if (isDef(embedded.think)) normalized.thought = embedded.think
+    if (isDef(embedded.state)) normalized.state = embedded.state
+    if (isDef(embedded.params)) normalized.params = embedded.params
+    if (isDef(embedded.command)) normalized.command = embedded.command
+
+    return normalized
+}
+
+/**
  * Validate and set default values for common argument patterns
  */
 MiniA.prototype._validateArgs = function(args, validations) {
@@ -2754,6 +2795,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         var thoughtStr = (isObject(thoughtValue) ? stringify(thoughtValue, __, "") : thoughtValue) || "(no thought)"
+
+        if (action != "final") {
+          var embeddedFinalAction = this._extractEmbeddedFinalAction(currentMsg.answer)
+          if (isMap(embeddedFinalAction)) {
+            var nextMsg = actionMessages[actionIndex + 1]
+            var nextActionRaw = ((isMap(nextMsg) && (nextMsg.action || nextMsg.type || nextMsg.name || nextMsg.tool || nextMsg.think)) || "") + ""
+            var hasNextFinalWithAnswer = false
+            if (isMap(nextMsg) && nextActionRaw.trim().toLowerCase() === "final" && isDef(nextMsg.answer)) {
+              hasNextFinalWithAnswer = true
+            }
+            if (!hasNextFinalWithAnswer) {
+              actionMessages.splice(actionIndex + 1, 0, embeddedFinalAction)
+            }
+          }
+        }
 
         if (action == "think") {
           this._logMessageWithCounter("think", `${thoughtStr}`)
