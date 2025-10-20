@@ -2,3 +2,4 @@
 
 include:
 - tests/advancedPlanning.yaml
+- tests/coreFunctionality.yaml
