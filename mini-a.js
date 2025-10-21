@@ -1367,12 +1367,15 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
 
-  // Remove markdown code block if format=md and answer is just a code block
+  // Remove markdown code block markers if format=md and answer is just a code block
   if ((args.format == "md" && args.format != "raw") && isString(answer)) {
     var trimmed = answer.trim()
     // Match code block: starts with ```[language]\n, ends with ``` and nothing else
-    var codeBlockMatch = trimmed.match(/^```[a-zA-Z0-9]+\n[\s\S]*\n```$/)
-    if (codeBlockMatch && trimmed === codeBlockMatch[0]) return ""
+    var codeBlockMatch = trimmed.match(/^```[a-zA-Z0-9]*\n([\s\S]*)\n```$/)
+    if (codeBlockMatch) {
+      // Extract content from within the code block
+      answer = codeBlockMatch[1]
+    }
   }
 
   // Handle JSON parsing for markdown format
@@ -3265,6 +3268,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         if (isMap(baseMsg) && baseMsg !== entry) {
           if (isUnDef(normalized.thought) && isDef(baseMsg.thought)) normalized.thought = baseMsg.thought
+          if (isUnDef(normalized.thought) && isDef(baseMsg.think)) normalized.thought = baseMsg.think
           if (isUnDef(normalized.command) && isDef(baseMsg.command)) normalized.command = baseMsg.command
           if (isUnDef(normalized.answer) && isDef(baseMsg.answer)) normalized.answer = baseMsg.answer
           if (isUnDef(normalized.params) && isDef(baseMsg.params)) normalized.params = baseMsg.params
@@ -3329,7 +3333,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
         var action = origActionRaw.toLowerCase()
-        var thoughtValue = jsonParse(((currentMsg.thought || "") + "").trim())
+        var thoughtValue = jsonParse(((currentMsg.thought || currentMsg.think || "") + "").trim())
         var commandValue = ((currentMsg.command || "") + "").trim()
         var answerValue = ((isObject(currentMsg.answer) ? stringify(currentMsg.answer,__,"") : currentMsg.answer) || "")
         var paramsValue = currentMsg.params
@@ -3735,6 +3739,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         if (isUnDef(normalized.action) && isString(entry)) normalized.action = entry
         if (isMap(topLevelMap) && entry !== topLevelMap) {
           if (isUnDef(normalized.thought) && isDef(topLevelMap.thought)) normalized.thought = topLevelMap.thought
+          if (isUnDef(normalized.thought) && isDef(topLevelMap.think)) normalized.thought = topLevelMap.think
           if (isUnDef(normalized.command) && isDef(topLevelMap.command)) normalized.command = topLevelMap.command
           if (isUnDef(normalized.params) && isDef(topLevelMap.params)) normalized.params = topLevelMap.params
           if (isUnDef(normalized.answer) && isDef(topLevelMap.answer)) normalized.answer = topLevelMap.answer
@@ -3755,7 +3760,7 @@ MiniA.prototype._runChatbotMode = function(options) {
           var currentMsg = actionEntries[actionIndex]
           var actionName = isString(currentMsg.action) ? currentMsg.action.trim() : ""
           var lowerAction = actionName.toLowerCase()
-          var thoughtValue = currentMsg.thought
+          var thoughtValue = currentMsg.thought || currentMsg.think
 
           if (isString(thoughtValue) && thoughtValue.length > 0) {
             this._logMessageWithCounter("thought", thoughtValue)
