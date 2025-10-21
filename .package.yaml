@@ -63,6 +63,7 @@ files:
 - mcps/mcp-net.yaml
 - mcps/mcp-oaf.yaml
 - mcps/mcp-oafp.yaml
+- mcps/mcp-random.yaml
 - mcps/mcp-s3.yaml
 - mcps/mcp-shell.yaml
 - mcps/mcp-ssh.yaml
@@ -103,6 +104,7 @@ filesHash:
   mcps/mcp-net.yaml: 36b0e8ef74274819422453d6e76df4426f37a187
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
   mcps/mcp-oafp.yaml: 4e7ba7a9ca5cb3dc9faa456f0f58225c7a41602a
+  mcps/mcp-random.yaml: ac2ee99722a6ae2baeb14e19d4f881ce03e369c4
   mcps/mcp-s3.yaml: 845a363c5ca9d291a1ab24dad80972b6651b1a29
   mcps/mcp-shell.yaml: ce8b702efa515b704720f0d4e73a0093c1e4b699
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
