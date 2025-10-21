@@ -6,6 +6,7 @@
 |------------|---------------------------------|------------------|------------|------------------------------------|
 | mcp-db     | Database access MCP             | STDIO/HTTP       | (included) | [mcp-db.yaml](mcp-db.yaml)         |
 | mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
+| mcp-file   | Local file management MCP       | STDIO/HTTP       | (included) | [mcp-file.yaml](mcp-file.yaml)     |
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | Provided by the `notifications` oPack (see its documentation) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
 | mcp-kube   | Kubernetes management MCP       | STDIO/HTTP       | (included) | [mcp-kube.yaml](mcp-kube.yaml)     |
@@ -46,6 +47,24 @@ ojob mini-a.yaml goal="build a markdown table with the contents of the 'test' ta
 
 ```bash
 ojob mini-a.yaml goal="send an email reminding the team about today's standup" mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=bot@example.com user=bot@example.com pass=<app_password> tls=true html=false', timeout: 5000)"
+```
+
+#### mcp-file
+
+`mcp-file` exposes file system operations (read, list, search, write, delete) restricted to a configurable root directory. By default all write/delete tools are disabled until you opt in with `readwrite=true`.
+
+- `root` (optional): absolute or relative base directory for all requests (defaults to the working directory). The MCP will reject paths that resolve outside of this root.
+- `readwrite` (optional, default: `false`): enable write/delete capabilities. Without it, only read-only tools are available.
+
+```bash
+ojob mini-a.yaml goal="summarize the README in ./docs" \
+  mcp="(cmd: 'ojob mcps/mcp-file.yaml root=docs', timeout: 5000)"
+```
+
+```bash
+ojob mini-a.yaml goal="create a TODO.md placeholder inside ./notes" \
+  mcp="(cmd: 'ojob mcps/mcp-file.yaml root=notes readwrite=true', timeout: 5000)" \
+  knowledge="- ensure confirm=true is set when deleting files"
 ```
 
 #### mcp-notify
