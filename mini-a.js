@@ -1357,8 +1357,8 @@ MiniA.prototype._createRateLimiter = function(args) {
 MiniA.prototype._processFinalAnswer = function(answer, args) {
   var textAnswer = answer
   if (isDef(args.outfile)) {
-    if (isDef(args.__format)) {
-      textAnswer = _$o(answer, args, __, true)
+    if (args.format != 'raw' && isDef(args.__format)) {
+      textAnswer = $o(answer, args, __, true)
     }
     io.writeFileString(args.outfile, textAnswer || "(no answer)")
     this.fnI("done", `Final answer written to ${args.outfile}`)
@@ -3505,7 +3505,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
           }
 
-          if (answerValue.trim().length == 0) {
+          var answerToCheck = (args.format == 'raw') ? answerValue : answerValue.trim()
+          if (answerToCheck.length == 0) {
             runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action.`)
             this._registerRuntimeError(runtime, {
               category: "permanent",
@@ -3638,7 +3639,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isDef(args.conversation)) io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
     
     // Extract final answer
-    res.answer = this._cleanCodeBlocks(res.answer)
+    if (args.format != 'raw') {
+      res.answer = this._cleanCodeBlocks(res.answer)
+    }
 
     // Calculate total session time and mark as completed (potentially failed due to max steps)
     var totalTime = now() - sessionStartTime
