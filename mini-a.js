@@ -1357,8 +1357,8 @@ MiniA.prototype._createRateLimiter = function(args) {
 MiniA.prototype._processFinalAnswer = function(answer, args) {
   var textAnswer = answer
   if (isDef(args.outfile)) {
-    if (isDef(args.__format)) {
-      textAnswer = _$o(answer, args, __, true)
+    if (args.format != 'raw' && isDef(args.__format)) {
+      textAnswer = $o(answer, args, __, true)
     }
     io.writeFileString(args.outfile, textAnswer || "(no answer)")
     this.fnI("done", `Final answer written to ${args.outfile}`)
@@ -1367,12 +1367,15 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
 
-  // Remove markdown code block if format=md and answer is just a code block
+  // Remove markdown code block markers if format=md and answer is just a code block
   if ((args.format == "md" && args.format != "raw") && isString(answer)) {
     var trimmed = answer.trim()
     // Match code block: starts with ```[language]\n, ends with ``` and nothing else
-    var codeBlockMatch = trimmed.match(/^```[a-zA-Z0-9]+\n[\s\S]*\n```$/)
-    if (codeBlockMatch && trimmed === codeBlockMatch[0]) return ""
+    var codeBlockMatch = trimmed.match(/^```[a-zA-Z0-9]*\n([\s\S]*)\n```$/)
+    if (codeBlockMatch) {
+      // Extract content from within the code block
+      answer = codeBlockMatch[1]
+    }
   }
 
   // Handle JSON parsing for markdown format
@@ -3265,6 +3268,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         if (isMap(baseMsg) && baseMsg !== entry) {
           if (isUnDef(normalized.thought) && isDef(baseMsg.thought)) normalized.thought = baseMsg.thought
+          if (isUnDef(normalized.thought) && isDef(baseMsg.think)) normalized.thought = baseMsg.think
           if (isUnDef(normalized.command) && isDef(baseMsg.command)) normalized.command = baseMsg.command
           if (isUnDef(normalized.answer) && isDef(baseMsg.answer)) normalized.answer = baseMsg.answer
           if (isUnDef(normalized.params) && isDef(baseMsg.params)) normalized.params = baseMsg.params
@@ -3329,7 +3333,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
         var action = origActionRaw.toLowerCase()
-        var thoughtValue = jsonParse(((currentMsg.thought || "") + "").trim())
+        var thoughtValue = jsonParse(((currentMsg.thought || currentMsg.think || "") + "").trim())
         var commandValue = ((currentMsg.command || "") + "").trim()
         var answerValue = ((isObject(currentMsg.answer) ? stringify(currentMsg.answer,__,"") : currentMsg.answer) || "")
         var paramsValue = currentMsg.params
@@ -3501,7 +3505,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
           }
 
-          if (answerValue.trim().length == 0) {
+          var answerToCheck = (args.format == 'raw') ? answerValue : answerValue.trim()
+          if (answerToCheck.length == 0) {
             runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action.`)
             this._registerRuntimeError(runtime, {
               category: "permanent",
@@ -3634,7 +3639,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isDef(args.conversation)) io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
     
     // Extract final answer
-    res.answer = this._cleanCodeBlocks(res.answer)
+    if (args.format != 'raw') {
+      res.answer = this._cleanCodeBlocks(res.answer)
+    }
 
     // Calculate total session time and mark as completed (potentially failed due to max steps)
     var totalTime = now() - sessionStartTime
@@ -3735,6 +3742,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         if (isUnDef(normalized.action) && isString(entry)) normalized.action = entry
         if (isMap(topLevelMap) && entry !== topLevelMap) {
           if (isUnDef(normalized.thought) && isDef(topLevelMap.thought)) normalized.thought = topLevelMap.thought
+          if (isUnDef(normalized.thought) && isDef(topLevelMap.think)) normalized.thought = topLevelMap.think
           if (isUnDef(normalized.command) && isDef(topLevelMap.command)) normalized.command = topLevelMap.command
           if (isUnDef(normalized.params) && isDef(topLevelMap.params)) normalized.params = topLevelMap.params
           if (isUnDef(normalized.answer) && isDef(topLevelMap.answer)) normalized.answer = topLevelMap.answer
@@ -3755,7 +3763,7 @@ MiniA.prototype._runChatbotMode = function(options) {
           var currentMsg = actionEntries[actionIndex]
           var actionName = isString(currentMsg.action) ? currentMsg.action.trim() : ""
           var lowerAction = actionName.toLowerCase()
-          var thoughtValue = currentMsg.thought
+          var thoughtValue = currentMsg.thought || currentMsg.think
 
           if (isString(thoughtValue) && thoughtValue.length > 0) {
             this._logMessageWithCounter("thought", thoughtValue)
