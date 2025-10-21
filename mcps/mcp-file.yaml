@@ -1,4 +1,4 @@
-# Author: OpenAI Assistant
+# Author: OpenAI Assistant, Nuno Aguiar
 help:
   text   : A STDIO/HTTP MCP file management server backed by OpenAF io utilities
   expects:
@@ -7,7 +7,7 @@ help:
     example  : "8888"
     mandatory: false
   - name     : root
-    desc     : Base directory restricting all file operations (default: current directory)
+    desc     : "Base directory restricting all file operations (default: current directory)"
     example  : "/workspace"
     mandatory: false
   - name     : readwrite
@@ -41,7 +41,7 @@ todo:
               example    : "./notes/today.md"
             encoding:
               type       : string
-              description: Optional charset passed to io.readFileString (default: utf-8).
+              description: "Optional charset passed to io.readFileString (default: utf-8)."
               example    : "utf-8"
               default    : "utf-8"
           required  : [ path ]
@@ -136,7 +136,7 @@ todo:
 
       write-file:
         name       : write-file
-        description: Writes text content to a file using io.writeFileString (requires readwrite=true).
+        description: Writes text content to a file using io.writeFileString (supports append; requires readwrite=true).
         inputSchema:
           type      : object
           properties:
@@ -158,6 +158,11 @@ todo:
               description: Create parent directories when they do not exist.
               example    : true
               default    : true
+            append:
+              type       : boolean
+              description: When true, appends content to the file instead of overwriting.
+              example    : false
+              default    : false
           required  : [ path, content ]
         annotations:
           title         : write-file
@@ -309,22 +314,30 @@ jobs:
         var info = io.fileInfo(fullPath)
         if (isUnDef(info)) return
         info.filename = isString(info.filename) ? info.filename : fileName
-        info.canonicalPath = isString(info.canonicalPath) ? info.canonicalPath : fullPath
-        info.filepath = isString(info.filepath) ? info.filepath : fullPath
-        info.path = info.canonicalPath
-        info.relativePath = global.__toRelative__(info.canonicalPath)
+        //info.canonicalPath = isString(info.canonicalPath) ? info.canonicalPath : fullPath
+        info.lastModified = isDef(info.lastModified) ? new Date(info.lastModified) : __
+        info.createTime = isDef(info.createTime) ? new Date(info.createTime) : __
+        info.lastAccess = isDef(info.lastAccess) ? new Date(info.lastAccess) : __
+        //info.filepath = isString(info.filepath) ? info.filepath : fullPath
+        //info.path = info.canonicalPath
+        info.relativePath = global.__toRelative__(info.canonicalPath || fullPath)
         info.isDirectory = info.isDirectory === true
         info.isFile = info.isFile === true
         info.hidden = fileObj.isHidden()
+
+        delete info.canonicalPath
+        delete info.filepath
+        delete info.path
+
         results.push(info)
         seen[fullPath] = true
       }
 
-      var traverse = function(value, ctxDir) {
+      var _traverse = function(value, ctxDir) {
         if (isUnDef(value)) return
         if (isArray(value)) {
           value.forEach(function(entry) {
-            traverse(entry, ctxDir)
+            _traverse(entry, ctxDir)
           })
           return
         }
@@ -377,7 +390,7 @@ jobs:
           }
           listNestedKeys.forEach(function(key) {
             if (isDef(value[key])) {
-              traverse(value[key], childContext)
+              _traverse(value[key], childContext)
             }
           })
         }
@@ -403,7 +416,7 @@ jobs:
               }
             })
           } else {
-            traverse(listed, currentDir)
+            _traverse(listed, currentDir)
           }
         } catch (innerErr2) {
           // Ignore fallback errors
@@ -420,7 +433,7 @@ jobs:
       if (isUnDef(raw)) {
         fallbackEnumerate(baseDir)
       } else {
-        traverse(raw, baseDir)
+        _traverse(raw, baseDir)
         if (results.length === 0) {
           fallbackEnumerate(baseDir)
         }
@@ -435,7 +448,7 @@ jobs:
       return results
     }
 
-# -----------------------
+# ----------------
 - name : Read File
   check:
     in:
@@ -465,7 +478,7 @@ jobs:
       return "[ERROR] " + (e.message || String(e))
     }
 
-# -----------------------
+# ---------------------
 - name : List Directory
   check:
     in:
@@ -492,7 +505,7 @@ jobs:
       return "[ERROR] " + (e.message || String(e))
     }
 
-# -----------------------
+# ---------------------
 - name : Search Content
   check:
     in:
@@ -516,7 +529,7 @@ jobs:
       var regexMode = args.regex === true
       var caseSensitive = args.caseSensitive === true
       var maxResults = Number(args.maxResults || 0)
-      var collected = []
+      var collected = $atomic(0, "long")
 
       var buildRegex = function() {
         var flags = caseSensitive ? "g" : "gi"
@@ -528,12 +541,14 @@ jobs:
         matcher = buildRegex()
       }
 
-      var processFile = function(filePath) {
-        if (maxResults > 0 && collected.length >= maxResults) return
+      var processFile = function(fInfo) {
+        try {
+        var filePath = fInfo.filepath
+        if (maxResults > 0 && collected.get() >= maxResults) return
         var content = io.readFileString(filePath)
         var lines = content.split(/\r?\n/)
         for (var i = 0; i < lines.length; i++) {
-          if (maxResults > 0 && collected.length >= maxResults) break
+          if (maxResults > 0 && collected.get() >= maxResults) break
           var line = lines[i]
           var matched = false
           if (regexMode) {
@@ -547,46 +562,28 @@ jobs:
             }
           }
           if (matched) {
-            collected.push({
+            collected.inc()
+            return {
               path        : filePath,
               relativePath: global.__toRelative__(filePath),
               line        : i + 1,
               preview     : line
-            })
+            }
+          } else {
+            return __
           }
         }
-      }
-
-      var walk = function(targetPath, info) {
-        if (maxResults > 0 && collected.length >= maxResults) return
-        var targetInfo = info
-        if (isUnDef(targetInfo)) {
-          targetInfo = io.fileInfo(targetPath)
-        }
-        if (isUnDef(targetInfo)) return
-        if (targetInfo.isFile === true) {
-          processFile(targetPath)
-        } else if (targetInfo.isDirectory === true) {
-          var entries = global.__listEntries__(targetPath, {
-            recursive    : args.recursive === true,
-            includeHidden: true
-          })
-          entries.forEach(function(entry) {
-            if (maxResults > 0 && collected.length >= maxResults) return
-            if (entry.isFile === true) {
-              walk(entry.canonicalPath || entry.path, entry)
-            }
-          })
+        } catch(ee) {
+          return { error: ee }
         }
       }
 
-      walk(startPath, searchInfo)
-      return collected
+      return pForEach(listFilesRecursive(startPath), processFile).filter(r => r != null && isMap(r))
     } catch (e) {
       return "[ERROR] " + (e.message || String(e))
     }
 
-# -----------------------
+# --------------------
 - name : Get File Info
   check:
     in:
@@ -611,7 +608,7 @@ jobs:
       return "[ERROR] " + (e.message || String(e))
     }
 
-# -----------------------
+# -----------------
 - name : Write File
   check:
     in:
@@ -619,6 +616,7 @@ jobs:
       content          : isString
       encoding         : isString.default("utf-8")
       createMissingDirs: toBoolean.isBoolean.default(true)
+      append           : toBoolean.isBoolean.default(false)
   exec : | #js
     try {
       if (isUnDef(global.__fileResolve__)) {
@@ -632,13 +630,14 @@ jobs:
       if (args.createMissingDirs !== false && parent !== null && !parent.exists()) {
         parent.mkdirs()
       }
-      io.writeFileString(filePath, args.content, args.encoding || "utf-8")
+      io.writeFileString(filePath, args.content, args.encoding || "utf-8", args.append === true)
       var info = io.fileInfo(filePath)
       if (isDef(info)) {
         info.path = isString(info.canonicalPath) ? info.canonicalPath : filePath
         info.relativePath = global.__toRelative__(info.path)
         info.encoding = args.encoding || "utf-8"
         info.contentLength = args.content.length
+        info.append = args.append === true
         return info
       }
       return {
@@ -651,7 +650,7 @@ jobs:
       return "[ERROR] " + (e.message || String(e))
     }
 
-# -----------------------
+# ------------------
 - name : Delete File
   check:
     in:
