@@ -43,11 +43,6 @@ version: '20251022'
 dependencies:
   openaf: '>=20250915'
 files:
-- .github/ISSUE_TEMPLATE/bug_report.md
-- .github/ISSUE_TEMPLATE/feature_request.md
-- .github/mini-a-web-screenshot1.jpg
-- .github/version.svg
-- .github/workflows/github-action.yml
 - .mcp-weather.pid
 - .odoc.db
 - .openaf_precompiled/.t8-20251020
@@ -94,12 +89,7 @@ files:
 - tests/coreFunctionality.js
 - tests/coreFunctionality.yaml
 filesHash:
-  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
-  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
-  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
-  .github/version.svg: dca8c29e7fee6b1fdd80beb6fe5b09aad6635e2f
-  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
-  .mcp-weather.pid: 0346998e907878e4bde4f407ff7c3d1556352e44
+  .mcp-weather.pid: becc8956cb5337af724f1d3f7f0fc7f85bfc6a6c
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   .openaf_precompiled/.t8-20251020: da39a3ee5e6b4b0d3255bfef95601890afd80709
   .openaf_precompiled/mini-a_js.class: ecad060f35b097511ca974f31780fc033ffa20ae
