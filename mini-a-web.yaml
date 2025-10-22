@@ -534,6 +534,30 @@ jobs:
     global.__useattach = args.useattach
     global.__planState = {}
     args.__format = "md"
+    
+    // Add system knowledge about visual diagram capabilities
+    var visualDiagramKnowledge = "The web interface supports rendering interactive visual diagrams directly from markdown code blocks.\n\n" +
+      "When users request charts, flowcharts, diagrams, graphs, timelines, state diagrams, entity relationships, sequence diagrams, Gantt charts, or any other visual representations:\n" +
+      "- Use markdown code blocks with the 'mermaid' language identifier\n" +
+      "- These will be automatically rendered as interactive SVG graphics\n" +
+      "- Supports: flowcharts, sequence diagrams, class diagrams, state diagrams, entity relationship diagrams, user journey maps, Gantt charts, pie charts, requirement diagrams, and more\n" +
+      "- Use appropriate diagram syntax for the visualization type requested\n\n" +
+      "Example formats available:\n" +
+      "- Flowcharts: graph TD/LR for top-down or left-right flows\n" +
+      "- Sequence diagrams: sequenceDiagram for interaction flows\n" +
+      "- State diagrams: stateDiagram-v2 for state machines\n" +
+      "- Class diagrams: classDiagram for object relationships\n" +
+      "- ER diagrams: erDiagram for database schemas\n" +
+      "- Gantt charts: gantt for project timelines\n" +
+      "- Pie charts: pie for data distribution\n\n" +
+      "Always prefer visual diagrams over text descriptions when users ask for charts, flows, or visual representations."
+
+    if (isUnDef(args.knowledge)) {
+      args.knowledge = visualDiagramKnowledge
+    } else {
+      args.knowledge = args.knowledge + "\n\n" + visualDiagramKnowledge
+    }
+    
     global.maArgs = merge(args, {})
     //global.ma = new MiniA()
     //global.ma.init( global.maArgs )

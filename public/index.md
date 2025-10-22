@@ -1,4 +1,15 @@
 <script src="showdown.min.js?raw=true"></script>
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ 
+        startOnLoad: false,
+        theme: 'default',
+        themeVariables: {
+            darkMode: false
+        }
+    });
+    window.mermaid = mermaid;
+</script>
 <script>
     document.title = 'Chat Interface';
     var _isD
@@ -1193,7 +1204,7 @@
         }
     }
 
-    function updateResultsContent(htmlContent) {
+    async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
         const wasAtBottom = isAtBottom();
@@ -1226,6 +1237,10 @@
         }
 
         bindUserAttachmentPreviews();
+        
+        // Wait for Mermaid rendering to complete before scrolling
+        // This ensures the content height is final
+        await renderMermaidDiagrams();
 
         lastContentUpdateTime = Date.now();
 
@@ -1489,6 +1504,58 @@
                 openAttachmentModal(name, content, language);
             });
         });
+    }
+
+    async function renderMermaidDiagrams() {
+        if (typeof window.mermaid === 'undefined') return;
+        
+        try {
+            // Update theme based on current dark mode state
+            const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+            await window.mermaid.initialize({
+                startOnLoad: false,
+                theme: isDark ? 'dark' : 'default',
+                themeVariables: {
+                    darkMode: isDark
+                }
+            });
+
+            // Find all code blocks with language 'mermaid'
+            const mermaidBlocks = resultsDiv.querySelectorAll('pre code.language-mermaid, pre code.mermaid');
+            
+            for (let i = 0; i < mermaidBlocks.length; i++) {
+                const block = mermaidBlocks[i];
+                if (block.dataset.mermaidRendered === 'true') continue;
+                
+                const code = block.textContent;
+                const pre = block.parentElement;
+                
+                try {
+                    // Create a container for the diagram
+                    const container = document.createElement('div');
+                    container.className = 'mermaid-diagram';
+                    container.style.textAlign = 'center';
+                    container.style.padding = '1rem';
+                    container.style.background = isDark ? '#0f1115' : '#f8f9fa';
+                    container.style.borderRadius = '0.5rem';
+                    container.style.margin = '1rem 0';
+                    container.setAttribute('data-mermaid-source', code);
+                    
+                    // Render the diagram
+                    const { svg } = await window.mermaid.render('mermaid-' + Date.now() + '-' + i, code);
+                    container.innerHTML = svg;
+                    
+                    // Replace the pre/code block with the rendered diagram
+                    pre.replaceWith(container);
+                    block.dataset.mermaidRendered = 'true';
+                } catch (error) {
+                    console.error('Failed to render Mermaid diagram:', error);
+                    // Keep the original code block if rendering fails
+                }
+            }
+        } catch (error) {
+            console.error('Mermaid rendering error:', error);
+        }
     }
 
     function bindAttachmentModalHandlers() {
@@ -1890,7 +1957,7 @@
         currentSessionUuid = entry.uuid;
 
         const htmlContent = converter.makeHtml(entry.content || '');
-        updateResultsContent(htmlContent);
+        await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
@@ -1924,7 +1991,7 @@
             const data = await response.json();
             updatePlanPanel(data.plan);
             const htmlContent = converter.makeHtml(data.content || '');
-            updateResultsContent(htmlContent);
+            await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
@@ -2223,7 +2290,7 @@
             
         } catch (error) {
             console.error('Error submitting prompt:', error);
-            updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
         }
     }
 
@@ -2241,7 +2308,7 @@
                 const data = await response.json();
                 updatePlanPanel(data.plan);
                 const htmlContent = converter.makeHtml(data.content || '');
-                updateResultsContent(htmlContent);
+                await updateResultsContent(htmlContent);
                 
                 hljs.highlightAll();
                 if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
@@ -2263,7 +2330,7 @@
                 
             } catch (error) {
                 console.error('Error fetching results:', error);
-                updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+                await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
                 stopProcessing();
             }
         }, 1500);
@@ -2305,7 +2372,7 @@
     }
 
     /* ========== EVENT HANDLERS ========== */
-    function handleClearClick() {
+    async function handleClearClick() {
         const uuidToClear = currentSessionUuid || 
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
 
@@ -2321,7 +2388,7 @@
             }).catch(err => console.error('Error sending clear request:', err));
         }
 
-        updateResultsContent('<p></p>');
+        await updateResultsContent('<p></p>');
         resetPlanPanel();
         removePreview();
         promptInput.value = '';
@@ -2536,11 +2603,45 @@
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
         __syncAttachmentModalTheme();
+        // Re-render Mermaid diagrams with new theme
+        if (typeof renderMermaidDiagrams === 'function') {
+            // Clear rendered flags to force re-render
+            const mermaidContainers = document.querySelectorAll('.mermaid-diagram');
+            mermaidContainers.forEach(container => {
+                const parent = container.parentElement;
+                if (parent) {
+                    const pre = document.createElement('pre');
+                    const code = document.createElement('code');
+                    code.className = 'language-mermaid';
+                    code.textContent = container.getAttribute('data-mermaid-source') || '';
+                    pre.appendChild(code);
+                    container.replaceWith(pre);
+                }
+            });
+            setTimeout(() => renderMermaidDiagrams(), 100);
+        }
     });
 
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
         __syncAttachmentModalTheme();
+        // Re-render Mermaid diagrams with new theme
+        if (typeof renderMermaidDiagrams === 'function') {
+            // Clear rendered flags to force re-render
+            const mermaidContainers = document.querySelectorAll('.mermaid-diagram');
+            mermaidContainers.forEach(container => {
+                const parent = container.parentElement;
+                if (parent) {
+                    const pre = document.createElement('pre');
+                    const code = document.createElement('code');
+                    code.className = 'language-mermaid';
+                    code.textContent = container.getAttribute('data-mermaid-source') || '';
+                    pre.appendChild(code);
+                    container.replaceWith(pre);
+                }
+            });
+            setTimeout(() => renderMermaidDiagrams(), 100);
+        }
     });
 </script>
