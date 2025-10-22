@@ -536,21 +536,17 @@ jobs:
     args.__format = "md"
     
     // Add system knowledge about visual diagram capabilities
-    var visualDiagramKnowledge = "The web interface supports rendering interactive visual diagrams directly from markdown code blocks.\n\n" +
-      "When users request charts, flowcharts, diagrams, graphs, timelines, state diagrams, entity relationships, sequence diagrams, Gantt charts, or any other visual representations:\n" +
-      "- Use markdown code blocks with the 'mermaid' language identifier\n" +
-      "- These will be automatically rendered as interactive SVG graphics\n" +
-      "- Supports: flowcharts, sequence diagrams, class diagrams, state diagrams, entity relationship diagrams, user journey maps, Gantt charts, pie charts, requirement diagrams, and more\n" +
-      "- Use appropriate diagram syntax for the visualization type requested\n\n" +
-      "Example formats available:\n" +
-      "- Flowcharts: graph TD/LR for top-down or left-right flows\n" +
-      "- Sequence diagrams: sequenceDiagram for interaction flows\n" +
-      "- State diagrams: stateDiagram-v2 for state machines\n" +
-      "- Class diagrams: classDiagram for object relationships\n" +
-      "- ER diagrams: erDiagram for database schemas\n" +
-      "- Gantt charts: gantt for project timelines\n" +
-      "- Pie charts: pie for data distribution\n\n" +
-      "Always prefer visual diagrams over text descriptions when users ask for charts, flows, or visual representations."
+    var visualDiagramKnowledge =
+      "Visual output rules (concise):\n\n" +
+      "Mermaid: Use ```mermaid``` for diagrams (graph, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, pie, etc.).\n\n" +
+      "Chart.js (MANDATORY format):\n" +
+      "- Wrap the config in a fenced code block labeled 'chart'. Aliases allowed: 'chartjs', 'chart.js'.\n" +
+      "- Put ONLY the Chart.js config object inside the block. No prose.\n" +
+      "- Required: type and data with labels and/or datasets. Optional: options, canvas {width,height}.\n" +
+      "- NEVER use 'json' or 'javascript' fences for charts. NEVER return bare JSON.\n\n" +
+      "Example:\n" +
+      "```chart\n{ type: 'bar', data: { labels: ['A','B'], datasets: [{ label: 'Count', data: [1,2] }] }, options: { responsive: true } }\n```\n\n" +
+      "Prefer a diagram/chart over text when a visual makes sense."
 
     if (isUnDef(args.knowledge)) {
       args.knowledge = visualDiagramKnowledge

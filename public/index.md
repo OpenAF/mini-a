@@ -1,4 +1,5 @@
 <script src="showdown.min.js?raw=true"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script type="module">
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
     mermaid.initialize({ 
@@ -202,6 +203,19 @@
         color: inherit;
         zoom: 0.9;
         position: relative;
+    }
+
+    .chartjs-chart {
+        position: relative;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    .chartjs-chart canvas {
+        display: block;
+        width: 100%;
+        height: auto !important;
     }
 
     /* ========== INPUT SECTION ========== */
@@ -1126,6 +1140,8 @@
     let attachments = [];
     let attachmentModalKeyListenerBound = false;
     let lastPlanDigest = '';
+    let chartResizeTimer = null;
+    let chartResizeHandlerBound = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -1204,12 +1220,34 @@
         }
     }
 
+    function destroyRenderedCharts() {
+        if (!resultsDiv) return;
+        const containers = resultsDiv.querySelectorAll('.chartjs-chart');
+        containers.forEach(container => {
+            if (container.__chartInstance && typeof container.__chartInstance.destroy === 'function') {
+                try {
+                    container.__chartInstance.destroy();
+                } catch (error) {
+                    console.error('Failed to destroy Chart.js instance:', error);
+                }
+            }
+            if (container.__chartInstance) {
+                delete container.__chartInstance;
+            }
+            if (container.__chartCanvasPrefs) {
+                delete container.__chartCanvasPrefs;
+            }
+        });
+    }
+
     async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
         const wasAtBottom = isAtBottom();
         const currentScrollBtn = document.getElementById('scrollToBottomBtn');
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
+
+        destroyRenderedCharts();
         
         resultsDiv.innerHTML = htmlContent;
         
@@ -1241,6 +1279,7 @@
         // Wait for Mermaid rendering to complete before scrolling
         // This ensures the content height is final
         await renderMermaidDiagrams();
+        await renderChartBlocks();
 
         lastContentUpdateTime = Date.now();
 
@@ -1556,6 +1595,326 @@
         } catch (error) {
             console.error('Mermaid rendering error:', error);
         }
+    }
+
+    function configureChartDefaults(isDark) {
+        if (!window.Chart || !window.Chart.defaults) return;
+        try {
+            window.Chart.defaults.color = isDark ? '#e6e6e6' : '#1b1d25';
+            window.Chart.defaults.borderColor = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.15)';
+            window.Chart.defaults.backgroundColor = isDark ? 'rgba(51,144,255,0.18)' : 'rgba(0,123,255,0.12)';
+        } catch (error) {
+            console.error('Failed to configure Chart.js defaults:', error);
+        }
+    }
+
+    function applyChartThemeDefaults(config, isDark) {
+        if (!config || typeof config !== 'object') return config;
+
+        const fallbackText = isDark ? '#e6e6e6' : '#1b1d25';
+        const fallbackGrid = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(33,37,41,0.1)';
+
+        config.options = config.options || {};
+        const options = config.options;
+
+        options.plugins = options.plugins || {};
+
+        if (options.plugins.legend !== false) {
+            if (options.plugins.legend === true) options.plugins.legend = {};
+            const legend = (options.plugins.legend && typeof options.plugins.legend === 'object') ? options.plugins.legend : {};
+            legend.labels = legend.labels || {};
+            if (!legend.labels.color) legend.labels.color = fallbackText;
+            options.plugins.legend = legend;
+        }
+
+        if (options.plugins.title !== false) {
+            if (options.plugins.title === true) options.plugins.title = { display: true };
+            if (options.plugins.title && typeof options.plugins.title === 'object' && !options.plugins.title.color) {
+                options.plugins.title.color = fallbackText;
+            }
+        }
+
+        if (options.plugins.tooltip !== false) {
+            if (options.plugins.tooltip === true) options.plugins.tooltip = {};
+            const tooltip = (options.plugins.tooltip && typeof options.plugins.tooltip === 'object') ? options.plugins.tooltip : {};
+            if (!tooltip.titleColor) tooltip.titleColor = fallbackText;
+            if (!tooltip.bodyColor) tooltip.bodyColor = fallbackText;
+            options.plugins.tooltip = tooltip;
+        }
+
+        if (options.scales && typeof options.scales === 'object') {
+            Object.values(options.scales).forEach(scale => {
+                if (!scale || typeof scale !== 'object') return;
+
+                if (scale.ticks !== false) {
+                    if (!scale.ticks || typeof scale.ticks !== 'object') scale.ticks = {};
+                    if (!scale.ticks.color) scale.ticks.color = fallbackText;
+                }
+
+                if (scale.grid !== false) {
+                    if (!scale.grid || typeof scale.grid !== 'object') scale.grid = {};
+                    if (!scale.grid.color) scale.grid.color = fallbackGrid;
+                }
+
+                if (scale.title && typeof scale.title === 'object' && !scale.title.color) {
+                    scale.title.color = fallbackText;
+                }
+            });
+        }
+
+        return config;
+    }
+
+    function tryParseChartConfig(raw) {
+        if (!raw) return null;
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+
+        try {
+            return JSON.parse(trimmed);
+        } catch (jsonError) {
+            // Continue with more permissive parsing
+        }
+
+        let expr = trimmed;
+        const assignmentMatch = expr.match(/^\s*(?:const|let|var)\s+[A-Za-z0-9_$]+\s*=\s*/);
+        if (assignmentMatch) expr = expr.slice(assignmentMatch[0].length);
+
+        const exportMatch = expr.match(/^\s*(?:module\.exports|export\s+default)\s*=\s*/);
+        if (exportMatch) expr = expr.slice(exportMatch[0].length);
+
+        if (expr.endsWith(';')) expr = expr.slice(0, -1);
+
+        const lowerExpr = expr.toLowerCase();
+        const bannedTokens = ['function', '=>', ' while', ' for', 'class', ' constructor', 'process', 'window', 'document', 'require', 'import', 'export ', 'eval', 'XMLHttpRequest'.toLowerCase(), 'fetch', 'settimeout', 'setinterval', 'alert', 'prompt'];
+        if (bannedTokens.some(token => lowerExpr.includes(token))) {
+            console.warn('Skipping chart block - disallowed token present in configuration.');
+            return null;
+        }
+
+        try {
+            const fn = new Function('"use strict"; return (' + expr + ');');
+            const evaluated = fn();
+            if (evaluated && typeof evaluated === 'object') {
+                return evaluated;
+            }
+        } catch (evalError) {
+            console.warn('Failed to evaluate chart configuration literal:', evalError);
+        }
+
+        return null;
+    }
+
+    function layoutChartContainer(container, canvasSettings) {
+        if (!container) return;
+
+        const rawViewportWidth = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 0;
+        const rawViewportHeight = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 0;
+        const fallbackWidth = (resultsDiv && resultsDiv.clientWidth) ? resultsDiv.clientWidth : 0;
+        const viewportWidth = Math.max(320, Math.floor((rawViewportWidth > 0 ? rawViewportWidth : fallbackWidth || 320) * 0.92));
+        const viewportHeight = Math.max(240, Math.floor((rawViewportHeight > 0 ? rawViewportHeight : 540) * 0.6));
+        const parentWidth = resultsDiv && resultsDiv.clientWidth ? Math.max(320, resultsDiv.clientWidth - 32) : viewportWidth;
+
+        const prefWidth = canvasSettings && canvasSettings.width ? Number(canvasSettings.width) : Math.max(parentWidth, viewportWidth);
+        const prefHeight = canvasSettings && canvasSettings.height ? Number(canvasSettings.height) : Math.round(prefWidth * 0.62);
+
+        const width = Math.max(320, Math.min(prefWidth, parentWidth, viewportWidth));
+        const heightFromWidth = Math.max(220, Math.round(width * (prefHeight > 0 ? prefHeight / Math.max(prefWidth, 1) : 0.62)));
+        const maxHeight = Math.max(240, Math.min(prefHeight, viewportHeight));
+        const height = Math.min(Math.max(220, heightFromWidth), maxHeight || heightFromWidth);
+
+        container.style.width = width + 'px';
+        container.style.maxWidth = '100%';
+        container.style.height = height + 'px';
+        container.style.maxHeight = Math.max(240, Math.min(prefHeight, viewportHeight)) + 'px';
+    }
+
+    function reflowRenderedCharts() {
+        const containers = document.querySelectorAll('.chartjs-chart');
+        containers.forEach(container => {
+            layoutChartContainer(container, container.__chartCanvasPrefs);
+            if (container.__chartInstance && typeof container.__chartInstance.resize === 'function') {
+                try {
+                    container.__chartInstance.resize();
+                } catch (error) {
+                    console.error('Failed to resize Chart.js instance:', error);
+                }
+            }
+        });
+    }
+
+    function scheduleChartReflow() {
+        if (chartResizeTimer) {
+            clearTimeout(chartResizeTimer);
+        }
+        chartResizeTimer = setTimeout(() => {
+            chartResizeTimer = null;
+            reflowRenderedCharts();
+        }, 150);
+    }
+
+    function renderChartBlocks() {
+        if (!resultsDiv || typeof window.Chart === 'undefined') return;
+
+        // Be liberal in what we accept: match common variants (chart, chartjs, chart.js)
+        // and also fall back to content sniffing for objects that look like Chart.js configs.
+        const allCodeBlocks = Array.from(resultsDiv.querySelectorAll('pre code'));
+        if (allCodeBlocks.length === 0) return;
+
+        function looksLikeChartClass(cls) {
+            const c = (cls || '').toLowerCase();
+            return (
+                /\blanguage-?chart(\.js|-js)?\b/.test(c) ||
+                /\bchartjs\b/.test(c) ||
+                /\bchart\.js\b/.test(c) ||
+                // Some highlighters add only a raw class name without the language- prefix
+                /(^|\s)chart(\.js|-js)?(\s|$)/.test(c)
+            );
+        }
+
+        // Quick content heuristic to catch blocks that were labeled as json/js but contain a Chart.js config
+        function looksLikeChartContent(text) {
+            if (!text) return false;
+            const t = String(text).trim();
+            // Avoid parsing huge blocks unnecessarily
+            if (t.length < 8) return false;
+            if (!/(^|\W)type\s*:/.test(t) || !/(^|\W)data\s*:/.test(t)) return false;
+            // Common Chart.js keys to further reduce false positives
+            if (!/(datasets|labels)\s*:/.test(t)) return false;
+            return true;
+        }
+
+        const blocks = allCodeBlocks.filter(block => {
+            return looksLikeChartClass(block.className) || looksLikeChartContent(block.textContent);
+        });
+        if (blocks.length === 0) return;
+
+        if (!chartResizeHandlerBound && typeof window !== 'undefined') {
+            window.addEventListener('resize', scheduleChartReflow);
+            chartResizeHandlerBound = true;
+        }
+
+        const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+        configureChartDefaults(isDark);
+
+        blocks.forEach((block) => {
+            const pre = block.parentElement;
+            if (!pre) return;
+
+            const raw = (block.textContent || '').trim();
+            if (!raw) return;
+
+            const parsed = tryParseChartConfig(raw);
+            if (!parsed) return;
+            let config = parsed;
+
+            if (config && typeof config === 'object' && config.chart) {
+                config = config.chart;
+            }
+
+            if (!config || typeof config !== 'object' || !config.type || !config.data) {
+                console.warn('Skipping chart block - configuration must include "type" and "data".');
+                return;
+            }
+
+            // Extra guard to avoid false positives when using the content heuristic
+            const hasDatasetsOrLabels = (config.data && (Array.isArray(config.data.datasets) || Array.isArray(config.data.labels)));
+            if (!hasDatasetsOrLabels) {
+                console.warn('Skipping chart block - data requires datasets or labels array.');
+                return;
+            }
+
+            const canvasSettings = (config.canvas && typeof config.canvas === 'object') ? config.canvas : null;
+            if (config.canvas) delete config.canvas;
+
+            const container = document.createElement('div');
+            container.className = 'chartjs-chart';
+            container.style.textAlign = 'center';
+            container.style.margin = '1.5rem 0';
+            container.style.padding = '1rem';
+            container.style.borderRadius = '0.6rem';
+            container.style.background = isDark ? '#0f1115' : '#f8f9fa';
+            container.style.border = isDark ? '1px solid #242629' : '1px solid #e0e0e0';
+            container.setAttribute('data-chart-source', raw);
+            container.__chartCanvasPrefs = canvasSettings || null;
+
+            const canvas = document.createElement('canvas');
+            if (canvasSettings) {
+                if (canvasSettings.width) canvas.setAttribute('data-width', canvasSettings.width);
+                if (canvasSettings.height) canvas.setAttribute('data-height', canvasSettings.height);
+            }
+            layoutChartContainer(container, canvasSettings);
+            const chartTitle = config.options && config.options.plugins && config.options.plugins.title && config.options.plugins.title.text;
+            if (chartTitle) {
+                canvas.setAttribute('aria-label', chartTitle);
+            } else {
+                canvas.setAttribute('aria-label', `${config.type} chart`);
+            }
+            canvas.setAttribute('role', 'img');
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            container.appendChild(canvas);
+
+            if (pre.parentElement) {
+                pre.parentElement.insertBefore(container, pre);
+            } else {
+                pre.replaceWith(container);
+            }
+
+            const themedConfig = applyChartThemeDefaults(config, isDark);
+
+            try {
+                themedConfig.options = themedConfig.options || {};
+                if (typeof themedConfig.options.responsive === 'undefined') themedConfig.options.responsive = true;
+                if (typeof themedConfig.options.maintainAspectRatio === 'undefined') themedConfig.options.maintainAspectRatio = false;
+
+                const ctx = canvas.getContext('2d');
+                const chartInstance = new window.Chart(ctx, themedConfig);
+                container.__chartInstance = chartInstance;
+                scheduleChartReflow();
+                pre.remove();
+            } catch (error) {
+                console.error('Failed to render Chart.js block:', error);
+                container.remove();
+            }
+        });
+    }
+
+    function resetRenderedChartsForTheme() {
+        const chartContainers = document.querySelectorAll('.chartjs-chart');
+        chartContainers.forEach(container => {
+            try {
+                if (container.__chartInstance && typeof container.__chartInstance.destroy === 'function') {
+                    container.__chartInstance.destroy();
+                }
+            } catch (error) {
+                console.error('Failed to destroy Chart.js instance during theme change:', error);
+            }
+            if (container.__chartInstance) {
+                delete container.__chartInstance;
+            }
+
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.className = 'language-chart';
+            code.textContent = container.getAttribute('data-chart-source') || '';
+            pre.appendChild(code);
+            container.replaceWith(pre);
+        });
+    }
+
+    function resetMermaidDiagramsForTheme() {
+        const mermaidContainers = document.querySelectorAll('.mermaid-diagram');
+        mermaidContainers.forEach(container => {
+            const parent = container.parentElement;
+            if (!parent) return;
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.className = 'language-mermaid';
+            code.textContent = container.getAttribute('data-mermaid-source') || '';
+            pre.appendChild(code);
+            container.replaceWith(pre);
+        });
     }
 
     function bindAttachmentModalHandlers() {
@@ -2599,49 +2958,31 @@
         __syncAttachmentModalTheme();
     });
 
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    function handleSystemThemeChange() {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
         __syncAttachmentModalTheme();
-        // Re-render Mermaid diagrams with new theme
-        if (typeof renderMermaidDiagrams === 'function') {
-            // Clear rendered flags to force re-render
-            const mermaidContainers = document.querySelectorAll('.mermaid-diagram');
-            mermaidContainers.forEach(container => {
-                const parent = container.parentElement;
-                if (parent) {
-                    const pre = document.createElement('pre');
-                    const code = document.createElement('code');
-                    code.className = 'language-mermaid';
-                    code.textContent = container.getAttribute('data-mermaid-source') || '';
-                    pre.appendChild(code);
-                    container.replaceWith(pre);
-                }
-            });
-            setTimeout(() => renderMermaidDiagrams(), 100);
-        }
-    });
 
-    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-        __refreshDarkMode();
-        __applyDarkModeIfNeeded();
-        __syncAttachmentModalTheme();
-        // Re-render Mermaid diagrams with new theme
         if (typeof renderMermaidDiagrams === 'function') {
-            // Clear rendered flags to force re-render
-            const mermaidContainers = document.querySelectorAll('.mermaid-diagram');
-            mermaidContainers.forEach(container => {
-                const parent = container.parentElement;
-                if (parent) {
-                    const pre = document.createElement('pre');
-                    const code = document.createElement('code');
-                    code.className = 'language-mermaid';
-                    code.textContent = container.getAttribute('data-mermaid-source') || '';
-                    pre.appendChild(code);
-                    container.replaceWith(pre);
-                }
-            });
+            resetMermaidDiagramsForTheme();
             setTimeout(() => renderMermaidDiagrams(), 100);
         }
-    });
+
+        if (typeof renderChartBlocks === 'function') {
+            resetRenderedChartsForTheme();
+            setTimeout(() => renderChartBlocks(), 120);
+        }
+    }
+
+    function bindThemeListener(mediaQuery) {
+        if (!mediaQuery) return;
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', handleSystemThemeChange);
+        } else if (typeof mediaQuery.addListener === 'function') {
+            mediaQuery.addListener(handleSystemThemeChange);
+        }
+    }
+
+    bindThemeListener(window.matchMedia('(prefers-color-scheme: dark)'));
+    bindThemeListener(window.matchMedia('(prefers-color-scheme: light)'));
 </script>
