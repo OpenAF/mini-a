@@ -304,6 +304,10 @@ todo:
           conversation: global._mini_a_web_loadFile(_hfile)
         }))
 
+        if (isDef(_rma.answer) && _rma.answer.trim().startsWith("```markdown") && _rma.answer.trim().endsWith("```")) {
+          // Remove markdown fences
+          _rma.answer = _rma.answer.trim().replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
+        }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
         log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
       }).catch((eee) => {
@@ -547,7 +551,17 @@ jobs:
       "  - Wrap only the config object inside ```chart``` (aliases: chartjs, chart.js).\n" +
       "  - Include `type`, `data.labels`, and at least one dataset; add palettes and `options` as needed.\n" +
       "  - Optional `canvas: { width, height }` block controls sizing when helpful.\n" +
-      "  - Never use other fences (json/javascript) and never return raw JSON.\n\n" +
+      "  - Never use other fences (json/javascript) and never return raw JSON.\n" +
+      "  - Use only static values; do not include functions or dynamic callbacks (no `ctx => ...`, no `function(){}`); configs are treated as data and code is not executed.\n" +
+      "  - Provide complete, deterministic data inline (no async or fetching).\n\n" +
+      "Available Chart.js plugins/types (preloaded):\n" +
+      "  - chartjs-adapter-date-fns (time scale; use scales.{x|y}.type='time' with ISO dates)\n" +
+      "  - @sgratzl/chartjs-chart-boxplot (types: 'boxplot', 'violin')\n" +
+      "  - chartjs-chart-treemap (type: 'treemap')\n" +
+      "  - chartjs-chart-sankey (type: 'sankey')\n" +
+      "  - chartjs-chart-matrix (type: 'matrix')\n" +
+      "  - chartjs-chart-graph (type: 'graph')\n" +
+      "  - chartjs-chart-geo (types: 'choropleth', 'bubbleMap')\n\n" +
       "Visual selection checklist:\n" +
       "1. Relationships or flows -> Mermaid `graph` or `sequenceDiagram`.\n" +
       "2. Timelines or roadmaps -> Mermaid `gantt`.\n" +
