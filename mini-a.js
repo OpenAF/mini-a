@@ -1373,7 +1373,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     var trimmed = answer.trim()
     // Match code block: starts with ```[language]\n, ends with ``` and nothing else
     // Capture the language and the inner body in separate groups
-    var codeBlockMatch = trimmed.match(/^```([a-zA-Z0-9_-]+)\s*\n([\s\S]*?)\n```$/)
+    var codeBlockMatch = trimmed.match(/^```([a-zA-Z0-9_-]*)\s*\n([\s\S]*?)\n```$/)
     if (codeBlockMatch) {
       var lang = (codeBlockMatch[1] || "").toLowerCase()
       var body = codeBlockMatch[2]
