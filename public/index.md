@@ -1880,6 +1880,24 @@
         });
     }
 
+    function forceRenderChartBlocks() {
+        if (typeof renderChartBlocks !== 'function') return;
+
+        const triggerRender = () => {
+            try {
+                renderChartBlocks();
+            } catch (error) {
+                console.error('Failed to force Chart.js rendering:', error);
+            }
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(triggerRender);
+        } else {
+            setTimeout(triggerRender, 0);
+        }
+    }
+
     function resetRenderedChartsForTheme() {
         const chartContainers = document.querySelectorAll('.chartjs-chart');
         chartContainers.forEach(container => {
@@ -2319,6 +2337,7 @@
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+        forceRenderChartBlocks();
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         refreshHistoryPanel();
@@ -2352,6 +2371,7 @@
             const htmlContent = converter.makeHtml(data.content || '');
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+            forceRenderChartBlocks();
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
             refreshHistoryPanel();
@@ -2650,6 +2670,7 @@
         } catch (error) {
             console.error('Error submitting prompt:', error);
             await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            forceRenderChartBlocks();
         }
     }
 
@@ -2668,8 +2689,9 @@
                 updatePlanPanel(data.plan);
                 const htmlContent = converter.makeHtml(data.content || '');
                 await updateResultsContent(htmlContent);
-                
+
                 hljs.highlightAll();
+                forceRenderChartBlocks();
                 if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
                 __refreshDarkMode();
 
@@ -2690,6 +2712,7 @@
             } catch (error) {
                 console.error('Error fetching results:', error);
                 await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+                forceRenderChartBlocks();
                 stopProcessing();
             }
         }, 1500);
@@ -2748,6 +2771,7 @@
         }
 
         await updateResultsContent('<p></p>');
+        forceRenderChartBlocks();
         resetPlanPanel();
         removePreview();
         promptInput.value = '';
