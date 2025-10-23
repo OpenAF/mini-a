@@ -264,12 +264,30 @@ todo:
                       }
                       var completedCount = 0
                       normalized.forEach(item => { if (item.done === true) completedCount++ })
+
+                      var progressInfo = isObject(lma._planningProgress) ? lma._planningProgress : {}
+                      var overallProgress = 0
+                      if (isNumber(progressInfo.overall)) {
+                        overallProgress = Math.max(0, Math.min(100, Math.round(progressInfo.overall)))
+                      } else if (normalized.length > 0) {
+                        overallProgress = Math.round((completedCount / normalized.length) * 100)
+                      }
+
+                      var checkpointInfo = { reached: 0, total: 0 }
+                      if (isObject(progressInfo.checkpoints)) {
+                        var checkpoints = progressInfo.checkpoints
+                        if (isNumber(checkpoints.reached)) checkpointInfo.reached = checkpoints.reached
+                        if (isNumber(checkpoints.total)) checkpointInfo.total = checkpoints.total
+                      }
+
                       global.__planState[uuid] = {
-                        items    : normalized,
-                        total    : normalized.length,
-                        completed: completedCount,
-                        active   : normalized.length > 0,
-                        updated  : Date.now()
+                        items      : normalized,
+                        total      : normalized.length,
+                        completed  : completedCount,
+                        overall    : overallProgress,
+                        checkpoints: checkpointInfo,
+                        active     : normalized.length > 0,
+                        updated    : Date.now()
                       }
                     } else {
                       if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
@@ -429,14 +447,23 @@ todo:
         _res.history = _history
         if (hasActivePlan) {
           _res.plan = {
-            active   : true,
-            items    : planState.items,
-            total    : planState.total,
-            completed: planState.completed,
-            updated  : planState.updated
+            active     : true,
+            items      : planState.items,
+            total      : planState.total,
+            completed  : planState.completed,
+            overall    : planState.overall,
+            checkpoints: planState.checkpoints,
+            updated    : planState.updated
           }
         } else {
-          _res.plan = { active: false, items: [], total: 0, completed: 0 }
+          _res.plan = {
+            active     : false,
+            items      : [],
+            total      : 0,
+            completed  : 0,
+            overall    : 0,
+            checkpoints: { reached: 0, total: 0 }
+          }
         }
       }
 
