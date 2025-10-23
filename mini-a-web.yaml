@@ -135,12 +135,14 @@ todo:
         }
         if (global.__usehistory && !global.__historykeep) {
           log("Deleting history file for session " + postData.uuid)
-          var _hfile = global.__historypath + "/c-" + postData.uuid + ".json"
-          if (io.fileExists(_hfile)) {
-            io.rm(_hfile)
-          }
           if (isFunction(global._mini_a_web_deleteHistory)) {
             global._mini_a_web_deleteHistory(postData.uuid)
+          } else {
+            // Fallback local cleanup
+            var _hfile = global.__historypath + "/c-" + postData.uuid + ".json"
+            if (io.fileExists(_hfile)) {
+              io.rm(_hfile)
+            }
           }
         }
       }
@@ -195,8 +197,8 @@ todo:
 
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
-          // If history file does not exist but we have history in memory, rebuild it
-          if (global.__usehistory && !io.fileExists(_hfile) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
+          // If history does not exist but we have history in memory, rebuild it
+          if (global.__usehistory && !global._mini_a_web_historyExists(uuid) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
             // Try rebuilding
             var _data = []
             for (var i = 0; i < global.__res[ uuid ].length; i++) {
@@ -210,7 +212,7 @@ todo:
               }
             }
             if (_data.length > 0) {
-              io.writeFileJSON(_hfile, { u: new Date(), c: _data }, "")
+              global._mini_a_web_saveFile(_hfile, { u: new Date(), c: _data })
               log("[" + uuid + "] Rebuilt history file " + _hfile)
             }
           }
@@ -670,6 +672,32 @@ jobs:
     global._mini_a_web_buildHistoryPayload = (uuid) => {
       if (isUnDef(uuid)) return __
       var hfile = global.__historypath + "/c-" + uuid + ".json"
+
+      // Prefer S3 when enabled
+      if (global.__historys3enabled) {
+        var stream, str
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          log("S3 history get (payload) bucket=" + global.__historys3bucket + " key=" + key)
+          stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+          str = af.fromInputStream2String(stream)
+        } catch(getErr) {
+          // Ignore missing objects; log other errors
+          if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
+            logErr(getErr)
+          }
+        } finally {
+          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
+        }
+        if (isDef(str)) {
+          try {
+            log("S3 history got payload for uuid=" + uuid + " size=" + str.length)
+            return str
+          } catch(convErr) { logErr(convErr) }
+        }
+      }
+
+      // Otherwise try local file if present
       if (io.fileExists(hfile)) {
         try {
           return io.readFileString(hfile)
@@ -677,6 +705,8 @@ jobs:
           logErr(readErr)
         }
       }
+
+      // Build from in-memory events
       if (isDef(global.__res[uuid]) && isArray(global.__res[uuid]) && global.__res[uuid].length > 0) {
         var data = []
         for (var i = 0; i < global.__res[uuid].length; i++) {
@@ -718,10 +748,11 @@ jobs:
       if (!global.__historys3enabled) return
       var payload = global._mini_a_web_buildHistoryPayload(uuid)
       if (isUnDef(payload)) return
-      var stream
+      var stream, bytes
       try {
-        stream = new Packages.java.io.ByteArrayInputStream(af.fromString2Bytes(payload, "utf-8"))
-        global.__historys3client.putObjectStream(global.__historys3bucket, global._mini_a_web_historyS3Key(uuid), stream, {}, "application/json")
+        var key = global._mini_a_web_historyS3Key(uuid)
+        log("S3 history put bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(bytes) ? bytes.length : 0))
+        global.__historys3client.putObjectStream(global.__historys3bucket, key, af.fromString2InputStream(payload), {}, "application/json")
       } catch(storeErr) {
         logErr(storeErr)
       } finally {
@@ -732,24 +763,70 @@ jobs:
     }
 
     global._mini_a_web_deleteHistory = (uuid) => {
-      if (!global.__historys3enabled) return
-      try {
-        global.__historys3client.removeObject(global.__historys3bucket, global._mini_a_web_historyS3Key(uuid))
-      } catch(removeErr) {
-        logErr(removeErr)
+      if (isUnDef(uuid)) return
+      var localFile = isString(global.__historypath) ? (global.__historypath + "/c-" + uuid + ".json") : __
+      // Remove remote if enabled
+      if (global.__historys3enabled) {
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          log("S3 history delete bucket=" + global.__historys3bucket + " key=" + key)
+          global.__historys3client.removeObject(global.__historys3bucket, key)
+        } catch(removeErr) {
+          logErr(removeErr)
+        }
+      }
+      // Always try to remove local cache file if present
+      if (isString(localFile) && io.fileExists(localFile)) {
+        try { io.rm(localFile) } catch(ignore) {}
       }
     }
 
     global._mini_a_web_saveFile = (aFile, aMap) => {
-      io.writeFileJSON(aFile, aMap, "")
       var uuid = global._mini_a_web_uuidFromPath(aFile)
-      if (isDef(uuid) && isFunction(global._mini_a_web_storeHistory)) {
+      if (global.__historys3enabled && isDef(uuid)) {
+        // Save to S3 instead of local
+        var payload
         try {
-          global._mini_a_web_storeHistory(uuid)
-        } catch(saveErr) {
-          logErr(saveErr)
+          payload = stringify(aMap, __, "")
+        } catch(jsonErr) { logErr(jsonErr); return }
+        var stream, bytes
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          bytes = af.fromString2Bytes(payload, "utf-8")
+          log("S3 history save bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(bytes) ? bytes.length : 0))
+          stream = new Packages.java.io.ByteArrayInputStream(bytes)
+          global.__historys3client.putObjectStream(global.__historys3bucket, key, stream, {}, "application/json")
+        } catch(storeErr) {
+          logErr(storeErr)
+        } finally {
+          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
+        }
+      } else {
+        // Local save
+        try { io.writeFileJSON(aFile, aMap, "") } catch(writeErr) { logErr(writeErr) }
+      }
+    }
+
+    global._mini_a_web_historyExists = (uuid) => {
+      if (isUnDef(uuid)) return false
+      var localFile = isString(global.__historypath) ? (global.__historypath + "/c-" + uuid + ".json") : __
+      if (global.__historys3enabled) {
+        var stream
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          log("S3 history exists? bucket=" + global.__historys3bucket + " key=" + key)
+          stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+          log("S3 history exists: true for key=" + key)
+          return true
+        } catch(getErr) {
+          // Missing object is not an error
+          try { if (String(getErr).indexOf("NoSuchKey") >= 0) log("S3 history exists: false for key=" + global._mini_a_web_historyS3Key(uuid)) } catch(ignore) {}
+          return false
+        } finally {
+          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
         }
       }
+      return isString(localFile) && io.fileExists(localFile)
     }
 
     global._mini_a_web_loadFile = (aFile) => {
@@ -757,10 +834,12 @@ jobs:
       if (global.__historys3enabled && isString(aFile)) {
         var uuid = global._mini_a_web_uuidFromPath(aFile)
         if (isDef(uuid)) {
-          var stream, bytes
+          var stream, str
           try {
-            stream = global.__historys3client.getObjectStream(global.__historys3bucket, global._mini_a_web_historyS3Key(uuid))
-            bytes = af.fromInputStream2Bytes(stream)
+            var key = global._mini_a_web_historyS3Key(uuid)
+            log("S3 history get (load) bucket=" + global.__historys3bucket + " key=" + key + " -> file=" + aFile)
+            stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+            str = af.fromInputStream2String(stream)
           } catch(getErr) {
             // Ignore missing objects
             if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
@@ -771,9 +850,10 @@ jobs:
               try { stream.close() } catch(ignore) {}
             }
           }
-          if (isDef(bytes)) {
+          if (isDef(str)) {
             try {
-              io.writeFileString(aFile, af.fromBytes2String(bytes, "utf-8"))
+              log("S3 history downloaded uuid=" + uuid + " size=" + str.length + " -> " + aFile)
+              io.writeFileString(aFile, str)
             } catch(writeErr) {
               logErr(writeErr)
             }
