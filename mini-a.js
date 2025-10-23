@@ -399,6 +399,13 @@ MiniA.prototype.getMetrics = function() {
             shell_commands_denied: global.__mini_a_metrics.shell_commands_denied.get(),
             unknown_actions: global.__mini_a_metrics.unknown_actions.get()
         },
+        planning: {
+            disabled_simple_goal: global.__mini_a_metrics.planning_disabled_simple_goal.get(),
+            plans_generated: global.__mini_a_metrics.plans_generated.get(),
+            plans_validated: global.__mini_a_metrics.plans_validated.get(),
+            plans_validation_failed: global.__mini_a_metrics.plans_validation_failed.get(),
+            plans_replanned: global.__mini_a_metrics.plans_replanned.get()
+        },
         performance: {
             steps_taken: global.__mini_a_metrics.steps_taken.get(),
             total_session_time_ms: global.__mini_a_metrics.total_session_time.get(),
@@ -1209,7 +1216,8 @@ MiniA.prototype._handlePlanUpdate = function() {
 MiniA.prototype._cleanCodeBlocks = function(text) {
     if (!isString(text)) return text
     var trimmed = String(text).trim()
-    if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+    const isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid");
+    if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
         return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
     }
     return text
@@ -1371,10 +1379,19 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   if ((args.format == "md" && args.format != "raw") && isString(answer)) {
     var trimmed = answer.trim()
     // Match code block: starts with ```[language]\n, ends with ``` and nothing else
-    var codeBlockMatch = trimmed.match(/^```[a-zA-Z0-9]*\n([\s\S]*)\n```$/)
+    // Capture the language and the inner body in separate groups
+    var codeBlockMatch = trimmed.match(/^```([a-zA-Z0-9_-]*)\s*\n([\s\S]*?)\n```$/)
     if (codeBlockMatch) {
-      // Extract content from within the code block
-      answer = codeBlockMatch[1]
+      var lang = (codeBlockMatch[1] || "").toLowerCase()
+      var body = codeBlockMatch[2]
+      // Preserve fences for visual languages like chart/chartjs and mermaid so the UI can render them
+      if (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid") {
+        // keep original fenced block
+        answer = trimmed
+      } else {
+        // Strip fences for plain markdown code blocks
+        answer = body
+      }
     }
   }
 
@@ -3721,7 +3738,8 @@ MiniA.prototype._runChatbotMode = function(options) {
       if (isMap(rawResponse) || isArray(rawResponse)) {
         parsedResponse = rawResponse
       } else if (isString(rawResponse)) {
-        var trimmedResponse = rawResponse.replace(/^```+(?:json)?\s*\n?([\s\S]+?)\n?```+$/g, "$1").trim()
+        //var trimmedResponse = rawResponse.replace(/^```+(?:json)?\s*\n?([\s\S]+?)\n?```+$/g, "$1").trim()
+        var trimmedResponse = rawResponse.trim()
         var jsonCandidate = trimmedResponse
         if (!jsonCandidate.startsWith("{") && jsonCandidate.indexOf("\n{") >= 0) {
           var match = jsonCandidate.match(/\{[\s\S]*\}/g)

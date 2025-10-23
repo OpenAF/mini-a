@@ -1,4 +1,48 @@
 <script src="showdown.min.js?raw=true"></script>
+<!-- Chart.js (v4 UMD) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<!-- Time adapter (bundle includes date-fns) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<!-- Boxplot (scoped package name!) -->
+<script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.5/build/index.umd.min.js"></script>
+<!-- Treemap -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js"></script>
+<!-- Sankey -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.14.0/dist/chartjs-chart-sankey.min.js"></script>
+<!-- Matrix (v3 for Chart.js v4) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@3.0.0/dist/chartjs-chart-matrix.min.js"></script>
+<!-- Graph -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-graph@4.3.5/build/index.umd.min.js"></script>
+<!-- Geo -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-geo@4.3.6/build/index.umd.min.js"></script>
+<script>
+    // Best-effort registration for plugins that expose globals in UMD builds
+    // Some @sgratzl UMD bundles auto-register themselves if Chart is present
+    // but we explicitly register the common ones when globals are available.
+    (function registerChartPlugins() {
+        if (!window || !window.Chart) return;
+        const { Chart } = window;
+        try { if (window.ChartDataLabels) Chart.register(window.ChartDataLabels); } catch (e) { /* noop */ }
+        try {
+            const annotation = window.ChartAnnotation || window['chartjs-plugin-annotation'] || window.annotationPlugin;
+            if (annotation) Chart.register(annotation);
+        } catch (e) { /* noop */ }
+        // No action needed for date-fns adapter; it hooks the time scale when loaded.
+    })();
+    // Expose a flag for quick diagnostics in dev tools
+    window.__chartjs_plugins_loaded = true;
+</script>
+<script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ 
+        startOnLoad: false,
+        theme: 'default',
+        themeVariables: {
+            darkMode: false
+        }
+    });
+    window.mermaid = mermaid;
+</script>
 <script>
     document.title = 'Chat Interface';
     var _isD
@@ -191,6 +235,19 @@
         color: inherit;
         zoom: 0.9;
         position: relative;
+    }
+
+    .chartjs-chart {
+        position: relative;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    .chartjs-chart canvas {
+        display: block;
+        width: 100%;
+        height: auto !important;
     }
 
     /* ========== INPUT SECTION ========== */
@@ -1015,7 +1072,7 @@
                     <path class="plan-progress-ring-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831" />
                     <path id="planProgressValue" class="plan-progress-ring-value" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831" stroke-dasharray="100" stroke-dashoffset="100" />
                 </svg>
-                <span id="planSummaryText" class="plan-summary-text">0/0 tasks completed</span>
+                <span id="planSummaryText" class="plan-summary-text">0% overall · 0/0 tasks completed</span>
             </span>
             <span class="plan-summary-icon" aria-hidden="true">🗺️</span>
         </summary>
@@ -1100,6 +1157,63 @@
     };
     const PLAN_DONE_STATUSES = new Set(['done', 'complete', 'completed', 'finished', 'success']);
 
+    /* ========== CHART PREPROCESSING ========== */
+    let chartBlockStore = [];
+
+    /**
+     * Preprocesses markdown to extract chart blocks that might be
+     * malformed due to preceding image syntax or inline text.
+     * Returns normalized markdown with chart placeholders.
+     */
+    function preprocessChartBlocks(markdown) {
+        if (!markdown) return markdown;
+        chartBlockStore = [];
+        let counter = 0;
+        
+        // Match chart blocks that may be preceded by anything on the same line
+        // Pattern: (optional content)```chart or ```chartjs or ```chart.js
+        const pattern = /^(.*)```(chart(?:\.js|-js)?|chartjs)\s*\n([\s\S]*?)\n```/gm;
+        
+        const processed = markdown.replace(pattern, (match, prefix, lang, content) => {
+            const id = counter++;
+            const trimmedPrefix = (prefix || '').trim();
+            
+            // Store the chart config
+            chartBlockStore.push({
+                id: id,
+                content: content,
+                language: lang
+            });
+            
+            // Return a clean marker that will survive markdown conversion
+            // If there was a prefix (like ![text]), preserve it on a separate line
+            const marker = `<div class="chart-placeholder" data-chart-id="${id}"></div>`;
+            return trimmedPrefix ? `${trimmedPrefix}\n\n${marker}` : marker;
+        });
+        
+        return processed;
+    }
+
+    /**
+     * Restores chart blocks after markdown conversion by replacing
+     * placeholders with properly formatted code blocks.
+     */
+    function postprocessChartBlocks(html) {
+        if (!html || chartBlockStore.length === 0) return html;
+        
+        let processed = html;
+        chartBlockStore.forEach(item => {
+            const placeholder = `<div class="chart-placeholder" data-chart-id="${item.id}"></div>`;
+            // Create a proper pre/code structure with chart class
+            const replacement = `<pre><code class="language-chart">${escapeHtml(item.content)}</code></pre>`;
+            processed = processed.replace(placeholder, replacement);
+        });
+        
+        // Clear the store after processing
+        chartBlockStore = [];
+        return processed;
+    }
+
     /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
     let pollingInterval = null;
@@ -1115,6 +1229,8 @@
     let attachments = [];
     let attachmentModalKeyListenerBound = false;
     let lastPlanDigest = '';
+    let chartResizeTimer = null;
+    let chartResizeHandlerBound = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -1193,14 +1309,38 @@
         }
     }
 
-    function updateResultsContent(htmlContent) {
+    function destroyRenderedCharts() {
+        if (!resultsDiv) return;
+        const containers = resultsDiv.querySelectorAll('.chartjs-chart');
+        containers.forEach(container => {
+            if (container.__chartInstance && typeof container.__chartInstance.destroy === 'function') {
+                try {
+                    container.__chartInstance.destroy();
+                } catch (error) {
+                    console.error('Failed to destroy Chart.js instance:', error);
+                }
+            }
+            if (container.__chartInstance) {
+                delete container.__chartInstance;
+            }
+            if (container.__chartCanvasPrefs) {
+                delete container.__chartCanvasPrefs;
+            }
+        });
+    }
+
+    async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
         const wasAtBottom = isAtBottom();
         const currentScrollBtn = document.getElementById('scrollToBottomBtn');
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
+
+        destroyRenderedCharts();
         
-        resultsDiv.innerHTML = htmlContent;
+        // Post-process to restore any chart blocks that were preprocessed
+        const processedHtml = postprocessChartBlocks(htmlContent);
+        resultsDiv.innerHTML = processedHtml;
         
         // Re-add scroll button
         const scrollBtnHTML = `
@@ -1226,6 +1366,11 @@
         }
 
         bindUserAttachmentPreviews();
+        
+        // Wait for Mermaid rendering to complete before scrolling
+        // This ensures the content height is final
+        await renderMermaidDiagrams();
+        await renderChartBlocks();
 
         lastContentUpdateTime = Date.now();
 
@@ -1488,6 +1633,432 @@
                 const content = decodeAttachmentContent(encoded);
                 openAttachmentModal(name, content, language);
             });
+        });
+    }
+
+    async function renderMermaidDiagrams() {
+        if (typeof window.mermaid === 'undefined') return;
+        
+        try {
+            // Update theme based on current dark mode state
+            const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+            await window.mermaid.initialize({
+                startOnLoad: false,
+                theme: isDark ? 'dark' : 'default',
+                themeVariables: {
+                    darkMode: isDark
+                }
+            });
+
+            // Find all code blocks with language 'mermaid'
+            const mermaidBlocks = resultsDiv.querySelectorAll('pre code.language-mermaid, pre code.mermaid');
+            
+            for (let i = 0; i < mermaidBlocks.length; i++) {
+                const block = mermaidBlocks[i];
+                if (block.dataset.mermaidRendered === 'true') continue;
+                
+                const code = block.textContent;
+                const pre = block.parentElement;
+                
+                try {
+                    // Create a container for the diagram
+                    const container = document.createElement('div');
+                    container.className = 'mermaid-diagram';
+                    container.style.textAlign = 'center';
+                    container.style.padding = '1rem';
+                    container.style.background = isDark ? '#0f1115' : '#f8f9fa';
+                    container.style.borderRadius = '0.5rem';
+                    container.style.margin = '1rem 0';
+                    container.setAttribute('data-mermaid-source', code);
+                    
+                    // Render the diagram
+                    const { svg } = await window.mermaid.render('mermaid-' + Date.now() + '-' + i, code);
+                    container.innerHTML = svg;
+                    
+                    // Replace the pre/code block with the rendered diagram
+                    pre.replaceWith(container);
+                    block.dataset.mermaidRendered = 'true';
+                } catch (error) {
+                    console.error('Failed to render Mermaid diagram:', error);
+                    // Keep the original code block if rendering fails
+                }
+            }
+        } catch (error) {
+            console.error('Mermaid rendering error:', error);
+        }
+    }
+
+    function configureChartDefaults(isDark) {
+        if (!window.Chart || !window.Chart.defaults) return;
+        try {
+            window.Chart.defaults.color = isDark ? '#e6e6e6' : '#1b1d25';
+            window.Chart.defaults.borderColor = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.15)';
+            window.Chart.defaults.backgroundColor = isDark ? 'rgba(51,144,255,0.18)' : 'rgba(0,123,255,0.12)';
+        } catch (error) {
+            console.error('Failed to configure Chart.js defaults:', error);
+        }
+    }
+
+    function applyChartThemeDefaults(config, isDark) {
+        if (!config || typeof config !== 'object') return config;
+
+        const fallbackText = isDark ? '#e6e6e6' : '#1b1d25';
+        const fallbackGrid = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(33,37,41,0.1)';
+
+        config.options = config.options || {};
+        const options = config.options;
+
+        options.plugins = options.plugins || {};
+
+        if (options.plugins.legend !== false) {
+            if (options.plugins.legend === true) options.plugins.legend = {};
+            const legend = (options.plugins.legend && typeof options.plugins.legend === 'object') ? options.plugins.legend : {};
+            legend.labels = legend.labels || {};
+            if (!legend.labels.color) legend.labels.color = fallbackText;
+            options.plugins.legend = legend;
+        }
+
+        if (options.plugins.title !== false) {
+            if (options.plugins.title === true) options.plugins.title = { display: true };
+            if (options.plugins.title && typeof options.plugins.title === 'object' && !options.plugins.title.color) {
+                options.plugins.title.color = fallbackText;
+            }
+        }
+
+        if (options.plugins.tooltip !== false) {
+            if (options.plugins.tooltip === true) options.plugins.tooltip = {};
+            const tooltip = (options.plugins.tooltip && typeof options.plugins.tooltip === 'object') ? options.plugins.tooltip : {};
+            if (!tooltip.titleColor) tooltip.titleColor = fallbackText;
+            if (!tooltip.bodyColor) tooltip.bodyColor = fallbackText;
+            options.plugins.tooltip = tooltip;
+        }
+
+        if (options.scales && typeof options.scales === 'object') {
+            Object.values(options.scales).forEach(scale => {
+                if (!scale || typeof scale !== 'object') return;
+
+                if (scale.ticks !== false) {
+                    if (!scale.ticks || typeof scale.ticks !== 'object') scale.ticks = {};
+                    if (!scale.ticks.color) scale.ticks.color = fallbackText;
+                }
+
+                if (scale.grid !== false) {
+                    if (!scale.grid || typeof scale.grid !== 'object') scale.grid = {};
+                    if (!scale.grid.color) scale.grid.color = fallbackGrid;
+                }
+
+                if (scale.title && typeof scale.title === 'object' && !scale.title.color) {
+                    scale.title.color = fallbackText;
+                }
+            });
+        }
+
+        return config;
+    }
+
+    function tryParseChartConfig(raw) {
+        if (!raw) return null;
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+
+        try {
+            return JSON.parse(trimmed);
+        } catch (jsonError) {
+            // Continue with more permissive parsing
+        }
+
+        let expr = trimmed;
+        const assignmentMatch = expr.match(/^\s*(?:const|let|var)\s+[A-Za-z0-9_$]+\s*=\s*/);
+        if (assignmentMatch) expr = expr.slice(assignmentMatch[0].length);
+
+        const exportMatch = expr.match(/^\s*(?:module\.exports|export\s+default)\s*=\s*/);
+        if (exportMatch) expr = expr.slice(exportMatch[0].length);
+
+        if (expr.endsWith(';')) expr = expr.slice(0, -1);
+
+        // Strip comments and string literals to reduce false positives
+        const cleaned = expr
+            .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments
+            .replace(/\/\/[^\n\r]*/g, '')              // line comments
+            .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g, ''); // strings
+
+        // Disallow risky tokens using word-boundary aware patterns (avoid matching inside words like 'forecast')
+        const bannedPatterns = [
+            { re: /\bfunction\b/i,        label: 'function' },
+            { re: /=>/,                    label: '=>'},
+            { re: /\bwhile\b/i,           label: 'while' },
+            { re: /\bfor\b/i,             label: 'for' },
+            { re: /\bclass\b/i,           label: 'class' },
+            { re: /\bconstructor\b/i,     label: 'constructor' },
+            { re: /\bprocess\b/i,         label: 'process' },
+            { re: /\bwindow\b/i,          label: 'window' },
+            { re: /\bdocument\b/i,        label: 'document' },
+            { re: /\brequire\b/i,         label: 'require' },
+            { re: /\bimport\b/i,          label: 'import' },
+            { re: /\bexport\b/i,          label: 'export' },
+            { re: /\beval\b/i,            label: 'eval' },
+            { re: /\bxmlhttprequest\b/i,  label: 'XMLHttpRequest' },
+            { re: /\bfetch\b/i,           label: 'fetch' },
+            { re: /\bsettimeout\b/i,      label: 'setTimeout' },
+            { re: /\bsetinterval\b/i,     label: 'setInterval' },
+            { re: /\balert\b/i,           label: 'alert' },
+            { re: /\bprompt\b/i,          label: 'prompt' }
+        ];
+
+        const matched = bannedPatterns.find(p => p.re.test(cleaned));
+        if (matched) {
+            console.warn('Skipping chart block - disallowed token present in configuration. (' + matched.label + ')');
+            return null;
+        }
+
+        try {
+            const fn = new Function('"use strict"; return (' + expr + ');');
+            const evaluated = fn();
+            if (evaluated && typeof evaluated === 'object') {
+                return evaluated;
+            }
+        } catch (evalError) {
+            console.warn('Failed to evaluate chart configuration literal:', evalError);
+        }
+
+        return null;
+    }
+
+    function layoutChartContainer(container, canvasSettings) {
+        if (!container) return;
+
+        const rawViewportWidth = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 0;
+        const rawViewportHeight = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 0;
+        const fallbackWidth = (resultsDiv && resultsDiv.clientWidth) ? resultsDiv.clientWidth : 0;
+        const viewportWidth = Math.max(320, Math.floor((rawViewportWidth > 0 ? rawViewportWidth : fallbackWidth || 320) * 0.92));
+        const viewportHeight = Math.max(240, Math.floor((rawViewportHeight > 0 ? rawViewportHeight : 540) * 0.6));
+        const parentWidth = resultsDiv && resultsDiv.clientWidth ? Math.max(320, resultsDiv.clientWidth - 32) : viewportWidth;
+
+        const prefWidth = canvasSettings && canvasSettings.width ? Number(canvasSettings.width) : Math.max(parentWidth, viewportWidth);
+        const prefHeight = canvasSettings && canvasSettings.height ? Number(canvasSettings.height) : Math.round(prefWidth * 0.62);
+
+        const width = Math.max(320, Math.min(prefWidth, parentWidth, viewportWidth));
+        const heightFromWidth = Math.max(220, Math.round(width * (prefHeight > 0 ? prefHeight / Math.max(prefWidth, 1) : 0.62)));
+        const maxHeight = Math.max(240, Math.min(prefHeight, viewportHeight));
+        const height = Math.min(Math.max(220, heightFromWidth), maxHeight || heightFromWidth);
+
+        container.style.width = width + 'px';
+        container.style.maxWidth = '100%';
+        container.style.height = height + 'px';
+        container.style.maxHeight = Math.max(240, Math.min(prefHeight, viewportHeight)) + 'px';
+    }
+
+    function reflowRenderedCharts() {
+        const containers = document.querySelectorAll('.chartjs-chart');
+        containers.forEach(container => {
+            layoutChartContainer(container, container.__chartCanvasPrefs);
+            if (container.__chartInstance && typeof container.__chartInstance.resize === 'function') {
+                try {
+                    container.__chartInstance.resize();
+                } catch (error) {
+                    console.error('Failed to resize Chart.js instance:', error);
+                }
+            }
+        });
+    }
+
+    function scheduleChartReflow() {
+        if (chartResizeTimer) {
+            clearTimeout(chartResizeTimer);
+        }
+        chartResizeTimer = setTimeout(() => {
+            chartResizeTimer = null;
+            reflowRenderedCharts();
+        }, 150);
+    }
+
+    function renderChartBlocks() {
+        if (!resultsDiv || typeof window.Chart === 'undefined') return;
+
+        // Be liberal in what we accept: match common variants (chart, chartjs, chart.js)
+        // and also fall back to content sniffing for objects that look like Chart.js configs.
+        const allCodeBlocks = Array.from(resultsDiv.querySelectorAll('pre code'));
+        if (allCodeBlocks.length === 0) return;
+
+        function looksLikeChartClass(cls) {
+            const c = (cls || '').toLowerCase();
+            return (
+                /\blanguage-?chart(\.js|-js)?\b/.test(c) ||
+                /\bchartjs\b/.test(c) ||
+                /\bchart\.js\b/.test(c) ||
+                // Some highlighters add only a raw class name without the language- prefix
+                /(^|\s)chart(\.js|-js)?(\s|$)/.test(c)
+            );
+        }
+
+        // Quick content heuristic to catch blocks that were labeled as json/js but contain a Chart.js config
+        function looksLikeChartContent(text) {
+            if (!text) return false;
+            const t = String(text).trim();
+            // Avoid parsing huge blocks unnecessarily
+            if (t.length < 8) return false;
+            if (!/(^|\W)type\s*:/.test(t) || !/(^|\W)data\s*:/.test(t)) return false;
+            // Common Chart.js keys to further reduce false positives
+            if (!/(datasets|labels)\s*:/.test(t)) return false;
+            return true;
+        }
+
+        const blocks = allCodeBlocks.filter(block => {
+            return looksLikeChartClass(block.className) || looksLikeChartContent(block.textContent);
+        });
+        if (blocks.length === 0) return;
+
+        if (!chartResizeHandlerBound && typeof window !== 'undefined') {
+            window.addEventListener('resize', scheduleChartReflow);
+            chartResizeHandlerBound = true;
+        }
+
+        const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+        configureChartDefaults(isDark);
+
+        blocks.forEach((block) => {
+            const pre = block.parentElement;
+            if (!pre) return;
+
+            const raw = (block.textContent || '').trim();
+            if (!raw) return;
+
+            const parsed = tryParseChartConfig(raw);
+            if (!parsed) return;
+            let config = parsed;
+
+            if (config && typeof config === 'object' && config.chart) {
+                config = config.chart;
+            }
+
+            if (!config || typeof config !== 'object' || !config.type || !config.data) {
+                console.warn('Skipping chart block - configuration must include "type" and "data".');
+                return;
+            }
+
+            // Extra guard to avoid false positives when using the content heuristic
+            const hasDatasetsOrLabels = (config.data && (Array.isArray(config.data.datasets) || Array.isArray(config.data.labels)));
+            if (!hasDatasetsOrLabels) {
+                console.warn('Skipping chart block - data requires datasets or labels array.');
+                return;
+            }
+
+            const canvasSettings = (config.canvas && typeof config.canvas === 'object') ? config.canvas : null;
+            if (config.canvas) delete config.canvas;
+
+            const container = document.createElement('div');
+            container.className = 'chartjs-chart';
+            container.style.textAlign = 'center';
+            container.style.margin = '1.5rem 0';
+            container.style.padding = '1rem';
+            container.style.borderRadius = '0.6rem';
+            container.style.background = isDark ? '#0f1115' : '#f8f9fa';
+            container.style.border = isDark ? '1px solid #242629' : '1px solid #e0e0e0';
+            container.setAttribute('data-chart-source', raw);
+            container.__chartCanvasPrefs = canvasSettings || null;
+
+            const canvas = document.createElement('canvas');
+            if (canvasSettings) {
+                if (canvasSettings.width) canvas.setAttribute('data-width', canvasSettings.width);
+                if (canvasSettings.height) canvas.setAttribute('data-height', canvasSettings.height);
+            }
+            layoutChartContainer(container, canvasSettings);
+            const chartTitle = config.options && config.options.plugins && config.options.plugins.title && config.options.plugins.title.text;
+            if (chartTitle) {
+                canvas.setAttribute('aria-label', chartTitle);
+            } else {
+                canvas.setAttribute('aria-label', `${config.type} chart`);
+            }
+            canvas.setAttribute('role', 'img');
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            container.appendChild(canvas);
+
+            if (pre.parentElement) {
+                pre.parentElement.insertBefore(container, pre);
+            } else {
+                pre.replaceWith(container);
+            }
+
+            const themedConfig = applyChartThemeDefaults(config, isDark);
+
+            try {
+                themedConfig.options = themedConfig.options || {};
+                if (typeof themedConfig.options.responsive === 'undefined') themedConfig.options.responsive = true;
+                if (typeof themedConfig.options.maintainAspectRatio === 'undefined') themedConfig.options.maintainAspectRatio = false;
+
+                const ctx = canvas.getContext('2d');
+                const chartInstance = new window.Chart(ctx, themedConfig);
+                container.__chartInstance = chartInstance;
+                scheduleChartReflow();
+                pre.remove();
+            } catch (error) {
+                console.error('Failed to render Chart.js block:', error);
+                container.remove();
+            }
+        });
+    }
+
+    /**
+     * Attempts to force re-rendering of all Chart.js blocks.
+     * 
+     * Depends on the global `renderChartBlocks` function, which is defined above in this script.
+     * If `renderChartBlocks` is missing, this function will do nothing.
+     * 
+     * If you refactor or modularize this code, ensure that `renderChartBlocks` is available in the global scope.
+     */
+    function forceRenderChartBlocks() {
+        if (typeof renderChartBlocks !== 'function') return;
+
+        const triggerRender = () => {
+            try {
+                renderChartBlocks();
+            } catch (error) {
+                console.error('Failed to force Chart.js rendering:', error);
+            }
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(triggerRender);
+        } else {
+            setTimeout(triggerRender, 0);
+        }
+    }
+
+    function resetRenderedChartsForTheme() {
+        const chartContainers = document.querySelectorAll('.chartjs-chart');
+        chartContainers.forEach(container => {
+            try {
+                if (container.__chartInstance && typeof container.__chartInstance.destroy === 'function') {
+                    container.__chartInstance.destroy();
+                }
+            } catch (error) {
+                console.error('Failed to destroy Chart.js instance during theme change:', error);
+            }
+            if (container.__chartInstance) {
+                delete container.__chartInstance;
+            }
+
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.className = 'language-chart';
+            code.textContent = container.getAttribute('data-chart-source') || '';
+            pre.appendChild(code);
+            container.replaceWith(pre);
+        });
+    }
+
+    function resetMermaidDiagramsForTheme() {
+        const mermaidContainers = document.querySelectorAll('.mermaid-diagram');
+        mermaidContainers.forEach(container => {
+            const parent = container.parentElement;
+            if (!parent) return;
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.className = 'language-mermaid';
+            code.textContent = container.getAttribute('data-mermaid-source') || '';
+            pre.appendChild(code);
+            container.replaceWith(pre);
         });
     }
 
@@ -1889,10 +2460,12 @@
 
         currentSessionUuid = entry.uuid;
 
-        const htmlContent = converter.makeHtml(entry.content || '');
-        updateResultsContent(htmlContent);
+        const preprocessed = preprocessChartBlocks(entry.content || '');
+        const htmlContent = converter.makeHtml(preprocessed);
+        await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+        forceRenderChartBlocks();
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         refreshHistoryPanel();
@@ -1923,9 +2496,11 @@
 
             const data = await response.json();
             updatePlanPanel(data.plan);
-            const htmlContent = converter.makeHtml(data.content || '');
-            updateResultsContent(htmlContent);
+            const preprocessed = preprocessChartBlocks(data.content || '');
+            const htmlContent = converter.makeHtml(preprocessed);
+            await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+            forceRenderChartBlocks();
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
             refreshHistoryPanel();
@@ -2076,7 +2651,7 @@
         planPanel.setAttribute('hidden', 'hidden');
         planPanel.removeAttribute('open');
         if (planList) planList.innerHTML = '';
-        if (planSummaryText) planSummaryText.textContent = '0/0 tasks completed';
+        if (planSummaryText) planSummaryText.textContent = '0% overall · 0/0 tasks completed';
         if (planProgressValue) planProgressValue.style.strokeDashoffset = '100';
     }
 
@@ -2099,18 +2674,40 @@
         if (typeof completed !== 'number' || completed < 0) {
             completed = items.filter(item => {
                 const status = (item && item.status ? String(item.status).toLowerCase() : '');
-                return item && item.done === true || PLAN_DONE_STATUSES.has(status);
+                return (item && item.done === true) || PLAN_DONE_STATUSES.has(status);
             }).length;
+        }
+
+        let overall = planPayload && typeof planPayload.overall === 'number' ? planPayload.overall : undefined;
+        if (typeof overall !== 'number' || Number.isNaN(overall)) {
+            const ratio = total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
+            overall = Math.round(ratio * 100);
+        } else {
+            overall = Math.max(0, Math.min(100, Math.round(overall)));
+        }
+
+        let checkpoints = { reached: 0, total: 0 };
+        if (planPayload && typeof planPayload.checkpoints === 'object' && planPayload.checkpoints !== null) {
+            const raw = planPayload.checkpoints;
+            const reached = typeof raw.reached === 'number' && !Number.isNaN(raw.reached) ? raw.reached : 0;
+            const totalCheckpoints = typeof raw.total === 'number' && !Number.isNaN(raw.total) ? raw.total : 0;
+            checkpoints = {
+                reached: Math.max(0, reached),
+                total: Math.max(0, totalCheckpoints)
+            };
         }
 
         planPanel.removeAttribute('hidden');
         if (planSummaryText) {
-            planSummaryText.textContent = `${completed}/${total} tasks completed`;
+            const summaryPieces = [`${overall}% overall`, `${completed}/${total} tasks completed`];
+            if (checkpoints.total > 0) {
+                summaryPieces.push(`checkpoints ${checkpoints.reached}/${checkpoints.total}`);
+            }
+            planSummaryText.textContent = summaryPieces.join(' · ');
         }
 
         if (planProgressValue) {
-            const ratio = total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
-            const offset = (100 - ratio * 100).toFixed(2);
+            const offset = (100 - overall).toFixed(2);
             planProgressValue.style.strokeDashoffset = offset;
         }
 
@@ -2223,7 +2820,8 @@
             
         } catch (error) {
             console.error('Error submitting prompt:', error);
-            updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            forceRenderChartBlocks();
         }
     }
 
@@ -2240,10 +2838,12 @@
 
                 const data = await response.json();
                 updatePlanPanel(data.plan);
-                const htmlContent = converter.makeHtml(data.content || '');
-                updateResultsContent(htmlContent);
-                
+                const preprocessed = preprocessChartBlocks(data.content || '');
+                const htmlContent = converter.makeHtml(preprocessed);
+                await updateResultsContent(htmlContent);
+
                 hljs.highlightAll();
+                forceRenderChartBlocks();
                 if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
                 __refreshDarkMode();
 
@@ -2263,7 +2863,8 @@
                 
             } catch (error) {
                 console.error('Error fetching results:', error);
-                updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+                await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+                forceRenderChartBlocks();
                 stopProcessing();
             }
         }, 1500);
@@ -2305,7 +2906,7 @@
     }
 
     /* ========== EVENT HANDLERS ========== */
-    function handleClearClick() {
+    async function handleClearClick() {
         const uuidToClear = currentSessionUuid || 
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
 
@@ -2321,7 +2922,8 @@
             }).catch(err => console.error('Error sending clear request:', err));
         }
 
-        updateResultsContent('<p></p>');
+        await updateResultsContent('<p></p>');
+        forceRenderChartBlocks();
         resetPlanPanel();
         removePreview();
         promptInput.value = '';
@@ -2532,15 +3134,31 @@
         __syncAttachmentModalTheme();
     });
 
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    function handleSystemThemeChange() {
         __refreshDarkMode();
         __applyDarkModeIfNeeded();
         __syncAttachmentModalTheme();
-    });
 
-    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-        __refreshDarkMode();
-        __applyDarkModeIfNeeded();
-        __syncAttachmentModalTheme();
-    });
+        if (typeof renderMermaidDiagrams === 'function') {
+            resetMermaidDiagramsForTheme();
+            setTimeout(() => renderMermaidDiagrams(), 100);
+        }
+
+        if (typeof renderChartBlocks === 'function') {
+            resetRenderedChartsForTheme();
+            setTimeout(() => renderChartBlocks(), 120);
+        }
+    }
+
+    function bindThemeListener(mediaQuery) {
+        if (!mediaQuery) return;
+        if (typeof mediaQuery.addEventListener === 'function') {
+            mediaQuery.addEventListener('change', handleSystemThemeChange);
+        } else if (typeof mediaQuery.addListener === 'function') {
+            mediaQuery.addListener(handleSystemThemeChange);
+        }
+    }
+
+    bindThemeListener(window.matchMedia('(prefers-color-scheme: dark)'));
+    bindThemeListener(window.matchMedia('(prefers-color-scheme: light)'));
 </script>

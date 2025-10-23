@@ -47,6 +47,16 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usediagrams
+    desc     : "Boolean to enable/disable Mermaid diagram generation (default: true)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usecharts
+    desc     : "Boolean to enable/disable Chart.js chart generation (default: true)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historys3bucket
     desc     : "S3 bucket to store conversation history objects"
     example  : "mini-a-history"
@@ -304,12 +314,30 @@ todo:
                       }
                       var completedCount = 0
                       normalized.forEach(item => { if (item.done === true) completedCount++ })
+
+                      var progressInfo = isObject(lma._planningProgress) ? lma._planningProgress : {}
+                      var overallProgress = 0
+                      if (isNumber(progressInfo.overall)) {
+                        overallProgress = Math.max(0, Math.min(100, Math.round(progressInfo.overall)))
+                      } else if (normalized.length > 0) {
+                        overallProgress = Math.round((completedCount / normalized.length) * 100)
+                      }
+
+                      var checkpointInfo = { reached: 0, total: 0 }
+                      if (isObject(progressInfo.checkpoints)) {
+                        var checkpoints = progressInfo.checkpoints
+                        if (isNumber(checkpoints.reached)) checkpointInfo.reached = checkpoints.reached
+                        if (isNumber(checkpoints.total)) checkpointInfo.total = checkpoints.total
+                      }
+
                       global.__planState[uuid] = {
-                        items    : normalized,
-                        total    : normalized.length,
-                        completed: completedCount,
-                        active   : normalized.length > 0,
-                        updated  : Date.now()
+                        items      : normalized,
+                        total      : normalized.length,
+                        completed  : completedCount,
+                        overall    : overallProgress,
+                        checkpoints: checkpointInfo,
+                        active     : normalized.length > 0,
+                        updated    : Date.now()
                       }
                     } else {
                       if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
@@ -351,6 +379,13 @@ todo:
           conversation: global._mini_a_web_loadFile(_hfile)
         }))
 
+        if (isDef(_rma.answer)) {
+          var trimmedAnswer = _rma.answer.trim();
+          if (trimmedAnswer.startsWith("```markdown") && trimmedAnswer.endsWith("```")) {
+            // Remove markdown fences
+            _rma.answer = trimmedAnswer.replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
+          }
+        }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
         if (isFunction(global._mini_a_web_storeHistory)) {
           try {
@@ -476,14 +511,23 @@ todo:
         _res.history = _history
         if (hasActivePlan) {
           _res.plan = {
-            active   : true,
-            items    : planState.items,
-            total    : planState.total,
-            completed: planState.completed,
-            updated  : planState.updated
+            active     : true,
+            items      : planState.items,
+            total      : planState.total,
+            completed  : planState.completed,
+            overall    : planState.overall,
+            checkpoints: planState.checkpoints,
+            updated    : planState.updated
           }
         } else {
-          _res.plan = { active: false, items: [], total: 0, completed: 0 }
+          _res.plan = {
+            active     : false,
+            items      : [],
+            total      : 0,
+            completed  : 0,
+            overall    : 0,
+            checkpoints: { reached: 0, total: 0 }
+          }
         }
       }
 
@@ -585,6 +629,8 @@ jobs:
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
       useplanning     : toBoolean().isBoolean().default(false)
+      usediagrams     : toBoolean().isBoolean().default(true)
+      usecharts       : toBoolean().isBoolean().default(true)
       historys3bucket : isString().default(__)
       historys3prefix : isString().default("")
       historys3url    : isString().default("https://s3.amazonaws.com")
@@ -636,6 +682,73 @@ jobs:
     }
 
     args.__format = "md"
+    
+    // Add system knowledge about visual diagram capabilities
+    var visualDiagramKnowledge = ""
+    var visualParts = []
+    
+    if (args.usediagrams || args.usecharts) {
+      visualParts.push(
+        "Visual output guidance (concise):\n\n" +
+        "- Default to including a diagram or chart whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
+        "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
+        "- Never mention the technical implementation (Mermaid, Chart.js, etc.) to users; refer only to 'diagrams' and 'charts'."
+      )
+    }
+    
+    if (args.usediagrams) {
+      visualParts.push(
+        "Diagrams:\n" +
+        "  - Use ```mermaid``` fences for flows (`graph TD`), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, mindmap, or pie charts.\n" +
+        "  - Keep node labels concise and prefer directional edges for processes."
+      )
+    }
+    
+    if (args.usecharts) {
+      visualParts.push(
+        "Charts (strict format):\n" +
+        "  - Wrap only the config object inside ```chart``` (aliases: chartjs, chart.js).\n" +
+        "  - Include `type`, `data.labels`, and at least one dataset; add palettes and `options` as needed.\n" +
+        "  - Optional `canvas: { width, height }` block controls sizing when helpful.\n" +
+        "  - Never use other fences (json/javascript) and never return raw JSON.\n" +
+        "  - Use only static values; do not include functions or dynamic callbacks (no `ctx => ...`, no `function(){}`); configs are treated as data and code is not executed.\n" +
+        "  - Provide complete, deterministic data inline (no async or fetching).\n" +
+        "  - IMPORTANT: When working with datetime values, keep them as strings in ISO format or as timestamp numbers. Do not use Date objects or date parsing functions in the chart configuration.\n\n" +
+        "Available chart plugins/types (preloaded):\n" +
+        "  - chartjs-adapter-date-fns (time scale; use scales.{x|y}.type='time' with ISO date strings)\n" +
+        "  - @sgratzl/chartjs-chart-boxplot (types: 'boxplot', 'violin')\n" +
+        "  - chartjs-chart-treemap (type: 'treemap')\n" +
+        "  - chartjs-chart-sankey (type: 'sankey')\n" +
+        "  - chartjs-chart-matrix (type: 'matrix')\n" +
+        "  - chartjs-chart-graph (type: 'graph')\n" +
+        "  - chartjs-chart-geo (types: 'choropleth', 'bubbleMap')"
+      )
+    }
+    
+    if (args.usediagrams || args.usecharts) {
+      var checklist = "\n\nVisual selection checklist:"
+      if (args.usediagrams) {
+        checklist += "\n1. Relationships or flows -> diagram with graph or sequence."
+        checklist += "\n2. Timelines or roadmaps -> diagram with gantt."
+      }
+      if (args.usecharts) {
+        checklist += "\n" + (args.usediagrams ? "3" : "1") + ". Comparisons or trends -> bar or line chart."
+        checklist += "\n" + (args.usediagrams ? "4" : "2") + ". Composition or ratios -> pie or doughnut chart."
+      }
+      checklist += "\n\nIf a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."
+      visualParts.push(checklist)
+    }
+    
+    visualDiagramKnowledge = visualParts.join("\n\n")
+
+    if (visualDiagramKnowledge.length > 0) {
+      if (isUnDef(args.knowledge)) {
+        args.knowledge = visualDiagramKnowledge
+      } else {
+        args.knowledge = args.knowledge + "\n\n" + visualDiagramKnowledge
+      }
+    }
+    
     global.maArgs = merge(args, {})
     //global.ma = new MiniA()
     //global.ma.init( global.maArgs )
