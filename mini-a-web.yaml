@@ -47,6 +47,40 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : historys3bucket
+    desc     : "S3 bucket to store conversation history objects"
+    example  : "mini-a-history"
+    mandatory: false
+  - name     : historys3prefix
+    desc     : "Optional S3 key prefix for history objects"
+    example  : "sessions/"
+    mandatory: false
+  - name     : historys3url
+    desc     : "Custom S3-compatible endpoint URL"
+    example  : "https://s3.amazonaws.com"
+    mandatory: false
+  - name     : historys3accesskey
+    desc     : "Access key ID for the history S3 endpoint"
+    example  : "AKIA..."
+    mandatory: false
+  - name     : historys3secret
+    desc     : "Secret key for the history S3 endpoint"
+    example  : "WJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    mandatory: false
+  - name     : historys3region
+    desc     : "Region for the history S3 endpoint when required"
+    example  : "eu-west-1"
+    mandatory: false
+  - name     : historys3useversion1
+    desc     : "Force the MinIO client to use the S3 API version 1 when listing objects"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historys3ignorecertcheck
+    desc     : "Ignore TLS certificate validation for the history S3 endpoint (use with caution)"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
 
 include:
 - oJobHTTPd.yaml
@@ -54,6 +88,7 @@ include:
 todo:
 - Init
 - Periodic cleanup of old sessions
+- Shutdown history S3 client
 - (httpdStart     ): "${onport:-8888}"
   ((mapLibs      )): true
 - (httpdHealthz   ): "${onport:-8888}"
@@ -100,9 +135,14 @@ todo:
         }
         if (global.__usehistory && !global.__historykeep) {
           log("Deleting history file for session " + postData.uuid)
-          var _hfile = global.__historypath + "/c-" + postData.uuid + ".json"
-          if (io.fileExists(_hfile)) {
-            io.rm(_hfile)
+          if (isFunction(global._mini_a_web_deleteHistory)) {
+            global._mini_a_web_deleteHistory(postData.uuid)
+          } else {
+            // Fallback local cleanup
+            var _hfile = global.__historypath + "/c-" + postData.uuid + ".json"
+            if (io.fileExists(_hfile)) {
+              io.rm(_hfile)
+            }
           }
         }
       }
@@ -157,8 +197,8 @@ todo:
 
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
-          // If history file does not exist but we have history in memory, rebuild it
-          if (global.__usehistory && !io.fileExists(_hfile) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
+          // If history does not exist but we have history in memory, rebuild it
+          if (global.__usehistory && !global._mini_a_web_historyExists(uuid) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
             // Try rebuilding
             var _data = []
             for (var i = 0; i < global.__res[ uuid ].length; i++) {
@@ -172,7 +212,7 @@ todo:
               }
             }
             if (_data.length > 0) {
-              io.writeFileJSON(_hfile, { u: new Date(), c: _data }, "")
+              global._mini_a_web_saveFile(_hfile, { u: new Date(), c: _data })
               log("[" + uuid + "] Rebuilt history file " + _hfile)
             }
           }
@@ -286,6 +326,13 @@ todo:
                 }
               }
               global.__res[uuid].push({ event: _e, message: m })
+              if (isFunction(global._mini_a_web_storeHistory)) {
+                try {
+                  global._mini_a_web_storeHistory(uuid)
+                } catch(syncErr) {
+                  logErr(syncErr)
+                }
+              }
               log("[" + uuid + "] " + _e + " " + m)
             } catch(eee) {
               $err(eee)
@@ -312,6 +359,13 @@ todo:
           }
         }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        if (isFunction(global._mini_a_web_storeHistory)) {
+          try {
+            global._mini_a_web_storeHistory(uuid)
+          } catch(storeErr) {
+            logErr(storeErr)
+          }
+        }
         log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
       }).catch((eee) => {
         logErr(eee)
@@ -481,6 +535,13 @@ todo:
       global.__res[ postData.uuid ] = sanitized
       delete global.__conversations[ postData.uuid ]
       global.__lastActivity[ postData.uuid ] = Date.now()
+      if (isFunction(global._mini_a_web_storeHistory)) {
+        try {
+          global._mini_a_web_storeHistory(postData.uuid)
+        } catch(syncErr) {
+          logErr(syncErr)
+        }
+      }
 
       return ow.server.httpd.reply({ status: "loaded", uuid: postData.uuid, entries: sanitized.length })
     } catch(e) {
@@ -493,12 +554,14 @@ ojob:
   - openaf: 20250915
   - oJob-common
   - mini-a
+  - S3
   catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
   logToConsole: true   # to change when finished
   daemon      : true
   argsFromEnvs: true
   loadLibs    :
   - mini-a.js
+  - s3.js
   channels    :
     create:
     - name: conversations
@@ -529,6 +592,14 @@ jobs:
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
       useplanning     : toBoolean().isBoolean().default(false)
+      historys3bucket : isString().default(__)
+      historys3prefix : isString().default("")
+      historys3url    : isString().default("https://s3.amazonaws.com")
+      historys3accesskey: isString().default(__)
+      historys3secret : isString().default(__)
+      historys3region : isString().default(__)
+      historys3useversion1: toBoolean().isBoolean().default(false)
+      historys3ignorecertcheck: toBoolean().isBoolean().default(false)
   exec : | #js
     global.__res = {}
     global.__usehistory = args.usehistory
@@ -540,6 +611,37 @@ jobs:
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
     global.__planState = {}
+    if (global.__usehistory && isString(global.__historypath)) {
+      try {
+        io.mkdir(global.__historypath)
+      } catch(ignore) {}
+    }
+
+    global.__historys3bucket = args.historys3bucket
+    global.__historys3client = __
+    global.__historys3enabled = false
+    global.__historys3prefix = isString(args.historys3prefix) ? String(args.historys3prefix) : ""
+    if (global.__historys3prefix.length > 0) {
+      while (global.__historys3prefix.charAt(0) == "/") {
+        global.__historys3prefix = global.__historys3prefix.substring(1)
+      }
+      while (global.__historys3prefix.length > 0 && global.__historys3prefix.charAt(global.__historys3prefix.length - 1) == "/") {
+        global.__historys3prefix = global.__historys3prefix.substring(0, global.__historys3prefix.length - 1)
+      }
+    }
+
+    if (global.__usehistory && isString(global.__historys3bucket) && global.__historys3bucket.length > 0) {
+      try {
+        global.__historys3client = new S3(args.historys3url, args.historys3accesskey, args.historys3secret, args.historys3region, args.historys3useversion1, args.historys3ignorecertcheck)
+        global.__historys3enabled = true
+        log("History S3 storage enabled for bucket " + global.__historys3bucket + (global.__historys3prefix.length > 0 ? (" with prefix " + global.__historys3prefix) : ""))
+      } catch(initErr) {
+        logErr(initErr)
+        global.__historys3client = __
+        global.__historys3enabled = false
+      }
+    }
+
     args.__format = "md"
     
     // Add system knowledge about visual diagram capabilities
@@ -583,12 +685,225 @@ jobs:
     //global.ma.init( global.maArgs )
     //global.ma = __
 
+    global._mini_a_web_historyS3Key = (uuid) => {
+      if (isUnDef(uuid)) return __
+      var clean = String(uuid)
+      var key = "c-" + clean + ".json"
+      if (global.__historys3prefix.length > 0) {
+        key = global.__historys3prefix + "/" + key
+      }
+      return key
+    }
+
+    global._mini_a_web_uuidFromPath = (aFile) => {
+      if (isUnDef(aFile) || isUnDef(global.__historypath)) return __
+      var base = String(global.__historypath)
+      if (base.length > 0 && base.charAt(base.length - 1) != "/") {
+        base = base + "/"
+      }
+      var prefix = base + "c-"
+      var file = String(aFile || "")
+      if (file.indexOf(prefix) == 0 && file.length > prefix.length + 5) {
+        var uuid = file.substring(prefix.length)
+        if (uuid.endsWith(".json")) {
+          uuid = uuid.substring(0, uuid.length - 5)
+        }
+        return uuid
+      }
+      return __
+    }
+
+    global._mini_a_web_buildHistoryPayload = (uuid) => {
+      if (isUnDef(uuid)) return __
+      var hfile = global.__historypath + "/c-" + uuid + ".json"
+
+      // Prefer S3 when enabled
+      if (global.__historys3enabled) {
+        var stream, str
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          log("S3 history get (payload) bucket=" + global.__historys3bucket + " key=" + key)
+          stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+          str = af.fromInputStream2String(stream)
+        } catch(getErr) {
+          // Ignore missing objects; log other errors
+          if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
+            logErr(getErr)
+          }
+        } finally {
+          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
+        }
+        if (isDef(str)) {
+          try {
+            log("S3 history got payload for uuid=" + uuid + " size=" + str.length)
+            return str
+          } catch(convErr) { logErr(convErr) }
+        }
+      }
+
+      // Otherwise try local file if present
+      if (io.fileExists(hfile)) {
+        try {
+          return io.readFileString(hfile)
+        } catch(readErr) {
+          logErr(readErr)
+        }
+      }
+
+      // Build from in-memory events
+      if (isDef(global.__res[uuid]) && isArray(global.__res[uuid]) && global.__res[uuid].length > 0) {
+        var data = []
+        for (var i = 0; i < global.__res[uuid].length; i++) {
+          var entry = global.__res[uuid][i]
+          if (isUnDef(entry) || isUnDef(entry.event)) continue
+          var msg = isDef(entry.message) ? entry.message : ""
+          switch(entry.event) {
+          case "👤":
+            data.push({ role: "user", content: msg })
+            break
+          case "🤖":
+          case "⬅️":
+          case "🏁":
+          case "✅":
+          case "❌":
+            data.push({ role: "assistant", content: msg })
+            break
+          case "⚙️":
+          case "🖥️":
+          case "📚":
+          case "ℹ️":
+          case "📂":
+          case "⚠️":
+          case "🛑":
+            data.push({ role: "system", content: msg })
+            break
+          default:
+            // Skip remaining events from being persisted
+          }
+        }
+        if (data.length > 0) {
+          return stringify({ u: new Date(), c: data }, __, "")
+        }
+      }
+      return __
+    }
+
+    global._mini_a_web_storeHistory = (uuid) => {
+      if (!global.__historys3enabled) return
+      var payload = global._mini_a_web_buildHistoryPayload(uuid)
+      if (isUnDef(payload)) return
+      var stream, bytes
+      try {
+        var key = global._mini_a_web_historyS3Key(uuid)
+        log("S3 history put bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(payload) ? payload.length : 0))
+        global.__historys3client.putObjectStream(global.__historys3bucket, key, af.fromString2InputStream(payload), {}, "application/json")
+      } catch(storeErr) {
+        logErr(storeErr)
+      } finally {
+        if (isDef(stream)) {
+          try { stream.close() } catch(ignore) {}
+        }
+      }
+    }
+
+    global._mini_a_web_deleteHistory = (uuid) => {
+      if (isUnDef(uuid)) return
+      var localFile = isString(global.__historypath) ? (global.__historypath + "/c-" + uuid + ".json") : __
+      // Remove remote if enabled
+      if (global.__historys3enabled) {
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          log("S3 history delete bucket=" + global.__historys3bucket + " key=" + key)
+          global.__historys3client.removeObject(global.__historys3bucket, key)
+        } catch(removeErr) {
+          logErr(removeErr)
+        }
+      }
+      // Always try to remove local cache file if present
+      if (isString(localFile) && io.fileExists(localFile)) {
+        try { io.rm(localFile) } catch(ignore) {}
+      }
+    }
+
     global._mini_a_web_saveFile = (aFile, aMap) => {
-      io.writeFileJSON(aFile, aMap, "")
+      var uuid = global._mini_a_web_uuidFromPath(aFile)
+      if (global.__historys3enabled && isDef(uuid)) {
+        // Save to S3 instead of local
+        var payload
+        try {
+          payload = stringify(aMap, __, "")
+        } catch(jsonErr) { logErr(jsonErr); return }
+        var stream, bytes
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          bytes = af.fromString2Bytes(payload, "utf-8")
+          log("S3 history save bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(bytes) ? bytes.length : 0))
+          stream = new Packages.java.io.ByteArrayInputStream(bytes)
+          global.__historys3client.putObjectStream(global.__historys3bucket, key, stream, {}, "application/json")
+        } catch(storeErr) {
+          logErr(storeErr)
+        } finally {
+          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
+        }
+      } else {
+        // Local save
+        try { io.writeFileJSON(aFile, aMap, "") } catch(writeErr) { logErr(writeErr) }
+      }
+    }
+
+    global._mini_a_web_historyExists = (uuid) => {
+      if (isUnDef(uuid)) return false
+      var localFile = isString(global.__historypath) ? (global.__historypath + "/c-" + uuid + ".json") : __
+      if (global.__historys3enabled) {
+        var stream
+        try {
+          var key = global._mini_a_web_historyS3Key(uuid)
+          log("S3 history exists? bucket=" + global.__historys3bucket + " key=" + key)
+          stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+          log("S3 history exists: true for key=" + key)
+          return true
+        } catch(getErr) {
+          // Missing object is not an error
+          try { if (String(getErr).indexOf("NoSuchKey") >= 0) log("S3 history exists: false for key=" + global._mini_a_web_historyS3Key(uuid)) } catch(ignore) {}
+          return false
+        } finally {
+          if (isDef(stream)) { try { stream.close() } catch(ignore) {} }
+        }
+      }
+      return isString(localFile) && io.fileExists(localFile)
     }
 
     global._mini_a_web_loadFile = (aFile) => {
       // Can be __
+      if (global.__historys3enabled && isString(aFile)) {
+        var uuid = global._mini_a_web_uuidFromPath(aFile)
+        if (isDef(uuid)) {
+          var stream, str
+          try {
+            var key = global._mini_a_web_historyS3Key(uuid)
+            log("S3 history get (load) bucket=" + global.__historys3bucket + " key=" + key + " -> file=" + aFile)
+            stream = global.__historys3client.getObjectStream(global.__historys3bucket, key)
+            str = af.fromInputStream2String(stream)
+          } catch(getErr) {
+            // Ignore missing objects
+            if (isDef(getErr) && String(getErr).indexOf("NoSuchKey") < 0) {
+              logErr(getErr)
+            }
+          } finally {
+            if (isDef(stream)) {
+              try { stream.close() } catch(ignore) {}
+            }
+          }
+          if (isDef(str)) {
+            try {
+              log("S3 history downloaded uuid=" + uuid + " size=" + str.length + " -> " + aFile)
+              io.writeFileString(aFile, str)
+            } catch(writeErr) {
+              logErr(writeErr)
+            }
+          }
+        }
+      }
       return aFile
     }
 
@@ -613,5 +928,22 @@ jobs:
       delete global.__res[ uuid ]
       delete global.__conversations[ uuid ]
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
+      if (global.__usehistory && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
+        try {
+          global._mini_a_web_deleteHistory(uuid)
+        } catch(cleanErr) {
+          logErr(cleanErr)
+        }
+      }
       log("Cleaned up session " + uuid)
+    }
+
+# ---------------------------------------
+- name : Shutdown history S3 client
+  type : shutdown
+  exec : | #js
+    if (isDef(global.__historys3client)) {
+      try { global.__historys3client.close() } catch(ignore) {}
+      global.__historys3client = __
+      global.__historys3enabled = false
     }
