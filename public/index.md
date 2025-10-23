@@ -1157,6 +1157,63 @@
     };
     const PLAN_DONE_STATUSES = new Set(['done', 'complete', 'completed', 'finished', 'success']);
 
+    /* ========== CHART PREPROCESSING ========== */
+    let chartBlockStore = [];
+
+    /**
+     * Preprocesses markdown to extract chart blocks that might be
+     * malformed due to preceding image syntax or inline text.
+     * Returns normalized markdown with chart placeholders.
+     */
+    function preprocessChartBlocks(markdown) {
+        if (!markdown) return markdown;
+        chartBlockStore = [];
+        let counter = 0;
+        
+        // Match chart blocks that may be preceded by anything on the same line
+        // Pattern: (optional content)```chart or ```chartjs or ```chart.js
+        const pattern = /^(.*)```(chart(?:\.js|-js)?|chartjs)\s*\n([\s\S]*?)\n```/gm;
+        
+        const processed = markdown.replace(pattern, (match, prefix, lang, content) => {
+            const id = counter++;
+            const trimmedPrefix = (prefix || '').trim();
+            
+            // Store the chart config
+            chartBlockStore.push({
+                id: id,
+                content: content,
+                language: lang
+            });
+            
+            // Return a clean marker that will survive markdown conversion
+            // If there was a prefix (like ![text]), preserve it on a separate line
+            const marker = `<div class="chart-placeholder" data-chart-id="${id}"></div>`;
+            return trimmedPrefix ? `${trimmedPrefix}\n\n${marker}` : marker;
+        });
+        
+        return processed;
+    }
+
+    /**
+     * Restores chart blocks after markdown conversion by replacing
+     * placeholders with properly formatted code blocks.
+     */
+    function postprocessChartBlocks(html) {
+        if (!html || chartBlockStore.length === 0) return html;
+        
+        let processed = html;
+        chartBlockStore.forEach(item => {
+            const placeholder = `<div class="chart-placeholder" data-chart-id="${item.id}"></div>`;
+            // Create a proper pre/code structure with chart class
+            const replacement = `<pre><code class="language-chart">${escapeHtml(item.content)}</code></pre>`;
+            processed = processed.replace(placeholder, replacement);
+        });
+        
+        // Clear the store after processing
+        chartBlockStore = [];
+        return processed;
+    }
+
     /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
     let pollingInterval = null;
@@ -1281,7 +1338,9 @@
 
         destroyRenderedCharts();
         
-        resultsDiv.innerHTML = htmlContent;
+        // Post-process to restore any chart blocks that were preprocessed
+        const processedHtml = postprocessChartBlocks(htmlContent);
+        resultsDiv.innerHTML = processedHtml;
         
         // Re-add scroll button
         const scrollBtnHTML = `
@@ -2401,7 +2460,8 @@
 
         currentSessionUuid = entry.uuid;
 
-        const htmlContent = converter.makeHtml(entry.content || '');
+        const preprocessed = preprocessChartBlocks(entry.content || '');
+        const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -2436,7 +2496,8 @@
 
             const data = await response.json();
             updatePlanPanel(data.plan);
-            const htmlContent = converter.makeHtml(data.content || '');
+            const preprocessed = preprocessChartBlocks(data.content || '');
+            const htmlContent = converter.makeHtml(preprocessed);
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
             forceRenderChartBlocks();
@@ -2777,7 +2838,8 @@
 
                 const data = await response.json();
                 updatePlanPanel(data.plan);
-                const htmlContent = converter.makeHtml(data.content || '');
+                const preprocessed = preprocessChartBlocks(data.content || '');
+                const htmlContent = converter.makeHtml(preprocessed);
                 await updateResultsContent(htmlContent);
 
                 hljs.highlightAll();
