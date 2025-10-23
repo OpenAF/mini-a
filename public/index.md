@@ -1726,7 +1726,7 @@
         // Disallow risky tokens using word-boundary aware patterns (avoid matching inside words like 'forecast')
         const bannedPatterns = [
             { re: /\bfunction\b/i,        label: 'function' },
-            { re: /=>/,                    label: '=>'} ,
+            { re: /=>/,                    label: '=>'},
             { re: /\bwhile\b/i,           label: 'while' },
             { re: /\bfor\b/i,             label: 'for' },
             { re: /\bclass\b/i,           label: 'class' },
