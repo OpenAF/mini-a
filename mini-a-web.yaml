@@ -304,9 +304,12 @@ todo:
           conversation: global._mini_a_web_loadFile(_hfile)
         }))
 
-        if (isDef(_rma.answer) && _rma.answer.trim().startsWith("```markdown") && _rma.answer.trim().endsWith("```")) {
-          // Remove markdown fences
-          _rma.answer = _rma.answer.trim().replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
+        if (isDef(_rma.answer)) {
+          var trimmedAnswer = _rma.answer.trim();
+          if (trimmedAnswer.startsWith("```markdown") && trimmedAnswer.endsWith("```")) {
+            // Remove markdown fences
+            _rma.answer = trimmedAnswer.replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
+          }
         }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
         log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
