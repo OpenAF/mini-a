@@ -39,14 +39,11 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251022'
+version: '20251023'
 dependencies:
   openaf: '>=20250915'
 files:
-- .mcp-weather.pid
 - .odoc.db
-- .openaf_precompiled/.t8-20251020
-- .openaf_precompiled/mini-a_js.class
 - .package.yaml
 - AGENTS.md
 - CODE_OF_CONDUCT.md
@@ -89,10 +86,7 @@ files:
 - tests/coreFunctionality.js
 - tests/coreFunctionality.yaml
 filesHash:
-  .mcp-weather.pid: becc8956cb5337af724f1d3f7f0fc7f85bfc6a6c
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/.t8-20251020: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  .openaf_precompiled/mini-a_js.class: ecad060f35b097511ca974f31780fc033ffa20ae
   AGENTS.md: 7b6df1520b27dc3ef4e025a084452c62d0e1c1f9
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
@@ -121,11 +115,11 @@ filesHash:
   mini-a-file-tool.js: 2c2981d1bfee062ba8d8fe10ca3006a37aeaa711
   mini-a-main.yaml: eb36f5a6749500c7bef073059abf461916174aed
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 92448c86ca5114b90b8811685187cabae5152cf0
-  mini-a.js: b0247906077c167ca19a872e74037730981c422c
+  mini-a-web.yaml: 534eb144b46e56767b2d4b29e1328e1738b93305
+  mini-a.js: 3fdb91b03b573fcc87a83843d2dc47bd4c17116e
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: c02780a1cec62b76c9fd6d6dcd92c15e4de49cc9
-  public/index.md: 42e879c1b451ca3303722ac4574373072045671b
+  public/index.md: 9d4b07312410ef581c3d1d9b28a3abd3439ed4eb
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
   tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
