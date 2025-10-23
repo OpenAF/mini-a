@@ -1072,7 +1072,7 @@
                     <path class="plan-progress-ring-bg" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831" />
                     <path id="planProgressValue" class="plan-progress-ring-value" d="M18 2.0845a15.9155 15.9155 0 1 1 0 31.831a15.9155 15.9155 0 1 1 0-31.831" stroke-dasharray="100" stroke-dashoffset="100" />
                 </svg>
-                <span id="planSummaryText" class="plan-summary-text">0/0 tasks completed</span>
+                <span id="planSummaryText" class="plan-summary-text">0% overall · 0/0 tasks completed</span>
             </span>
             <span class="plan-summary-icon" aria-hidden="true">🗺️</span>
         </summary>
@@ -2590,7 +2590,7 @@
         planPanel.setAttribute('hidden', 'hidden');
         planPanel.removeAttribute('open');
         if (planList) planList.innerHTML = '';
-        if (planSummaryText) planSummaryText.textContent = '0/0 tasks completed';
+        if (planSummaryText) planSummaryText.textContent = '0% overall · 0/0 tasks completed';
         if (planProgressValue) planProgressValue.style.strokeDashoffset = '100';
     }
 
@@ -2613,18 +2613,40 @@
         if (typeof completed !== 'number' || completed < 0) {
             completed = items.filter(item => {
                 const status = (item && item.status ? String(item.status).toLowerCase() : '');
-                return item && item.done === true || PLAN_DONE_STATUSES.has(status);
+                return (item && item.done === true) || PLAN_DONE_STATUSES.has(status);
             }).length;
+        }
+
+        let overall = planPayload && typeof planPayload.overall === 'number' ? planPayload.overall : undefined;
+        if (typeof overall !== 'number' || Number.isNaN(overall)) {
+            const ratio = total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
+            overall = Math.round(ratio * 100);
+        } else {
+            overall = Math.max(0, Math.min(100, Math.round(overall)));
+        }
+
+        let checkpoints = { reached: 0, total: 0 };
+        if (planPayload && typeof planPayload.checkpoints === 'object' && planPayload.checkpoints !== null) {
+            const raw = planPayload.checkpoints;
+            const reached = typeof raw.reached === 'number' && !Number.isNaN(raw.reached) ? raw.reached : 0;
+            const totalCheckpoints = typeof raw.total === 'number' && !Number.isNaN(raw.total) ? raw.total : 0;
+            checkpoints = {
+                reached: Math.max(0, reached),
+                total: Math.max(0, totalCheckpoints)
+            };
         }
 
         planPanel.removeAttribute('hidden');
         if (planSummaryText) {
-            planSummaryText.textContent = `${completed}/${total} tasks completed`;
+            const summaryPieces = [`${overall}% overall`, `${completed}/${total} tasks completed`];
+            if (checkpoints.total > 0) {
+                summaryPieces.push(`checkpoints ${checkpoints.reached}/${checkpoints.total}`);
+            }
+            planSummaryText.textContent = summaryPieces.join(' · ');
         }
 
         if (planProgressValue) {
-            const ratio = total > 0 ? Math.min(1, Math.max(0, completed / total)) : 0;
-            const offset = (100 - ratio * 100).toFixed(2);
+            const offset = (100 - overall).toFixed(2);
             planProgressValue.style.strokeDashoffset = offset;
         }
 
