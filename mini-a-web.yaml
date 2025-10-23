@@ -751,7 +751,7 @@ jobs:
       var stream, bytes
       try {
         var key = global._mini_a_web_historyS3Key(uuid)
-        log("S3 history put bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(bytes) ? bytes.length : 0))
+        log("S3 history put bucket=" + global.__historys3bucket + " key=" + key + " size=" + (isDef(payload) ? payload.length : 0))
         global.__historys3client.putObjectStream(global.__historys3bucket, key, af.fromString2InputStream(payload), {}, "application/json")
       } catch(storeErr) {
         logErr(storeErr)
