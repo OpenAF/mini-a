@@ -399,6 +399,13 @@ MiniA.prototype.getMetrics = function() {
             shell_commands_denied: global.__mini_a_metrics.shell_commands_denied.get(),
             unknown_actions: global.__mini_a_metrics.unknown_actions.get()
         },
+        planning: {
+            disabled_simple_goal: global.__mini_a_metrics.planning_disabled_simple_goal.get(),
+            plans_generated: global.__mini_a_metrics.plans_generated.get(),
+            plans_validated: global.__mini_a_metrics.plans_validated.get(),
+            plans_validation_failed: global.__mini_a_metrics.plans_validation_failed.get(),
+            plans_replanned: global.__mini_a_metrics.plans_replanned.get()
+        },
         performance: {
             steps_taken: global.__mini_a_metrics.steps_taken.get(),
             total_session_time_ms: global.__mini_a_metrics.total_session_time.get(),
