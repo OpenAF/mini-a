@@ -1,5 +1,37 @@
 <script src="showdown.min.js?raw=true"></script>
+<!-- Chart.js (v4 UMD) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<!-- Time adapter (bundle includes date-fns) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<!-- Boxplot (scoped package name!) -->
+<script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.5/build/index.umd.min.js"></script>
+<!-- Treemap -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js"></script>
+<!-- Sankey -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.14.0/dist/chartjs-chart-sankey.min.js"></script>
+<!-- Matrix (v3 for Chart.js v4) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@3.0.0/dist/chartjs-chart-matrix.min.js"></script>
+<!-- Graph -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-graph@4.3.5/build/index.umd.min.js"></script>
+<!-- Geo -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-geo@4.3.6/build/index.umd.min.js"></script>
+<script>
+    // Best-effort registration for plugins that expose globals in UMD builds
+    // Some @sgratzl UMD bundles auto-register themselves if Chart is present
+    // but we explicitly register the common ones when globals are available.
+    (function registerChartPlugins() {
+        if (!window || !window.Chart) return;
+        const { Chart } = window;
+        try { if (window.ChartDataLabels) Chart.register(window.ChartDataLabels); } catch (e) { /* noop */ }
+        try {
+            const annotation = window.ChartAnnotation || window['chartjs-plugin-annotation'] || window.annotationPlugin;
+            if (annotation) Chart.register(annotation);
+        } catch (e) { /* noop */ }
+        // No action needed for date-fns adapter; it hooks the time scale when loaded.
+    })();
+    // Expose a flag for quick diagnostics in dev tools
+    window.__chartjs_plugins_loaded = true;
+</script>
 <script type="module">
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
     mermaid.initialize({ 
@@ -1685,10 +1717,38 @@
 
         if (expr.endsWith(';')) expr = expr.slice(0, -1);
 
-        const lowerExpr = expr.toLowerCase();
-        const bannedTokens = ['function', '=>', ' while', ' for', 'class', ' constructor', 'process', 'window', 'document', 'require', 'import', 'export ', 'eval', 'XMLHttpRequest'.toLowerCase(), 'fetch', 'settimeout', 'setinterval', 'alert', 'prompt'];
-        if (bannedTokens.some(token => lowerExpr.includes(token))) {
-            console.warn('Skipping chart block - disallowed token present in configuration.');
+        // Strip comments and string literals to reduce false positives
+        const cleaned = expr
+            .replace(/\/\*[\s\S]*?\*\//g, '')        // block comments
+            .replace(/\/\/[^\n\r]*/g, '')              // line comments
+            .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`/g, ''); // strings
+
+        // Disallow risky tokens using word-boundary aware patterns (avoid matching inside words like 'forecast')
+        const bannedPatterns = [
+            { re: /\bfunction\b/i,        label: 'function' },
+            { re: /=>/,                    label: '=>'},
+            { re: /\bwhile\b/i,           label: 'while' },
+            { re: /\bfor\b/i,             label: 'for' },
+            { re: /\bclass\b/i,           label: 'class' },
+            { re: /\bconstructor\b/i,     label: 'constructor' },
+            { re: /\bprocess\b/i,         label: 'process' },
+            { re: /\bwindow\b/i,          label: 'window' },
+            { re: /\bdocument\b/i,        label: 'document' },
+            { re: /\brequire\b/i,         label: 'require' },
+            { re: /\bimport\b/i,          label: 'import' },
+            { re: /\bexport\b/i,          label: 'export' },
+            { re: /\beval\b/i,            label: 'eval' },
+            { re: /\bxmlhttprequest\b/i,  label: 'XMLHttpRequest' },
+            { re: /\bfetch\b/i,           label: 'fetch' },
+            { re: /\bsettimeout\b/i,      label: 'setTimeout' },
+            { re: /\bsetinterval\b/i,     label: 'setInterval' },
+            { re: /\balert\b/i,           label: 'alert' },
+            { re: /\bprompt\b/i,          label: 'prompt' }
+        ];
+
+        const matched = bannedPatterns.find(p => p.re.test(cleaned));
+        if (matched) {
+            console.warn('Skipping chart block - disallowed token present in configuration. (' + matched.label + ')');
             return null;
         }
 
@@ -1878,6 +1938,32 @@
                 container.remove();
             }
         });
+    }
+
+    /**
+     * Attempts to force re-rendering of all Chart.js blocks.
+     * 
+     * Depends on the global `renderChartBlocks` function, which is defined above in this script.
+     * If `renderChartBlocks` is missing, this function will do nothing.
+     * 
+     * If you refactor or modularize this code, ensure that `renderChartBlocks` is available in the global scope.
+     */
+    function forceRenderChartBlocks() {
+        if (typeof renderChartBlocks !== 'function') return;
+
+        const triggerRender = () => {
+            try {
+                renderChartBlocks();
+            } catch (error) {
+                console.error('Failed to force Chart.js rendering:', error);
+            }
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(triggerRender);
+        } else {
+            setTimeout(triggerRender, 0);
+        }
     }
 
     function resetRenderedChartsForTheme() {
@@ -2319,6 +2405,7 @@
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+        forceRenderChartBlocks();
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         refreshHistoryPanel();
@@ -2352,6 +2439,7 @@
             const htmlContent = converter.makeHtml(data.content || '');
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+            forceRenderChartBlocks();
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
             refreshHistoryPanel();
@@ -2650,6 +2738,7 @@
         } catch (error) {
             console.error('Error submitting prompt:', error);
             await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
+            forceRenderChartBlocks();
         }
     }
 
@@ -2668,8 +2757,9 @@
                 updatePlanPanel(data.plan);
                 const htmlContent = converter.makeHtml(data.content || '');
                 await updateResultsContent(htmlContent);
-                
+
                 hljs.highlightAll();
+                forceRenderChartBlocks();
                 if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
                 __refreshDarkMode();
 
@@ -2690,6 +2780,7 @@
             } catch (error) {
                 console.error('Error fetching results:', error);
                 await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+                forceRenderChartBlocks();
                 stopProcessing();
             }
         }, 1500);
@@ -2748,6 +2839,7 @@
         }
 
         await updateResultsContent('<p></p>');
+        forceRenderChartBlocks();
         resetPlanPanel();
         removePreview();
         promptInput.value = '';

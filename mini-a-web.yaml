@@ -304,6 +304,13 @@ todo:
           conversation: global._mini_a_web_loadFile(_hfile)
         }))
 
+        if (isDef(_rma.answer)) {
+          var trimmedAnswer = _rma.answer.trim();
+          if (trimmedAnswer.startsWith("```markdown") && trimmedAnswer.endsWith("```")) {
+            // Remove markdown fences
+            _rma.answer = trimmedAnswer.replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
+          }
+        }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
         log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
       }).catch((eee) => {
@@ -537,16 +544,33 @@ jobs:
     
     // Add system knowledge about visual diagram capabilities
     var visualDiagramKnowledge =
-      "Visual output rules (concise):\n\n" +
-      "Mermaid: Use ```mermaid``` for diagrams (graph, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, pie, etc.).\n\n" +
-      "Chart.js (MANDATORY format):\n" +
-      "- Wrap the config in a fenced code block labeled 'chart'. Aliases allowed: 'chartjs', 'chart.js'.\n" +
-      "- Put ONLY the Chart.js config object inside the block. No prose.\n" +
-      "- Required: type and data with labels and/or datasets. Optional: options, canvas {width,height}.\n" +
-      "- NEVER use 'json' or 'javascript' fences for charts. NEVER return bare JSON.\n\n" +
-      "Example:\n" +
-      "```chart\n{ type: 'bar', data: { labels: ['A','B'], datasets: [{ label: 'Count', data: [1,2] }] }, options: { responsive: true } }\n```\n\n" +
-      "Prefer a diagram/chart over text when a visual makes sense."
+      "Visual output guidance (concise):\n\n" +
+      "- Default to including a diagram or chart whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
+      "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n\n" +
+      "Mermaid diagrams:\n" +
+      "  - Use ```mermaid``` fences for flows (`graph TD`), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, mindmap, or pie charts.\n" +
+      "  - Keep node labels concise and prefer directional edges for processes.\n\n" +
+      "Chart.js visuals (strict format):\n" +
+      "  - Wrap only the config object inside ```chart``` (aliases: chartjs, chart.js).\n" +
+      "  - Include `type`, `data.labels`, and at least one dataset; add palettes and `options` as needed.\n" +
+      "  - Optional `canvas: { width, height }` block controls sizing when helpful.\n" +
+      "  - Never use other fences (json/javascript) and never return raw JSON.\n" +
+      "  - Use only static values; do not include functions or dynamic callbacks (no `ctx => ...`, no `function(){}`); configs are treated as data and code is not executed.\n" +
+      "  - Provide complete, deterministic data inline (no async or fetching).\n\n" +
+      "Available Chart.js plugins/types (preloaded):\n" +
+      "  - chartjs-adapter-date-fns (time scale; use scales.{x|y}.type='time' with ISO dates)\n" +
+      "  - @sgratzl/chartjs-chart-boxplot (types: 'boxplot', 'violin')\n" +
+      "  - chartjs-chart-treemap (type: 'treemap')\n" +
+      "  - chartjs-chart-sankey (type: 'sankey')\n" +
+      "  - chartjs-chart-matrix (type: 'matrix')\n" +
+      "  - chartjs-chart-graph (type: 'graph')\n" +
+      "  - chartjs-chart-geo (types: 'choropleth', 'bubbleMap')\n\n" +
+      "Visual selection checklist:\n" +
+      "1. Relationships or flows -> Mermaid `graph` or `sequenceDiagram`.\n" +
+      "2. Timelines or roadmaps -> Mermaid `gantt`.\n" +
+      "3. Comparisons or trends -> Chart.js `bar` or `line` chart.\n" +
+      "4. Composition or ratios -> Chart.js `pie`/`doughnut`.\n\n" +
+      "If a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."
 
     if (isUnDef(args.knowledge)) {
       args.knowledge = visualDiagramKnowledge
