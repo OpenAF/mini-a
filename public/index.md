@@ -1940,6 +1940,14 @@
         });
     }
 
+    /**
+     * Attempts to force re-rendering of all Chart.js blocks.
+     * 
+     * Depends on the global `renderChartBlocks` function, which is defined above in this script.
+     * If `renderChartBlocks` is missing, this function will do nothing.
+     * 
+     * If you refactor or modularize this code, ensure that `renderChartBlocks` is available in the global scope.
+     */
     function forceRenderChartBlocks() {
         if (typeof renderChartBlocks !== 'function') return;
 
