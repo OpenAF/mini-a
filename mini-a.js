@@ -1209,7 +1209,8 @@ MiniA.prototype._handlePlanUpdate = function() {
 MiniA.prototype._cleanCodeBlocks = function(text) {
     if (!isString(text)) return text
     var trimmed = String(text).trim()
-    if (trimmed.startsWith("```") && trimmed.endsWith("```") && (!trimmed.startsWith("```chart") && !trimmed.startsWith("```mermaid"))) {
+    const isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid");
+    if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
         return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
     }
     return text
