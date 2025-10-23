@@ -322,6 +322,20 @@ Mini-A tracks detailed runtime metrics (LLM calls, shell approvals, escalation c
 
 These metrics are useful for tracking costs, diagnosing stuck runs, and creating operational dashboards for long-lived agents.
 
+### Metric categories returned by `getMetrics()`
+
+| Category | Keys | What they represent |
+|----------|------|--------------------|
+| `llm_calls` | `normal`, `low_cost`, `total`, `fallback_to_main` | How many requests were routed to the primary or low-cost model and the number of times Mini-A escalated back to the main model. |
+| `goals` | `achieved`, `failed`, `stopped` | Goal-level outcomes for the current run. |
+| `actions` | `thoughts_made`, `thinks_made`, `finals_made`, `mcp_actions_executed`, `mcp_actions_failed`, `shell_commands_executed`, `shell_commands_blocked`, `shell_commands_approved`, `shell_commands_denied`, `unknown_actions` | Volume and success of high-level agent actions, including MCP calls and shell approvals. |
+| `planning` | `disabled_simple_goal`, `plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned` | Planning workflow activity: when planning was skipped, generated, validated, or rebuilt during a session. |
+| `performance` | `steps_taken`, `total_session_time_ms`, `avg_step_time_ms`, `max_context_tokens`, `llm_estimated_tokens`, `llm_actual_tokens`, `llm_normal_tokens`, `llm_lc_tokens` | Execution pacing, wall-clock timings, and token consumption. |
+| `behavior_patterns` | `escalations`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that help detect unhealthy loops or parser issues. |
+| `summarization` | `summaries_made`, `summaries_skipped`, `summaries_forced`, `context_summarizations`, `summaries_tokens_reduced`, `summaries_original_tokens`, `summaries_final_tokens` | Automatic summarization decisions and token savings. |
+
+Use these counters to plot dashboards, set alerts (for example, when `consecutive_errors` keeps climbing), or estimate LLM spend based on token metrics.
+
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
