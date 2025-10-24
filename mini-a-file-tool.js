@@ -277,6 +277,7 @@ MiniFileTool.prototype._listEntries = function(baseDir, options) {
  */
 MiniFileTool.prototype.readFile = function(params) {
   params = params || {}
+  if (isUnDef(params.path)) return "[ERROR] path is required"
   try {
     this._ensureInitialized()
     var filePath = this._resolve(params.path)
@@ -374,6 +375,7 @@ MiniFileTool.prototype._collectFiles = function(startPath, recursive) {
  */
 MiniFileTool.prototype.searchContent = function(params) {
   params = params || {}
+  if (isUnDef(params.pattern)) return "[ERROR] pattern is required"
   try {
     this._ensureInitialized()
     if (!isString(params.pattern)) {
@@ -466,6 +468,7 @@ MiniFileTool.prototype.searchContent = function(params) {
  */
 MiniFileTool.prototype.getFileInfo = function(params) {
   params = params || {}
+  if (isUnDef(params.path)) return "[ERROR] path is required"
   try {
     this._ensureInitialized()
     var filePath = this._resolve(params.path)
@@ -507,6 +510,8 @@ MiniFileTool.prototype.getFileInfo = function(params) {
  */
 MiniFileTool.prototype.writeFile = function(params) {
   params = params || {}
+  if (isUnDef(params.path)) return "[ERROR] path is required"
+  if (isUnDef(params.content)) return "[ERROR] content is required"
   try {
     this._ensureInitialized()
     this._ensureWritable("write operations")
@@ -576,6 +581,8 @@ MiniFileTool.prototype._deleteRecursive = function(targetPath) {
  */
 MiniFileTool.prototype.deleteFile = function(params) {
   params = params || {}
+  if (isUnDef(params.path)) return "[ERROR] path is required"
+  if (isUnDef(params.confirm)) return "[ERROR] confirm is required"
   try {
     this._ensureInitialized()
     this._ensureWritable("delete operations")

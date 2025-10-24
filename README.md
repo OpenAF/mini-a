@@ -24,6 +24,13 @@ If you prefer the browser UI, start `./mini-a-web.sh onport=8888` after exportin
 
 **Need to share supporting text?** Launch the web server with `useattach=true` to reveal the paperclip button beside the prompt box. You can attach multiple text-based files (up to 512 KB each) before submitting, review them as removable chips, and open the full contents from the conversation stream.
 
+Common web toggles:
+
+- `showexecs=true` to surface executed commands in the transcript
+- `logpromptheaders=origin,referer` to emit selected HTTP headers for debugging
+- `usediagrams=false` / `usecharts=false` to disable Mermaid diagrams or Chart.js rendering when the runtime lacks those assets
+- `useattach=true` to enable the paperclip for uploading supporting text snippets
+
 ## Documentation
 
 - **[Detailed Usage Guide](USAGE.md)** - Comprehensive guide covering all configuration options, examples, and best practices
@@ -216,6 +223,7 @@ Mini-A ships with three complementary components:
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
 - **Text Attachments in the Web UI**: When started with `useattach=true`, upload and review text files alongside your prompt with collapsible previews in the conversation log
+- **Utility MCP Helpers**: Add `useutils=true` to bundle the Mini File Tool utilities as an on-demand MCP you can call from the agent
 - **Chatbot Mode**: Toggle `chatbotmode=true` to strip agent-style instructions and chat with the model in a lightweight assistant mode
 - **Safety Features**: Command filtering, confirmation prompts, and read-only modes
 - **Conversation Persistence**: Save and resume conversations across sessions
@@ -250,6 +258,7 @@ All Mini-A options can be passed as command line arguments:
 - `goal` – Objective the agent should achieve (required for `MiniA.start` / `mini-a.yaml`)
 - `mcp` – MCP server configuration (single object or array, in JSON/SLON)
 - `usetools` – Register MCP tools directly with the model instead of expanding the prompt with tool schemas
+- `useutils` – Mount the Mini File Tool helpers as an auxiliary MCP connection (default `false`)
 - `useshell` – Allow shell command execution (default `false`)
 - `shell` – Prefix every shell command (requires `useshell=true`; ideal for sandboxing with `sandbox-exec`, `container exec`, `docker exec`, etc.)
 - `readwrite` – Allow file system modifications without confirmation prompts (default `false`)
