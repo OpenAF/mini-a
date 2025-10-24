@@ -1,0 +1,76 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    OpenAF oJob example of having Mini-A (mini AI agent) build a summary report (markdown and HTML) about the current folder 
+    (non-recursive) with file details and a pie chart of file sizes. It uses shell commands to gather file info and Chart.js
+    for the pie chart.
+
+ojob:
+  logToConsole: true
+  opacks      :
+  - mini-a
+  - Mermaid
+  flags       :
+    MD_DARKMODE: 'auto'
+    MD_CHART   : true
+
+jobsInclude:
+- mini-a.yaml
+
+todo:
+- Build summary.md
+- Build summary.html
+
+jobs:
+# ----------------------
+- name: Build summary.md
+  args:
+    useshell       : true
+    shellbatch     : true
+    shellallowpipes: true
+    usediagrams    : true
+    usecharts      : true
+    readwrite      : true
+    format         : md
+    outfile        : summary.md
+    debug          : false
+    goal           : |
+      Write a concise markdown report about the current folder (non-recursive) with two sections.
+
+      Section 1 — Files
+      - Produce a markdown table with columns: File, Size (bytes), Modified (ISO 8601, local time).
+      - Include only regular files in "."; exclude: summary.md, summary.html, temporary/backup files (*~, *.swp), and typical VCS/build folders (.git, node_modules, dist, build) if present.
+      - Use relative paths (e.g., ./file.ext) and escape markdown characters in names.
+      - Sort rows by Size (bytes) descending.
+      - Add a final Total row with total number of files and total size in bytes.
+      - Gather data using shell, preferring portable stat:
+        - If "stat --version" succeeds (GNU): stat -c '%n|%s|%Y' -- "$f"
+        - Else (BSD/macOS): stat -f '%N|%z|%m' "$f"
+
+      Section 2 — Pie chart of file sizes
+      - Insert a fenced code block tagged chartjs that contains ONLY valid Chart.js JSON (no comments).
+      - Define a pie chart with labels = file names and one dataset with data = sizes in bytes.
+      - If >12 files, keep the 11 largest and group the rest as "Other".
+      - Truncate labels to 40 chars with an ellipsis if needed.
+      - Provide a distinct backgroundColor array (one hex color per slice).
+      - Example structure (replace with computed values):
+      ```chartjs
+      {"type":"pie","data":{"labels":["fileA","fileB"],"datasets":[{"label":"File size (bytes)","data":[123,456],"backgroundColor":["#4e79a7","#f28e2b"]}]},"options":{"responsive":true,"plugins":{"legend":{"position":"right"}}}}
+      ```
+
+      Formatting
+      - Use headings "## 1. Files" and "## 2. File size pie chart".
+      - Keep prose minimal; do not include any extra text inside the chartjs code block.
+  to  :
+  - MiniAgent
+
+# -------------------------
+- name : Build summary.html
+  to   :
+  - (oafp):
+      file    : summary.md
+      debug   : false
+      in      : md
+      out     : html
+      htmlopen: "false"
+      outfile : summary.html
