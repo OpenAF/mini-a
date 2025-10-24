@@ -1365,7 +1365,7 @@ MiniA.prototype._createRateLimiter = function(args) {
 MiniA.prototype._processFinalAnswer = function(answer, args) {
   var textAnswer = answer
   if (isDef(args.outfile)) {
-    if (args.format != 'raw' && isDef(args.__format)) {
+    if (args.format != 'raw' && args.format != 'md' && isDef(args.__format)) {
       textAnswer = $o(answer, args, __, true)
     }
     io.writeFileString(args.outfile, textAnswer || "(no answer)")
@@ -1754,6 +1754,279 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
     }
   }
   return __
+}
+
+MiniA.prototype._createUtilsMcpConfig = function(args) {
+  try {
+    if (typeof MiniFileTool !== "function") {
+      if (io.fileExists("mini-a-file-tool.js")) {
+        load("mini-a-file-tool.js")
+      }
+    }
+
+    if (typeof MiniFileTool !== "function") {
+      this.fnI("warn", "Mini-A file tool helpers not available; skipping utils MCP registration.")
+      return __
+    }
+
+    var toolOptions = {}
+    if (args.readwrite === true) toolOptions.readwrite = true
+    var fileTool = new MiniFileTool(toolOptions)
+    if (fileTool._initialized !== true) {
+      var initResult = fileTool.init(toolOptions)
+      if (isString(initResult) && initResult.indexOf("[ERROR]") === 0) {
+        this.fnI("warn", `Failed to initialize Mini-A utils MCP: ${initResult}`)
+        return __
+      }
+    }
+
+    var prototypeNames = Object.getOwnPropertyNames(MiniFileTool.prototype)
+    var methodNames = prototypeNames.filter(function(name) {
+      if (name === "constructor") return false
+      if (name.charAt(0) === "_") return false
+      return isFunction(MiniFileTool.prototype[name])
+    })
+
+    if (methodNames.length === 0) return __
+
+    var metadataByFn = {
+      init: {
+        name       : "init",
+        description: "Re-initialize the file tool with a new root directory and permissions.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            root     : { type: "string", description: "Root directory for subsequent operations. Defaults to current directory." },
+            readwrite: { type: "boolean", description: "Enable write/delete operations when true." }
+          }
+        }
+      },
+      readFile: {
+        name       : "readFile",
+        description: "Read the contents and metadata of a file.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            path    : { type: "string", description: "Path to the target file (relative or absolute)." },
+            encoding: { type: "string", description: "Character encoding to use. Defaults to \"utf-8\"." }
+          },
+          required: ["path"]
+        }
+      },
+      listDirectory: {
+        name       : "listDirectory",
+        description: "List files/directories inside a path.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            path         : { type: "string", description: "Directory to list. Defaults to root." },
+            includeHidden: { type: "boolean", description: "Include hidden files when true." },
+            recursive    : { type: "boolean", description: "Recursively list contents when true." }
+          }
+        }
+      },
+      searchContent: {
+        name       : "searchContent",
+        description: "Search for text inside files under the root.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            pattern     : { type: "string", description: "Text or regex to search for." },
+            path        : { type: "string", description: "Starting directory or file. Defaults to root." },
+            regex       : { type: "boolean", description: "Treat pattern as regular expression when true." },
+            caseSensitive: { type: "boolean", description: "Perform case-sensitive search when true." },
+            recursive   : { type: "boolean", description: "Search recursively when true. Defaults to true." },
+            maxResults  : { type: "number", description: "Maximum number of matches to return (0 = no limit)." }
+          },
+          required: ["pattern"]
+        }
+      },
+      getFileInfo: {
+        name       : "getFileInfo",
+        description: "Retrieve metadata about a file or directory.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            path: { type: "string", description: "Target file or directory path." }
+          },
+          required: ["path"]
+        }
+      },
+      writeFile: {
+        name       : "writeFile",
+        description: "Write or append content to a file (requires readwrite=true).",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            path            : { type: "string", description: "Destination file path." },
+            content         : { type: "string", description: "Content to write to the file." },
+            encoding        : { type: "string", description: "Encoding to use. Defaults to \"utf-8\"." },
+            append          : { type: "boolean", description: "Append to existing file when true." },
+            createMissingDirs: { type: "boolean", description: "Create parent directories when they do not exist. Defaults to true." }
+          },
+          required: ["path", "content"]
+        }
+      },
+      deleteFile: {
+        name       : "deleteFile",
+        description: "Delete a file or directory (requires readwrite=true).",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            path     : { type: "string", description: "File or directory to remove." },
+            confirm  : { type: "boolean", description: "Must be true to confirm deletion." },
+            recursive: { type: "boolean", description: "Delete directories recursively when true." }
+          },
+          required: ["path", "confirm"]
+        }
+      }
+    }
+
+    var parent = this
+    var formatResponse = function(result) {
+      if (isString(result) && result.indexOf("[ERROR]") === 0) {
+        return {
+          error  : result,
+          content: [{ type: "text", text: result }]
+        }
+      }
+
+      var output = result
+      if (result === fileTool) {
+        output = {
+          status   : "initialized",
+          root     : fileTool._root,
+          readwrite: fileTool._readWrite === true
+        }
+      }
+
+      var text
+      if (isString(output)) {
+        text = output
+      } else {
+        text = stringify(output, __, "")
+      }
+      if (!isString(text) || text.length === 0) text = stringify(output, __, "")
+      if (!isString(text) || text.length === 0) text = "null"
+
+      return {
+        content: [{ type: "text", text: text }]
+      }
+    }
+
+    var fns = {}
+    var fnsMeta = {}
+
+    methodNames.forEach(function(name) {
+      var meta = metadataByFn[name] || {
+        name       : name,
+        description: "Execute MiniFileTool." + name,
+        inputSchema: { type: "object" }
+      }
+      fnsMeta[name] = meta
+      fns[name] = function(params) {
+        var payload = params
+        if (isUnDef(payload)) payload = {}
+        try {
+          var result = fileTool[name](payload)
+          return formatResponse(result)
+        } catch (err) {
+          var message = "[ERROR] " + (err && err.message ? err.message : String(err))
+          parent.fnI("warn", `Mini-A utils MCP '${name}' failed: ${message}`)
+          return {
+            error  : message,
+            content: [{ type: "text", text: message }]
+          }
+        }
+      }
+    })
+
+    return {
+      id     : "mini-a-utils",
+      type   : "dummy",
+      options: {
+        name   : "mini-a-utils",
+        fns    : fns,
+        fnsMeta: fnsMeta
+      }
+    }
+  } catch (e) {
+    var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
+    this.fnI("warn", `Failed to prepare Mini-A utils MCP: ${errMsg}`)
+    return __
+  }
+}
+
+MiniA.prototype._createShellMcpConfig = function(args) {
+  try {
+    if (toBoolean(args.useshell) !== true) return __
+
+    var parent = this
+
+    var fns = {
+      shell: function(params) {
+        var p = isObject(params) ? params : {}
+        var cmd = isString(p.command) ? p.command : ""
+        if (cmd.length === 0) {
+          var msg = "[ERROR] Missing required 'command' parameter"
+          parent.fnI("warn", `Mini-A shell MCP failed: ${msg}`)
+          return { error: msg, content: [{ type: "text", text: msg }] }
+        }
+        try {
+          var result = parent._runCommand({
+            command        : cmd,
+            readwrite      : toBoolean(p.readwrite) === true ? true : toBoolean(args.readwrite),
+            checkall       : toBoolean(p.checkall) === true ? true : toBoolean(args.checkall),
+            shellallow     : isDef(p.shellallow) ? p.shellallow : args.shellallow,
+            shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
+            shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
+            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shell
+          })
+          var out = result && isString(result.output) ? result.output : stringify(result, __, "")
+          if (!isString(out) || out.length === 0) out = "(no output)"
+          return { content: [{ type: "text", text: out }] }
+        } catch (err) {
+          var msg = "[ERROR] " + (err && err.message ? err.message : String(err))
+          parent.fnI("warn", `Mini-A shell MCP failed: ${msg}`)
+          return { error: msg, content: [{ type: "text", text: msg }] }
+        }
+      }
+    }
+
+    var fnsMeta = {
+      shell: {
+        name       : "shell",
+        description: "Execute a POSIX shell command under Mini-A's safety checks and allowlists.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            command        : { type: "string", description: "POSIX command to execute." },
+            readwrite      : { type: "boolean", description: "Allow write operations (inherits global when omitted)." },
+            checkall       : { type: "boolean", description: "Ask approval even when not risky (inherits global)." },
+            shellallow     : { type: "string", description: "Comma-separated allowlist to override bans." },
+            shellbanextra  : { type: "string", description: "Comma-separated extra banned commands." },
+            shellallowpipes: { type: "boolean", description: "Allow pipes/redirection/control operators." },
+            shellprefix    : { type: "string", description: "Prefix to prepend to the command (e.g., 'docker exec -it <cid> sh -lc')." }
+          },
+          required: ["command"]
+        }
+      }
+    }
+
+    return {
+      id     : "mini-a-shell",
+      type   : "dummy",
+      options: {
+        name   : "mini-a-shell",
+        fns    : fns,
+        fnsMeta: fnsMeta
+      }
+    }
+  } catch (e) {
+    var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
+    this.fnI("warn", `Failed to prepare Mini-A shell MCP: ${errMsg}`)
+    return __
+  }
 }
 
 MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
@@ -2274,6 +2547,7 @@ MiniA.prototype.init = function(args) {
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
@@ -2287,6 +2561,7 @@ MiniA.prototype.init = function(args) {
     }
     this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
     this._useTools = args.usetools
+    this._useUtils = args.useutils
 
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
@@ -2352,20 +2627,32 @@ MiniA.prototype.init = function(args) {
       this.mcpToolNames = []
       this.mcpToolToConnection = {}
     }
-    if (isDef(args.mcp) && needMCPInit) {
-      var mcpConfigs = af.fromJSSLON(args.mcp)
-      
-      // Handle both single object and array of MCP configurations
-      if (!isArray(mcpConfigs)) {
-        mcpConfigs = [mcpConfigs]
+    var aggregatedMcpConfigs = []
+    if (needMCPInit) {
+      if (isDef(args.mcp)) {
+        var parsedMcpConfigs = af.fromJSSLON(args.mcp)
+        if (!isArray(parsedMcpConfigs)) parsedMcpConfigs = [parsedMcpConfigs]
+        aggregatedMcpConfigs = aggregatedMcpConfigs.concat(parsedMcpConfigs)
       }
 
-      this.fnI("mcp", `${args.mcplazy ? "Preparing" : "Initializing"} ${mcpConfigs.length} MCP connection(s)...`)
+      if (args.useutils === true) {
+        var utilsMcpConfig = this._createUtilsMcpConfig(args)
+        if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
+      }
 
-      // Initialize each MCP connection
-      mcpConfigs.forEach((mcpConfig, index) => {
+      // Auto-register a dummy MCP for shell execution when both usetools and useshell are enabled
+      if (args.usetools === true && args.useshell === true) {
+        var shellMcpConfig = this._createShellMcpConfig(args)
+        if (isMap(shellMcpConfig)) aggregatedMcpConfigs.push(shellMcpConfig)
+      }
+    }
+
+    if (needMCPInit && aggregatedMcpConfigs.length > 0) {
+      this.fnI("mcp", `${args.mcplazy ? "Preparing" : "Initializing"} ${aggregatedMcpConfigs.length} MCP connection(s)...`)
+
+      aggregatedMcpConfigs.forEach((mcpConfig, index) => {
         try {
-          var mcp, id = md5(stringify(mcpConfig, __, ""))
+          var mcp, id = md5(isString(mcpConfig.id) ? mcpConfig.id : stringify(mcpConfig, __, ""))
           var isExisting = Object.keys(this._mcpConnections).indexOf(id) >= 0
           if (isExisting) {
             mcp = this._mcpConnections[id]
@@ -2627,6 +2914,7 @@ MiniA.prototype.init = function(args) {
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
+ * - useutils (boolean, default=false): Auto-register the Mini File Tool utilities as an MCP dummy server.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
@@ -2685,6 +2973,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
@@ -2708,6 +2997,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellBatch = args.shellbatch
     this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
     this._useTools = args.usetools
+    this._useUtils = args.useutils
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
     if (isDef(args.rtm) && isUnDef(args.rpm)) {
@@ -3465,6 +3755,25 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             flushToolActions()
             break
           }
+          // When tools mode is enabled, route shell through the MCP tool to unify execution and tracing
+          if (this._useTools === true && this.mcpToolToConnection && isDef(this.mcpToolToConnection["shell"])) {
+            pendingToolActions.push({
+              toolName     : "shell",
+              params       : {
+                command        : commandValue,
+                readwrite      : args.readwrite,
+                checkall       : args.checkall,
+                shellallow     : args.shellallow,
+                shellbanextra  : args.shellbanextra,
+                shellallowpipes: args.shellallowpipes,
+                shellprefix    : args.shell
+              },
+              stepLabel    : stepLabel,
+              updateContext: !this._useTools
+            })
+            continue
+          }
+          // Legacy path (no tools integration)
           flushToolActions()
           var shellOutput = this._runCommand({
             command        : commandValue,
