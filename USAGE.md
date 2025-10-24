@@ -117,8 +117,9 @@ http://localhost:8888/
 
 Optional flags when starting the server:
 
-- `showExecs=true` to show executed commands in the interaction stream
-- `logPromptHeaders="origin,referer"` to log selected incoming headers for debugging
+- `showexecs=true` to show executed commands in the interaction stream
+- `logpromptheaders=origin,referer` to log selected incoming headers for debugging
+- `usediagrams=false` / `usecharts=false` to disable Mermaid or Chart.js rendering when running headless
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
 - `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`)
@@ -245,6 +246,7 @@ Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, 
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
+- **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
