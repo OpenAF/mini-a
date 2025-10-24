@@ -1975,7 +1975,7 @@ MiniA.prototype._createShellMcpConfig = function(args) {
         try {
           var result = parent._runCommand({
             command        : cmd,
-            readwrite      : toBoolean(p.readwrite) === true ? true : toBoolean(args.readwrite),
+            readwrite      : toBoolean(p.readwrite) || toBoolean(args.readwrite),
             checkall       : toBoolean(p.checkall) === true ? true : toBoolean(args.checkall),
             shellallow     : isDef(p.shellallow) ? p.shellallow : args.shellallow,
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
