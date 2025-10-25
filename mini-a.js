@@ -2777,6 +2777,7 @@ MiniA.prototype.init = function(args) {
         if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
 
         var updated = llmInstance
+        log(`Registering MCP tools on LLM via tool interface...`)
         Object.keys(this._mcpConnections).forEach(connectionId => {
           var client = this._mcpConnections[connectionId]
           if (isUnDef(client)) return
@@ -2787,6 +2788,7 @@ MiniA.prototype.init = function(args) {
           } catch (e) {
             var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
             this.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+            //$err(e)
           }
         })
         return updated

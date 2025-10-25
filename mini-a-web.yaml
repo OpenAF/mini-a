@@ -751,9 +751,11 @@ jobs:
     }
     
     global.maArgs = merge(args, {})
-    //global.ma = new MiniA()
-    //global.ma.init( global.maArgs )
-    //global.ma = __
+    if (!toBoolean(args.mcplazy)) {
+      var _ma = new MiniA()
+      _ma.init( global.maArgs )
+      _ma = __
+    }
 
     global._mini_a_web_historyS3Key = (uuid) => {
       if (isUnDef(uuid)) return __
