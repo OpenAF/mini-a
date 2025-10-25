@@ -879,14 +879,14 @@
     .copy-actions {
         display: flex;
         gap: 0.5rem;
-        justify-content: flex-end;
+        justify-content: flex-start;
         align-items: center;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.3s ease;
         margin-top: 1rem;
         margin-bottom: 1rem;
-        padding-right: 0.5rem;
+        padding-left: 0.5rem;
     }
 
     .copy-actions.show {
@@ -895,9 +895,9 @@
     }
 
     .copy-actions button {
-        background: var(--panel-bg);
+        background: transparent;
         color: var(--text);
-        border: 1px solid var(--border);
+        border: none;
         border-radius: 4px;
         width: 28px;
         height: 28px;
@@ -905,21 +905,22 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        box-shadow: none;
         transition: all 0.2s ease;
         padding: 0;
         position: relative;
+        opacity: 0.6;
     }
 
     .copy-actions button:hover {
-        background: var(--border);
-        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-        transform: translateY(-1px);
+        background: var(--panel-bg);
+        box-shadow: none;
+        opacity: 1;
     }
 
     .copy-actions button:active {
         transform: translateY(0);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+        box-shadow: none;
     }
 
     .copy-actions button.copied svg {
@@ -3214,6 +3215,7 @@
         promptInput.value = '';
         clearAttachments();
         lastRawContent = '';
+        hideScrollToBottomButton();
 
         try {
             if (typeof window !== 'undefined') window.mini_a_session_uuid = null;
