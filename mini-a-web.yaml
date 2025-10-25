@@ -700,7 +700,8 @@ jobs:
       visualParts.push(
         "Diagrams:\n" +
         "  - Use ```mermaid``` fences for flows (`graph TD`), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, mindmap, or pie charts.\n" +
-        "  - Keep node labels concise and prefer directional edges for processes."
+        "  - Keep node labels concise and prefer directional edges for processes.\n" +
+        "  - CRITICAL: Always wrap all labels in double quotes (e.g., A[\"Label text\"] not A[Label text]) to avoid syntax errors."
       )
     }
     

@@ -239,7 +239,6 @@
 
     .chartjs-chart {
         position: relative;
-        width: 100%;
         max-width: 100%;
         overflow-x: auto;
     }
@@ -876,6 +875,70 @@
         pointer-events: auto;
     }
 
+    /* ========== COPY ACTIONS ========== */
+    .copy-actions {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: flex-end;
+        align-items: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+        padding-right: 0.5rem;
+    }
+
+    .copy-actions.show {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .copy-actions button {
+        background: var(--panel-bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        width: 28px;
+        height: 28px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        transition: all 0.2s ease;
+        padding: 0;
+        position: relative;
+    }
+
+    .copy-actions button:hover {
+        background: var(--border);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        transform: translateY(-1px);
+    }
+
+    .copy-actions button:active {
+        transform: translateY(0);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+
+    .copy-actions button.copied svg {
+        opacity: 0;
+    }
+
+    .copy-actions button.copied::after {
+        content: '✓';
+        position: absolute;
+        font-size: 16px;
+        font-weight: bold;
+        color: var(--text);
+    }
+
+    .copy-actions button svg {
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+    }
+
     /* ========== LOADING PREVIEW ANIMATION ========== */
     .preview {
         margin-top: 1.5em;
@@ -1064,6 +1127,21 @@
                 <path d="M7 13l5 5 5-5M7 6l5 5 5-5"/>
             </svg>
         </button>
+        <!-- Copy actions -->
+        <div id="copyActions" class="copy-actions">
+            <button id="copyLastAnswerBtn" title="Copy last answer" aria-label="Copy last answer" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+            </button>
+            <button id="copyConversationBtn" title="Copy entire conversation" aria-label="Copy entire conversation" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                </svg>
+            </button>
+        </div>
     </div>
     <details id="planPanel" class="plan-panel" hidden>
         <summary>
@@ -1231,6 +1309,7 @@
     let lastPlanDigest = '';
     let chartResizeTimer = null;
     let chartResizeHandlerBound = false;
+    let lastRawContent = '';
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -1261,6 +1340,9 @@
     const planSummaryText = document.getElementById('planSummaryText');
     const planList = document.getElementById('planList');
     const planProgressValue = document.getElementById('planProgressValue');
+    const copyActions = document.getElementById('copyActions');
+    const copyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
+    const copyConversationBtn = document.getElementById('copyConversationBtn');
 
     applyAttachmentAvailability(false);
 
@@ -1329,6 +1411,157 @@
         });
     }
 
+    function updateCopyActionsVisibility() {
+        const actions = document.getElementById('copyActions');
+        if (!actions) return;
+
+        if (!isProcessing && resultsDiv && resultsDiv.textContent.trim().length > 0) {
+            actions.classList.add('show');
+        } else {
+            actions.classList.remove('show');
+        }
+    }
+
+    function copyToClipboard(text) {
+        // Try modern clipboard API first
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text);
+        }
+
+        // Fallback to legacy method
+        return new Promise((resolve, reject) => {
+            try {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.left = '-9999px';
+                textarea.style.top = '-9999px';
+                document.body.appendChild(textarea);
+                textarea.select();
+                textarea.setSelectionRange(0, textarea.value.length);
+
+                const success = document.execCommand('copy');
+                document.body.removeChild(textarea);
+
+                if (success) {
+                    resolve();
+                } else {
+                    reject(new Error('Copy command failed'));
+                }
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    async function handleCopyLastAnswer() {
+        try {
+            const response = await fetch('/result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ uuid: currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null) })
+            });
+
+            if (!response.ok) return;
+
+            const data = await response.json();
+            const content = data.content || '';
+
+            // Create a temporary div to parse the HTML content
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+
+            // Find the last user prompt (👤) to determine where the last answer starts
+            const allText = tempDiv.textContent || tempDiv.innerText || '';
+            const lines = allText.split('\n');
+
+            // Find the last occurrence of user prompt marker
+            let lastUserPromptIndex = -1;
+            for (let i = lines.length - 1; i >= 0; i--) {
+                if (lines[i].includes('👤')) {
+                    lastUserPromptIndex = i;
+                    break;
+                }
+            }
+
+            let lastAnswer;
+            if (lastUserPromptIndex >= 0) {
+                // Get everything after the last user prompt
+                const answerLines = lines.slice(lastUserPromptIndex + 1);
+                // Filter out event markers and empty lines
+                const filteredLines = answerLines.filter(line => {
+                    const trimmed = line.trim();
+                    // Skip empty lines and lines that are just event emojis
+                    if (!trimmed) return false;
+                    // Skip lines that start with event emojis
+                    if (/^[⚙️🖥️💡💭🌀🛑⏳🏁✅❌📚ℹ️📂⚠️🛑]/.test(trimmed)) return false;
+                    return true;
+                });
+                lastAnswer = filteredLines.join('\n').trim();
+            } else {
+                // No user prompt found, just get all content
+                lastAnswer = allText.trim();
+            }
+
+            // Fallback: if we got nothing or very little, just use the whole content
+            if (!lastAnswer || lastAnswer.length < 10) {
+                lastAnswer = allText.trim();
+            }
+
+            await copyToClipboard(lastAnswer);
+
+            // Visual feedback
+            const btn = document.getElementById('copyLastAnswerBtn');
+            if (btn) {
+                const originalTitle = btn.title;
+                btn.title = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.title = originalTitle;
+                    btn.classList.remove('copied');
+                }, 1500);
+            }
+        } catch (error) {
+            console.error('Failed to copy last answer:', error);
+        }
+    }
+
+    async function handleCopyConversation() {
+        try {
+            const response = await fetch('/result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ uuid: currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null) })
+            });
+
+            if (!response.ok) return;
+
+            const data = await response.json();
+            const content = data.content || '';
+
+            // Clean up HTML tags for plain text copy
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            const plainText = tempDiv.textContent || tempDiv.innerText || content;
+
+            await copyToClipboard(plainText.trim());
+
+            // Visual feedback
+            const btn = document.getElementById('copyConversationBtn');
+            if (btn) {
+                const originalTitle = btn.title;
+                btn.title = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.title = originalTitle;
+                    btn.classList.remove('copied');
+                }, 1500);
+            }
+        } catch (error) {
+            console.error('Failed to copy conversation:', error);
+        }
+    }
+
     async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
@@ -1342,16 +1575,32 @@
         const processedHtml = postprocessChartBlocks(htmlContent);
         resultsDiv.innerHTML = processedHtml;
         
-        // Re-add scroll button
+        // Re-add scroll button and copy actions
         const scrollBtnHTML = `
             <button id="scrollToBottomBtn" title="Scroll to bottom" aria-label="Scroll to bottom">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M7 13l5 5 5-5M7 6l5 5 5-5"/>
                 </svg>
             </button>`;
+        const copyActionsHTML = `
+            <div id="copyActions" class="copy-actions">
+                <button id="copyLastAnswerBtn" title="Copy last answer" aria-label="Copy last answer" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+                <button id="copyConversationBtn" title="Copy entire conversation" aria-label="Copy entire conversation" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                    </svg>
+                </button>
+            </div>`;
         resultsDiv.insertAdjacentHTML('beforeend', scrollBtnHTML);
-        
-        // Reattach event listener and restore state
+        resultsDiv.insertAdjacentHTML('beforeend', copyActionsHTML);
+
+        // Reattach event listener and restore state for scroll button
         const newScrollBtn = document.getElementById('scrollToBottomBtn');
         if (newScrollBtn) {
             newScrollBtn.addEventListener('click', () => {
@@ -1364,6 +1613,19 @@
                 newScrollBtn.classList.add('show');
             }
         }
+
+        // Reattach event listeners for copy actions
+        const newCopyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
+        const newCopyConversationBtn = document.getElementById('copyConversationBtn');
+        if (newCopyLastAnswerBtn) {
+            newCopyLastAnswerBtn.addEventListener('click', handleCopyLastAnswer);
+        }
+        if (newCopyConversationBtn) {
+            newCopyConversationBtn.addEventListener('click', handleCopyConversation);
+        }
+
+        // Show/hide copy actions based on processing state
+        updateCopyActionsVisibility();
 
         bindUserAttachmentPreviews();
         
@@ -1638,7 +1900,7 @@
 
     async function renderMermaidDiagrams() {
         if (typeof window.mermaid === 'undefined') return;
-        
+
         try {
             // Update theme based on current dark mode state
             const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
@@ -1647,20 +1909,32 @@
                 theme: isDark ? 'dark' : 'default',
                 themeVariables: {
                     darkMode: isDark
-                }
+                },
+                suppressErrorRendering: true  // Suppress error messages in rendered output
             });
 
             // Find all code blocks with language 'mermaid'
             const mermaidBlocks = resultsDiv.querySelectorAll('pre code.language-mermaid, pre code.mermaid');
-            
+
             for (let i = 0; i < mermaidBlocks.length; i++) {
                 const block = mermaidBlocks[i];
                 if (block.dataset.mermaidRendered === 'true') continue;
-                
+
                 const code = block.textContent;
                 const pre = block.parentElement;
-                
+
                 try {
+                    // Validate syntax first using parse
+                    if (typeof window.mermaid.parse === 'function') {
+                        const parseResult = await window.mermaid.parse(code, { suppressErrors: true });
+                        if (!parseResult) {
+                            // Invalid syntax, keep original code block
+                            console.warn('Mermaid syntax validation failed, keeping original code block');
+                            block.dataset.mermaidRendered = 'true';
+                            continue;
+                        }
+                    }
+
                     // Create a container for the diagram
                     const container = document.createElement('div');
                     container.className = 'mermaid-diagram';
@@ -1670,17 +1944,18 @@
                     container.style.borderRadius = '0.5rem';
                     container.style.margin = '1rem 0';
                     container.setAttribute('data-mermaid-source', code);
-                    
+
                     // Render the diagram
                     const { svg } = await window.mermaid.render('mermaid-' + Date.now() + '-' + i, code);
                     container.innerHTML = svg;
-                    
+
                     // Replace the pre/code block with the rendered diagram
                     pre.replaceWith(container);
                     block.dataset.mermaidRendered = 'true';
                 } catch (error) {
                     console.error('Failed to render Mermaid diagram:', error);
-                    // Keep the original code block if rendering fails
+                    // Mark as rendered to avoid retry loops, keep original code block
+                    block.dataset.mermaidRendered = 'true';
                 }
             }
         } catch (error) {
@@ -1948,8 +2223,9 @@
 
             const container = document.createElement('div');
             container.className = 'chartjs-chart';
+            container.style.display = 'block';
             container.style.textAlign = 'center';
-            container.style.margin = '1.5rem 0';
+            container.style.margin = '1.5rem auto';
             container.style.padding = '1rem';
             container.style.borderRadius = '0.6rem';
             container.style.background = isDark ? '#0f1115' : '#f8f9fa';
@@ -1990,7 +2266,6 @@
                 const ctx = canvas.getContext('2d');
                 const chartInstance = new window.Chart(ctx, themedConfig);
                 container.__chartInstance = chartInstance;
-                scheduleChartReflow();
                 pre.remove();
             } catch (error) {
                 console.error('Failed to render Chart.js block:', error);
@@ -2470,6 +2745,7 @@
         __refreshDarkMode();
         refreshHistoryPanel();
         closeHistoryPanel();
+        lastRawContent = entry.content || '';
     }
 
     async function refreshCurrentConversationView() {
@@ -2504,6 +2780,7 @@
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
             refreshHistoryPanel();
+            lastRawContent = data.content || '';
 
             // If the conversation hasn't finished and has actual content, resume live polling and set processing UI state
             if (data && data.status !== 'finished' && data.content && data.content.trim().length > 0) {
@@ -2761,6 +3038,7 @@
         addPreview();
         clearAttachments();
         resetPlanPanel();
+        updateCopyActionsVisibility();
     }
 
     function stopProcessing() {
@@ -2784,9 +3062,10 @@
                 body: JSON.stringify({ uuid: currentSessionUuid, request: 'stop' })
             }).catch(error => console.error('Error stopping request:', error));
         }
-        
+
         currentSessionUuid = null;
         removePreview();
+        updateCopyActionsVisibility();
     }
 
     /* ========== API FUNCTIONS ========== */
@@ -2815,9 +3094,10 @@
             if (!response.ok) throw new Error('Failed to submit prompt');
 
             await response.json();
+            lastRawContent = '';
             startProcessing();
             startPolling();
-            
+
         } catch (error) {
             console.error('Error submitting prompt:', error);
             await updateResultsContent('<p style="color: red;">Error submitting prompt. Please try again.</p>');
@@ -2838,14 +3118,19 @@
 
                 const data = await response.json();
                 updatePlanPanel(data.plan);
-                const preprocessed = preprocessChartBlocks(data.content || '');
-                const htmlContent = converter.makeHtml(preprocessed);
-                await updateResultsContent(htmlContent);
 
-                hljs.highlightAll();
-                forceRenderChartBlocks();
-                if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
-                __refreshDarkMode();
+                // Only update content if it has actually changed to prevent chart flickering
+                const rawContent = data.content || '';
+                if (rawContent !== lastRawContent) {
+                    const preprocessed = preprocessChartBlocks(rawContent);
+                    const htmlContent = converter.makeHtml(preprocessed);
+                    await updateResultsContent(htmlContent);
+                    hljs.highlightAll();
+                    forceRenderChartBlocks();
+                    if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+                    __refreshDarkMode();
+                    lastRawContent = rawContent;
+                }
 
                 if (data.status === 'finished') {
                     if (currentSessionUuid && historyEnabled !== false) {
@@ -2928,6 +3213,7 @@
         removePreview();
         promptInput.value = '';
         clearAttachments();
+        lastRawContent = '';
 
         try {
             if (typeof window !== 'undefined') window.mini_a_session_uuid = null;
@@ -3075,6 +3361,14 @@
             scrollToBottomBtn.addEventListener('click', handleScrollToBottomClick);
         }
 
+        if (copyLastAnswerBtn) {
+            copyLastAnswerBtn.addEventListener('click', handleCopyLastAnswer);
+        }
+
+        if (copyConversationBtn) {
+            copyConversationBtn.addEventListener('click', handleCopyConversation);
+        }
+
         // Start ping system
         try {
             startPing();
@@ -3084,6 +3378,7 @@
 
         configureFeatureAvailability();
         refreshHistoryPanel();
+        updateCopyActionsVisibility();
     }
 
     // Initialize the application
