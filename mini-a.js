@@ -303,7 +303,15 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
  * </odoc>
  */
 MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
-  cFn = _$(cFn, "cFn").or().isFunction().default((_e, _m) => log("[" + this._id + "] " + _e + " " + _m))
+  cFn = _$(cFn, "cFn").or().isFunction().default((_e, _m) => {
+    var extra = ""
+
+    if (_e != "➡️" && _e != "⬅️" && _e != "📏" && _e != "⏳" && _e != "🏁" && _e != "🤖") {
+      extra = "  "
+    }
+
+    log("[" + this._id + "] " + extra + _e + " " + _m)
+  })
 
   var _e = ""
   switch(e) {
@@ -2434,7 +2442,7 @@ MiniA.prototype._runCommand = function(args) {
       var note = detected.length ? " Detected: " + detected.join(", ") : ""
       var _r
       if (!this._shellBatch) {
-        _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + ansiColor("faint","(" + note + " )"), ["No", "Yes", "Always"])
+        _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + (note.length > 0 ? ansiColor("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
       } else {
         _r == 0 // No prompt in batch mode; default to "No"
       }
