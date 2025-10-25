@@ -112,6 +112,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : mcpdynamic
+    desc     : Enable dynamic tool selection instead of registering all MCP tools (analyzes goal to select relevant tools, CLI mode)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useplanning
     desc     : Enable task planning updates (agent mode only, CLI mode)
     example  : "true"
