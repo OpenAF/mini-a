@@ -109,6 +109,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : mcpdynamic
+    desc     : Enable dynamic tool selection instead of registering all MCP tools (analyzes goal to select relevant tools)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useplanning
     desc     : Enable task planning updates (agent mode only)
     example  : "true"
@@ -157,6 +162,7 @@ jobs:
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
       usetools       : toBoolean.isBoolean.default(false)
+      mcpdynamic     : toBoolean.isBoolean.default(false)
       useplanning    : toBoolean.isBoolean.default(false)
       rules          : isString.default(__)
       state          : isString.default(__)
