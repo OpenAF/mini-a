@@ -941,8 +941,16 @@
     }
 
     /* ========== LOADING PREVIEW ANIMATION ========== */
+    
+    /* Reduce spacing before preview animation */
+    #resultsDiv > p:has(+ .preview),
+    #resultsDiv > div:has(+ .preview),
+    #resultsDiv > *:has(+ .preview) {
+        margin-bottom: 0 !important;
+    }
+    
     .preview {
-        margin-top: 1.5em;
+        margin-top: 0.5em;
         height: 4em;
         border-radius: 0.5em;
         position: relative;
