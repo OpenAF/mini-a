@@ -212,6 +212,7 @@ The `start()` method accepts various configuration options:
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
+- **`useplanning`** (boolean, default: false): Maintain a persistent task plan in agent mode; Mini-A disables it automatically when the goal looks trivial
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
@@ -226,6 +227,7 @@ The `start()` method accepts various configuration options:
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
+- **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, falling back to all tools if no clear match is found
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
@@ -238,6 +240,16 @@ mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-db.yaml
 ```
 
 Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit cache settings). When detected, Mini-A caches results keyed by tool name and parameters for the configured TTL, reusing outputs on subsequent steps to avoid redundant calls.
+
+##### Dynamic MCP tool selection
+
+Set `usetools=true mcpdynamic=true` when you want Mini-A to narrow the registered MCP tools to only those that look useful for the current goal. The agent evaluates the candidate list in stages:
+
+1. **Keyword heuristics**: quick matching on tool names, descriptions, and goal keywords.
+2. **Low-cost model inference**: if `OAF_LC_MODEL` is configured, the cheaper model proposes a shortlist.
+3. **Primary model inference**: the main model performs the same selection when the low-cost tier does not return results.
+
+If every stage returns an empty list (or errors), Mini-A logs the issue and falls back to registering the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. Leave `mcpdynamic` false when you prefer the traditional “register everything” behaviour or when your model lacks tool-calling support.
 
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
@@ -277,6 +289,38 @@ mini.start({ goal: "Draft a friendly release note", chatbotmode: true })
 ```
 
 Switching back to the default agent mode is as simple as omitting the flag (or setting it to `false`).
+
+## Planning Workflow
+
+Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested “tree” plan with checkpoints.
+
+### What the plan contains
+
+- **Structured steps**: Each entry includes a human-readable title, status (`pending`, `in_progress`, `done`, `blocked`, etc.), and progress percentage. Complex goals nest subtasks under parent steps.
+- **Checkpoints**: Selected steps are stamped as checkpoints so Mini-A can call out major milestones and roll them into the progress bar.
+- **Feasibility annotations**: Steps that require shell access or MCP tools are pre-marked; if the required capability is disabled, the status flips to `blocked` with an explanatory note.
+- **State integration**: The entire plan lives under `state.plan`, making it available to downstream automation or custom UI extensions. Metadata like `state.plan.meta.needsReplan` and `state.plan.meta.validation` highlight when the model should adjust the plan.
+
+### Runtime behaviour
+
+- **Logging & UI**: Every time the plan changes, Mini-A emits a 🗺️ log entry summarizing the checklist and overall progress. The web UI mirrors this with an expandable plan card.
+- **Automatic replanning**: When a step fails repeatedly, the runtime marks it as `blocked`, increments planning metrics, and sets `needsReplan=true` so the model knows to rethink the approach.
+- **Metrics**: Counters such as `plans_generated`, `plans_validated`, and `plans_replanned` surface via `MiniA.getMetrics()` to help monitor how often plans are created or adjusted.
+
+### Examples
+
+```bash
+ojob mini-a.yaml goal="Audit the repo and prepare upgrade notes" useshell=true useplanning=true
+```
+
+```javascript
+var agent = new MiniA()
+agent.start({
+    goal       : "Refactor the project scaffold and document the steps",
+    useshell   : true,
+    useplanning: true
+})
+```
 
 ## Examples
 

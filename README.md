@@ -93,6 +93,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 Recent updates focus on performance and resiliency when working with MCP tools:
 
 - **Parallel tool execution** – When the model responds with multiple independent tool calls in the same step, Mini-A executes them concurrently, reducing overall latency for long-running MCP operations.
+- **Dynamic tool selection** – Pair `usetools=true` with `mcpdynamic=true` to let Mini-A narrow the registered tool set via keyword heuristics, then the low-cost LLM, and finally the primary model, falling back to the full catalog if none match.
 - **Smart context caching** – System prompts and tool schema summaries are cached across sessions, minimizing repeated token overhead and keeping instructions consistent even as the tool roster grows.
 - **Deterministic tool result caching** – Tools marked with `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit caching metadata reuse previous results for the same parameters. Configure the default cache window with `toolcachettl=<ms>` or override it per tool via metadata.
 - **Lazy MCP initialization** – Pass `mcplazy=true` to defer establishing MCP connections until a tool is actually needed. This shortens startup times when many optional integrations are configured.
@@ -219,6 +220,7 @@ Mini-A ships with three complementary components:
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
 - **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) of the current task, complete with web UI progress tracking
+- **Dynamic MCP Tool Selection**: Combine `usetools=true` with `mcpdynamic=true` to have the agent register only the tools it considers relevant to the current goal, falling back gracefully when needed
 - **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
@@ -258,6 +260,7 @@ All Mini-A options can be passed as command line arguments:
 - `goal` – Objective the agent should achieve (required for `MiniA.start` / `mini-a.yaml`)
 - `mcp` – MCP server configuration (single object or array, in JSON/SLON)
 - `usetools` – Register MCP tools directly with the model instead of expanding the prompt with tool schemas
+- `mcpdynamic` – When combined with `usetools=true`, analyze the goal and register only the MCP tools that look relevant
 - `useutils` – Mount the Mini File Tool helpers as an auxiliary MCP connection (default `false`)
 - `useshell` – Allow shell command execution (default `false`)
 - `shell` – Prefix every shell command (requires `useshell=true`; ideal for sandboxing with `sandbox-exec`, `container exec`, `docker exec`, etc.)
@@ -280,6 +283,7 @@ All Mini-A options can be passed as command line arguments:
 - `outfile` – Path to write the final answer (implies JSON output unless `__format` is provided)
 - `__format` – Output format (e.g. `md`, `json`)
 - `chatbotmode` – Skip the agent workflow and respond like a regular chat assistant (default `false`)
+- `useplanning` – Keep a live task plan in agent mode; Mini-A disables it automatically for trivial goals
 
 For a complete list of options, see the [Usage Guide](USAGE.md).
 
