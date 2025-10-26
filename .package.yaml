@@ -117,11 +117,11 @@ filesHash:
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
   mini-a-main.yaml: 81cc2029c4dd67d15f283cb4be0ee09e66db3a54
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 656b01aa30fb6dfaed6e88b6521811cc542fc77e
-  mini-a.js: 45f05deb543114fa8f1080733754f5c6c25c6150
+  mini-a-web.yaml: 6a7006d440b40c0c034e0adeaa9d5bb361426749
+  mini-a.js: 640ab3ea5a21feb063918a755afd66de575ca0ab
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 7dccc44f4acd266646770b81aa29832a7b04bcaa
-  public/index.md: 98b9a4aa2197fde79aa7378df55be415fda5080c
+  public/index.md: 7c662109de56c4938466b5aba604a5d9d0eeb5b0
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
   tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
