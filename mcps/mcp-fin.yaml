@@ -1,14 +1,10 @@
-# Author: OpenAI Assistant
+# Author: OpenAI Assistant, Nuno Aguiar
 help:
   text   : A STDIO/HTTP MCP Yahoo Finance information server
   expects:
   - name     : onport
     desc     : If defined starts a MCP server on the provided port
     example  : "8888"
-    mandatory: false
-  - name     : libs
-    desc     : Optional comma separated libraries or @oPack/library.js references to preload
-    example  : "@APIs/custom-helper.js,lib/extra.js"
     mandatory: false
 
 todo:
@@ -76,8 +72,8 @@ todo:
 ojob:
   opacks      :
   - openaf     : 20250915
-  - oJob-common: 20250914
-  - APIs       : 20250915
+  - oJob-common: 20251012
+  - APIs       : 20220515
   catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
   logToConsole: false
   argsFromEnvs: true
@@ -98,44 +94,10 @@ jobs:
   exec : | #js
     if (global.__yfinanceInitialised__) return
 
-    function loadLibrary(lib) {
-      if (lib.startsWith("@")) {
-        if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
-          var match = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
-          var packPath = getOPackPath(match[1])
-          var filePath = packPath + "/" + match[2] + ".js"
-          if (io.fileExists(filePath)) {
-            loadLib(filePath)
-          } else {
-            throw "Library '" + lib + "' not found in oPack path " + packPath
-          }
-        } else {
-          throw "Library '" + lib + "' must follow the format @oPack/library.js"
-        }
-      } else {
-        loadLib(lib)
-      }
-    }
-
-    loadLibrary("@APIs/apiYFinance.js")
-
-    if (isDef(args.libs) && args.libs.length > 0) {
-      args.libs.split(",")
-        .map(function(lib) { return lib.trim() })
-        .filter(function(lib) { return lib.length > 0 })
-        .forEach(function(lib) {
-          loadLibrary(lib)
-        })
-    }
-
-    if (!isDef(ow.loadObj) || !isDef(ow.loadObj().apiYFinance)) {
-      throw "Unable to load apiYFinance helper"
-    }
-
-    global.__yfinanceAPI__ = ow.loadObj().apiYFinance
+    global.__yfinanceAPI__ = require("apiYFinance.js")
     global.__yfinanceInitialised__ = true
 
-# --------------------------
+# ----------------------
 - name : Get ticker data
   check:
     in:
@@ -147,7 +109,7 @@ jobs:
     }
     return global.__yfinanceAPI__.getTicketData(args.symbol, args.raw)
 
-# ---------------------------------
+# ------------------------------
 - name : Get ticker fundamentals
   check:
     in:
