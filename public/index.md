@@ -1311,6 +1311,7 @@
     let chartResizeTimer = null;
     let chartResizeHandlerBound = false;
     let lastRawContent = '';
+    let lastRenderedHtml = '';
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -1423,90 +1424,230 @@
         }
     }
 
+    const EVENT_MARKERS = ['⚙️','🖥️','💡','💭','🌀','🛑','⏳','🏁','✅','❌','📚','ℹ️','📂','⚠️'];
+
+    function isEventMarkerLine(line) {
+        if (!line) return false;
+        const trimmed = line.trim();
+        if (!trimmed) return false;
+        return EVENT_MARKERS.some(marker => trimmed.startsWith(marker));
+    }
+
+    function removeEventMarkerLines(text) {
+        if (!text) return '';
+        const lines = text.split('\n');
+        const filtered = lines.filter(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return true;
+            return !isEventMarkerLine(line);
+        });
+        return filtered.join('\n');
+    }
+
     function copyToClipboard(text) {
-        // Try modern clipboard API first
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            return navigator.clipboard.writeText(text);
+        function manualCopy(value) {
+            if (typeof window === 'undefined' || typeof window.prompt !== 'function') return false;
+            try {
+                const promptText = 'Unable to access the clipboard automatically. Copy the text below manually (Ctrl+C, Enter to close):';
+                const result = window.prompt(promptText, value);
+                return result !== null;
+            } catch (error) {
+                return false;
+            }
         }
 
-        // Fallback to legacy method
-        return new Promise((resolve, reject) => {
-            try {
+        function legacyCopy(value) {
+            return new Promise((resolve, reject) => {
                 const textarea = document.createElement('textarea');
-                textarea.value = text;
+                textarea.value = value;
+                textarea.setAttribute('readonly', '');
                 textarea.style.position = 'fixed';
-                textarea.style.left = '-9999px';
-                textarea.style.top = '-9999px';
+                textarea.style.opacity = '0';
+                textarea.style.left = '0';
+                textarea.style.top = '0';
                 document.body.appendChild(textarea);
+
+                const selection = document.getSelection();
+                const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+                textarea.focus();
                 textarea.select();
                 textarea.setSelectionRange(0, textarea.value.length);
 
-                const success = document.execCommand('copy');
-                document.body.removeChild(textarea);
+                let succeeded = false;
+                let copyError = null;
+                try {
+                    succeeded = document.execCommand('copy');
+                } catch (error) {
+                    copyError = error;
+                } finally {
+                    document.body.removeChild(textarea);
 
-                if (success) {
+                    if (selection) {
+                        selection.removeAllRanges();
+                        if (previousRange) selection.addRange(previousRange);
+                    }
+                }
+
+                if (succeeded) {
                     resolve();
                 } else {
-                    reject(new Error('Copy command failed'));
+                    if (manualCopy(value)) {
+                        resolve();
+                        return;
+                    }
+                    reject(copyError || new Error('Copy command failed'));
                 }
-            } catch (error) {
-                reject(error);
-            }
-        });
+            });
+        }
+
+        // Try modern clipboard API first and fall back only on failure
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+        }
+
+        // Fallback to legacy execCommand path (handles http/file contexts)
+        return legacyCopy(text);
     }
 
-    async function handleCopyLastAnswer() {
+    function getLatestConversationHtml() {
+        if (lastRenderedHtml && lastRenderedHtml.length > 0) {
+            return lastRenderedHtml;
+        }
+        if (resultsDiv && resultsDiv.innerHTML) {
+            return resultsDiv.innerHTML;
+        }
+        return '';
+    }
+
+    async function ensureConversationContentForCopy() {
+        const cachedHtml = getLatestConversationHtml();
+        if (lastRawContent && lastRawContent.trim().length > 0) {
+            return { raw: lastRawContent, html: cachedHtml };
+        }
+
+        const uuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
+        if (!uuid) {
+            return { raw: '', html: cachedHtml };
+        }
+
         try {
             const response = await fetch('/result', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ uuid: currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null) })
+                body: JSON.stringify({ uuid })
             });
 
-            if (!response.ok) return;
+            if (!response.ok) {
+                return { raw: '', html: cachedHtml };
+            }
 
             const data = await response.json();
-            const content = data.content || '';
+            lastRawContent = data.content || '';
+            return { raw: lastRawContent, html: cachedHtml };
+        } catch (error) {
+            console.error('Failed to refresh conversation for copy:', error);
+            return { raw: '', html: cachedHtml };
+        }
+    }
 
-            // Create a temporary div to parse the HTML content
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = content;
+    function extractPlainTextFromHtml(html) {
+        if (!html) return '';
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = html;
 
-            // Find the last user prompt (👤) to determine where the last answer starts
-            const allText = tempDiv.textContent || tempDiv.innerText || '';
-            const lines = allText.split('\n');
+        // Normalize <br> to newline
+        const brNodes = tempDiv.querySelectorAll('br');
+        brNodes.forEach(node => {
+            node.replaceWith('\n');
+        });
 
-            // Find the last occurrence of user prompt marker
-            let lastUserPromptIndex = -1;
+        // Convert code blocks to fenced markdown
+        const preBlocks = tempDiv.querySelectorAll('pre');
+        preBlocks.forEach(pre => {
+            const code = pre.querySelector('code');
+            const rawText = code ? code.textContent : pre.textContent;
+            const codeText = rawText ? rawText.trimEnd() : '';
+            let language = '';
+            if (code && code.className) {
+                const match = code.className.match(/language-([\w-]+)/i);
+                if (match) {
+                    language = match[1];
+                }
+            }
+            const fence = `\n\`\`\`${language ? language.trim() : ''}\n${codeText.trim()}\n\`\`\`\n`;
+            pre.replaceWith(document.createTextNode(fence));
+        });
+
+        // Wrap inline code with backticks
+        const inlineCodes = tempDiv.querySelectorAll('code');
+        inlineCodes.forEach(code => {
+            if (code.closest('pre')) return;
+            const inlineText = code.textContent || '';
+            const backticked = '`' + inlineText.trim() + '`';
+            code.replaceWith(document.createTextNode(backticked));
+        });
+
+        return tempDiv.textContent || tempDiv.innerText || '';
+    }
+
+    function extractLastAnswerFromText(text) {
+        const allText = text || '';
+        if (!allText) return '';
+
+        const lines = allText.split('\n');
+        let lastUserPromptIndex = -1;
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const trimmed = lines[i].trim();
+            if (trimmed.endsWith('👤')) {
+                lastUserPromptIndex = i;
+                break;
+            }
+        }
+
+        if (lastUserPromptIndex < 0) {
             for (let i = lines.length - 1; i >= 0; i--) {
                 if (lines[i].includes('👤')) {
                     lastUserPromptIndex = i;
                     break;
                 }
             }
+        }
 
-            let lastAnswer;
-            if (lastUserPromptIndex >= 0) {
-                // Get everything after the last user prompt
-                const answerLines = lines.slice(lastUserPromptIndex + 1);
-                // Filter out event markers and empty lines
-                const filteredLines = answerLines.filter(line => {
-                    const trimmed = line.trim();
-                    // Skip empty lines and lines that are just event emojis
-                    if (!trimmed) return false;
-                    // Skip lines that start with event emojis
-                    if (/^[⚙️🖥️💡💭🌀🛑⏳🏁✅❌📚ℹ️📂⚠️🛑]/.test(trimmed)) return false;
-                    return true;
-                });
-                lastAnswer = filteredLines.join('\n').trim();
-            } else {
-                // No user prompt found, just get all content
-                lastAnswer = allText.trim();
+        let lastAnswer;
+        if (lastUserPromptIndex >= 0) {
+            const answerLines = lines.slice(lastUserPromptIndex + 1);
+            const filteredLines = answerLines.filter(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return false;
+                if (isEventMarkerLine(line)) return false;
+                return true;
+            });
+            lastAnswer = filteredLines.join('\n').trim();
+        } else {
+            lastAnswer = allText.trim();
+        }
+
+        if (!lastAnswer || lastAnswer.length < 10) {
+            const fallback = removeEventMarkerLines(allText).trim();
+            lastAnswer = fallback || lastAnswer;
+        }
+        return removeEventMarkerLines(lastAnswer).trim();
+    }
+
+    async function handleCopyLastAnswer() {
+        try {
+            const { raw, html } = await ensureConversationContentForCopy();
+            let sourceText = '';
+            if (raw && raw.trim().length > 0) {
+                sourceText = raw;
+            } else if (html) {
+                sourceText = extractPlainTextFromHtml(html);
             }
 
-            // Fallback: if we got nothing or very little, just use the whole content
-            if (!lastAnswer || lastAnswer.length < 10) {
-                lastAnswer = allText.trim();
+            const lastAnswer = extractLastAnswerFromText(sourceText);
+            if (!lastAnswer) {
+                throw new Error('No answer available to copy.');
             }
 
             await copyToClipboard(lastAnswer);
@@ -1529,23 +1670,20 @@
 
     async function handleCopyConversation() {
         try {
-            const response = await fetch('/result', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ uuid: currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null) })
-            });
+            const { raw, html } = await ensureConversationContentForCopy();
+            let sourceText = '';
+            if (raw && raw.trim().length > 0) {
+                sourceText = raw;
+            } else if (html) {
+                sourceText = extractPlainTextFromHtml(html);
+            }
 
-            if (!response.ok) return;
+            const plainText = removeEventMarkerLines(sourceText).trim();
+            if (!plainText) {
+                throw new Error('No conversation available to copy.');
+            }
 
-            const data = await response.json();
-            const content = data.content || '';
-
-            // Clean up HTML tags for plain text copy
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = content;
-            const plainText = tempDiv.textContent || tempDiv.innerText || content;
-
-            await copyToClipboard(plainText.trim());
+            await copyToClipboard(plainText);
 
             // Visual feedback
             const btn = document.getElementById('copyConversationBtn');
@@ -1574,6 +1712,7 @@
         
         // Post-process to restore any chart blocks that were preprocessed
         const processedHtml = postprocessChartBlocks(htmlContent);
+        lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
         
         // Re-add scroll button and copy actions

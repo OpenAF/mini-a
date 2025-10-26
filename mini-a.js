@@ -2696,6 +2696,103 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   return allTools.map(t => t.name)
 }
 
+MiniA.prototype._applySystemInstructions = function(args) {
+  args = _$(args, "args").isMap().default({})
+
+  if (!isString(this._systemInst) || this._systemInst.length === 0) return
+
+  this._currentMode = toBoolean(args.chatbotmode) ? "chatbot" : "agent"
+
+  var updatedMainLLM = isDef(this.llm) && isFunction(this.llm.withInstructions)
+    ? this.llm.withInstructions(this._systemInst)
+    : __
+  if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+
+  if (this._use_lc && isDef(this.lc_llm) && isFunction(this.lc_llm.withInstructions)) {
+    var updatedLowCostLLM = this.lc_llm.withInstructions(this._systemInst)
+    if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+  }
+
+  var systemTokens = this._estimateTokens(this._systemInst)
+  this.fnI("size", `System prompt ~${systemTokens} tokens`)
+  if (toBoolean(args.debug)) {
+    print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
+  }
+}
+
+MiniA.prototype._registerMcpToolsForGoal = function(args) {
+  args = _$(args, "args").isMap().default({})
+
+  var useDynamicSelection = toBoolean(args.mcpdynamic)
+  var selectedToolNames = []
+
+  if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
+    if (useDynamicSelection && isString(args.goal) && args.goal.length > 0) {
+      selectedToolNames = this._selectMcpToolsDynamically(args.goal, this.mcpTools)
+    }
+
+    var parent = this
+    var registerMcpTools = function(llmInstance) {
+      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
+
+      var updated = llmInstance
+      log(`Registering MCP tools on LLM via tool interface...`)
+
+      Object.keys(parent._mcpConnections || {}).forEach(function(connectionId) {
+        var client = parent._mcpConnections[connectionId]
+        if (isUnDef(client)) return
+
+        try {
+          var result
+          var connectionToolNames = parent.mcpTools
+            .filter(function(tool) { return parent.mcpToolToConnection[tool.name] === connectionId })
+            .map(function(tool) { return tool.name })
+
+          var hasDynamicSelection = useDynamicSelection && selectedToolNames.length > 0
+          if (hasDynamicSelection) {
+            var toolsForThisConnection = selectedToolNames.filter(function(name) {
+              return connectionToolNames.indexOf(name) >= 0
+            })
+
+            if (toolsForThisConnection.length > 0) {
+              parent.fnI("mcp", `Registering ${toolsForThisConnection.length} selected tool(s) from connection ${connectionId.substring(0, 8)}...`)
+              result = updated.withMcpTools(client, toolsForThisConnection)
+            } else {
+              parent.fnI("mcp", `No selected tools for connection ${connectionId.substring(0, 8)}, skipping registration.`)
+            }
+          } else {
+            result = updated.withMcpTools(client)
+          }
+
+          if (isDef(result)) updated = result
+        } catch (e) {
+          var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+          parent.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
+        }
+      })
+
+      return updated
+    }
+
+    var updatedMainLLM = registerMcpTools(this.llm)
+    if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
+
+    if (this._use_lc && isDef(this.lc_llm)) {
+      var updatedLowCostLLM = registerMcpTools(this.lc_llm)
+      if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
+    }
+
+    var toolCountMsg = useDynamicSelection && selectedToolNames.length > 0
+      ? `${selectedToolNames.length} dynamically selected`
+      : `${this.mcpTools.length}`
+    this.fnI("mcp", `Registered ${toolCountMsg} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+  } else if (useDynamicSelection) {
+    this.fnI("mcp", "Dynamic MCP selection requested, but MCP tool interface is disabled or no tools are available.")
+  }
+
+  this._applySystemInstructions(args)
+}
+
 // ============================================================================
 // MAIN METHODS
 // ============================================================================
@@ -2915,11 +3012,9 @@ MiniA.prototype.init = function(args) {
               }
             }))
             this._mcpConnections[id] = mcp
-            if (args.mcplazy === true) {
-              this._lazyMcpConnections[id] = true
-            } else {
-              mcp.initialize()
-              this._lazyMcpConnections[id] = false
+            mcp.initialize()
+            this._lazyMcpConnections[id] = false
+            if (args.mcplazy !== true) {
               sleep(100, true)
             }
             if (!isFunction(mcp.__miniAOriginalCallTool)) {
@@ -2970,74 +3065,6 @@ MiniA.prototype.init = function(args) {
       })
 
       this.fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
-    }
-
-    if (this._useTools && this.mcpTools.length > 0) {
-      var parent = this
-      var selectedToolNames = []
-
-      // Perform dynamic tool selection if enabled
-      if (args.mcpdynamic === true && isString(args.goal) && args.goal.length > 0) {
-        selectedToolNames = this._selectMcpToolsDynamically(args.goal, this.mcpTools)
-      }
-
-      var registerMcpTools = llmInstance => {
-        if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
-
-        var updated = llmInstance
-        log(`Registering MCP tools on LLM via tool interface...`)
-        Object.keys(this._mcpConnections).forEach(connectionId => {
-          var client = this._mcpConnections[connectionId]
-          if (isUnDef(client)) return
-
-          try {
-            var result
-
-            // If dynamic selection is enabled and we have selected tools
-            if (args.mcpdynamic === true && selectedToolNames.length > 0) {
-              // Filter tools that belong to this specific connection
-              var connectionToolNames = parent.mcpTools
-                .filter(tool => parent.mcpToolToConnection[tool.name] === connectionId)
-                .map(tool => tool.name)
-
-              // Get intersection of selected tools and this connection's tools
-              var toolsForThisConnection = selectedToolNames.filter(name =>
-                connectionToolNames.indexOf(name) >= 0
-              )
-
-              // Only register if this connection has selected tools
-              if (toolsForThisConnection.length > 0) {
-                parent.fnI("mcp", `Registering ${toolsForThisConnection.length} selected tool(s) from connection ${connectionId.substring(0, 8)}...`)
-                result = updated.withMcpTools(client, toolsForThisConnection)
-              } else {
-                parent.fnI("mcp", `No selected tools for connection ${connectionId.substring(0, 8)}, skipping registration.`)
-              }
-            } else {
-              // Default behavior: register all tools
-              result = updated.withMcpTools(client)
-            }
-
-            if (isDef(result)) updated = result
-          } catch (e) {
-            var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
-            parent.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
-          }
-        })
-        return updated
-      }
-
-      var updatedMainLLM = registerMcpTools(this.llm)
-      if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
-
-      if (this._use_lc) {
-        var updatedLowCostLLM = registerMcpTools(this.lc_llm)
-        if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
-      }
-
-      var toolCountMsg = args.mcpdynamic === true && selectedToolNames.length > 0
-        ? `${selectedToolNames.length} dynamically selected`
-        : `${this.mcpTools.length}`
-      this.fnI("mcp", `Registered ${toolCountMsg} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
     }
 
     // Provide system prompt instructions
@@ -3119,20 +3146,6 @@ MiniA.prototype.init = function(args) {
       this._systemInst = this._getCachedSystemPrompt("agent", agentPayload, this._SYSTEM_PROMPT)
     }
 
-    this._currentMode = args.chatbotmode ? "chatbot" : "agent"
-
-    var updatedMainLLM = this.llm.withInstructions(this._systemInst)
-    if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
-    if (this._use_lc) {
-      var updatedLowCostLLM = this.lc_llm.withInstructions(this._systemInst)
-      if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
-    }
-
-    var systemTokens = this._estimateTokens(this._systemInst)
-    this.fnI("size", `System prompt ~${systemTokens} tokens`)
-    if (args.debug) {
-      print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
-    }
     this._isInitialized = true
   } catch(ee) {
     this._isInitialized = false
@@ -3374,7 +3387,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     this.fnI("user", `${args.goal}`)
 
+    if (toBoolean(args.mcpdynamic) === true) {
+      args.mcplazy = true
+    }
+
     this.init(args)
+    this._registerMcpToolsForGoal(args)
 
     var initialState = {}
     if (isDef(args.state)) {

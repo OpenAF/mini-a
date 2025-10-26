@@ -753,7 +753,7 @@ jobs:
     global.maArgs = merge(args, {})
     if (!toBoolean(args.mcplazy)) {
       var _ma = new MiniA()
-      _ma.init( global.maArgs )
+      _ma.init( merge( global.maArgs, { mcpdynamic: false } ) )
       _ma = __
     }
 
