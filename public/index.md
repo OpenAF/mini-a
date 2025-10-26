@@ -877,12 +877,10 @@
 
     /* ========== COPY ACTIONS ========== */
     .copy-actions {
-        display: flex;
+        display: none;
         gap: 0.5rem;
         justify-content: flex-start;
         align-items: center;
-        opacity: 0;
-        pointer-events: none;
         transition: opacity 0.3s ease;
         margin-top: 1rem;
         margin-bottom: 1rem;
@@ -890,6 +888,7 @@
     }
 
     .copy-actions.show {
+        display: flex;
         opacity: 1;
         pointer-events: auto;
     }
@@ -1425,8 +1424,14 @@
         const actions = document.getElementById('copyActions');
         if (!actions) return;
 
+        const wasHidden = !actions.classList.contains('show');
+
         if (!isProcessing && resultsDiv && resultsDiv.textContent.trim().length > 0) {
             actions.classList.add('show');
+            // Scroll to bottom if we just showed the copy actions and were previously at bottom
+            if (wasHidden && autoScrollEnabled) {
+                setTimeout(() => scrollResultsToBottom(), 10);
+            }
         } else {
             actions.classList.remove('show');
         }
