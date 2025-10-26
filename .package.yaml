@@ -61,6 +61,7 @@ files:
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
 - mcps/mcp-file.yaml
+- mcps/mcp-fin.yaml
 - mcps/mcp-kube.yaml
 - mcps/mcp-net.yaml
 - mcps/mcp-oaf.yaml
@@ -104,6 +105,7 @@ filesHash:
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
   mcps/mcp-file.yaml: 995249f68f27578648a6ced34957b872b62cd6e7
+  mcps/mcp-fin.yaml: 919e509a174ba2fec50a1f6066ce57654d179244
   mcps/mcp-kube.yaml: 431dde2e8a85f813f8c42e7d32d6c6582b719057
   mcps/mcp-net.yaml: dff5115d164807f71c61f9ff153e96553144e6a9
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
@@ -121,7 +123,7 @@ filesHash:
   mini-a.js: 640ab3ea5a21feb063918a755afd66de575ca0ab
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 7dccc44f4acd266646770b81aa29832a7b04bcaa
-  public/index.md: 7c662109de56c4938466b5aba604a5d9d0eeb5b0
+  public/index.md: 0bf7bdc72c67f94edba299201e06e4c0376d6c83
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
   tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
