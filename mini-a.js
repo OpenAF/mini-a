@@ -2497,6 +2497,206 @@ MiniA.prototype._runCommand = function(args) {
 }
 
 // ============================================================================
+// DYNAMIC TOOL SELECTION
+// ============================================================================
+
+/**
+ * Selects MCP tools by keyword matching against the goal text.
+ * Analyzes words in the goal and matches them against tool names and descriptions.
+ *
+ * @param {string} goal - The user's goal text
+ * @param {Array} allTools - Array of all available MCP tools from all connections
+ * @returns {Array} Array of selected tool names
+ */
+MiniA.prototype._selectToolsByKeywordMatch = function(goal, allTools) {
+  if (!isString(goal) || !isArray(allTools) || allTools.length === 0) {
+    return []
+  }
+
+  // Extract meaningful keywords from the goal (filter out common words)
+  var commonWords = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must", "can", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those", "what", "which", "who", "when", "where", "why", "how"]
+
+  var goalWords = goal
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && commonWords.indexOf(w) < 0)
+
+  if (goalWords.length === 0) {
+    return []
+  }
+
+  // Score each tool based on keyword matches
+  var scoredTools = allTools.map(tool => {
+    var score = 0
+    var toolText = ((tool.name || "") + " " + (tool.description || "")).toLowerCase()
+
+    // Check for exact word matches in tool name (higher weight)
+    goalWords.forEach(word => {
+      if ((tool.name || "").toLowerCase().indexOf(word) >= 0) {
+        score += 10
+      }
+      if ((tool.description || "").toLowerCase().indexOf(word) >= 0) {
+        score += 3
+      }
+    })
+
+    // Check for tool name similarity
+    var toolNameWords = (tool.name || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/[_\s-]+/)
+      .filter(w => w.length > 2)
+
+    toolNameWords.forEach(toolWord => {
+      goalWords.forEach(goalWord => {
+        if (toolWord === goalWord) {
+          score += 15
+        } else if (toolWord.indexOf(goalWord) >= 0 || goalWord.indexOf(toolWord) >= 0) {
+          score += 5
+        }
+      })
+    })
+
+    return { tool: tool, score: score }
+  })
+
+  // Filter tools with score > 0 and sort by score
+  var matchedTools = scoredTools
+    .filter(st => st.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(st => st.tool.name)
+
+  return matchedTools
+}
+
+/**
+ * Selects MCP tools using an LLM to analyze the goal and available tools.
+ *
+ * @param {string} goal - The user's goal text
+ * @param {Array} allTools - Array of all available MCP tools
+ * @param {Object} llmInstance - The LLM instance to use (preferably low-cost)
+ * @returns {Array} Array of selected tool names
+ */
+MiniA.prototype._selectToolsByLLM = function(goal, allTools, llmInstance) {
+  if (!isString(goal) || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) {
+    return []
+  }
+
+  try {
+    var toolsList = allTools.map((tool, idx) => {
+      return `${idx + 1}. ${tool.name}: ${tool.description || "No description"}`
+    }).join("\n")
+
+    var prompt = `You are a tool selection assistant. Given a user goal and a list of available tools, select which tools are most relevant to achieve the goal.
+
+User Goal: ${goal}
+
+Available Tools:
+${toolsList}
+
+Instructions:
+- Analyze the goal and identify which tools would be helpful
+- Only select tools that are clearly relevant to the goal
+- If the goal is simple and doesn't need any tools, return an empty list
+- Return ONLY a JSON array of tool names, nothing else
+- Format: ["tool_name1", "tool_name2"]
+- If no tools are relevant, return: []
+
+Selected tools (JSON array only):`
+
+    var response = llmInstance.prompt(prompt)
+    if (!isString(response)) {
+      return []
+    }
+
+    // Try to parse the JSON response
+    response = response.trim()
+
+    // Extract JSON array if wrapped in markdown code blocks
+    var jsonMatch = response.match(/```(?:json)?\s*(\[[^\]]*\])\s*```/)
+    if (jsonMatch) {
+      response = jsonMatch[1]
+    } else if (response.indexOf("[") >= 0) {
+      var startIdx = response.indexOf("[")
+      var endIdx = response.lastIndexOf("]")
+      if (startIdx >= 0 && endIdx > startIdx) {
+        response = response.substring(startIdx, endIdx + 1)
+      }
+    }
+
+    var selectedTools = JSON.parse(response)
+    if (!isArray(selectedTools)) {
+      return []
+    }
+
+    // Validate that selected tools exist in allTools
+    var validToolNames = allTools.map(t => t.name)
+    return selectedTools.filter(name => validToolNames.indexOf(name) >= 0)
+  } catch (e) {
+    this.fnI("warn", `LLM tool selection failed: ${e.message || e}`)
+    return []
+  }
+}
+
+/**
+ * Dynamically selects MCP tools based on the goal.
+ * Uses a multi-stage approach: keyword matching, low-cost LLM, then regular LLM.
+ *
+ * @param {string} goal - The user's goal text
+ * @param {Array} allTools - Array of all available MCP tools from all connections
+ * @returns {Array} Array of selected tool names, or all tool names if selection fails
+ */
+MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
+  var parent = this
+
+  if (!isArray(allTools) || allTools.length === 0) {
+    return []
+  }
+
+  this.fnI("mcp", `Analyzing goal to dynamically select relevant tools from ${allTools.length} available...`)
+
+  // Stage 1: Try keyword-based matching
+  var keywordSelected = this._selectToolsByKeywordMatch(goal, allTools)
+  if (keywordSelected.length > 0) {
+    this.fnI("done", `Selected ${keywordSelected.length} tool(s) via keyword matching: ${keywordSelected.join(", ")}`)
+    return keywordSelected
+  }
+
+  this.fnI("mcp", "Keyword matching found no clear matches, trying LLM-based selection...")
+
+  // Stage 2: Try low-cost LLM if available
+  if (this._use_lc && isDef(this.lc_llm)) {
+    try {
+      var lcSelected = this._selectToolsByLLM(goal, allTools, this.lc_llm)
+      if (lcSelected.length > 0) {
+        this.fnI("done", `Selected ${lcSelected.length} tool(s) via low-cost LLM: ${lcSelected.join(", ")}`)
+        return lcSelected
+      }
+    } catch (e) {
+      this.fnI("warn", `Low-cost LLM tool selection failed: ${e.message || e}`)
+    }
+  }
+
+  // Stage 3: Try regular LLM as fallback
+  if (isDef(this.llm)) {
+    try {
+      var llmSelected = this._selectToolsByLLM(goal, allTools, this.llm)
+      if (llmSelected.length > 0) {
+        this.fnI("done", `Selected ${llmSelected.length} tool(s) via main LLM: ${llmSelected.join(", ")}`)
+        return llmSelected
+      }
+    } catch (e) {
+      this.fnI("warn", `Main LLM tool selection failed: ${e.message || e}`)
+    }
+  }
+
+  // Fallback: If all methods fail or return empty, return all tools
+  this.fnI("warn", `Dynamic tool selection returned no results, registering all ${allTools.length} tools as fallback`)
+  return allTools.map(t => t.name)
+}
+
+// ============================================================================
 // MAIN METHODS
 // ============================================================================
 
@@ -2773,6 +2973,14 @@ MiniA.prototype.init = function(args) {
     }
 
     if (this._useTools && this.mcpTools.length > 0) {
+      var parent = this
+      var selectedToolNames = []
+
+      // Perform dynamic tool selection if enabled
+      if (args.mcpdynamic === true && isString(args.goal) && args.goal.length > 0) {
+        selectedToolNames = this._selectMcpToolsDynamically(args.goal, this.mcpTools)
+      }
+
       var registerMcpTools = llmInstance => {
         if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
 
@@ -2783,12 +2991,36 @@ MiniA.prototype.init = function(args) {
           if (isUnDef(client)) return
 
           try {
-            var result = updated.withMcpTools(client)
+            var result
+
+            // If dynamic selection is enabled and we have selected tools
+            if (args.mcpdynamic === true && selectedToolNames.length > 0) {
+              // Filter tools that belong to this specific connection
+              var connectionToolNames = parent.mcpTools
+                .filter(tool => parent.mcpToolToConnection[tool.name] === connectionId)
+                .map(tool => tool.name)
+
+              // Get intersection of selected tools and this connection's tools
+              var toolsForThisConnection = selectedToolNames.filter(name =>
+                connectionToolNames.indexOf(name) >= 0
+              )
+
+              // Only register if this connection has selected tools
+              if (toolsForThisConnection.length > 0) {
+                parent.fnI("mcp", `Registering ${toolsForThisConnection.length} selected tool(s) from connection ${connectionId.substring(0, 8)}...`)
+                result = updated.withMcpTools(client, toolsForThisConnection)
+              } else {
+                parent.fnI("mcp", `No selected tools for connection ${connectionId.substring(0, 8)}, skipping registration.`)
+              }
+            } else {
+              // Default behavior: register all tools
+              result = updated.withMcpTools(client)
+            }
+
             if (isDef(result)) updated = result
           } catch (e) {
             var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
-            this.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
-            //$err(e)
+            parent.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
           }
         })
         return updated
@@ -2802,7 +3034,10 @@ MiniA.prototype.init = function(args) {
         if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
       }
 
-      this.fnI("mcp", `Registered ${this.mcpTools.length} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+      var toolCountMsg = args.mcpdynamic === true && selectedToolNames.length > 0
+        ? `${selectedToolNames.length} dynamically selected`
+        : `${this.mcpTools.length}`
+      this.fnI("mcp", `Registered ${toolCountMsg} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
     }
 
     // Provide system prompt instructions
