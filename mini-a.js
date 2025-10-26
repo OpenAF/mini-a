@@ -2985,8 +2985,9 @@ MiniA.prototype.init = function(args) {
         if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
 
         var updated = llmInstance
-        Object.keys(parent._mcpConnections).forEach(connectionId => {
-          var client = parent._mcpConnections[connectionId]
+        log(`Registering MCP tools on LLM via tool interface...`)
+        Object.keys(this._mcpConnections).forEach(connectionId => {
+          var client = this._mcpConnections[connectionId]
           if (isUnDef(client)) return
 
           try {
