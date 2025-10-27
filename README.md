@@ -159,6 +159,22 @@ mini-a.sh goal="check if port 80 is open on google.com" mcp="(cmd: 'ojob mcps/mc
 
 # Email operations
 mini-a.sh goal="send a test email" mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=test@example.com', timeout: 5000)" rpm=20
+
+# S3 inventory (read-only by default; add readwrite=true to enable writes)
+mini-a.sh goal="list the latest invoices in our S3 bucket" \
+  mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=finance-archive prefix=invoices/', timeout: 5000)" rpm=20
+
+# RSS monitoring
+mini-a.sh goal="summarize the last five posts from the OpenAI blog" \
+  mcp="(cmd: 'ojob mcps/mcp-rss.yaml', timeout: 5000)" knowledge="- prefer bullet lists" rpm=20
+
+# Market data lookups
+mini-a.sh goal="compare AAPL and MSFT revenue trends" \
+  mcp="(cmd: 'ojob mcps/mcp-fin.yaml', timeout: 5000)" rpm=20
+
+# Local shell MCP (inherits the command allow/deny list)
+mini-a.sh goal="collect disk usage stats" \
+  mcp="(cmd: 'ojob mcps/mcp-shell.yaml timeout=3000 shellallow=df,du', timeout: 5000)" rpm=20
 ```
 
 #### Shell operations
@@ -221,7 +237,7 @@ Mini-A ships with three complementary components:
 - **Flexible Configuration**: Extensive configuration options for different use cases
 - **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) of the current task, complete with web UI progress tracking
 - **Dynamic MCP Tool Selection**: Combine `usetools=true` with `mcpdynamic=true` to have the agent register only the tools it considers relevant to the current goal, falling back gracefully when needed
-- **Built-in MCPs**: Includes database, network, time/timezone, email, data channel, and SSH execution MCP servers
+- **Built-in MCPs**: Includes database, file system, network, time/timezone, email, data channel, RSS, S3, Yahoo Finance, SSH execution, and local shell MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
 - **Simple Web UI**: Lightweight embedded chat interface for interactive use (screenshot above)
 - **Text Attachments in the Web UI**: When started with `useattach=true`, upload and review text files alongside your prompt with collapsible previews in the conversation log
