@@ -122,17 +122,6 @@ Enable `useplanning=true` to activate a richer planning workflow that now adapts
 
 The new planning helpers live entirely in `state.plan`, so existing prompts and transcripts remain compatible while gaining richer telemetry.
 
-### Recent MCP additions
-
-Last week's release expanded the built-in MCP catalog so you can cover more workflows without pulling in external servers:
-
-- **S3 object storage (`mcps/mcp-s3.yaml`)** – Browse buckets, inspect objects, generate pre-signed URLs, and (optionally) enable read/write operations through a hardened MCP interface.
-- **Local shell tooling (`mcps/mcp-shell.yaml`)** – Execute vetted shell commands or batches through the MCP safety layer, reusing the same allow/deny lists that protect direct shell access.
-- **Yahoo Finance data (`mcps/mcp-fin.yaml`)** – Pull price series and company fundamentals straight from Yahoo Finance via deterministic, cache-friendly tools.
-- **RSS discovery and retrieval (`mcps/mcp-rss.yaml`)** – Look up curated feed endpoints and normalize RSS/Atom content for summarization or monitoring flows.
-
-See [mcps/README.md](mcps/README.md) for full tool descriptions and parameter details.
-
 ### Running the mini agent
 
 #### Single MCP connection
