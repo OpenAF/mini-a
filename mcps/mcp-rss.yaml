@@ -1,4 +1,4 @@
-# Author: OpenAI Assistant
+# Author: OpenAI Assistant, Nuno Aguiar
 help:
   text   : A STDIO/HTTP MCP RSS utility server
   expects:
@@ -6,13 +6,13 @@ help:
     desc     : If defined starts a MCP server on the provided port
     example  : "8888"
     mandatory: false
-
   - name     : userAgent
     desc     : Optional User-Agent header to use when requesting RSS feeds or metadata
     example  : "mini-a-mcp-rss"
     mandatory: false
 
 todo:
+- Init
 - (if    ): "isDef(args.onport)"
   ((then)):
   - (httpdStart   ): "${onport:-8080}"
@@ -29,7 +29,7 @@ todo:
 
       get-rss-feed:
         name       : get-rss-feed
-        description: Retrieves and normalises items from a RSS/Atom feed URL.
+        description: Retrieves and normalises items from a RSS/Atom feed URL. Use also 'find-rss-url' to locate known feed URLs.
         inputSchema:
           type      : object
           properties:
@@ -61,12 +61,6 @@ todo:
             query:
               type       : string
               description: Word or partial name to search for in the feed catalogue.
-            limit:
-              type       : integer
-              description: Maximum number of results to return (defaults to 10).
-            userAgent:
-              type       : string
-              description: Overrides the HTTP User-Agent header used for the request.
           required: [ query ]
         annotations:
           title         : find-rss-url
@@ -99,10 +93,77 @@ include:
 
 init:
   defaultPath: rss.channel.item
-  catalogueAPI: https://api.github.com/repos/openaf/ojob.io/contents/news
+  catalogueAPI:
+  - name: aws
+    url : https://aws.amazon.com/blogs/aws/feed
+  - name: adoptium
+    url : https://adoptium.net/rss.xml
+  - name: awsnews
+    url : https://aws.amazon.com/about-aws/whats-new/recent/feed/
+  - name: azure
+    url : https://azure.microsoft.com/en-us/blog/feed
+  - name: bbc
+    url : http://feeds.bbci.co.uk/news/rss.xml?edition=int
+  - name: cnet
+    url : https://www.cnet.com/rss/news/
+  - name: engadget
+    url : https://www.engadget.com/rss.xml
+  - name: facebook
+    url : https://engineering.fb.com/feed/
+  - name: gcp
+    url : https://cloudblog.withgoogle.com/rss
+  - name: github
+    url : https://github.blog/feed/
+  - name: github-changelog
+    url : https://github.blog/changelog/feed/
+  - name: google
+    url : https://www.blog.google/rss/
+  - name: hackernews
+    url : http://feeds.feedburner.com/TheHackersNews?format=xml
+  - name: helm
+    url : https://helm.sh/blog/index.xml
+  - name: k8s
+    url : https://kubernetes.io/feed.xml
+  - name: macrumors
+    url : http://feeds.macrumors.com/MacRumors-All
+  - name: microsoft
+    url : https://blogs.microsoft.com/feed/
+  - name: microsoft-insider
+    url : https://insider.microsoft365.com/rss/blog
+  - name: nytimes
+    url : https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/world/rss.xml
+  - name: openai
+    url : https://openai.com/blog/rss.xml
+  - name: oraclecloud
+    url : https://blogs.oracle.com/cloud-infrastructure/rss
+  - name: ovh
+    url : https://blog.ovhcloud.com/feed/
+  - name: redhatcloud
+    url : https://cloud.redhat.com/blog/rss.xml
+  - name: scaleway
+    url : https://blog.scaleway.com/rss/
+  - name: slashdot
+    url : http://rss.slashdot.org/Slashdot/slashdotMain
+  - name: techcrunch
+    url : https://techcrunch.com/rss
+  - name: the-register
+    url : https://www.theregister.com/headlines.rss
+  - name: the-verge
+    url : https://www.theverge.com/rss/index.xml
+  - name: tomshardware
+    url : https://www.tomshardware.com/feeds/all
+  - name: wired
+    url : http://feeds.wired.com/wired/index
 
 jobs:
-# ------------------
+# -----------
+- name : Init
+  exec : | #js
+    // Initialization job (no operation needed for now)
+    global.catalogueAPI = args.init.catalogueAPI
+    global.defaultPath  = args.init.defaultPath
+
+# -------------------
 - name : Get RSS feed
   check:
     in:
@@ -124,9 +185,9 @@ jobs:
       return item
     }
 
-    if (isUnDef(args.path)) args.path = args.init.defaultPath
+    if (isUnDef(args.path)) args.path = global.defaultPath
 
-    var rest = $rest({ requestHeaders: { "User-Agent": args.userAgent || root.args.userAgent || "mini-a-mcp-rss" } })
+    var rest = $rest({ requestHeaders: { "User-Agent": args.userAgent || "mini-a-mcp-rss" } })
     var xml = rest.get(args.url)
     var rssObj = af.fromXML2Obj(xml)
     var wrapper = $$(rssObj)
@@ -150,51 +211,13 @@ jobs:
 
     return mapped
 
+# -------------------
 - name : Find RSS URL
   check:
     in:
       query    : isString
-      limit    : toNumber.isNumber.default(10)
-      userAgent: isString.default(__)
   exec : | #js
-    var rest = $rest({ requestHeaders: { "User-Agent": args.userAgent || root.args.userAgent || "mini-a-mcp-rss" } })
-    var files = rest.get(args.init.catalogueAPI)
-    if (isString(files)) files = JSON.parse(files)
-    if (!isArray(files)) return []
-
-    var results = []
-
-    files.filter(f => f.type == "file" && f.name.endsWith(".yaml") && f.name != "rss.yaml").forEach(file => {
-      try {
-        var content = String(rest.get(file.download_url))
-        var argsIdx = content.indexOf("\n  args:")
-        if (argsIdx < 0) argsIdx = content.indexOf("\nargs:")
-        if (argsIdx < 0) return
-        var argsBlock = content.substring(argsIdx)
-        var urlMatch = argsBlock.match(/\n\s+url:\s*([^\s#]+)/)
-        if (!urlMatch) {
-          urlMatch = argsBlock.match(/\n\s+url:\s*\"([^\"]+)\"/)
-        }
-        if (!urlMatch) return
-        var helpMatch = content.match(/help:\s*\n\s*text\s*:\s*(.+)/)
-        var name = file.name.replace(/\.yaml$/, "")
-        var entry = {
-          name : name,
-          url  : urlMatch[1].trim().replace(/^\"|\"$/g, ""),
-          title: helpMatch ? helpMatch[1].trim() : name,
-          source: file.html_url
-        }
-        results.push(entry)
-      } catch(e) {
-        logErr(e)
-      }
-    })
-
-    var escaped = args.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    var pattern = new RegExp(escaped, "i")
-    var filtered = results
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .filter(r => pattern.test(r.name) || pattern.test(r.title) || pattern.test(r.url))
-
-    var limit = isNumber(args.limit) && args.limit > 0 ? args.limit : results.length
-    return filtered.slice(0, limit)
+    var rest = $rest({ requestHeaders: { "User-Agent": args.userAgent || "mini-a-mcp-rss" } })
+    
+    var results = global.catalogueAPI.filter(api => api.name.toLowerCase().includes(args.query.toLowerCase()))
+    return results
