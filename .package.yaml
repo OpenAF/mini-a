@@ -95,13 +95,13 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: 6b0e52f59e26f3f16ba8a89338c792f3a763f0b7
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: eaaa2a23dc9617d3a369805c2639cd160ac52dcb
+  README.md: 17e33bea42db18943765776da8b62991aa5d5da5
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
   USAGE.md: 0b9cb75a3d5c32c1a9c61432f69485f5c5ccf41d
   examples/README.md: bd779bff34653547069d6a647346fc703f8fcfb9
   examples/summary.yaml: 58c12ffc5107dc53f02ed7c04f903fa945d9ec91
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
-  mcps/README.md: 44e5ef574fceb1d426ee07480ab6fecc7d1e874a
+  mcps/README.md: c644840aff1dd2157ca287e6329a93661e2e17b8
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
