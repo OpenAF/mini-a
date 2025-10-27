@@ -9,13 +9,17 @@
 | mcp-file   | Local file management MCP       | STDIO/HTTP       | (included) | [mcp-file.yaml](mcp-file.yaml)     |
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | Provided by the `notifications` oPack (see its documentation) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
+| mcp-fin    | Yahoo Finance market data MCP   | STDIO/HTTP       | (included) | [mcp-fin.yaml](mcp-fin.yaml)       |
 | mcp-kube   | Kubernetes management MCP       | STDIO/HTTP       | (included) | [mcp-kube.yaml](mcp-kube.yaml)     |
 | mcp-time   | Time and timezone utility MCP   | STDIO/HTTP       | (included) | [mcp-time.yaml](mcp-time.yaml)     |
 | mcp-random | Random data generation MCP      | STDIO/HTTP       | (included) | [mcp-random.yaml](mcp-random.yaml) |
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
+| mcp-shell  | Local shell execution MCP       | STDIO/HTTP       | (included) | [mcp-shell.yaml](mcp-shell.yaml)   |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oafp   | OpenAF processor (oafp) runner & docs MCP | STDIO/HTTP | (included) | [mcp-oafp.yaml](mcp-oafp.yaml)   |
+| mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
+| mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
 | mcp-weather| Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
 
 See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contribution guidelines.
@@ -271,6 +275,93 @@ Example — search for filters documentation mentioning SQL:
 
 ```bash
 oafp in=mcp data="(cmd: 'ojob mcps/mcp-oafp.yaml', tool: search-doc, params: (query: 'sql'))"
+```
+
+#### mcp-shell
+
+`mcp-shell` provides a controlled execution environment for local shell commands. It mirrors Mini-A's built-in allow/deny lists and lets you opt into additional binaries or shell features.
+
+Startup flags:
+
+- `readwrite` (default `false`): Allow commands that may change system state.
+- `shellallow`: Comma-separated allow-list of commands to unblock.
+- `shellbanextra`: Additional commands to forbid even if normally allowed.
+- `shellallowpipes`: Permit pipes, redirects, and control operators.
+- `cwd`, `timeout`, `env`: Set defaults for commands invoked through the MCP.
+
+Exposed tools:
+
+- `shell-exec`: Run a single command with optional stdin, cwd, timeout, env, and `parseJson` toggles.
+- `shell-batch`: Execute an array of commands (strings or maps) sequentially, inheriting top-level cwd/timeout/env values.
+
+Example — run disk usage diagnostics with an explicit allow-list:
+
+```bash
+mini-a.sh goal="summarize disk usage" \
+  mcp="(cmd: 'ojob mcps/mcp-shell.yaml shellallow=df,du timeout=4000', timeout: 5000)" rpm=20
+```
+
+#### mcp-s3
+
+`mcp-s3` wraps the OpenAF `S3` library so the agent can browse buckets, read objects, upload new payloads, or generate pre-signed URLs. The server is read-only unless you explicitly opt into write/delete support.
+
+Key arguments:
+
+- `url`, `accessKey`, `secret`, `region`: Connection details for your S3-compatible endpoint (all optional for public buckets).
+- `bucket`: Default bucket when the tool input omits one.
+- `readwrite`: Enable write/delete operations (`false` by default).
+- `useversion1`, `ignorecertcheck`: Compatibility flags for legacy or self-hosted endpoints.
+
+Primary tools:
+
+- `s3-list-buckets`, `s3-list-objects`: Enumerate accessible buckets or bucket contents.
+- `s3-get-object`: Retrieve object data with optional range reads or metadata fetches.
+- `s3-put-object`, `s3-delete-object`: Manage objects when `readwrite=true`.
+- `s3-presign-get`: Produce temporary GET URLs for sharing or ingestion pipelines.
+
+Example — list JSON reports under a prefix:
+
+```bash
+mini-a.sh goal="audit nightly reports" \
+  mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=ops-data prefix=reports/nightly/', timeout: 5000)" rpm=20
+```
+
+Example — upload a processed artifact (write mode):
+
+```bash
+mini-a.sh goal="publish sanitized metrics" \
+  mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=ops-data readwrite=true', timeout: 5000)" \
+  knowledge="- encode uploads as base64 when calling s3-put-object" rpm=20
+```
+
+#### mcp-fin
+
+`mcp-fin` pulls market intelligence from Yahoo Finance. It lazily initialises the bundled `apiYFinance.js` helper and exposes two deterministic tools:
+
+- `get-ticker-data`: Fetch historical price series, ranges, and technical indicators for a given `symbol` (set `raw=true` to inspect the untouched Yahoo response).
+- `get-ticker-fundamentals`: Retrieve company fundamentals (income statement, balance sheet, etc.) with the same optional `raw` flag.
+
+Example — compare revenue growth across two tickers:
+
+```bash
+mini-a.sh goal="chart revenue for NVDA vs AMD" \
+  mcp="(cmd: 'ojob mcps/mcp-fin.yaml', timeout: 5000)" rpm=20
+```
+
+#### mcp-rss
+
+`mcp-rss` simplifies monitoring blogs and news feeds. It ships with a curated catalogue (AWS, OpenAI, TechCrunch, etc.) and allows both direct fetches and discovery lookups.
+
+Tools:
+
+- `get-rss-feed`: Download and normalise feed items. Accepts `nodesc=true` to strip descriptions, `path` to override the item array location, and `userAgent` to customise the HTTP header.
+- `find-rss-url`: Search the bundled catalogue for feeds whose names include a `query` substring.
+
+Example — locate an official feed and pull the latest posts:
+
+```bash
+mini-a.sh goal="summarize the most recent Azure announcements" \
+  mcp="(cmd: 'ojob mcps/mcp-rss.yaml', timeout: 5000)" rpm=20
 ```
 
 #### mcp-weather
