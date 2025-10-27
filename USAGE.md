@@ -268,6 +268,9 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 - **`outfile`** (string): Path to file where final answer will be written
 - **`__format`** (string): Output format (e.g. "json", "md", ...)
 
+#### Audit Logging
+- **`auditch`** (string): JSSLON definition for the OpenAF channel that stores Mini-A interaction events. When supplied, each call to `fnI` is persisted under the `_mini_a_audit_channel` key. Example for a file-backed log: `auditch="(type: 'file', options: (file: 'audit.json'))"`. Channel types and options follow the OpenAF channel conventions documented in `github.com/openaf/docs/openaf.md` and `github.com/openaf/docs/llm-guide.md`; keep the structure compatible with `$ch().create(type, options)`.
+
 #### Rate Limiting
 - **`rtm`** (number): Rate limit in calls per minute
 
