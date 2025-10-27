@@ -32,6 +32,7 @@ var MiniA = function() {
   this._planningStrategy = "off"
   this._planningStats = { validations: 0, adjustments: 0 }
   this._planningProgress = { overall: 0, completed: 0, total: 0, checkpoints: { reached: 0, total: 0 } }
+  this._auditon = false
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -371,6 +372,18 @@ MiniA.prototype.setInteractionFn = function(afn) {
  * </odoc>
  */
 MiniA.prototype.fnI = function(event, message) {
+  if (this._auditon) {
+    var _t = nowUTC()
+    $ch("_mini_a_audit_channel").set({
+      ts: _t,
+      id: this._id
+    }, {
+      ts: _t,
+      id: this._id,
+      e : event,
+      m : message
+    })
+  }
   return this._fnI(event, message)
 }
 
@@ -1403,6 +1416,8 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     }
   }
 
+  this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
+
   // Handle JSON parsing for markdown format
   if ((args.format == "json" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
     this.state = "stop"
@@ -1413,7 +1428,6 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     return answer
   }
 
-  this.fnI("final", `Final answer determined. Goal achieved.`)
   this.state = "stop"
 
   // Mark goal as achieved if not already counted
@@ -2840,7 +2854,8 @@ MiniA.prototype.init = function(args) {
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" },
       { name: "toolcachettl", type: "number", default: __ },
-      { name: "mcplazy", type: "boolean", default: false }
+      { name: "mcplazy", type: "boolean", default: false },
+      { name: "auditch", type: "string", default: __ },
     ])
 
     // Convert and validate boolean arguments
@@ -2897,6 +2912,19 @@ MiniA.prototype.init = function(args) {
           this.fnI("error", `Failed to load library ${lib}: ${e.message}`)
         }
       })
+    }
+
+    // Check the need to init auditch
+    if (isDef(args.auditch) && args.auditch.length > 0) {
+      var _auditchm = af.fromJSSLON(args.auditch)
+      if (isMap(_auditchm)) {
+        try {
+          $ch("_mini_a_audit_channel").create(isDef(_auditchm.type) ? _auditchm.type : "simple", isMap(_auditchm.options) ? _auditchm.options : {})
+          this._auditon = true
+        } catch (e) {
+          this.fnI("error", `Failed to create audit channel: ${e.message}`)
+        }
+      }
     }
 
     // Using OAF_MODEL env var for model selection
