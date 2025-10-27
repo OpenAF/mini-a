@@ -97,7 +97,7 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 17e33bea42db18943765776da8b62991aa5d5da5
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
-  USAGE.md: 0b9cb75a3d5c32c1a9c61432f69485f5c5ccf41d
+  USAGE.md: 7e325c62e987bd4cc6df65a793f7ecdf35c32701
   examples/README.md: bd779bff34653547069d6a647346fc703f8fcfb9
   examples/summary.yaml: 58c12ffc5107dc53f02ed7c04f903fa945d9ec91
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
@@ -122,7 +122,7 @@ filesHash:
   mini-a-main.yaml: 81cc2029c4dd67d15f283cb4be0ee09e66db3a54
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 6a7006d440b40c0c034e0adeaa9d5bb361426749
-  mini-a.js: 640ab3ea5a21feb063918a755afd66de575ca0ab
+  mini-a.js: c33a825c0e7811455289e5794beb6b29784ba8a3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 7dccc44f4acd266646770b81aa29832a7b04bcaa
   public/index.md: 0bf7bdc72c67f94edba299201e06e4c0376d6c83
