@@ -1,0 +1,200 @@
+# Author: OpenAI Assistant
+help:
+  text   : A STDIO/HTTP MCP RSS utility server
+  expects:
+  - name     : onport
+    desc     : If defined starts a MCP server on the provided port
+    example  : "8888"
+    mandatory: false
+
+  - name     : userAgent
+    desc     : Optional User-Agent header to use when requesting RSS feeds or metadata
+    example  : "mini-a-mcp-rss"
+    mandatory: false
+
+todo:
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
+      serverInfo:
+        name   : mini-a-rss
+        title  : OpenAF mini-a MCP RSS utility server
+        version: 1.0.0
+
+    ((fnsMeta)): &MCPFNSMETA
+
+      get-rss-feed:
+        name       : get-rss-feed
+        description: Retrieves and normalises items from a RSS/Atom feed URL.
+        inputSchema:
+          type      : object
+          properties:
+            url:
+              type       : string
+              description: The RSS/Atom URL to retrieve.
+            nodesc:
+              type       : boolean
+              description: If true removes descriptions from the output.
+              default    : false
+            path:
+              type       : string
+              description: Optional JSON path to the array of items (defaults to rss.channel.item or detected path).
+            userAgent:
+              type       : string
+              description: Overrides the HTTP User-Agent header used for the request.
+          required: [ url ]
+        annotations:
+          title         : get-rss-feed
+          readOnlyHint  : true
+          idempotentHint: true
+
+      find-rss-url:
+        name       : find-rss-url
+        description: Finds RSS/Atom feed URLs for known sources using the ojob.io/news catalogue.
+        inputSchema:
+          type      : object
+          properties:
+            query:
+              type       : string
+              description: Word or partial name to search for in the feed catalogue.
+            limit:
+              type       : integer
+              description: Maximum number of results to return (defaults to 10).
+            userAgent:
+              type       : string
+              description: Overrides the HTTP User-Agent header used for the request.
+          required: [ query ]
+        annotations:
+          title         : find-rss-url
+          readOnlyHint  : true
+          idempotentHint: true
+
+    ((fns    )): &MCPFNS
+      get-rss-feed: Get RSS feed
+      find-rss-url: Find RSS URL
+
+  ((else)):
+  - (stdioMCP ): *MCPSERVER
+    ((fnsMeta)): *MCPFNSMETA
+    ((fns    )): *MCPFNS
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mcp-rss.pid
+    killPrevious: true
+
+include:
+- oJobMCP.yaml
+
+init:
+  defaultPath: rss.channel.item
+  catalogueAPI: https://api.github.com/repos/openaf/ojob.io/contents/news
+
+jobs:
+# ------------------
+- name : Get RSS feed
+  check:
+    in:
+      url      : isString
+      nodesc   : toBoolean.isBoolean.default(false)
+      path     : isString.default(__)
+      userAgent: isString.default(__)
+  exec : | #js
+    var fnText = v => {
+      if (isUnDef(v) || v === null) return ""
+      if (isMap(v) && isDef(v.null)) v = v.null
+      return String(v).replace(/<.+?>/g, "").replace(/(( |\n)( |\n))+/g, "$1").trim()
+    }
+
+    var normalise = item => {
+      if (isUnDef(item.date) && isDef(item.published)) item.date = new Date(item.published)
+      if (isUnDef(item.description) && isDef(item.content)) item.description = String(item.content).replace(/<[^>]+>/g, "").trim()
+      if (isDef(item.id) && isUnDef(item.link) && String(item.id).startsWith("http")) item.link = item.id
+      return item
+    }
+
+    if (isUnDef(args.path)) args.path = args.init.defaultPath
+
+    var rest = $rest({ requestHeaders: { "User-Agent": args.userAgent || root.args.userAgent || "mini-a-mcp-rss" } })
+    var xml = rest.get(args.url)
+    var rssObj = af.fromXML2Obj(xml)
+    var wrapper = $$(rssObj)
+    var items = wrapper.get(args.path)
+
+    if (isUnDef(items) && args.path != "feed.entry") {
+      items = wrapper.get("feed.entry")
+    }
+
+    if (isUnDef(items)) return []
+
+    var mapped = (isArray(items) ? items : [ items ]).map(normalise).map(item => {
+      var base = {
+        title: fnText(item.title),
+        date : isDef(item.date) ? new Date(item.date) : new Date(isDef(item.pubDate) ? item.pubDate : Date.now()),
+        link : item.link
+      }
+      if (!args.nodesc) base.description = fnText(item.description)
+      return base
+    })
+
+    return mapped
+
+- name : Find RSS URL
+  check:
+    in:
+      query    : isString
+      limit    : toNumber.isNumber.default(10)
+      userAgent: isString.default(__)
+  exec : | #js
+    var rest = $rest({ requestHeaders: { "User-Agent": args.userAgent || root.args.userAgent || "mini-a-mcp-rss" } })
+    var files = rest.get(args.init.catalogueAPI)
+    if (isString(files)) files = JSON.parse(files)
+    if (!isArray(files)) return []
+
+    var results = []
+
+    files.filter(f => f.type == "file" && f.name.endsWith(".yaml") && f.name != "rss.yaml").forEach(file => {
+      try {
+        var content = String(rest.get(file.download_url))
+        var argsIdx = content.indexOf("\n  args:")
+        if (argsIdx < 0) argsIdx = content.indexOf("\nargs:")
+        if (argsIdx < 0) return
+        var argsBlock = content.substring(argsIdx)
+        var urlMatch = argsBlock.match(/\n\s+url:\s*([^\s#]+)/)
+        if (!urlMatch) {
+          urlMatch = argsBlock.match(/\n\s+url:\s*\"([^\"]+)\"/)
+        }
+        if (!urlMatch) return
+        var helpMatch = content.match(/help:\s*\n\s*text\s*:\s*(.+)/)
+        var name = file.name.replace(/\.yaml$/, "")
+        var entry = {
+          name : name,
+          url  : urlMatch[1].trim().replace(/^\"|\"$/g, ""),
+          title: helpMatch ? helpMatch[1].trim() : name,
+          source: file.html_url
+        }
+        results.push(entry)
+      } catch(e) {
+        logErr(e)
+      }
+    })
+
+    var escaped = args.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    var pattern = new RegExp(escaped, "i")
+    var filtered = results
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .filter(r => pattern.test(r.name) || pattern.test(r.title) || pattern.test(r.url))
+
+    var limit = isNumber(args.limit) && args.limit > 0 ? args.limit : results.length
+    return filtered.slice(0, limit)
