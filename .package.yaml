@@ -51,7 +51,7 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251027'
+version: '20251028'
 dependencies:
   openaf: '>=20250915'
 files:
