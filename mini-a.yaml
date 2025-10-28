@@ -20,6 +20,11 @@ help:
     desc     : A MCP connection object (or array of objects) using OpenAF's $mcp() function in SLON or JSON format
     example  : "(url: 'http://127.0.0.1:17879/mcp', type: remote, debug: false)"
     mandatory: false
+  - name     : mcplazy
+    desc     : Initialize MCP connections lazily on first use instead of during startup
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : verbose
     desc     : Whether to print detailed logs
     example  : "true"
@@ -36,6 +41,10 @@ help:
   - name     : tpm
     desc     : Maximum number of LLM tokens per minute across prompt and completion
     example  : "80000"
+    mandatory: false
+  - name     : rtm
+    desc     : Legacy alias for rpm (requests per minute)
+    example  : "20"
     mandatory: false
   - name     : readwrite
     desc     : Allow read-write commands without confirmation (dangerous)
@@ -104,9 +113,18 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : toolcachettl
+    desc     : Default cache TTL in milliseconds for MCP tool results
+    example  : "600000"
+    mandatory: false
   - name     : usetools
     desc     : Register MCP tools directly on the model instead of expanding the prompt with schemas
     example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : useutils
+    desc     : Automatically register Mini File Tool utilities as an MCP connection
+    example  : "true"
     mandatory: false
     options  : ["true", "false"]
   - name     : mcpdynamic
@@ -119,6 +137,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : chatbotmode
+    desc     : Run Mini-A in conversational chatbot mode without agent planning
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : rules
     desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
@@ -126,6 +149,14 @@ help:
   - name     : state
     desc     : Initial state data to provide to the agent as structured JSON/SLON
     example  : '{"current_task": "analysis", "progress": 0}'
+    mandatory: false
+  - name     : format
+    desc     : Output format for the final answer (md or json)
+    example  : "json"
+    mandatory: false
+  - name     : auditch
+    desc     : SLON/JSON definition of an audit channel to record agent activity
+    example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
 
 todo:
@@ -146,9 +177,13 @@ jobs:
   check:
     in:
       goal           : isString
+      mcp            : isString.default(__)
       verbose        : toBoolean.isBoolean.default(false)
+      rpm            : toNumber.isNumber.default(__)
       rtm            : toNumber.isNumber.default(__)
+      tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(25)
+      maxcontext     : toNumber.isNumber.default(0)
       readwrite      : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)
@@ -157,15 +192,22 @@ jobs:
       outfile        : isString.default(__)
       libs           : isString.default(__)
       conversation   : isString.default(__)
+      format         : isString.default(__)
+      raw            : toBoolean.isBoolean.default(false)
       shellallow     : isString.default(__)
       shellbanextra  : isString.default(__)
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
+      toolcachettl   : toNumber.isNumber.default(__)
       usetools       : toBoolean.isBoolean.default(false)
+      useutils       : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
+      mcplazy        : toBoolean.isBoolean.default(false)
       useplanning    : toBoolean.isBoolean.default(false)
+      chatbotmode    : toBoolean.isBoolean.default(false)
       rules          : isString.default(__)
       state          : isString.default(__)
+      auditch        : isString.default(__)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()

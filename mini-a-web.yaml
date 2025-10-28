@@ -91,6 +91,33 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : mcplazy
+    desc     : "Initialize MCP connections lazily on first use instead of during Init"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : toolcachettl
+    desc     : "Default cache TTL in milliseconds for MCP tool results"
+    example  : "600000"
+    mandatory: false
+  - name     : useutils
+    desc     : "Register Mini File Tool utilities as an MCP connection automatically"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : chatbotmode
+    desc     : "Run Mini-A in chatbot mode without agent planning prompts"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : format
+    desc     : "Preferred Mini-A response format (md or json)"
+    example  : "json"
+    mandatory: false
+  - name     : auditch
+    desc     : "SLON/JSON definition of an audit channel for Mini-A interaction logs"
+    example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -639,6 +666,12 @@ jobs:
       historys3region : isString().default(__)
       historys3useversion1: toBoolean().isBoolean().default(false)
       historys3ignorecertcheck: toBoolean().isBoolean().default(false)
+      mcplazy        : toBoolean().isBoolean().default(false)
+      toolcachettl   : toNumber().isNumber().default(__)
+      useutils       : toBoolean().isBoolean().default(false)
+      chatbotmode    : toBoolean().isBoolean().default(false)
+      format         : isString().default(__)
+      auditch        : isString().default(__)
   exec : | #js
     global.__res = {}
     global.__usehistory = args.usehistory
@@ -681,7 +714,9 @@ jobs:
       }
     }
 
-    args.__format = "md"
+    if (isUnDef(args.__format)) {
+      args.__format = isDef(args.format) ? args.format : "md"
+    }
     
     // Add system knowledge about visual diagram capabilities
     var visualDiagramKnowledge = ""
