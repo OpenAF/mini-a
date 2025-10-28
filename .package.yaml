@@ -13,12 +13,24 @@ scripts:
     print("Using Mini-A")
     print("------------")
     print()
-    print("  To get started, run:")
-    print(`     ${path}/mini-a.sh -jobhelp`)
-    print("     (and set OAF_MODEL environment variable)")
+    print("  1) Set the OAF_MODEL environment variable.")
+    print("     If you need an interactive helper, run:")
+    print("       ojob ojob.io/ai/buildOAFModel")
     print()
-    print("  Or set OAF_MODEL environment variable and then start the web interface with:")
-    print(`     ${path}/mini-a-web.sh onport=12345`)
+    print("  2) CLI usage/help:")
+    print("       opack exec mini-a -jobhelp")
+    print()
+    print("  3) Web interface:")
+    print("       opack exec mini-a onport=12345 [arguments]")
+    print()
+    print(`  4) Examples (oJob-based orchestration): ${path}/examples`)
+    print()
+    print("  5) Optional Unix alias 'mini-a' to run opack exec mini-a:")
+    print("       Bash: echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.bashrc && . ~/.bashrc")
+    print("       Zsh:  echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.zshrc && . ~/.zshrc")
+    print("     Or create a portable wrapper:")
+    print("       mkdir -p ~/.local/bin && printf '#!/usr/bin/env sh\\nopack exec mini-a \"$@\"\\n' > ~/.local/bin/mini-a && chmod +x ~/.local/bin/mini-a")
+    print("       Ensure ~/.local/bin is on your PATH")
     print()
     print("Visit https://github.com/openaf/mini-a for documentation and examples.")
     print()
@@ -43,7 +55,14 @@ version: '20251027'
 dependencies:
   openaf: '>=20250915'
 files:
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+- .github/mini-a-web-screenshot1.jpg
+- .github/version.svg
+- .github/workflows/github-action.yml
 - .odoc.db
+- .openaf_precompiled/.t8-20251028
+- .openaf_precompiled/mini-a_js.class
 - .package.yaml
 - AGENTS.md
 - CODE_OF_CONDUCT.md
@@ -89,7 +108,14 @@ files:
 - tests/coreFunctionality.js
 - tests/coreFunctionality.yaml
 filesHash:
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
+  .github/version.svg: 113652ad0af393d8ae6a6aa208a8c13b6d29dfdc
+  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20251028: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a_js.class: 17d7feafca3f09e51ff14d424a26360d9e31a266
   AGENTS.md: 7b6df1520b27dc3ef4e025a084452c62d0e1c1f9
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
@@ -121,10 +147,10 @@ filesHash:
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
   mini-a-main.yaml: 81cc2029c4dd67d15f283cb4be0ee09e66db3a54
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 6a7006d440b40c0c034e0adeaa9d5bb361426749
+  mini-a-web.yaml: a3bd7ba34a40a20c7caad5e2cd0824313fd6fc10
   mini-a.js: c33a825c0e7811455289e5794beb6b29784ba8a3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 7dccc44f4acd266646770b81aa29832a7b04bcaa
+  mini-a.yaml: 43bfbe6b3626b99f0d78fc15031eb83199cc2ae2
   public/index.md: 0bf7bdc72c67f94edba299201e06e4c0376d6c83
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
