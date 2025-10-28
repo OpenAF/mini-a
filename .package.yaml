@@ -55,14 +55,7 @@ version: '20251028'
 dependencies:
   openaf: '>=20250915'
 files:
-- .github/ISSUE_TEMPLATE/bug_report.md
-- .github/ISSUE_TEMPLATE/feature_request.md
-- .github/mini-a-web-screenshot1.jpg
-- .github/version.svg
-- .github/workflows/github-action.yml
 - .odoc.db
-- .openaf_precompiled/.t8-20251028
-- .openaf_precompiled/mini-a_js.class
 - .package.yaml
 - AGENTS.md
 - CODE_OF_CONDUCT.md
@@ -108,14 +101,7 @@ files:
 - tests/coreFunctionality.js
 - tests/coreFunctionality.yaml
 filesHash:
-  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
-  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
-  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
-  .github/version.svg: 113652ad0af393d8ae6a6aa208a8c13b6d29dfdc
-  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/.t8-20251028: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  .openaf_precompiled/mini-a_js.class: 17d7feafca3f09e51ff14d424a26360d9e31a266
   AGENTS.md: 7b6df1520b27dc3ef4e025a084452c62d0e1c1f9
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
