@@ -30,6 +30,25 @@ Common web toggles:
 - `logpromptheaders=origin,referer` to emit selected HTTP headers for debugging
 - `usediagrams=false` / `usecharts=false` to disable Mermaid diagrams or Chart.js rendering when the runtime lacks those assets
 - `useattach=true` to enable the paperclip for uploading supporting text snippets
+- `mode=shell` (or any preset below) to reuse a curated bundle of flags from [`mini-a-modes.yaml`](mini-a-modes.yaml)
+
+### Mode presets
+
+Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with
+`mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from
+[`mini-a-modes.yaml`](mini-a-modes.yaml) before applying any explicit flags you provide on the command line.
+
+Built-in presets:
+
+- **`shell`** – Read-only shell access (`useshell=true`).
+- **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`).
+- **`shellutils`** – Shell plus the Mini File Tool MCP utilities (`useutils=true usetools=true`).
+- **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
+- **`web`** – Browser UI with tool registration (`usetools=true`).
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, and planning enabled (`usetools=true usediagrams=true usecharts=true usehistory=true useattach=true historykeep=true useplanning=true`).
+
+Create your own presets by copying the file and adding new entries or overriding them locally—the agent loads the YAML on each
+run, so custom additions are immediately available.
 
 ## Documentation
 
@@ -288,6 +307,7 @@ All Mini-A options can be passed as command line arguments:
 - `knowledge` – Extra instructions or the path to a text file to append to the system prompt
 - `rules` – Additional numbered rules (JSON/SLON array) injected into the system prompt
 - `state` – Initial agent state payload (JSON/SLON string or object) preserved between steps
+- `mode` – Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) to toggle a bundle of arguments at once
 - `conversation` – Path to a conversation JSON file to load/save chat history
 - `libs` – Comma-separated list of extra OpenAF libraries to load before starting
 - `maxsteps` – Maximum consecutive steps without a successful action before forcing a final response (default `15`)
@@ -300,6 +320,7 @@ All Mini-A options can be passed as command line arguments:
 - `__format` – Output format (e.g. `md`, `json`)
 - `chatbotmode` – Skip the agent workflow and respond like a regular chat assistant (default `false`)
 - `useplanning` – Keep a live task plan in agent mode; Mini-A disables it automatically for trivial goals
+- `auditch` – Persist every interaction event to an OpenAF channel (JSSLON definition)
 
 For a complete list of options, see the [Usage Guide](USAGE.md).
 

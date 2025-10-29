@@ -213,6 +213,7 @@ The `start()` method accepts various configuration options:
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`useplanning`** (boolean, default: false): Maintain a persistent task plan in agent mode; Mini-A disables it automatically when the goal looks trivial
+- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) to prefill a bundle of related flags
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
@@ -263,6 +264,17 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
+
+#### Mode Presets
+- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
+  - `shell` – Enables read-only shell access.
+  - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
+  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`).
+  - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
+  - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
+  - `webfull` – Turns on diagrams, charts, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true usehistory=true useattach=true historykeep=true useplanning=true`).
+
+Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 
 #### Output Configuration
 - **`outfile`** (string): Path to file where final answer will be written
