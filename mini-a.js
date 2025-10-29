@@ -1051,14 +1051,119 @@ MiniA.prototype._persistExecutionPlanToFile = function(options) {
   var execPlan = isObject(options) && isObject(options.plan) ? options.plan : (isObject(this._executionPlan) ? this._executionPlan.parsed : null)
   if (!isObject(execPlan)) return
 
-  var markdown = this._renderMarkdownPlan(execPlan)
-  if (!isString(markdown) || markdown.trim().length === 0) return
+  // Render the current structured plan to markdown (core sections)
+  var baseMarkdown = this._renderMarkdownPlan(execPlan)
+  if (!isString(baseMarkdown) || baseMarkdown.trim().length === 0) return
+
+  // Collect dynamic insights accumulated during this run
+  if (!isObject(this._plannerInsights)) this._plannerInsights = {}
+  if (!isArray(this._plannerInsights.entries)) this._plannerInsights.entries = []
+
+  // Build insights / progress sections
+  var insightsLines = []
+  if (this._plannerInsights.entries.length > 0) {
+    insightsLines.push("## Live Insights")
+    for (var i = 0; i < this._plannerInsights.entries.length; i++) {
+      var e = this._plannerInsights.entries[i]
+      var ts = isNumber(e.at) ? new Date(e.at).toISOString() : "";
+      var phaseInfo = (isObject(e.pointer) ? ` (P${e.pointer.phaseIndex + 1} T${e.pointer.taskIndex + 1})` : "")
+      var cat = isString(e.category) && e.category.length > 0 ? ` [${e.category}]` : ""
+      var msg = isString(e.message) ? e.message.trim() : stringify(e.message, __, "")
+      insightsLines.push(`- ${ts}${phaseInfo}${cat}: ${msg}`)
+    }
+    insightsLines.push("")
+  }
+
+  var progressLines = []
+  if (isObject(this._planningProgress) && this._planningProgress.total > 0) {
+    progressLines.push("## Progress Snapshot")
+    progressLines.push(`- Overall: ${this._planningProgress.overall}% (${this._planningProgress.completed}/${this._planningProgress.total} steps)`)
+    if (isObject(this._planningProgress.checkpoints) && this._planningProgress.checkpoints.total > 0) {
+      progressLines.push(`- Checkpoints: ${this._planningProgress.checkpoints.reached}/${this._planningProgress.checkpoints.total}`)
+    }
+    if (isObject(this._executionPlan) && isObject(this._executionPlan.pointer)) {
+      progressLines.push(`- Pointer: phase ${this._executionPlan.pointer.phaseIndex + 1}, task ${this._executionPlan.pointer.taskIndex + 1}`)
+    }
+    progressLines.push("")
+  }
+
+  // Merge with existing file if present (preserve prior insights, do not lose manual notes)
+  var existing = ""
+  if (io.fileExists(planPath) && io.fileInfo(planPath).isFile) {
+    try { existing = io.readFileString(planPath) } catch(e) { existing = "" }
+  }
+  var existingNorm = existing.replace(/\r\n/g, "\n")
+
+  // Extract existing Live Insights to avoid duplication
+  var mergedInsights = []
+  if (existingNorm.indexOf("## Live Insights") >= 0) {
+    var parts = existingNorm.split(/\n(?=## Live Insights)/)
+    for (var pi = 1; pi < parts.length; pi++) {
+      var section = parts[pi]
+      var lines = section.split(/\n/)
+      // first line should be '## Live Insights'
+      if (lines.length > 0 && /^## Live Insights/.test(lines[0])) {
+        for (var li = 1; li < lines.length; li++) {
+          var l = lines[li].trim()
+          if (l.startsWith("- ")) mergedInsights.push(l)
+        }
+      }
+    }
+  }
+  // Append new insights uniquely
+  var newInsightBullets = insightsLines.filter(l => l.startsWith("- "))
+  for (var ni = 0; ni < newInsightBullets.length; ni++) {
+    if (mergedInsights.indexOf(newInsightBullets[ni]) < 0) mergedInsights.push(newInsightBullets[ni])
+  }
+  var mergedInsightsSection = []
+  if (mergedInsights.length > 0) {
+    mergedInsightsSection.push("## Live Insights")
+    mergedInsightsSection = mergedInsightsSection.concat(mergedInsights)
+    mergedInsightsSection.push("")
+  }
+
+  // Keep existing Notes / Dependencies sections if user edited them
+  var extraSections = []
+  var keepSectionNames = ["## Notes", "## Dependencies"]
+  for (var ks = 0; ks < keepSectionNames.length; ks++) {
+    var name = keepSectionNames[ks]
+    if (existingNorm.indexOf(name) >= 0) {
+      var sectParts = existingNorm.split(new RegExp(`\n(?=${name})`))
+      for (var sp = 1; sp < sectParts.length; sp++) {
+        var seg = sectParts[sp]
+        if (seg.startsWith(name)) {
+          // capture until next heading or end
+          var segLines = seg.split(/\n/)
+          var collected = []
+          for (var sl = 0; sl < segLines.length; sl++) {
+            var line = segLines[sl]
+            if (sl > 0 && /^##\s+/.test(line)) break
+            collected.push(line)
+          }
+          if (collected.length > 0) {
+            // Remove duplicate trailing blank line
+            while (collected.length > 0 && collected[collected.length - 1].trim().length === 0) collected.pop()
+            collected.push("")
+            extraSections.push(collected.join("\n"))
+          }
+        }
+      }
+    }
+  }
+
+  // Assemble final markdown
+  var finalLines = []
+  finalLines.push(baseMarkdown.trim())
+  if (progressLines.length > 0) finalLines = finalLines.concat(progressLines)
+  if (mergedInsightsSection.length > 0) finalLines = finalLines.concat(mergedInsightsSection)
+  if (extraSections.length > 0) finalLines = finalLines.concat(extraSections)
+  var finalContent = finalLines.join("\n")
 
   try {
-    io.writeFileString(planPath, markdown)
+    io.writeFileString(planPath, finalContent)
     this._planFileTarget = planPath
     if (isObject(this._executionPlan)) this._executionPlan.planFile = planPath
-    if (isObject(this._executionPlan)) this._executionPlan.rawMarkdown = markdown.trim()
+    if (isObject(this._executionPlan)) this._executionPlan.rawMarkdown = finalContent.trim()
   } catch (persistErr) {
     this.fnI("warn", `Failed to update plan file '${planPath}': ${persistErr && persistErr.message ? persistErr.message : persistErr}`)
   }
@@ -1759,6 +1864,20 @@ MiniA.prototype._handlePlanningObstacle = function(details) {
     }
     this._planningStats.adjustments++
     this._logMessageWithCounter("plan", "Plan marked for replanning due to obstacle.")
+  }
+  // Record obstacle insight
+  if (!isObject(this._plannerInsights)) this._plannerInsights = {}
+  if (!isArray(this._plannerInsights.entries)) this._plannerInsights.entries = []
+  var obstacleMsg = isObject(details) && isString(details.message) ? details.message : "(no message)"
+  this._plannerInsights.entries.push({
+    at      : now(),
+    pointer : isObject(this._executionPlan) && isObject(this._executionPlan.pointer) ? merge({}, this._executionPlan.pointer) : {},
+    category: "obstacle",
+    message : obstacleMsg.substring(0, 240)
+  })
+  // Persist immediately so other Mini-A instances can ingest latest insights
+  if (isObject(this._executionPlan) && isObject(this._executionPlan.parsed)) {
+    this._persistExecutionPlanToFile({ plan: this._executionPlan.parsed, reason: "obstacle" })
   }
 }
 MiniA.prototype._handlePlanUpdate = function() {
@@ -3622,7 +3741,7 @@ MiniA.prototype._runPlanningMode = function(options) {
     finalFormat = "json"
   }
 
-  this.fnI("plan", planMarkdown)
+  this.fnI("plan", "\n" + planMarkdown)
 
   this.state = "stop"
   global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
@@ -5083,6 +5202,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             global.__mini_a_metrics.finals_made.inc()
             if (this._enablePlanning && isObject(this._executionPlan)) {
               this._advanceExecutionPlan({ final: true })
+              // Record final insight and persist
+              if (!isObject(this._plannerInsights)) this._plannerInsights = {}
+              if (!isArray(this._plannerInsights.entries)) this._plannerInsights.entries = []
+              this._plannerInsights.entries.push({
+                at      : now(),
+                pointer : isObject(this._executionPlan.pointer) ? merge({}, this._executionPlan.pointer) : {},
+                category: "final",
+                message : `Goal completed. Final answer prepared.`
+              })
+              this._persistExecutionPlanToFile({ plan: this._executionPlan.parsed, reason: "final" })
             }
 
             runtime.consecutiveThoughts = 0
@@ -5129,6 +5258,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       if (this._enablePlanning && isObject(this._executionPlan) && runtime.successfulActionDetected && runtime.hadErrorThisStep !== true) {
         this._advanceExecutionPlan({ success: true })
+        // Capture a planner insight for future phases
+        if (!isObject(this._plannerInsights)) this._plannerInsights = {}
+        if (!isArray(this._plannerInsights.entries)) this._plannerInsights.entries = []
+        var pointerCopy = isObject(this._executionPlan) && isObject(this._executionPlan.pointer) ? merge({}, this._executionPlan.pointer) : {}
+        var lastContext = runtime.context.length > 0 ? runtime.context.slice(-1)[0] : "(no observation)"
+        this._plannerInsights.entries.push({
+          at      : now(),
+          pointer : pointerCopy,
+          category: "progress",
+          message : `Advanced after step ${step + 1}: ${lastContext.substring(0, 240)}`
+        })
+        // Persist updated plan file with insights
+        this._persistExecutionPlanToFile({ plan: this._executionPlan.parsed, reason: "step-progress" })
       }
 
       if (runtime.hadErrorThisStep) {
