@@ -77,4 +77,57 @@
     })
     ow.test.assert(blocked === true, true, "A step should be blocked after obstacle handling")
   }
+
+  exports.testMarkdownPlanParsing = function() {
+    var agent = createAgent()
+    var markdown = "# Plan: Ship feature\n\n## Phase 1: Analysis\n- [ ] Review existing config\n- [x] Identify impacted modules\n\n## Phase 2: Implementation\n- [ ] Update parsers\n- [ ] Write regression tests\n\n## Dependencies\n- Repo access\n- CI pipeline\n\n## Notes\n- Keep plan concise"
+    var parsed = agent._parseMarkdownPlan(markdown, { goal: "Ship feature" })
+    ow.test.assert(isObject(parsed) && parsed.phases.length === 2, true, "Should parse phases from markdown plan")
+    ow.test.assert(parsed.phases[0].tasks.length === 2, true, "First phase should include tasks")
+    var planState = agent._buildExecutionPlanState(parsed, { phaseIndex: 0, taskIndex: 0 }, { goal: "Ship feature" })
+    ow.test.assert(isObject(planState) && isArray(planState.steps), true, "Execution state should be created from parsed plan")
+  }
+
+  exports.testExecutionPlanInitialization = function() {
+    var agent = createAgent()
+    var markdown = "# Plan: Improve docs\n\n## Phase 1: Audit\n- [ ] List outdated sections\n\n## Phase 2: Update\n- [ ] Refresh README\n- [ ] Verify examples"
+    agent._providedPlanMarkdown = markdown
+    agent._agentState = {}
+    agent._initializeExecutionPlan({ goal: "Improve docs", args: {} })
+    ow.test.assert(isObject(agent._executionPlan) && isArray(agent._executionPlan.parsed.phases), true, "Execution plan should be stored")
+    ow.test.assert(isObject(agent._agentState.plan), true, "Agent state should hold parsed plan")
+    agent._advanceExecutionPlan({ success: true })
+    ow.test.assert(agent._executionPlan.pointer.taskIndex === 1 || agent._executionPlan.pointer.phaseIndex > 0, true, "Advancing execution plan should progress the pointer")
+  }
+
+  exports.testPlanJsonConversion = function() {
+    var agent = createAgent()
+    var markdown = "# Plan: Deliver feature\n\n## Phase 1: Prep\n- [x] Review requirements\n- [ ] Outline solution\n\n## Phase 2: Build\n- [ ] Implement module\n\n## Dependencies\n- Access to staging\n- API keys\n\n## Notes\n- Keep solution small"
+    var parsed = agent._parseMarkdownPlan(markdown, { goal: "Deliver feature" })
+    var jsonPlan = agent._convertPlanToJsonPhases(parsed)
+    ow.test.assert(isArray(jsonPlan) && jsonPlan.length === 2, true, "JSON plan should contain two phases")
+    ow.test.assert(jsonPlan[0].tasks[0].completed === true, true, "Completed tasks should be marked in JSON output")
+    ow.test.assert(isArray(jsonPlan[0].dependencies) && jsonPlan[0].dependencies.length === 2, true, "Dependencies should be included on the first phase entry")
+  }
+
+  exports.testPlanMarkdownRendering = function() {
+    var agent = createAgent()
+    var plan = {
+      title       : "QA Checklist",
+      phases      : [
+        {
+          title: "Phase 1: Verify",
+          tasks: [
+            { label: "Run unit tests", checked: true },
+            { label: "Review coverage", checked: false }
+          ]
+        }
+      ],
+      dependencies: ["CI access"],
+      notes       : ["Capture any flaky tests"]
+    }
+    var rendered = agent._renderMarkdownPlan(plan)
+    ow.test.assert(rendered.indexOf("- [x] Run unit tests") >= 0, true, "Rendered Markdown should mark completed tasks")
+    ow.test.assert(rendered.indexOf("## Dependencies") >= 0, true, "Rendered Markdown should include dependencies section")
+  }
 })()

@@ -212,7 +212,10 @@ The `start()` method accepts various configuration options:
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
-- **`useplanning`** (boolean, default: false): Maintain a persistent task plan in agent mode; Mini-A disables it automatically when the goal looks trivial
+- **`useplanning`** (boolean, default: false): Consume a pre-generated Markdown plan (from `knowledge` or `planfile`) and advance it automatically; logs a warning and reverts to adaptive planning if no plan is supplied
+- **`plan`** (string, optional): Path to a Markdown plan. When `planmode=true`, Mini-A saves the generated plan here and returns a JSON array of phases/tasks; during execution it keeps the file's checkbox state synchronized with completed work.
+- **`planfile`** (string, optional): Path to a Markdown plan to load when `useplanning=true`
+- **`planmode`** (boolean, default: false): Generate a standalone Markdown plan instead of executing the goal (mutually exclusive with `chatbotmode` and automatically disables `useplanning` during the run)
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) to prefill a bundle of related flags
 
 #### Shell and File System Access
@@ -307,7 +310,23 @@ Switching back to the default agent mode is as simple as omitting the flag (or s
 
 ## Planning Workflow
 
-Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested “tree” plan with checkpoints.
+Enable `useplanning=true` (while keeping `chatbotmode=false`) when you have a Markdown plan that Mini-A should execute. Provide the plan inline via `knowledge` or point to a file with `planfile=/path/to/plan.md`. If no plan is supplied, Mini-A logs a warning and falls back to the adaptive planner. The agent still classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested “tree” plan with checkpoints.
+
+#### Supplying plans
+
+- **Inline knowledge** – Paste the Markdown plan (starting with `# Plan:`) into the `knowledge` argument.
+- **Plan files** – Use `plan=repo/plan.md` (or `planfile=repo/plan.md`) to load the plan from disk. The contents are also appended to the `knowledge` block so the model can reference it.
+- **Automatic progress tracking** – As soon as a plan is imported, Mini-A mirrors the phases and checkbox tasks inside `state.plan` and advances them whenever a step succeeds. When `plan` is provided, it also rewrites the Markdown file with updated checkbox states.
+
+#### Generating plans
+
+Run the agent with `planmode=true` to produce a reusable Markdown plan without executing any tools:
+
+```bash
+ojob mini-a.yaml goal="Add planmode support" planmode=true useshell=false
+```
+
+The low-cost model gathers supporting insights, while the main model emits the final plan in Markdown. Provide `plan=/path/to/plan.md` to write that Markdown to disk and receive a JSON array of phases and tasks, ready to feed into another session via `plan=...`, `planfile=...`, or `knowledge=...`.
 
 ### What the plan contains
 
