@@ -25,7 +25,7 @@ jobs:
     readwrite      : true
     usetools       : true
     debug          : false
-    goal           : |
+    goal           : | #markdown
       Go through all markdown documentation files in the current folder and sub-folders (excluding the .git folder if it exists).
         For each markdown file found, analyze all other non-markdown files in the repository to identify any relevant and significant changes that should be reflected in the documentation.
         Update each markdown file with accurate information about:
