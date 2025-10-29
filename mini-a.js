@@ -2932,8 +2932,9 @@ MiniA.prototype.init = function(args) {
 
     // Using OAF_MODEL env var for model selection
     if (isUnDef(getEnv("OAF_MODEL"))) {
-      logErr("OAF_MODEL environment variable not set. Please set it to your desired LLM model.")
-      return
+      var _msg = "OAF_MODEL environment variable not set. Please set it to your desired LLM model."
+      logErr(_msg)
+      throw new Error(_msg)
     }
     // Check for the low-cost model in OAF_LC_MODEL
     if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
@@ -3229,7 +3230,7 @@ MiniA.prototype.start = function(args) {
         this.state = "stop"
         var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
         this.fnI("error", `Agent failed: ${errMsg}`)
-        throw e
+        return
     }
 }
 

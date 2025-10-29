@@ -160,19 +160,26 @@ help:
     mandatory: false
 
 todo:
+- CheckEnv
 - MiniAgent
 
 ojob:
   opacks      :
   - openaf: 20250725
   - mini-a
-  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  catch       : printErrnl("[" + job.name + "] "); printErr(exception)
   logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js
 
 jobs:
 # ----------------
+- name : CheckEnv
+  exec : | #js
+    if (isUnDef(getEnv("OAF_MODEL"))) {
+      throw "OAF_MODEL environment variable not set. Please export OAF_MODEL with your model configuration before running Mini-A."
+    }
+
 - name : MiniAgent
   check:
     in:

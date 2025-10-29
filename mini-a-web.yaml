@@ -123,6 +123,7 @@ include:
 - oJobHTTPd.yaml
 
 todo:
+- CheckEnv
 - Init
 - Periodic cleanup of old sessions
 - Shutdown history S3 client
@@ -619,7 +620,7 @@ ojob:
   - oJob-common
   - mini-a
   - S3
-  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  catch       : printErrnl("[" + job.name + "] "); printErr(exception)
   logToConsole: true   # to change when finished
   daemon      : true
   argsFromEnvs: true
@@ -634,6 +635,12 @@ ojob:
 
 jobs:
 # ---------------------
+- name : CheckEnv
+  exec : | #js
+    if (isUnDef(getEnv("OAF_MODEL"))) {
+      throw "OAF_MODEL environment variable not set. Please export OAF_MODEL with your model configuration before starting the Mini-A web server."
+    }
+
 - name : Static content
   exec : | #js
     args.path = getOPackPath("mini-a") + "/public"
