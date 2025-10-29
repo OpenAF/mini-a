@@ -637,7 +637,7 @@ jobs:
 # ---------------------
 - name : CheckEnv
   exec : | #js
-    var hasModelOverride = isDef(args) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
+    var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
     if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
     }
