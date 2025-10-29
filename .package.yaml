@@ -109,9 +109,9 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: 6b0e52f59e26f3f16ba8a89338c792f3a763f0b7
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 17e33bea42db18943765776da8b62991aa5d5da5
+  README.md: 0e518817f94ba3ca3e03b70f7926a0e42468dc45
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
-  USAGE.md: 7e325c62e987bd4cc6df65a793f7ecdf35c32701
+  USAGE.md: fcf914f9f08d0c2c517d1c0dbcbfc5b064ced960
   examples/README.md: bd779bff34653547069d6a647346fc703f8fcfb9
   examples/document.yaml: 248196d15694955a6c99a45280ed9b6abf7bf17c
   examples/summary.yaml: 58c12ffc5107dc53f02ed7c04f903fa945d9ec91
@@ -134,13 +134,13 @@ filesHash:
   mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
-  mini-a-main.yaml: bb09ce99de0035f77f71e488fe72ffa59d3db2a8
+  mini-a-main.yaml: 843905120e08ca5f04b859045498c3bdfbf7aafd
   mini-a-modes.yaml: f6f8f6675ed0c052e1c4623e24a32d4c743d37a2
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: a3bd7ba34a40a20c7caad5e2cd0824313fd6fc10
-  mini-a.js: bc61c5b5b841dbb4bcc754c3d276ecf7ce765921
+  mini-a.js: c73903796652eaf93a51c7c5ce5819d467c1444d
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 43bfbe6b3626b99f0d78fc15031eb83199cc2ae2
+  mini-a.yaml: e1712ec76f476df168b38eaab4c29f4206c5ebf5
   public/index.md: 0bf7bdc72c67f94edba299201e06e4c0376d6c83
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
