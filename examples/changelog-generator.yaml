@@ -24,6 +24,7 @@ jobs:
     shellbatch     : true
     shellallowpipes: true
     readwrite      : true
+    usetools       : true
     format         : md
     outfile        : CHANGELOG.md
     debug          : false
