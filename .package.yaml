@@ -3,7 +3,7 @@ scripts:
   preerase: ''
   posterase: ''
   preinstall: ''
-  postinstall: |
+  postinstall: | #js
     var path = args.OPACK_PATH
 
     $sh(`chmod +x ${path}/mini-a.sh`)
