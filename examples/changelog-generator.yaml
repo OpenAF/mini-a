@@ -27,7 +27,7 @@ jobs:
     format         : md
     outfile        : CHANGELOG.md
     debug          : false
-    goal           : |
+    goal           : | #markdown
       Create a comprehensive CHANGELOG.md file from git commit history following these requirements:
 
       Data Collection:
@@ -91,5 +91,6 @@ jobs:
       - Truncate very long commit messages to 100 characters with "..." if needed
       - Handle merge commits appropriately (you can exclude them or include them as "Other")
       - Ensure the file is valid markdown that renders well in GitHub
+
   to  :
   - MiniAgent

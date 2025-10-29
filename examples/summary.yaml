@@ -34,7 +34,7 @@ jobs:
     format         : md
     outfile        : summary.md
     debug          : false
-    goal           : |
+    goal           : | #markdown
       Write a concise markdown report about the current folder (non-recursive) with two sections.
 
       Section 1 — Files
