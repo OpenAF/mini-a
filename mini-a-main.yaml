@@ -130,6 +130,10 @@ help:
     desc     : Initial state data to provide to the agent as structured JSON/SLON (CLI mode)
     example  : '{"current_task": "analysis", "progress": 0}'
     mandatory: false
+  - name     : mode
+    desc     : Apply a predefined argument preset from mini-a-modes.yaml (CLI and web modes)
+    example  : shell
+    mandatory: false
   - name     : onport
     desc     : Port to run the HTTP server on (web mode)
     example  : "8888"
@@ -151,6 +155,7 @@ ojob:
   argsFromEnvs: true
 
 todo:
+- apply-mode-preset
 - (if    ): |
     toBoolean(args.web) || toBoolean(args.onport) == true
   ((then)):
@@ -159,12 +164,108 @@ todo:
   - start-cli
 
 jobs:
+# -----------------------
+- name: apply-mode-preset
+  exec: | #js
+    if (args.__modeApplied === true) return
+    if (!isString(args.mode)) return
+    var modeName = args.mode.trim()
+    if (modeName.length === 0) return
+
+    var modesPath = getOPackPath("mini-a") + "/mini-a-modes.yaml"
+    var presets = {}
+    try {
+      var loaded = io.readFileYAML(modesPath)
+      if (isMap(loaded) && isMap(loaded.modes)) {
+        presets = loaded.modes
+      } else if (isMap(loaded)) {
+        presets = loaded
+      } else {
+        presets = {}
+      }
+    } catch(e) {
+      var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+      logWarn(`Failed to load mode presets for '${modeName}': ${errMsg}`)
+      args.__modeApplied = true
+      return
+    }
+
+    if (!isMap(presets) || Object.keys(presets).length === 0) {
+      logWarn(`Mode '${modeName}' requested but no presets are defined.`)
+      args.__modeApplied = true
+      return
+    }
+
+    var keys = Object.keys(presets)
+    var resolvedKey
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
+      if (key === modeName || key.toLowerCase() === modeName.toLowerCase()) {
+        resolvedKey = key
+        break
+      }
+    }
+
+    if (isUnDef(resolvedKey)) {
+      logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
+      args.__modeApplied = true
+      return
+    }
+
+    var preset = presets[resolvedKey]
+    if (!isMap(preset)) {
+      logWarn(`Mode '${resolvedKey}' preset is invalid.`)
+      args.__modeApplied = true
+      return
+    }
+
+    var applied = []
+    var paramsSource = preset.params
+    var applyParam = function(key, value) {
+      if (isString(key) && key.length > 0) {
+        args[key] = value
+        applied.push(key)
+      }
+    }
+
+    if (isArray(paramsSource)) {
+      paramsSource.forEach(function(entry) {
+        if (!isMap(entry)) return
+        Object.keys(entry).forEach(function(paramKey) {
+          applyParam(paramKey, entry[paramKey])
+        })
+      })
+    } else if (isMap(paramsSource)) {
+      Object.keys(paramsSource).forEach(function(paramKey) {
+        applyParam(paramKey, paramsSource[paramKey])
+      })
+    } else if (isDef(paramsSource)) {
+      logWarn(`Mode '${resolvedKey}' has unsupported params definition.`)
+    }
+
+    var infoMsg = `Mode '${resolvedKey}' enabled`
+    if (isString(preset.description) && preset.description.length > 0) {
+      infoMsg += `: ${preset.description}`
+    }
+    log(infoMsg)
+
+    if (applied.length > 0) {
+      log(`Mode '${resolvedKey}' applied defaults for: ${applied.join(", ")}`)
+    } else {
+      log(`Mode '${resolvedKey}' did not change any arguments (overrides already provided).`)
+    }
+
+    args.mode = resolvedKey
+    args.__modeApplied = true
+
+    global._args = args
+
 # ---------------
 - name: start-web
   exec: | #js
-    oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
+    oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", global._args, genUUID(), __, false)
 
 # ---------------
 - name: start-cli
   exec: | #js
-    oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
+    oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", global._args, genUUID(), __, false)

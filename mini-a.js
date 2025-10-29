@@ -1442,6 +1442,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
       answer = jsonParse(answer)
     }
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
+    if (isString(answer)) answer = "\n" + answer
     return $o(answer || "(no answer)", args, __, true)
   }
 }
@@ -3232,7 +3233,7 @@ MiniA.prototype.start = function(args) {
 
 MiniA.prototype._startInternal = function(args, sessionStartTime) {
     _$(args.goal, "args.goal").isString().$_()
-    
+
     // Validate common arguments
     this._validateArgs(args, [
       { name: "rpm", type: "number", default: __ },

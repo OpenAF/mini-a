@@ -1,0 +1,39 @@
+modes:
+
+  shell:
+    description: "Read-only mode for shell commands"
+    params     :
+      useshell: true
+
+  shellrw:
+    description: "Read-write mode for shell commands"
+    params     :
+      useshell : true
+      readwrite: true
+
+  shellutils:
+    description: "Shell mode with utilities"
+    params     :
+      useutils : true
+      usetools : true
+
+  chatbot:
+    description: "Chatbot mode"
+    params     :
+      chatbotmode: true
+
+  web    :
+    description: "Web mode with tools"
+    params     :
+      usetools: true
+
+  webfull:
+    description: "Web full mode"
+    params     :
+      usediagrams: true
+      usecharts  : true
+      usetools   : true
+      usehistory : true
+      useattach  : true
+      historykeep: true
+      useplanning: true 
