@@ -207,7 +207,7 @@ The `start()` method accepts various configuration options:
 ### Optional Parameters
 
 #### Basic Configuration
-- **`maxsteps`** (number, default: 25): Maximum number of steps the agent will take
+- **`maxsteps`** (number, default: 15): Maximum consecutive steps without a successful action before the agent forces a final answer
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
@@ -681,7 +681,7 @@ Mini-A includes robust error handling:
 
 1. **Start Simple**: Begin with basic goals and gradually add complexity
 2. **Use Knowledge**: Provide relevant context to improve results
-3. **Set Appropriate Limits**: Use `maxsteps` to prevent runaway execution
+3. **Set Appropriate Limits**: Use `maxsteps` to cap consecutive no-progress iterations
 4. **Enable Safety**: Use `checkall: true` for file system operations
 5. **Monitor Progress**: Use custom interaction functions for better visibility
 6. **Save Conversations**: Use conversation persistence for complex multi-step tasks
@@ -703,7 +703,7 @@ Mini-A includes robust error handling:
 2. **MCP connection fails**: Verify MCP server is running and accessible
 3. **Commands blocked**: Check if commands are in banned list or enable `readwrite`
 4. **Context too large**: Use `maxcontext` parameter to enable auto-summarization
-5. **Goal not achieved**: Increase `maxsteps` or refine goal description
+5. **Goal not achieved**: Increase `maxsteps` if the agent stops after repeated no-progress steps, or refine the goal description
 
 ### Dual-Model Specific Issues
 

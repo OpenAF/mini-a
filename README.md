@@ -290,7 +290,7 @@ All Mini-A options can be passed as command line arguments:
 - `state` – Initial agent state payload (JSON/SLON string or object) preserved between steps
 - `conversation` – Path to a conversation JSON file to load/save chat history
 - `libs` – Comma-separated list of extra OpenAF libraries to load before starting
-- `maxsteps` – Maximum number of agent steps (default `25`)
+- `maxsteps` – Maximum consecutive steps without a successful action before forcing a final response (default `15`)
 - `maxcontext` – Approximate token budget for context before auto-summarization kicks in (default disabled)
 - `rpm` – Maximum LLM requests per minute (waits automatically)
 - `tpm` – Maximum combined prompt/completion tokens per minute

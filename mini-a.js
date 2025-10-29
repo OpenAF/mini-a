@@ -1664,7 +1664,8 @@ MiniA.prototype._setCheckpoint = function(label, runtime) {
       recentSimilarThoughts: runtime.recentSimilarThoughts,
       toolContexts       : runtime.toolContexts,
       errorHistory       : runtime.errorHistory,
-      restoredFromCheckpoint: false
+      restoredFromCheckpoint: false,
+      successfulActionDetected: runtime.successfulActionDetected === true
     }, __, ""), __, __, true)
   }
   this._lastCheckpoint = snapshot
@@ -1688,6 +1689,7 @@ MiniA.prototype._restoreCheckpoint = function(runtime, reason) {
   runtime.toolContexts = isObject(snapshot.runtime.toolContexts) ? snapshot.runtime.toolContexts : {}
   runtime.errorHistory = isArray(snapshot.runtime.errorHistory) ? snapshot.runtime.errorHistory.slice() : []
   runtime.restoredFromCheckpoint = true
+  runtime.successfulActionDetected = snapshot.runtime.successfulActionDetected === true
   if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.consecutive_errors)) {
     global.__mini_a_metrics.consecutive_errors.set(runtime.consecutiveErrors)
   }
@@ -3191,7 +3193,7 @@ MiniA.prototype.init = function(args) {
  * - verbose (boolean, default=false): Whether to enable verbose logging.
  * - rpm (number, optional): Maximum LLM requests per minute. The agent waits between calls when this limit is reached.
  * - tpm (number, optional): Maximum LLM tokens per minute. Prompt and completion tokens count toward the limit and will trigger waits when exceeded.
- * - maxsteps (number, default=25): Maximum number of steps the agent will take to achieve the goal.
+ * - maxsteps (number, default=15): Maximum consecutive steps without a successful action before forcing a final answer.
  * - readwrite (boolean, default=false): Whether to allow read/write operations on the filesystem.
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
  * - useshell (boolean, default=false): Whether to allow shell command execution.
@@ -3238,7 +3240,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._validateArgs(args, [
       { name: "rpm", type: "number", default: __ },
       { name: "tpm", type: "number", default: __ },
-      { name: "maxsteps", type: "number", default: 25 },
+      { name: "maxsteps", type: "number", default: 15 },
       { name: "knowledge", type: "string", default: "" },
       { name: "outfile", type: "string", default: __ },
       { name: "libs", type: "string", default: "" },
@@ -3504,9 +3506,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       currentTool         : null,
       toolContexts        : {},
       errorHistory        : [],
-      restoredFromCheckpoint: false
+      restoredFromCheckpoint: false,
+      successfulActionDetected: false
     }
-    var maxSteps = args.maxsteps
+    var maxSteps = isNumber(args.maxsteps) ? Math.max(0, args.maxsteps) : 0
     var currentToolContext = {}
     this._setCheckpoint("initial", runtime)
     this._prepareToolExecution = info => {
@@ -3550,12 +3553,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         observation = normalized.display
       }
 
-      runtime.consecutiveThoughts = 0
-      runtime.stepsWithoutAction = 0
-      runtime.totalThoughts = Math.max(0, runtime.totalThoughts - 1)
-      runtime.recentSimilarThoughts = []
-      global.__mini_a_metrics.consecutive_thoughts.set(0)
-
       var hasError = false
       if (details.error === true || (isString(details.error) && details.error.length > 0)) {
         hasError = true
@@ -3576,6 +3573,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           context : { toolName: toolName, stepLabel: stepLabel }
         })
       }
+
+      runtime.consecutiveThoughts = 0
+      if (!hasError) {
+        runtime.stepsWithoutAction = 0
+        runtime.successfulActionDetected = true
+      }
+      runtime.totalThoughts = Math.max(0, runtime.totalThoughts - 1)
+      runtime.recentSimilarThoughts = []
+      global.__mini_a_metrics.consecutive_thoughts.set(0)
 
       if (isDef(toolName) && toolName.length > 0) {
         var actionEntry = `${toolName}${isDef(params) ? `: ${af.toSLON(params)}` : ""}`
@@ -3617,8 +3623,22 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     sessionStartTime = now()
     this.state = "processing"
     // Context will hold the history of thoughts, actions, and observations
-    // We will iterate up to maxSteps to try to achieve the goal
-    for(var step = 0; step < maxSteps && this.state != "stop"; step++) {
+    // We iterate until requested stop or hitting the consecutive no-progress limit
+    for (var step = 0; this.state != "stop"; step++) {
+      if (step > 0) {
+        if (runtime.successfulActionDetected === true) {
+          runtime.stepsWithoutAction = 0
+        } else {
+          runtime.stepsWithoutAction++
+        }
+      }
+
+      if (isNumber(maxSteps) && maxSteps > 0 && runtime.stepsWithoutAction >= maxSteps) {
+        break
+      }
+
+      runtime.successfulActionDetected = false
+
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
       var stateSnapshot = stringify(this._agentState, __, "")
@@ -4005,7 +4025,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
           runtime.consecutiveThoughts++
           runtime.totalThoughts++
-          runtime.stepsWithoutAction++
           global.__mini_a_metrics.consecutive_thoughts.set(runtime.consecutiveThoughts)
 
           if (runtime.consecutiveThoughts >= 5) {
@@ -4083,6 +4102,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.totalThoughts = Math.max(0, runtime.totalThoughts - 1)
           runtime.recentSimilarThoughts = []
           global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
 
           runtime.lastActions.push(`shell: ${commandValue}`)
           if (runtime.lastActions.length > 3) runtime.lastActions.shift()
@@ -4139,6 +4159,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
           global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
 
           var totalTime = now() - sessionStartTime
           global.__mini_a_metrics.total_session_time.set(totalTime)
@@ -4162,7 +4183,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         runtime.consecutiveThoughts++
         runtime.totalThoughts++
-        runtime.stepsWithoutAction++
         global.__mini_a_metrics.consecutive_thoughts.set(runtime.consecutiveThoughts)
 
         checkAndSummarizeContext()
@@ -4207,7 +4227,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return "(no answer)"
     }
 
-    this.fnI("warn", `Reached max steps. Asking for final answer...`)
+    if (isNumber(maxSteps) && maxSteps > 0 && runtime.stepsWithoutAction >= maxSteps) {
+      runtime.context.push(`[OBS LIMIT] Reached ${maxSteps} consecutive steps without successful actions.`)
+    }
+
+    this.fnI("warn", `Reached max steps without successful actions. Asking for final answer...`)
     // Get final answer from model
     var finalResponseWithStats
     try {

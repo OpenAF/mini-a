@@ -31,8 +31,8 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : maxsteps
-    desc     : Maximum number of steps to take
-    example  : "25"
+    desc     : Maximum consecutive steps without a successful action before forcing a final response
+    example  : "15"
     mandatory: false
   - name     : rpm
     desc     : Maximum number of LLM requests per minute
@@ -182,7 +182,7 @@ jobs:
       rpm            : toNumber.isNumber.default(__)
       rtm            : toNumber.isNumber.default(__)
       tpm            : toNumber.isNumber.default(__)
-      maxsteps       : toNumber.isNumber.default(25)
+      maxsteps       : toNumber.isNumber.default(15)
       maxcontext     : toNumber.isNumber.default(0)
       readwrite      : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
