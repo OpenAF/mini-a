@@ -3454,7 +3454,8 @@ MiniA.prototype._runPlanningMode = function(options) {
     this.fnI("warn", `Unable to cache generated plan: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`)
   }
 
-  this.fnI("plan", planMarkdown)
+  // this.fnI("plan", planMarkdown)
+  this.fnI("plan", "Planning mode completed successfully.")
 
   this.state = "stop"
   global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
