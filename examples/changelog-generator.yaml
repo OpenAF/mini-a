@@ -1,0 +1,95 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    OpenAF oJob example of having Mini-A (mini AI agent) generate a formatted CHANGELOG.md from git commit history.
+    The changelog groups commits by type (features, fixes, chores, docs, etc.) and formats them in a clean,
+    readable markdown structure following conventional changelog patterns.
+
+ojob:
+  logToConsole: true
+  opacks      :
+  - mini-a
+
+jobsInclude:
+- mini-a.yaml
+
+todo:
+- Generate CHANGELOG.md
+
+jobs:
+# --------------------------
+- name: Generate CHANGELOG.md
+  args:
+    useshell       : true
+    shellbatch     : true
+    shellallowpipes: true
+    readwrite      : true
+    format         : md
+    outfile        : CHANGELOG.md
+    debug          : false
+    goal           : |
+      Create a comprehensive CHANGELOG.md file from git commit history following these requirements:
+
+      Data Collection:
+      - Use git commands to retrieve commit history
+      - Get commit hash (short form), author, date (ISO 8601), and commit message for each commit
+      - Retrieve commits from the last 50 commits or up to 6 months, whichever is more recent
+      - Use portable git commands that work across all platforms
+
+      Commit Type Classification:
+      - Analyze each commit message to categorize it by type
+      - Common types to identify (case-insensitive, prefix matching):
+        * Features (feat:, feature:, add:, new:)
+        * Fixes (fix:, bugfix:, bug:, patch:, hotfix:)
+        * Documentation (docs:, doc:, documentation:)
+        * Chores (chore:, build:, ci:, refactor:, style:, test:)
+        * Breaking Changes (BREAKING:, breaking:, major:)
+        * Other (commits that don't match above patterns)
+      - Use the commit message prefix before the first colon to determine type
+      - If no prefix pattern matches, categorize as "Other"
+
+      Formatting Requirements:
+      - Start with "# Changelog" heading
+      - Add a brief introduction: "All notable changes to this project will be documented in this file."
+      - Group commits by type in this order:
+        1. Breaking Changes (if any)
+        2. Features
+        3. Fixes
+        4. Documentation
+        5. Chores
+        6. Other
+      - For each group that has commits:
+        * Use "## [Type]" as the section heading (e.g., "## Features", "## Fixes")
+        * List commits as markdown bullet points
+        * Format: "- **[short-hash]**: [commit message without type prefix] ([date], by [author])"
+        * Sort commits within each group by date descending (newest first)
+      - Skip empty groups (don't show sections with no commits)
+      - Add a footer note: "Generated automatically from git history"
+
+      Example Structure:
+      ```
+      # Changelog
+      
+      All notable changes to this project will be documented in this file.
+      
+      ## Features
+      - **abc123**: Add new user authentication module (2024-01-15, by John Doe)
+      - **def456**: Support for dark mode in UI (2024-01-10, by Jane Smith)
+      
+      ## Fixes
+      - **ghi789**: Fix memory leak in data processing (2024-01-14, by John Doe)
+      
+      ## Documentation
+      - **jkl012**: Update README with installation steps (2024-01-12, by Jane Smith)
+      
+      ---
+      *Generated automatically from git history*
+      ```
+
+      Additional Notes:
+      - Clean up commit messages: remove conventional commit prefixes from display (e.g., "feat: " becomes "")
+      - Truncate very long commit messages to 100 characters with "..." if needed
+      - Handle merge commits appropriately (you can exclude them or include them as "Other")
+      - Ensure the file is valid markdown that renders well in GitHub
+  to  :
+  - MiniAgent

@@ -2,6 +2,47 @@
 
 This folder contains runnable examples that showcase how to use the mini-a (Mini Agent) with OpenAF oJob workflows.
 
+## Git Changelog Generator (changelog-generator.yaml)
+
+Generates a formatted CHANGELOG.md file from git commit history with:
+- Automatic commit type classification (features, fixes, docs, chores, etc.)
+- Grouped and sorted commit entries
+- Clean markdown formatting following conventional changelog patterns
+- Configurable time range for commit history
+
+The workflow is defined in `changelog-generator.yaml` and leverages the `mini-a` opack.
+
+### Prerequisites
+- OpenAF installed: https://openaf.io
+- Required opacks (installed automatically when running the job, or install explicitly):
+  - mini-a
+- A git repository with commit history
+
+Optional explicit install:
+
+```sh
+opack install mini-a
+```
+
+### How to run
+
+```sh
+ojob examples/changelog-generator.yaml
+# or
+ojob -f examples/changelog-generator.yaml
+```
+
+Outputs in the current working directory:
+- `CHANGELOG.md` — Formatted changelog with commits grouped by type
+
+### Notes
+- The generator analyzes the last 50 commits or 6 months of history (whichever is more recent)
+- Commit messages are parsed for conventional commit prefixes (feat:, fix:, docs:, etc.)
+- Commits are grouped into: Breaking Changes, Features, Fixes, Documentation, Chores, and Other
+- Each commit entry includes the short hash, cleaned message, date, and author
+- Merge commits can be included or excluded based on the goal configuration
+- The output follows standard changelog formatting conventions
+
 ## Folder summary report (summary.yaml)
 
 Builds a concise report about the current folder (non-recursive) with:
