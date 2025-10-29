@@ -160,7 +160,6 @@ help:
     mandatory: false
 
 todo:
-- CheckEnv
 - MiniAgent
 
 ojob:
@@ -182,6 +181,8 @@ jobs:
     }
 
 - name : MiniAgent
+  from :
+  - CheckEnv
   check:
     in:
       goal           : isString

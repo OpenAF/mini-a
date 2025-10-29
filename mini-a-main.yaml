@@ -153,6 +153,7 @@ help:
 
 ojob:
   argsFromEnvs: true
+  logToConsole: false
 
 todo:
 - apply-mode-preset

@@ -123,7 +123,6 @@ include:
 - oJobHTTPd.yaml
 
 todo:
-- CheckEnv
 - Init
 - Periodic cleanup of old sessions
 - Shutdown history S3 client
@@ -642,6 +641,7 @@ jobs:
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before starting the Mini-A web server."
     }
 
+# ---------------------
 - name : Static content
   exec : | #js
     args.path = getOPackPath("mini-a") + "/public"
@@ -654,6 +654,8 @@ jobs:
 
 # -----------
 - name : Init
+  from :
+  - CheckEnv
   check:
     in:
       showexecs       : toBoolean().isBoolean().default(false)
