@@ -33,6 +33,10 @@ var MiniA = function() {
   this._planningStats = { validations: 0, adjustments: 0 }
   this._planningProgress = { overall: 0, completed: 0, total: 0, checkpoints: { reached: 0, total: 0 } }
   this._auditon = false
+  this._planModeEnabled = false
+  this._providedPlanMarkdown = ""
+  this._executionPlan = null
+  this._plannerInsights = {}
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -222,6 +226,31 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 • Be transparent about limitations or missing information.
 • Decline gracefully if a request conflicts with instructions or policies.
     `
+
+  this._PLANNER_SYSTEM_PROMPT = `
+You are a dedicated planning specialist. Produce a concise, execution-ready plan that other Mini-A agents can follow verbatim.
+
+## OUTPUT REQUIREMENTS
+- Respond in Markdown only.
+- Start with "# Plan: <short goal description>".
+- Group work into numbered phases using "## Phase <n>: <title>" headings.
+- Under each phase list actionable tasks using checkboxes ("- [ ] task").
+- Include "## Dependencies" and "## Notes" sections when relevant.
+- Keep sentences direct and avoid filler.
+
+## PLAN CONTENT
+- Break the goal into concrete, sequential tasks.
+- Highlight required tools, files, or resources.
+- Call out dependencies between tasks or phases.
+- Include verification/validation tasks and edge-case checks.
+- Reference gathered insights and constraints faithfully.
+
+## STYLE
+- Prefer short bullet phrases over paragraphs.
+- Use present-tense commands ("Update", "Verify").
+- Avoid repeating the goal verbatim in every task.
+- Ensure the plan is machine-parseable (one task per checkbox).
+  `
 
   this._STEP_PROMPT_TEMPLATE = `
 GOAL: {{{goal}}}
@@ -833,6 +862,63 @@ MiniA.prototype._normalizePlanItems = function(plan) {
   return normalized.filter(entry => isString(entry.title) && entry.title.length > 0)
 }
 
+MiniA.prototype._extractPlanMarkdown = function(text) {
+  if (!isString(text)) return ""
+  var marker = text.indexOf("# Plan:")
+  if (marker < 0) return ""
+  return text.substring(marker).trim()
+}
+
+MiniA.prototype._ingestPlanKnowledge = function(args, knowledgeText) {
+  var baseKnowledge = isString(knowledgeText) ? knowledgeText : ""
+  var trimmedKnowledge = baseKnowledge.trim()
+  var info = {
+    knowledge   : trimmedKnowledge,
+    planMarkdown: "",
+    origin      : ""
+  }
+
+  var planFilePath = isObject(args) && isString(args.planfile) ? args.planfile.trim() : ""
+  var planFromFile = ""
+  if (planFilePath.length > 0) {
+    if (io.fileExists(planFilePath) && io.fileInfo(planFilePath).isFile) {
+      try {
+        planFromFile = io.readFileString(planFilePath)
+        info.origin = "file"
+      } catch (pfErr) {
+        this.fnI("warn", `Failed to read planfile '${planFilePath}': ${pfErr && pfErr.message ? pfErr.message : pfErr}`)
+      }
+    } else {
+      this.fnI("warn", `Plan file '${planFilePath}' not found or not a regular file.`)
+    }
+  }
+
+  var planMarkdown = ""
+  if (planFromFile.length > 0) planMarkdown = planFromFile.trim()
+
+  if (planMarkdown.length === 0) {
+    var extracted = this._extractPlanMarkdown(trimmedKnowledge)
+    if (extracted.length > 0) {
+      planMarkdown = extracted
+      info.origin = "knowledge"
+    }
+  }
+
+  if (planMarkdown.length > 0) {
+    info.planMarkdown = planMarkdown
+    if (info.origin === "file") {
+      var normalizedPlan = planMarkdown.trim()
+      if (trimmedKnowledge.indexOf(normalizedPlan) < 0) {
+        info.knowledge = trimmedKnowledge.length > 0
+          ? `${trimmedKnowledge}\n\n${normalizedPlan}`
+          : normalizedPlan
+      }
+    }
+  }
+
+  return info
+}
+
 MiniA.prototype._assessGoalComplexity = function(goalText, args) {
   var text = isString(goalText) ? goalText.trim() : stringify(goalText, __, "")
   var words = text.length > 0 ? text.split(/\s+/).filter(Boolean) : []
@@ -1022,6 +1108,374 @@ MiniA.prototype._buildDecomposedPlan = function(goalText, context) {
       needsReplan: false
     }
   }
+}
+
+MiniA.prototype._parseMarkdownPlan = function(markdown, context) {
+  if (!isString(markdown)) return null
+  var normalized = markdown.replace(/\r\n/g, "\n").split(/\n/)
+  var plan = { title: "", phases: [], dependencies: [], notes: [] }
+  var currentPhase = null
+  var section = "phases"
+  for (var i = 0; i < normalized.length; i++) {
+    var line = normalized[i]
+    var trimmed = line.trim()
+    if (trimmed.length === 0) continue
+
+    if (/^#\s*Plan\s*:/i.test(trimmed)) {
+      plan.title = trimmed.replace(/^#\s*Plan\s*:\s*/i, "").trim()
+      section = "phases"
+      continue
+    }
+
+    if (/^##\s*Phase\s*/i.test(trimmed)) {
+      var match = trimmed.match(/^##\s*Phase\s*(\d+)?[^:]*:?\s*(.*)$/i)
+      var phaseIndex = isArray(match) && isDef(match[1]) ? Number(match[1]) : plan.phases.length + 1
+      if (isNaN(phaseIndex) || phaseIndex <= 0) phaseIndex = plan.phases.length + 1
+      var phaseTitle = isArray(match) && isString(match[2]) && match[2].trim().length > 0
+        ? match[2].trim()
+        : `Phase ${phaseIndex}`
+      currentPhase = { index: phaseIndex - 1, title: phaseTitle, tasks: [] }
+      plan.phases.push(currentPhase)
+      section = "phases"
+      continue
+    }
+
+    if (/^##\s*Dependencies/i.test(trimmed)) {
+      section = "dependencies"
+      currentPhase = null
+      continue
+    }
+
+    if (/^##\s*Notes?/i.test(trimmed)) {
+      section = "notes"
+      currentPhase = null
+      continue
+    }
+
+    var checkbox = line.match(/^\s*-\s*\[(x|X| )\]\s*(.+)$/)
+    if (checkbox) {
+      if (!isObject(currentPhase)) {
+        currentPhase = { index: plan.phases.length, title: `Phase ${plan.phases.length + 1}`, tasks: [] }
+        plan.phases.push(currentPhase)
+      }
+      currentPhase.tasks.push({
+        label  : checkbox[2].trim(),
+        checked: checkbox[1].toLowerCase() === "x"
+      })
+      continue
+    }
+
+    if (section === "dependencies") {
+      if (/^\s*-\s+/.test(trimmed)) plan.dependencies.push(trimmed.replace(/^\s*-\s+/, "").trim())
+      else plan.dependencies.push(trimmed)
+      continue
+    }
+
+    if (section === "notes") {
+      if (/^\s*-\s+/.test(trimmed)) plan.notes.push(trimmed.replace(/^\s*-\s+/, "").trim())
+      else plan.notes.push(trimmed)
+      continue
+    }
+
+    if (section === "phases" && isObject(currentPhase) && /^\s*-\s+/.test(trimmed)) {
+      currentPhase.tasks.push({ label: trimmed.replace(/^\s*-\s+/, "").trim(), checked: false })
+      continue
+    }
+  }
+
+  if (plan.phases.length === 0) {
+    var extractedTasks = []
+    for (var j = 0; j < normalized.length; j++) {
+      var check = normalized[j].match(/^\s*-\s*\[(x|X| )\]\s*(.+)$/)
+      if (check) extractedTasks.push({ label: check[2].trim(), checked: check[1].toLowerCase() === "x" })
+    }
+    if (extractedTasks.length > 0) {
+      plan.phases.push({ index: 0, title: "Phase 1", tasks: extractedTasks })
+    }
+  }
+
+  for (var p = 0; p < plan.phases.length; p++) {
+    var phase = plan.phases[p]
+    if (!isArray(phase.tasks)) phase.tasks = []
+    phase.index = p
+    if (!isString(phase.title) || phase.title.length === 0) phase.title = `Phase ${p + 1}`
+  }
+
+  if (plan.title.length === 0 && isObject(context) && isString(context.goal)) {
+    plan.title = context.goal.split(/\n+/)[0].trim()
+  }
+
+  return plan
+}
+
+MiniA.prototype._buildExecutionPlanState = function(parsedPlan, pointer, options) {
+  if (!isObject(parsedPlan) || !isArray(parsedPlan.phases)) return null
+  var pointerInfo = isObject(pointer) ? pointer : {}
+  var pointerPhase = isNumber(pointerInfo.phaseIndex) ? pointerInfo.phaseIndex : 0
+  var pointerTask = isNumber(pointerInfo.taskIndex) ? pointerInfo.taskIndex : 0
+  if (pointerPhase < 0) pointerPhase = 0
+  if (pointerTask < 0) pointerTask = 0
+
+  var steps = []
+  var checkpoints = []
+  var goalTitle = isObject(options) && isString(options.goal) ? options.goal : parsedPlan.title
+  var strategy = parsedPlan.phases.length > 1 ? "tree" : "simple"
+
+  for (var p = 0; p < parsedPlan.phases.length; p++) {
+    var phase = parsedPlan.phases[p]
+    var tasks = isObject(phase) && isArray(phase.tasks) ? phase.tasks : []
+    var children = []
+    var completedCount = 0
+    var requiresShellKeywords = [/shell/, /terminal/, /command/, /cli/]
+    var requiresToolKeywords = [/tool/, /mcp/, /api/, /endpoint/]
+
+    for (var t = 0; t < tasks.length; t++) {
+      var task = tasks[t]
+      var label = isObject(task) && isString(task.label) ? task.label : `(task ${t + 1})`
+      var lowerLabel = label.toLowerCase()
+      var childStatus = "pending"
+
+      if (p < pointerPhase) childStatus = "done"
+      else if (p > pointerPhase) childStatus = task.checked === true ? "done" : "pending"
+      else {
+        if (task.checked === true || t < pointerTask) childStatus = "done"
+        else if (t === pointerTask) childStatus = task.checked === true ? "done" : "in_progress"
+        else childStatus = task.checked === true ? "done" : "pending"
+      }
+
+      if (task.checked === true && childStatus !== "done") childStatus = "done"
+      if (childStatus === "done") completedCount++
+
+      var requires = []
+      for (var r = 0; r < requiresShellKeywords.length; r++) {
+        if (requiresShellKeywords[r].test(lowerLabel)) {
+          requires.push("shell")
+          break
+        }
+      }
+      for (var rt = 0; rt < requiresToolKeywords.length; rt++) {
+        if (requiresToolKeywords[rt].test(lowerLabel)) {
+          requires.push("mcp_tool")
+          break
+        }
+      }
+
+      var checkpoint = (t === tasks.length - 1) || (/verify|validate|test|confirm/.test(lowerLabel))
+      var progress = childStatus === "done" ? 100 : (childStatus === "in_progress" ? 25 : 0)
+
+      var childStep = {
+        id       : `P${p + 1}-T${t + 1}`,
+        title    : label,
+        status   : childStatus,
+        progress : progress
+      }
+      if (requires.length > 0) childStep.requires = requires
+      if (checkpoint) childStep.checkpoint = true
+
+      children.push(childStep)
+
+      checkpoints.push({
+        id        : `P${p + 1}-C${t + 1}`,
+        title     : `Confirm ${label}`,
+        status    : childStatus === "done" ? "done" : "pending",
+        linkedStep: childStep.id
+      })
+    }
+
+    var phaseStatus = "pending"
+    if (p < pointerPhase) phaseStatus = "done"
+    else if (p > pointerPhase) {
+      var allMarked = tasks.length > 0 && tasks.every(function(taskItem) { return isObject(taskItem) && taskItem.checked === true })
+      phaseStatus = allMarked ? "done" : "pending"
+    } else {
+      if (tasks.length === 0) phaseStatus = pointerTask > 0 ? "done" : "pending"
+      else if (pointerTask >= tasks.length && tasks.length > 0) phaseStatus = "done"
+      else if (completedCount === tasks.length && tasks.length > 0) phaseStatus = "done"
+      else phaseStatus = "in_progress"
+    }
+
+    var phaseProgress = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : (phaseStatus === "done" ? 100 : 0)
+    steps.push({
+      id      : `P${p + 1}`,
+      title   : isObject(phase) && isString(phase.title) ? phase.title : `Phase ${p + 1}`,
+      status  : phaseStatus,
+      progress: phaseProgress,
+      children: children
+    })
+  }
+
+  var pointerPhaseSafe = Math.min(pointerPhase, Math.max(steps.length - 1, 0))
+  var nextPhaseTitle = steps.length > 0 && pointerPhaseSafe < steps.length
+    ? steps[pointerPhaseSafe].title
+    : "(complete)"
+  var nextTaskTitle = "(complete)"
+  if (pointerPhaseSafe < parsedPlan.phases.length) {
+    var pointerTasks = parsedPlan.phases[pointerPhaseSafe].tasks || []
+    if (pointerTask < pointerTasks.length) {
+      nextTaskTitle = isString(pointerTasks[pointerTask].label) ? pointerTasks[pointerTask].label : nextTaskTitle
+    }
+  }
+
+  return {
+    version    : 3,
+    strategy   : strategy,
+    goal       : goalTitle,
+    steps      : steps,
+    checkpoints: checkpoints,
+    meta       : {
+      createdAt : now(),
+      source    : "markdown-plan",
+      dependencies: parsedPlan.dependencies,
+      notes      : parsedPlan.notes,
+      pointer    : { phaseIndex: pointerPhaseSafe, taskIndex: pointerTask },
+      nextPhase  : nextPhaseTitle,
+      nextTask   : nextTaskTitle,
+      originTitle: parsedPlan.title
+    }
+  }
+}
+
+MiniA.prototype._initializeExecutionPlan = function(options) {
+  if (!this._enablePlanning) return
+  var opts = isObject(options) ? options : {}
+  var goalText = isString(opts.goal) ? opts.goal : opts.args && isString(opts.args.goal) ? opts.args.goal : ""
+  var planMarkdown = isString(this._providedPlanMarkdown) ? this._providedPlanMarkdown.trim() : ""
+  if (planMarkdown.length === 0) {
+    this.fnI("plan", "useplanning requested but no reusable plan was found. Falling back to adaptive planning.")
+    return
+  }
+
+  var parsed = this._parseMarkdownPlan(planMarkdown, { goal: goalText })
+  if (!isObject(parsed) || !isArray(parsed.phases) || parsed.phases.length === 0) {
+    this.fnI("plan", "Provided plan could not be parsed. Falling back to on-the-fly planning.")
+    return
+  }
+
+  var pointer = { phaseIndex: 0, taskIndex: 0 }
+  outer: for (var p = 0; p < parsed.phases.length; p++) {
+    var tasks = isArray(parsed.phases[p].tasks) ? parsed.phases[p].tasks : []
+    if (tasks.length === 0) {
+      pointer.phaseIndex = p
+      pointer.taskIndex = 0
+      break outer
+    }
+    var allDone = true
+    for (var t = 0; t < tasks.length; t++) {
+      if (tasks[t].checked === true) continue
+      pointer.phaseIndex = p
+      pointer.taskIndex = t
+      allDone = false
+      break outer
+    }
+    if (allDone) {
+      pointer.phaseIndex = p + 1
+      pointer.taskIndex = 0
+    }
+  }
+
+  if (pointer.phaseIndex >= parsed.phases.length) {
+    pointer.phaseIndex = parsed.phases.length - 1
+    var lastTasks = parsed.phases.length > 0 && isArray(parsed.phases[parsed.phases.length - 1].tasks)
+      ? parsed.phases[parsed.phases.length - 1].tasks.length
+      : 0
+    pointer.taskIndex = lastTasks
+  }
+
+  var planState = this._buildExecutionPlanState(parsed, pointer, { goal: goalText })
+  if (!isObject(planState)) return
+
+  this._executionPlan = {
+    rawMarkdown: planMarkdown,
+    parsed     : parsed,
+    pointer    : pointer,
+    planState  : planState,
+    goal       : goalText
+  }
+
+  if (!isObject(this._agentState)) this._agentState = {}
+  this._agentState.plan = planState
+  if (isObject(this._agentState.plan) && isObject(this._agentState.plan.meta)) {
+    this._agentState.plan.meta.rawPlan = planMarkdown
+  }
+  this._handlePlanUpdate()
+}
+
+MiniA.prototype._syncExecutionPlanState = function(context) {
+  if (!this._enablePlanning) return
+  if (!isObject(this._executionPlan)) return
+  var exec = this._executionPlan
+  var goalText = exec.goal || (isObject(context) && isString(context.goal) ? context.goal : "")
+  var planState = this._buildExecutionPlanState(exec.parsed, exec.pointer, { goal: goalText })
+  if (!isObject(planState)) return
+  exec.planState = planState
+  if (!isObject(this._agentState)) this._agentState = {}
+  this._agentState.plan = planState
+  if (!isObject(this._agentState.plan.meta)) this._agentState.plan.meta = {}
+  this._agentState.plan.meta.pointer = { phaseIndex: exec.pointer.phaseIndex, taskIndex: exec.pointer.taskIndex }
+  this._agentState.plan.meta.rawPlan = exec.rawMarkdown
+  this._agentState.plan.meta.nextPhase = planState.meta.nextPhase
+  this._agentState.plan.meta.nextTask = planState.meta.nextTask
+  this._agentState.plan.meta.dependencies = planState.meta.dependencies
+  this._agentState.plan.meta.notes = planState.meta.notes
+  this._handlePlanUpdate()
+}
+
+MiniA.prototype._advanceExecutionPlan = function(details) {
+  if (!this._enablePlanning) return
+  if (!isObject(this._executionPlan) || !isObject(this._executionPlan.parsed)) return
+  var exec = this._executionPlan
+  var phases = isArray(exec.parsed.phases) ? exec.parsed.phases : []
+  if (phases.length === 0) return
+
+  var info = isObject(details) ? details : {}
+  var success = info.success === true
+  var final = info.final === true
+  if (!success && !final) return
+
+  var pointer = isObject(exec.pointer) ? exec.pointer : { phaseIndex: 0, taskIndex: 0 }
+  if (!isNumber(pointer.phaseIndex) || pointer.phaseIndex < 0) pointer.phaseIndex = 0
+  if (!isNumber(pointer.taskIndex) || pointer.taskIndex < 0) pointer.taskIndex = 0
+  if (pointer.phaseIndex >= phases.length) pointer.phaseIndex = phases.length - 1
+
+  var currentPhase = phases[pointer.phaseIndex]
+  var tasks = isObject(currentPhase) && isArray(currentPhase.tasks) ? currentPhase.tasks : []
+
+  if (final) {
+    for (var p = 0; p < phases.length; p++) {
+      if (!isArray(phases[p].tasks)) continue
+      for (var t = 0; t < phases[p].tasks.length; t++) phases[p].tasks[t].checked = true
+    }
+    exec.pointer = {
+      phaseIndex: phases.length - 1,
+      taskIndex : isArray(phases[phases.length - 1].tasks) ? phases[phases.length - 1].tasks.length : 0
+    }
+    this._syncExecutionPlanState({ goal: exec.goal })
+    return
+  }
+
+  if (pointer.taskIndex < tasks.length) {
+    tasks[pointer.taskIndex].checked = true
+  }
+
+  var nextPhaseIndex = pointer.phaseIndex
+  var nextTaskIndex = pointer.taskIndex + 1
+
+  while (nextPhaseIndex < phases.length) {
+    var phaseTasks = isArray(phases[nextPhaseIndex].tasks) ? phases[nextPhaseIndex].tasks : []
+    while (nextTaskIndex < phaseTasks.length && phaseTasks[nextTaskIndex].checked === true) {
+      nextTaskIndex++
+    }
+    if (nextTaskIndex < phaseTasks.length) break
+    nextPhaseIndex++
+    nextTaskIndex = 0
+  }
+
+  exec.pointer = {
+    phaseIndex: Math.min(nextPhaseIndex, phases.length - 1),
+    taskIndex : nextPhaseIndex >= phases.length ? (isArray(phases[phases.length - 1].tasks) ? phases[phases.length - 1].tasks.length : 0) : nextTaskIndex
+  }
+
+  this._syncExecutionPlanState({ goal: exec.goal })
 }
 
 MiniA.prototype._generateInitialPlan = function(goalText, strategy, args) {
@@ -2810,6 +3264,205 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
   this._applySystemInstructions(args)
 }
 
+MiniA.prototype._collectPlanInsights = function(options) {
+  var opts = isObject(options) ? options : {}
+  var args = isObject(opts.args) ? opts.args : {}
+  var goalText = isString(opts.goal) ? opts.goal : isString(args.goal) ? args.goal : ""
+  var addCall = isFunction(opts.addCall) ? opts.addCall : function() {}
+  var registerCallUsage = isFunction(opts.registerCallUsage) ? opts.registerCallUsage : function() {}
+
+  var insights = {
+    scope        : "",
+    key_steps    : [],
+    risks        : [],
+    dependencies : [],
+    validations  : [],
+    tools        : []
+  }
+
+  if (this._use_lc !== true || isUnDef(this.lc_llm)) {
+    this._plannerInsights = insights
+    return insights
+  }
+
+  var analysisPrompt = [
+    "You are preparing supporting notes for a software planning session.",
+    "Analyze the goal and environment details below and respond with a compact JSON object having keys:",
+    "  scope: short bullet-style summary of the main workstream",
+    "  key_steps: array of 3-5 essential activities",
+    "  risks: array of potential blockers or uncertainties",
+    "  dependencies: array describing required inputs, files, or approvals",
+    "  validations: array describing how to confirm success or handle edge cases",
+    "  tools: array of recommended tools or resources to use",
+    "Keep each array entry under 140 characters.",
+    "GOAL:", goalText.trim(),
+    "ENVIRONMENT:",
+    `- Shell access: ${toBoolean(args.useshell) ? "enabled" : "disabled"}`,
+    `- Registered tools: ${isArray(this.mcpToolNames) && this.mcpToolNames.length > 0 ? this.mcpToolNames.join(", ") : "none"}`
+  ].join("\n")
+
+  var lcLLM = this.lc_llm
+  if (isFunction(lcLLM.withInstructions)) {
+    lcLLM = lcLLM.withInstructions("Respond strictly with JSON.")
+  }
+
+  try {
+    var responseWithStats = this._withExponentialBackoff(() => {
+      addCall()
+      if (isFunction(lcLLM.promptJSONWithStats)) return lcLLM.promptJSONWithStats(analysisPrompt)
+      return lcLLM.promptWithStats(analysisPrompt)
+    }, {
+      maxAttempts : 3,
+      initialDelay: 250,
+      maxDelay    : 4000,
+      context     : { source: "llm", llmType: "low-cost", operation: "plan-analysis" },
+      onRetry     : (err, attempt, wait, category) => {
+        this.fnI("retry", `Low-cost model analysis attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+          global.__mini_a_metrics.retries.inc()
+        }
+      }
+    })
+
+    var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+    var tokenTotal = this._getTotalTokens(stats)
+    registerCallUsage(tokenTotal)
+    if (isObject(global.__mini_a_metrics)) {
+      if (isObject(global.__mini_a_metrics.llm_actual_tokens)) global.__mini_a_metrics.llm_actual_tokens.getAdd(tokenTotal)
+      if (isObject(global.__mini_a_metrics.llm_lc_tokens)) global.__mini_a_metrics.llm_lc_tokens.getAdd(tokenTotal)
+      if (isObject(global.__mini_a_metrics.llm_lc_calls)) global.__mini_a_metrics.llm_lc_calls.inc()
+    }
+
+    var parsed = responseWithStats && responseWithStats.response
+    if (isString(parsed)) parsed = jsonParse(parsed, __, __, true)
+    if (isObject(parsed)) {
+      if (isString(parsed.scope)) insights.scope = parsed.scope.trim()
+      if (isArray(parsed.key_steps)) insights.key_steps = parsed.key_steps
+      if (isArray(parsed.risks)) insights.risks = parsed.risks
+      if (isArray(parsed.dependencies)) insights.dependencies = parsed.dependencies
+      if (isArray(parsed.validations)) insights.validations = parsed.validations
+      if (isArray(parsed.tools)) insights.tools = parsed.tools
+    }
+  } catch (e) {
+    this.fnI("warn", `Planning insights collection failed: ${e && e.message ? e.message : e}`)
+  }
+
+  this._plannerInsights = insights
+  return insights
+}
+
+MiniA.prototype._runPlanningMode = function(options) {
+  var opts = isObject(options) ? options : {}
+  var args = isObject(opts.args) ? opts.args : {}
+  var addCall = isFunction(opts.addCall) ? opts.addCall : function() {}
+  var registerCallUsage = isFunction(opts.registerCallUsage) ? opts.registerCallUsage : function() {}
+  var sessionStartTime = isNumber(opts.sessionStartTime) ? opts.sessionStartTime : now()
+
+  var goalText = isString(args.goal) ? args.goal.trim() : ""
+  var knowledgeText = isString(args.knowledge) ? args.knowledge.trim() : ""
+  var analysis = isObject(this._planningAssessment) ? this._planningAssessment : this._assessGoalComplexity(goalText)
+  var insights = this._collectPlanInsights({ args: args, addCall: addCall, registerCallUsage: registerCallUsage, goal: goalText })
+
+  var environmentLines = [
+    `Shell access: ${toBoolean(args.useshell) ? "enabled" : "disabled"}`,
+    `Low-cost model: ${this._use_lc && isObject(this._oaf_lc_model) ? this._oaf_lc_model.model : "not configured"}`,
+    `Main model: ${isObject(this._oaf_model) ? this._oaf_model.model : "unknown"}`,
+    `Registered tools: ${this.mcpToolNames.length > 0 ? this.mcpToolNames.join(", ") : "none"}`
+  ]
+
+  var assessmentSummary = analysis && isObject(analysis)
+    ? `Complexity: ${analysis.level} (score ${analysis.score})`
+    : "Complexity: unknown"
+
+  var insightLines = []
+  if (isString(insights.scope) && insights.scope.length > 0) insightLines.push(`Scope: ${insights.scope}`)
+  if (isArray(insights.key_steps) && insights.key_steps.length > 0) insightLines.push(`Key steps: ${insights.key_steps.join("; ")}`)
+  if (isArray(insights.risks) && insights.risks.length > 0) insightLines.push(`Risks: ${insights.risks.join("; ")}`)
+  if (isArray(insights.dependencies) && insights.dependencies.length > 0) insightLines.push(`Dependencies: ${insights.dependencies.join("; ")}`)
+  if (isArray(insights.validations) && insights.validations.length > 0) insightLines.push(`Validation: ${insights.validations.join("; ")}`)
+  if (isArray(insights.tools) && insights.tools.length > 0) insightLines.push(`Tooling hints: ${insights.tools.join("; ")}`)
+
+  var plannerPromptParts = [
+    `GOAL:\n${goalText}`,
+    assessmentSummary,
+    `ENVIRONMENT:\n- ${environmentLines.join("\n- ")}`
+  ]
+  if (knowledgeText.length > 0) plannerPromptParts.push(`KNOWN CONTEXT:\n${knowledgeText}`)
+  if (insightLines.length > 0) plannerPromptParts.push(`PRELIMINARY INSIGHTS:\n- ${insightLines.join("\n- ")}`)
+  plannerPromptParts.push("Produce the plan following the system instructions.")
+
+  var plannerPrompt = plannerPromptParts.join("\n\n")
+
+  var plannerLLM = this.llm
+  if (isFunction(plannerLLM.withInstructions)) plannerLLM = plannerLLM.withInstructions(this._PLANNER_SYSTEM_PROMPT)
+
+  var planResponseWithStats
+  try {
+    planResponseWithStats = this._withExponentialBackoff(() => {
+      addCall()
+      if (isFunction(plannerLLM.promptWithStats)) return plannerLLM.promptWithStats(plannerPrompt)
+      return { response: plannerLLM.prompt(plannerPrompt), stats: {} }
+    }, {
+      maxAttempts : 3,
+      initialDelay: 250,
+      maxDelay    : 6000,
+      context     : { source: "llm", operation: "planmode" },
+      onRetry     : (err, attempt, wait, category) => {
+        this.fnI("retry", `Plan generation attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+          global.__mini_a_metrics.retries.inc()
+        }
+      }
+    })
+  } catch (e) {
+    this.fnI("error", `Plan generation failed: ${e && e.message ? e.message : e}`)
+    this.state = "stop"
+    return ""
+  }
+
+  var planStats = isObject(planResponseWithStats) ? planResponseWithStats.stats : {}
+  var planTokenTotal = this._getTotalTokens(planStats)
+  registerCallUsage(planTokenTotal)
+  if (isObject(global.__mini_a_metrics)) {
+    if (isObject(global.__mini_a_metrics.llm_actual_tokens)) global.__mini_a_metrics.llm_actual_tokens.getAdd(planTokenTotal)
+    if (isObject(global.__mini_a_metrics.llm_normal_tokens)) global.__mini_a_metrics.llm_normal_tokens.getAdd(planTokenTotal)
+    if (isObject(global.__mini_a_metrics.llm_normal_calls)) global.__mini_a_metrics.llm_normal_calls.inc()
+    if (isObject(global.__mini_a_metrics.plans_generated)) global.__mini_a_metrics.plans_generated.inc()
+  }
+
+  var planMarkdown = planResponseWithStats && planResponseWithStats.response
+  if (!isString(planMarkdown)) planMarkdown = stringify(planMarkdown, __, "")
+  planMarkdown = isString(planMarkdown) ? planMarkdown.trim() : ""
+  if (planMarkdown.indexOf("# Plan:") < 0) {
+    planMarkdown = `# Plan: ${goalText.split(/\n+/)[0].trim()}\n\n${planMarkdown}`.trim()
+  }
+
+  this._providedPlanMarkdown = planMarkdown
+
+  try {
+    var cacheKey = sha384(stringify({
+      goal      : goalText,
+      knowledge : knowledgeText,
+      tools     : this.mcpToolNames,
+      useshell  : toBoolean(args.useshell)
+    }, __, ""))
+    $cache(this._planCacheName).set(cacheKey, {
+      value    : { markdown: planMarkdown, insights: this._plannerInsights, createdAt: now() },
+      expiresAt: now() + 3600000
+    })
+  } catch (cacheErr) {
+    this.fnI("warn", `Unable to cache generated plan: ${cacheErr && cacheErr.message ? cacheErr.message : cacheErr}`)
+  }
+
+  this.fnI("plan", planMarkdown)
+
+  this.state = "stop"
+  global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
+
+  var outputArgs = merge({}, args, { format: "md" })
+  return this._processFinalAnswer(planMarkdown, outputArgs)
+}
+
 // ============================================================================
 // MAIN METHODS
 // ============================================================================
@@ -2823,9 +3476,20 @@ MiniA.prototype.init = function(args) {
   if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
   if (isUnDef(args.format)) args.format = "md"
 
+  var initPlanMode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
   var initChatbotMode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
   var initUsePlanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
-  this._enablePlanning = (!initChatbotMode && initUsePlanning)
+  if (initPlanMode && initChatbotMode) {
+    this.fnI("warn", "chatbotmode is not available during planmode; disabling chatbotmode.")
+    initChatbotMode = false
+  }
+  if (initPlanMode && initUsePlanning) {
+    this.fnI("warn", "planmode already generates a plan; useplanning has been disabled for this run.")
+    initUsePlanning = false
+  }
+  this._planModeEnabled = initPlanMode
+  this._enablePlanning = (!initChatbotMode && initUsePlanning && !initPlanMode)
+  args.planmode = initPlanMode
   args.chatbotmode = initChatbotMode
   args.useplanning = initUsePlanning
   if (this._isInitialized) return
@@ -2861,6 +3525,8 @@ MiniA.prototype.init = function(args) {
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
+      { name: "planmode", type: "boolean", default: false },
+      { name: "planfile", type: "string", default: "" },
     ])
 
     // Convert and validate boolean arguments
@@ -2873,9 +3539,14 @@ MiniA.prototype.init = function(args) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(args.planmode)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
+
+    this._providedPlanMarkdown = ""
+    this._executionPlan = null
+    this._plannerInsights = {}
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
@@ -3150,7 +3821,17 @@ MiniA.prototype.init = function(args) {
 
     if (args.format == "json") rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
-    var trimmedKnowledge = args.knowledge.trim()
+      var trimmedKnowledge = args.knowledge.trim()
+      var planIngestion = this._ingestPlanKnowledge(args, trimmedKnowledge)
+      if (isObject(planIngestion)) {
+        if (isString(planIngestion.knowledge)) {
+          trimmedKnowledge = planIngestion.knowledge
+          args.knowledge = trimmedKnowledge
+        }
+        if (isString(planIngestion.planMarkdown)) {
+          this._providedPlanMarkdown = planIngestion.planMarkdown
+        }
+      }
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
@@ -3288,7 +3969,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "rules", type: "string", default: "" },
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
-      { name: "shellbanextra", type: "string", default: "" }
+      { name: "shellbanextra", type: "string", default: "" },
+      { name: "planmode", type: "boolean", default: false },
+      { name: "planfile", type: "string", default: "" }
     ])
 
     // Convert and validate boolean arguments
@@ -3302,6 +3985,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
@@ -3313,8 +3997,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._planningStrategy = "off"
     this._planningProgress = { overall: 0, completed: 0, total: 0, checkpoints: { reached: 0, total: 0 } }
     this._planningStats = { validations: 0, adjustments: 0 }
+    var planModeActive = args.planmode === true
+    if (planModeActive && args.chatbotmode) {
+      this.fnI("warn", "chatbotmode is not available during planmode; disabling chatbotmode.")
+      args.chatbotmode = false
+    }
+    if (planModeActive && args.useplanning) {
+      this.fnI("warn", "planmode already generates a plan; useplanning has been disabled for this run.")
+      args.useplanning = false
+    }
+    this._planModeEnabled = planModeActive
     this._preparePlanning(args)
-    this._enablePlanning = (!args.chatbotmode && args.useplanning)
+    this._enablePlanning = (!args.chatbotmode && args.useplanning && !planModeActive)
+    this._providedPlanMarkdown = ""
+    this._executionPlan = null
+    this._plannerInsights = {}
     this._lastPlanMessage = ""
     this._planCounter = 0
     this._lastPlanSnapshot = ""
@@ -3457,17 +4154,26 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     this.fnI("user", `${args.goal}`)
 
-    if (toBoolean(args.mcpdynamic) === true) {
-      args.mcplazy = true
-    }
+      if (toBoolean(args.mcpdynamic) === true) {
+        args.mcplazy = true
+      }
 
-    this.init(args)
-    this._registerMcpToolsForGoal(args)
+      this.init(args)
+      this._registerMcpToolsForGoal(args)
 
-    var initialState = {}
-    if (isDef(args.state)) {
-      var providedState = args.state
-      if (isString(providedState)) {
+      if (this._planModeEnabled === true) {
+        return this._runPlanningMode({
+          args             : args,
+          addCall          : addCall,
+          registerCallUsage: registerCallUsage,
+          sessionStartTime : sessionStartTime
+        })
+      }
+
+      var initialState = {}
+      if (isDef(args.state)) {
+        var providedState = args.state
+        if (isString(providedState)) {
         var parsedState = jsonParse(providedState, __, __, true)
         if (isObject(parsedState)) providedState = parsedState
       }
@@ -3475,13 +4181,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var clonedState = jsonParse(stringify(providedState, __, ""), __, __, true)
         initialState = isObject(clonedState) ? clonedState : providedState
       }
-    }
-    this._agentState = isObject(initialState) ? initialState : {}
-    if (this._enablePlanning) {
-      this._initializePlanningState({ goal: args.goal, args: args })
-      if (isObject(this._agentState) && isUnDef(this._agentState.plan)) this._agentState.plan = []
-      this._handlePlanUpdate()
-    }
+      }
+      this._agentState = isObject(initialState) ? initialState : {}
+      if (this._enablePlanning) {
+        this._initializeExecutionPlan({ goal: args.goal, args: args })
+      }
+      if (this._enablePlanning) {
+        this._initializePlanningState({ goal: args.goal, args: args })
+        if (isObject(this._agentState) && isUnDef(this._agentState.plan)) this._agentState.plan = []
+        this._handlePlanUpdate()
+      }
 
     this.fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
 
@@ -3680,6 +4389,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
+      if (this._enablePlanning && isObject(this._executionPlan)) {
+        this._syncExecutionPlanState({ goal: args.goal })
+      }
       var stateSnapshot = stringify(this._agentState, __, "")
       if (args.debug || args.verbose) {
         this.fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
@@ -4191,14 +4903,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               context : { step: stepLabel }
             })
             break
-          }
+            }
 
-          global.__mini_a_metrics.finals_made.inc()
+            global.__mini_a_metrics.finals_made.inc()
+            if (this._enablePlanning && isObject(this._executionPlan)) {
+              this._advanceExecutionPlan({ final: true })
+            }
 
-          runtime.consecutiveThoughts = 0
-          runtime.stepsWithoutAction = 0
-          global.__mini_a_metrics.consecutive_thoughts.set(0)
-          runtime.successfulActionDetected = true
+            runtime.consecutiveThoughts = 0
+            runtime.stepsWithoutAction = 0
+            global.__mini_a_metrics.consecutive_thoughts.set(0)
+            runtime.successfulActionDetected = true
 
           var totalTime = now() - sessionStartTime
           global.__mini_a_metrics.total_session_time.set(totalTime)
@@ -4235,6 +4950,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
       if (args.debug || args.verbose) {
         this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+      }
+
+      if (this._enablePlanning && isObject(this._executionPlan) && runtime.successfulActionDetected && runtime.hadErrorThisStep !== true) {
+        this._advanceExecutionPlan({ success: true })
       }
 
       if (runtime.hadErrorThisStep) {
@@ -4587,15 +5306,19 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackAnswer = fallbackResponseWithStats.response
       finalAnswer = isString(fallbackAnswer) ? fallbackAnswer.trim() : stringify(fallbackAnswer, __, "")
       global.__mini_a_metrics.goals_stopped.inc()
-    } else {
-      global.__mini_a_metrics.finals_made.inc()
-      global.__mini_a_metrics.goals_achieved.inc()
-    }
+      } else {
+        global.__mini_a_metrics.finals_made.inc()
+        global.__mini_a_metrics.goals_achieved.inc()
+      }
 
-    var totalTime = now() - sessionStartTime
-    global.__mini_a_metrics.total_session_time.set(totalTime)
+      if (this._enablePlanning && isObject(this._executionPlan)) {
+        this._advanceExecutionPlan({ final: true })
+      }
 
-    this.state = "stop"
+      var totalTime = now() - sessionStartTime
+      global.__mini_a_metrics.total_session_time.set(totalTime)
+
+      this.state = "stop"
 
     return this._processFinalAnswer(finalAnswer, args)
 }

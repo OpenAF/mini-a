@@ -77,4 +77,26 @@
     })
     ow.test.assert(blocked === true, true, "A step should be blocked after obstacle handling")
   }
+
+  exports.testMarkdownPlanParsing = function() {
+    var agent = createAgent()
+    var markdown = "# Plan: Ship feature\n\n## Phase 1: Analysis\n- [ ] Review existing config\n- [x] Identify impacted modules\n\n## Phase 2: Implementation\n- [ ] Update parsers\n- [ ] Write regression tests\n\n## Dependencies\n- Repo access\n- CI pipeline\n\n## Notes\n- Keep plan concise"
+    var parsed = agent._parseMarkdownPlan(markdown, { goal: "Ship feature" })
+    ow.test.assert(isObject(parsed) && parsed.phases.length === 2, true, "Should parse phases from markdown plan")
+    ow.test.assert(parsed.phases[0].tasks.length === 2, true, "First phase should include tasks")
+    var planState = agent._buildExecutionPlanState(parsed, { phaseIndex: 0, taskIndex: 0 }, { goal: "Ship feature" })
+    ow.test.assert(isObject(planState) && isArray(planState.steps), true, "Execution state should be created from parsed plan")
+  }
+
+  exports.testExecutionPlanInitialization = function() {
+    var agent = createAgent()
+    var markdown = "# Plan: Improve docs\n\n## Phase 1: Audit\n- [ ] List outdated sections\n\n## Phase 2: Update\n- [ ] Refresh README\n- [ ] Verify examples"
+    agent._providedPlanMarkdown = markdown
+    agent._agentState = {}
+    agent._initializeExecutionPlan({ goal: "Improve docs", args: {} })
+    ow.test.assert(isObject(agent._executionPlan) && isArray(agent._executionPlan.parsed.phases), true, "Execution plan should be stored")
+    ow.test.assert(isObject(agent._agentState.plan), true, "Agent state should hold parsed plan")
+    agent._advanceExecutionPlan({ success: true })
+    ow.test.assert(agent._executionPlan.pointer.taskIndex === 1 || agent._executionPlan.pointer.phaseIndex > 0, true, "Advancing execution plan should progress the pointer")
+  }
 })()

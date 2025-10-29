@@ -141,6 +141,11 @@ Enable `useplanning=true` to activate a richer planning workflow that now adapts
 
 The new planning helpers live entirely in `state.plan`, so existing prompts and transcripts remain compatible while gaining richer telemetry.
 
+Two new planning workflows build on top of this foundation:
+
+- **Planning mode (`planmode=true`)** – Generates a reusable Markdown plan (with numbered phases and checkbox tasks) using the main model, while the low-cost model gathers preliminary insights. The resulting plan can be saved to disk or passed as knowledge to another Mini-A session. Planning mode automatically disables `chatbotmode` and `useplanning` for the run so it can focus on producing the plan.
+- **Plan execution (`useplanning=true`)** – When provided with a Markdown plan (either in `knowledge` or via `planfile=/path/to/plan.md`), the agent imports the phases, tracks progress automatically, and advances the checkbox list as successful steps complete. If no plan is supplied, Mini-A logs a warning and falls back to adaptive planning.
+
 ### Running the mini agent
 
 #### Single MCP connection
@@ -319,7 +324,9 @@ All Mini-A options can be passed as command line arguments:
 - `outfile` – Path to write the final answer (implies JSON output unless `__format` is provided)
 - `__format` – Output format (e.g. `md`, `json`)
 - `chatbotmode` – Skip the agent workflow and respond like a regular chat assistant (default `false`)
-- `useplanning` – Keep a live task plan in agent mode; Mini-A disables it automatically for trivial goals
+- `useplanning` – Consume a pre-generated Markdown plan (from `knowledge` or `planfile`) and track progress; falls back to adaptive planning when no plan is available
+- `planfile` – Path to a Markdown plan that should be loaded when `useplanning=true`
+- `planmode` – Generate a reusable Markdown plan instead of executing the goal (mutually exclusive with `chatbotmode`)
 - `auditch` – Persist every interaction event to an OpenAF channel (JSSLON definition)
 
 For a complete list of options, see the [Usage Guide](USAGE.md).
