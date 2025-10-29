@@ -66,6 +66,7 @@ files:
 - TESTS_MODELS.md
 - USAGE.md
 - examples/README.md
+- examples/changelog-generator.yaml
 - examples/document.yaml
 - examples/summary.yaml
 - mcps/CREATING.md
@@ -112,9 +113,10 @@ filesHash:
   README.md: 8388a2586e37a9eabba98f5700c148f1f656fb84
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
   USAGE.md: fea047a05c914eae40294de5b5e69505c37f823c
-  examples/README.md: bd779bff34653547069d6a647346fc703f8fcfb9
-  examples/document.yaml: 248196d15694955a6c99a45280ed9b6abf7bf17c
-  examples/summary.yaml: 58c12ffc5107dc53f02ed7c04f903fa945d9ec91
+  examples/README.md: 264f8a2fe38e0c2cdf1daa5f89f68f54d9b74b93
+  examples/changelog-generator.yaml: fd6a10a7b328b2a9470f87ee0f16271643d0d8ff
+  examples/document.yaml: 19871e428a840eb2b726a4167664a0f27926a66d
+  examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/README.md: c644840aff1dd2157ca287e6329a93661e2e17b8
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
