@@ -2852,6 +2852,8 @@ MiniA.prototype.init = function(args) {
       { name: "knowledge", type: "string", default: "" },
       { name: "outfile", type: "string", default: __ },
       { name: "libs", type: "string", default: "" },
+      { name: "model", type: "string", default: __ },
+      { name: "modellc", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
@@ -2930,22 +2932,58 @@ MiniA.prototype.init = function(args) {
       }
     }
 
-    // Using OAF_MODEL env var for model selection
-    if (isUnDef(getEnv("OAF_MODEL"))) {
-      var _msg = "OAF_MODEL environment variable not set. Please set it to your desired LLM model."
+    var parseModelConfig = function(rawValue, source) {
+      if (isUnDef(rawValue)) return __
+      var parsed = rawValue
+      if (isString(parsed)) {
+        parsed = parsed.trim()
+        if (parsed.length === 0) return __
+        try {
+          parsed = af.fromJSSLON(parsed)
+        } catch (e) {
+          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+          throw new Error(`Invalid ${source} model configuration: ${errMsg}`)
+        }
+      }
+      if (!isMap(parsed)) {
+        throw new Error(`Invalid ${source} model configuration: expected a map/object.`)
+      }
+      return parsed
+    }
+
+    if (isUnDef(this._oaf_model)) {
+      var overrideModel = parseModelConfig(args.model, "model parameter")
+      if (isDef(overrideModel)) this._oaf_model = overrideModel
+    }
+
+    if (isUnDef(this._oaf_model)) {
+      var envModel = parseModelConfig(getEnv("OAF_MODEL"), "OAF_MODEL environment variable")
+      if (isDef(envModel)) this._oaf_model = envModel
+    }
+
+    if (isUnDef(this._oaf_model)) {
+      var _msg = "No model configuration provided. Set the OAF_MODEL environment variable or pass the model= parameter."
       logErr(_msg)
       throw new Error(_msg)
     }
-    // Check for the low-cost model in OAF_LC_MODEL
-    if (isDef(getEnv("OAF_LC_MODEL")) && isUnDef(this._oaf_lc_model)) {
-      this._oaf_lc_model = af.fromJSSLON(getEnv("OAF_LC_MODEL"))
+
+    if (isUnDef(this._oaf_lc_model)) {
+      var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter")
+      if (isDef(overrideLcModel)) this._oaf_lc_model = overrideLcModel
+    }
+
+    if (isUnDef(this._oaf_lc_model)) {
+      var envLcModel = parseModelConfig(getEnv("OAF_LC_MODEL"), "OAF_LC_MODEL environment variable")
+      if (isDef(envLcModel)) this._oaf_lc_model = envLcModel
+    }
+
+    if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
       this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
     } else {
       this._use_lc = false
     }
 
-    if (isUnDef(this._oaf_model)) this._oaf_model = af.fromJSSLON(getEnv("OAF_MODEL"))
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
 

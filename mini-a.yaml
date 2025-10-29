@@ -176,8 +176,9 @@ jobs:
 # ----------------
 - name : CheckEnv
   exec : | #js
-    if (isUnDef(getEnv("OAF_MODEL"))) {
-      throw "OAF_MODEL environment variable not set. Please export OAF_MODEL with your model configuration before running Mini-A."
+    var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
+    if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
+      throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before running Mini-A."
     }
 
 - name : MiniAgent
@@ -198,6 +199,8 @@ jobs:
       knowledge      : isString.default(__)
       outfile        : isString.default(__)
       libs           : isString.default(__)
+      model          : isString.default(__)
+      modellc        : isString.default(__)
       conversation   : isString.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
