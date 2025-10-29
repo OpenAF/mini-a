@@ -66,6 +66,7 @@ files:
 - TESTS_MODELS.md
 - USAGE.md
 - examples/README.md
+- examples/document.yaml
 - examples/summary.yaml
 - mcps/CREATING.md
 - mcps/README.md
@@ -112,6 +113,7 @@ filesHash:
   TESTS_MODELS.md: c8e334b573b4231f58f9798be83178f23ea53635
   USAGE.md: 7e325c62e987bd4cc6df65a793f7ecdf35c32701
   examples/README.md: bd779bff34653547069d6a647346fc703f8fcfb9
+  examples/document.yaml: 248196d15694955a6c99a45280ed9b6abf7bf17c
   examples/summary.yaml: 58c12ffc5107dc53f02ed7c04f903fa945d9ec91
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/README.md: c644840aff1dd2157ca287e6329a93661e2e17b8
