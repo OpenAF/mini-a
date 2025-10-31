@@ -1153,11 +1153,25 @@ MiniA.prototype._serializeMarkdownPlan = function(plan) {
   return lines.join("\n").trim() + "\n"
 }
 
+/**
+ * Loads plan content from a file path or inline string.
+ * Supports both JSON and Markdown formats, auto-detecting the format if not specified.
+ * 
+ * @param {string} source - File path or inline plan content string
+ * @param {string} format - Optional format override ("json" or "markdown")
+ * @returns {Object|undefined} Plan object with format, plan data, and raw content, or undefined if loading fails
+ */
 MiniA.prototype._loadPlanContent = function(source, format) {
   if (!isString(source) || source.length === 0) return __
   var content = source
+  // Check if source is a file path and attempt to read it
   if (io.fileExists(source)) {
-    content = io.readFileString(source)
+    try {
+      content = io.readFileString(source)
+    } catch(e) {
+      this.fnI("warn", `Failed to read plan file '${source}': ${e}`)
+      return __
+    }
   }
   if (!isString(content) || content.trim().length === 0) return __
   var detectedFormat = isString(format) ? format : this._detectPlanFormatFromContent(content)
@@ -1174,20 +1188,31 @@ MiniA.prototype._loadPlanContent = function(source, format) {
   return __
 }
 
+/**
+ * Loads a plan from command-line arguments, checking planfile first, then knowledge field.
+ * The planfile parameter takes precedence and will be used if it points to a valid file.
+ * If planfile is not provided or cannot be loaded, falls back to checking args.knowledge.
+ * 
+ * @param {Object} args - Arguments object containing planfile and/or knowledge properties
+ * @returns {Object|undefined} Plan object with source, path, format, and plan data, or undefined if no plan found
+ */
 MiniA.prototype._loadPlanFromArgs = function(args) {
   if (!isObject(args)) return __
   var planfile = isString(args.planfile) && args.planfile.length > 0 ? args.planfile : __
   var planFromFile = __
   if (planfile) {
     if (!io.fileExists(planfile)) {
-      this.fnI("warn", `Plan file '${planfile}' not found.`)
-    }
-    var fmt = this._detectPlanFormatFromFilename(planfile)
-    planFromFile = this._loadPlanContent(planfile, fmt)
-    if (isObject(planFromFile)) {
-      planFromFile.source = "file"
-      planFromFile.path = planfile
-      return planFromFile
+      this.fnI("warn", `Plan file '${planfile}' not found. Ensure the file path is correct if not creating.`)
+    } else {
+      var fmt = this._detectPlanFormatFromFilename(planfile)
+      planFromFile = this._loadPlanContent(planfile, fmt)
+      if (isObject(planFromFile)) {
+        planFromFile.source = "file"
+        planFromFile.path = planfile
+        return planFromFile
+      } else {
+        this.fnI("warn", `Plan file '${planfile}' exists but could not be parsed as a valid plan.`)
+      }
     }
   }
 
@@ -1730,10 +1755,14 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
 
 MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
   var sections = []
-  sections.push("You are Mini-A's dedicated planning specialist. Generate a precise, structured plan that another Mini-A instance can execute.")
-  sections.push("The plan must be concise, explicit about dependencies, and organized into numbered phases with checkbox tasks.")
-  sections.push("Always include a 'Notes for Future Agents' section at the end to capture persistent knowledge and execution history notes.")
-  sections.push("If any task is risky or requires more detail, suggest creating sub-plans.")
+  sections.push("You are Mini-A's dedicated planning specialist. Your role is to generate a precise, structured, and executable plan that another Mini-A instance will use to accomplish the goal.")
+  sections.push("")
+  sections.push("CRITICAL PLANNING PRINCIPLES:")
+  sections.push("1. Create ACTIONABLE tasks - each task should be concrete and implementable, not vague concepts")
+  sections.push("2. Make dependencies EXPLICIT - clearly state what must be completed before each task/phase can begin")
+  sections.push("3. Think ITERATIVELY - plans can be refined as execution reveals new information")
+  sections.push("4. Include VERIFICATION - every deliverable needs a validation checkpoint")
+  sections.push("5. Preserve CONTEXT - use 'Notes for Future Agents' to capture insights that help with plan refinement")
 
   sections.push("\n## Goal")
   sections.push(insights.goal)
@@ -1756,25 +1785,84 @@ MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
   var formatInstructions
   if (format === "json") {
     formatInstructions = "Return a single JSON object matching this structure: {\n  \"goal\": string,\n  \"phases\": [ { \"name\": string, \"tasks\": [ { \"description\": string, \"completed\": false, \"dependencies\": [strings], \"suggestSubplan\": boolean? } ], \"suggestions\": [strings], \"references\": [strings] } ],\n  \"dependencies\": [strings],\n  \"notes\": [strings],\n  \"executionHistory\": [strings]\n}." +
-      "\nSet every task's 'completed' flag to false by default unless context proves it is already done." +
-      "\nAlways include the \"Notes for Future Agents\" array; do not omit it even if empty." +
-      "\nAdd entries to \"dependencies\" to clarify ordering or prerequisites between phases."
+      "\n\nJSON FIELD GUIDELINES:" +
+      "\n- 'goal': Clear, measurable objective statement" +
+      "\n- 'phases': 3-7 sequential phases with descriptive names (e.g., 'Setup Environment', 'Implement Core Logic')" +
+      "\n- 'tasks': Specific actions with clear completion criteria (start with action verbs: 'Create...', 'Verify...', 'Update...')" +
+      "\n- 'completed': Always false for new plans unless evidence shows task is done" +
+      "\n- 'dependencies': List task IDs or phase names that must complete first (e.g., ['Phase 1', 'Setup database'])" +
+      "\n- 'suggestSubplan': Set to true for complex tasks needing detailed breakdown" +
+      "\n- 'suggestions': Implementation tips, best practices, or alternative approaches" +
+      "\n- 'references': File paths, documentation links, or related plan files" +
+      "\n- 'notes': Key insights, assumptions, constraints, or learnings for future agents" +
+      "\n- 'executionHistory': Initially empty; will track execution progress and outcomes"
   } else {
-    formatInstructions = "Return Markdown starting with '# Plan: <goal>' followed by numbered phases (## Phase X: ...)." +
-      " Each actionable task MUST be a checkbox list item '- [ ] task description'." +
-      " Include dependencies, references, and suggestions as plain bullets under the relevant phase." +
-      " Conclude with '## Notes for Future Agents' and '## Execution History' sections." +
-      " Provide short notes even if they say 'No notes yet.'"
+    formatInstructions = "Return Markdown with this exact structure:\n\n" +
+      "# Plan: <concise goal statement>\n\n" +
+      "## Phase 1: <descriptive phase name>\n" +
+      "- [ ] First actionable task (be specific about WHAT to do and HOW to verify)\n" +
+      "- [ ] Second task with clear completion criteria\n" +
+      "  - **Dependencies:** What must be done first\n" +
+      "  - **Verification:** How to confirm this task is complete\n\n" +
+      "**Suggestions:**\n- Implementation tips or alternative approaches\n- Best practices to consider\n\n" +
+      "**References:**\n- Relevant file paths or documentation\n\n" +
+      "## Phase 2: <next phase name>\n" +
+      "[Continue pattern...]\n\n" +
+      "## Notes for Future Agents\n" +
+      "- Key assumptions made during planning\n" +
+      "- Known constraints or limitations\n" +
+      "- Insights that may help with plan refinement\n" +
+      "- Suggested checkpoints for replanning if needed\n\n" +
+      "## Execution History\n" +
+      "- Initially empty; will be populated during execution\n\n" +
+      "TASK QUALITY CHECKLIST:\n" +
+      "✓ Each task starts with an action verb (Create, Update, Test, Deploy, etc.)\n" +
+      "✓ Tasks are specific enough that completion is unambiguous\n" +
+      "✓ Complex tasks flag 'suggestSubplan: true' for detailed breakdown\n" +
+      "✓ Dependencies are explicitly stated (not assumed)\n" +
+      "✓ Verification steps are included for critical deliverables"
   }
 
-  sections.push("\n## Requirements")
-  sections.push("- Break work into sequential phases with explicit names.")
-  sections.push("- Each phase must list actionable checkbox tasks (no empty phases).")
-  sections.push("- Highlight dependencies between phases or tasks when relevant.")
-  sections.push("- Identify verification/validation steps for critical deliverables.")
-  sections.push("- Suggest when deeper sub-plans are recommended.")
-  sections.push("- Mention any supporting files or plan references that would help future agents.")
-  sections.push("- Keep wording terse and implementation focused.")
+  sections.push("\n## Requirements for Creating Effective Plans")
+  sections.push("")
+  sections.push("PHASE ORGANIZATION:")
+  sections.push("- Create 3-7 sequential phases with clear, descriptive names")
+  sections.push("- Order phases logically: setup → implementation → testing → deployment")
+  sections.push("- Each phase should represent a meaningful milestone")
+  sections.push("- No empty phases - every phase must have at least one task")
+  sections.push("")
+  sections.push("TASK DEFINITION:")
+  sections.push("- Write specific, actionable tasks (e.g., 'Create user authentication middleware' not 'Handle auth')")
+  sections.push("- Include acceptance criteria or verification steps for important tasks")
+  sections.push("- Use checkbox format: '- [ ] task description'")
+  sections.push("- Flag complex tasks with 'suggestSubplan: true' when they need detailed breakdown")
+  sections.push("- Keep tasks focused - if a task has multiple steps, consider splitting it")
+  sections.push("")
+  sections.push("DEPENDENCY MANAGEMENT:")
+  sections.push("- Explicitly list what must complete before a task/phase can start")
+  sections.push("- Reference specific phases or tasks (e.g., 'Depends on Phase 1: Setup')")
+  sections.push("- Identify parallel work opportunities (tasks with no dependencies)")
+  sections.push("- Note external dependencies (API access, credentials, infrastructure)")
+  sections.push("")
+  sections.push("CONTEXT PRESERVATION:")
+  sections.push("- Use 'Notes for Future Agents' to capture:")
+  sections.push("  * Key assumptions or constraints")
+  sections.push("  * Important architectural decisions")
+  sections.push("  * Potential risks or gotchas")
+  sections.push("  * Suggested points for replanning if complexity increases")
+  sections.push("- Include references to relevant files, docs, or related plans")
+  sections.push("- Provide suggestions for implementation approaches or best practices")
+  sections.push("")
+  sections.push("VERIFICATION & VALIDATION:")
+  sections.push("- Include verification tasks after critical deliverables")
+  sections.push("- Specify how to confirm task completion (e.g., 'Run tests', 'Check logs', 'Verify output')")
+  sections.push("- Add checkpoint phases for complex projects")
+  sections.push("")
+  sections.push("STYLE GUIDELINES:")
+  sections.push("- Keep task descriptions concise but complete (1-2 lines)")
+  sections.push("- Use consistent terminology throughout the plan")
+  sections.push("- Avoid jargon unless it's domain-specific and necessary")
+  sections.push("- Write for clarity - another agent must understand without asking questions")
 
   sections.push("\n## Output Format")
   sections.push(formatInstructions)
