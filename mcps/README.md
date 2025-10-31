@@ -21,6 +21,7 @@
 | mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
 | mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
 | mcp-weather| Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
+| mcp-web    | Web search and URL fetching MCP | STDIO/HTTP       | (included) | [mcp-web.yaml](mcp-web.yaml)       |
 
 See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contribution guidelines.
 
@@ -362,6 +363,42 @@ Example — locate an official feed and pull the latest posts:
 ```bash
 mini-a.sh goal="summarize the most recent Azure announcements" \
   mcp="(cmd: 'ojob mcps/mcp-rss.yaml', timeout: 5000)" rpm=20
+```
+
+#### mcp-web
+
+`mcp-web` provides a simple web search and URL retrieval toolkit. It performs searches via DuckDuckGo and fetches web pages using jsoup, returning cleaned HTML, raw HTML, plain text, or a structured map.
+
+Arguments:
+
+- `onport` (optional): start an HTTP MCP server on the specified port.
+
+Tools:
+
+- `web-search`: Search the web and return an array of results with `title`, `description`, and `link`.
+  - Input: `query` (string, required), `limit` (number, default 12), `searchEngine` (string, default `duckduckgo`/`ddg`).
+- `get-url`: Fetch and process a single URL.
+  - Input: `url` (string, required), `style` (enum `html` | `basic` | `text` | `map`, default `basic`).
+
+Example — search the web (STDIO MCP):
+
+```bash
+mini-a.sh goal="find the official Rust language blog and summarize the latest post" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml', timeout: 5000)" rpm=20 __format=md
+```
+
+Example — fetch a URL as text:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-web.yaml', tool: get-url, params: (url: 'https://www.rust-lang.org/', style: 'text'))"
+```
+
+Example — run as HTTP MCP server and call remotely:
+
+```bash
+ojob mcps/mcp-web.yaml onport=9999
+
+oafp in=mcp data="(type: remote, url: 'http://localhost:9999/mcp', tool: web-search, params: (query: 'site:openaf.io jsoup', limit: 5))"
 ```
 
 #### mcp-weather
