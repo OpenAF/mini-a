@@ -4439,7 +4439,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Add plan content to knowledge BEFORE validation
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
       var planContent = this._convertPlanObject(preloadedPlan.plan, preloadedPlan.format)
-      //this.fnI("info", `DEBUG: planContent type: ${typeof planContent}, length: ${isString(planContent) ? planContent.length : 'N/A'}`)
       if (isString(planContent) && planContent.length > 0) {
         var planSection = "\n\n## CURRENT PLAN:\n" + planContent
         if (isString(args.knowledge) && args.knowledge.length > 0) {
