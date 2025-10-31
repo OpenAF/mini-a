@@ -1559,9 +1559,7 @@ MiniA.prototype._markPhaseCompletionFromAnswer = function(answerText) {
     }
   }
   if (phasesToMark.length === 0) return
-  if (phasesToMark.length > 0) {
-    this.fnI('plan', 'Detected completion for phase(s): ' + phasesToMark.join(', '))
-  }
+  this.fnI('plan', 'Detected completion for phase(s): ' + phasesToMark.join(', '))
   // Iterate internal plan steps
   if (!isArray(this._agentState.plan.steps)) return
   for (var i = 0; i < this._agentState.plan.steps.length; i++) {
