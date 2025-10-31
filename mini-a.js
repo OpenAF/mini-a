@@ -1740,7 +1740,7 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
         var analysisText = isString(analysisResponse.response) ? analysisResponse.response : stringify(analysisResponse, __, "")
         if (isString(analysisText)) insights.summary = this._cleanCodeBlocks(analysisText).trim()
       } else if (isString(analysisResponse)) {
-        if (isFunction(controls && controls.afterCall)) controls.afterCall(0, analyzerLLM === this.lc_llm ? "lc" : "main")
+        if (controls && isFunction(controls.afterCall)) controls.afterCall(0, analyzerLLM === this.lc_llm ? "lc" : "main")
         insights.summary = this._cleanCodeBlocks(analysisResponse).trim()
       }
     } catch(e) {
