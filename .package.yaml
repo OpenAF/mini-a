@@ -130,7 +130,7 @@ filesHash:
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
   mcps/mcp-oafp.yaml: 4e7ba7a9ca5cb3dc9faa456f0f58225c7a41602a
   mcps/mcp-random.yaml: ac2ee99722a6ae2baeb14e19d4f881ce03e369c4
-  mcps/mcp-rss.yaml: dc1af03277d24234a9440e94c440c9c5b465dc1c
+  mcps/mcp-rss.yaml: 2f24b8d05aa184b08a23f2ab1789dbf4d2b78581
   mcps/mcp-s3.yaml: 845a363c5ca9d291a1ab24dad80972b6651b1a29
   mcps/mcp-shell.yaml: ce8b702efa515b704720f0d4e73a0093c1e4b699
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
@@ -139,7 +139,7 @@ filesHash:
   mcps/mcp-web.yaml: 9d6b5c89689426419f2f3aaf36b925aa7bbaa732
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
   mini-a-main.yaml: 2f5199ed62e2a7b63800c44cf5f8fa279cd27a55
-  mini-a-modes.yaml: f6f8f6675ed0c052e1c4623e24a32d4c743d37a2
+  mini-a-modes.yaml: 64af551d2bade3a5485ef414177427f8085f0fd6
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 1dc8ef9e7064b2581afe7c7d30bd393c3f71a0eb
   mini-a.js: af242065f3863ad4a64cacfc236f5ebc6419cb34
