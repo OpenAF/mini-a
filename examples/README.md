@@ -15,7 +15,7 @@ opack install Mermaid  # For summary.yaml
 
 ---
 
-## Git Changelog Generator (changelog-generator.yaml)
+## Git Changelog generator (changelog-gen.yaml)
 
 Generates a formatted CHANGELOG.md file from git commit history with:
 - Automatic commit type classification (features, fixes, docs, chores, etc.)
@@ -29,7 +29,7 @@ Generates a formatted CHANGELOG.md file from git commit history with:
 ### How to run
 
 ```sh
-ojob examples/changelog-generator.yaml
+ojob examples/changelog-gen.yaml
 ```
 
 ### Output
