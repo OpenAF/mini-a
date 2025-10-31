@@ -4765,7 +4765,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this._handlePlanUpdate()
     }
 
-    this.fnI("info", `Using model: ${isDef(this._oaf_model.model) ? this._oaf_model.model : (isDef(this._oaf_model.options) ? this._oaf_model.options.model : "unknown")} (${this._oaf_model.type})`)
+    var modelName = isDef(this._oaf_model.model)
+      ? this._oaf_model.model
+      : (isDef(this._oaf_model.options) ? this._oaf_model.options.model : "unknown");
+    this.fnI("info", `Using model: ${modelName} (${this._oaf_model.type})`)
 
     // Get model response and parse as JSON
     // Check context size and summarize if too large
