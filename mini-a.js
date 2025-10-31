@@ -1375,7 +1375,6 @@ MiniA.prototype._persistExternalPlan = function() {
         var m = line.match(phaseCompletionRegex)
         if (m) {
           var pNum = parseInt(m[1])
-          var ts = m[2]
           if (isNumber(pNum)) {
             latestByPhase[pNum] = line // overwrite keeps latest occurrence
           }
