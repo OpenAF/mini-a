@@ -212,8 +212,15 @@ The `start()` method accepts various configuration options:
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
-- **`useplanning`** (boolean, default: false): Maintain a persistent task plan in agent mode; Mini-A disables it automatically when the goal looks trivial
+- **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) to prefill a bundle of related flags
+
+#### Planning Controls
+- **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
+- **`planfile`** (string): When planning, write the generated plan to this path. In execution mode, load an existing plan from this path (Markdown `.md` or JSON `.json`) and keep it in sync as tasks complete.
+- **`planformat`** (string): Override the plan output format during `planmode` (`markdown` or `json`). Defaults to the detected extension of `planfile`, or Markdown when unspecified.
+- **`resumefailed`** (boolean, default: false): Resume execution from the last failed task when re-running Mini-A against a partially completed plan file.
+- **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON.
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
@@ -278,6 +285,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 
 #### Output Configuration
 - **`outfile`** (string): Path to file where final answer will be written
+- **`outputfile`** (string): When `convertplan=true`, path for the converted plan artifact (format inferred from extension)
 - **`__format`** (string): Output format (e.g. "json", "md", ...)
 
 #### Audit Logging
@@ -307,7 +315,9 @@ Switching back to the default agent mode is as simple as omitting the flag (or s
 
 ## Planning Workflow
 
-Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested “tree” plan with checkpoints.
+Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested “tree” plan with checkpoints. Provide `planfile=plan.md` (or `.json`) to reuse a pre-generated plan; Mini-A keeps task checkboxes in sync as execution progresses.
+
+Use `planmode=true` when you only need Mini-A to design the plan. The runtime gathers context using the low-cost model (when available), asks the primary model for the final structured plan, writes the result to `planfile` (if supplied), prints it, and exits.
 
 ### What the plan contains
 
@@ -319,6 +329,8 @@ Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want 
 ### Runtime behaviour
 
 - **Logging & UI**: Every time the plan changes, Mini-A emits a 🗺️ log entry summarizing the checklist and overall progress. The web UI mirrors this with an expandable plan card.
+- **External plan syncing**: When executing an imported plan (`planfile=`), Mini-A updates the source file in place—`- [ ]` becomes `- [x]` in Markdown and `"completed": true` in JSON—so follow-up runs or other agents can continue where the last session stopped. Notes and execution history persist at the bottom of the file.
+- **Resume support**: Run again with `resumefailed=true` to focus on the last failed task instead of replaying earlier steps. This is especially useful when the previous run halted mid-phase.
 - **Automatic replanning**: When a step fails repeatedly, the runtime marks it as `blocked`, increments planning metrics, and sets `needsReplan=true` so the model knows to rethink the approach.
 - **Metrics**: Counters such as `plans_generated`, `plans_validated`, and `plans_replanned` surface via `MiniA.getMetrics()` to help monitor how often plans are created or adjusted.
 
