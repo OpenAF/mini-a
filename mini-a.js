@@ -1199,7 +1199,7 @@ MiniA.prototype._loadPlanContent = function(source, format) {
 MiniA.prototype._loadPlanFromArgs = function(args) {
   if (!isObject(args)) return __
   var planfile = isString(args.planfile) && args.planfile.length > 0 ? args.planfile : __
-  var planFromFile = __
+  var planFromFile
   if (planfile) {
     if (!io.fileExists(planfile)) {
       this.fnI("warn", `Plan file '${planfile}' not found. Ensure the file path is correct if not creating.`)
