@@ -34,6 +34,13 @@ For basic usage, only set the main model:
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 ```
 
+### Recommended Model Tiers
+
+- **All uses (best)**: Claude Sonnet 4.5, OpenAI GPT-5, Google Gemini 2.5, OpenAI OSS 120B
+- **Low cost (best)**: OpenAI GPT-5 mini, Amazon Nova Pro/Mini, OpenAI OSS 20B
+- **Simple agent shell tool**: Gemma 3, Phi 4
+- **Chatbot**: Mistral 7B, Llama 3.2 8B
+
 ### Dual-Model Setup (Cost Optimization)
 
 Mini-A supports intelligent dual-model usage to optimize costs while maintaining quality:
@@ -68,6 +75,41 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 - 5+ total thoughts (thinking loop detection)
 - 4+ steps without meaningful progress
 - Repeating similar thoughts detected
+
+## Mode Presets
+
+Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) before applying any explicit flags you provide on the command line.
+
+### Built-in Presets
+
+- **`shell`** – Read-only shell access (`useshell=true`).
+- **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`).
+- **`shellutils`** – Shell plus the Mini File Tool MCP utilities (`useutils=true usetools=true`).
+- **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
+- **`web`** – Browser UI with tool registration (`usetools=true`).
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, and planning enabled (`usetools=true usediagrams=true usecharts=true usehistory=true useattach=true historykeep=true useplanning=true`).
+
+### Creating Custom Presets
+
+Create your own presets by copying `mini-a-modes.yaml` and adding new entries or overriding them locally—the agent loads the YAML on each run, so custom additions are immediately available.
+
+**Example custom preset:**
+
+```yaml
+# In mini-a-modes.yaml
+modes:
+  mypreset:
+    useshell: true
+    readwrite: true
+    maxsteps: 30
+    knowledge: "Always use concise responses"
+```
+
+**Usage:**
+
+```bash
+./mini-a.sh mode=mypreset goal="your goal here"
+```
 
 ## Reliability features
 
@@ -315,9 +357,20 @@ Switching back to the default agent mode is as simple as omitting the flag (or s
 
 ## Planning Workflow
 
-Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested “tree” plan with checkpoints. Provide `planfile=plan.md` (or `.json`) to reuse a pre-generated plan; Mini-A keeps task checkboxes in sync as execution progresses.
+Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested "tree" plan with checkpoints. Provide `planfile=plan.md` (or `.json`) to reuse a pre-generated plan; Mini-A keeps task checkboxes in sync as execution progresses.
 
 Use `planmode=true` when you only need Mini-A to design the plan. The runtime gathers context using the low-cost model (when available), asks the primary model for the final structured plan, writes the result to `planfile` (if supplied), prints it, and exits.
+
+### Advanced Planning Features
+
+Mini-A includes sophisticated planning capabilities that adapt to task complexity:
+
+- **Goal-aware strategy selection** – Inspects the goal upfront and disables planning for trivial requests, keeps a short linear task list for moderate work, and creates a nested plan tree for complex missions.
+- **Automatic decomposition & checkpoints** – Seeds `state.plan` with structured steps, intermediate checkpoints, and progress percentages so the LLM can track execution without handcrafting the scaffold from scratch.
+- **Feasibility validation** – Pre-checks each step against available shell access and registered MCP tools, blocking impossible tasks and surfacing actionable warnings in the log.
+- **Dynamic replanning hooks** – Marks the active step as `blocked` whenever the runtime raises an error, flagging `state.plan.meta.needsReplan=true` so the model knows to adjust its strategy.
+- **Progress metrics & logging** – Records overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_replanned`, etc.) that show up in `getMetrics()`.
+- **Planning mode & conversion utilities** – Generate reusable Markdown/JSON plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`).
 
 ### What the plan contains
 
@@ -348,6 +401,321 @@ agent.start({
     useplanning: true
 })
 ```
+
+## Advanced Features
+
+Mini-A includes several advanced capabilities to optimize performance and resource usage when working with MCP tools and large-scale operations.
+
+### Parallel Tool Execution
+
+When the model responds with multiple independent tool calls in the same step, Mini-A executes them concurrently, reducing overall latency for long-running MCP operations. This is particularly beneficial when:
+
+- Fetching data from multiple external APIs simultaneously
+- Running independent file operations in parallel
+- Querying multiple databases or services at once
+
+**How it works:**
+- The agent analyzes tool calls within a single response
+- Independent operations are identified and executed in parallel
+- Results are collected and presented to the model together
+- Sequential operations continue to run in order when dependencies exist
+
+### Dynamic Tool Selection
+
+Pair `usetools=true` with `mcpdynamic=true` to let Mini-A narrow the registered tool set via intelligent filtering. This feature is especially useful when working with large MCP catalogs where registering all tools would overwhelm the context window.
+
+**Selection strategy (multi-stage):**
+1. **Keyword heuristics** – Quick matching on tool names, descriptions, and goal keywords
+2. **Low-cost LLM inference** – If `OAF_LC_MODEL` is configured, the cheaper model proposes a shortlist
+3. **Primary model inference** – The main model performs selection when the low-cost tier doesn't return results
+4. **Fallback to full catalog** – If all stages return empty, Mini-A registers everything to ensure no tools are hidden
+
+**Benefits:**
+- Reduced context window usage
+- Faster tool registration
+- Lower token costs for large tool catalogs
+- Graceful degradation when filtering fails
+
+### Tool Caching & Optimization
+
+Mini-A implements smart caching for deterministic and read-only tools to avoid redundant operations.
+
+**Caching criteria:**
+- Tools marked with `annotations.readOnlyHint`
+- Tools marked with `annotations.idempotentHint`
+- Tools with explicit caching metadata
+
+**Configuration:**
+- Use `toolcachettl=<ms>` to set the default cache window
+- Override per-tool via metadata
+- Results are keyed by tool name and parameters
+- Cache is maintained within a single session
+
+**Smart context caching:**
+- System prompts are cached across sessions
+- Tool schema summaries are reused
+- Consistent instructions even as tool rosters grow
+- Minimizes repeated token overhead
+
+### Lazy MCP Initialization
+
+Pass `mcplazy=true` to defer establishing MCP connections until a tool is actually needed. This optimization significantly shortens startup times when working with many optional integrations.
+
+**When to use:**
+- Multiple MCP servers configured but not all needed for every goal
+- Slow-starting MCP servers
+- Network-based MCP connections with high latency
+- Development environments with optional tools
+
+**Benefits:**
+- Faster agent startup
+- Reduced resource consumption
+- Connections only established when needed
+- Failed connections don't block startup
+
+**Example:**
+
+```bash
+./mini-a.sh goal="analyze local files" \
+  mcp="[(cmd: 'ojob mcps/mcp-db.yaml...'), (cmd: 'ojob mcps/mcp-net.yaml...')]" \
+  mcplazy=true \
+  usetools=true
+```
+
+## MCP Integration Deep Dive
+
+Mini-A provides comprehensive support for Model Context Protocol (MCP) servers, enabling integration with databases, APIs, file systems, and custom tools.
+
+### Understanding MCP Server Types
+
+Mini-A supports two MCP server communication modes:
+
+#### STDIO MCP Servers
+
+**How they work:**
+- Process spawned locally with command specified in `mcp.cmd`
+- Communication via standard input/output streams
+- Server lifecycle managed by Mini-A
+- Automatic cleanup on session end
+
+**When to use:**
+- Local tool integrations
+- Database connections
+- File system operations
+- Quick prototyping
+
+**Example:**
+```bash
+mini-a.sh goal="query database" \
+  mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa')"
+```
+
+#### HTTP(S) MCP Servers
+
+**How they work:**
+- MCP server runs as independent HTTP service
+- Mini-A connects via `mcp.url`
+- Server lifecycle independent of Mini-A
+- Can be shared across multiple agents
+
+**When to use:**
+- Shared services across teams
+- Remote integrations
+- Production deployments
+- Load balancing scenarios
+
+**Example:**
+```bash
+# Start MCP server separately
+ojob mcps/mcp-ssh.yaml onport=8888 ssh=ssh://user@host
+
+# Connect Mini-A to HTTP MCP
+mini-a.sh goal="check remote server" \
+  mcp="(type: remote, url: 'http://localhost:8888/mcp')"
+```
+
+### Multiple MCP Orchestration
+
+Mini-A can coordinate multiple MCP servers simultaneously, enabling complex cross-system workflows.
+
+#### Example: Docker Hub + Wikipedia Cross-Reference
+
+```bash
+mini-a.sh \
+  goal="get the latest top 20 tags used by library/ubuntu, cross-check those tag names with the list of Ubuntu releases in Wikipedia, and produce a table with ubuntu release, tag name and latest push date" \
+  mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000), (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" \
+  rpm=20 \
+  tpm=80000 \
+  __format=md
+```
+
+#### Example: Database + S3 + Email Integration
+
+```bash
+mini-a.sh \
+  goal="query invoices from database, archive to S3, and email summary" \
+  mcp="[
+    (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:postgresql://localhost/billing', timeout: 5000),
+    (cmd: 'ojob mcps/mcp-s3.yaml bucket=invoices-archive', timeout: 5000),
+    (cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=billing@example.com', timeout: 5000)
+  ]" \
+  rpm=15
+```
+
+#### Example: Multi-Database Federation
+
+```bash
+mini-a.sh \
+  goal="compare customer data between production and warehouse databases" \
+  mcp="[
+    (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:postgresql://prod-db/customers', timeout: 5000),
+    (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:mysql://warehouse-db/analytics', timeout: 5000)
+  ]" \
+  usetools=true
+```
+
+### Built-in MCP Servers
+
+Mini-A includes several production-ready MCP servers in the `mcps/` directory:
+
+#### Database Operations (mcp-db)
+```bash
+mini-a.sh goal="create a test table with European countries" \
+  mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)"
+```
+
+#### Time & Timezone Utilities (mcp-time)
+```bash
+mini-a.sh goal="what time is it in Sydney right now?" \
+  mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
+```
+
+#### Network Utilities (mcp-net)
+```bash
+mini-a.sh goal="check if port 80 is open on google.com" \
+  mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)"
+```
+
+#### SSH Execution (mcp-ssh)
+```bash
+mini-a.sh goal="run 'uptime' on remote host via SSH MCP" \
+  mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', timeout: 5000)"
+```
+
+#### S3 Operations (mcp-s3)
+```bash
+# Read-only by default; add readwrite=true to enable writes
+mini-a.sh goal="list the latest invoices in our S3 bucket" \
+  mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=finance-archive prefix=invoices/', timeout: 5000)"
+```
+
+#### RSS Monitoring (mcp-rss)
+```bash
+mini-a.sh goal="summarize the last five posts from the OpenAI blog" \
+  mcp="(cmd: 'ojob mcps/mcp-rss.yaml', timeout: 5000)" \
+  knowledge="- prefer bullet lists"
+```
+
+#### Market Data (mcp-fin)
+```bash
+mini-a.sh goal="compare AAPL and MSFT revenue trends" \
+  mcp="(cmd: 'ojob mcps/mcp-fin.yaml', timeout: 5000)"
+```
+
+#### Email Operations (mcp-email)
+```bash
+mini-a.sh goal="send a test email" \
+  mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=test@example.com', timeout: 5000)"
+```
+
+#### Local Shell MCP (mcp-shell)
+```bash
+# Inherits the command allow/deny list
+mini-a.sh goal="collect disk usage stats" \
+  mcp="(cmd: 'ojob mcps/mcp-shell.yaml timeout=3000 shellallow=df,du', timeout: 5000)"
+```
+
+### MCP Configuration Patterns
+
+#### Pattern 1: Development vs Production
+
+```javascript
+// Development: Local STDIO
+var devAgent = new MiniA()
+devAgent.start({
+    goal: "test feature",
+    mcp: "(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./test-db')"
+})
+
+// Production: HTTP MCP with load balancing
+var prodAgent = new MiniA()
+prodAgent.start({
+    goal: "process requests",
+    mcp: "(type: remote, url: 'https://mcp-lb.example.com/mcp')"
+})
+```
+
+#### Pattern 2: Conditional MCP Loading
+
+```javascript
+var mcpConfig = []
+if (needsDatabase) {
+    mcpConfig.push("(cmd: 'ojob mcps/mcp-db.yaml ...')")
+}
+if (needsS3) {
+    mcpConfig.push("(cmd: 'ojob mcps/mcp-s3.yaml ...')")
+}
+
+var agent = new MiniA()
+agent.start({
+    goal: "process data",
+    mcp: "[" + mcpConfig.join(",") + "]",
+    mcplazy: true  // Don't connect until needed
+})
+```
+
+#### Pattern 3: MCP with Fallbacks
+
+```bash
+# Try primary MCP, fall back to backup
+mini-a.sh goal="fetch data" \
+  mcp="[(type: remote, url: 'https://primary-mcp.example.com/mcp'), (type: remote, url: 'https://backup-mcp.example.com/mcp')]" \
+  usetools=true
+```
+
+### Best Practices for MCP Integration
+
+1. **Security First**
+   - Use `readwrite=false` by default for MCP servers
+   - Apply `shellallow`/`shellbanextra` filters to shell-based MCPs
+   - Validate MCP server authentication
+   - Use HTTPS for remote MCP connections
+
+2. **Performance Optimization**
+   - Enable `mcplazy=true` when using multiple optional MCPs
+   - Use `mcpdynamic=true` with large tool catalogs
+   - Set appropriate `timeout` values per MCP
+   - Consider HTTP MCPs for high-latency operations
+
+3. **Error Handling**
+   - Configure circuit breakers for flaky MCPs
+   - Use exponential backoff for transient failures
+   - Monitor MCP connection health
+   - Implement graceful degradation
+
+4. **Resource Management**
+   - Close unused MCP connections
+   - Set reasonable timeout values
+   - Monitor memory usage with multiple MCPs
+   - Use connection pooling for HTTP MCPs
+
+5. **Development Workflow**
+   - Start with single MCP and add incrementally
+   - Test MCPs independently before orchestration
+   - Use verbose logging during development
+   - Document MCP dependencies in your goals
+
+For more information on creating custom MCP servers, see [Creating MCPs](mcps/CREATING.md).
 
 ## Examples
 
@@ -637,7 +1005,7 @@ Use `shell=...` together with `useshell=true` when you want Mini-A to execute ev
 
 > **Tip:** Mix and match strategies. You can still require confirmations (`checkall=true`) or tweak allowlists (`shellallow=...`) even when commands are routed through Docker, Podman, or sandbox-exec.
 
-## Advanced Features
+## Advanced Usage Patterns
 
 ### Conversation Persistence
 

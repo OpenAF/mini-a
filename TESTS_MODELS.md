@@ -1,6 +1,6 @@
 # Tests
 
-This document expands on the [model compatibility overview](README.md#model-compatibility--tests) in the main README. Each matrix captures how popular language models behave when Mini-A runs through two repeatable scenarios:
+This document provides detailed test results showing how popular language models behave when Mini-A runs through two repeatable scenarios:
 
 - **"Files"** – strictly shell-based operations that inspect the repository layout.
 - **"Tools"** – MCP-backed tasks that probe the network utility descriptors.
