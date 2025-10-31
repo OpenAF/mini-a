@@ -194,6 +194,25 @@ docker run --rm -ti \
   libs="@AWS/aws.js"
 ```
 
+#### AWS Bedrock (OpenAI OSS 20B)
+
+```bash
+docker run --rm -ti \
+  -e OPACKS=aws,mini-a \
+  -e OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'openai.gpt-oss-20b-1:0', temperature: 0), timeout: 900000)" \
+  -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+  -v $(pwd)/history:/tmp/history \
+  -e OJOB=mini-a/mini-a-web.yaml \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345 chatbotmode=true \
+  usehistory=true historykeep=true historypath=/tmp/history \
+  useattach=true \
+  libs="@AWS/aws.js"
+```
+
 #### OpenAI (GPT‑5 Mini)
 
 ```bash
