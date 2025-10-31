@@ -139,6 +139,7 @@ Enable `useplanning=true` to activate a richer planning workflow that now adapts
 - **Feasibility validation** pre-checks each step against available shell access and registered MCP tools, blocking impossible tasks and surfacing actionable warnings in the log.
 - **Dynamic replanning hooks** mark the active step as `blocked` whenever the runtime raises an error, flagging `state.plan.meta.needsReplan=true` so the model knows to adjust its strategy.
 - **Progress metrics & logging** record overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_replanned`, etc.) that show up in `getMetrics()`.
+- **Planning mode & conversion utilities** let you generate reusable Markdown/JSON plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`).
 
 The new planning helpers live entirely in `state.plan`, so existing prompts and transcripts remain compatible while gaining richer telemetry.
 
@@ -230,7 +231,9 @@ All other flags (MCP connections, attachments, shell access, etc.) continue to w
 
 ### Task planning updates (agent mode, opt-in)
 
-Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`). Leave `useplanning` unset/false and Mini-A will skip the planning instructions entirely.
+Set `useplanning=true` (and keep `chatbotmode=false`) to have the agent maintain a lightweight task plan inside the state (`plan` array). Each item includes a short title and a status (`pending`, `in_progress`, `done`, or `blocked`). Point `planfile` at a Markdown/JSON plan to pick up where a previous run stopped—Mini-A keeps the checkbox state in sync and can resume failures when you add `resumefailed=true`. Leave `useplanning` unset/false and Mini-A will skip the planning instructions entirely.
+
+Need a plan without execution? Run `planmode=true planfile=plan.md` to have Mini-A gather context, draft the structured checklist, and exit. Pair it with `convertplan=true` to move between Markdown and JSON while preserving the footer notes.
 
 - **CLI / oJob output**: Planning updates appear with the 🗺️ icon, alongside thought (`💭`) messages.
 - **Web UI**: When an active plan exists the transcript keeps the 🗺️ entries and the interface surfaces an expandable progress card that summarizes completed vs. total steps and renders the plan as a numbered checklist with completed items struck through.
@@ -255,7 +258,8 @@ Mini-A ships with three complementary components:
 - **STDIO or HTTP MCPs**: Use MCPs over STDIO or start them as remote HTTP servers with `onport` (see [MCP docs](mcps/README.md))
 - **Shell Access**: Optional shell command execution with safety controls
 - **Flexible Configuration**: Extensive configuration options for different use cases
-- **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) of the current task, complete with web UI progress tracking
+- **Dynamic Planning View**: Opt into `useplanning=true` to keep a live plan (🗺️) of the current task, complete with web UI progress tracking and automatic syncing when you load an external plan file
+- **Planning Mode**: `planmode=true` generates reusable Markdown/JSON plans that other Mini-A instances can consume or resume
 - **Dynamic MCP Tool Selection**: Combine `usetools=true` with `mcpdynamic=true` to have the agent register only the tools it considers relevant to the current goal, falling back gracefully when needed
 - **Built-in MCPs**: Includes database, file system, network, time/timezone, email, data channel, RSS, S3, Yahoo Finance, SSH execution, and local shell MCP servers
 - **Multiple MCP Connections**: Connect to multiple MCPs at once and orchestrate across them
