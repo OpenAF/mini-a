@@ -339,7 +339,6 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "load"     : _e = "📂"; break
   case "warn"     : _e = "⚠️"; break
   case "stop"     : _e = "🛑"; break
-  case "error"    : _e = "❗"; break
   case "summarize": _e = "🌀"; break
   default         : _e = e
   }
@@ -489,6 +488,12 @@ MiniA.prototype._formatTokenStats = function(stats) {
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
 }
 
+// Fast helpers for status checks used across planning code paths
+MiniA.prototype._isStatusDone = function(status) {
+  var s = isString(status) ? status.toLowerCase() : ""
+  return s === "done" || s === "complete" || s === "completed" || s === "finished" || s === "success" || s === "resolved"
+}
+
 MiniA.prototype._getTotalTokens = function(stats) {
     if (!isObject(stats)) return 0
     if (isNumber(stats.total_tokens)) return stats.total_tokens
@@ -496,6 +501,35 @@ MiniA.prototype._getTotalTokens = function(stats) {
     var completion = isNumber(stats.completion_tokens) ? stats.completion_tokens : 0
     var derived = prompt + completion
     return derived > 0 ? derived : 0
+}
+
+// Cached status icon mapping for plan display
+MiniA.prototype._getStatusIcons = function() {
+  if (isObject(this._statusIcons)) return this._statusIcons
+  this._statusIcons = {
+    pending     : { icon: "⏳", label: "pending" },
+    todo        : { icon: "⏳", label: "to do" },
+    not_started : { icon: "⏳", label: "not started" },
+    ready       : { icon: "⏳", label: "ready" },
+    in_progress : { icon: "⚙️", label: "in progress" },
+    progressing : { icon: "⚙️", label: "in progress" },
+    working     : { icon: "⚙️", label: "working" },
+    running     : { icon: "⚙️", label: "running" },
+    active      : { icon: "⚙️", label: "active" },
+    done        : { icon: "✅", label: "done" },
+    complete    : { icon: "✅", label: "complete" },
+    completed   : { icon: "✅", label: "completed" },
+    finished    : { icon: "✅", label: "finished" },
+    success     : { icon: "✅", label: "success" },
+    blocked     : { icon: "🛑", label: "blocked" },
+    stuck       : { icon: "🛑", label: "stuck" },
+    paused      : { icon: "⏸️", label: "paused" },
+    waiting     : { icon: "⏳", label: "waiting" },
+    failed      : { icon: "❌", label: "failed" },
+    cancelled   : { icon: "🚫", label: "cancelled" },
+    canceled    : { icon: "🚫", label: "cancelled" }
+  }
+  return this._statusIcons
 }
 
 MiniA.prototype._parseListOption = function(value) {
@@ -562,6 +596,7 @@ MiniA.prototype._splitShellPrefix = function(value) {
 MiniA.prototype._normalizePlanItems = function(plan) {
   if (!this._enablePlanning) return []
   if (isUnDef(plan)) return []
+  var self = this
 
   if (isString(plan)) {
     try {
@@ -715,7 +750,7 @@ MiniA.prototype._normalizePlanItems = function(plan) {
     }
 
     var combinedStatusCounts = {
-      done: normalizedStatus === "done" || normalizedStatus === "complete" || normalizedStatus === "completed" || normalizedStatus === "finished" || normalizedStatus === "success" ? 1 : 0,
+      done: self._isStatusDone(normalizedStatus) ? 1 : 0,
       in_progress: normalizedStatus === "in_progress" || normalizedStatus === "active" || normalizedStatus === "running" ? 1 : 0,
       blocked: normalizedStatus === "blocked" || normalizedStatus === "failed" || normalizedStatus === "stuck" ? 1 : 0,
       pending: normalizedStatus === "pending" || normalizedStatus === "todo" || normalizedStatus === "not_started" || normalizedStatus === "waiting" || normalizedStatus === "ready" ? 1 : 0
@@ -814,7 +849,7 @@ MiniA.prototype._normalizePlanItems = function(plan) {
 
   for (var n = 0; n < normalized.length; n++) {
     summary.totalEntries++
-    if (normalized[n].status === "done" || normalized[n].status === "complete" || normalized[n].status === "completed" || normalized[n].status === "finished" || normalized[n].status === "success") {
+    if (self._isStatusDone(normalized[n].status)) {
       summary.completedEntries++
     }
   }
@@ -1185,9 +1220,7 @@ MiniA.prototype._convertPlanFormat = function(inputPayload, targetFormat) {
 }
 
 MiniA.prototype._mapStatusToBoolean = function(status) {
-  var normalized = isString(status) ? status.toLowerCase() : ""
-  if (["done", "complete", "completed", "finished", "success", "resolved"].indexOf(normalized) >= 0) return true
-  return false
+  return this._isStatusDone(status)
 }
 
 MiniA.prototype._mapBooleanToStatus = function(flag) {
@@ -1430,10 +1463,12 @@ MiniA.prototype._persistExternalPlan = function() {
   // (diagnostic logging removed)
         var statusById2 = statusById
         var lines = serialized.split(/\r?\n/)
+        var checkboxRe = this._getMdCheckboxRe()
+        var checkboxReplaceRe = this._getMdCheckboxReplaceRe()
         for (var li = 0; li < lines.length; li++) {
           var line = lines[li]
           // Match a markdown task list item: - [ ] or - [x]
-          var m = line.match(/^(-\s*\[( |x|X)\]\s*)(.+)$/)
+          var m = line.match(checkboxRe)
           if (!m) continue
           var taskText = m[3].trim().toLowerCase()
           // Attempt to find corresponding internal node by fuzzy title match
@@ -1450,11 +1485,10 @@ MiniA.prototype._persistExternalPlan = function() {
             }
           }
           if (foundNode && isString(foundNode.status)) {
-            var doneStatuses = ['done','complete','completed','finished','success']
-            var isDone = doneStatuses.indexOf(foundNode.status.toLowerCase()) >= 0 || Number(foundNode.progress) === 100
+            var isDone = this._isStatusDone(foundNode.status) || Number(foundNode.progress) === 100
             if (isDone) {
               // normalize to - [x] (lowercase x)
-              lines[li] = lines[li].replace(/^-\s*\[( |x|X)\]\s*/, '- [x] ')
+              lines[li] = lines[li].replace(checkboxReplaceRe, '- [x] ')
             }
           }
         }
@@ -1479,21 +1513,7 @@ MiniA.prototype._markPhaseCompletionFromAnswer = function(answerText) {
   if (!isObject(this._agentState) || !isObject(this._agentState.plan)) return
   if (!isString(answerText) || answerText.length === 0) return
   // Support multiple phrasing variants signalling completion
-  var phasePatterns = [
-    /Phase\s+(\d+)\s+Completed/gi,
-    /Phase\s+(\d+)\s+Complete/gi,
-    /Phase\s+(\d+)\s+Execution\s+Complete/gi,
-    /Phase\s+(\d+)\s+has\s+been\s+successfully\s+completed/gi,
-    /Phase\s+(\d+)\s+finished/gi,
-    /Completed\s+Phase\s+(\d+)/gi,
-    /Phase\s+(\d+)\s+has\s+been\s+successfully\s+executed/gi,
-    /Phase\s+(\d+)\s+executed\s+successfully/gi,
-    /Phase\s+(\d+)\s+successfully\s+executed/gi,
-    /Phase\s+(\d+)\s+successfully\s+completed/gi,
-    /Phase\s+(\d+)\s+is\s+done/gi,
-    /Phase\s+(\d+)\s+is\s+complete/gi,
-    /Phase\s+(\d+)\s+is\s+completed/gi
-  ]
+  var phasePatterns = this._getPhaseCompletionPatterns()
   var phasesToMark = []
   phasePatterns.forEach(r => {
     var match
@@ -1564,12 +1584,12 @@ MiniA.prototype._markPhaseCompletionFromAnswer = function(answerText) {
     this._agentState.plan.steps.forEach(s => {
       if (!isObject(s)) return
       total++
-      if (isString(s.status) && ['done','complete','completed','finished','success'].indexOf(s.status.toLowerCase()) >= 0) completed++
+      if (this._isStatusDone(s.status)) completed++
       if (isArray(s.children)) {
         s.children.forEach(c => {
           if (!isObject(c)) return
           total++
-          if (isString(c.status) && ['done','complete','completed','finished','success'].indexOf(c.status.toLowerCase()) >= 0) completed++
+          if (this._isStatusDone(c.status)) completed++
         })
       }
     })
@@ -1583,6 +1603,39 @@ MiniA.prototype._markPhaseCompletionFromAnswer = function(answerText) {
   var stamp = new Date().toISOString()
   this._agentState.plan.meta.executionHistory.push({ at: stamp, phases: phasesToMark.slice(), summary: 'Phase completion detected.' })
   this._handlePlanUpdate()
+}
+
+// Lazily build and cache regex patterns used to detect phase completion mentions
+MiniA.prototype._getPhaseCompletionPatterns = function() {
+  if (isArray(this._phaseCompletionPatterns) && this._phaseCompletionPatterns.length > 0) return this._phaseCompletionPatterns
+  this._phaseCompletionPatterns = [
+    /Phase\s+(\d+)\s+Completed/gi,
+    /Phase\s+(\d+)\s+Complete/gi,
+    /Phase\s+(\d+)\s+Execution\s+Complete/gi,
+    /Phase\s+(\d+)\s+has\s+been\s+successfully\s+completed/gi,
+    /Phase\s+(\d+)\s+finished/gi,
+    /Completed\s+Phase\s+(\d+)/gi,
+    /Phase\s+(\d+)\s+has\s+been\s+successfully\s+executed/gi,
+    /Phase\s+(\d+)\s+executed\s+successfully/gi,
+    /Phase\s+(\d+)\s+successfully\s+executed/gi,
+    /Phase\s+(\d+)\s+successfully\s+completed/gi,
+    /Phase\s+(\d+)\s+is\s+done/gi,
+    /Phase\s+(\d+)\s+is\s+complete/gi,
+    /Phase\s+(\d+)\s+is\s+completed/gi
+  ]
+  return this._phaseCompletionPatterns
+}
+
+// Markdown checkbox regex getters (cached)
+MiniA.prototype._getMdCheckboxRe = function() {
+  if (this._mdCheckboxRe) return this._mdCheckboxRe
+  this._mdCheckboxRe = /^(-\s*\[( |x|X)\]\s*)(.+)$/
+  return this._mdCheckboxRe
+}
+MiniA.prototype._getMdCheckboxReplaceRe = function() {
+  if (this._mdCheckboxReplaceRe) return this._mdCheckboxReplaceRe
+  this._mdCheckboxReplaceRe = /^(-\s*\[)( |x|X)(\]\s*)/
+  return this._mdCheckboxReplaceRe
 }
 
 MiniA.prototype._displayPlanPayload = function(payload, args) {
@@ -2027,8 +2080,7 @@ MiniA.prototype._markPlanBlocked = function(nodes) {
   for (var i = 0; i < nodes.length; i++) {
     var node = nodes[i]
     if (!isObject(node)) continue
-    var status = isString(node.status) ? node.status.toLowerCase() : ""
-    if (["done", "complete", "completed", "finished", "success"].indexOf(status) >= 0) {
+    if (this._isStatusDone(node.status)) {
       if (this._markPlanBlocked(node.children)) return true
       continue
     }
@@ -2086,11 +2138,11 @@ MiniA.prototype._handlePlanUpdate = function() {
       var doneChildren = 0
       for (var ac = 0; ac < childCount; ac++) {
         var ch = phaseNode.children[ac]
-        if (isObject(ch) && isString(ch.status) && ['done','complete','completed','finished','success'].indexOf(ch.status.toLowerCase()) >= 0) {
+        if (isObject(ch) && this._isStatusDone(ch.status)) {
           doneChildren++
         }
       }
-      var phaseDone = isString(phaseNode.status) && ['done','complete','completed','finished','success'].indexOf(phaseNode.status.toLowerCase()) >= 0
+      var phaseDone = this._isStatusDone(phaseNode.status)
       if (!phaseDone && doneChildren === childCount) {
         phaseNode.status = 'done'
         phaseNode.progress = 100
@@ -2113,29 +2165,7 @@ MiniA.prototype._handlePlanUpdate = function() {
     var snapshot = stringify(planItems, __, "")
     if (snapshot === this._lastPlanSnapshot) return
 
-    var statusIcons = {
-        pending     : { icon: "⏳", label: "pending" },
-        todo        : { icon: "⏳", label: "to do" },
-        not_started : { icon: "⏳", label: "not started" },
-        ready       : { icon: "⏳", label: "ready" },
-        in_progress : { icon: "⚙️", label: "in progress" },
-        progressing : { icon: "⚙️", label: "in progress" },
-        working     : { icon: "⚙️", label: "working" },
-        running     : { icon: "⚙️", label: "running" },
-        active      : { icon: "⚙️", label: "active" },
-        done        : { icon: "✅", label: "done" },
-        complete    : { icon: "✅", label: "complete" },
-        completed   : { icon: "✅", label: "completed" },
-        finished    : { icon: "✅", label: "finished" },
-        success     : { icon: "✅", label: "success" },
-        blocked     : { icon: "🛑", label: "blocked" },
-        stuck       : { icon: "🛑", label: "stuck" },
-        paused      : { icon: "⏸️", label: "paused" },
-        waiting     : { icon: "⏳", label: "waiting" },
-        failed      : { icon: "❌", label: "failed" },
-        cancelled   : { icon: "🚫", label: "cancelled" },
-        canceled    : { icon: "🚫", label: "cancelled" }
-    }
+  var statusIcons = this._getStatusIcons()
 
     var lines = []
     for (var i = 0; i < planItems.length; i++) {
@@ -2157,7 +2187,7 @@ MiniA.prototype._handlePlanUpdate = function() {
     }
 
     var message = lines.join("\n")
-    this._logMessageWithCounter("plan", message)
+    this._logMessageWithCounter("plan", "\n" + message)
     this._lastPlanSnapshot = snapshot
     this._persistExternalPlan()
 }
@@ -2378,10 +2408,10 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
         if (!hasChecked && isObject(this._agentState.plan) && isArray(this._agentState.plan.steps)) {
           var doneTerms = []
           this._agentState.plan.steps.forEach(s => {
-            if (isObject(s) && isString(s.title) && isString(s.status) && /done|complete|finished|success/i.test(s.status)) {
+            if (isObject(s) && isString(s.title) && this._isStatusDone(s.status)) {
               doneTerms.push(s.title.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim())
               if (isArray(s.children)) s.children.forEach(c => {
-                if (isObject(c) && isString(c.title) && isString(c.status) && /done|complete|finished|success/i.test(c.status)) {
+                if (isObject(c) && isString(c.title) && this._isStatusDone(c.status)) {
                   doneTerms.push(c.title.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim())
                 }
               })
@@ -2389,13 +2419,15 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
           })
           if (doneTerms.length > 0) {
             var lines2 = persisted.split(/\r?\n/)
+            var checkboxRe2 = this._getMdCheckboxRe()
+            var checkboxReplaceRe2 = this._getMdCheckboxReplaceRe()
             for (var i2 = 0; i2 < lines2.length; i2++) {
               var ln = lines2[i2]
-              var m2 = ln.match(/^(-\s*\[( |x|X)\]\s*)(.+)$/)
+              var m2 = ln.match(checkboxRe2)
               if (!m2) continue
               var rawDesc = m2[3].trim().toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()
               if (doneTerms.indexOf(rawDesc) >= 0) {
-                lines2[i2] = ln.replace(/^(-\s*\[)( |x|X)(\]\s*)/, '$1x$3')
+                lines2[i2] = ln.replace(checkboxReplaceRe2, '$1x$3')
               }
             }
             var newContent = lines2.join('\n')
@@ -2449,9 +2481,9 @@ MiniA.prototype._llmRewritePlan = function(currentMarkdown, finalAnswer, args) {
     if (isObject(this._agentState) && isObject(this._agentState.plan) && isArray(this._agentState.plan.steps)) {
       this._agentState.plan.steps.forEach(s => {
         if (!isObject(s) || !isString(s.title)) return
-        if (isString(s.status) && /done|complete|finished|success/i.test(s.status)) completedList.push(s.title)
+        if (this._isStatusDone(s.status)) completedList.push(s.title)
         if (isArray(s.children)) s.children.forEach(c => {
-          if (isObject(c) && isString(c.title) && isString(c.status) && /done|complete|finished|success/i.test(c.status)) completedList.push(c.title)
+          if (isObject(c) && isString(c.title) && this._isStatusDone(c.status)) completedList.push(c.title)
         })
       })
     }
@@ -3492,7 +3524,7 @@ MiniA.prototype._runCommand = function(args) {
       if (!this._shellBatch) {
         _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + (note.length > 0 ? ansiColor("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
       } else {
-        _r == 0 // No prompt in batch mode; default to "No"
+        _r = 0 // No prompt in batch mode; default to "No"
       }
       if (_r == 2) {
         exec = true
@@ -4334,7 +4366,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this.fnI("warn", `Plan content is not a valid string or is empty`)
       }
     } else {
-      this.fnI("info", `DEBUG: No preloaded plan to add to knowledge`)
+      //this.fnI("info", `DEBUG: No preloaded plan to add to knowledge`)
     }
 
     // Validate common arguments
@@ -4648,7 +4680,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this._handlePlanUpdate()
     }
 
-    this.fnI("info", `Using model: ${this._oaf_model.model} (${this._oaf_model.type})`)
+    this.fnI("info", `Using model: ${isDef(this._oaf_model.model) ? this._oaf_model.model : (isDef(this._oaf_model.options) ? this._oaf_model.options.model : "unknown")} (${this._oaf_model.type})`)
 
     // Get model response and parse as JSON
     // Check context size and summarize if too large
