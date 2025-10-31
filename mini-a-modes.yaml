@@ -17,6 +17,13 @@ modes:
       useutils : true
       usetools : true
 
+  internet:
+    description: "Internet access mode"
+    params     :
+      usetools   : true
+      mcp        : "[(cmd: ojob ojob.io/ai/mcps/mcp-time) | (cmd: ojob ojob.io/ai/mcps/mcp-web) ]"
+      mcpdynamic : true
+
   chatbot:
     description: "Chatbot mode"
     params     :
