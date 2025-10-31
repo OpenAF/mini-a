@@ -4739,7 +4739,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
       // Reset initialization flag if knowledge was enriched with plan, to force re-init with updated knowledge
-      if (isString(args.knowledge) && args.knowledge.length > 0 && args.knowledge.indexOf("## CURRENT PLAN:") >= 0) {
+      if (args.knowledgeUpdated === true) {
         this._isInitialized = false
       }
 
