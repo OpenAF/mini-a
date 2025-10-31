@@ -51,7 +51,7 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251030'
+version: '20251031'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -87,6 +87,7 @@ files:
 - mcps/mcp-ssh.yaml
 - mcps/mcp-time.yaml
 - mcps/mcp-weather.yaml
+- mcps/mcp-web.yaml
 - mini-a-file-tool.js
 - mini-a-main.yaml
 - mini-a-modes.yaml
@@ -118,7 +119,7 @@ filesHash:
   examples/document.yaml: 19871e428a840eb2b726a4167664a0f27926a66d
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
-  mcps/README.md: c644840aff1dd2157ca287e6329a93661e2e17b8
+  mcps/README.md: e9a083cae21f3eaee45057877b027b15cc9717a7
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
@@ -135,6 +136,7 @@ filesHash:
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
   mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
+  mcps/mcp-web.yaml: 9d6b5c89689426419f2f3aaf36b925aa7bbaa732
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
   mini-a-main.yaml: 2f5199ed62e2a7b63800c44cf5f8fa279cd27a55
   mini-a-modes.yaml: f6f8f6675ed0c052e1c4623e24a32d4c743d37a2
