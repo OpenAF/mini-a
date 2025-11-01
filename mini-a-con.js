@@ -70,7 +70,7 @@ try {
 
   if (resumeConversation !== true && isString(initialConversationPath) && initialConversationPath.trim().length > 0) {
     try {
-      if (io.fileExists(initialConversationPath)) io.writeFileString(initialConversationPath, "")
+      if (io.fileExists(initialConversationPath) && io.fileInfo(initialConversationPath).isFile) io.rm(initialConversationPath)
       lastConversationStats = __
     } catch (conversationResetError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to reset conversation at startup: " + conversationResetError, errorColor))
@@ -134,7 +134,7 @@ try {
     auditch        : { type: "string", description: "Audit channel definition" }
   }
 
-  if (!(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation = conversationFilePath
+  if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
   var sessionParameterNames = Object.keys(parameterDefinitions).sort()
 
   function coerceDefaultValue(def, rawValue, key) {
@@ -355,20 +355,6 @@ try {
     return analysis
   }
 
-  function repeatChar(symbol, count) {
-    var total = Math.max(0, Number(count) || 0)
-    var out = ""
-    for (var i = 0; i < total; i++) out += symbol
-    return out
-  }
-
-  function renderBar(ratio) {
-    var width = 20
-    var safeRatio = Math.max(0, Math.min(1, ratio || 0))
-    var filled = Math.round(safeRatio * width)
-    return repeatChar("█", filled) + repeatChar("░", width - filled)
-  }
-
   function printContextSummary(agentInstance) {
     var stats = refreshConversationStats(agentInstance)
     if (!isObject(stats) || stats.messageCount === 0) {
@@ -386,7 +372,8 @@ try {
         tokens  : section.tokens,
         share   : (share * 100).toFixed(1) + "%",
         messages: section.messages,
-        bar     : renderBar(share)
+        //bar     : ow.format.string.progress(section.tokens, stats.totalTokens, 0, 20, "█", "░")
+        bar     : colorifyText(ow.format.string.progress(section.tokens, stats.totalTokens, 0, 25), "RESET")
       }
     })
 
@@ -439,8 +426,7 @@ try {
       return
     }
     try {
-      print("----> " + convoPath)
-      //if (io.fileExists(convoPath)) io.rm(convoPath)
+      if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
       lastConversationStats = __
       print(colorifyText("Conversation cleared. Future goals will start fresh.", successColor))
     } catch (clearError) {
@@ -638,8 +624,8 @@ try {
   }
 
   function runGoal(goalText) {
-    var args = buildArgs(goalText)
-    if (!ensureModel(args)) return
+    var _args = buildArgs(goalText)
+    if (!ensureModel(_args)) return
     var agent = new MiniA()
     agent.setInteractionFn(function(event, message) {
       agent.defaultInteractionFn(event, message, function(icon, text, id) {
@@ -647,10 +633,10 @@ try {
       })
     })
     try {
-      agent.init(args)
-      lastResult = agent.start(args)
+      agent.init(_args)
+      lastResult = agent.start(_args)
       refreshConversationStats(agent)
-      if (isUnDef(args.outfile)) {
+      if (isUnDef(_args.outfile)) {
         //print(colorifyText("\n🏁 Final answer", successColor))
         if (isObject(lastResult) || isArray(lastResult)) {
           print(stringify(lastResult, __, "  "))
@@ -660,7 +646,7 @@ try {
           print(stringify(lastResult, __, ""))
         }
       } else {
-        print(colorifyText("Final answer written to " + args.outfile, successColor))
+        print(colorifyText("Final answer written to " + _args.outfile, successColor))
       }
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
@@ -807,12 +793,12 @@ try {
     var exitConversationPath = isString(exitStats.path) && exitStats.path.length > 0 ? exitStats.path : getConversationPath()
     if (isString(exitConversationPath) && exitConversationPath.length > 0) {
       if (io.fileExists(exitConversationPath)) {
-        print(colorifyText("Conversation saved to " + exitConversationPath + ".", hintColor))
+        printnl(colorifyText("Conversation saved to " + exitConversationPath + ".", hintColor))
       } else {
-        print(colorifyText("Conversation context updated for this session.", hintColor))
+        printnl(colorifyText("Conversation context updated for this session.", hintColor))
       }
     }
-    print(colorifyText("Start Mini-A with resume=true to continue this conversation; omit it to begin fresh next time.", hintColor))
+    print(colorifyText(" Start mini-a with 'resume=true' to continue this conversation.", hintColor))
   }
 } catch(_ge) {
   $err(_ge)
