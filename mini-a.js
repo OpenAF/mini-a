@@ -263,6 +263,47 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._planCounter = 0
   this._lastPlanSnapshot = ""
   this._enablePlanning = false
+
+  if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
+  if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
+}
+
+MiniA._activeInstances = []
+MiniA._shutdownHookRegistered = false
+
+MiniA._trackInstance = function(instance) {
+  if (!isObject(instance)) return
+  if (!isArray(MiniA._activeInstances)) MiniA._activeInstances = []
+  if (MiniA._activeInstances.indexOf(instance) === -1) MiniA._activeInstances.push(instance)
+}
+
+MiniA._destroyAllMcpConnections = function() {
+  if (!isArray(MiniA._activeInstances)) return
+  MiniA._activeInstances.forEach(function(agent) {
+    if (!isObject(agent) || !isObject(agent._mcpConnections)) return
+    Object.keys(agent._mcpConnections).forEach(function(connectionId) {
+      var client = agent._mcpConnections[connectionId]
+      if (isObject(client) && typeof client.destroy === "function") {
+        try { client.destroy() } catch(ignoreClientDestroy) {}
+      }
+    })
+  })
+}
+
+MiniA._registerShutdownHook = function() {
+  if (MiniA._shutdownHookRegistered === true) return
+  if (typeof addOnOpenAFShutdown !== "function") return
+
+  addOnOpenAFShutdown(function() {
+    try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
+    try {
+      if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
+        $mcp.destroy()
+      }
+    } catch(ignoreMcpDestroy) {}
+  })
+
+  MiniA._shutdownHookRegistered = true
 }
 
 /**

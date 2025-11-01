@@ -87,6 +87,12 @@ try {
     commandHistory = __
   }
 
+  if (typeof addOnOpenAFShutdown === "function") {
+    addOnOpenAFShutdown(function() {
+      finalizeSession("shutdown")
+    })
+  }
+
   // Utility functions
   // -----------------
 
@@ -454,6 +460,8 @@ try {
   var sessionOptions = resetOptions()
   var lastResult = __
   var internalParameters = { goalprefix: true }
+  var activeAgent = __
+  var shutdownHandled = false
 
   function promptLabel() {
     var prefix = colorifyText(basePrompt, accentColor)
@@ -645,10 +653,25 @@ try {
     //print(prefix + " " + iconText + " " + message)
   }
 
+  function persistConversationSnapshot(agentInstance) {
+    var convoPath = getConversationPath()
+    if (!isString(convoPath) || convoPath.trim().length === 0) return
+    var agentRef = isObject(agentInstance) ? agentInstance : activeAgent
+    if (!isObject(agentRef)) return
+    try {
+      if (!isObject(agentRef.llm) || typeof agentRef.llm.getGPT !== "function") return
+      var conversation = agentRef.llm.getGPT().getConversation()
+      if (isArray(conversation)) {
+        io.writeFileJSON(convoPath, { u: new Date(), c: conversation }, "")
+      }
+    } catch(ignorePersistError) { }
+  }
+
   function runGoal(goalText) {
     var _args = buildArgs(goalText)
     if (!ensureModel(_args)) return
     var agent = new MiniA()
+    activeAgent = agent
     agent.setInteractionFn(function(event, message) {
       agent.defaultInteractionFn(event, message, function(icon, text, id) {
         printEvent(event, icon, text, id)
@@ -687,6 +710,7 @@ try {
         sleep(75)
         return false
       }).exec()
+      persistConversationSnapshot(agent)
       refreshConversationStats(agent)
       if (stopRequested) {
         print(colorifyText("Mini-A stopped by user (Esc).", hintColor))
@@ -709,6 +733,32 @@ try {
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
       printErr(colorifyText("ITALIC," + errorColor, "!!") + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
+    }
+  }
+
+  function finalizeSession(reason) {
+    if (shutdownHandled) return
+    shutdownHandled = true
+
+    try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
+    try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
+
+    if (commandHistory && typeof commandHistory.flush === "function") {
+      try { commandHistory.flush() } catch(ignoreFlushError) {}
+    }
+
+    var exitStats = isObject(lastConversationStats) ? lastConversationStats : __
+    if (isObject(exitStats) && isNumber(exitStats.messageCount) && exitStats.messageCount > 0) {
+      var exitConversationPath = isString(exitStats.path) && exitStats.path.length > 0 ? exitStats.path : getConversationPath()
+      if (isString(exitConversationPath) && exitConversationPath.length > 0) {
+        if (io.fileExists(exitConversationPath)) {
+          printnl(colorifyText("Conversation saved to " + exitConversationPath + ".", hintColor))
+        } else {
+          printnl(colorifyText("Conversation context updated for this session.", hintColor))
+        }
+      }
+      print(colorifyText(" Start mini-a with 'resume=true' to continue this conversation.", hintColor))
+      print(colorifyText("Goodbye!", accentColor))
     }
   }
 
@@ -840,24 +890,7 @@ try {
     runGoal(goalText)
   }
 
-  if (commandHistory && typeof commandHistory.flush === "function") {
-    try {
-      commandHistory.flush()
-    } catch (flushError) { }
-  }
-  var exitStats = isObject(lastConversationStats) ? lastConversationStats : __
-  if (isObject(exitStats) && isNumber(exitStats.messageCount) && exitStats.messageCount > 0) {
-    var exitConversationPath = isString(exitStats.path) && exitStats.path.length > 0 ? exitStats.path : getConversationPath()
-    if (isString(exitConversationPath) && exitConversationPath.length > 0) {
-      if (io.fileExists(exitConversationPath)) {
-        printnl(colorifyText("Conversation saved to " + exitConversationPath + ".", hintColor))
-      } else {
-        printnl(colorifyText("Conversation context updated for this session.", hintColor))
-      }
-    }
-    print(colorifyText(" Start mini-a with 'resume=true' to continue this conversation.", hintColor))
-    print(colorifyText("Goodbye!", accentColor))
-  }
+  finalizeSession("exit")
 } catch(_ge) {
   $err(_ge)
 }
