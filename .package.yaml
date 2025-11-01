@@ -51,7 +51,7 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251031'
+version: '20251101'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -88,6 +88,7 @@ files:
 - mcps/mcp-time.yaml
 - mcps/mcp-weather.yaml
 - mcps/mcp-web.yaml
+- mini-a-con.js
 - mini-a-file-tool.js
 - mini-a-main.yaml
 - mini-a-modes.yaml
@@ -106,20 +107,20 @@ files:
 - tests/coreFunctionality.yaml
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  AGENTS.md: 7b6df1520b27dc3ef4e025a084452c62d0e1c1f9
+  AGENTS.md: 8fb8ca99dbc0f0c11ef55ba7b5edd37666f47a8f
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
-  EXTERNAL-MCPS.md: 6b0e52f59e26f3f16ba8a89338c792f3a763f0b7
+  EXTERNAL-MCPS.md: d1b6fdc039da1951a46578c38fe546657654d0de
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 1492b7ff600dc6d2f18e822dc9b7558655a5cd32
-  TESTS_MODELS.md: 29c3bac8d6e74325a7abca52b2640512ac7d9729
-  USAGE.md: daea9198002719658d0522367128fc821e4bad9c
+  README.md: bed653eca8faf31e530a93643604f45673e0e8d4
+  TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
+  USAGE.md: ec738b00da90b8c85835e071012542f449219e4c
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: 4f329832fb682821b7357c5f0a2d4f5f811d29f7
   examples/document.yaml: 19871e428a840eb2b726a4167664a0f27926a66d
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
-  mcps/README.md: e9a083cae21f3eaee45057877b027b15cc9717a7
+  mcps/README.md: b7be8f2c15d6a59efff5f7ff27a8d6da71738f92
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
@@ -137,12 +138,13 @@ filesHash:
   mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: 9d6b5c89689426419f2f3aaf36b925aa7bbaa732
+  mini-a-con.js: cd1e40b0e84ba7f279cc95d6685da25abb9cda77
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
-  mini-a-main.yaml: 2f5199ed62e2a7b63800c44cf5f8fa279cd27a55
-  mini-a-modes.yaml: 64af551d2bade3a5485ef414177427f8085f0fd6
+  mini-a-main.yaml: 40f2f73ae9f35f8a131b8abe4d72dde980ed3aab
+  mini-a-modes.yaml: 2f5a9d13edc724d82c180c44424b9b1e41ccbb81
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 1dc8ef9e7064b2581afe7c7d30bd393c3f71a0eb
-  mini-a.js: af242065f3863ad4a64cacfc236f5ebc6419cb34
+  mini-a.js: 174138cf3912079b9fa9c78729574b1878c37cb8
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 407fa76f80eb77d9984be7a954e75f589dbe91c9
   public/index.md: 0bf7bdc72c67f94edba299201e06e4c0376d6c83
