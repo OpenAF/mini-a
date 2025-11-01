@@ -1,40 +1,43 @@
 plugin("Console")
+var args = processExpr(" ")
 
-if (isUnDef(global.MiniA)) {
-  try {
-    load("mini-a.js")
-  } catch(e) {
-    var _candidates = [
-      io.buildPath(".", "mini-a.js"),
-      io.buildPath(io.fileInfo(".").canonicalPath, "mini-a.js")
-    ]
-    var _loaded = false
-    _candidates.forEach(function(path) {
-      if (_loaded) return
-      if (isString(path) && io.fileExists(path)) {
-        load(path)
-        _loaded = true
-      }
-    })
-    if (!_loaded) throw e
-  }
-}
+__initializeCon()
+loadLib("mini-a.js")
 
 ow.loadFormat()
-var con = new Console()
-var format = ow.format
+var con          = new Console()
+var format       = ow.format
 var colorSupport = (typeof colorify === "function")
-var basePrompt = "mini-a"
+var basePrompt   = "mini-a"
 var promptSymbol = "➤"
-var promptColor = "FG(41)"
-var accentColor = "FG(218)"
-var hintColor = "FG(249)"
-var errorColor = "FG(196)"
+var promptColor  = "FG(41)"
+var accentColor  = "FG(218)"
+var hintColor    = "FG(249)"
+var errorColor   = "FG(196)"
 var successColor = "FG(112)"
+var historyFileName = ".openaf-mini-a_history"
+var historyHome     = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+var historyFilePath = io.fileInfo((historyHome || ".") + "/" + historyFileName).canonicalPath
+var consoleReader   = null
+var commandHistory  = null
+var slashCommands   = ["help", "set", "toggle", "unset", "show", "reset", "last", "exit", "quit"]
+
+try {
+  if (isDef(con) && typeof con.getConsoleReader === "function") {
+    consoleReader = con.getConsoleReader()
+    commandHistory = new Packages.jline.console.history.FileHistory(new java.io.File(historyFilePath))
+    consoleReader.setHistory(commandHistory)
+  }
+} catch (historyError) {
+  commandHistory = null
+}
+
+// Utility functions
+// -----------------
 
 function colorifyText(text, color) {
   if (!colorSupport || isUnDef(color)) return text
-  return colorify(text, { color: color })
+  return ansiColor(color, text)
 }
 
 var parameterDefinitions = {
@@ -75,6 +78,97 @@ var parameterDefinitions = {
   modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
   auditch        : { type: "string", description: "Audit channel definition" }
 }
+var sessionParameterNames = Object.keys(parameterDefinitions).sort()
+
+function parseBoolean(value) {
+  var lowered = ("" + value).trim().toLowerCase()
+  if (lowered === "true" || lowered === "1" || lowered === "yes" || lowered === "y" || lowered === "on") return true
+  if (lowered === "false" || lowered === "0" || lowered === "no" || lowered === "n" || lowered === "off") return false
+  return undefined
+}
+
+function coerceDefaultValue(def, rawValue, key) {
+  if (!isDef(def) || isUnDef(rawValue)) return undefined
+  if (def.type === "boolean") {
+    var parsedBool = parseBoolean(rawValue)
+    if (isUnDef(parsedBool)) {
+      print(colorifyText("Ignored CLI override for " + key + ": expected boolean.", errorColor))
+      return undefined
+    }
+    return parsedBool
+  }
+  if (def.type === "number") {
+    var parsedNum = parseNumber(rawValue)
+    if (isUnDef(parsedNum)) {
+      print(colorifyText("Ignored CLI override for " + key + ": expected number.", errorColor))
+      return undefined
+    }
+    return parsedNum
+  }
+  if (def.type === "string") {
+    return String(rawValue)
+  }
+  return rawValue
+}
+
+function applyArgumentDefaults(argMap) {
+  if (!isObject(argMap)) return
+  Object.keys(argMap).forEach(function(originalKey) {
+    var normalizedKey = String(originalKey).toLowerCase()
+    if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, normalizedKey)) return
+    var definition = parameterDefinitions[normalizedKey]
+    var rawValue = argMap[originalKey]
+    var coerced = coerceDefaultValue(definition, rawValue, normalizedKey)
+    if (isDef(coerced)) definition.default = coerced
+  })
+}
+
+if (consoleReader) {
+  try {
+    var slashParameterHints = { set: "=", toggle: "", unset: "" }
+    consoleReader.addCompleter(
+      new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
+        if (buf === null) return -1
+        var uptoCursor = buf.substring(0, cursor)
+        if (uptoCursor.indexOf("/") !== 0) return -1
+
+        var firstSpace = uptoCursor.indexOf(" ")
+        if (firstSpace === -1) {
+          var partialCommand = uptoCursor.toLowerCase()
+          slashCommands.forEach(function(cmd) {
+            var candidateCommand = "/" + cmd
+            if (candidateCommand.toLowerCase().indexOf(partialCommand) === 0) candidates.add(candidateCommand)
+          })
+          return candidates.isEmpty() ? -1 : 0
+        }
+
+        var commandName = uptoCursor.substring(1, firstSpace)
+        var lookupName = commandName.toLowerCase()
+        if (!Object.prototype.hasOwnProperty.call(slashParameterHints, lookupName)) return -1
+
+        var remainder = uptoCursor.substring(firstSpace + 1)
+        var trimmedRemainder = remainder.replace(/^\s*/, "")
+        var insertionPoint = cursor - trimmedRemainder.length
+
+        var suffix = slashParameterHints[lookupName]
+        var keyTokenMatch = trimmedRemainder.match(/^[^\s=]*/)
+        var keyToken = keyTokenMatch ? keyTokenMatch[0] : ""
+
+        if (trimmedRemainder.length !== keyToken.length) return -1
+
+        sessionParameterNames.forEach(function(name) {
+          if (name.indexOf(keyToken) === 0) candidates.add(name + suffix)
+        })
+        return candidates.isEmpty() ? -1 : Number(insertionPoint)
+      })
+    )
+    if (consoleReader.getCompletionHandler) {
+      consoleReader.getCompletionHandler().setPrintSpaceAfterFullCompletion(false)
+    }
+  } catch (completionError) { }
+}
+
+applyArgumentDefaults(args)
 
 function resetOptions() {
   var opts = {}
@@ -111,13 +205,6 @@ function collectMultiline(initial) {
     lines.push(nextLine)
   }
   return lines.join("\n")
-}
-
-function parseBoolean(value) {
-  var lowered = ("" + value).trim().toLowerCase()
-  if (lowered === "true" || lowered === "1" || lowered === "yes" || lowered === "y" || lowered === "on") return true
-  if (lowered === "false" || lowered === "0" || lowered === "no" || lowered === "n" || lowered === "off") return false
-  return undefined
 }
 
 function parseNumber(value) {
@@ -189,24 +276,21 @@ function toggleOption(name) {
   print(colorifyText("Toggled " + key + " -> " + toggled, successColor))
 }
 
+/**
+ * Prints the current session options in a table format.
+ * Each row contains the parameter name, its value, and a description.
+ */
 function describeOptions() {
-  var rows = []
-  Object.keys(parameterDefinitions).sort().forEach(function(key) {
+  var rows = Object.keys(parameterDefinitions).sort().map(function(key) {
     var def = parameterDefinitions[key]
     var active = sessionOptions[key]
     var value
     if (isUnDef(active)) value = "(unset)"
     else if (isObject(active) || isArray(active)) value = stringify(active, __, "")
     else value = "" + active
-    rows.push({ parameter: key, value: value, description: def.description })
+    return { parameter: key, value: value, description: def.description }
   })
-  rows.forEach(function(row) {
-    var label = colorifyText(row.parameter, accentColor)
-    print(label + ": " + row.value)
-    if (isDef(row.description) && row.description.length > 0) {
-      print(colorifyText("    " + row.description, hintColor))
-    }
-  })
+  print( printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true) )
 }
 
 function ensureModel(args) {
@@ -235,16 +319,16 @@ function buildArgs(goalText) {
 }
 
 var eventPalette = {
-  user : "FG(147)",
-  think: "FG(223)",
+  user   : "FG(147)",
+  think  : "FG(223)",
   thought: "FG(223)",
-  exec : "FG(117)",
-  shell: "FG(81)",
-  final: successColor,
-  error: errorColor,
-  warn : "FG(214)",
-  info : hintColor,
-  plan : "FG(135)"
+  exec   : "FG(117)",
+  shell  : "FG(81)",
+  final  : successColor,
+  error  : errorColor,
+  warn   : "FG(214)",
+  info   : hintColor,
+  plan   : "FG(135)"
 }
 
 function printEvent(type, icon, message, id) {
@@ -285,22 +369,27 @@ function runGoal(goalText) {
 
 function printHelp() {
   var lines = [
-    "Type a goal and press Enter to launch Mini-A.",
-    "Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
+    "- Type a goal and press Enter to launch Mini-A.",
+    "- Enter '" + colorifyText("\"\"\"", accentColor) + colorifyText("' on a new line to compose multi-line goals.", hintColor),
+    "- Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
+    "",
     "Commands (prefix with '/'):",
-    "  /help            Show this help message",
-    "  /set <key> <value>  Update a Mini-A parameter (use '" + colorifyText("\"\"\"", accentColor) + "' for multi-line values)",
-    "  /toggle <key>    Toggle boolean parameter",
-    "  /unset <key>     Clear a parameter",
-    "  /show            Display configured parameters",
-    "  /reset           Restore default parameters",
-    "  /last            Print the previous final answer",
-    "  /exit            Leave the console"
+    "  " + colorifyText("/help", "BOLD") + colorifyText("               Show this help message", hintColor),
+    "  " + colorifyText("/set", "BOLD") + colorifyText(" <key> <value>  Update a Mini-A parameter (use '", hintColor) + colorifyText("\"\"\"", accentColor) + colorifyText("' for multi-line values)", hintColor),
+    "  " + colorifyText("/toggle", "BOLD") + colorifyText(" <key>       Toggle boolean parameter", hintColor),
+    "  " + colorifyText("/unset", "BOLD") + colorifyText(" <key>        Clear a parameter", hintColor),
+    "  " + colorifyText("/show", "BOLD") + colorifyText("               Display configured parameters", hintColor),
+    "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
+    "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
+    "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
   ]
-  lines.forEach(function(line) { print(colorifyText(line, hintColor)) })
+  print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
 }
 
-print(colorifyText("mini-a console", accentColor))
+const miniaLogo = `._ _ o._ o   _ 
+| | ||| ||~~(_|`
+print(colorifyText(miniaLogo, "BOLD") + colorifyText(" console", accentColor))
+print()
 print(colorifyText("Type /help for available commands.", hintColor))
 
 while(true) {
@@ -378,3 +467,8 @@ while(true) {
 }
 
 print(colorifyText("Goodbye!", accentColor))
+if (commandHistory && typeof commandHistory.flush === "function") {
+  try {
+    commandHistory.flush()
+  } catch (flushError) { }
+}

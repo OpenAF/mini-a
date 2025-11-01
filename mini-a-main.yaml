@@ -162,7 +162,12 @@ todo:
   ((then)):
   - start-web
   ((else)):
-  - start-cli
+  - (if): |
+      isDef(args.goal)
+    ((then)):
+    - start-cli
+    ((else)):
+    - start-con
 
 jobs:
 # -----------------------
@@ -270,3 +275,8 @@ jobs:
 - name: start-cli
   exec: | #js
     oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", global._args, genUUID(), __, false)
+
+# ---------------
+- name: start-con
+  exec: | #js
+    load("mini-a-con.js")
