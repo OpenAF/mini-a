@@ -3901,7 +3901,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
 
       var updated = llmInstance
-      log(`Registering MCP tools on LLM via tool interface...`)
+      parent.fnI("info", `Registering MCP tools on LLM via tool interface...`)
 
       Object.keys(parent._mcpConnections || {}).forEach(function(connectionId) {
         var client = parent._mcpConnections[connectionId]
@@ -4207,10 +4207,10 @@ MiniA.prototype.init = function(args) {
               posFn : (t, a, r) => {
                 var hasError = isMap(r) && isDef(r.error)
                 if (hasError) {
-                  logWarn(`Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
+                  parent.fnI("error", `Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
                   global.__mini_a_metrics.mcp_actions_failed.inc()
                 } else {
-                  log(`Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
+                  parent.fnI("info", `Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
                   global.__mini_a_metrics.mcp_actions_executed.inc()
                 }
                 if (args.debug) {

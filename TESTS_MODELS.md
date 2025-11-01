@@ -33,9 +33,9 @@ Consistent ✅ rows indicate the model can gather filesystem context, summarize 
 
 | Test | Command |
 |------|---------|
-| **files md**   | ```mini-a.sh goal="list the filenames in the current folder" useshell=true format=md``` |
+| **files md**   | ```mini-a goal="list the filenames in the current folder" useshell=true format=md``` |
 | **files oafp** | ```oafp in=minia data="(goal: 'list the filenames in the current folder', useshell: true)" out=ctree``` |
-| **files chat** | ```mini-a.sh goal="list the filenames in the current folder" useshell=true format=md chatbotmode=true``` |
+| **files chat** | ```mini-a goal="list the filenames in the current folder" useshell=true format=md chatbotmode=true``` |
 | **files oafp chat** | ```oafp in=minia data="(goal: 'list the filenames in the current folder', useshell: true, chatbotmode: true)" out=ctree``` |
 
 ## "Tools" tests
@@ -61,7 +61,7 @@ Tool-centric flows stress whether a model can interpret MCP tool schemas, wait f
 
 | Test | Command |
 |------|---------|
-| **Emb tool** | ```mini-a.sh goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" format=md``` |
-| **API tool** | ```mini-a.sh goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" format=md usetools=true``` |
-| **Emb tool chat** | ```mini-a.sh goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" chatbotmode=true format=md``` |
-| **API tool chat** | ```mini-a.sh goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" format=md chatbotmode=true usetools=true``` |
+| **Emb tool** | ```mini-a goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" format=md``` |
+| **API tool** | ```mini-a goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" format=md usetools=true``` |
+| **Emb tool chat** | ```mini-a goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" chatbotmode=true format=md``` |
+| **API tool chat** | ```mini-a goal="what is the port 443 latency for host yahoo.co.jp" mcp="(cmd: 'ojob mcps/mcp-net.yaml')" format=md chatbotmode=true usetools=true``` |

@@ -298,7 +298,7 @@ Exposed tools:
 Example — run disk usage diagnostics with an explicit allow-list:
 
 ```bash
-mini-a.sh goal="summarize disk usage" \
+mini-a goal="summarize disk usage" \
   mcp="(cmd: 'ojob mcps/mcp-shell.yaml shellallow=df,du timeout=4000', timeout: 5000)" rpm=20
 ```
 
@@ -323,14 +323,14 @@ Primary tools:
 Example — list JSON reports under a prefix:
 
 ```bash
-mini-a.sh goal="audit nightly reports" \
+mini-a goal="audit nightly reports" \
   mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=ops-data prefix=reports/nightly/', timeout: 5000)" rpm=20
 ```
 
 Example — upload a processed artifact (write mode):
 
 ```bash
-mini-a.sh goal="publish sanitized metrics" \
+mini-a goal="publish sanitized metrics" \
   mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=ops-data readwrite=true', timeout: 5000)" \
   knowledge="- encode uploads as base64 when calling s3-put-object" rpm=20
 ```
@@ -345,7 +345,7 @@ mini-a.sh goal="publish sanitized metrics" \
 Example — compare revenue growth across two tickers:
 
 ```bash
-mini-a.sh goal="chart revenue for NVDA vs AMD" \
+mini-a goal="chart revenue for NVDA vs AMD" \
   mcp="(cmd: 'ojob mcps/mcp-fin.yaml', timeout: 5000)" rpm=20
 ```
 
@@ -361,7 +361,7 @@ Tools:
 Example — locate an official feed and pull the latest posts:
 
 ```bash
-mini-a.sh goal="summarize the most recent Azure announcements" \
+mini-a goal="summarize the most recent Azure announcements" \
   mcp="(cmd: 'ojob mcps/mcp-rss.yaml', timeout: 5000)" rpm=20
 ```
 
@@ -383,7 +383,7 @@ Tools:
 Example — search the web (STDIO MCP):
 
 ```bash
-mini-a.sh goal="find the official Rust language blog and summarize the latest post" \
+mini-a goal="find the official Rust language blog and summarize the latest post" \
   mcp="(cmd: 'ojob mcps/mcp-web.yaml', timeout: 5000)" rpm=20 __format=md
 ```
 
