@@ -1,6 +1,6 @@
 try {
   plugin("Console")
-  var args = processExpr(" ")
+  var args = isDef(global._args) ? global._args : processExpr(" ")
 
   // Helper functions
   // ----------------
@@ -164,15 +164,21 @@ try {
   }
 
   function applyArgumentDefaults(argMap) {
-    if (!isObject(argMap)) return
+    if (!isObject(argMap)) return {}
+    var extraArgs = {}
     Object.keys(argMap).forEach(function(originalKey) {
       var normalizedKey = String(originalKey).toLowerCase()
-      if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, normalizedKey)) return
+      if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, normalizedKey)) {
+        // Store arguments not in parameterDefinitions for later merging
+        extraArgs[normalizedKey] = argMap[originalKey]
+        return
+      }
       var definition = parameterDefinitions[normalizedKey]
       var rawValue = argMap[originalKey]
       var coerced = coerceDefaultValue(definition, rawValue, normalizedKey)
       if (isDef(coerced)) definition.default = coerced
     })
+    return extraArgs
   }
 
   if (consoleReader) {
@@ -220,7 +226,7 @@ try {
     } catch (completionError) { }
   }
 
-  applyArgumentDefaults(args)
+  var extraCLIArgs = applyArgumentDefaults(args)
 
   function getConversationPath() {
     if (sessionOptions && Object.prototype.hasOwnProperty.call(sessionOptions, "conversation")) {
@@ -570,12 +576,22 @@ try {
   function buildArgs(goalText) {
     var cleanGoal = isString(goalText) ? goalText.trim() : goalText
     var args = {}
+    
+    // First, merge extra CLI arguments that weren't in parameterDefinitions
+    if (isObject(extraCLIArgs)) {
+      Object.keys(extraCLIArgs).forEach(function(key) {
+        args[key] = extraCLIArgs[key]
+      })
+    }
+    
+    // Then, merge sessionOptions (which may override extraCLIArgs)
     Object.keys(sessionOptions).forEach(function(key) {
       if (internalParameters[key]) return
       var value = sessionOptions[key]
       if (isUnDef(value) || value === "") return
       args[key] = value
     })
+    
     if (isString(sessionOptions.goalprefix) && sessionOptions.goalprefix.length > 0) {
       cleanGoal = sessionOptions.goalprefix + cleanGoal
     }
