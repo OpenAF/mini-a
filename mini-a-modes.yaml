@@ -21,7 +21,7 @@ modes:
     description: "Internet access mode"
     params     :
       usetools   : true
-      mcp        : "[(cmd: ojob ojob.io/ai/mcps/mcp-time) | (cmd: ojob ojob.io/ai/mcps/mcp-web) ]"
+      mcp        : "[(cmd: ojob ojob.io/ai/mcps/mcp-time) | (cmd: ojob ojob.io/ai/mcps/mcp-web) | (cmd: ojob ojob.io/ai/mcps/mcp-weather) ]"
       mcpdynamic : true
 
   chatbot:

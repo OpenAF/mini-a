@@ -613,29 +613,35 @@ try {
     plan   : "FG(135)"
   }
 
+  var _prevEventLength = __
   function printEvent(type, icon, message, id) {
     // Ignore user events
     if (type == "user") return
-    var extra = ""
+    var extra = "", inline = false
 
     var iconText
-    if (icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
+    if (icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
       iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (visibleLength(icon) > 1 ? " " : "  ")
     } else {
-      if (toBoolean(args.verbose)) {
-        if (type == "final") {
-          iconText = colorifyText("⦿", "RESET," + (eventPalette[type] || accentColor)) + " "
-        } else if (type == "error") {
-          iconText = colorifyText("✖", "RESET," + (eventPalette[type] || accentColor)) + " "
-        } else {
-          iconText = colorifyText("•", "RESET," + (eventPalette[type] || accentColor)) + " "
-        }
+      if (type == "final") {
+        iconText = colorifyText("⦿", "RESET," + (eventPalette[type] || accentColor)) + " "
+      } else if (type == "error") {
+        iconText = colorifyText("✖", "RESET," + (eventPalette[type] || accentColor)) + " "
       } else {
-        return
+        iconText = colorifyText("•", "RESET," + (eventPalette[type] || accentColor)) + " "
       }
+      inline = true
     }
     //var prefix = colorifyText("[" + id + "]", hintColor)
-    print( ow.format.withSideLine( extra + iconText + colorifyText(message, hintColor + ",ITALIC"), __, promptColor, hintColor + ",ITALIC", ow.format.withSideLineThemes().simpleLine) )
+    var _msg = ow.format.withSideLine( extra + iconText + colorifyText(message, hintColor + ",ITALIC"), __, promptColor, hintColor + ",ITALIC", ow.format.withSideLineThemes().simpleLine) 
+    if (args.verbose === true || !inline) {
+      print(_msg)
+      _prevEventLength = __
+    } else {
+      if (isDef(_prevEventLength)) printnl(repeat(_prevEventLength, " ") + "\r")
+      printnl(_msg + "\r")
+      _prevEventLength = visibleLength(_msg)
+    }
     //print(prefix + " " + iconText + " " + message)
   }
 
@@ -654,6 +660,7 @@ try {
       refreshConversationStats(agent)
       if (isUnDef(_args.outfile)) {
         //print(colorifyText("\n🏁 Final answer", successColor))
+        print()
         if (isObject(lastResult) || isArray(lastResult)) {
           print(stringify(lastResult, __, "  "))
         } else if (isString(lastResult)) {
@@ -798,7 +805,6 @@ try {
     runGoal(goalText)
   }
 
-  print(colorifyText("Goodbye!", accentColor))
   if (commandHistory && typeof commandHistory.flush === "function") {
     try {
       commandHistory.flush()
@@ -815,6 +821,7 @@ try {
       }
     }
     print(colorifyText(" Start mini-a with 'resume=true' to continue this conversation.", hintColor))
+    print(colorifyText("Goodbye!", accentColor))
   }
 } catch(_ge) {
   $err(_ge)

@@ -15,10 +15,15 @@ Two steps to use:
    export OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000, temperature: 1)"
    ```
 
-2. Run the agent:
+2. Run the console:
    ```bash
-   ./mini-a.sh goal="your goal"
+   opack exec mini-a
    ```
+   Type your goal at the prompt, or pass it inline:
+   ```bash
+   opack exec mini-a goal="your goal"
+   ```
+   If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
 
 Shell access is disabled by default for safety; add `useshell=true` when you explicitly want the agent to run commands.
 
@@ -28,17 +33,17 @@ For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model se
 
 **List files:**
 ```bash
-./mini-a.sh goal="list all JavaScript files in this directory" useshell=true
+mini-a goal="list all JavaScript files in this directory" useshell=true
 ```
 
 **Using MCP servers:**
 ```bash
-./mini-a.sh goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
+mini-a goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
 **Chatbot mode:**
 ```bash
-./mini-a.sh goal="help me plan a vacation in Lisbon" chatbotmode=true
+mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 ```
 
 ## Installation
@@ -49,7 +54,7 @@ For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model se
    opack install mini-a
    ```
 3. Set your model configuration (see Quick Start above)
-4. Start using Mini-A!
+4. Start using Mini-A via `opack exec mini-a` (or the `mini-a` alias if you added it)!
 
 ## Features
 
@@ -87,7 +92,8 @@ For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model se
 Mini-A ships with complementary components:
 
 - **`mini-a.yaml`** - Core oJob definition that implements the agent workflow
-- **`mini-a.sh`** - Shell wrapper script for convenient execution
+- **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
+- **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
 - **`mini-a-modes.yaml`** - Configuration presets for common use cases
@@ -163,7 +169,7 @@ Mini-A includes built-in security features:
 **Example with Docker sandbox:**
 ```bash
 docker run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work ubuntu:24.04 sleep infinity
-./mini-a.sh goal="analyze files" useshell=true shell="docker exec mini-a-sandbox"
+mini-a goal="analyze files" useshell=true shell="docker exec mini-a-sandbox"
 ```
 
 See [USAGE.md](USAGE.md#security-considerations) for detailed security information and sandboxing strategies.

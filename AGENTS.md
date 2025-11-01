@@ -1,10 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-Mini-A runs on OpenAF jobs. The core agent logic lives in `mini-a.js`, while `mini-a.yaml` orchestrates CLI sessions and `mini-a-web.yaml` powers the HTTP UI. Shell wrappers (`mini-a.sh`, `mini-a-web.sh`) simply invoke those jobs. Supporting assets sit in `public/` (Markdown UI template plus vendored `showdown.min.js`). Use `mcps/` for built-in Model Context Protocol job descriptors and reference docs; each `.yaml` under that folder can be invoked through the `mcp=` parameter. Additional guidance and examples are in `USAGE.md` and `README.md`.
+Mini-A runs on OpenAF jobs. The core agent logic lives in `mini-a.js`, while `mini-a.yaml` orchestrates CLI sessions and `mini-a-web.yaml` powers the HTTP UI. The interactive console (`mini-a-con.js`) is exposed through `opack exec mini-a` (or the optional `mini-a` alias). Shell wrappers (`mini-a.sh`, `mini-a-web.sh`) invoke the same jobs when working from a cloned repository. Supporting assets sit in `public/` (Markdown UI template plus vendored `showdown.min.js`). Use `mcps/` for built-in Model Context Protocol job descriptors and reference docs; each `.yaml` under that folder can be invoked through the `mcp=` parameter. Additional guidance and examples are in `USAGE.md` and `README.md`.
 
 ## Build, Test, and Development Commands
-- `./mini-a.sh goal="draft release notes" useshell=false`: start the agent via oJob with the CLI wrapper.
+- `mini-a goal="draft release notes" useshell=false`: start the agent from the installed console (alias shown after install). Use `opack exec mini-a ...` if you skipped the alias.
 - `ojob mini-a.yaml goal="..." debug=true`: run directly to see verbose logs for troubleshooting.
 - `./mini-a-web.sh onport=8888`: launch the web interface and visit `http://localhost:8888`.
 - `ojob mcps/mcp-db.yaml jdbc="..."`: exercise individual MCP descriptors during development.

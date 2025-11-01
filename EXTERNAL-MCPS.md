@@ -29,7 +29,7 @@ Some external MCP servers also expose an HTTP endpoint. When available, you can 
 Example (replace URL with the MCP’s endpoint):
 
 ```bash
-mini-a.sh goal="query the external MCP" \
+mini-a goal="query the external MCP" \
 	mcp="(type: remote, url: 'http://external.mcp.local:1234/mcp')" \
 	rpm=20 tpm=80000 __format=md
 ```
@@ -40,7 +40,7 @@ Refer to the external MCP’s documentation to confirm whether it exposes an HTT
 When connecting to remote MCPs you may also need to provide credentials or API keys. Use standard oJob argument syntax, for example:
 
 ```bash
-mini-a.sh goal="use the private MCP" \
+mini-a goal="use the private MCP" \
         mcp="(type: remote, url: 'https://example/mcp', headers: (authorization: 'Bearer ${MY_TOKEN}'))"
 ```
 

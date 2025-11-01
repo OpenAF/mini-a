@@ -16,13 +16,15 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 ## Command-Line Execution
 
-Mini-A can be started from the shell in three equivalent ways:
+Mini-A now ships with an interactive console so you can start the agent directly from the installed oPack:
 
-- `./mini-a.sh goal="summarize the logs" useshell=true` — wrapper script that resolves the repository path automatically.
+- `opack exec mini-a` — launches the console; append arguments such as `goal="summarize the logs" useshell=true`, or type the goal at the prompt.
+- `mini-a goal="summarize the logs" useshell=true` — same console when you add the optional alias printed after installation.
+- `./mini-a.sh goal="summarize the logs" useshell=true` — wrapper script when running from a cloned repository.
 - `ojob mini-a.yaml goal="summarize the logs" useshell=true` — direct invocation of the oJob definition.
 - `ojob mini-a-web.yaml onport=8888` — launches the HTTP server that powers the browser UI found in `public/`.
 
-All command-line flags documented below work with either `mini-a.sh` or `ojob mini-a.yaml`.
+All command-line flags documented below work with the console (`opack exec mini-a` / `mini-a`) as well as `mini-a.sh` and `mini-a.yaml`.
 
 ## Model Configuration
 
@@ -78,7 +80,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 ## Mode Presets
 
-Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) before applying any explicit flags you provide on the command line.
+Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) before applying any explicit flags you provide on the command line.
 
 ### Built-in Presets
 
@@ -108,7 +110,7 @@ modes:
 **Usage:**
 
 ```bash
-./mini-a.sh mode=mypreset goal="your goal here"
+mini-a mode=mypreset goal="your goal here"
 ```
 
 ## Reliability features
@@ -495,7 +497,7 @@ Pass `mcplazy=true` to defer establishing MCP connections until a tool is actual
 **Example:**
 
 ```bash
-./mini-a.sh goal="analyze local files" \
+mini-a goal="analyze local files" \
   mcp="[(cmd: 'ojob mcps/mcp-db.yaml...'), (cmd: 'ojob mcps/mcp-net.yaml...')]" \
   mcplazy=true \
   usetools=true
@@ -525,7 +527,7 @@ Mini-A supports two MCP server communication modes:
 
 **Example:**
 ```bash
-mini-a.sh goal="query database" \
+mini-a goal="query database" \
   mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa')"
 ```
 
@@ -549,7 +551,7 @@ mini-a.sh goal="query database" \
 ojob mcps/mcp-ssh.yaml onport=8888 ssh=ssh://user@host
 
 # Connect Mini-A to HTTP MCP
-mini-a.sh goal="check remote server" \
+mini-a goal="check remote server" \
   mcp="(type: remote, url: 'http://localhost:8888/mcp')"
 ```
 
@@ -560,7 +562,7 @@ Mini-A can coordinate multiple MCP servers simultaneously, enabling complex cros
 #### Example: Docker Hub + Wikipedia Cross-Reference
 
 ```bash
-mini-a.sh \
+mini-a \
   goal="get the latest top 20 tags used by library/ubuntu, cross-check those tag names with the list of Ubuntu releases in Wikipedia, and produce a table with ubuntu release, tag name and latest push date" \
   mcp="[(cmd: 'docker run --rm -i mcp/dockerhub', timeout: 5000), (cmd: 'docker run --rm -i mcp/wikipedia-mcp', timeout: 5000)]" \
   rpm=20 \
@@ -571,7 +573,7 @@ mini-a.sh \
 #### Example: Database + S3 + Email Integration
 
 ```bash
-mini-a.sh \
+mini-a \
   goal="query invoices from database, archive to S3, and email summary" \
   mcp="[
     (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:postgresql://localhost/billing', timeout: 5000),
@@ -584,7 +586,7 @@ mini-a.sh \
 #### Example: Multi-Database Federation
 
 ```bash
-mini-a.sh \
+mini-a \
   goal="compare customer data between production and warehouse databases" \
   mcp="[
     (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:postgresql://prod-db/customers', timeout: 5000),
@@ -599,58 +601,58 @@ Mini-A includes several production-ready MCP servers in the `mcps/` directory:
 
 #### Database Operations (mcp-db)
 ```bash
-mini-a.sh goal="create a test table with European countries" \
+mini-a goal="create a test table with European countries" \
   mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000)"
 ```
 
 #### Time & Timezone Utilities (mcp-time)
 ```bash
-mini-a.sh goal="what time is it in Sydney right now?" \
+mini-a goal="what time is it in Sydney right now?" \
   mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
 #### Network Utilities (mcp-net)
 ```bash
-mini-a.sh goal="check if port 80 is open on google.com" \
+mini-a goal="check if port 80 is open on google.com" \
   mcp="(cmd: 'ojob mcps/mcp-net.yaml', timeout: 5000)"
 ```
 
 #### SSH Execution (mcp-ssh)
 ```bash
-mini-a.sh goal="run 'uptime' on remote host via SSH MCP" \
+mini-a goal="run 'uptime' on remote host via SSH MCP" \
   mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22/ident readwrite=false', timeout: 5000)"
 ```
 
 #### S3 Operations (mcp-s3)
 ```bash
 # Read-only by default; add readwrite=true to enable writes
-mini-a.sh goal="list the latest invoices in our S3 bucket" \
+mini-a goal="list the latest invoices in our S3 bucket" \
   mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=finance-archive prefix=invoices/', timeout: 5000)"
 ```
 
 #### RSS Monitoring (mcp-rss)
 ```bash
-mini-a.sh goal="summarize the last five posts from the OpenAI blog" \
+mini-a goal="summarize the last five posts from the OpenAI blog" \
   mcp="(cmd: 'ojob mcps/mcp-rss.yaml', timeout: 5000)" \
   knowledge="- prefer bullet lists"
 ```
 
 #### Market Data (mcp-fin)
 ```bash
-mini-a.sh goal="compare AAPL and MSFT revenue trends" \
+mini-a goal="compare AAPL and MSFT revenue trends" \
   mcp="(cmd: 'ojob mcps/mcp-fin.yaml', timeout: 5000)"
 ```
 
 #### Email Operations (mcp-email)
 ```bash
-mini-a.sh goal="send a test email" \
+mini-a goal="send a test email" \
   mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=test@example.com', timeout: 5000)"
 ```
 
 #### Local Shell MCP (mcp-shell)
 ```bash
 # Inherits the command allow/deny list
-mini-a.sh goal="collect disk usage stats" \
+mini-a goal="collect disk usage stats" \
   mcp="(cmd: 'ojob mcps/mcp-shell.yaml timeout=3000 shellallow=df,du', timeout: 5000)"
 ```
 
@@ -695,9 +697,8 @@ agent.start({
 
 #### Pattern 3: MCP with Fallbacks
 
-```bash
 # Try primary MCP, fall back to backup
-mini-a.sh goal="fetch data" \
+mini-a goal="fetch data" \
   mcp="[(type: remote, url: 'https://primary-mcp.example.com/mcp'), (type: remote, url: 'https://backup-mcp.example.com/mcp')]" \
   usetools=true
 ```
@@ -985,7 +986,7 @@ Use `shell=...` together with `useshell=true` when you want Mini-A to execute ev
 - **Cons:** sandbox profiles can be verbose; access to developer tools may require profile tweaks.
 - **Example:**
   ```bash
-  ./mini-a.sh goal="catalog ~/Projects" useshell=true \
+  mini-a goal="catalog ~/Projects" useshell=true \
     shell="sandbox-exec -f /usr/share/sandbox/default.sb"
   ```
 
@@ -997,7 +998,7 @@ Use `shell=...` together with `useshell=true` when you want Mini-A to execute ev
 - **Example:**
   ```bash
   container run --detach --name mini-a --image docker.io/library/ubuntu:24.04 sleep infinity
-  ./mini-a.sh goal="inspect /work" useshell=true shell="container exec mini-a"
+  mini-a goal="inspect /work" useshell=true shell="container exec mini-a"
   ```
 
 #### Linux / macOS / Windows WSL (Docker)
@@ -1008,7 +1009,7 @@ Use `shell=...` together with `useshell=true` when you want Mini-A to execute ev
 - **Example:**
   ```bash
   docker run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work ubuntu:24.04 sleep infinity
-  ./mini-a.sh goal="summarize git status" useshell=true shell="docker exec mini-a-sandbox"
+  mini-a goal="summarize git status" useshell=true shell="docker exec mini-a-sandbox"
   ```
 
 #### Linux / macOS / Windows WSL (Podman)
@@ -1019,7 +1020,7 @@ Use `shell=...` together with `useshell=true` when you want Mini-A to execute ev
 - **Example:**
   ```bash
   podman run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work docker.io/library/fedora:latest sleep infinity
-  ./mini-a.sh goal="list source files" useshell=true shell="podman exec mini-a-sandbox"
+  mini-a goal="list source files" useshell=true shell="podman exec mini-a-sandbox"
   ```
 
 > **Tip:** Mix and match strategies. You can still require confirmations (`checkall=true`) or tweak allowlists (`shellallow=...`) even when commands are routed through Docker, Podman, or sandbox-exec.
