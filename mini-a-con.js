@@ -73,7 +73,7 @@ try {
       if (io.fileExists(initialConversationPath) && io.fileInfo(initialConversationPath).isFile) io.rm(initialConversationPath)
       lastConversationStats = __
     } catch (conversationResetError) {
-      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to reset conversation at startup: " + conversationResetError, errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to reset conversation at startup: " + conversationResetError, errorColor))
     }
   }
 
@@ -497,14 +497,14 @@ try {
     if (def.type === "boolean") {
       var parsedBool = parseBoolean(value)
       if (isUnDef(parsedBool)) {
-        print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse boolean value for " + key + ". Use true/false.", errorColor))
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse boolean value for " + key + ". Use true/false.", errorColor))
         return
       }
       value = parsedBool
     } else if (def.type === "number") {
       var parsedNum = parseNumber(value)
       if (isUnDef(parsedNum)) {
-        print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse numeric value for " + key + ".", errorColor))
+        printERr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse numeric value for " + key + ".", errorColor))
         return
       }
       value = parsedNum
@@ -519,7 +519,7 @@ try {
   function unsetOption(name) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
-      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown parameter: " + name, errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown parameter: " + name, errorColor))
       return
     }
     if (Object.prototype.hasOwnProperty.call(parameterDefinitions[key], "default")) {
@@ -534,12 +534,12 @@ try {
   function toggleOption(name) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
-      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown parameter: " + name, errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown parameter: " + name, errorColor))
       return
     }
     var def = parameterDefinitions[key]
     if (def.type !== "boolean") {
-      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Parameter " + key + " is not boolean.", errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Parameter " + key + " is not boolean.", errorColor))
       return
     }
     var current = sessionOptions[key]
@@ -569,7 +569,7 @@ try {
     if (isString(args.model) && args.model.trim().length > 0) return true
     var envModel = getEnv("OAF_MODEL")
     if (isString(envModel) && envModel.trim().length > 0) return true
-    print(colorifyText("OAF_MODEL is not set and no model override provided. Export OAF_MODEL or use /set model ...", errorColor))
+    printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("OAF_MODEL is not set and no model override provided. Export OAF_MODEL or use /set model ...", errorColor))
     return false
   }
 
@@ -620,7 +620,7 @@ try {
     var extra = "", inline = false
 
     var iconText
-    if (icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
+    if (type != "error" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
       iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (visibleLength(icon) > 1 ? " " : "  ")
     } else {
       if (type == "final") {
@@ -673,7 +673,7 @@ try {
       }
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
-      print(colorifyText("Mini-A execution failed: " + errMsg, errorColor))
+      printErr(colorifyText("ITALIC," + errorColor, "!!") + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
     }
   }
 
@@ -793,7 +793,7 @@ try {
         }
         continue
       }
-      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown command: /" + command, errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown command: /" + command, errorColor))
       continue
     }
     var goalText = trimmed
