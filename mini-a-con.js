@@ -654,10 +654,45 @@ try {
         printEvent(event, icon, text, id)
       })
     })
+    var agentResult = __
+    var stopRequested = false
     try {
       agent.init(_args)
-      lastResult = agent.start(_args)
+      $tb(function() {
+        agentResult = agent.start(_args)
+      }).stopWhen(function(done) {
+        if (done === true) return true
+        var rawCode = con.readCharNB()
+        var code = isDef(rawCode) ? Number(rawCode) : NaN
+        if (!isNaN(code) && code > 0) {
+          if (code === 27) {
+            sleep(40)
+            var followRaw = con.readCharNB()
+            var followCode = isDef(followRaw) ? Number(followRaw) : NaN
+            if (isNaN(followCode) || followCode <= 0) {
+              sleep(40)
+              followRaw = con.readCharNB()
+              followCode = isDef(followRaw) ? Number(followRaw) : NaN
+            }
+            if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
+              stopRequested = true
+              agent.state = "stop"
+              if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
+                try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
+              }
+              printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
+            }
+          }
+        }
+        sleep(75)
+        return false
+      }).exec()
       refreshConversationStats(agent)
+      if (stopRequested) {
+        print(colorifyText("Mini-A stopped by user (Esc).", hintColor))
+        return
+      }
+      lastResult = agentResult
       if (isUnDef(_args.outfile)) {
         //print(colorifyText("\n🏁 Final answer", successColor))
         print()
@@ -681,7 +716,7 @@ try {
     var conversationPath = getConversationPath()
     var conversationDisplay = (isString(conversationPath) && conversationPath.length > 0) ? conversationPath : "disabled"
     var lines = [
-      "• Type a goal and press Enter to launch Mini-A.",
+      "• Type a goal and press Enter to launch Mini-A. Hit 'Esc' to request stop during execution.",
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
       "• Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
