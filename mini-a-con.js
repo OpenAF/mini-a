@@ -702,7 +702,7 @@ try {
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
 
-  const miniaLogo = ` ._ _ o._ o   _ 
+  const miniaLogo = ` ._ _ ${colorifyText("o", promptColor)}._ ${colorifyText("o", promptColor)}   _ 
  | | ||| ||~~(_|`
   print(colorifyText(miniaLogo, "BOLD") + colorifyText(" console", accentColor))
   print()
