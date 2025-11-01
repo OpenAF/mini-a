@@ -716,7 +716,7 @@ try {
     var conversationPath = getConversationPath()
     var conversationDisplay = (isString(conversationPath) && conversationPath.length > 0) ? conversationPath : "disabled"
     var lines = [
-      "• Type a goal and press Enter to launch Mini-A. Hit 'Esc' to request stop during execution.",
+      "• Type a goal and press Enter to launch Mini-A. Press " + colorifyText("Esc", accentColor) + colorifyText(" during execution to request a stop.", hintColor),
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
       "• Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
