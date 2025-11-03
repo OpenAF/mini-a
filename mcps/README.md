@@ -16,6 +16,7 @@
 | mcp-ch     | Data channel MCP (STDIO/HTTP)   | STDIO/HTTP       | (included) | [mcp-ch.yaml](mcp-ch.yaml)         |
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-shell  | Local shell execution MCP       | STDIO/HTTP       | (included) | [mcp-shell.yaml](mcp-shell.yaml)   |
+| mcp-mini-a | Mini-A agent runner MCP         | STDIO/HTTP       | (included) | [mcp-mini-a.yaml](mcp-mini-a.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oafp   | OpenAF processor (oafp) runner & docs MCP | STDIO/HTTP | (included) | [mcp-oafp.yaml](mcp-oafp.yaml)   |
 | mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
@@ -26,6 +27,14 @@
 See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contribution guidelines.
 
 ### Examples
+
+#### mcp-mini-a
+
+`mcp-mini-a` exposes the Mini-A agent as a MCP server. Use the `run-goal` tool to execute goals and retrieve the final answer plus runtime metrics. Launch-time arguments control sensitive capabilities (for example `useshell`, `mcp`, or model overrides); remote callers can only adjust the goal alongside formatting and planning flags. Provide shared knowledge or default rules at startup via `knowledge=` or `rules=` arguments when launching `ojob`.
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-mini-a.yaml', tool: run-goal, params: (goal: 'summarize README.md', format: 'md', useplanning: true))"
+```
 
 #### mcp-db
 

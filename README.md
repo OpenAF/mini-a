@@ -62,6 +62,7 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, and more
+- **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
 - **Web UI** - Lightweight embedded chat interface for interactive use
 - **Planning Mode** - Generate and execute structured task plans for complex goals
