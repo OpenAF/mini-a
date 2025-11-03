@@ -306,6 +306,72 @@ MiniA._registerShutdownHook = function() {
   MiniA._shutdownHookRegistered = true
 }
 
+MiniA.buildVisualKnowledge = function(options) {
+  options = _$(options, "options").isMap().default({})
+  var useDiagrams = _$(toBoolean(options.useDiagrams), "options.useDiagrams").isBoolean().default(false)
+  var useCharts = _$(toBoolean(options.useCharts), "options.useCharts").isBoolean().default(false)
+
+  if (!useDiagrams && !useCharts) return ""
+
+  var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
+  if (existingKnowledge.indexOf("Visual output guidance (concise):") >= 0) return ""
+
+  var visualParts = []
+
+  visualParts.push(
+    "Visual output guidance (concise):\n\n" +
+    "- Default to including a diagram or chart whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
+    "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
+    "- Never mention the technical implementation (Mermaid, Chart.js, etc.) to users; refer only to 'diagrams' and 'charts'."
+  )
+
+  if (useDiagrams) {
+    visualParts.push(
+      "Diagrams:\n" +
+      "  - Use ```mermaid``` fences for flows (`graph TD`), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, mindmap, or pie charts.\n" +
+      "  - Keep node labels concise and prefer directional edges for processes.\n" +
+      "  - CRITICAL: Always wrap all labels in double quotes (e.g., A[\"Label text\"] not A[Label text]) to avoid syntax errors."
+    )
+  }
+
+  if (useCharts) {
+    visualParts.push(
+      "Charts (strict format):\n" +
+      "  - Wrap only the config object inside ```chart``` (aliases: chartjs, chart.js).\n" +
+      "  - Include `type`, `data.labels`, and at least one dataset; add palettes and `options` as needed.\n" +
+      "  - Optional `canvas: { width, height }` block controls sizing when helpful.\n" +
+      "  - Never use other fences (json/javascript) and never return raw JSON.\n" +
+      "  - Use only static values; do not include functions or dynamic callbacks (no `ctx => ...`, no `function(){}`); configs are treated as data and code is not executed.\n" +
+      "  - Provide complete, deterministic data inline (no async or fetching).\n" +
+      "  - IMPORTANT: When working with datetime values, keep them as strings in ISO format or as timestamp numbers. Do not use Date objects or date parsing functions in the chart configuration.\n\n" +
+      "Available chart plugins/types (preloaded):\n" +
+      "  - chartjs-adapter-date-fns (time scale; use scales.{x|y}.type='time' with ISO date strings)\n" +
+      "  - @sgratzl/chartjs-chart-boxplot (types: 'boxplot', 'violin')\n" +
+      "  - chartjs-chart-treemap (type: 'treemap')\n" +
+      "  - chartjs-chart-sankey (type: 'sankey')\n" +
+      "  - chartjs-chart-matrix (type: 'matrix')\n" +
+      "  - chartjs-chart-graph (type: 'graph')\n" +
+      "  - chartjs-chart-geo (types: 'choropleth', 'bubbleMap')"
+    )
+  }
+
+  var checklist = "\n\nVisual selection checklist:"
+  if (useDiagrams) {
+    checklist += "\n1. Relationships or flows -> diagram with graph or sequence."
+    checklist += "\n2. Timelines or roadmaps -> diagram with gantt."
+  }
+  if (useCharts) {
+    var baseIndex = useDiagrams ? 3 : 1
+    checklist += "\n" + baseIndex + ". Comparisons or trends -> bar or line chart."
+    checklist += "\n" + (baseIndex + 1) + ". Composition or ratios -> pie or doughnut chart."
+  }
+  checklist += "\n\nIf a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."
+
+  visualParts.push(checklist)
+
+  return visualParts.join("\n\n")
+}
+
 /**
  * Helper function to log thought or think messages with counter for repeated messages
  */
@@ -4065,6 +4131,8 @@ MiniA.prototype.init = function(args) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
+    args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -4074,6 +4142,20 @@ MiniA.prototype.init = function(args) {
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
+
+    var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
+    var visualKnowledge = MiniA.buildVisualKnowledge({
+      useDiagrams: args.usediagrams,
+      useCharts: args.usecharts,
+      existingKnowledge: baseKnowledge
+    })
+    if (visualKnowledge.length > 0) {
+      args.knowledge = baseKnowledge.length > 0
+        ? baseKnowledge + "\n\n" + visualKnowledge
+        : visualKnowledge
+    } else {
+      args.knowledge = baseKnowledge
+    }
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
