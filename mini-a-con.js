@@ -512,7 +512,7 @@ try {
     } else if (def.type === "number") {
       var parsedNum = parseNumber(value)
       if (isUnDef(parsedNum)) {
-        printERr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse numeric value for " + key + ".", errorColor))
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse numeric value for " + key + ".", errorColor))
         return
       }
       value = parsedNum
@@ -732,7 +732,7 @@ try {
       }
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
-      printErr(colorifyText("ITALIC," + errorColor, "!!") + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
+      printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
     }
   }
 
