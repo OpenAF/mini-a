@@ -811,8 +811,15 @@ try {
   print()
   print(colorifyText("Type /help for available commands.", hintColor))
 
+  const _miniaConReset = function() {
+  	if (String(java.lang.System.getProperty("os.name")).match(/Windows/)) return true
+  	if (!__initializeCon() || isUnDef(__con)) return false
+  	__con.getTerminal().settings.set("-icanon min 1 -echo")
+  	return true
+  }
+  
   while(true) {
-    conReset()
+    _miniaConReset()
     var input = con.readLinePrompt(promptLabel())
     if (isUnDef(input)) break
     var trimmed = String(input)
