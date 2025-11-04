@@ -3282,7 +3282,7 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellallow     : isDef(p.shellallow) ? p.shellallow : args.shellallow,
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
             shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
-            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shell
+            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix
           })
           var out = result && isString(result.output) ? result.output : stringify(result, __, "")
           if (!isString(out) || out.length === 0) out = "(no output)"
@@ -4188,7 +4188,7 @@ MiniA.prototype.init = function(args) {
     if (isNumber(args.toolcachettl) && args.toolcachettl > 0) {
       this._toolCacheDefaultTtl = args.toolcachettl
     }
-    this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
+    this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._useTools = args.usetools
     this._useUtils = args.useutils
 
@@ -4659,7 +4659,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
-    this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
+    this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._useTools = args.usetools
     this._useUtils = args.useutils
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
@@ -5547,7 +5547,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 shellallow     : args.shellallow,
                 shellbanextra  : args.shellbanextra,
                 shellallowpipes: args.shellallowpipes,
-                shellprefix    : args.shell
+                shellprefix    : args.shellprefix
               },
               stepLabel    : stepLabel,
               updateContext: !this._useTools
