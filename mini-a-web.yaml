@@ -57,6 +57,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useascii
+    desc     : "Boolean to enable/disable ASCII art sketch generation (default: true)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historys3bucket
     desc     : "S3 bucket to store conversation history objects"
     example  : "mini-a-history"
@@ -668,6 +673,7 @@ jobs:
       useplanning     : toBoolean().isBoolean().default(false)
       usediagrams     : toBoolean().isBoolean().default(true)
       usecharts       : toBoolean().isBoolean().default(true)
+      useascii        : toBoolean().isBoolean().default(true)
       historys3bucket : isString().default(__)
       historys3prefix : isString().default("")
       historys3url    : isString().default("https://s3.amazonaws.com")

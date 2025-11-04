@@ -39,6 +39,7 @@ modes:
     params     :
       usediagrams: true
       usecharts  : true
+      useascii   : true
       usetools   : true
       usehistory : true
       useattach  : true
