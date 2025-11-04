@@ -599,6 +599,13 @@ mini-a \
 
 Mini-A includes several production-ready MCP servers in the `mcps/` directory:
 
+#### Mini-A Agent Runner (mcp-mini-a)
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-mini-a.yaml', tool: run-goal, params: (goal: 'draft release notes for vNext', format: 'md', useplanning: true))"
+```
+
+This MCP lets other automations trigger Mini-A itself. Provide the `goal` alongside optional formatting or planning flags (`format`, `raw`, `chatbotmode`, `useplanning`, `planmode`, `planformat`, `convertplan`). Sensitive toggles—including knowledge packs or custom rules—must be set when you launch the server and are not exposed to remote callers. Pass them as `knowledge=` or `rules=` arguments when starting `ojob mcps/mcp-mini-a.yaml`. The response includes the final answer, execution status, and metric counters.
+
 #### Database Operations (mcp-db)
 ```bash
 mini-a goal="create a test table with European countries" \
