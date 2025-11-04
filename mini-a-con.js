@@ -812,6 +812,7 @@ try {
   print(colorifyText("Type /help for available commands.", hintColor))
 
   while(true) {
+    conReset()
     var input = con.readLinePrompt(promptLabel())
     if (isUnDef(input)) break
     var trimmed = String(input)
