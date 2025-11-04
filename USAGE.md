@@ -288,6 +288,8 @@ The `start()` method accepts various configuration options:
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
 - **`shell`** (string): Prefix applied to every shell command (use with `useshell=true`)
+- **`shellprefix`** (string): Override the shell prefix embedded inside stored plans or MCP executions so converted tasks run
+  against the right environment
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
@@ -326,6 +328,12 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
 - **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt
+
+#### Visual Guidance
+- **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
+- **`usecharts`** (boolean, default: false): Hint the model to provide Chart.js snippets for data visualization tasks
+- **`useascii`** (boolean, default: false): Encourage ASCII sketch recommendations for lightweight diagramming when graphical
+  renderers are unavailable or disabled
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
