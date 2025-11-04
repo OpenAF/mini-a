@@ -70,6 +70,8 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 - **Conversation Persistence** - Save and resume conversations across sessions
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
+- **ASCII Sketch Guidance** - Optionally provide lightweight diagrams using plain text blocks when graphical renderers are
+  unavailable (`useascii=true`)
 
 ## Documentation
 
@@ -111,9 +113,11 @@ Mini-A ships with complementary components:
 | `usetools` | Register MCP tools with the model | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow | `false` |
+| `useascii` | Ask the model to include ASCII sketch suggestions alongside responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` | - |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |
+| `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
 | `verbose` / `debug` | Enable detailed logging | `false` |
 
 For the complete list and detailed explanations, see the [Usage Guide](USAGE.md#configuration-options).
