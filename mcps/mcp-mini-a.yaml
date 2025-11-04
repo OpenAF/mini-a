@@ -16,10 +16,7 @@ help:
     mandatory: false
 
 todo:
-- (code): | #js
-    if (isUnDef(global.__mini_a_serverDefaults)) {
-      global.__mini_a_serverDefaults = merge({}, args)
-    }
+- Init
 - (if    ): "isDef(args.onport)"
   ((then)):
   - (httpdStart   ): "${onport:-8080}"
@@ -93,7 +90,13 @@ include:
 - oJobMCP.yaml
 
 jobs:
-# -----------------
+# -----------
+- name : Init
+  exec : | #js
+    if (isUnDef(global.__mini_a_serverDefaults)) {
+      global.__mini_a_serverDefaults = merge({}, args)
+    }
+# ---------------------------------
 - name : Ensure model configuration
   exec : | #js
     var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model) || isArray(args.model))
@@ -101,7 +104,7 @@ jobs:
       throw "OAF_MODEL environment variable not set. Provide model= with your configuration or export OAF_MODEL before using run-goal."
     }
 
-# -----------------
+# ----------------------
 - name : Run Mini-A goal
   from :
   - Ensure model configuration
