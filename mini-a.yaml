@@ -127,14 +127,54 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usediagrams
+    desc     : Encourage Mermaid diagrams by priming the agent with diagram guidance
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usemermaid
+    desc     : Alias for usediagrams; setting either enables Mermaid diagram guidance
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usecharts
+    desc     : Encourage Chart.js outputs by priming the agent with chart guidance
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : useascii
+    desc     : Encourage ASCII sketches in the generated knowledge prompt
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : mcpdynamic
     desc     : Enable dynamic tool selection instead of registering all MCP tools (analyzes goal to select relevant tools)
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : forceplanning
+    desc     : Force planning even when heuristics would normally skip it
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useplanning
     desc     : Enable task planning updates (agent mode only)
     example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : planmode
+    desc     : Run Mini-A in plan-only mode (produce or convert plans without executing)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : convertplan
+    desc     : Convert the loaded/generated plan to the requested format and exit
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : resumefailed
+    desc     : Attempt to resume the last failed goal on startup
+    example  : "false"
     mandatory: false
     options  : ["true", "false"]
   - name     : chatbotmode
@@ -149,6 +189,26 @@ help:
   - name     : state
     desc     : Initial state data to provide to the agent as structured JSON/SLON
     example  : '{"current_task": "analysis", "progress": 0}'
+    mandatory: false
+  - name     : planfile
+    desc     : Plan file path to load or save before execution
+    example  : "/path/to/plan.md"
+    mandatory: false
+  - name     : planformat
+    desc     : Plan format override; accepts md or json
+    example  : "json"
+    mandatory: false
+  - name     : plancontent
+    desc     : Inline plan definition provided as Markdown or JSON content
+    example  : "# Plan\n- Step 1"
+    mandatory: false
+  - name     : outputfile
+    desc     : Alternative key for outfile, used mainly during plan conversions
+    example  : "/tmp/output.json"
+    mandatory: false
+  - name     : shellprefix
+    desc     : Override shell prefix when converting plans or running commands from stored plans
+    example  : "docker exec -it container sh -lc"
     mandatory: false
   - name     : format
     desc     : Output format for the final answer (md or json)
@@ -199,6 +259,7 @@ jobs:
       shell          : isString.default(__)
       knowledge      : isString.default(__)
       outfile        : isString.default(__)
+      outputfile     : isString.default(__)
       libs           : isString.default(__)
       model          : isString.default(__)
       modellc        : isString.default(__)
@@ -209,19 +270,33 @@ jobs:
       shellbanextra  : isString.default(__)
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
+      shellprefix    : isString.default(__)
       toolcachettl   : toNumber.isNumber.default(__)
       usetools       : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(false)
+      usediagrams    : toBoolean.isBoolean.default(false)
+      usemermaid     : toBoolean.isBoolean.default(false)
+      usecharts      : toBoolean.isBoolean.default(false)
+      useascii       : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcplazy        : toBoolean.isBoolean.default(false)
       useplanning    : toBoolean.isBoolean.default(false)
+      forceplanning  : toBoolean.isBoolean.default(false)
+      planmode       : toBoolean.isBoolean.default(false)
+      convertplan    : toBoolean.isBoolean.default(false)
+      resumefailed   : toBoolean.isBoolean.default(false)
       chatbotmode    : toBoolean.isBoolean.default(false)
+      planfile       : isString.default(__)
+      planformat     : isString.default(__)
+      plancontent    : isString.default(__)
       rules          : isString.default(__)
       state          : isString.default(__)
       auditch        : isString.default(__)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
+    if (isDef(args.usemermaid) && isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
+    if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
     if (isUnDef(args.format)) args.format = "md"
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     _ma.init(args)

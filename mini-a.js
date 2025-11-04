@@ -310,8 +310,9 @@ MiniA.buildVisualKnowledge = function(options) {
   options = _$(options, "options").isMap().default({})
   var useDiagrams = _$(toBoolean(options.useDiagrams), "options.useDiagrams").isBoolean().default(false)
   var useCharts = _$(toBoolean(options.useCharts), "options.useCharts").isBoolean().default(false)
+  var useAscii = _$(toBoolean(options.useAscii), "options.useAscii").isBoolean().default(false)
 
-  if (!useDiagrams && !useCharts) return ""
+  if (!useDiagrams && !useCharts && !useAscii) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
   if (existingKnowledge.indexOf("Visual output guidance (concise):") >= 0) return ""
@@ -320,9 +321,9 @@ MiniA.buildVisualKnowledge = function(options) {
 
   visualParts.push(
     "Visual output guidance (concise):\n\n" +
-    "- Default to including a diagram or chart whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
+    "- Default to including a diagram, chart, or ASCII sketch whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
     "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
-    "- Never mention the technical implementation (Mermaid, Chart.js, etc.) to users; refer only to 'diagrams' and 'charts'."
+    "- Never mention the technical implementation (Mermaid, Chart.js, ASCII renderer, etc.); refer only to the visual type."
   )
 
   if (useDiagrams) {
@@ -355,15 +356,36 @@ MiniA.buildVisualKnowledge = function(options) {
     )
   }
 
+  if (useAscii) {
+    visualParts.push(
+      "ASCII visuals:\n" +
+      "  - Use ```text``` (aliases: ascii, plaintext) fences so spacing and alignment remain intact.\n" +
+      "  - Compose structures with simple characters (+, -, |, /, or \\) or emoji to highlight steps, statuses, or relationships.\n" +
+      "  - Keep width under ~80 characters and ensure the sketch is readable in monospaced fonts.\n" +
+      "  - Provide a brief caption immediately after the fence explaining the insight.\n" +
+      "  - Favor ASCII sketches when a lightweight visual aids clarity but full diagrams/charts would be excessive."
+    )
+  }
+
   var checklist = "\n\nVisual selection checklist:"
+  var nextIndex = 1
   if (useDiagrams) {
-    checklist += "\n1. Relationships or flows -> diagram with graph or sequence."
-    checklist += "\n2. Timelines or roadmaps -> diagram with gantt."
+    checklist += "\n" + nextIndex + ". Relationships or flows -> diagram with graph or sequence."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". Timelines or roadmaps -> diagram with gantt."
+    nextIndex++
   }
   if (useCharts) {
-    var baseIndex = useDiagrams ? 3 : 1
-    checklist += "\n" + baseIndex + ". Comparisons or trends -> bar or line chart."
-    checklist += "\n" + (baseIndex + 1) + ". Composition or ratios -> pie or doughnut chart."
+    checklist += "\n" + nextIndex + ". Comparisons or trends -> bar or line chart."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". Composition or ratios -> pie or doughnut chart."
+    nextIndex++
+  }
+  if (useAscii) {
+    checklist += "\n" + nextIndex + ". Quick overviews or lightweight structure -> ASCII sketch with aligned characters or emoji."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ASCII table or emoticon map as fallback."
+    nextIndex++
   }
   checklist += "\n\nIf a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."
 
@@ -3260,7 +3282,7 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellallow     : isDef(p.shellallow) ? p.shellallow : args.shellallow,
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
             shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
-            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shell
+            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix
           })
           var out = result && isString(result.output) ? result.output : stringify(result, __, "")
           if (!isString(out) || out.length === 0) out = "(no output)"
@@ -4133,6 +4155,7 @@ MiniA.prototype.init = function(args) {
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
+    args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -4147,6 +4170,7 @@ MiniA.prototype.init = function(args) {
     var visualKnowledge = MiniA.buildVisualKnowledge({
       useDiagrams: args.usediagrams,
       useCharts: args.usecharts,
+      useAscii: args.useascii,
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {
@@ -4164,7 +4188,7 @@ MiniA.prototype.init = function(args) {
     if (isNumber(args.toolcachettl) && args.toolcachettl > 0) {
       this._toolCacheDefaultTtl = args.toolcachettl
     }
-    this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
+    this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._useTools = args.usetools
     this._useUtils = args.useutils
 
@@ -4635,7 +4659,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellExtraBanned = this._parseListOption(args.shellbanextra)
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
-    this._shellPrefix = isString(args.shell) ? args.shell.trim() : ""
+    this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._useTools = args.usetools
     this._useUtils = args.useutils
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
@@ -5523,7 +5547,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 shellallow     : args.shellallow,
                 shellbanextra  : args.shellbanextra,
                 shellallowpipes: args.shellallowpipes,
-                shellprefix    : args.shell
+                shellprefix    : args.shellprefix
               },
               stepLabel    : stepLabel,
               updateContext: !this._useTools

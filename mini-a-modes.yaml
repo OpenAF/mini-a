@@ -9,6 +9,7 @@ modes:
     description: "Read-write mode for shell commands"
     params     :
       useshell : true
+      useutils : true
       readwrite: true
 
   shellutils:
@@ -39,6 +40,7 @@ modes:
     params     :
       usediagrams: true
       usecharts  : true
+      useascii   : true
       usetools   : true
       usehistory : true
       useattach  : true

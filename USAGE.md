@@ -89,7 +89,7 @@ Mini-A ships with reusable argument bundles so you can switch behaviors without 
 - **`shellutils`** – Shell plus the Mini File Tool MCP utilities (`useutils=true usetools=true`).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
 - **`web`** – Browser UI with tool registration (`usetools=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, and planning enabled (`usetools=true usediagrams=true usecharts=true usehistory=true useattach=true historykeep=true useplanning=true`).
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and planning enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
 
 ### Creating Custom Presets
 
@@ -163,7 +163,7 @@ Optional flags when starting the server:
 
 - `showexecs=true` to show executed commands in the interaction stream
 - `logpromptheaders=origin,referer` to log selected incoming headers for debugging
-- `usediagrams=false` / `usecharts=false` to disable Mermaid or Chart.js rendering when running headless
+- `usediagrams=false` / `usecharts=false` / `useascii=false` to disable Mermaid, Chart.js, or ASCII sketch guidance when running headless
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
 - `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`)
@@ -342,7 +342,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`).
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
   - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
-  - `webfull` – Turns on diagrams, charts, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true usehistory=true useattach=true historykeep=true useplanning=true`).
+  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 
