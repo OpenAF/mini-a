@@ -48,17 +48,17 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : usediagrams
-    desc     : "Boolean to enable/disable Mermaid diagram generation (default: true)"
+    desc     : "Boolean to enable/disable Mermaid diagram generation (default: false)"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
   - name     : usecharts
-    desc     : "Boolean to enable/disable Chart.js chart generation (default: true)"
+    desc     : "Boolean to enable/disable Chart.js chart generation (default: false)"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
   - name     : useascii
-    desc     : "Boolean to enable/disable ASCII art sketch generation (default: true)"
+    desc     : "Boolean to enable/disable ASCII art sketch generation (default: false)"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -671,9 +671,9 @@ jobs:
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
       useplanning     : toBoolean().isBoolean().default(false)
-      usediagrams     : toBoolean().isBoolean().default(true)
-      usecharts       : toBoolean().isBoolean().default(true)
-      useascii        : toBoolean().isBoolean().default(true)
+      usediagrams     : toBoolean().isBoolean().default(false)
+      usecharts       : toBoolean().isBoolean().default(false)
+      useascii        : toBoolean().isBoolean().default(false)
       historys3bucket : isString().default(__)
       historys3prefix : isString().default("")
       historys3url    : isString().default("https://s3.amazonaws.com")

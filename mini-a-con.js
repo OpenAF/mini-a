@@ -104,6 +104,7 @@ try {
   var parameterDefinitions = {
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
+    raw            : { type: "boolean", default: false, description: "Return raw LLM output without formatting adjustments" },
     useshell       : { type: "boolean", default: false, description: "Allow shell command execution" },
     readwrite      : { type: "boolean", default: false, description: "Allow write operations during shell commands" },
     checkall       : { type: "boolean", default: false, description: "Ask for confirmation before shell commands" },
@@ -111,17 +112,27 @@ try {
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
     usetools       : { type: "boolean", default: false, description: "Register MCP tools directly on the model" },
     useutils       : { type: "boolean", default: false, description: "Enable bundled Mini File Tool utilities" },
+    usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
+    usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
+    usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },
+    useascii       : { type: "boolean", default: false, description: "Enable ASCII-based visuals in knowledge prompt" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
+    planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
+    convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
+    resumefailed   : { type: "boolean", default: false, description: "Attempt to resume the last failed goal on startup" },
+    forceplanning  : { type: "boolean", default: false, description: "Force planning even when heuristics would skip it" },
     chatbotmode    : { type: "boolean", default: false, description: "Run Mini-A in chatbot mode" },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     rpm            : { type: "number", description: "Requests per minute limit" },
+    rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
     toolcachettl   : { type: "number", description: "Default MCP result cache TTL (ms)" },
     goalprefix     : { type: "string", description: "Optional prefix automatically added to every goal" },
     shell          : { type: "string", description: "Prefix applied to each shell command" },
+    shellprefix    : { type: "string", description: "Override shell prefix when converting plans" },
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
@@ -130,8 +141,9 @@ try {
     conversation   : { type: "string", description: "Conversation history file" },
     outfile        : { type: "string", description: "Save final answer to file" },
     outputfile     : { type: "string", description: "Alias for outfile for plan conversions" },
-    planfile       : { type: "string", description: "Plan file to load before execution" },
+    planfile       : { type: "string", description: "Plan file to load or save before execution" },
     planformat     : { type: "string", description: "Plan format override (md|json)" },
+    plancontent    : { type: "string", description: "Inline plan content (JSON or Markdown) to preload" },
     rules          : { type: "string", description: "Custom agent rules (JSON or SLON)" },
     state          : { type: "string", description: "Initial agent state (JSON or SLON)" },
     format         : { type: "string", description: "Final answer format (md|json)" },
@@ -600,6 +612,12 @@ try {
       args[key] = value
     })
     
+    if (isDef(args.usemermaid)) {
+      if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
+      delete args.usemermaid
+    }
+    if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
+
     if (isString(sessionOptions.goalprefix) && sessionOptions.goalprefix.length > 0) {
       cleanGoal = sessionOptions.goalprefix + cleanGoal
     }
