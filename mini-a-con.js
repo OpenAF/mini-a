@@ -61,7 +61,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "history", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "history", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -144,6 +144,7 @@ try {
     planfile       : { type: "string", description: "Plan file to load or save before execution" },
     planformat     : { type: "string", description: "Plan format override (md|json)" },
     plancontent    : { type: "string", description: "Inline plan content (JSON or Markdown) to preload" },
+    saveplannotes  : { type: "boolean", default: false, description: "Append execution learnings to plan notes" },
     rules          : { type: "string", description: "Custom agent rules (JSON or SLON)" },
     state          : { type: "string", description: "Initial agent state (JSON or SLON)" },
     format         : { type: "string", description: "Final answer format (md|json)" },
@@ -455,6 +456,82 @@ try {
       print(colorifyText("Conversation cleared. Future goals will start fresh.", successColor))
     } catch (clearError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to clear conversation: " + clearError, errorColor))
+    }
+  }
+
+  function compactConversationContext(preserveCount) {
+    var stats = refreshConversationStats(activeAgent)
+    if (!isObject(stats) || !isArray(stats.entries) || stats.entries.length === 0) {
+      print(colorifyText("No conversation context to compact.", hintColor))
+      return
+    }
+
+    var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
+    var entries = stats.entries.slice()
+    var keepSize = Math.min(keepCount, entries.length)
+    var keepTail = entries.slice(entries.length - keepSize)
+    var summarizeUntil = entries.length - keepTail.length
+
+    var preserved = []
+    var summarizeCandidates = []
+    for (var i = 0; i < summarizeUntil; i++) {
+      var entry = entries[i]
+      var role = isString(entry.role) ? entry.role.toLowerCase() : ""
+      if (role === "system" || role === "developer") {
+        preserved.push(entry)
+      } else {
+        summarizeCandidates.push(entry)
+      }
+    }
+
+    if (summarizeCandidates.length === 0) {
+      print(colorifyText("No user or assistant messages to summarize from earlier history.", hintColor))
+      return
+    }
+
+    var summarySource = []
+    summarizeCandidates.forEach(function(entry) {
+      var role = isString(entry.role) ? entry.role.toUpperCase() : "UNKNOWN"
+      var content = flattenConversationContent(entry.content)
+      summarySource.push(`${role}: ${content}`)
+    })
+    var summaryPayload = summarySource.join("\n")
+    var summaryText = ""
+    if (typeof summarize === "function") {
+      try { summaryText = summarize(summaryPayload) } catch(ignoreSummaryError) {}
+    }
+    if (!isString(summaryText) || summaryText.trim().length === 0) {
+      summaryText = summaryPayload.substring(0, 400)
+    }
+    summaryText = summaryText.trim()
+
+    var summaryEntry = {
+      role   : "assistant",
+      content: `Context summary (${summarizeCandidates.length} messages condensed on ${new Date().toISOString()}): ${summaryText}`
+    }
+
+    var newConversation = preserved.concat([summaryEntry]).concat(keepTail)
+    var convoPath = getConversationPath()
+    if (!isString(convoPath) || convoPath.trim().length === 0) {
+      print(colorifyText("Conversation path is not configured. Use /set conversation <path> first.", hintColor))
+      return
+    }
+
+    try {
+      io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
+      if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
+        try { activeAgent.llm.getGPT().setConversation(newConversation) } catch(ignoreSetConversation) {}
+      }
+      var previousTokens = stats.totalTokens
+      var updatedStats = refreshConversationStats(activeAgent)
+      var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
+      var reduction = previousTokens > 0 ? Math.max(0, previousTokens - afterTokens) : 0
+      print(colorifyText(`Conversation compacted. Preserved ${keepTail.length} recent message${keepTail.length === 1 ? "" : "s"}.`, successColor))
+      if (previousTokens > 0) {
+        print(colorifyText(`Estimated tokens: ~${previousTokens} → ~${afterTokens} (saved ~${reduction}).`, hintColor))
+      }
+    } catch (compactError) {
+      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to compact conversation: " + compactError, errorColor))
     }
   }
 
@@ -799,6 +876,7 @@ try {
       "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation", hintColor),
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
+      "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
@@ -860,6 +938,20 @@ try {
       }
       if (command === "context") {
         printContextSummary()
+        continue
+      }
+      if (command === "compact") {
+        compactConversationContext()
+        continue
+      }
+      if (command.indexOf("compact ") === 0) {
+        var keepValue = command.substring(8).trim()
+        var parsedKeep = parseInt(keepValue, 10)
+        if (isNaN(parsedKeep)) {
+          print(colorifyText("Usage: /compact [messagesToKeep]", errorColor))
+        } else {
+          compactConversationContext(parsedKeep)
+        }
         continue
       }
       if (command === "history") {
