@@ -3538,9 +3538,9 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
 MiniA.prototype._createUtilsMcpConfig = function(args) {
   try {
     if (typeof MiniFileTool !== "function") {
-      if (io.fileExists("mini-a-file-tool.js")) {
-        load("mini-a-file-tool.js")
-      }
+      //if (io.fileExists("mini-a-file-tool.js")) {
+      loadLib("mini-a-file-tool.js")
+      //}
     }
 
     if (typeof MiniFileTool !== "function") {
@@ -4822,6 +4822,9 @@ MiniA.prototype.init = function(args) {
             mcp = $mcp(merge(mcpConfig, {
               shared: true,
               preFn : (t, a) => {
+                if (isObject(parent._runtime)) {
+                  parent._runtime.modelToolCallDetected = true
+                }
                 parent.fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
                 if (typeof parent._prepareToolExecution === "function") {
                   var currentCtx = parent._runtime && parent._runtime.currentTool
@@ -5466,6 +5469,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       errorHistory        : [],
       restoredFromCheckpoint: false,
       successfulActionDetected: false,
+      modelToolCallDetected  : false,
       earlyStopTriggered      : false,
       earlyStopReason         : "",
       earlyStopHandled        : false,
@@ -5614,6 +5618,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       runtime.successfulActionDetected = false
+      runtime.modelToolCallDetected = false
 
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
@@ -5882,6 +5887,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       if (actionMessages.length === 0) {
+        if (runtime.modelToolCallDetected === true) {
+          if (stateUpdatedThisStep && !stateRecordedInContext) {
+            runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
+            stateRecordedInContext = true
+          }
+          if (args.debug || args.verbose) {
+            this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+          }
+          continue
+        }
+
         runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
         this._registerRuntimeError(runtime, {
           category: "permanent",
