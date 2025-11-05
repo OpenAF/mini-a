@@ -264,6 +264,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._planCounter = 0
   this._lastPlanSnapshot = ""
   this._enablePlanning = false
+  this._hasExternalPlan = false
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -1072,6 +1073,32 @@ MiniA.prototype._selectPlanningStrategy = function(analysis, args) {
   if (analysis.level === "trivial" || analysis.level === "easy") return "off"
   if (analysis.level === "moderate") return "simple"
   return "tree"
+}
+
+/**
+ * Determines whether planning should be enabled based on mode, user flags, and complexity assessment.
+ * This is the single source of truth for planning enablement logic.
+ *
+ * @param {Object} args - Arguments object containing chatbotmode, useplanning, planfile, plancontent, forceplanning
+ * @returns {boolean} True if planning should be enabled
+ */
+MiniA.prototype._shouldEnablePlanning = function(args) {
+  // Chatbot mode never uses planning
+  if (args.chatbotmode) return false
+
+  // If user didn't request planning, disable it
+  if (!args.useplanning) return false
+
+  // Check complexity assessment
+  var strategy = this._planningStrategy || "off"
+
+  // Override complexity check if explicit plan provided or force flag set
+  if (strategy === "off") {
+    return isString(args.planfile) || isString(args.plancontent) || toBoolean(args.forceplanning) === true
+  }
+
+  // Otherwise follow the strategy
+  return strategy !== "off"
 }
 
 MiniA.prototype._preparePlanning = function(args) {
@@ -2422,6 +2449,12 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
 
 MiniA.prototype._initializePlanningState = function(options) {
   if (!this._enablePlanning) return
+
+  // Skip initialization if external plan already loaded
+  if (this._hasExternalPlan === true) {
+    return
+  }
+
   var opts = isObject(options) ? options : {}
   var goalText = opts.goal || opts.args && opts.args.goal || ""
   var strategy = this._planningStrategy
@@ -4584,6 +4617,7 @@ MiniA.prototype.init = function(args) {
       { name: "auditch", type: "string", default: __ },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
+      { name: "forceplanning", type: "boolean", default: false },
       { name: "saveplannotes", type: "boolean", default: false },
       { name: "outputfile", type: "string", default: __ }
     ])
@@ -4606,6 +4640,7 @@ MiniA.prototype.init = function(args) {
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
+    args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
@@ -5098,7 +5133,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._planningProgress = { overall: 0, completed: 0, total: 0, checkpoints: { reached: 0, total: 0 } }
     this._planningStats = { validations: 0, adjustments: 0 }
     this._preparePlanning(args)
-    this._enablePlanning = (!args.chatbotmode && args.useplanning)
+    // Use centralized logic to determine if planning should be enabled
+    // _preparePlanning has already assessed complexity and set _planningStrategy
+    this._enablePlanning = this._shouldEnablePlanning(args)
     this._lastPlanMessage = ""
     this._planCounter = 0
     this._lastPlanSnapshot = ""
@@ -5195,18 +5232,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     if (args.useplanning && !isObject(preloadedPlan)) {
-      // useplanning=true but no plan found - just inform and continue
-      this.fnI("plan", "No plan found to load; continuing without planning-only mode.")
+      // useplanning=true but no plan found - just inform and continue with auto-generated plan
+      this.fnI("plan", "No plan file found; will generate plan automatically during execution.")
     }
     
     // If we have a preloaded plan, prepare it for execution
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
       this._prepareExternalPlanExecution(preloadedPlan, args)
       this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
+      // Mark that external plan is loaded to skip auto-generation later
+      this._hasExternalPlan = true
     } else {
       if (args.useplanning || isString(args.planfile)) {
         this.fnI("warn", `Plan file specified but plan object is invalid.`)
       }
+      this._hasExternalPlan = false
     }
 
     this._alwaysExec = args.readwrite
