@@ -37,6 +37,7 @@ var MiniA = function() {
   this._externalPlanMapping = {}
   this._resumeFailedTasks = false
   this._loadedPlanPayload = null
+  this._savePlanNotes = false
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -263,6 +264,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._planCounter = 0
   this._lastPlanSnapshot = ""
   this._enablePlanning = false
+  this._hasExternalPlan = false
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -321,9 +323,9 @@ MiniA.buildVisualKnowledge = function(options) {
 
   visualParts.push(
     "Visual output guidance (concise):\n\n" +
-    "- Default to including a diagram, chart, or ASCII sketch whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
+    "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
     "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
-    "- Never mention the technical implementation (Mermaid, Chart.js, ASCII renderer, etc.); refer only to the visual type."
+    "- Never mention the technical implementation (Mermaid, Chart.js, ANSI codes, etc.); refer only to the visual type."
   )
 
   if (useDiagrams) {
@@ -358,12 +360,27 @@ MiniA.buildVisualKnowledge = function(options) {
 
   if (useAscii) {
     visualParts.push(
-      "ASCII visuals:\n" +
-      "  - Use ```text``` (aliases: ascii, plaintext) fences so spacing and alignment remain intact.\n" +
-      "  - Compose structures with simple characters (+, -, |, /, or \\) or emoji to highlight steps, statuses, or relationships.\n" +
-      "  - Keep width under ~80 characters and ensure the sketch is readable in monospaced fonts.\n" +
-      "  - Provide a brief caption immediately after the fence explaining the insight.\n" +
-      "  - Favor ASCII sketches when a lightweight visual aids clarity but full diagrams/charts would be excessive."
+      "ASCII/UTF-8 visuals with ANSI colors:\n" +
+      "  - ALWAYS prefer markdown tables for tabular data (using | and - characters).\n" +
+      "  - Use full UTF-8 characters for non-tabular visuals: box-drawing (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬), arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇).\n" +
+      "  - Leverage emoji strategically: status indicators (✅❌⚠️🔴🟢🟡), workflow symbols (🔄🔁⏸️▶️⏹️), category icons (📁📂📄🔧⚙️🔑🔒), and semantic markers (💡🎯🚀⭐🏆).\n" +
+      "  - Apply ANSI color codes for semantic highlighting (ONLY outside markdown code blocks):\n" +
+      "    • Errors/critical: \\u001b[31m (red), \\u001b[1;31m (bold red)\n" +
+      "    • Success/positive: \\u001b[32m (green), \\u001b[1;32m (bold green)\n" +
+      "    • Warnings: \\u001b[33m (yellow), \\u001b[1;33m (bold yellow)\n" +
+      "    • Info/headers: \\u001b[34m (blue), \\u001b[1;34m (bold blue), \\u001b[36m (cyan)\n" +
+      "    • Emphasis: \\u001b[1m (bold), \\u001b[4m (underline), \\u001b[7m (inverse)\n" +
+      "    • Backgrounds: \\u001b[41m (red bg), \\u001b[42m (green bg), \\u001b[43m (yellow bg), \\u001b[44m (blue bg)\n" +
+      "    • Always reset with \\u001b[0m after colored text\n" +
+      "    • Combine codes with semicolons: \\u001b[1;32;4m (bold green underline)\n" +
+      "    • IMPORTANT: Never use ANSI codes inside markdown code blocks (```); color only plain text output\n" +
+      "  - Create hierarchical structures with indentation and tree symbols (├── └── │ ─).\n" +
+      "  - Design progress bars using blocks (█▓▒░), fractions (▏▎▍▌▋▊▉), or percentage indicators.\n" +
+      "  - Use spinners/activity indicators: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ or ◐◓◑◒ or ⣾⣽⣻⢿⡿⣟⣯⣷.\n" +
+      "  - Use UTF-8 box-drawing for diagrams, panels, or containers, NOT for tables.\n" +
+      "  - Combine ANSI colors with markdown tables by coloring cell content, not borders.\n" +
+      "  - Use color gradients for metrics: green→yellow→red based on thresholds.\n" +
+      "  - Assume output is terminal monospaced font; align visuals accordingly not needing a markdown code block."
     )
   }
 
@@ -382,9 +399,13 @@ MiniA.buildVisualKnowledge = function(options) {
     nextIndex++
   }
   if (useAscii) {
-    checklist += "\n" + nextIndex + ". Quick overviews or lightweight structure -> ASCII sketch with aligned characters or emoji."
+    checklist += "\n" + nextIndex + ". Quick overviews or lightweight structure -> UTF-8 box-drawing diagrams with ANSI color coding for status/hierarchy."
     nextIndex++
-    checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ASCII table or emoticon map as fallback."
+    checklist += "\n" + nextIndex + ". Progress tracking or metrics -> ANSI-colored progress bars, gauges, or sparklines with emoji indicators."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". Lists or comparisons -> Colored bullet points with semantic emoji (✅❌⚠️) and UTF-8 symbols."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ANSI-enhanced ASCII table or emoticon map as fallback."
     nextIndex++
   }
   checklist += "\n\nIf a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."
@@ -1054,6 +1075,32 @@ MiniA.prototype._selectPlanningStrategy = function(analysis, args) {
   return "tree"
 }
 
+/**
+ * Determines whether planning should be enabled based on mode, user flags, and complexity assessment.
+ * This is the single source of truth for planning enablement logic.
+ *
+ * @param {Object} args - Arguments object containing chatbotmode, useplanning, planfile, plancontent, forceplanning
+ * @returns {boolean} True if planning should be enabled
+ */
+MiniA.prototype._shouldEnablePlanning = function(args) {
+  // Chatbot mode never uses planning
+  if (args.chatbotmode) return false
+
+  // If user didn't request planning, disable it
+  if (!args.useplanning) return false
+
+  // Check complexity assessment
+  var strategy = this._planningStrategy || "off"
+
+  // Override complexity check if explicit plan provided or force flag set
+  if (strategy === "off") {
+    return isString(args.planfile) || isString(args.plancontent) || toBoolean(args.forceplanning) === true
+  }
+
+  // Otherwise follow the strategy
+  return strategy !== "off"
+}
+
 MiniA.prototype._preparePlanning = function(args) {
   var assessment = this._assessGoalComplexity(args.goal)
   this._planningAssessment = assessment
@@ -1106,6 +1153,43 @@ MiniA.prototype._ensurePlanFooter = function(plan) {
   if (!isArray(plan.notes)) plan.notes = []
   if (!isArray(plan.executionHistory)) plan.executionHistory = []
   if (!isArray(plan.dependencies)) plan.dependencies = []
+  return plan
+}
+
+MiniA.prototype._ensurePhaseVerificationTasks = function(plan) {
+  if (!isObject(plan)) return plan
+  if (!isArray(plan.phases)) return plan
+
+  for (var i = 0; i < plan.phases.length; i++) {
+    var phase = plan.phases[i]
+    if (!isObject(phase)) continue
+    if (!isArray(phase.tasks)) phase.tasks = []
+
+    var hasVerification = false
+    for (var j = 0; j < phase.tasks.length; j++) {
+      var task = phase.tasks[j]
+      if (!isObject(task)) continue
+      if (toBoolean(task.verification) === true) {
+        hasVerification = true
+        break
+      }
+      if (isString(task.description) && task.description.toLowerCase().indexOf("verify") >= 0) {
+        hasVerification = true
+        break
+      }
+    }
+
+    if (!hasVerification) {
+      var phaseLabel = isString(phase.name) && phase.name.length > 0 ? phase.name : `Phase ${i + 1}`
+      phase.tasks.push({
+        description : `Verify that \"${phaseLabel}\" outcomes satisfy the phase goals`,
+        completed   : false,
+        dependencies: isArray(phase.dependencies) ? clone(phase.dependencies, true) : [],
+        verification: true
+      })
+    }
+  }
+
   return plan
 }
 
@@ -1396,6 +1480,7 @@ MiniA.prototype._importPlanForExecution = function(planPayload) {
   if (!isObject(planPayload) || !isObject(planPayload.plan)) return __
   var external = this._ensurePlanFooter(clone(planPayload.plan, true))
   if (!isArray(external.phases)) external.phases = []
+  external = this._ensurePhaseVerificationTasks(external)
 
   var steps = []
   var mapping = {}
@@ -1806,6 +1891,7 @@ MiniA.prototype._displayPlanPayload = function(payload, args) {
 }
 
 MiniA.prototype._prepareExternalPlanExecution = function(payload, args) {
+  this._critiquePlanWithLLM(payload, args)
   var imported = this._importPlanForExecution(payload)
   if (!isObject(imported) || !isObject(imported.plan)) return
   if (!isObject(this._agentState)) this._agentState = {}
@@ -1877,6 +1963,107 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
   }
 
   return insights
+}
+
+MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
+  var planPayload = isObject(payload) ? payload : {}
+  var plan = planPayload.plan
+  if (!isObject(plan)) return
+
+  if (!isObject(plan.meta)) plan.meta = {}
+  if (isObject(plan.meta.llmCritique) && isString(plan.meta.llmCritique.verdict)) return
+
+  var format = isString(planPayload.format) ? planPayload.format : "markdown"
+  var planText = this._convertPlanObject(plan, format)
+  if (!isString(planText) || planText.trim().length === 0) return
+
+  var validatorLLM = this.llm
+  if (!isObject(validatorLLM) || (typeof validatorLLM.promptWithStats !== "function" && typeof validatorLLM.promptJSONWithStats !== "function")) return
+
+  var critiquePrompt = "You generated the following execution plan. Critically evaluate it BEFORE running the tasks." +
+    " Provide JSON ONLY with this structure: {\"verdict\":\"PASS|REVISE\",\"issues\":[strings],\"missingWork\":[strings],\"qualityRisks\":[strings],\"summary\":string}." +
+    "\n- Use verdict=PASS only if the plan is immediately executable." +
+    "\n- Use verdict=REVISE if any phase/tasks are unclear, missing, blocked, or risky." +
+    "\n- Reference specific phases/tasks in issues when possible." +
+    "\n- Keep the summary to one concise sentence." +
+    "\n\nPLAN:\n" + planText.trim()
+
+  if (isObject(args) && isString(args.goal) && args.goal.length > 0) {
+    critiquePrompt += "\n\nGOAL:\n" + args.goal
+  }
+
+  try {
+    var responseWithStats = this._withExponentialBackoff(() => {
+      if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
+      if (isFunction(validatorLLM.promptJSONWithStats)) {
+        return validatorLLM.promptJSONWithStats(critiquePrompt)
+      }
+      return validatorLLM.promptWithStats(critiquePrompt)
+    }, {
+      maxAttempts : 3,
+      initialDelay: 400,
+      maxDelay    : 4000,
+      context     : { source: "llm", operation: "plan-critique" },
+      onRetry     : (err, attempt, wait) => {
+        this.fnI("retry", `Plan critique attempt ${attempt} failed (${err}). Retrying in ${wait}ms...`)
+      }
+    })
+
+    var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+    var totalTokens = this._getTotalTokens(stats)
+    if (controls && isFunction(controls.afterCall)) controls.afterCall(totalTokens, "main")
+
+    var critiqueContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
+    if (isObject(critiqueContent) && isString(critiqueContent.response)) critiqueContent = critiqueContent.response
+    if (isString(critiqueContent)) critiqueContent = this._cleanCodeBlocks(critiqueContent)
+
+    var critique = isObject(critiqueContent) ? critiqueContent : jsonParse(String(critiqueContent || ""), __, __, true)
+    if (!isObject(critique)) {
+      var fallback = String(critiqueContent || "")
+      var jsonMatch = fallback.match(/\{[\s\S]*\}/)
+      if (jsonMatch) critique = jsonParse(jsonMatch[0], __, __, true)
+    }
+    if (!isObject(critique)) return
+
+    var verdictRaw = isString(critique.verdict) ? critique.verdict.trim().toUpperCase() : "UNKNOWN"
+    var verdict = verdictRaw === "PASS" ? "PASS" : "REVISE"
+    var issues = isArray(critique.issues) ? critique.issues.filter(isString) : []
+    var missing = isArray(critique.missingWork) ? critique.missingWork.filter(isString) : []
+    if (missing.length === 0 && isArray(critique.gaps)) missing = critique.gaps.filter(isString)
+    var risks = isArray(critique.qualityRisks) ? critique.qualityRisks.filter(isString) : []
+    if (risks.length === 0 && isArray(critique.risks)) risks = critique.risks.filter(isString)
+    var summary = isString(critique.summary) ? critique.summary.trim() : ""
+    if (summary.length === 0 && isString(critique.notes)) summary = critique.notes.trim()
+
+    plan.meta.llmCritique = {
+      verdict     : verdict,
+      issues      : issues,
+      missingWork : missing,
+      qualityRisks: risks,
+      summary     : summary,
+      raw         : critique
+    }
+
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_validated)) {
+      global.__mini_a_metrics.plans_validated.inc()
+    }
+    this._planningStats.validations = (this._planningStats.validations || 0) + 1
+
+    if (verdict !== "PASS") {
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_validation_failed)) {
+        global.__mini_a_metrics.plans_validation_failed.inc()
+      }
+      plan.meta.needsReplan = true
+    }
+
+    var headline = `LLM critique verdict: ${verdict}`
+    if (issues.length > 0) headline += ` | Issues: ${issues.slice(0, 2).join("; ")}`
+    if (missing.length > 0) headline += ` | Missing: ${missing.slice(0, 2).join("; ")}`
+    this.fnI("plan", headline)
+    if (summary.length > 0) this.fnI("plan", `Critique summary: ${summary}`)
+  } catch (critiqueErr) {
+    this.fnI("warn", `Plan critique failed: ${critiqueErr}`)
+  }
 }
 
 MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
@@ -2050,9 +2237,11 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
       throw "Failed to parse plan JSON output."
     }
     payload = { format: "json", plan: this._ensurePlanFooter(parsed), raw: planContent }
+    payload.plan = this._ensurePhaseVerificationTasks(payload.plan)
+    payload.raw = this._convertPlanObject(payload.plan, "json")
   } else {
     payload = { format: "markdown", plan: this._parseMarkdownPlan(planContent) || {}, raw: planContent }
-    payload.plan = this._ensurePlanFooter(payload.plan)
+    payload.plan = this._ensurePhaseVerificationTasks(this._ensurePlanFooter(payload.plan))
     planContent = this._serializeMarkdownPlan(payload.plan)
     payload.raw = planContent
   }
@@ -2060,6 +2249,8 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_generated)) {
     global.__mini_a_metrics.plans_generated.inc()
   }
+
+  this._critiquePlanWithLLM(payload, args, controls)
 
   if (isString(args.planfile) && args.planfile.length > 0) {
     try {
@@ -2258,6 +2449,12 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
 
 MiniA.prototype._initializePlanningState = function(options) {
   if (!this._enablePlanning) return
+
+  // Skip initialization if external plan already loaded
+  if (this._hasExternalPlan === true) {
+    return
+  }
+
   var opts = isObject(options) ? options : {}
   var goalText = opts.goal || opts.args && opts.args.goal || ""
   var strategy = this._planningStrategy
@@ -2287,6 +2484,8 @@ MiniA.prototype._initializePlanningState = function(options) {
   if (!validation.valid && isArray(validation.issues) && validation.issues.length > 0) {
     this.fnI("plan", `Plan validation warnings: ${validation.issues.join("; ")}`)
   }
+
+  this._critiquePlanWithLLM({ plan: this._agentState.plan, format: "json" }, opts.args || {})
 }
 
 MiniA.prototype._markPlanBlocked = function(nodes) {
@@ -2305,6 +2504,101 @@ MiniA.prototype._markPlanBlocked = function(nodes) {
   return false
 }
 
+MiniA.prototype._collectBlockedPlanNodes = function(nodes, collector) {
+  if (!isArray(nodes)) return
+  var target = isArray(collector) ? collector : []
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i]
+    if (!isObject(node)) continue
+    if (isObject(node.meta) && node.meta.markedBlocked === true) target.push(node)
+    if (isArray(node.children) && node.children.length > 0) {
+      this._collectBlockedPlanNodes(node.children, target)
+    }
+  }
+  return target
+}
+
+MiniA.prototype._applyDynamicReplanAdjustments = function(obstacle) {
+  if (!this._enablePlanning) return
+  if (!isObject(this._agentState) || !isObject(this._agentState.plan)) return
+  if (!isArray(this._agentState.plan.steps)) return
+
+  if (!isObject(this._agentState.plan.meta)) this._agentState.plan.meta = {}
+  if (!isArray(this._agentState.plan.meta.dynamicAdjustments)) this._agentState.plan.meta.dynamicAdjustments = []
+
+  var blockedNodes = this._collectBlockedPlanNodes(this._agentState.plan.steps, [])
+  if (!isArray(blockedNodes) || blockedNodes.length === 0) return
+
+  var category = isObject(obstacle) && isString(obstacle.category) ? obstacle.category : "unknown"
+  var message = isObject(obstacle) && isString(obstacle.message) ? obstacle.message : ""
+  var context = isObject(obstacle) && isObject(obstacle.context) ? obstacle.context : {}
+  var descriptor = []
+  if (message.length > 0) descriptor.push(message)
+  if (isString(context.toolName)) descriptor.push(`tool ${context.toolName}`)
+  else if (isString(context.tool)) descriptor.push(`tool ${context.tool}`)
+  else if (isString(context.operation)) descriptor.push(`operation ${context.operation}`)
+  var summary = descriptor.length > 0 ? descriptor.join(" – ") : `Obstacle (${category})`
+  var normalized = summary.toLowerCase().replace(/\s+/g, " ").trim()
+
+  var adjustments = this._agentState.plan.meta.dynamicAdjustments
+  for (var ai = 0; ai < adjustments.length; ai++) {
+    var existing = adjustments[ai]
+    if (isObject(existing) && existing.signature === normalized) {
+      blockedNodes.forEach(function(node) {
+        if (isObject(node) && isObject(node.meta)) delete node.meta.markedBlocked
+      })
+      return
+    }
+  }
+
+  for (var idx = 0; idx < blockedNodes.length; idx++) {
+    var node = blockedNodes[idx]
+    if (!isObject(node)) continue
+    if (!isArray(node.children)) node.children = []
+
+    var duplicate = false
+    for (var c = 0; c < node.children.length; c++) {
+      var child = node.children[c]
+      if (!isObject(child) || !isObject(child.meta)) continue
+      if (child.meta.dynamicAdjustmentSignature === normalized) {
+        duplicate = true
+        break
+      }
+    }
+    if (duplicate) {
+      if (isObject(node.meta)) delete node.meta.markedBlocked
+      continue
+    }
+
+    var newId = `${node.id || 'STEP'}-ADJ-${adjustments.length + idx + 1}`
+    var taskLabel = summary.length > 140 ? summary.substring(0, 137) + '…' : summary
+    var mitigationTask = {
+      id      : newId,
+      title   : `Mitigate obstacle: ${taskLabel}`,
+      status  : "pending",
+      progress: 0,
+      meta    : {
+        dynamicAdjustmentSignature: normalized,
+        dynamic                  : true,
+        createdAt                : now()
+      }
+    }
+    node.children.unshift(mitigationTask)
+    node.status = "in_progress"
+    node.progress = 0
+    if (isObject(node.meta)) delete node.meta.markedBlocked
+  }
+
+  adjustments.push({
+    at       : now(),
+    summary  : summary,
+    signature: normalized,
+    category : category
+  })
+
+  this._logMessageWithCounter("plan", `Dynamic replanning: added mitigation task for '${summary}'.`)
+}
+
 MiniA.prototype._handlePlanningObstacle = function(details) {
   if (!this._enablePlanning) return
   if (!isObject(this._agentState) || !isObject(this._agentState.plan)) return
@@ -2312,14 +2606,16 @@ MiniA.prototype._handlePlanningObstacle = function(details) {
   if (!isObject(this._agentState.plan.meta)) this._agentState.plan.meta = {}
   if (!isArray(this._agentState.plan.meta.obstacles)) this._agentState.plan.meta.obstacles = []
 
-  this._agentState.plan.meta.needsReplan = true
-  this._agentState.plan.meta.lastObstacleAt = now()
-  this._agentState.plan.meta.obstacles.push({
+  var obstacleEntry = {
     at      : now(),
     category: isObject(details) && isString(details.category) ? details.category : "unknown",
     message : isObject(details) && isString(details.message) ? details.message : "",
     context : isObject(details) && isObject(details.context) ? details.context : {}
-  })
+  }
+
+  this._agentState.plan.meta.needsReplan = true
+  this._agentState.plan.meta.lastObstacleAt = obstacleEntry.at
+  this._agentState.plan.meta.obstacles.push(obstacleEntry)
 
   if (this._markPlanBlocked(this._agentState.plan.steps)) {
     if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_replanned)) {
@@ -2328,6 +2624,9 @@ MiniA.prototype._handlePlanningObstacle = function(details) {
     this._planningStats.adjustments++
     this._logMessageWithCounter("plan", "Plan marked for replanning due to obstacle.")
   }
+
+  this._applyDynamicReplanAdjustments(obstacleEntry)
+  this._handlePlanUpdate()
 }
 MiniA.prototype._handlePlanUpdate = function() {
     if (!this._enablePlanning) return
@@ -2558,6 +2857,124 @@ MiniA.prototype._createRateLimiter = function(args) {
 /**
  * Process and return final answer based on format requirements
  */
+MiniA.prototype._extractExecutionNotes = function() {
+  var notes = []
+  var seen = {}
+  var runtime = this._runtime
+
+  var addNote = function(text, key) {
+    if (!isString(text)) return
+    var trimmed = text.trim()
+    if (trimmed.length === 0) return
+    var normalized = isString(key) && key.length > 0 ? key.toLowerCase() : trimmed.toLowerCase()
+    if (seen[normalized]) return
+    seen[normalized] = true
+    notes.push(trimmed)
+  }
+
+  if (isObject(runtime)) {
+    if (runtime.earlyStopTriggered === true) {
+      var reason = isString(runtime.earlyStopReason) && runtime.earlyStopReason.length > 0
+        ? runtime.earlyStopReason
+        : "repeated failures"
+      addNote(`Early stop triggered: ${reason}`, "early-stop")
+    }
+    if (isArray(runtime.errorHistory)) {
+      var recentErrors = runtime.errorHistory.slice(-5)
+      for (var i = 0; i < recentErrors.length; i++) {
+        var entry = recentErrors[i]
+        var signature = this._computeErrorSignature(entry)
+        var category = isString(entry.category) ? entry.category : "unknown"
+        var message = isString(entry.message) ? entry.message : ""
+        var context = isObject(entry.context) ? entry.context : {}
+        var contextDetail = isString(context.toolName) ? ` (tool ${context.toolName})`
+          : (isString(context.tool) ? ` (tool ${context.tool})`
+            : (isString(context.operation) ? ` (${context.operation})` : ""))
+        var label = message.length > 0 ? `${category}: ${message}${contextDetail}` : `${category}${contextDetail}`
+        addNote(`Error encountered: ${label}`, signature.length > 0 ? `error:${signature}` : undefined)
+      }
+    }
+  }
+
+  if (isObject(this._agentState) && isObject(this._agentState.plan) && isObject(this._agentState.plan.meta)) {
+    var meta = this._agentState.plan.meta
+    if (isArray(meta.obstacles)) {
+      for (var oi = 0; oi < meta.obstacles.length; oi++) {
+        var obstacle = meta.obstacles[oi]
+        if (!isObject(obstacle)) continue
+        var msg = isString(obstacle.message) && obstacle.message.length > 0 ? obstacle.message : "Unspecified obstacle"
+        var catLabel = isString(obstacle.category) && obstacle.category.length > 0 ? obstacle.category : "unknown"
+        addNote(`Obstacle noted (${catLabel}): ${msg}`, `obstacle:${catLabel}:${msg}`)
+      }
+    }
+    if (isArray(meta.dynamicAdjustments)) {
+      for (var di = 0; di < meta.dynamicAdjustments.length; di++) {
+        var adj = meta.dynamicAdjustments[di]
+        if (!isObject(adj)) continue
+        var summary = isString(adj.summary) ? adj.summary : "Dynamic adjustment recorded"
+        var sig = isString(adj.signature) ? adj.signature : summary
+        addNote(`Dynamic replanning adjustment: ${summary}`, `adjustment:${sig}`)
+      }
+    }
+  }
+
+  return notes
+}
+
+MiniA.prototype._appendExecutionNotesToPlan = function(args) {
+  var shouldSave = this._savePlanNotes === true || (isObject(args) && toBoolean(args.saveplannotes))
+  if (!shouldSave) return
+  if (!isObject(this._activePlanSource) || !isObject(this._activePlanSource.external)) return
+
+  var external = this._activePlanSource.external
+  var extracted = this._extractExecutionNotes()
+  if (!isArray(extracted) || extracted.length === 0) return
+
+  if (!isArray(external.notes)) external.notes = []
+  var existing = {}
+  for (var i = 0; i < external.notes.length; i++) {
+    var existingNote = external.notes[i]
+    if (isString(existingNote)) existing[existingNote.toLowerCase().trim()] = true
+  }
+
+  var appended = 0
+  for (var j = 0; j < extracted.length; j++) {
+    var note = extracted[j]
+    if (!isString(note)) continue
+    var key = note.toLowerCase().trim()
+    if (key.length === 0 || existing[key]) continue
+    external.notes.push(note)
+    existing[key] = true
+    appended++
+  }
+
+  if (appended === 0) return
+
+  if (isObject(this._agentState) && isObject(this._agentState.plan)) {
+    if (!isObject(this._agentState.plan.meta)) this._agentState.plan.meta = {}
+    if (!isArray(this._agentState.plan.meta.notes)) this._agentState.plan.meta.notes = []
+    for (var k = 0; k < extracted.length; k++) {
+      var planNote = extracted[k]
+      if (!isString(planNote)) continue
+      var planKey = planNote.toLowerCase().trim()
+      var already = false
+      for (var pn = 0; pn < this._agentState.plan.meta.notes.length; pn++) {
+        var existingPlanNote = this._agentState.plan.meta.notes[pn]
+        if (isString(existingPlanNote) && existingPlanNote.toLowerCase().trim() === planKey) {
+          already = true
+          break
+        }
+      }
+      if (!already) this._agentState.plan.meta.notes.push(planNote)
+    }
+  }
+
+  this.fnI("plan", `Captured ${appended} execution note${appended === 1 ? "" : "s"} for future runs.`)
+}
+
+/**
+ * Process and return final answer based on format requirements
+ */
 MiniA.prototype._processFinalAnswer = function(answer, args) {
   var textAnswer = answer
   if (isDef(args.outfile)) {
@@ -2612,6 +3029,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
         this.fnI('warn', 'LLM rewrite of plan failed: ' + ePlanRW)
       }
     }
+    this._appendExecutionNotesToPlan(args)
     this._persistExternalPlan()
     this.fnI("plan", `Plan persisted to ${this._activePlanSource.path}`)
     // Fallback: if after persistence there are no checked boxes but internal shows completed steps, flip relevant boxes
@@ -2988,6 +3406,63 @@ MiniA.prototype._renderErrorHistory = function(runtime) {
   return parts.length > 0 ? `[ERROR HISTORY] ${parts.join(" | ")}` : ""
 }
 
+MiniA.prototype._computeErrorSignature = function(entry) {
+  if (!isObject(entry)) return ""
+  var pieces = []
+  if (isString(entry.category) && entry.category.length > 0) pieces.push(entry.category.toLowerCase())
+  if (isString(entry.message) && entry.message.length > 0) pieces.push(entry.message.toLowerCase())
+  var ctx = isObject(entry.context) ? entry.context : {}
+  if (isString(ctx.toolName)) pieces.push(`tool:${ctx.toolName.toLowerCase()}`)
+  if (isString(ctx.tool)) pieces.push(`tool:${ctx.tool.toLowerCase()}`)
+  if (isString(ctx.operation)) pieces.push(`op:${ctx.operation.toLowerCase()}`)
+  if (isString(ctx.stepLabel)) pieces.push(`step:${ctx.stepLabel.toLowerCase()}`)
+  if (isString(ctx.step)) pieces.push(`step:${String(ctx.step).toLowerCase()}`)
+  return pieces.join("|")
+}
+
+MiniA.prototype._triggerEarlyStop = function(runtime, info) {
+  if (!isObject(runtime) || runtime.earlyStopTriggered === true) return
+  runtime.earlyStopTriggered = true
+  runtime.earlyStopHandled = false
+  runtime.earlyStopContextRecorded = false
+  runtime.earlyStopSignature = isObject(info) && isString(info.signature) ? info.signature : ""
+  var reason = isObject(info) && isString(info.reason) ? info.reason : "repeated failures"
+  runtime.earlyStopReason = reason.length > 0 ? reason : "repeated failures"
+  this.fnI("warn", `Early stop guard activated due to ${runtime.earlyStopReason}.`)
+}
+
+MiniA.prototype._shouldEarlyStop = function(runtime) {
+  if (!isObject(runtime) || !isArray(runtime.errorHistory)) return false
+  if (runtime.errorHistory.length < 3) return false
+  var recent = runtime.errorHistory.slice(-3)
+  var baseSig = this._computeErrorSignature(recent[recent.length - 1])
+  if (!isString(baseSig) || baseSig.length === 0) return false
+  if (runtime.earlyStopSignature === baseSig) return false
+
+  for (var i = 0; i < recent.length; i++) {
+    if (this._computeErrorSignature(recent[i]) !== baseSig) return false
+  }
+
+  var firstTime = recent[0].time || now()
+  var lastTime = recent[recent.length - 1].time || now()
+  if (lastTime - firstTime > 120000) return false
+
+  var latest = recent[recent.length - 1]
+  var reasonParts = []
+  if (isString(latest.category) && latest.category.length > 0) reasonParts.push(latest.category)
+  if (isString(latest.message) && latest.message.length > 0) reasonParts.push(latest.message)
+  var ctx = isObject(latest.context) ? latest.context : {}
+  if (isString(ctx.toolName)) reasonParts.push(`tool ${ctx.toolName}`)
+  else if (isString(ctx.tool)) reasonParts.push(`tool ${ctx.tool}`)
+  else if (isString(ctx.operation)) reasonParts.push(`operation ${ctx.operation}`)
+
+  var reason = reasonParts.join(" – ")
+  if (reason.length > 160) reason = reason.substring(0, 157) + "…"
+
+  this._triggerEarlyStop(runtime, { signature: baseSig, reason: reason })
+  return true
+}
+
 MiniA.prototype._isCircuitOpen = function(connectionId) {
   if (!isString(connectionId) || connectionId.length === 0) return false
   var state = this._mcpCircuitState[connectionId]
@@ -3032,6 +3507,8 @@ MiniA.prototype._registerRuntimeError = function(runtime, details) {
     message : info.message || "",
     context : info.context
   })
+
+  this._shouldEarlyStop(runtime)
 
   if (this._enablePlanning) this._handlePlanningObstacle(info)
 
@@ -4140,6 +4617,8 @@ MiniA.prototype.init = function(args) {
       { name: "auditch", type: "string", default: __ },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
+      { name: "forceplanning", type: "boolean", default: false },
+      { name: "saveplannotes", type: "boolean", default: false },
       { name: "outputfile", type: "string", default: __ }
     ])
 
@@ -4161,10 +4640,14 @@ MiniA.prototype.init = function(args) {
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
+    args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
+    args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
+
+    this._savePlanNotes = args.saveplannotes
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
     var visualKnowledge = MiniA.buildVisualKnowledge({
@@ -4650,7 +5133,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._planningProgress = { overall: 0, completed: 0, total: 0, checkpoints: { reached: 0, total: 0 } }
     this._planningStats = { validations: 0, adjustments: 0 }
     this._preparePlanning(args)
-    this._enablePlanning = (!args.chatbotmode && args.useplanning)
+    // Use centralized logic to determine if planning should be enabled
+    // _preparePlanning has already assessed complexity and set _planningStrategy
+    this._enablePlanning = this._shouldEnablePlanning(args)
     this._lastPlanMessage = ""
     this._planCounter = 0
     this._lastPlanSnapshot = ""
@@ -4747,18 +5232,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     if (args.useplanning && !isObject(preloadedPlan)) {
-      // useplanning=true but no plan found - just inform and continue
-      this.fnI("plan", "No plan found to load; continuing without planning-only mode.")
+      // useplanning=true but no plan found - just inform and continue with auto-generated plan
+      this.fnI("plan", "No plan file found; will generate plan automatically during execution.")
     }
     
     // If we have a preloaded plan, prepare it for execution
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
       this._prepareExternalPlanExecution(preloadedPlan, args)
       this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
+      // Mark that external plan is loaded to skip auto-generation later
+      this._hasExternalPlan = true
     } else {
       if (args.useplanning || isString(args.planfile)) {
         this.fnI("warn", `Plan file specified but plan object is invalid.`)
       }
+      this._hasExternalPlan = false
     }
 
     this._alwaysExec = args.readwrite
@@ -4977,7 +5465,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       toolContexts        : {},
       errorHistory        : [],
       restoredFromCheckpoint: false,
-      successfulActionDetected: false
+      successfulActionDetected: false,
+      earlyStopTriggered      : false,
+      earlyStopReason         : "",
+      earlyStopHandled        : false,
+      earlyStopContextRecorded: false,
+      earlyStopSignature      : ""
     }
     var maxSteps = isNumber(args.maxsteps) ? Math.max(0, args.maxsteps) : 0
     var currentToolContext = {}
@@ -5095,6 +5588,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Context will hold the history of thoughts, actions, and observations
     // We iterate until requested stop or hitting the consecutive no-progress limit
     for (var step = 0; this.state != "stop"; step++) {
+      if (runtime.earlyStopTriggered === true && runtime.earlyStopHandled !== true) {
+        var stopReason = isString(runtime.earlyStopReason) && runtime.earlyStopReason.length > 0
+          ? runtime.earlyStopReason
+          : "repeated failures"
+        this.fnI("warn", `Early stop triggered before step ${step + 1}: ${stopReason}`)
+        runtime.earlyStopHandled = true
+        if (runtime.earlyStopContextRecorded !== true) {
+          runtime.context.push(`[OBS STOP] Early stop triggered: ${stopReason}`)
+          runtime.earlyStopContextRecorded = true
+        }
+        break
+      }
+
       if (step > 0) {
         if (runtime.successfulActionDetected === true) {
           runtime.stepsWithoutAction = 0
@@ -5697,11 +6203,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return "(no answer)"
     }
 
-    if (isNumber(maxSteps) && maxSteps > 0 && runtime.stepsWithoutAction >= maxSteps) {
-      runtime.context.push(`[OBS LIMIT] Reached ${maxSteps} consecutive steps without successful actions.`)
+    if (runtime.earlyStopTriggered === true) {
+      var recordedReason = isString(runtime.earlyStopReason) && runtime.earlyStopReason.length > 0
+        ? runtime.earlyStopReason
+        : "repeated failures"
+      if (runtime.earlyStopContextRecorded !== true) {
+        runtime.context.push(`[OBS STOP] Early stop triggered: ${recordedReason}`)
+        runtime.earlyStopContextRecorded = true
+      }
+      this.fnI("warn", `Early stop triggered after repeated failures (${recordedReason}). Requesting final answer...`)
+    } else {
+      if (isNumber(maxSteps) && maxSteps > 0 && runtime.stepsWithoutAction >= maxSteps) {
+        runtime.context.push(`[OBS LIMIT] Reached ${maxSteps} consecutive steps without successful actions.`)
+      }
+      this.fnI("warn", `Reached max steps without successful actions. Asking for final answer...`)
     }
-
-    this.fnI("warn", `Reached max steps without successful actions. Asking for final answer...`)
     // Get final answer from model
     var finalResponseWithStats
     try {

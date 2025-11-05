@@ -1069,6 +1069,26 @@
         padding: 0.3rem 0.9rem 0.6rem 0.9rem;
         border-top: 1px solid var(--border);
         background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
+        max-height: 200px;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    .plan-panel-body::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .plan-panel-body::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .plan-panel-body::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 4px;
+    }
+
+    .plan-panel-body::-webkit-scrollbar-thumb:hover {
+        background: var(--accent);
     }
 
     .plan-list {
@@ -1305,6 +1325,7 @@
     let pollingInterval = null;
     let pingInterval = null;
     let isProcessing = false;
+    let conversationFinished = false;
     let autoScrollEnabled = true;
     let isScrollingProgrammatically = false;
     let lastContentUpdateTime = 0;
@@ -1317,6 +1338,7 @@
     let lastPlanDigest = '';
     let chartResizeTimer = null;
     let chartResizeHandlerBound = false;
+    let planResizeHandlerBound = false;
     let lastRawContent = '';
     let lastRenderedHtml = '';
 
@@ -2924,7 +2946,16 @@
             if (!response.ok) throw new Error('Failed to load current conversation');
 
             const data = await response.json();
-            updatePlanPanel(data.plan);
+            // Only update plan panel if conversation is not finished
+            if (data && data.status !== 'finished' && !conversationFinished) {
+                updatePlanPanel(data.plan);
+            } else {
+                // Force hide plan panel for finished conversations
+                if (planPanel) {
+                    planPanel.setAttribute('hidden', 'hidden');
+                    planPanel.removeAttribute('open');
+                }
+            }
             const preprocessed = preprocessChartBlocks(data.content || '');
             const htmlContent = converter.makeHtml(preprocessed);
             await updateResultsContent(htmlContent);
@@ -3075,6 +3106,25 @@
     }
 
     /* ========== PLAN PANEL HELPERS ========== */
+    function adjustPlanPanelHeight() {
+        if (!resultsDiv || !planPanel) return;
+
+        // Use requestAnimationFrame to ensure accurate measurements after layout
+        requestAnimationFrame(() => {
+            const resultsDivHeight = resultsDiv.clientHeight;
+            const maxPlanPanelHeight = resultsDivHeight * 0.5;
+            const summary = planPanel.querySelector('summary');
+            const summaryHeight = summary ? summary.offsetHeight : 0;
+            const planPanelBody = planPanel.querySelector('.plan-panel-body');
+
+            if (planPanelBody) {
+                // Account for summary, borders, margins, and padding
+                const availableHeight = maxPlanPanelHeight - summaryHeight - 20;
+                planPanelBody.style.maxHeight = Math.max(100, availableHeight) + 'px';
+            }
+        });
+    }
+
     function resetPlanPanel(clearDigest = true) {
         if (!planPanel) return;
         if (clearDigest) lastPlanDigest = '';
@@ -3087,6 +3137,12 @@
 
     function updatePlanPanel(planPayload) {
         if (!planPanel) return;
+
+        // Don't update or show plan panel if conversation is finished
+        if (conversationFinished) {
+            resetPlanPanel(false);
+            return;
+        }
 
         const digest = JSON.stringify(planPayload || {});
         if (digest === lastPlanDigest) return;
@@ -3128,6 +3184,16 @@
         }
 
         planPanel.removeAttribute('hidden');
+
+        // Bind resize handler and toggle handler on first use
+        if (!planResizeHandlerBound && typeof window !== 'undefined') {
+            window.addEventListener('resize', adjustPlanPanelHeight);
+            if (planPanel) {
+                planPanel.addEventListener('toggle', adjustPlanPanelHeight);
+            }
+            planResizeHandlerBound = true;
+        }
+
         if (planSummaryText) {
             const summaryPieces = [`${overall}% overall`, `${completed}/${total} tasks completed`];
             if (checkpoints.total > 0) {
@@ -3172,11 +3238,15 @@
                 planList.appendChild(li);
             });
         }
+
+        // Dynamically adjust max-height to ensure plan panel doesn't exceed 50% of results pane
+        adjustPlanPanelHeight();
     }
 
     /* ========== PROCESSING STATE MANAGEMENT ========== */
     function startProcessing() {
         isProcessing = true;
+        conversationFinished = false;
         autoScrollEnabled = true;
         promptInput.disabled = true;
         promptInput.value = '';
@@ -3218,6 +3288,14 @@
 
         currentSessionUuid = null;
         removePreview();
+
+        // Force close and hide plan panel when processing is stopped/canceled
+        conversationFinished = true;
+        if (planPanel) {
+            planPanel.setAttribute('hidden', 'hidden');
+            planPanel.removeAttribute('open');
+        }
+
         updateCopyActionsVisibility();
     }
 
@@ -3270,7 +3348,11 @@
                 if (!response.ok) throw new Error('Failed to fetch results');
 
                 const data = await response.json();
-                updatePlanPanel(data.plan);
+
+                // Only update plan panel if conversation is not finished and hasn't been marked as finished
+                if (data && data.status !== 'finished' && !conversationFinished) {
+                    updatePlanPanel(data.plan);
+                }
 
                 // Only update content if it has actually changed to prevent chart flickering
                 const rawContent = data.content || '';
@@ -3286,6 +3368,7 @@
                 }
 
                 if (data.status === 'finished') {
+                    conversationFinished = true;
                     if (currentSessionUuid && historyEnabled !== false) {
                         const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, data);
                         if (savedEntry) {
@@ -3294,6 +3377,11 @@
                     }
                     lastSubmittedPrompt = '';
                     removePreview();
+                    // Force close and hide plan panel when final answer is provided
+                    if (planPanel) {
+                        planPanel.setAttribute('hidden', 'hidden');
+                        planPanel.removeAttribute('open');
+                    }
                     stopProcessing();
                 } else {
                     addPreview();
@@ -3363,6 +3451,7 @@
         await updateResultsContent('<p></p>');
         forceRenderChartBlocks();
         resetPlanPanel();
+        conversationFinished = false;
         removePreview();
         promptInput.value = '';
         clearAttachments();

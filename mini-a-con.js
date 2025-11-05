@@ -53,6 +53,7 @@ try {
   var hintColor    = "FG(249)"
   var errorColor   = "FG(196)"
   var successColor = "FG(112)"
+  var numericColor = "FG(155)"
   var historyFileName       = ".openaf-mini-a_history"
   var historyHome           = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
   var historyFilePath       = resolveCanonicalPath(historyHome, historyFileName)
@@ -61,7 +62,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "history", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "history", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -131,8 +132,7 @@ try {
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
     toolcachettl   : { type: "number", description: "Default MCP result cache TTL (ms)" },
     goalprefix     : { type: "string", description: "Optional prefix automatically added to every goal" },
-    shell          : { type: "string", description: "Prefix applied to each shell command" },
-    shellprefix    : { type: "string", description: "Override shell prefix when converting plans" },
+    shellprefix    : { type: "string", description: "Prefix applied to each shell command" },
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
@@ -144,6 +144,7 @@ try {
     planfile       : { type: "string", description: "Plan file to load or save before execution" },
     planformat     : { type: "string", description: "Plan format override (md|json)" },
     plancontent    : { type: "string", description: "Inline plan content (JSON or Markdown) to preload" },
+    saveplannotes  : { type: "boolean", default: false, description: "Append execution learnings to plan notes" },
     rules          : { type: "string", description: "Custom agent rules (JSON or SLON)" },
     state          : { type: "string", description: "Initial agent state (JSON or SLON)" },
     format         : { type: "string", description: "Final answer format (md|json)" },
@@ -397,14 +398,14 @@ try {
         share   : (share * 100).toFixed(1) + "%",
         messages: section.messages,
         //bar     : ow.format.string.progress(section.tokens, stats.totalTokens, 0, 20, "█", "░")
-        bar     : colorifyText(ow.format.string.progress(section.tokens, stats.totalTokens, 0, 25), "RESET")
+        bar     : colorifyText(ow.format.string.progress(section.tokens, stats.totalTokens, 0, 35), "RESET")
       }
     })
 
     print(colorifyText("Conversation context usage", accentColor))
     print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
     var methodLabel = stats.estimateMethod === "model" ? "model-based" : "approximate"
-    print(colorifyText("Total messages: " + stats.messageCount + " | Estimated tokens: ~" + stats.totalTokens + " (" + methodLabel + ")", hintColor))
+    print(colorifyText("Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | Estimated tokens: ~", hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
     if (isString(stats.path) && stats.path.length > 0) {
       print(colorifyText("Conversation file: " + stats.path, hintColor))
     }
@@ -455,6 +456,94 @@ try {
       print(colorifyText("Conversation cleared. Future goals will start fresh.", successColor))
     } catch (clearError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to clear conversation: " + clearError, errorColor))
+    }
+  }
+
+  function compactConversationContext(preserveCount) {
+    var stats = refreshConversationStats(activeAgent)
+    if (!isObject(stats) || !isArray(stats.entries) || stats.entries.length === 0) {
+      print(colorifyText("No conversation context to compact.", hintColor))
+      return
+    }
+
+    var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
+    var entries = stats.entries.slice()
+    var keepSize = Math.min(keepCount, entries.length)
+    var keepTail = entries.slice(entries.length - keepSize)
+    var summarizeUntil = entries.length - keepTail.length
+
+    var preserved = []
+    var summarizeCandidates = []
+    for (var i = 0; i < summarizeUntil; i++) {
+      var entry = entries[i]
+      var role = isString(entry.role) ? entry.role.toLowerCase() : ""
+      if (role === "system" || role === "developer") {
+        preserved.push(entry)
+      } else {
+        summarizeCandidates.push(entry)
+      }
+    }
+
+    if (summarizeCandidates.length === 0) {
+      print(colorifyText("No user or assistant messages to summarize from earlier history.", hintColor))
+      return
+    }
+
+    var summarySource = []
+    summarizeCandidates.forEach(function(entry) {
+      var role = isString(entry.role) ? entry.role.toUpperCase() : "UNKNOWN"
+      var content = flattenConversationContent(entry.content)
+      summarySource.push(`${role}: ${content}`)
+    })
+    var summaryPayload = summarySource.join("\n")
+    var summaryText = ""
+    if (typeof summarize === "function") {
+      try { summaryText = summarize(summaryPayload) } catch(ignoreSummaryError) {}
+    }
+    if (!isString(summaryText) || summaryText.trim().length === 0) {
+      summaryText = summaryPayload.substring(0, 400)
+    }
+    summaryText = summaryText.trim()
+
+    var summaryEntry = {
+      role: "assistant",
+      content: `Context summary (${summarizeCandidates.length} messages condensed on ${new Date().toISOString()}): ${summaryText}`
+    }
+
+    var newConversation = preserved.concat([summaryEntry]).concat(keepTail)
+    var convoPath = getConversationPath()
+    if (!isString(convoPath) || convoPath.trim().length === 0) {
+      print(colorifyText("Conversation path is not configured. Use /set conversation <path> first.", hintColor))
+      return
+    }
+
+    try {
+      io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
+      if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
+        try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+      }
+      var previousTokens = stats.totalTokens
+      var updatedStats = refreshConversationStats(activeAgent)
+      var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
+      var reduction = previousTokens > 0 ? Math.max(0, previousTokens - afterTokens) : 0
+      print(
+        colorifyText("Conversation compacted. Preserved ", successColor) +
+        colorifyText(String(keepTail.length), numericColor) +
+        colorifyText(" recent message" + (keepTail.length === 1 ? "" : "s") + ".", successColor)
+      )
+      if (previousTokens > 0) {
+        print(
+          colorifyText("Estimated tokens: ~", hintColor) +
+          colorifyText(String(previousTokens), numericColor) +
+          colorifyText(" → ~", hintColor) +
+          colorifyText(String(afterTokens), numericColor) +
+          colorifyText(" (saved ~", hintColor) +
+          colorifyText(String(reduction), numericColor) +
+          colorifyText(").", hintColor)
+        )
+      }
+    } catch (compactError) {
+      print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to compact conversation: " + compactError, errorColor))
     }
   }
 
@@ -799,6 +888,7 @@ try {
       "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation", hintColor),
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
+      "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
@@ -868,6 +958,20 @@ try {
       }
       if (command === "context") {
         printContextSummary()
+        continue
+      }
+      if (command === "compact") {
+        compactConversationContext()
+        continue
+      }
+      if (command.indexOf("compact ") === 0) {
+        var keepValue = command.substring(8).trim()
+        var parsedKeep = parseInt(keepValue, 10)
+        if (isNaN(parsedKeep)) {
+          print(colorifyText("Usage: /compact [messagesToKeep]", errorColor))
+        } else {
+          compactConversationContext(parsedKeep)
+        }
         continue
       }
       if (command === "history") {
