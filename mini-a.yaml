@@ -202,6 +202,23 @@ help:
     desc     : Inline plan definition provided as Markdown or JSON content
     example  : "# Plan\n- Step 1"
     mandatory: false
+  - name     : updatefreq
+    desc     : Plan update frequency (auto, always, checkpoints, never)
+    example  : "auto"
+    mandatory: false
+  - name     : updateinterval
+    desc     : Number of steps between automatic plan updates when updatefreq=auto
+    example  : "3"
+    mandatory: false
+  - name     : forceupdates
+    desc     : Force plan updates even when actions fail
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : planlog
+    desc     : Optional file path to append plan update logs
+    example  : "plan-updates.log"
+    mandatory: false
   - name     : outputfile
     desc     : Alternative key for outfile, used mainly during plan conversions
     example  : "/tmp/output.json"

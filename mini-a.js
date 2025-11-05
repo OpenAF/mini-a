@@ -38,6 +38,10 @@ var MiniA = function() {
   this._resumeFailedTasks = false
   this._loadedPlanPayload = null
   this._savePlanNotes = false
+  this._planUpdateConfig = { frequency: "auto", interval: 3, force: false, logFile: null }
+  this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
+  this._planLogFile = __
+  this._planResumeInfo = null
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -137,6 +141,9 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Update 'status', 'progress', and checkpoints as work advances; set 'state.plan.meta.overallProgress' to the completion percentage you compute.
 • When obstacles occur set 'state.plan.meta.needsReplan=true', adjust affected steps (e.g., mark as blocked or add alternatives), and rebuild the subtree if required.
 • Keep the plan synchronized with reality - revise titles, ordering, or decomposition whenever you learn new information or the goal changes.
+• When a plan file is provided (useplanning=true with planfile=...), append progress updates after meaningful actions. Document what completed, the status, and the result, and add key learnings under "## Knowledge Base" so future runs can resume quickly.
+• Do not allow more than a few steps to pass without updating the plan file. If several steps elapse without an update—or if you approach the max step limit—summarize progress and next actions in the plan immediately.
+• Use clear sections when updating the plan file: start with "---" followed by "## Progress Update - <timestamp>", a "### Completed Task" bullet list, and "### Knowledge for Next Execution" entries.
 {{/if}}
 
 ## EXAMPLE:
@@ -1153,6 +1160,16 @@ MiniA.prototype._ensurePlanFooter = function(plan) {
   if (!isArray(plan.notes)) plan.notes = []
   if (!isArray(plan.executionHistory)) plan.executionHistory = []
   if (!isArray(plan.dependencies)) plan.dependencies = []
+  if (!isArray(plan.knowledgeBase)) {
+    if (isArray(plan.notes) && plan.notes.length > 0) {
+      plan.knowledgeBase = clone(plan.notes, true)
+    } else {
+      plan.knowledgeBase = []
+    }
+  }
+  if (isArray(plan.knowledgeBase) && plan.notes.length === 0 && plan.knowledgeBase.length > 0) {
+    plan.notes = clone(plan.knowledgeBase, true)
+  }
   return plan
 }
 
@@ -1222,6 +1239,9 @@ MiniA.prototype._parseMarkdownPlan = function(markdown) {
         }
         plan.phases.push(currentPhase)
         currentSection = "phase"
+      } else if (/^##\s+Knowledge\s+Base/i.test(line)) {
+        currentSection = "knowledge"
+        currentPhase = __
       } else if (/^##\s+Dependencies/i.test(line)) {
         currentSection = "dependencies"
         currentPhase = __
@@ -1275,6 +1295,16 @@ MiniA.prototype._parseMarkdownPlan = function(markdown) {
       continue
     }
 
+    if (currentSection === "knowledge") {
+      if (!isArray(plan.knowledgeBase)) plan.knowledgeBase = []
+      if (/^[-*]\s+/.test(line)) {
+        plan.knowledgeBase.push(line.replace(/^[-*]\s+/, "").trim())
+      } else {
+        plan.knowledgeBase.push(line)
+      }
+      continue
+    }
+
     if (currentSection === "notes") {
       if (/^[-*]\s+/.test(line)) {
         plan.notes.push(line.replace(/^[-*]\s+/, "").trim())
@@ -1292,6 +1322,10 @@ MiniA.prototype._parseMarkdownPlan = function(markdown) {
       }
       continue
     }
+  }
+
+  if (!isArray(plan.knowledgeBase)) {
+    plan.knowledgeBase = plan.notes.slice()
   }
 
   return this._ensurePlanFooter(plan)
@@ -1344,8 +1378,37 @@ MiniA.prototype._serializeMarkdownPlan = function(plan) {
   }
 
   lines.push("")
+  var knowledgeEntries = []
+  if (isArray(plan.knowledgeBase) && plan.knowledgeBase.length > 0) {
+    knowledgeEntries = plan.knowledgeBase
+  } else if (plan.notes.length > 0) {
+    knowledgeEntries = plan.notes
+  }
+  lines.push("## Knowledge Base")
+  if (knowledgeEntries.length === 0) {
+    lines.push("- No knowledge captured yet.")
+  } else {
+    for (var kb = 0; kb < knowledgeEntries.length; kb++) {
+      lines.push(`- ${knowledgeEntries[kb]}`)
+    }
+  }
+
+  lines.push("")
   lines.push("## Notes for Future Agents")
-  if (plan.notes.length === 0) {
+  var notesDiffer = false
+  if (plan.notes.length !== knowledgeEntries.length) {
+    notesDiffer = true
+  } else {
+    for (var ni = 0; ni < plan.notes.length; ni++) {
+      if (plan.notes[ni] !== knowledgeEntries[ni]) {
+        notesDiffer = true
+        break
+      }
+    }
+  }
+  if (!notesDiffer && plan.notes.length > 0) {
+    lines.push("- Refer to Knowledge Base above.")
+  } else if (plan.notes.length === 0) {
     lines.push("- No additional notes yet.")
   } else {
     for (var n = 0; n < plan.notes.length; n++) {
@@ -1411,6 +1474,7 @@ MiniA.prototype._loadPlanContent = function(source, format) {
  */
 MiniA.prototype._loadPlanFromArgs = function(args) {
   if (!isObject(args)) return __
+  this._planResumeInfo = null
   var planfile = isString(args.planfile) && args.planfile.length > 0 ? args.planfile : __
   var planFromFile
   if (planfile) {
@@ -1422,6 +1486,7 @@ MiniA.prototype._loadPlanFromArgs = function(args) {
       if (isObject(planFromFile)) {
         planFromFile.source = "file"
         planFromFile.path = planfile
+        this._planResumeInfo = this._extractPlanResumeInfo(planFromFile.plan)
         return planFromFile
       } else {
         this.fnI("warn", `Plan file '${planfile}' exists but could not be parsed as a valid plan.`)
@@ -1433,6 +1498,7 @@ MiniA.prototype._loadPlanFromArgs = function(args) {
     var maybePlan = this._loadPlanContent(args.knowledge, __)
     if (isObject(maybePlan)) {
       maybePlan.source = "knowledge"
+      this._planResumeInfo = this._extractPlanResumeInfo(maybePlan.plan)
       return maybePlan
     }
   }
@@ -1743,6 +1809,350 @@ MiniA.prototype._persistExternalPlan = function() {
   } catch(e) {
     this.fnI("warn", `Failed to persist plan to ${this._activePlanSource.path}: ${e}`)
   }
+}
+
+MiniA.prototype._logPlanUpdate = function(message, level) {
+  var stamp = new Date().toISOString()
+  var lvl = isString(level) && level.length > 0 ? level.toUpperCase() : "INFO"
+  var formatted = `[${stamp}] [PLANNING] [${lvl}] ${message}`
+  if (isObject(this._sessionArgs) && (toBoolean(this._sessionArgs.debug) || toBoolean(this._sessionArgs.verbose))) {
+    this.fnI("plan", formatted)
+  }
+  if (isString(this._planLogFile) && this._planLogFile.length > 0) {
+    try {
+      io.writeFileString(this._planLogFile, formatted + "\n", true)
+    } catch(e) {
+      this.fnI("warn", `Failed to write plan log '${this._planLogFile}': ${e}`)
+    }
+  }
+}
+
+MiniA.prototype._validatePlanFilePath = function(planfile) {
+  if (!isString(planfile) || planfile.length === 0) {
+    return { valid: false, error: "No planfile specified" }
+  }
+  try {
+    var FileRef = Packages.java.io.File
+    var fileObj = new FileRef(planfile)
+    var parent = fileObj.getParentFile()
+    if (parent && !parent.exists()) {
+      return { valid: false, error: `Directory does not exist: ${String(parent.getPath())}` }
+    }
+    if (fileObj.exists()) {
+      if (!fileObj.canWrite()) {
+        return { valid: false, error: `Cannot write to plan file: ${planfile}` }
+      }
+    } else if (parent && !parent.canWrite()) {
+      return { valid: false, error: `Directory not writable: ${String(parent.getPath())}` }
+    }
+  } catch(e) {
+    return { valid: false, error: String(e) }
+  }
+  return { valid: true }
+}
+
+MiniA.prototype._configurePlanUpdates = function(args) {
+  var freq = isString(args && args.updatefreq) ? args.updatefreq.toLowerCase().trim() : "auto"
+  var allowed = ["always", "auto", "checkpoints", "never"]
+  if (allowed.indexOf(freq) < 0) freq = "auto"
+  var interval = isNumber(args && args.updateinterval) ? Math.max(1, Math.round(args.updateinterval)) : 3
+  var force = toBoolean(args && args.forceupdates)
+  var logFile = isString(args && args.planlog) && args.planlog.length > 0 ? args.planlog : __
+
+  this._planUpdateConfig = { frequency: freq, interval: interval, force: force, logFile: logFile }
+  this._planLogFile = logFile
+  this._planUpdateState = {
+    lastStep          : 0,
+    updates           : 0,
+    lastReason        : "",
+    lastReminderStep  : 0,
+    checkpoints       : [],
+    nextCheckpointIndex: 0
+  }
+
+  if (freq === "checkpoints") {
+    var maxSteps = isNumber(args && args.maxsteps) && args.maxsteps > 0 ? Math.round(args.maxsteps) : 0
+    if (maxSteps > 0) {
+      var cp = [0.25, 0.5, 0.75, 1].map(function(f){
+        return Math.max(1, Math.round(maxSteps * f))
+      }).filter(function(value, index, self){
+        return self.indexOf(value) === index
+      }).sort(function(a, b){ return a - b })
+      this._planUpdateState.checkpoints = cp
+    }
+  }
+
+  if (isString(logFile) && logFile.length > 0) {
+    try {
+      var FileRef = Packages.java.io.File
+      var logObj = new FileRef(logFile)
+      var parentDir = logObj.getParentFile()
+      if (parentDir && !parentDir.exists()) parentDir.mkdirs()
+      if (!logObj.exists()) io.writeFileString(logFile, "")
+    } catch(e) {
+      this.fnI("warn", `Failed to initialize plan log '${logFile}': ${e}`)
+    }
+  }
+}
+
+MiniA.prototype._shouldTriggerPlanUpdate = function(stepNumber, reason, payload) {
+  if (reason === "final") return true
+  if (!this._enablePlanning) return false
+  var config = this._planUpdateConfig || {}
+  if (!isObject(config) || config.frequency === "never") {
+    return false
+  }
+  if (config.force === true && isObject(payload)) {
+    var statusLabel = isString(payload.status) ? payload.status.toUpperCase() : ""
+    if (statusLabel === "FAILED") return true
+  }
+  if (isObject(payload) && toBoolean(payload.force)) return true
+  if (config.frequency === "always") return true
+  if (!isNumber(stepNumber) || stepNumber <= 0) return false
+
+  if (config.frequency === "checkpoints") {
+    var checkpoints = isArray(this._planUpdateState && this._planUpdateState.checkpoints)
+      ? this._planUpdateState.checkpoints
+      : []
+    var index = isObject(this._planUpdateState) ? this._planUpdateState.nextCheckpointIndex || 0 : 0
+    if (index < checkpoints.length && stepNumber >= checkpoints[index]) {
+      this._planUpdateState.nextCheckpointIndex = index + 1
+      return true
+    }
+    return false
+  }
+
+  var lastStep = isObject(this._planUpdateState) && isNumber(this._planUpdateState.lastStep)
+    ? this._planUpdateState.lastStep
+    : 0
+  if (stepNumber === lastStep && this._planUpdateState.lastReason === reason) return false
+  var interval = Math.max(1, config.interval || 3)
+  return (stepNumber - lastStep) >= interval
+}
+
+MiniA.prototype._appendKnowledgeEntries = function(entries) {
+  if (!isArray(entries) || entries.length === 0) return
+  if (!isObject(this._activePlanSource) || !isObject(this._activePlanSource.external)) return
+  var external = this._activePlanSource.external
+  if (!isArray(external.notes)) external.notes = []
+  if (!isArray(external.knowledgeBase)) external.knowledgeBase = []
+  var existing = {}
+  var collect = function(list) {
+    for (var i = 0; i < list.length; i++) {
+      var entry = list[i]
+      if (isString(entry)) {
+        existing[entry.toLowerCase().trim()] = true
+      }
+    }
+  }
+  collect(external.notes)
+  collect(external.knowledgeBase)
+
+  for (var j = 0; j < entries.length; j++) {
+    var value = isString(entries[j]) ? entries[j].trim() : ""
+    if (value.length === 0) continue
+    var key = value.toLowerCase()
+    if (existing[key]) continue
+    external.notes.push(value)
+    external.knowledgeBase.push(value)
+    existing[key] = true
+  }
+}
+
+MiniA.prototype._buildProgressUpdateBlock = function(reason, payload, stepNumber) {
+  var details = isObject(payload) ? payload : {}
+  var timestamp = new Date().toISOString()
+  var description = isString(details.description) && details.description.length > 0
+    ? details.description
+    : (reason === "shell"
+      ? `Executed shell command${isString(details.command) ? `: ${details.command}` : ""}`
+      : reason === "step-limit"
+        ? "Approaching step limit"
+        : reason === "early-stop"
+          ? "Execution paused due to early stop"
+          : reason === "final"
+            ? "Goal completed"
+            : `Agent reasoning step ${stepNumber}`)
+  if (!isString(description) || description.length === 0) return __
+
+  var status = isString(details.status) && details.status.length > 0
+    ? details.status.toUpperCase()
+    : (reason === "final" ? "COMPLETED" : "IN_PROGRESS")
+  var resultText = ""
+  if (isString(details.result) && details.result.length > 0) {
+    resultText = details.result
+  } else if (isString(details.output) && details.output.length > 0) {
+    resultText = details.output
+  } else if (isString(details.summary) && details.summary.length > 0) {
+    resultText = details.summary
+  }
+  if (resultText.length > 1200) {
+    resultText = resultText.substring(0, 1200) + "\n[truncated]"
+  }
+
+  var knowledge = []
+  if (isArray(details.knowledge)) {
+    knowledge = details.knowledge.filter(isString)
+  } else if (isString(details.knowledge) && details.knowledge.length > 0) {
+    knowledge = [details.knowledge]
+  } else if (isArray(details.notes)) {
+    knowledge = details.notes.filter(isString)
+  }
+
+  var lines = ["---", `## Progress Update - ${timestamp}`, ""]
+  lines.push("### Completed Task")
+  lines.push(`- **Task:** ${description}`)
+  lines.push(`- **Status:** ${status}`)
+  lines.push(`- **Result:** ${resultText.length > 0 ? resultText : "(not recorded)"}`)
+  lines.push("")
+
+  if (knowledge.length > 0) {
+    lines.push("### Knowledge for Next Execution")
+    for (var i = 0; i < knowledge.length; i++) {
+      lines.push(`- ${knowledge[i]}`)
+    }
+    lines.push("")
+  }
+
+  return { block: lines.join("\n"), knowledge: knowledge }
+}
+
+MiniA.prototype._safePersistPlan = function(context) {
+  if (!this._enablePlanning) return false
+  try {
+    this._persistExternalPlan()
+    return true
+  } catch(e) {
+    var stepInfo = isObject(context) && isNumber(context.step) ? ` at step ${context.step}` : ""
+    this._logPlanUpdate(`Failed to persist plan${stepInfo}: ${e}`, "ERROR")
+    try {
+      if (isObject(this._activePlanSource) && isString(this._activePlanSource.path)) {
+        var backupPath = this._activePlanSource.path + ".backup"
+        var serialized = this._convertPlanObject(this._activePlanSource.external, this._activePlanSource.format || "markdown")
+        if (isString(serialized) && serialized.length > 0) {
+          io.writeFileString(backupPath, serialized)
+          this._logPlanUpdate(`Plan saved to backup: ${backupPath}`, "WARN")
+          return true
+        }
+      }
+    } catch(e2) {
+      this._logPlanUpdate(`Backup persistence failed: ${e2}`, "ERROR")
+    }
+  }
+  return false
+}
+
+MiniA.prototype._applyProgressUpdateBlock = function(updateBlock, context) {
+  if (!isObject(updateBlock) || !isString(updateBlock.block)) return false
+  if (!isObject(this._activePlanSource) || !isObject(this._activePlanSource.external)) return false
+  var external = this._activePlanSource.external
+  if (!isArray(external.executionHistory)) external.executionHistory = []
+  external.executionHistory.push(updateBlock.block)
+  this._appendKnowledgeEntries(updateBlock.knowledge)
+  if (isObject(this._planUpdateState)) {
+    this._planUpdateState.updates = (this._planUpdateState.updates || 0) + 1
+    this._planUpdateState.lastReason = context && context.reason ? context.reason : ""
+  }
+  var reasonLabel = context && context.reason ? ` (${context.reason})` : ""
+  this._logPlanUpdate(`Plan update recorded${reasonLabel}`)
+  return this._safePersistPlan(context)
+}
+
+MiniA.prototype._recordPlanActivity = function(reason, payload) {
+  if (!this._enablePlanning) return
+  if (!isObject(this._activePlanSource) || !isString(this._activePlanSource.path)) return
+  var runtime = this._runtime || {}
+  var stepNumber = isObject(payload) && isNumber(payload.step)
+    ? payload.step
+    : (isNumber(runtime.currentStepNumber) ? runtime.currentStepNumber : 0)
+  if (!this._shouldTriggerPlanUpdate(stepNumber, reason, payload)) return
+  var updateBlock = this._buildProgressUpdateBlock(reason, payload, stepNumber)
+  if (!isObject(updateBlock)) return
+  if (this._applyProgressUpdateBlock(updateBlock, { reason: reason, step: stepNumber })) {
+    if (isObject(this._planUpdateState)) {
+      this._planUpdateState.lastStep = stepNumber
+    }
+  }
+}
+
+MiniA.prototype._maybeInjectPlanReminder = function(prompt, stepNumber, maxSteps) {
+  if (!this._enablePlanning || !isString(prompt) || prompt.length === 0) return prompt
+  var config = this._planUpdateConfig || {}
+  if (!isObject(config) || config.frequency === "never") return prompt
+  if (!isNumber(stepNumber) || stepNumber <= 0) return prompt
+  var reminders = []
+  var lastStep = isObject(this._planUpdateState) && isNumber(this._planUpdateState.lastStep)
+    ? this._planUpdateState.lastStep
+    : 0
+  var stepsSinceLast = stepNumber - lastStep
+  var interval = Math.max(1, config.interval || 3)
+  if (stepsSinceLast >= interval && this._planUpdateState.lastReminderStep !== stepNumber) {
+    var target = isObject(this._activePlanSource) && isString(this._activePlanSource.path)
+      ? this._activePlanSource.path
+      : "the plan file"
+    reminders.push(`SYSTEM REMINDER: It has been ${stepsSinceLast} step${stepsSinceLast === 1 ? "" : "s"} since the last plan update. Please update ${target} with current progress and learnings.`)
+  }
+  if (isNumber(maxSteps) && maxSteps > 0 && (maxSteps - stepNumber) <= 2) {
+    var remaining = Math.max(0, maxSteps - stepNumber)
+    var targetFile = isObject(this._activePlanSource) && isString(this._activePlanSource.path)
+      ? this._activePlanSource.path
+      : "the plan file"
+    reminders.push(`URGENT: Only ${remaining} step${remaining === 1 ? "" : "s"} remaining. Update ${targetFile} now with progress and knowledge.`)
+  }
+  if (reminders.length === 0) return prompt
+  this._planUpdateState.lastReminderStep = stepNumber
+  return prompt + "\n\n" + reminders.join("\n")
+}
+
+MiniA.prototype._summarizeRecentContext = function(runtime) {
+  if (!isObject(runtime) || !isArray(runtime.context) || runtime.context.length === 0) return "(no observations yet)"
+  var tail = runtime.context.slice(-3)
+  var joined = tail.join(" | ")
+  if (joined.length > 800) return joined.substring(0, 800) + "…"
+  return joined
+}
+
+MiniA.prototype._collectSessionKnowledgeForPlan = function() {
+  var knowledge = []
+  if (isObject(this._agentState) && isObject(this._agentState.plan) && isObject(this._agentState.plan.meta)) {
+    if (isArray(this._agentState.plan.meta.notes)) {
+      knowledge = knowledge.concat(this._agentState.plan.meta.notes.filter(isString))
+    }
+  }
+  var extracted = this._extractExecutionNotes()
+  if (isArray(extracted)) {
+    knowledge = knowledge.concat(extracted.filter(isString))
+  }
+  var dedup = {}
+  var unique = []
+  for (var i = 0; i < knowledge.length; i++) {
+    var value = knowledge[i]
+    if (!isString(value)) continue
+    var key = value.toLowerCase().trim()
+    if (key.length === 0 || dedup[key]) continue
+    dedup[key] = true
+    unique.push(value.trim())
+  }
+  return unique
+}
+
+MiniA.prototype._extractPlanResumeInfo = function(plan) {
+  if (!isObject(plan)) return __
+  var knowledge = []
+  if (isArray(plan.knowledgeBase) && plan.knowledgeBase.length > 0) {
+    knowledge = plan.knowledgeBase.slice()
+  } else if (isArray(plan.notes)) {
+    knowledge = plan.notes.slice()
+  }
+  var history = isArray(plan.executionHistory) ? plan.executionHistory.slice() : []
+  var status = "IN_PROGRESS"
+  if (history.length > 0) {
+    var lastEntry = history[history.length - 1]
+    if (isString(lastEntry) && lastEntry.toLowerCase().indexOf("goal completed") >= 0) {
+      status = "COMPLETED"
+    }
+  }
+  return { knowledge: knowledge, executionHistory: history, status: status }
 }
 
 // Mark phase completion heuristically from final answer text (simple regex based)
@@ -3010,6 +3420,14 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
 
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
 
+  this._recordPlanActivity("final", {
+    step       : this._runtime && this._runtime.currentStepNumber,
+    status     : "COMPLETED",
+    description: "Goal completed",
+    result     : isString(answer) ? answer : stringify(answer, __, ""),
+    knowledge  : this._collectSessionKnowledgeForPlan()
+  })
+
   // Persist plan if using external plan
   if (this._enablePlanning && isObject(this._activePlanSource) && isString(this._activePlanSource.path)) {
     // Heuristic phase completion update before persisting
@@ -4235,6 +4653,7 @@ MiniA.prototype._runCommand = function(args) {
       exec = true
     }
 
+    var finalCommand = args.command
     if (exec) {
       var originalCommand = args.command
       var shellPrefix = ""
@@ -4243,7 +4662,7 @@ MiniA.prototype._runCommand = function(args) {
         var overridePrefix = String(args.shellprefix).trim()
         if (overridePrefix.length > 0) shellPrefix = overridePrefix
       }
-      var finalCommand = originalCommand
+      finalCommand = originalCommand
       var shInput = originalCommand
       if (isString(shellPrefix) && shellPrefix.length > 0) {
         var needsSpace = /\s$/.test(shellPrefix)
@@ -4263,6 +4682,17 @@ MiniA.prototype._runCommand = function(args) {
       args.executedCommand = finalCommand
       global.__mini_a_metrics.shell_commands_executed.inc()
     }
+
+    var activityStatus = exec ? "SUCCESS" : "FAILED"
+    this._recordPlanActivity("shell", {
+      step       : this._runtime && this._runtime.currentStepNumber,
+      status     : activityStatus,
+      description: exec
+        ? `Executed shell command: ${finalCommand}`
+        : `Shell command blocked: ${args.command}`,
+      result     : isString(args.output) ? args.output : "",
+      command    : finalCommand
+    })
 
     return args
 }
@@ -4619,7 +5049,11 @@ MiniA.prototype.init = function(args) {
       { name: "planformat", type: "string", default: __ },
       { name: "forceplanning", type: "boolean", default: false },
       { name: "saveplannotes", type: "boolean", default: false },
-      { name: "outputfile", type: "string", default: __ }
+      { name: "outputfile", type: "string", default: __ },
+      { name: "updatefreq", type: "string", default: "auto" },
+      { name: "updateinterval", type: "number", default: 3 },
+      { name: "forceupdates", type: "boolean", default: false },
+      { name: "planlog", type: "string", default: __ }
     ])
 
     // Convert and validate boolean arguments
@@ -4643,9 +5077,13 @@ MiniA.prototype.init = function(args) {
     args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
+    args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
+    args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
+    args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
+    args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
 
     this._savePlanNotes = args.saveplannotes
 
@@ -4674,6 +5112,7 @@ MiniA.prototype.init = function(args) {
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._useTools = args.usetools
     this._useUtils = args.useutils
+    this._configurePlanUpdates(args)
 
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
@@ -5083,6 +5522,26 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       //this.fnI("info", `DEBUG: No preloaded plan to add to knowledge`)
     }
 
+    if (isObject(this._planResumeInfo) && this._planResumeInfo.status === "COMPLETED") {
+      this.fnI("plan", "Previous execution completed. Starting with a fresh plan.")
+    } else if (isObject(this._planResumeInfo) && isArray(this._planResumeInfo.knowledge) && this._planResumeInfo.knowledge.length > 0) {
+      var knowledgeLines = []
+      for (var ri = 0; ri < this._planResumeInfo.knowledge.length; ri++) {
+        var resumeEntry = this._planResumeInfo.knowledge[ri]
+        if (!isString(resumeEntry)) continue
+        knowledgeLines.push(`- ${resumeEntry}`)
+      }
+      if (knowledgeLines.length > 0) {
+        var knowledgeBlock = "\n\n## PLAN KNOWLEDGE:\n" + knowledgeLines.join("\n")
+        if (isString(args.knowledge) && args.knowledge.length > 0) {
+          args.knowledge = args.knowledge + knowledgeBlock
+        } else {
+          args.knowledge = knowledgeBlock.trim()
+        }
+        this.fnI("plan", `Imported ${knowledgeLines.length} knowledge entr${knowledgeLines.length === 1 ? "y" : "ies"} from existing plan.`)
+      }
+    }
+
     // Validate common arguments
     this._validateArgs(args, [
       { name: "rpm", type: "number", default: __ },
@@ -5099,7 +5558,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "shellbanextra", type: "string", default: __ },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
-      { name: "outputfile", type: "string", default: __ }
+      { name: "outputfile", type: "string", default: __ },
+      { name: "updatefreq", type: "string", default: "auto" },
+      { name: "updateinterval", type: "number", default: 3 },
+      { name: "forceupdates", type: "boolean", default: false },
+      { name: "planlog", type: "string", default: __ }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -5124,9 +5587,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
+    args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
+    args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
+    args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
+    args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
 
     if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
+
+    if (args.useplanning && isString(args.planfile) && args.planfile.length > 0) {
+      var planValidation = this._validatePlanFilePath(args.planfile)
+      if (!planValidation.valid) {
+        this.fnI("warn", `Planning disabled: ${planValidation.error}`)
+        args.useplanning = false
+      }
+    }
 
     this._planningAssessment = null
     this._planningStrategy = "off"
@@ -5147,6 +5622,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._useTools = args.usetools
     this._useUtils = args.useutils
+    this._configurePlanUpdates(args)
+    this._sessionArgs = args
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
     if (isDef(args.rtm) && isUnDef(args.rpm)) {
@@ -5588,11 +6065,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Context will hold the history of thoughts, actions, and observations
     // We iterate until requested stop or hitting the consecutive no-progress limit
     for (var step = 0; this.state != "stop"; step++) {
+      runtime.currentStepNumber = step + 1
       if (runtime.earlyStopTriggered === true && runtime.earlyStopHandled !== true) {
         var stopReason = isString(runtime.earlyStopReason) && runtime.earlyStopReason.length > 0
           ? runtime.earlyStopReason
           : "repeated failures"
         this.fnI("warn", `Early stop triggered before step ${step + 1}: ${stopReason}`)
+        this._recordPlanActivity("early-stop", {
+          step       : runtime.currentStepNumber,
+          status     : "IN_PROGRESS",
+          description: `Early stop triggered: ${stopReason}`,
+          result     : stopReason,
+          force      : true
+        })
         runtime.earlyStopHandled = true
         if (runtime.earlyStopContextRecorded !== true) {
           runtime.context.push(`[OBS STOP] Early stop triggered: ${stopReason}`)
@@ -5610,6 +6095,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       if (isNumber(maxSteps) && maxSteps > 0 && runtime.stepsWithoutAction >= maxSteps) {
+        this._recordPlanActivity("step-limit", {
+          step       : runtime.currentStepNumber,
+          status     : "IN_PROGRESS",
+          description: "Approaching step limit",
+          result     : this._summarizeRecentContext(runtime),
+          force      : true
+        })
         break
       }
 
@@ -5629,6 +6121,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         progress: progressEntries.join("\n"),
         state  : stateSnapshot
       })
+      prompt = this._maybeInjectPlanReminder(prompt, runtime.currentStepNumber, maxSteps)
 
       var contextTokens = this._estimateTokens(runtime.context.join(""))
       global.__mini_a_metrics.max_context_tokens.set(Math.max(global.__mini_a_metrics.max_context_tokens.get(), contextTokens))
@@ -6492,6 +6985,13 @@ MiniA.prototype._runChatbotMode = function(options) {
       var currentSteps = global.__mini_a_metrics.steps_taken.get()
       var newAvg = currentSteps === 1 ? stepTime : ((currentAvg * (currentSteps - 1)) + stepTime) / currentSteps
       global.__mini_a_metrics.avg_step_time.set(Math.round(newAvg))
+
+      this._recordPlanActivity("llm-step", {
+        step       : runtime.currentStepNumber,
+        status     : "IN_PROGRESS",
+        description: `Agent reasoning step ${runtime.currentStepNumber}`,
+        result     : this._summarizeRecentContext(runtime)
+      })
 
       if (handled) {
         continue

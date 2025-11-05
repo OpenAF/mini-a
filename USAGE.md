@@ -288,6 +288,10 @@ The `start()` method accepts various configuration options:
 - **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON.
 - **`forceplanning`** (boolean, default: false): Force planning to be enabled even if the complexity assessment suggests it's not needed. Overrides the automatic planning strategy selection.
 - **`saveplannotes`** (boolean, default: false): When enabled, persist execution notes, critique results, and dynamic adjustments within the plan file structure. Useful for maintaining a complete audit trail of plan evolution.
+- **`updatefreq`** (string, default: `auto`): Controls how often Mini-A writes progress to `planfile`. Accepted values are `auto` (every `updateinterval` steps), `always` (after every qualifying action), `checkpoints` (25/50/75/100% of `maxsteps`), or `never`.
+- **`updateinterval`** (number, default: `3`): Step interval used when `updatefreq=auto`. Mini-A updates the plan after this many steps without a recorded update.
+- **`forceupdates`** (boolean, default: false): When true, Mini-A records plan updates even when actions fail so the plan reflects obstacles and retry instructions.
+- **`planlog`** (string, optional): Append every plan update to the specified log file for auditing and debugging.
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
@@ -411,6 +415,33 @@ Mini-A includes sophisticated planning capabilities that adapt to task complexit
 - **External plan management** – When loading plans via `planfile=` or `plancontent=`, Mini-A sets the `_hasExternalPlan` flag to prevent reinitializing planning state. External plans go through the same critique and verification enhancement process as generated plans, and notes/execution history are preserved during format conversions.
 - **Progress metrics & logging** – Records overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned`, etc.) that show up in `getMetrics()`.
 - **Planning mode & conversion utilities** – Generate reusable Markdown/JSON plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`). Use `saveplannotes=true` to persist execution notes within the plan file.
+
+### Automatic Plan Updates
+
+When you provide both `useplanning=true` and `planfile=...`, Mini-A now keeps the plan document in sync with each session:
+
+- After meaningful actions (shell commands, reasoning steps, final answers), the agent appends a block like:
+
+  ```
+  ---
+  ## Progress Update - 2024-05-01T12:34:56Z
+
+  ### Completed Task
+  - **Task:** Executed shell command: ls -1 src
+  - **Status:** SUCCESS
+  - **Result:** ...
+
+  ### Knowledge for Next Execution
+  - src/components now contains the generated scaffolding
+  ```
+
+  Entries are stored under `## Execution History`, while new insights land in `## Knowledge Base` for future runs.
+- If several steps pass without an update (controlled by `updatefreq` and `updateinterval`), the system inserts reminders into the LLM prompt so progress is recorded before continuing.
+- Approaching the `maxsteps` limit automatically triggers a progress snapshot that summarises remaining work for the next execution.
+- Set `forceupdates=true` to log updates even when commands fail—useful for documenting obstacles and retry instructions.
+- Provide `planlog=/path/to/log` to capture every update in a separate append-only log file for auditing.
+
+Plan files created or updated by Mini-A now include the imported knowledge section, so re-running with the same `planfile` resumes with context, outstanding tasks, and accumulated learnings intact.
 
 ### What the plan contains
 
