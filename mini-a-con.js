@@ -907,6 +907,13 @@ try {
   	__con.getTerminal().settings.set("-icanon min 1 -echo")
   	return true
   }
+
+  addOnOpenAFShutdown(() => {
+    if (String(java.lang.System.getProperty("os.name")).match(/Windows/)) return true
+    if (!__initializeCon() || isUnDef(__con)) return false
+  	__con.getTerminal().settings.set("icanon echo")
+  	return true
+  })
   
   while(true) {
     _miniaConReset()

@@ -104,9 +104,8 @@ ojob mini-a.yaml goal="tell me the current time in Tokyo and convert it to New Y
 Key tools exposed by `mcp-time` include:
 
 - `current-time`: Provides detailed information about the current moment for an optional timezone.
-- `convert-time`: Converts a supplied date/time into a different timezone and format.
-- `timezone-difference`: Calculates the offset difference between two timezones at a given moment.
-- `list-timezones`: Lists available timezone identifiers (with optional filtering).
+- `timezone-tools`: Executes timezone utilities by passing `operation` as `convert`, `difference`, or `list` alongside the relevant parameters.
+- `sleep`: Pauses execution for a specified number of milliseconds using OpenAF's `sleep` function.
 
 #### mcp-random
 
