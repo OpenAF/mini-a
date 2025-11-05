@@ -1852,12 +1852,12 @@ MiniA.prototype._validatePlanFilePath = function(planfile) {
 }
 
 MiniA.prototype._configurePlanUpdates = function(args) {
-  var freq = isString(args && args.updatefreq) ? args.updatefreq.toLowerCase().trim() : "auto"
+  var freq = isString(args.updatefreq) ? args.updatefreq.toLowerCase().trim() : "auto"
   var allowed = ["always", "auto", "checkpoints", "never"]
   if (allowed.indexOf(freq) < 0) freq = "auto"
-  var interval = isNumber(args && args.updateinterval) ? Math.max(1, Math.round(args.updateinterval)) : 3
-  var force = toBoolean(args && args.forceupdates)
-  var logFile = isString(args && args.planlog) && args.planlog.length > 0 ? args.planlog : __
+  var interval = isNumber(args.updateinterval) ? Math.max(1, Math.round(args.updateinterval)) : 3
+  var force = args.forceupdates
+  var logFile = isString(args.planlog) && args.planlog.length > 0 ? args.planlog : __
 
   this._planUpdateConfig = { frequency: freq, interval: interval, force: force, logFile: logFile }
   this._planLogFile = logFile
@@ -1871,7 +1871,7 @@ MiniA.prototype._configurePlanUpdates = function(args) {
   }
 
   if (freq === "checkpoints") {
-    var maxSteps = isNumber(args && args.maxsteps) && args.maxsteps > 0 ? Math.round(args.maxsteps) : 0
+    var maxSteps = isNumber(args.maxsteps) && args.maxsteps > 0 ? Math.round(args.maxsteps) : 0
     if (maxSteps > 0) {
       var cp = [0.25, 0.5, 0.75, 1].map(function(f){
         return Math.max(1, Math.round(maxSteps * f))
@@ -2312,7 +2312,7 @@ MiniA.prototype._prepareExternalPlanExecution = function(payload, args) {
     path    : payload.path,
     external: imported.external
   }
-  this._resumeFailedTasks = toBoolean(args && args.resumefailed)
+  this._resumeFailedTasks = toBoolean(args.resumefailed)
   this._loadedPlanPayload = payload
   this._enablePlanning = true
   this._handlePlanUpdate()
@@ -3175,6 +3175,9 @@ MiniA.prototype._extractEmbeddedFinalAction = function(answerPayload) {
 MiniA.prototype._validateArgs = function(args, validations) {
     validations.forEach(v => {
         var value = args[v.name]
+	if (v.type === "string" && isDef(value)) value = String(value)
+	else if (v.type === "boolean" && isDef(value)) value = toBoolean(value)
+	else if (v.type === "number" && isDef(value)) value = Number(value)
         var validated = _$(value, v.path || `args.${v.name}`)
         
         if (v.type === "string") validated = validated.isString()
