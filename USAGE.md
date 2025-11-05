@@ -80,7 +80,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 ## Mode Presets
 
-Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) before applying any explicit flags you provide on the command line.
+Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones) before applying any explicit flags you provide on the command line.
 
 ### Built-in Presets
 
@@ -93,12 +93,12 @@ Mini-A ships with reusable argument bundles so you can switch behaviors without 
 
 ### Creating Custom Presets
 
-Create your own presets by copying `mini-a-modes.yaml` and adding new entries or overriding them locally—the agent loads the YAML on each run, so custom additions are immediately available.
+Create your own presets by creating a `~/.openaf-mini-a_modes.yaml` file in your home directory. Custom modes are automatically merged with the built-in presets from `mini-a-modes.yaml`, with custom definitions taking precedence. The agent loads both YAML files on each run, so custom additions and overrides are immediately available.
 
 **Example custom preset:**
 
 ```yaml
-# In mini-a-modes.yaml
+# In ~/.openaf-mini-a_modes.yaml
 modes:
   mypreset:
     useshell: true
@@ -277,7 +277,7 @@ The `start()` method accepts various configuration options:
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
-- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) to prefill a bundle of related flags
+- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` to prefill a bundle of related flags
 
 #### Planning Controls
 - **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
@@ -352,7 +352,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Mode Presets
-- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
+- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access.
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`).

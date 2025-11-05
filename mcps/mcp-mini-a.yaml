@@ -220,6 +220,28 @@ jobs:
         return
       }
 
+      // Load custom modes from user's home directory
+      var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+      var customModesPath = resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml")
+      if (io.fileExists(customModesPath)) {
+        try {
+          var customLoaded = io.readFileYAML(customModesPath)
+          var customPresets = {}
+          if (isMap(customLoaded) && isMap(customLoaded.modes)) {
+            customPresets = customLoaded.modes
+          } else if (isMap(customLoaded)) {
+            customPresets = customLoaded
+          }
+          // Merge custom modes with default modes (custom overrides defaults)
+          if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
+            presets = merge(presets, customPresets)
+          }
+        } catch(e) {
+          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+          logWarn("Failed to load custom mode presets from '" + customModesPath + "': " + errMsg)
+        }
+      }
+
       if (!isMap(presets) || isUnDef(presets[modeName])) {
         logWarn("Mode '" + modeName + "' requested but not found in presets.")
         targetArgs.__modeApplied = true
