@@ -66,12 +66,14 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
 - **Web UI** - Lightweight embedded chat interface for interactive use
 - **Planning Mode** - Generate and execute structured task plans for complex goals
+  - **Plan Validation** - LLM-based critique validates plans before execution
+  - **Dynamic Replanning** - Automatic plan adjustments when obstacles occur
+  - **Phase Verification** - Auto-generated verification tasks ensure phase completion
 - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets)
 - **Conversation Persistence** - Save and resume conversations across sessions
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
-- **ASCII Sketch Guidance** - Optionally provide lightweight diagrams using plain text blocks when graphical renderers are
-  unavailable (`useascii=true`)
+- **Enhanced Visual Output** - UTF-8 box-drawing characters, ANSI color codes, and emoji for rich terminal displays (`useascii=true`)
 
 ## Documentation
 
@@ -112,8 +114,8 @@ Mini-A ships with complementary components:
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
-| `useplanning` | Enable task planning workflow | `false` |
-| `useascii` | Ask the model to include ASCII sketch suggestions alongside responses | `false` |
+| `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
+| `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` | - |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |

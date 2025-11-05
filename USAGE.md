@@ -121,9 +121,10 @@ Mini-A now includes resilience primitives so long-running sessions can absorb tr
 - **Automatic checkpoints** snapshot the agent state after each successful step; if a transient error strikes, Mini-A restores the last checkpoint and keeps working instead of abandoning the goal.
 - **Error categorization** separates transient hiccups (network, rate limits, timeouts) from permanent problems (invalid tool payloads, unsupported actions) so retries are only attempted when they make sense.
 - **MCP circuit breakers** pause connections that repeatedly fail and log a warning, preventing noisy integrations from derailing the rest of the plan. Mini-A will automatically retry after the cooldown expires.
-- **Persistent error summaries** prepend the latest recovery notes to the context whenever it is summarized, keeping operators informed about what went wrong and how it was resolved.
+- **Early stop mechanism** detects repeated failure patterns and gracefully halts execution before exhausting retry budgets. When triggered, the system sets `runtime.earlyStopTriggered=true` and records the reason (e.g., "repeated failures") in `runtime.earlyStopReason`. Execution notes are automatically extracted and included in the final response to document what was attempted and why the agent stopped.
+- **Persistent error summaries** prepend the latest recovery notes to the context whenever it is summarized, keeping operators informed about what went wrong and how it was resolved. The `_extractExecutionNotes()` method collects recent errors, early stop signals, and other runtime events to provide comprehensive troubleshooting context.
 
-All of these behaviors are enabled by default. Use verbose or debug logging (`verbose=true` or `debug=true`) to watch the retry, recovery, and circuit-breaker messages in real time.
+All of these behaviors are enabled by default. Use verbose or debug logging (`verbose=true` or `debug=true`) to watch the retry, recovery, circuit-breaker, and early stop messages in real time.
 
 ## Web UI quick start
 
@@ -282,8 +283,11 @@ The `start()` method accepts various configuration options:
 - **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
 - **`planfile`** (string): When planning, write the generated plan to this path. In execution mode, load an existing plan from this path (Markdown `.md` or JSON `.json`) and keep it in sync as tasks complete.
 - **`planformat`** (string): Override the plan output format during `planmode` (`markdown` or `json`). Defaults to the detected extension of `planfile`, or Markdown when unspecified.
+- **`plancontent`** (string): Provide plan content directly as a string instead of loading from a file. Useful for programmatic plan injection.
 - **`resumefailed`** (boolean, default: false): Resume execution from the last failed task when re-running Mini-A against a partially completed plan file.
 - **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON.
+- **`forceplanning`** (boolean, default: false): Force planning to be enabled even if the complexity assessment suggests it's not needed. Overrides the automatic planning strategy selection.
+- **`saveplannotes`** (boolean, default: false): When enabled, persist execution notes, critique results, and dynamic adjustments within the plan file structure. Useful for maintaining a complete audit trail of plan evolution.
 
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
@@ -332,8 +336,12 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 #### Visual Guidance
 - **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
 - **`usecharts`** (boolean, default: false): Hint the model to provide Chart.js snippets for data visualization tasks
-- **`useascii`** (boolean, default: false): Encourage ASCII sketch recommendations for lightweight diagramming when graphical
-  renderers are unavailable or disabled
+- **`useascii`** (boolean, default: false): Encourage enhanced UTF-8/ANSI visual output for rich terminal displays. When enabled, Mini-A guides the model to use:
+  - **Full UTF-8 characters**: Box-drawing (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬), arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇)
+  - **Strategic emoji**: Status indicators (✅❌⚠️🔴🟢🟡), workflow symbols (🔄🔁⏸️▶️⏹️), category icons (📁📂📄🔧⚙️🔑🔒), and semantic markers (💡🎯🚀⭐🏆)
+  - **ANSI color codes**: Semantic highlighting for errors (red), success (green), warnings (yellow), info (blue/cyan), with support for bold, underline, backgrounds, and combined styles. Colors are applied outside markdown code blocks for proper terminal rendering
+  - **Markdown tables**: Preferred format for tabular data with colored cell content for enhanced readability
+  - **Progress indicators**: Block characters (█▓▒░), fractions (▏▎▍▌▋▊▉), spinners (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏), and percentage displays with color gradients
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
@@ -394,12 +402,15 @@ Use `planmode=true` when you only need Mini-A to design the plan. The runtime ga
 
 Mini-A includes sophisticated planning capabilities that adapt to task complexity:
 
-- **Goal-aware strategy selection** – Inspects the goal upfront and disables planning for trivial requests, keeps a short linear task list for moderate work, and creates a nested plan tree for complex missions.
+- **Goal-aware strategy selection** – Inspects the goal upfront and disables planning for trivial requests, keeps a short linear task list for moderate work, and creates a nested plan tree for complex missions. The `_shouldEnablePlanning()` method centralizes all planning enablement logic, considering chatbot mode, user preferences, complexity assessment, and explicit plan overrides.
 - **Automatic decomposition & checkpoints** – Seeds `state.plan` with structured steps, intermediate checkpoints, and progress percentages so the LLM can track execution without handcrafting the scaffold from scratch.
 - **Feasibility validation** – Pre-checks each step against available shell access and registered MCP tools, blocking impossible tasks and surfacing actionable warnings in the log.
-- **Dynamic replanning hooks** – Marks the active step as `blocked` whenever the runtime raises an error, flagging `state.plan.meta.needsReplan=true` so the model knows to adjust its strategy.
-- **Progress metrics & logging** – Records overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_replanned`, etc.) that show up in `getMetrics()`.
-- **Planning mode & conversion utilities** – Generate reusable Markdown/JSON plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`).
+- **LLM-based plan critique** – Before executing any plan, Mini-A validates it using the `_critiquePlanWithLLM()` method. The LLM evaluates the plan structure, identifies missing work, quality risks, and unclear phases, returning a verdict of `PASS` or `REVISE`. Failed critiques set `state.plan.meta.needsReplan=true` and increment the `plans_validation_failed` metric. This critique runs for both generated plans and externally loaded plans, ensuring all execution starts with validated task structures.
+- **Phase verification tasks** – Mini-A automatically adds verification tasks to each phase via `_ensurePhaseVerificationTasks()`. If a phase lacks an explicit verification step, the system injects one titled "Verify that [Phase Name] outcomes satisfy the phase goals." These tasks are marked with `verification: true` and ensure each phase is properly validated before proceeding.
+- **Dynamic replanning** – When obstacles occur during execution, the `_applyDynamicReplanAdjustments()` method dynamically injects mitigation tasks into the plan without requiring full replanning. Blocked nodes receive child tasks that address the specific obstacle, and the system tracks adjustments via `state.plan.meta.dynamicAdjustments` to avoid duplicate mitigations. This allows the agent to adapt to failures while preserving the overall plan structure.
+- **External plan management** – When loading plans via `planfile=` or `plancontent=`, Mini-A sets the `_hasExternalPlan` flag to prevent reinitializing planning state. External plans go through the same critique and verification enhancement process as generated plans, and notes/execution history are preserved during format conversions.
+- **Progress metrics & logging** – Records overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned`, etc.) that show up in `getMetrics()`.
+- **Planning mode & conversion utilities** – Generate reusable Markdown/JSON plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`). Use `saveplannotes=true` to persist execution notes within the plan file.
 
 ### What the plan contains
 
@@ -1181,7 +1192,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `llm_calls` | `normal`, `low_cost`, `total`, `fallback_to_main` | Request volume per model tier and how often the session escalated back to the main model after low-cost failures. |
 | `goals` | `achieved`, `failed`, `stopped` | High-level result of the current run. |
 | `actions` | `thoughts_made`, `thinks_made`, `finals_made`, `mcp_actions_executed`, `mcp_actions_failed`, `shell_commands_executed`, `shell_commands_blocked`, `shell_commands_approved`, `shell_commands_denied`, `unknown_actions` | Operational footprint: mental steps, final responses, MCP usage, and shell gatekeeping outcomes. |
-| `planning` | `disabled_simple_goal`, `plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned` | Visibility into the planning engine—when it was bypassed, generated plans, validation passes/failures, and replans triggered by runtime feedback. |
+| `planning` | `disabled_simple_goal`, `plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned` | Visibility into the planning engine—when it was bypassed, generated plans, LLM critique validation passes/failures, and replans triggered by runtime feedback. The `plans_validated` counter tracks all LLM critiques run, while `plans_validation_failed` counts verdicts of `REVISE`. Dynamic replanning adjustments are logged separately in plan metadata. |
 | `performance` | `steps_taken`, `total_session_time_ms`, `avg_step_time_ms`, `max_context_tokens`, `llm_estimated_tokens`, `llm_actual_tokens`, `llm_normal_tokens`, `llm_lc_tokens` | Execution pacing and token consumption for cost analysis. |
 | `behavior_patterns` | `escalations`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that highlight unhealthy loops or parser problems. |
 | `summarization` | `summaries_made`, `summaries_skipped`, `summaries_forced`, `context_summarizations`, `summaries_tokens_reduced`, `summaries_original_tokens`, `summaries_final_tokens` | Auto-summarization activity and token savings. |
