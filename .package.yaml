@@ -121,7 +121,7 @@ filesHash:
   examples/document.yaml: 19871e428a840eb2b726a4167664a0f27926a66d
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
-  mcps/README.md: cdf68c5b9b999347d5d28aed2c0345a6dc9130b8
+  mcps/README.md: 245638921e4f3f55996d46731791a5b27d765ebb
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
@@ -137,10 +137,10 @@ filesHash:
   mcps/mcp-s3.yaml: 845a363c5ca9d291a1ab24dad80972b6651b1a29
   mcps/mcp-shell.yaml: ce8b702efa515b704720f0d4e73a0093c1e4b699
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
-  mcps/mcp-time.yaml: 5b75f2b73f7650f778f1e80309ba922b006c04f2
+  mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: 9d6b5c89689426419f2f3aaf36b925aa7bbaa732
-  mini-a-con.js: a41733806cf2a110740ea3df97eb834e5209e9c4
+  mini-a-con.js: ae0afc0c1fa34498c798ad7497f3c00b8071a440
   mini-a-file-tool.js: 583454ffc176c3428319f577f860329524e8a6c2
   mini-a-main.yaml: 5652337744c6782fb25625256860a433eee7997b
   mini-a-modes.yaml: d148e52565d727674fe636994ec3847b06b3a7aa
