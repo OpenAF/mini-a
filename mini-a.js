@@ -322,9 +322,9 @@ MiniA.buildVisualKnowledge = function(options) {
 
   visualParts.push(
     "Visual output guidance (concise):\n\n" +
-    "- Default to including a diagram, chart, or ASCII sketch whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
+    "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
     "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
-    "- Never mention the technical implementation (Mermaid, Chart.js, ASCII renderer, etc.); refer only to the visual type."
+    "- Never mention the technical implementation (Mermaid, Chart.js, ANSI codes, etc.); refer only to the visual type."
   )
 
   if (useDiagrams) {
@@ -359,12 +359,27 @@ MiniA.buildVisualKnowledge = function(options) {
 
   if (useAscii) {
     visualParts.push(
-      "ASCII visuals:\n" +
-      "  - Use ```text``` (aliases: ascii, plaintext) fences so spacing and alignment remain intact.\n" +
-      "  - Compose structures with simple characters (+, -, |, /, or \\) or emoji to highlight steps, statuses, or relationships.\n" +
-      "  - Keep width under ~80 characters and ensure the sketch is readable in monospaced fonts.\n" +
-      "  - Provide a brief caption immediately after the fence explaining the insight.\n" +
-      "  - Favor ASCII sketches when a lightweight visual aids clarity but full diagrams/charts would be excessive."
+      "ASCII/UTF-8 visuals with ANSI colors:\n" +
+      "  - ALWAYS prefer markdown tables for tabular data (using | and - characters).\n" +
+      "  - Use full UTF-8 characters for non-tabular visuals: box-drawing (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬), arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇).\n" +
+      "  - Leverage emoji strategically: status indicators (✅❌⚠️🔴🟢🟡), workflow symbols (🔄🔁⏸️▶️⏹️), category icons (📁📂📄🔧⚙️🔑🔒), and semantic markers (💡🎯🚀⭐🏆).\n" +
+      "  - Apply ANSI color codes for semantic highlighting (ONLY outside markdown code blocks):\n" +
+      "    • Errors/critical: \\u001b[31m (red), \\u001b[1;31m (bold red)\n" +
+      "    • Success/positive: \\u001b[32m (green), \\u001b[1;32m (bold green)\n" +
+      "    • Warnings: \\u001b[33m (yellow), \\u001b[1;33m (bold yellow)\n" +
+      "    • Info/headers: \\u001b[34m (blue), \\u001b[1;34m (bold blue), \\u001b[36m (cyan)\n" +
+      "    • Emphasis: \\u001b[1m (bold), \\u001b[4m (underline), \\u001b[7m (inverse)\n" +
+      "    • Backgrounds: \\u001b[41m (red bg), \\u001b[42m (green bg), \\u001b[43m (yellow bg), \\u001b[44m (blue bg)\n" +
+      "    • Always reset with \\u001b[0m after colored text\n" +
+      "    • Combine codes with semicolons: \\u001b[1;32;4m (bold green underline)\n" +
+      "    • IMPORTANT: Never use ANSI codes inside markdown code blocks (```); color only plain text output\n" +
+      "  - Create hierarchical structures with indentation and tree symbols (├── └── │ ─).\n" +
+      "  - Design progress bars using blocks (█▓▒░), fractions (▏▎▍▌▋▊▉), or percentage indicators.\n" +
+      "  - Use spinners/activity indicators: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ or ◐◓◑◒ or ⣾⣽⣻⢿⡿⣟⣯⣷.\n" +
+      "  - Use UTF-8 box-drawing for diagrams, panels, or containers, NOT for tables.\n" +
+      "  - Combine ANSI colors with markdown tables by coloring cell content, not borders.\n" +
+      "  - Use color gradients for metrics: green→yellow→red based on thresholds.\n" +
+      "  - Assume output is terminal monospaced font; align visuals accordingly not needing a markdown code block."
     )
   }
 
@@ -383,9 +398,13 @@ MiniA.buildVisualKnowledge = function(options) {
     nextIndex++
   }
   if (useAscii) {
-    checklist += "\n" + nextIndex + ". Quick overviews or lightweight structure -> ASCII sketch with aligned characters or emoji."
+    checklist += "\n" + nextIndex + ". Quick overviews or lightweight structure -> UTF-8 box-drawing diagrams with ANSI color coding for status/hierarchy."
     nextIndex++
-    checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ASCII table or emoticon map as fallback."
+    checklist += "\n" + nextIndex + ". Progress tracking or metrics -> ANSI-colored progress bars, gauges, or sparklines with emoji indicators."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". Lists or comparisons -> Colored bullet points with semantic emoji (✅❌⚠️) and UTF-8 symbols."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ANSI-enhanced ASCII table or emoticon map as fallback."
     nextIndex++
   }
   checklist += "\n\nIf a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."

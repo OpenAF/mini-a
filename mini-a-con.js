@@ -53,6 +53,7 @@ try {
   var hintColor    = "FG(249)"
   var errorColor   = "FG(196)"
   var successColor = "FG(112)"
+  var numericColor = "FG(155)"
   var historyFileName       = ".openaf-mini-a_history"
   var historyHome           = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
   var historyFilePath       = resolveCanonicalPath(historyHome, historyFileName)
@@ -131,8 +132,7 @@ try {
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
     toolcachettl   : { type: "number", description: "Default MCP result cache TTL (ms)" },
     goalprefix     : { type: "string", description: "Optional prefix automatically added to every goal" },
-    shell          : { type: "string", description: "Prefix applied to each shell command" },
-    shellprefix    : { type: "string", description: "Override shell prefix when converting plans" },
+    shellprefix    : { type: "string", description: "Prefix applied to each shell command" },
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
@@ -398,14 +398,14 @@ try {
         share   : (share * 100).toFixed(1) + "%",
         messages: section.messages,
         //bar     : ow.format.string.progress(section.tokens, stats.totalTokens, 0, 20, "█", "░")
-        bar     : colorifyText(ow.format.string.progress(section.tokens, stats.totalTokens, 0, 25), "RESET")
+        bar     : colorifyText(ow.format.string.progress(section.tokens, stats.totalTokens, 0, 35), "RESET")
       }
     })
 
     print(colorifyText("Conversation context usage", accentColor))
     print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
     var methodLabel = stats.estimateMethod === "model" ? "model-based" : "approximate"
-    print(colorifyText("Total messages: " + stats.messageCount + " | Estimated tokens: ~" + stats.totalTokens + " (" + methodLabel + ")", hintColor))
+    print(colorifyText("Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | Estimated tokens: ~", hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
     if (isString(stats.path) && stats.path.length > 0) {
       print(colorifyText("Conversation file: " + stats.path, hintColor))
     }
@@ -506,7 +506,7 @@ try {
     summaryText = summaryText.trim()
 
     var summaryEntry = {
-      role   : "assistant",
+      role: "assistant",
       content: `Context summary (${summarizeCandidates.length} messages condensed on ${new Date().toISOString()}): ${summaryText}`
     }
 
@@ -520,15 +520,27 @@ try {
     try {
       io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
-        try { activeAgent.llm.getGPT().setConversation(newConversation) } catch(ignoreSetConversation) {}
+        try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
       }
       var previousTokens = stats.totalTokens
       var updatedStats = refreshConversationStats(activeAgent)
       var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
       var reduction = previousTokens > 0 ? Math.max(0, previousTokens - afterTokens) : 0
-      print(colorifyText(`Conversation compacted. Preserved ${keepTail.length} recent message${keepTail.length === 1 ? "" : "s"}.`, successColor))
+      print(
+        colorifyText("Conversation compacted. Preserved ", successColor) +
+        colorifyText(String(keepTail.length), numericColor) +
+        colorifyText(" recent message" + (keepTail.length === 1 ? "" : "s") + ".", successColor)
+      )
       if (previousTokens > 0) {
-        print(colorifyText(`Estimated tokens: ~${previousTokens} → ~${afterTokens} (saved ~${reduction}).`, hintColor))
+        print(
+          colorifyText("Estimated tokens: ~", hintColor) +
+          colorifyText(String(previousTokens), numericColor) +
+          colorifyText(" → ~", hintColor) +
+          colorifyText(String(afterTokens), numericColor) +
+          colorifyText(" (saved ~", hintColor) +
+          colorifyText(String(reduction), numericColor) +
+          colorifyText(").", hintColor)
+        )
       }
     } catch (compactError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to compact conversation: " + compactError, errorColor))
