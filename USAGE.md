@@ -176,7 +176,7 @@ Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/
 
 Run the Mini‑A browser UI inside a container by passing the proper `OAF_MODEL` configuration for your LLM provider and exposing port `12345`. The following examples mount a `history/` directory from the host so conversation transcripts persist across runs.
 
-> **Tip:** Replace secrets like API keys or session tokens with values from your shell environment or a secure secret manager. The `OPACKS` and `libs` flags load the provider- and Mini‑A-specific OpenAF packs and helper scripts.
+> **Tip:** Replace secrets like API keys or session tokens with values from your shell environment or a secure secret manager. The `OPACKS` and `libs` flags load the provider- and Mini‑A-specific OpenAF packs and helper scripts. When you always need the same helpers (for example `@AWS/aws.js` for Bedrock), set `OAF_MINI_A_LIBS` so Mini‑A picks them up automatically without having to pass `libs="..."` every time.
 
 #### AWS Bedrock (Mistral 7B Instruct)
 
@@ -194,7 +194,7 @@ docker run --rm -ti \
   onport=12345 chatbotmode=true \
   usehistory=true historykeep=true historypath=/tmp/history \
   useattach=true \
-  libs="@AWS/aws.js"
+  libs="@AWS/aws.js"  # optional if OAF_MINI_A_LIBS is set
 ```
 
 #### AWS Bedrock (OpenAI OSS 20B)
@@ -213,7 +213,7 @@ docker run --rm -ti \
   onport=12345 chatbotmode=true \
   usehistory=true historykeep=true historypath=/tmp/history \
   useattach=true \
-  libs="@AWS/aws.js"
+  libs="@AWS/aws.js"  # optional if OAF_MINI_A_LIBS is set
 ```
 
 #### OpenAI (GPT‑5 Mini)

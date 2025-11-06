@@ -190,6 +190,15 @@ jobs:
 # -----------------------
 - name: apply-mode-preset
   exec: | #js
+    if (!(isString(args.libs) && args.libs.trim().length > 0)) {
+      var envLibs = args.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
+      if (isString(envLibs) && envLibs.trim().length > 0) {
+        args.libs = envLibs.trim()
+        //log("Using libs from OAF_MINI_A_LIBS environment variable.")
+      }
+      global._args = args
+    }
+
     if (args.__modeApplied === true) return
     if (!isString(args.mode)) return
     var modeName = args.mode.trim()
