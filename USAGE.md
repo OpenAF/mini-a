@@ -26,6 +26,8 @@ Mini-A now ships with an interactive console so you can start the agent directly
 
 All command-line flags documented below work with the console (`opack exec mini-a` / `mini-a`) as well as `mini-a.sh` and `mini-a.yaml`.
 
+Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
+
 ## Model Configuration
 
 ### Single Model Setup

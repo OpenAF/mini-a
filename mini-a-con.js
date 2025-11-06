@@ -211,7 +211,7 @@ try {
 
   if (consoleReader) {
     try {
-      var slashParameterHints = { set: "=", toggle: "", unset: "" }
+      var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -669,9 +669,14 @@ try {
   /**
    * Prints the current session options in a table format.
    * Each row contains the parameter name, its value, and a description.
+   * Optionally filters rows by a case-insensitive prefix.
    */
-  function describeOptions() {
-    var rows = Object.keys(parameterDefinitions).sort().map(function(key) {
+  function describeOptions(prefix) {
+    var normalizedPrefix = isString(prefix) ? prefix.trim().toLowerCase() : ""
+    var rows = Object.keys(parameterDefinitions).sort().filter(function(key) {
+      if (normalizedPrefix.length === 0) return true
+      return key.indexOf(normalizedPrefix) === 0
+    }).map(function(key) {
       var def = parameterDefinitions[key]
       var active = sessionOptions[key]
       var value
@@ -680,6 +685,14 @@ try {
       else value = "" + active
       return { parameter: key, value: value, description: def.description }
     })
+    if (rows.length === 0) {
+      var shownPrefix = isString(prefix) ? prefix : (isUnDef(prefix) ? "" : String(prefix))
+      var filterMessage = shownPrefix.length > 0
+        ? "No parameters match prefix '" + shownPrefix + "'."
+        : "No parameters available."
+      print(colorifyText(filterMessage, hintColor))
+      return
+    }
     print( printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true) )
   }
 
@@ -892,7 +905,7 @@ try {
       "  " + colorifyText("/set", "BOLD") + colorifyText(" <key> <value>  Update a Mini-A parameter (use '", hintColor) + colorifyText("\"\"\"", accentColor) + colorifyText("' for multi-line values)", hintColor),
       "  " + colorifyText("/toggle", "BOLD") + colorifyText(" <key>       Toggle boolean parameter", hintColor),
       "  " + colorifyText("/unset", "BOLD") + colorifyText(" <key>        Clear a parameter", hintColor),
-      "  " + colorifyText("/show", "BOLD") + colorifyText("               Display configured parameters", hintColor),
+      "  " + colorifyText("/show", "BOLD") + colorifyText(" [prefix]      Display configured parameters (filtered by prefix)", hintColor),
       "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
       "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation", hintColor),
@@ -950,6 +963,11 @@ try {
       }
       if (command === "show") {
         describeOptions()
+        continue
+      }
+      if (command.indexOf("show ") === 0) {
+        var prefixFilter = command.substring(5).trim()
+        describeOptions(prefixFilter.length > 0 ? prefixFilter : __)
         continue
       }
       if (command === "reset") {

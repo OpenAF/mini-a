@@ -24,6 +24,7 @@ Two steps to use:
    opack exec mini-a goal="your goal"
    ```
    If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
+   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`.
 
 Shell access is disabled by default for safety; add `useshell=true` when you explicitly want the agent to run commands.
 
