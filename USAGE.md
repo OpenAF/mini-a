@@ -7,11 +7,17 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
+- **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
+- **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 # Optional: Set a low-cost model for routine operations
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+# Optional: Set console history size
+export OAF_MINI_A_CON_HIST_SIZE=1000
+# Optional: Set libraries to load automatically
+export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
 ```
 
 ## Command-Line Execution

@@ -87,6 +87,15 @@ try {
       consoleReader = con.getConsoleReader()
       commandHistory = new Packages.jline.console.history.FileHistory(new java.io.File(historyFilePath))
       consoleReader.setHistory(commandHistory)
+
+      // Set history max size from environment variable if defined
+      var historySize = getEnv("OAF_MINI_A_CON_HIST_SIZE")
+      if (isDef(historySize) && isString(historySize) && historySize.trim().length > 0) {
+        var numericHistorySize = parseInt(historySize, 10)
+        if (!isNaN(numericHistorySize) && numericHistorySize > 0) {
+          con.getConsoleReader().getHistory().setMaxSize(numericHistorySize)
+        }
+      }
     }
   } catch (historyError) {
     commandHistory = __
