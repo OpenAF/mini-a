@@ -1136,6 +1136,7 @@ MiniA.prototype._preparePlanning = function(args) {
 MiniA.prototype._detectPlanFormatFromFilename = function(filename) {
   if (!isString(filename) || filename.length === 0) return __
   if (filename.toLowerCase().endsWith(".json")) return "json"
+  if (filename.toLowerCase().endsWith(".yaml") || filename.toLowerCase().endsWith(".yml")) return "yaml"
   if (filename.toLowerCase().endsWith(".md") || filename.toLowerCase().endsWith(".markdown")) return "markdown"
   return __
 }
@@ -1149,6 +1150,11 @@ MiniA.prototype._detectPlanFormatFromContent = function(content) {
       jsonParse(trimmed, __, __, true)
       return "json"
     } catch(e) {}
+  }
+  // Detect YAML by checking for common YAML patterns (key: value, array indicators)
+  if (/^(goal|phases|dependencies|knowledgeBase|notes|executionHistory):\s*/m.test(trimmed) &&
+      !/^#\s*Plan:/m.test(trimmed) && !/{.*}/s.test(trimmed)) {
+    return "yaml"
   }
   if (/^- \[[ xX]\]/m.test(trimmed) || /^##\s+Phase/m.test(trimmed)) return "markdown"
   if (/^#\s*Plan:/m.test(trimmed)) return "markdown"
@@ -1429,12 +1435,23 @@ MiniA.prototype._serializeMarkdownPlan = function(plan) {
   return lines.join("\n").trim() + "\n"
 }
 
+MiniA.prototype._serializeYAMLPlan = function(plan) {
+  plan = this._ensurePlanFooter(isObject(plan) ? clone(plan, true) : {})
+  try {
+    var yamlString = af.toYAML(plan)
+    return isString(yamlString) ? yamlString : ""
+  } catch(e) {
+    this.fnI("warn", `Failed to serialize plan to YAML: ${e}`)
+    return ""
+  }
+}
+
 /**
  * Loads plan content from a file path or inline string.
- * Supports both JSON and Markdown formats, auto-detecting the format if not specified.
- * 
+ * Supports JSON, YAML, and Markdown formats, auto-detecting the format if not specified.
+ *
  * @param {string} source - File path or inline plan content string
- * @param {string} format - Optional format override ("json" or "markdown")
+ * @param {string} format - Optional format override ("json", "yaml", or "markdown")
  * @returns {Object|undefined} Plan object with format, plan data, and raw content, or undefined if loading fails
  */
 MiniA.prototype._loadPlanContent = function(source, format) {
@@ -1455,6 +1472,16 @@ MiniA.prototype._loadPlanContent = function(source, format) {
     var parsed = jsonParse(content, __, __, true)
     if (!isObject(parsed)) return __
     return { format: "json", plan: this._ensurePlanFooter(parsed), raw: content }
+  }
+  if (detectedFormat === "yaml") {
+    try {
+      var parsedYaml = af.fromYAML(content)
+      if (!isObject(parsedYaml)) return __
+      return { format: "yaml", plan: this._ensurePlanFooter(parsedYaml), raw: content }
+    } catch(e) {
+      this.fnI("warn", `Failed to parse YAML plan: ${e}`)
+      return __
+    }
   }
   if (detectedFormat === "markdown") {
     var parsedMd = this._parseMarkdownPlan(content)
@@ -1510,6 +1537,11 @@ MiniA.prototype._convertPlanObject = function(planObject, format) {
   if (!isObject(planObject)) return __
   if (format === "json") {
     return stringify(planObject, __, "  ") + "\n"
+  }
+  if (format === "yaml") {
+    // YAML format uses the same object structure as JSON
+    // We'll use a helper to convert to YAML string
+    return this._serializeYAMLPlan(planObject)
   }
   return this._serializeMarkdownPlan(planObject)
 }
@@ -1804,8 +1836,40 @@ MiniA.prototype._persistExternalPlan = function() {
   // (removed diagnostics block)
     // (diagnostic logging removed)
 
-    io.writeFileString(this._activePlanSource.path, serialized)
-    this.fnI("plan", `Plan persisted (${hasExternal ? 'external mapping' : 'internal snapshot'}) to ${this._activePlanSource.path}`)
+    // Check if content has changed before writing
+    var currentContent = ""
+    var hasChanged = true
+    if (io.fileExists(this._activePlanSource.path)) {
+      try {
+        currentContent = io.readFileString(this._activePlanSource.path)
+        hasChanged = (currentContent !== serialized)
+      } catch(eRead) {
+        this.fnI('warn', 'Failed to read current plan for comparison: ' + eRead)
+        hasChanged = true
+      }
+    }
+
+    if (!hasChanged) {
+      this.fnI("plan", `Plan content unchanged, skipping write to ${this._activePlanSource.path}`)
+    } else {
+      // Create backup file before writing (only if content changed)
+      if (io.fileExists(this._activePlanSource.path)) {
+        try {
+          var timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')
+          var pathParts = this._activePlanSource.path.split('/')
+          var filename = pathParts.pop()
+          var dir = pathParts.join('/')
+          var backupPath = (dir ? dir + '/' : '') + filename + '.' + timestamp + '.bak'
+          io.writeFileString(backupPath, currentContent)
+          this.fnI("plan", `Backup created at ${backupPath}`)
+        } catch(eBackup) {
+          this.fnI('warn', 'Failed to create backup: ' + eBackup)
+        }
+      }
+
+      io.writeFileString(this._activePlanSource.path, serialized)
+      this.fnI("plan", `Plan persisted (${hasExternal ? 'external mapping' : 'internal snapshot'}) to ${this._activePlanSource.path}`)
+    }
   } catch(e) {
     this.fnI("warn", `Failed to persist plan to ${this._activePlanSource.path}: ${e}`)
   }
@@ -2030,8 +2094,22 @@ MiniA.prototype._safePersistPlan = function(context) {
         var backupPath = this._activePlanSource.path + ".backup"
         var serialized = this._convertPlanObject(this._activePlanSource.external, this._activePlanSource.format || "markdown")
         if (isString(serialized) && serialized.length > 0) {
-          io.writeFileString(backupPath, serialized)
-          this._logPlanUpdate(`Plan saved to backup: ${backupPath}`, "WARN")
+          // Check if backup content has changed before writing
+          var needsWrite = true
+          if (io.fileExists(backupPath)) {
+            try {
+              var existingBackup = io.readFileString(backupPath)
+              needsWrite = (existingBackup !== serialized)
+            } catch(eReadBackup) {
+              needsWrite = true
+            }
+          }
+          if (needsWrite) {
+            io.writeFileString(backupPath, serialized)
+            this._logPlanUpdate(`Plan saved to backup: ${backupPath}`, "WARN")
+          } else {
+            this._logPlanUpdate(`Backup content unchanged, skipping write to ${backupPath}`, "INFO")
+          }
           return true
         }
       }
@@ -2506,7 +2584,7 @@ MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
   }
 
   var formatInstructions
-  if (format === "json") {
+  if (format === "json" || format === "yaml") {
     formatInstructions = "Return a single JSON object matching this structure: {\n  \"goal\": string,\n  \"phases\": [ { \"name\": string, \"tasks\": [ { \"description\": string, \"completed\": false, \"dependencies\": [strings], \"suggestSubplan\": boolean? } ], \"suggestions\": [strings], \"references\": [strings] } ],\n  \"dependencies\": [strings],\n  \"notes\": [strings],\n  \"executionHistory\": [strings]\n}." +
       "\n\nJSON FIELD GUIDELINES:" +
       "\n- 'goal': Clear, measurable objective statement" +
@@ -2596,10 +2674,13 @@ MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
 MiniA.prototype._runPlanningMode = function(args, controls) {
   var targetFormat = this._detectPlanFormatFromFilename(args.planfile) || (args.planfile ? "markdown" : (args.planformat || "markdown"))
   if (isString(args.planformat)) {
-    targetFormat = args.planformat.toLowerCase() === "json" ? "json" : targetFormat
-    if (args.planformat.toLowerCase() === "markdown") targetFormat = "markdown"
+    var formatLower = args.planformat.toLowerCase()
+    if (formatLower === "json") targetFormat = "json"
+    else if (formatLower === "yaml" || formatLower === "yml") targetFormat = "yaml"
+    else if (formatLower === "markdown" || formatLower === "md") targetFormat = "markdown"
   }
-  if (targetFormat !== "json") targetFormat = "markdown"
+  // Default to markdown if format is not one of the supported types
+  if (targetFormat !== "json" && targetFormat !== "yaml") targetFormat = "markdown"
 
   this.fnI("plan", `Generating plan in ${targetFormat.toUpperCase()} format...`)
 
@@ -2616,7 +2697,8 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
 
   var responseWithStats = this._withExponentialBackoff(() => {
     if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
-    if (targetFormat === "json" && isFunction(plannerLLM.promptJSONWithStats)) {
+    // Use JSON prompt for both json and yaml formats (yaml uses same structure as json)
+    if ((targetFormat === "json" || targetFormat === "yaml") && isFunction(plannerLLM.promptJSONWithStats)) {
       return plannerLLM.promptJSONWithStats(prompt)
     }
     if (isFunction(plannerLLM.promptWithStats)) return plannerLLM.promptWithStats(prompt)
@@ -2641,14 +2723,14 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   planContent = this._cleanCodeBlocks(planContent)
 
   var payload
-  if (targetFormat === "json") {
+  if (targetFormat === "json" || targetFormat === "yaml") {
     var parsed = jsonParse(planContent, __, __, true)
     if (!isObject(parsed)) {
       throw "Failed to parse plan JSON output."
     }
-    payload = { format: "json", plan: this._ensurePlanFooter(parsed), raw: planContent }
+    payload = { format: targetFormat, plan: this._ensurePlanFooter(parsed), raw: planContent }
     payload.plan = this._ensurePhaseVerificationTasks(payload.plan)
-    payload.raw = this._convertPlanObject(payload.plan, "json")
+    payload.raw = this._convertPlanObject(payload.plan, targetFormat)
   } else {
     payload = { format: "markdown", plan: this._parseMarkdownPlan(planContent) || {}, raw: planContent }
     payload.plan = this._ensurePhaseVerificationTasks(this._ensurePlanFooter(payload.plan))
@@ -2664,8 +2746,22 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
 
   if (isString(args.planfile) && args.planfile.length > 0) {
     try {
-      io.writeFileString(args.planfile, this._convertPlanObject(payload.plan, payload.format))
-      this.fnI("plan", `Plan saved to ${args.planfile}`)
+      var planContent = this._convertPlanObject(payload.plan, payload.format)
+      var shouldWrite = true
+      if (io.fileExists(args.planfile)) {
+        try {
+          var existingContent = io.readFileString(args.planfile)
+          shouldWrite = (existingContent !== planContent)
+        } catch(eRead) {
+          shouldWrite = true
+        }
+      }
+      if (shouldWrite) {
+        io.writeFileString(args.planfile, planContent)
+        this.fnI("plan", `Plan saved to ${args.planfile}`)
+      } else {
+        this.fnI("plan", `Plan content unchanged, skipping write to ${args.planfile}`)
+      }
     } catch(e) {
       this.fnI("warn", `Failed to save plan to ${args.planfile}: ${e}`)
     }
@@ -3435,21 +3531,6 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   if (this._enablePlanning && isObject(this._activePlanSource) && isString(this._activePlanSource.path)) {
     // Heuristic phase completion update before persisting
     this._markPhaseCompletionFromAnswer(answer)
-    // Attempt LLM-assisted plan rewrite (checkbox/status updates) if markdown
-    if ((this._activePlanSource.format || '').toLowerCase() === 'markdown' && isString(this._activePlanSource.path)) {
-      try {
-        var originalPlanMd = io.readFileString(this._activePlanSource.path)
-        if (isString(originalPlanMd) && originalPlanMd.length > 0) {
-          var rewritten = this._llmRewritePlan(originalPlanMd, answer, args) || originalPlanMd
-          if (isString(rewritten) && rewritten.trim().length > 0 && rewritten !== originalPlanMd) {
-            io.writeFileString(this._activePlanSource.path, rewritten)
-            this.fnI('plan', 'Plan file updated via LLM rewrite before internal persistence pass.')
-          }
-        }
-      } catch(ePlanRW) {
-        this.fnI('warn', 'LLM rewrite of plan failed: ' + ePlanRW)
-      }
-    }
     this._appendExecutionNotesToPlan(args)
     this._persistExternalPlan()
     this.fnI("plan", `Plan persisted to ${this._activePlanSource.path}`)
@@ -3522,44 +3603,6 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     if (isString(answer)) answer = "\n" + answer
     return $o(answer || "(no answer)", args, __, true)
-  }
-}
-
-// Use LLM to rewrite plan markdown reflecting completed tasks.
-MiniA.prototype._llmRewritePlan = function(currentMarkdown, finalAnswer, args) {
-  if (!isString(currentMarkdown) || currentMarkdown.length === 0) return currentMarkdown
-  var systemInstr = "You are a plan post-processor. Update markdown checkboxes to reflect completion. Only change [ ] to [x] for tasks clearly done. Preserve structure; do not rephrase tasks. Append a bullet to '## Execution History' summarizing what was completed if not present."
-  var completedList = []
-  try {
-    if (isObject(this._agentState) && isObject(this._agentState.plan) && isArray(this._agentState.plan.steps)) {
-      this._agentState.plan.steps.forEach(s => {
-        if (!isObject(s) || !isString(s.title)) return
-        if (this._isStatusDone(s.status)) completedList.push(s.title)
-        if (isArray(s.children)) s.children.forEach(c => {
-          if (isObject(c) && isString(c.title) && this._isStatusDone(c.status)) completedList.push(c.title)
-        })
-      })
-    }
-  } catch(eCL) { /* ignore */ }
-  var completedSection = completedList.length > 0 ? ("COMPLETED TASKS:\n" + completedList.map(t => "- " + t).join("\n") + "\n\n") : ""
-  var userContent = completedSection + "CURRENT PLAN:\n" + currentMarkdown + "\n\nFINAL ANSWER:\n" + (isString(finalAnswer) ? finalAnswer : stringify(finalAnswer, __, "")) + "\n\nUpdate the plan now."
-  try {
-    // Prefer a lightweight single-call; reuse existing llm interface
-    var prompt = systemInstr + "\n\n" + userContent
-    var responseWithStats = this.llm.promptWithStats(prompt)
-    var raw = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
-    if (!isString(raw) || raw.trim().length === 0) return currentMarkdown
-    var rewritten = raw.trim()
-    // Clean fenced code block if model wrapped output
-    if (rewritten.startsWith('```')) {
-      rewritten = rewritten.replace(/^```[a-zA-Z0-9_-]*\n/, '').replace(/```$/,'').trim()
-    }
-    // Basic sanity: must still contain '## Execution History'
-    if (rewritten.indexOf('## Execution History') < 0) return currentMarkdown
-    return rewritten.endsWith('\n') ? rewritten : (rewritten + '\n')
-  } catch(e) {
-    this.fnI('warn', 'Plan rewrite failed: ' + e)
-    return currentMarkdown
   }
 }
 
@@ -5517,6 +5560,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         } else {
           args.knowledge = planSection.trim()
         }
+        args.knowledgeUpdated = true
         this.fnI("plan", `Plan content added to args.knowledge (${args.knowledge.length} chars total, plan: ${planContent.length} chars).`)
       } else {
         this.fnI("warn", `Plan content is not a valid string or is empty`)
@@ -5541,6 +5585,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         } else {
           args.knowledge = knowledgeBlock.trim()
         }
+        args.knowledgeUpdated = true
         this.fnI("plan", `Imported ${knowledgeLines.length} knowledge entr${knowledgeLines.length === 1 ? "y" : "ies"} from existing plan.`)
       }
     }
