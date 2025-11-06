@@ -868,6 +868,19 @@ try {
     })
     var agentResult = __
     var stopRequested = false
+    var stopTrigger = "Esc"
+    var ctrlCArmed = false
+
+    function requestStop(triggerLabel) {
+      if (stopRequested) return
+      stopRequested = true
+      stopTrigger = triggerLabel || "Esc"
+      agent.state = "stop"
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
+        try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
+      }
+      printEvent("warn", "🛑", (triggerLabel || "Esc") + " pressed. Requesting Mini-A to stop...")
+    }
     try {
       agent.init(_args)
       $tb(function() {
@@ -877,7 +890,19 @@ try {
         var rawCode = con.readCharNB()
         var code = isDef(rawCode) ? Number(rawCode) : NaN
         if (!isNaN(code) && code > 0) {
-          if (code === 27) {
+          if (code === 3) {
+            if (ctrlCArmed === true) {
+              ctrlCArmed = false
+              try {
+                printEvent("warn", "🛑", "Ctrl-C pressed twice. Forcing Mini-A to terminate...")
+                exec(-1, true)
+              } catch(ignoreCtrlCExecError) {}
+            } else {
+              ctrlCArmed = true
+              requestStop("Ctrl-C")
+            }
+          } else if (code === 27) {
+            ctrlCArmed = false
             sleep(40)
             var followRaw = con.readCharNB()
             var followCode = isDef(followRaw) ? Number(followRaw) : NaN
@@ -886,14 +911,7 @@ try {
               followRaw = con.readCharNB()
               followCode = isDef(followRaw) ? Number(followRaw) : NaN
             }
-            if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
-              stopRequested = true
-              agent.state = "stop"
-              if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
-                try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
-              }
-              printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
-            }
+            if ((isNaN(followCode) || followCode <= 0) && !stopRequested) requestStop("Esc")
           }
         }
         sleep(75)
@@ -902,7 +920,7 @@ try {
       persistConversationSnapshot(agent)
       refreshConversationStats(agent)
       if (stopRequested) {
-        print(colorifyText("Mini-A stopped by user (Esc).", hintColor))
+        print(colorifyText("Mini-A stopped by user (" + stopTrigger + ").", hintColor))
         return
       }
       lastResult = agentResult
@@ -955,7 +973,7 @@ try {
     var conversationPath = getConversationPath()
     var conversationDisplay = (isString(conversationPath) && conversationPath.length > 0) ? conversationPath : "disabled"
     var lines = [
-      "• Type a goal and press Enter to launch Mini-A. Press " + colorifyText("Esc", accentColor) + colorifyText(" during execution to request a stop.", hintColor),
+      "• Type a goal and press Enter to launch Mini-A. Press " + colorifyText("Esc", accentColor) + colorifyText(" or ", hintColor) + colorifyText("Ctrl-C", accentColor) + colorifyText(" during execution to request a stop.", hintColor),
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
       "• Include file contents in your goal using " + colorifyText("@path/to/file", accentColor) + colorifyText(" syntax.", hintColor),
       "  Example: " + colorifyText("\"Follow these instructions @docs/guide.md and apply @config/settings.json\"", hintColor),
