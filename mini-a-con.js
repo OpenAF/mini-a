@@ -1,3 +1,7 @@
+// Author: Nuno Aguiar
+// License: Apache 2.0
+// Description: Mini-A interactive console session
+
 try {
   plugin("Console")
   var args = isDef(global._args) ? global._args : processExpr(" ")
@@ -111,6 +115,7 @@ try {
     checkall       : { type: "boolean", default: false, description: "Ask for confirmation before shell commands" },
     shellbatch     : { type: "boolean", default: false, description: "Automatically approve shell commands" },
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
+    showexecs      : { type: "boolean", default: true, description: "Show shell/exec events in the interaction stream" },
     usetools       : { type: "boolean", default: false, description: "Register MCP tools directly on the model" },
     useutils       : { type: "boolean", default: false, description: "Enable bundled Mini File Tool utilities" },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
@@ -144,6 +149,10 @@ try {
     planfile       : { type: "string", description: "Plan file to load or save before execution" },
     planformat     : { type: "string", description: "Plan format override (md|json)" },
     plancontent    : { type: "string", description: "Inline plan content (JSON or Markdown) to preload" },
+    updatefreq     : { type: "string", default: "auto", description: "Plan update frequency (auto|always|checkpoints|never)" },
+    updateinterval : { type: "number", default: 3, description: "Steps between plan updates when updatefreq=auto" },
+    forceupdates   : { type: "boolean", default: false, description: "Force plan updates even when actions fail" },
+    planlog        : { type: "string", description: "Append plan updates to this log file" },
     saveplannotes  : { type: "boolean", default: false, description: "Append execution learnings to plan notes" },
     rules          : { type: "string", description: "Custom agent rules (JSON or SLON)" },
     state          : { type: "string", description: "Initial agent state (JSON or SLON)" },
@@ -735,7 +744,7 @@ try {
     var extra = "", inline = false
 
     var iconText
-    if (type != "📚" && type != "error" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
+    if ((sessionOptions.showexecs && (icon == "⚙️" || icon == "🖥️")) && icon != "📚" && type != "error" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
       iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (visibleLength(icon) > 1 ? " " : "  ")
     } else {
       if (type == "final") {

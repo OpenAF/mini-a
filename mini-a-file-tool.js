@@ -1,3 +1,7 @@
+// Author: Nuno Aguiar
+// License: Apache 2.0
+// Description: Mini-A file tool for basic file operations within a specified root directory
+
 /**
  * <odoc>
  * <key>MiniFileTool(options) : MiniFileTool</key>
