@@ -805,7 +805,7 @@ try {
 
     var iconText
     if ((sessionOptions.showexecs && (icon == "⚙️" || icon == "🖥️")) && icon != "📚" && type != "error" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
-      iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (visibleLength(icon) > 1 ? " " : "  ")
+      iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (icon.length > 1 ? " " : "  ")
     } else {
       if (type == "final") {
         iconText = colorifyText("⦿", "RESET," + (eventPalette[type] || accentColor)) + " "
@@ -817,14 +817,22 @@ try {
       inline = true
     }
     //var prefix = colorifyText("[" + id + "]", hintColor)
-    var _msg = ow.format.withSideLine( extra + iconText + colorifyText(message, hintColor + ",ITALIC"), __, promptColor, hintColor + ",ITALIC", ow.format.withSideLineThemes().simpleLine) 
+    var _msg = colorifyText("│ ", promptColor) + extra + iconText + colorifyText(message.replace(/\n/g, "↵").trim(), hintColor + ",ITALIC")
     if (args.verbose === true || !inline) {
       print(_msg)
       _prevEventLength = __
     } else {
-      if (isDef(_prevEventLength)) printnl("\r" + repeat(_prevEventLength, " ") + "\r")
+      if (isDef(_prevEventLength)) {
+        var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+        var prevLines = Math.ceil(_prevEventLength / termWidth)
+        for (var i = 0; i < prevLines; i++) {
+          printnl("\r" + repeat(termWidth, " ") + "\r")
+          if (i < prevLines - 1) printnl("\u001b[1A")
+        }
+        printnl("\r")
+      }
       printnl(_msg + "\r")
-      _prevEventLength = visibleLength(_msg)
+      _prevEventLength = _msg.length
     }
     //print(prefix + " " + iconText + " " + message)
   }
