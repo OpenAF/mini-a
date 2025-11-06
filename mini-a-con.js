@@ -818,19 +818,24 @@ try {
     }
     //var prefix = colorifyText("[" + id + "]", hintColor)
     var _msg = colorifyText("│ ", promptColor) + extra + iconText + colorifyText(message.replace(/\n/g, "↵").trim(), hintColor + ",ITALIC")
+    // Optimized: extract previous line erase logic
+    function _erasePrev() {
+      if (!isDef(_prevEventLength)) return
+      var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+      var prevLines = Math.ceil(_prevEventLength / termWidth)
+      for (var i = 0; i < prevLines; i++) {
+      printnl("\r" + repeat(termWidth, " ") + "\r")
+      if (i < prevLines - 1) printnl("\u001b[1A")
+      }
+      printnl("\r")
+    }
+
     if (args.verbose === true || !inline) {
+      _erasePrev()
       print(_msg)
       _prevEventLength = __
     } else {
-      if (isDef(_prevEventLength)) {
-        var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
-        var prevLines = Math.ceil(_prevEventLength / termWidth)
-        for (var i = 0; i < prevLines; i++) {
-          printnl("\r" + repeat(termWidth, " ") + "\r")
-          if (i < prevLines - 1) printnl("\u001b[1A")
-        }
-        printnl("\r")
-      }
+      _erasePrev()
       printnl(_msg + "\r")
       _prevEventLength = _msg.length
     }
