@@ -1,3 +1,7 @@
+// Author: Nuno Aguiar
+// License: Apache 2.0
+// Description: Mini Agent (Mini-A) to achieve goals using an LLM and shell commands.
+
 ow.loadMetrics()
 
 /**
@@ -1836,6 +1840,21 @@ MiniA.prototype._persistExternalPlan = function() {
   // (removed diagnostics block)
     // (diagnostic logging removed)
 
+    // Helper function to check if content is a complete plan (not intermediate/fragment)
+    var isCompletePlan = function(content, format) {
+      if (!isString(content) || content.length === 0) return false
+      if (format === 'json' || format === 'yaml') {
+        // For JSON/YAML, check if it has basic structure
+        return content.indexOf('"goal"') >= 0 || content.indexOf('goal:') >= 0
+      }
+      // For Markdown, check if it starts with "# Plan:" and has key sections
+      var hasProperStart = content.indexOf('# Plan:') >= 0
+      var hasDependencies = content.indexOf('## Dependencies') >= 0
+      var hasKnowledgeBase = content.indexOf('## Knowledge Base') >= 0
+      var hasExecutionHistory = content.indexOf('## Execution History') >= 0
+      return hasProperStart && hasDependencies && hasKnowledgeBase && hasExecutionHistory
+    }
+
     // Check if content has changed before writing
     var currentContent = ""
     var hasChanged = true
@@ -1852,23 +1871,46 @@ MiniA.prototype._persistExternalPlan = function() {
     if (!hasChanged) {
       this.fnI("plan", `Plan content unchanged, skipping write to ${this._activePlanSource.path}`)
     } else {
-      // Create backup file before writing (only if content changed)
-      if (io.fileExists(this._activePlanSource.path)) {
-        try {
-          var timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')
-          var pathParts = this._activePlanSource.path.split('/')
-          var filename = pathParts.pop()
-          var dir = pathParts.join('/')
-          var backupPath = (dir ? dir + '/' : '') + filename + '.' + timestamp + '.bak'
-          io.writeFileString(backupPath, currentContent)
-          this.fnI("plan", `Backup created at ${backupPath}`)
-        } catch(eBackup) {
-          this.fnI('warn', 'Failed to create backup: ' + eBackup)
-        }
+      // Validate that the new content is complete before writing
+      var isComplete = isCompletePlan(serialized, fmt)
+      var shouldWrite = false
+      var writeReason = ""
+
+      if (isComplete) {
+        shouldWrite = true
+        writeReason = "content is complete"
+      } else if (serialized.length >= currentContent.length) {
+        // Fallback: allow write if new size >= old size (prevents data loss)
+        shouldWrite = true
+        writeReason = `new size (${serialized.length} bytes) >= old size (${currentContent.length} bytes)`
+      } else {
+        this.fnI("warn", `Skipping plan write: content appears incomplete (${serialized.length} bytes < ${currentContent.length} bytes) and missing required sections`)
       }
 
-      io.writeFileString(this._activePlanSource.path, serialized)
-      this.fnI("plan", `Plan persisted (${hasExternal ? 'external mapping' : 'internal snapshot'}) to ${this._activePlanSource.path}`)
+      if (shouldWrite) {
+        // Create backup file before writing (only if content changed and current content is substantial)
+        if (io.fileExists(this._activePlanSource.path)) {
+          try {
+            var shouldBackup = isCompletePlan(currentContent, fmt)
+            if (shouldBackup) {
+              var timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '')
+              var pathParts = this._activePlanSource.path.split('/')
+              var filename = pathParts.pop()
+              var dir = pathParts.join('/')
+              var backupPath = (dir ? dir + '/' : '') + filename + '.' + timestamp + '.bak'
+              io.writeFileString(backupPath, currentContent)
+              this.fnI("plan", `Backup created at ${backupPath}`)
+            } else {
+              this.fnI("plan", `Skipping backup: current content appears incomplete or fragmentary`)
+            }
+          } catch(eBackup) {
+            this.fnI('warn', 'Failed to create backup: ' + eBackup)
+          }
+        }
+
+        io.writeFileString(this._activePlanSource.path, serialized)
+        this.fnI("plan", `Plan persisted (${hasExternal ? 'external mapping' : 'internal snapshot'}) to ${this._activePlanSource.path} - ${writeReason}`)
+      }
     }
   } catch(e) {
     this.fnI("warn", `Failed to persist plan to ${this._activePlanSource.path}: ${e}`)
@@ -2564,6 +2606,27 @@ MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
   sections.push("3. Think ITERATIVELY - plans can be refined as execution reveals new information")
   sections.push("4. Include VERIFICATION - every deliverable needs a validation checkpoint")
   sections.push("5. Preserve CONTEXT - use 'Notes for Future Agents' to capture insights that help with plan refinement")
+
+  // Check for read-only tools
+  var readOnlyTools = []
+  if (isArray(this.mcpTools) && this.mcpTools.length > 0) {
+    readOnlyTools = this.mcpTools.filter(function(tool) {
+      if (!isObject(tool)) return false
+      var annotations = isObject(tool.inputSchema) && isObject(tool.inputSchema["x-mini-a"]) ? tool.inputSchema["x-mini-a"] : {}
+      var metadata = isObject(tool.metadata) ? tool.metadata : {}
+      return toBoolean(annotations.readOnlyHint) || toBoolean(metadata.readOnlyHint)
+    })
+  }
+
+  if (readOnlyTools.length > 0) {
+    sections.push("")
+    sections.push("TOOL ACCESS:")
+    sections.push("You have access to read-only tools that can help you gather information to create a better plan.")
+    sections.push("- Use these tools ONLY when they provide valuable context for planning (e.g., exploring files, checking environment)")
+    sections.push("- Do NOT use tools that modify state, write files, or execute commands during planning")
+    sections.push("- Available read-only tools: " + readOnlyTools.map(function(t) { return t.name }).join(", "))
+    sections.push("- Tool usage should be minimal and focused on gathering essential information")
+  }
 
   sections.push("\n## Goal")
   sections.push(insights.goal)
