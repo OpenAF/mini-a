@@ -23,6 +23,7 @@
 | mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
 | mcp-weather| Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
 | mcp-web    | Web search and URL fetching MCP | STDIO/HTTP       | (included) | [mcp-web.yaml](mcp-web.yaml)       |
+| mcp-math   | Mathematical operations and unit conversions | STDIO/HTTP | (included) | [mcp-math.yaml](mcp-math.yaml)     |
 
 See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contribution guidelines.
 
@@ -421,6 +422,53 @@ Example — retrieve the JSON forecast for Lisbon:
 
 ```bash
 oafp in=mcp data="(cmd: 'ojob mcps/mcp-weather.yaml', tool: get-weather, params: (location: 'Lisbon, Portugal'))"
+```
+
+#### mcp-math
+
+`mcp-math` provides mathematical operations, statistical analysis, unit conversions, and number properties. All tools are deterministic and read-only.
+
+Available tools:
+
+- `calculate`: Perform basic and advanced mathematical operations (add, subtract, multiply, divide, power, sqrt, abs, sin, cos, tan, log, ln, exp, ceil, floor, round).
+  - Input: `operation` (string), `values` (array of numbers), optional `precision` (decimal places).
+- `statistics`: Calculate statistical measures for a dataset (mean, median, mode, stddev, variance, min, max, sum, count, range).
+  - Input: `values` (array of numbers), optional `metrics` (array of metric names to return).
+- `convert-unit`: Convert values between units of measurement (length, mass, temperature, volume).
+  - Input: `value` (number), `fromUnit` (string), `toUnit` (string), optional `precision`.
+  - Supported units: m, km, mi, ft, in, cm, mm, yd (length); kg, g, lb, oz (mass); c, f, k (temperature); l, ml, gal, qt, pt, cup (volume).
+- `number-info`: Analyze number properties including prime check, factors, prime factorization, and more.
+  - Input: `value` (number).
+
+Example — perform calculations:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-math.yaml', tool: calculate, params: (operation: 'add', values: [10, 20, 30]))"
+```
+
+Example — calculate statistics:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-math.yaml', tool: statistics, params: (values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))"
+```
+
+Example — convert units:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-math.yaml', tool: convert-unit, params: (value: 100, fromUnit: 'km', toUnit: 'mi', precision: 2))"
+```
+
+Example — analyze number properties:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-math.yaml', tool: number-info, params: (value: 42))"
+```
+
+Example — use with Mini-A for complex math tasks:
+
+```bash
+mini-a goal="Calculate the mean and standard deviation of temperatures [20, 22, 19, 23, 21] and convert the mean from Celsius to Fahrenheit" \
+  mcp="(cmd: 'ojob mcps/mcp-math.yaml', timeout: 5000)" rpm=20 __format=md
 ```
 
 ## Using MCPs as STDIO or HTTP Remote Server

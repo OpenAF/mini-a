@@ -122,6 +122,23 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : updatefreq
+    desc     : Plan update frequency (auto, always, checkpoints, never)
+    example  : "auto"
+    mandatory: false
+  - name     : updateinterval
+    desc     : Number of steps between automatic plan updates when updatefreq=auto
+    example  : "3"
+    mandatory: false
+  - name     : forceupdates
+    desc     : Force plan updates even when actions fail (CLI mode)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : planlog
+    desc     : Optional file path to append plan update logs
+    example  : "plan-updates.log"
+    mandatory: false
   - name     : rules
     desc     : Custom rules or instructions for the agent (JSON or SLON array of strings, CLI mode)
     example  : '["Always provide detailed explanations", "Use concise language"]'

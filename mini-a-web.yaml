@@ -47,6 +47,23 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : updatefreq
+    desc     : "Plan update frequency (auto, always, checkpoints, never)"
+    example  : "auto"
+    mandatory: false
+  - name     : updateinterval
+    desc     : "Steps between automatic plan updates when updatefreq=auto"
+    example  : "3"
+    mandatory: false
+  - name     : forceupdates
+    desc     : "Force plan updates even when actions fail"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : planlog
+    desc     : "Optional log file to append plan update entries"
+    example  : "plan-updates.log"
+    mandatory: false
   - name     : usediagrams
     desc     : "Boolean to enable/disable Mermaid diagram generation (default: false)"
     example  : "true"
@@ -671,6 +688,10 @@ jobs:
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
       useplanning     : toBoolean().isBoolean().default(false)
+      updatefreq      : isString().default("auto")
+      updateinterval  : toNumber().isNumber().default(3)
+      forceupdates    : toBoolean().isBoolean().default(false)
+      planlog         : isString().default(__)
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
       useascii        : toBoolean().isBoolean().default(false)
