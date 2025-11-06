@@ -34,6 +34,37 @@ All command-line flags documented below work with the console (`opack exec mini-
 
 Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
 
+### Attaching Files in the Console
+
+The console supports inline file attachments using the `@path/to/file` syntax. When you include file references in your goal, Mini-A automatically reads and includes the file contents as part of the submitted goal.
+
+**Features:**
+- Attach multiple files in a single goal: `@file1.md @file2.json`
+- Embed file references within sentences: `Follow these instructions @docs/guide.md and also check @config/settings.json`
+- Files are wrapped with clear delimiters showing the file path
+- Non-existent or unreadable files produce error messages without blocking the goal
+
+**Examples:**
+
+```bash
+# Single file attachment
+mini-a ➤ Review the code in @src/main.js and suggest improvements
+
+# Multiple files
+mini-a ➤ Compare @config/dev.json with @config/prod.json
+
+# Files embedded in natural language
+mini-a ➤ I need you to follow these instructions @docs/guidelines.md and then apply the rules from @policies/standards.md to create a new feature
+```
+
+Each attached file is displayed with a `📎 Attached: <filepath>` confirmation message, and the file contents are formatted as:
+
+```
+--- Content from <filepath> ---
+<file contents>
+--- End of <filepath> ---
+```
+
 ## Model Configuration
 
 ### Single Model Setup

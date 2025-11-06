@@ -26,6 +26,8 @@ Two steps to use:
    If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
    Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`.
 
+   **Tip**: Include file contents in your goals using `@path/to/file` syntax (e.g., `Follow these instructions @docs/guide.md`).
+
 Shell access is disabled by default for safety; add `useshell=true` when you explicitly want the agent to run commands.
 
 For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.

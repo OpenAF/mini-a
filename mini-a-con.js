@@ -713,17 +713,55 @@ try {
     return false
   }
 
+  function processFileAttachments(text) {
+    if (!isString(text) || text.trim().length === 0) return text
+
+    // Match @path patterns - matches @ followed by path characters until whitespace
+    var pattern = /@([^\s]+)/g
+    var match
+    var result = text
+    var processed = []
+
+    while ((match = pattern.exec(text)) !== null) {
+      var fullMatch = match[0]  // e.g., "@some/file.md"
+      var filePath = match[1]   // e.g., "some/file.md"
+
+      // Skip if already processed (same file referenced multiple times)
+      if (processed.indexOf(fullMatch) !== -1) continue
+      processed.push(fullMatch)
+
+      try {
+        // Try to read the file
+        var fileContent = io.readFileString(filePath)
+        if (isDef(fileContent)) {
+          // Replace all occurrences of this pattern with the file content
+          var replacement = "\n\n--- Content from " + filePath + " ---\n" + fileContent + "\n--- End of " + filePath + " ---\n\n"
+          result = result.split(fullMatch).join(replacement)
+          print(colorifyText("📎 Attached: " + filePath + " (" + fileContent.length + " bytes)", successColor))
+        }
+      } catch (fileError) {
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to read file " + filePath + ": " + fileError, errorColor))
+      }
+    }
+
+    return result
+  }
+
   function buildArgs(goalText) {
     var cleanGoal = isString(goalText) ? goalText.trim() : goalText
+
+    // Process file attachments (@file/path references)
+    cleanGoal = processFileAttachments(cleanGoal)
+
     var args = {}
-    
+
     // First, merge extra CLI arguments that weren't in parameterDefinitions
     if (isObject(extraCLIArgs)) {
       Object.keys(extraCLIArgs).forEach(function(key) {
         args[key] = extraCLIArgs[key]
       })
     }
-    
+
     // Then, merge sessionOptions (which may override extraCLIArgs)
     Object.keys(sessionOptions).forEach(function(key) {
       if (internalParameters[key]) return
@@ -731,7 +769,7 @@ try {
       if (isUnDef(value) || value === "") return
       args[key] = value
     })
-    
+
     if (isDef(args.usemermaid)) {
       if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
       delete args.usemermaid
@@ -784,7 +822,7 @@ try {
       print(_msg)
       _prevEventLength = __
     } else {
-      if (isDef(_prevEventLength)) printnl(repeat(_prevEventLength, " ") + "\r")
+      if (isDef(_prevEventLength)) printnl("\r" + repeat(_prevEventLength, " ") + "\r")
       printnl(_msg + "\r")
       _prevEventLength = visibleLength(_msg)
     }
@@ -906,6 +944,8 @@ try {
     var lines = [
       "• Type a goal and press Enter to launch Mini-A. Press " + colorifyText("Esc", accentColor) + colorifyText(" during execution to request a stop.", hintColor),
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
+      "• Include file contents in your goal using " + colorifyText("@path/to/file", accentColor) + colorifyText(" syntax.", hintColor),
+      "  Example: " + colorifyText("\"Follow these instructions @docs/guide.md and apply @config/settings.json\"", hintColor),
       "• Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
       "",
