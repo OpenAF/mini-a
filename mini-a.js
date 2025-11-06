@@ -5465,9 +5465,9 @@ MiniA.prototype.init = function(args) {
             this._toolCacheSettings[tool.name] = this._computeToolCacheSettings(tool, this._toolCacheDefaultTtl)
           })
 
-          this.fnI("done", `MCP connection ${index + 1} established. Found #${tools.length} tools.`)
+          this.fnI("done", `MCP connection #${index + 1} established. Found #${tools.length} tools.`)
         } catch (e) {
-          logErr(`❌ Failed to initialize MCP connection ${index + 1}: ${e.message}`)
+          logErr(`❌ Failed to initialize MCP connection #${index + 1}: ${e.message}`)
           throw e
         }
       })

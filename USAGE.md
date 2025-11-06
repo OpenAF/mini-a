@@ -7,11 +7,17 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
+- **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
+- **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 # Optional: Set a low-cost model for routine operations
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+# Optional: Set console history size
+export OAF_MINI_A_CON_HIST_SIZE=1000
+# Optional: Set libraries to load automatically
+export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
 ```
 
 ## Command-Line Execution
@@ -25,6 +31,39 @@ Mini-A now ships with an interactive console so you can start the agent directly
 - `ojob mini-a-web.yaml onport=8888` — launches the HTTP server that powers the browser UI found in `public/`.
 
 All command-line flags documented below work with the console (`opack exec mini-a` / `mini-a`) as well as `mini-a.sh` and `mini-a.yaml`.
+
+Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
+
+### Attaching Files in the Console
+
+The console supports inline file attachments using the `@path/to/file` syntax. When you include file references in your goal, Mini-A automatically reads and includes the file contents as part of the submitted goal.
+
+**Features:**
+- Attach multiple files in a single goal: `@file1.md @file2.json`
+- Embed file references within sentences: `Follow these instructions @docs/guide.md and also check @config/settings.json`
+- Files are wrapped with clear delimiters showing the file path
+- Non-existent or unreadable files produce error messages without blocking the goal
+
+**Examples:**
+
+```bash
+# Single file attachment
+mini-a ➤ Review the code in @src/main.js and suggest improvements
+
+# Multiple files
+mini-a ➤ Compare @config/dev.json with @config/prod.json
+
+# Files embedded in natural language
+mini-a ➤ I need you to follow these instructions @docs/guidelines.md and then apply the rules from @policies/standards.md to create a new feature
+```
+
+Each attached file is displayed with a `📎 Attached: <filepath>` confirmation message, and the file contents are formatted as:
+
+```
+--- Content from <filepath> ---
+<file contents>
+--- End of <filepath> ---
+```
 
 ## Model Configuration
 

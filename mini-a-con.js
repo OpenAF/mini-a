@@ -87,6 +87,15 @@ try {
       consoleReader = con.getConsoleReader()
       commandHistory = new Packages.jline.console.history.FileHistory(new java.io.File(historyFilePath))
       consoleReader.setHistory(commandHistory)
+
+      // Set history max size from environment variable if defined
+      var historySize = getEnv("OAF_MINI_A_CON_HIST_SIZE")
+      if (isDef(historySize) && isString(historySize) && historySize.trim().length > 0) {
+        var numericHistorySize = parseInt(historySize, 10)
+        if (!isNaN(numericHistorySize) && numericHistorySize > 0) {
+          con.getConsoleReader().getHistory().setMaxSize(numericHistorySize)
+        }
+      }
     }
   } catch (historyError) {
     commandHistory = __
@@ -211,7 +220,7 @@ try {
 
   if (consoleReader) {
     try {
-      var slashParameterHints = { set: "=", toggle: "", unset: "" }
+      var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -669,9 +678,14 @@ try {
   /**
    * Prints the current session options in a table format.
    * Each row contains the parameter name, its value, and a description.
+   * Optionally filters rows by a case-insensitive prefix.
    */
-  function describeOptions() {
-    var rows = Object.keys(parameterDefinitions).sort().map(function(key) {
+  function describeOptions(prefix) {
+    var normalizedPrefix = isString(prefix) ? prefix.trim().toLowerCase() : ""
+    var rows = Object.keys(parameterDefinitions).sort().filter(function(key) {
+      if (normalizedPrefix.length === 0) return true
+      return key.indexOf(normalizedPrefix) === 0
+    }).map(function(key) {
       var def = parameterDefinitions[key]
       var active = sessionOptions[key]
       var value
@@ -680,6 +694,14 @@ try {
       else value = "" + active
       return { parameter: key, value: value, description: def.description }
     })
+    if (rows.length === 0) {
+      var shownPrefix = isString(prefix) ? prefix : (isUnDef(prefix) ? "" : String(prefix))
+      var filterMessage = shownPrefix.length > 0
+        ? "No parameters match prefix '" + shownPrefix + "'."
+        : "No parameters available."
+      print(colorifyText(filterMessage, hintColor))
+      return
+    }
     print( printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true) )
   }
 
@@ -691,17 +713,55 @@ try {
     return false
   }
 
+  function processFileAttachments(text) {
+    if (!isString(text) || text.trim().length === 0) return text
+
+    // Match @path patterns - matches @ followed by path characters until whitespace
+    var pattern = /@([^\s]+)/g
+    var match
+    var result = text
+    var processed = []
+
+    while ((match = pattern.exec(text)) !== null) {
+      var fullMatch = match[0]  // e.g., "@some/file.md"
+      var filePath = match[1]   // e.g., "some/file.md"
+
+      // Skip if already processed (same file referenced multiple times)
+      if (processed.indexOf(fullMatch) !== -1) continue
+      processed.push(fullMatch)
+
+      try {
+        // Try to read the file
+        var fileContent = io.readFileString(filePath)
+        if (isDef(fileContent)) {
+          // Replace all occurrences of this pattern with the file content
+          var replacement = "\n\n--- Content from " + filePath + " ---\n" + fileContent + "\n--- End of " + filePath + " ---\n\n"
+          result = result.split(fullMatch).join(replacement)
+          print(colorifyText("📎 Attached: " + filePath + " (" + fileContent.length + " bytes)", successColor))
+        }
+      } catch (fileError) {
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to read file " + filePath + ": " + fileError, errorColor))
+      }
+    }
+
+    return result
+  }
+
   function buildArgs(goalText) {
     var cleanGoal = isString(goalText) ? goalText.trim() : goalText
+
+    // Process file attachments (@file/path references)
+    cleanGoal = processFileAttachments(cleanGoal)
+
     var args = {}
-    
+
     // First, merge extra CLI arguments that weren't in parameterDefinitions
     if (isObject(extraCLIArgs)) {
       Object.keys(extraCLIArgs).forEach(function(key) {
         args[key] = extraCLIArgs[key]
       })
     }
-    
+
     // Then, merge sessionOptions (which may override extraCLIArgs)
     Object.keys(sessionOptions).forEach(function(key) {
       if (internalParameters[key]) return
@@ -709,7 +769,7 @@ try {
       if (isUnDef(value) || value === "") return
       args[key] = value
     })
-    
+
     if (isDef(args.usemermaid)) {
       if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
       delete args.usemermaid
@@ -745,7 +805,7 @@ try {
 
     var iconText
     if ((sessionOptions.showexecs && (icon == "⚙️" || icon == "🖥️")) && icon != "📚" && type != "error" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
-      iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (visibleLength(icon) > 1 ? " " : "  ")
+      iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (icon.length > 1 ? " " : "  ")
     } else {
       if (type == "final") {
         iconText = colorifyText("⦿", "RESET," + (eventPalette[type] || accentColor)) + " "
@@ -757,14 +817,22 @@ try {
       inline = true
     }
     //var prefix = colorifyText("[" + id + "]", hintColor)
-    var _msg = ow.format.withSideLine( extra + iconText + colorifyText(message, hintColor + ",ITALIC"), __, promptColor, hintColor + ",ITALIC", ow.format.withSideLineThemes().simpleLine) 
+    var _msg = colorifyText("│ ", promptColor) + extra + iconText + colorifyText(message.replace(/\n/g, "↵").trim(), hintColor + ",ITALIC")
     if (args.verbose === true || !inline) {
       print(_msg)
       _prevEventLength = __
     } else {
-      if (isDef(_prevEventLength)) printnl(repeat(_prevEventLength, " ") + "\r")
+      if (isDef(_prevEventLength)) {
+        var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+        var prevLines = Math.ceil(_prevEventLength / termWidth)
+        for (var i = 0; i < prevLines; i++) {
+          printnl("\r" + repeat(termWidth, " ") + "\r")
+          if (i < prevLines - 1) printnl("\u001b[1A")
+        }
+        printnl("\r")
+      }
       printnl(_msg + "\r")
-      _prevEventLength = visibleLength(_msg)
+      _prevEventLength = _msg.length
     }
     //print(prefix + " " + iconText + " " + message)
   }
@@ -884,6 +952,8 @@ try {
     var lines = [
       "• Type a goal and press Enter to launch Mini-A. Press " + colorifyText("Esc", accentColor) + colorifyText(" during execution to request a stop.", hintColor),
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
+      "• Include file contents in your goal using " + colorifyText("@path/to/file", accentColor) + colorifyText(" syntax.", hintColor),
+      "  Example: " + colorifyText("\"Follow these instructions @docs/guide.md and apply @config/settings.json\"", hintColor),
       "• Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
       "",
@@ -892,7 +962,7 @@ try {
       "  " + colorifyText("/set", "BOLD") + colorifyText(" <key> <value>  Update a Mini-A parameter (use '", hintColor) + colorifyText("\"\"\"", accentColor) + colorifyText("' for multi-line values)", hintColor),
       "  " + colorifyText("/toggle", "BOLD") + colorifyText(" <key>       Toggle boolean parameter", hintColor),
       "  " + colorifyText("/unset", "BOLD") + colorifyText(" <key>        Clear a parameter", hintColor),
-      "  " + colorifyText("/show", "BOLD") + colorifyText("               Display configured parameters", hintColor),
+      "  " + colorifyText("/show", "BOLD") + colorifyText(" [prefix]      Display configured parameters (filtered by prefix)", hintColor),
       "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
       "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation", hintColor),
@@ -950,6 +1020,11 @@ try {
       }
       if (command === "show") {
         describeOptions()
+        continue
+      }
+      if (command.indexOf("show ") === 0) {
+        var prefixFilter = command.substring(5).trim()
+        describeOptions(prefixFilter.length > 0 ? prefixFilter : __)
         continue
       }
       if (command === "reset") {
