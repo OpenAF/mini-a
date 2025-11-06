@@ -173,6 +173,7 @@ ojob:
   logToConsole: false
 
 todo:
+- preset-libs
 - apply-mode-preset
 - (if    ): |
     toBoolean(args.web) || toBoolean(args.onport) == true
@@ -187,6 +188,16 @@ todo:
     - start-con
 
 jobs:
+# -----------------------
+- name: preset-libs
+  exec: | #js
+    if (isString(args.libs) && args.libs.trim().length > 0) return
+    var envLibs = getEnv("OAF_MINI_A_LIBS")
+    if (isString(envLibs) && envLibs.trim().length > 0) {
+      args.libs = envLibs.trim()
+      log("Using libs from OAF_MINI_A_LIBS environment variable.")
+    }
+
 # -----------------------
 - name: apply-mode-preset
   exec: | #js
