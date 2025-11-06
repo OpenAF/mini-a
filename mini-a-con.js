@@ -1,3 +1,7 @@
+// Author: Nuno Aguiar
+// License: Apache 2.0
+// Description: Mini-A interactive console session
+
 try {
   plugin("Console")
   var args = isDef(global._args) ? global._args : processExpr(" ")
