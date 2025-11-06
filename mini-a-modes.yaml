@@ -12,8 +12,8 @@ modes:
       useutils : true
       readwrite: true
 
-  shellutils:
-    description: "Shell mode with utilities"
+  utils:
+    description: "Utilities mode"
     params     :
       useutils : true
       usetools : true

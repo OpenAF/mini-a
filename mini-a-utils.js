@@ -1,14 +1,14 @@
 // Author: Nuno Aguiar
 // License: Apache 2.0
-// Description: Mini-A file tool for basic file operations within a specified root directory
+// Description: Mini-A utils tool for basic file operations within a specified root directory
 
 /**
  * <odoc>
- * <key>MiniFileTool(options) : MiniFileTool</key>
- * Creates a MiniFileTool instance to perform file operations within a specified root directory.
+ * <key>MiniUtilsTool(options) : MiniUtilsTool</key>
+ * Creates a MiniUtilsTool instance to perform file operations within a specified root directory.
  * </odoc>
  */
-var MiniFileTool = function(options) {
+var MiniUtilsTool = function(options) {
   this._FileClass = Packages.java.io.File
   this._initialized = false
   this._root = null
@@ -23,8 +23,8 @@ var MiniFileTool = function(options) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.init(options) : Object</key>
- * Initializes the MiniFileTool instance with the specified options.
+ * <key>MiniUtilsTool.init(options) : Object</key>
+ * Initializes the MiniUtilsTool instance with the specified options.
  *
  * The `options` parameter can be:
  * - A string representing the root directory path.
@@ -32,10 +32,10 @@ var MiniFileTool = function(options) {
  *   - `root` (string): The root directory path. Defaults to the current directory (`"."`).
  *   - `readwrite` (boolean): If set to `true`, enables write operations. Defaults to `false` (read-only mode).
  *
- * Returns the MiniFileTool instance on success, or an error message string on failure.
+ * Returns the MiniUtilsTool instance on success, or an error message string on failure.
  * </odoc>
  */
-MiniFileTool.prototype.init = function(options) {
+MiniUtilsTool.prototype.init = function(options) {
   try {
     if (isUnDef(options)) options = {}
     if (isString(options)) options = { root: options }
@@ -72,19 +72,19 @@ MiniFileTool.prototype.init = function(options) {
   }
 }
 
-MiniFileTool.prototype._ensureInitialized = function() {
+MiniUtilsTool.prototype._ensureInitialized = function() {
   if (this._initialized !== true) {
     throw new Error("File context not initialized")
   }
 }
 
-MiniFileTool.prototype._withinRoot = function(candidate) {
+MiniUtilsTool.prototype._withinRoot = function(candidate) {
   if (!isString(candidate)) return false
   if (candidate === this._root) return true
   return isString(this._rootWithSep) && candidate.indexOf(this._rootWithSep) === 0
 }
 
-MiniFileTool.prototype._toRelative = function(targetPath) {
+MiniUtilsTool.prototype._toRelative = function(targetPath) {
   if (!isString(targetPath)) return targetPath
   if (!this._withinRoot(targetPath)) return targetPath
   var relative = targetPath.substring(this._root.length)
@@ -97,7 +97,7 @@ MiniFileTool.prototype._toRelative = function(targetPath) {
   return relative
 }
 
-MiniFileTool.prototype._resolve = function(target) {
+MiniUtilsTool.prototype._resolve = function(target) {
   var File = this._FileClass
   var candidate = new File(target)
   if (!candidate.isAbsolute()) {
@@ -110,13 +110,13 @@ MiniFileTool.prototype._resolve = function(target) {
   return resolved
 }
 
-MiniFileTool.prototype._ensureWritable = function(operation) {
+MiniUtilsTool.prototype._ensureWritable = function(operation) {
   if (this._readWrite !== true) {
     throw new Error("Read-only mode. Set readwrite=true to allow " + operation)
   }
 }
 
-MiniFileTool.prototype._listEntries = function(baseDir, options) {
+MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
   var self = this
   options = options || {}
   var includeHidden = options.includeHidden === true
@@ -264,7 +264,7 @@ MiniFileTool.prototype._listEntries = function(baseDir, options) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.readFile(params) : Object</key>
+ * <key>MiniUtilsTool.readFile(params) : Object</key>
  * Reads the content of a file specified by the `path` parameter.
  * The `params` object can have the following properties:
  * - `path` (string, required): The relative or absolute path to the file to be read.
@@ -279,7 +279,7 @@ MiniFileTool.prototype._listEntries = function(baseDir, options) {
  * - Other file metadata such as size, last modified date, etc.
  * </odoc>
  */
-MiniFileTool.prototype.readFile = function(params) {
+MiniUtilsTool.prototype.readFile = function(params) {
   params = params || {}
   if (isUnDef(params.path)) return "[ERROR] path is required"
   try {
@@ -306,7 +306,7 @@ MiniFileTool.prototype.readFile = function(params) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.listDirectory(params) : Array</key>
+ * <key>MiniUtilsTool.listDirectory(params) : Array</key>
  * Lists the contents of a directory specified by the `path` parameter.
  * The `params` object can have the following properties:
  * - `path` (string, optional): The relative or absolute path to the directory to be listed. Defaults to the root directory (`"."`).
@@ -319,7 +319,7 @@ MiniFileTool.prototype.readFile = function(params) {
  * - Other file metadata such as size, last modified date, type (file or directory), etc.
  * </odoc>
  */
-MiniFileTool.prototype.listDirectory = function(params) {
+MiniUtilsTool.prototype.listDirectory = function(params) {
   params = params || {}
   try {
     this._ensureInitialized()
@@ -339,7 +339,7 @@ MiniFileTool.prototype.listDirectory = function(params) {
   }
 }
 
-MiniFileTool.prototype._collectFiles = function(startPath, recursive) {
+MiniUtilsTool.prototype._collectFiles = function(startPath, recursive) {
   var entries = this._listEntries(startPath, { recursive: recursive, includeHidden: true })
   var files = []
   var self = this
@@ -359,7 +359,7 @@ MiniFileTool.prototype._collectFiles = function(startPath, recursive) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.searchContent(params) : Array</key>
+ * <key>MiniUtilsTool.searchContent(params) : Array</key>
  * Searches for a specified pattern within the content of files starting from a given directory.
  * The `params` object can have the following properties:
  * - `pattern` (string, required): The pattern to search for within the file contents.
@@ -377,7 +377,7 @@ MiniFileTool.prototype._collectFiles = function(startPath, recursive) {
  * - `preview`: A preview of the line containing the pattern.
  * </odoc>
  */
-MiniFileTool.prototype.searchContent = function(params) {
+MiniUtilsTool.prototype.searchContent = function(params) {
   params = params || {}
   if (isUnDef(params.pattern)) return "[ERROR] pattern is required"
   try {
@@ -458,7 +458,7 @@ MiniFileTool.prototype.searchContent = function(params) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.getFileInfo(params) : Object</key>
+ * <key>MiniUtilsTool.getFileInfo(params) : Object</key>
  * Retrieves information about a file or directory specified by the `path` parameter.
  * The `params` object can have the following properties:
  * - `path` (string, required): The relative or absolute path to the file or directory.
@@ -470,7 +470,7 @@ MiniFileTool.prototype.searchContent = function(params) {
  * - Other file metadata such as size, type (file or directory), last modified date, etc.
  * </odoc>
  */
-MiniFileTool.prototype.getFileInfo = function(params) {
+MiniUtilsTool.prototype.getFileInfo = function(params) {
   params = params || {}
   if (isUnDef(params.path)) return "[ERROR] path is required"
   try {
@@ -493,7 +493,7 @@ MiniFileTool.prototype.getFileInfo = function(params) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.writeFile(params) : Object</key>
+ * <key>MiniUtilsTool.writeFile(params) : Object</key>
  * Writes content to a file specified by the `path` parameter.
  * The `params` object can have the following properties:
  * - `path` (string, required): The relative or absolute path to the file to be written.
@@ -512,7 +512,7 @@ MiniFileTool.prototype.getFileInfo = function(params) {
  * - Other file metadata such as size, last modified date, etc.
  * </odoc>
  */
-MiniFileTool.prototype.writeFile = function(params) {
+MiniUtilsTool.prototype.writeFile = function(params) {
   params = params || {}
   if (isUnDef(params.path)) return "[ERROR] path is required"
   if (isUnDef(params.content)) return "[ERROR] content is required"
@@ -548,7 +548,7 @@ MiniFileTool.prototype.writeFile = function(params) {
   }
 }
 
-MiniFileTool.prototype._deleteRecursive = function(targetPath) {
+MiniUtilsTool.prototype._deleteRecursive = function(targetPath) {
   var self = this
   var entries = this._listEntries(targetPath, { recursive: true, includeHidden: true })
   entries.sort(function(a, b) {
@@ -568,7 +568,7 @@ MiniFileTool.prototype._deleteRecursive = function(targetPath) {
 
 /**
  * <odoc>
- * <key>MiniFileTool.deleteFile(params) : Object</key>
+ * <key>MiniUtilsTool.deleteFile(params) : Object</key>
  * Deletes a file or directory specified by the `path` parameter.
  * The `params` object can have the following properties:
  * - `path` (string, required): The relative or absolute path to the file or directory to be deleted.
@@ -583,7 +583,7 @@ MiniFileTool.prototype._deleteRecursive = function(targetPath) {
  * - `type`: Indicates whether the deleted item was a `"file"` or `"directory"`.
  * </odoc>
  */
-MiniFileTool.prototype.deleteFile = function(params) {
+MiniUtilsTool.prototype.deleteFile = function(params) {
   params = params || {}
   if (isUnDef(params.path)) return "[ERROR] path is required"
   if (isUnDef(params.confirm)) return "[ERROR] confirm is required"

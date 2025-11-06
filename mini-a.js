@@ -4064,20 +4064,20 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
 
 MiniA.prototype._createUtilsMcpConfig = function(args) {
   try {
-    if (typeof MiniFileTool !== "function") {
-      //if (io.fileExists("mini-a-file-tool.js")) {
-      loadLib("mini-a-file-tool.js")
+    if (typeof MiniUtilsTool !== "function") {
+      //if (io.fileExists("mini-a-utils.js")) {
+      loadLib("mini-a-utils.js")
       //}
     }
 
-    if (typeof MiniFileTool !== "function") {
-      this.fnI("warn", "Mini-A file tool helpers not available; skipping utils MCP registration.")
+    if (typeof MiniUtilsTool !== "function") {
+      this.fnI("warn", "Mini-A utils tool helpers not available; skipping utils MCP registration.")
       return __
     }
 
     var toolOptions = {}
     if (args.readwrite === true) toolOptions.readwrite = true
-    var fileTool = new MiniFileTool(toolOptions)
+    var fileTool = new MiniUtilsTool(toolOptions)
     if (fileTool._initialized !== true) {
       var initResult = fileTool.init(toolOptions)
       if (isString(initResult) && initResult.indexOf("[ERROR]") === 0) {
@@ -4086,11 +4086,11 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     }
 
-    var prototypeNames = Object.getOwnPropertyNames(MiniFileTool.prototype)
+    var prototypeNames = Object.getOwnPropertyNames(MiniUtilsTool.prototype)
     var methodNames = prototypeNames.filter(function(name) {
       if (name === "constructor") return false
       if (name.charAt(0) === "_") return false
-      return isFunction(MiniFileTool.prototype[name])
+      return isFunction(MiniUtilsTool.prototype[name])
     })
 
     if (methodNames.length === 0) return __
@@ -4226,7 +4226,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     methodNames.forEach(function(name) {
       var meta = metadataByFn[name] || {
         name       : name,
-        description: "Execute MiniFileTool." + name,
+        description: "Execute MiniUtilsTool." + name,
         inputSchema: { type: "object" }
       }
       fnsMeta[name] = meta
