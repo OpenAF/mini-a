@@ -280,12 +280,12 @@ The `start()` method accepts various configuration options:
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` to prefill a bundle of related flags
 
 #### Planning Controls
-- **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
-- **`planfile`** (string): When planning, write the generated plan to this path. In execution mode, load an existing plan from this path (Markdown `.md` or JSON `.json`) and keep it in sync as tasks complete.
-- **`planformat`** (string): Override the plan output format during `planmode` (`markdown` or `json`). Defaults to the detected extension of `planfile`, or Markdown when unspecified.
+- **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON/YAML plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
+- **`planfile`** (string): When planning, write the generated plan to this path. In execution mode, load an existing plan from this path (Markdown `.md`, JSON `.json`, or YAML `.yaml`/`.yml`) and keep it in sync as tasks complete.
+- **`planformat`** (string): Override the plan output format during `planmode` (`markdown`, `json`, or `yaml`). Defaults to the detected extension of `planfile`, or Markdown when unspecified.
 - **`plancontent`** (string): Provide plan content directly as a string instead of loading from a file. Useful for programmatic plan injection.
 - **`resumefailed`** (boolean, default: false): Resume execution from the last failed task when re-running Mini-A against a partially completed plan file.
-- **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON.
+- **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON/YAML.
 - **`forceplanning`** (boolean, default: false): Force planning to be enabled even if the complexity assessment suggests it's not needed. Overrides the automatic planning strategy selection.
 - **`saveplannotes`** (boolean, default: false): When enabled, persist execution notes, critique results, and dynamic adjustments within the plan file structure. Useful for maintaining a complete audit trail of plan evolution.
 - **`updatefreq`** (string, default: `auto`): Controls how often Mini-A writes progress to `planfile`. Accepted values are `auto` (every `updateinterval` steps), `always` (after every qualifying action), `checkpoints` (25/50/75/100% of `maxsteps`), or `never`.
@@ -414,7 +414,7 @@ Mini-A includes sophisticated planning capabilities that adapt to task complexit
 - **Dynamic replanning** – When obstacles occur during execution, the `_applyDynamicReplanAdjustments()` method dynamically injects mitigation tasks into the plan without requiring full replanning. Blocked nodes receive child tasks that address the specific obstacle, and the system tracks adjustments via `state.plan.meta.dynamicAdjustments` to avoid duplicate mitigations. This allows the agent to adapt to failures while preserving the overall plan structure.
 - **External plan management** – When loading plans via `planfile=` or `plancontent=`, Mini-A sets the `_hasExternalPlan` flag to prevent reinitializing planning state. External plans go through the same critique and verification enhancement process as generated plans, and notes/execution history are preserved during format conversions.
 - **Progress metrics & logging** – Records overall completion, checkpoint counts, and new counters (`plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned`, etc.) that show up in `getMetrics()`.
-- **Planning mode & conversion utilities** – Generate reusable Markdown/JSON plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`). Use `saveplannotes=true` to persist execution notes within the plan file.
+- **Planning mode & conversion utilities** – Generate reusable Markdown/JSON/YAML plans via `planmode=true`, sync them with `planfile=...` during execution, resume failed runs (`resumefailed=true`), and convert formats on demand (`convertplan=true`). Use `saveplannotes=true` to persist execution notes within the plan file.
 
 ### Automatic Plan Updates
 
