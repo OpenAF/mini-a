@@ -143,7 +143,7 @@ filesHash:
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
-  mcps/mcp-web.yaml: 9d6b5c89689426419f2f3aaf36b925aa7bbaa732
+  mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
   mini-a-con.js: 19bbc88d9ad5b094e83fbd5a84433753c2db3cf1
   mini-a-file-tool.js: 4d1c9b0fc70613c3a8bad3c45a1ec0054c11dca4
   mini-a-main.yaml: a5562bb631dcfffcb20c1af35861b413a1eef547
