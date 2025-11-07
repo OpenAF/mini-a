@@ -2871,6 +2871,82 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   return payload
 }
 
+MiniA.prototype._runValidationMode = function(planPayload, args, controls) {
+  if (!isObject(planPayload) || !isObject(planPayload.plan)) {
+    throw "validateplan=true requires a plan from planfile, plancontent, or planmode=true"
+  }
+
+  this.fnI("plan", "Validating plan...")
+
+  // Run structure validation
+  var validation = this._validatePlanStructure(planPayload.plan, args)
+  if (!isObject(planPayload.plan.meta)) planPayload.plan.meta = {}
+  planPayload.plan.meta.validation = validation
+
+  if (isObject(global.__mini_a_metrics)) {
+    if (isObject(global.__mini_a_metrics.plans_validated)) {
+      global.__mini_a_metrics.plans_validated.inc()
+    }
+    if (!validation.valid && isObject(global.__mini_a_metrics.plans_validation_failed)) {
+      global.__mini_a_metrics.plans_validation_failed.inc()
+    }
+  }
+
+  // Run LLM critique
+  this._critiquePlanWithLLM(planPayload, args, controls)
+
+  // Display validation results
+  this.fnI("plan", "\n=== Plan Validation Results ===\n")
+
+  // Structure validation results
+  this.fnI("plan", "Structure Validation: " + (validation.valid ? "PASS" : "FAIL"))
+  if (isArray(validation.issues) && validation.issues.length > 0) {
+    this.fnI("plan", "Issues found:")
+    validation.issues.forEach(function(issue) {
+      this.fnI("plan", "  - " + issue)
+    }.bind(this))
+  } else {
+    this.fnI("plan", "  No structural issues found.")
+  }
+
+  // LLM critique results
+  var critique = planPayload.plan.meta.llmCritique
+  if (isObject(critique)) {
+    this.fnI("plan", "\nLLM Critique: " + critique.verdict)
+    if (isString(critique.summary) && critique.summary.length > 0) {
+      this.fnI("plan", "Summary: " + critique.summary)
+    }
+    if (isArray(critique.issues) && critique.issues.length > 0) {
+      this.fnI("plan", "\nIssues:")
+      critique.issues.forEach(function(issue) {
+        this.fnI("plan", "  - " + issue)
+      }.bind(this))
+    }
+    if (isArray(critique.missingWork) && critique.missingWork.length > 0) {
+      this.fnI("plan", "\nMissing Work:")
+      critique.missingWork.forEach(function(work) {
+        this.fnI("plan", "  - " + work)
+      }.bind(this))
+    }
+    if (isArray(critique.qualityRisks) && critique.qualityRisks.length > 0) {
+      this.fnI("plan", "\nQuality Risks:")
+      critique.qualityRisks.forEach(function(risk) {
+        this.fnI("plan", "  - " + risk)
+      }.bind(this))
+    }
+  }
+
+  // Overall status
+  var overallPass = validation.valid && (!isObject(critique) || critique.verdict === "PASS")
+  this.fnI("plan", "\n=== Overall Status: " + (overallPass ? "PASS" : "NEEDS REVISION") + " ===\n")
+
+  return {
+    validation: validation,
+    critique: critique,
+    status: overallPass ? "PASS" : "NEEDS_REVISION"
+  }
+}
+
 MiniA.prototype._buildSimplePlan = function(goalText, context) {
   var trimmed = isString(goalText) ? goalText.trim() : stringify(goalText, __, "")
   var parts = trimmed.split(/(?:\n+|;|\.\s+)/).map(p => p.trim()).filter(p => p.length > 0)
@@ -5776,6 +5852,22 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this.fnI("plan", `\n${convertedContent}`)
       }
       return convertedContent
+    }
+
+    if (args.validateplan) {
+      var planToValidate = preloadedPlan
+
+      // If planmode is also enabled, generate the plan first
+      if (args.planmode) {
+        planToValidate = this._runPlanningMode(args, planCallControls)
+      }
+
+      if (!isObject(planToValidate) || !isObject(planToValidate.plan)) {
+        throw "validateplan=true requires a plan from planfile, plancontent, or planmode=true"
+      }
+
+      var validationResult = this._runValidationMode(planToValidate, args, planCallControls)
+      return validationResult
     }
 
     if (args.planmode) {

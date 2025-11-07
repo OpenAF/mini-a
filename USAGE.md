@@ -323,6 +323,7 @@ The `start()` method accepts various configuration options:
 - **`planfile`** (string): When planning, write the generated plan to this path. In execution mode, load an existing plan from this path (Markdown `.md`, JSON `.json`, or YAML `.yaml`/`.yml`) and keep it in sync as tasks complete.
 - **`planformat`** (string): Override the plan output format during `planmode` (`markdown`, `json`, or `yaml`). Defaults to the detected extension of `planfile`, or Markdown when unspecified.
 - **`plancontent`** (string): Provide plan content directly as a string instead of loading from a file. Useful for programmatic plan injection.
+- **`validateplan`** (boolean, default: false): Validate a plan using LLM-based critique and structure validation without executing it. Can be combined with `planmode=true` to generate and validate in one step, or used with `planfile=` to validate an existing plan. The validation checks for structural issues, missing work, quality risks, and provides an overall PASS/NEEDS_REVISION verdict.
 - **`resumefailed`** (boolean, default: false): Resume execution from the last failed task when re-running Mini-A against a partially completed plan file.
 - **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON/YAML.
 - **`forceplanning`** (boolean, default: false): Force planning to be enabled even if the complexity assessment suggests it's not needed. Overrides the automatic planning strategy selection.
@@ -441,6 +442,37 @@ Switching back to the default agent mode is as simple as omitting the flag (or s
 Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested "tree" plan with checkpoints. Provide `planfile=plan.md` (or `.json`) to reuse a pre-generated plan; Mini-A keeps task checkboxes in sync as execution progresses.
 
 Use `planmode=true` when you only need Mini-A to design the plan. The runtime gathers context using the low-cost model (when available), asks the primary model for the final structured plan, writes the result to `planfile` (if supplied), prints it, and exits.
+
+### Plan Validation
+
+Use `validateplan=true` to validate a plan without executing it. This feature performs both LLM-based critique and structure validation to ensure your plan is ready for execution.
+
+**Validate an existing plan:**
+```bash
+ojob mini-a.yaml goal="Your goal" planfile=plan.md validateplan=true useshell=true
+```
+
+**Generate and validate a plan in one step:**
+```bash
+ojob mini-a.yaml goal="Audit repository and prepare upgrade notes" planmode=true validateplan=true useshell=true
+```
+
+The validation process checks for:
+- **Structure validation**: Verifies the plan has the required structure and checks each step against available capabilities (shell access, MCP tools)
+- **LLM critique**: Evaluates the plan for missing work, unclear tasks, quality risks, and provides actionable feedback
+- **Overall verdict**: Returns either PASS (ready for execution) or NEEDS_REVISION (requires improvements)
+
+Validation results include:
+- Issues found in the plan structure
+- Missing work that should be added
+- Quality risks that could affect execution
+- Specific suggestions for improvement
+
+This is particularly useful for:
+- Reviewing plans before committing to execution
+- Validating externally created plans
+- Iterating on plan quality before starting work
+- Ensuring all required tools and permissions are available
 
 ### Advanced Planning Features
 

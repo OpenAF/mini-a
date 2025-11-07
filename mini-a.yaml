@@ -167,6 +167,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : validateplan
+    desc     : Validate a plan using LLM-based critique and structure validation without executing
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : convertplan
     desc     : Convert the loaded/generated plan to the requested format and exit
     example  : "false"
@@ -300,6 +305,7 @@ jobs:
       useplanning    : toBoolean.isBoolean.default(false)
       forceplanning  : toBoolean.isBoolean.default(false)
       planmode       : toBoolean.isBoolean.default(false)
+      validateplan   : toBoolean.isBoolean.default(false)
       convertplan    : toBoolean.isBoolean.default(false)
       resumefailed   : toBoolean.isBoolean.default(false)
       chatbotmode    : toBoolean.isBoolean.default(false)
