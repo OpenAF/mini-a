@@ -374,7 +374,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
-- **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt
+- **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt (can be text or file path)
 
 #### Visual Guidance
 - **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
@@ -1147,13 +1147,20 @@ agent.start({
 
 ### Custom Rules and Guardrails
 
-Provide extra numbered rules to the system prompt using the `rules` parameter. Supply them as a JSON or SLON array so they are injected verbatim.
+Provide extra numbered rules to the system prompt using the `rules` parameter. Supply them as a JSON or SLON array so they are injected verbatim, or specify a file path to load the rules from.
 
 ```javascript
+// Inline rules
 var agent = new MiniA()
 agent.start({
     goal: "Review generated SQL queries",
     rules: "[ 'Never run destructive DDL statements', 'Use markdown tables for final summaries' ]"
+})
+
+// Or load rules from a file
+agent.start({
+    goal: "Review generated SQL queries",
+    rules: "path/to/custom-rules.json"
 })
 ```
 
