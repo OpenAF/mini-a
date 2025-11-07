@@ -374,7 +374,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
-- **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt
+- **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt (can be text or file path)
 
 #### Visual Guidance
 - **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
@@ -389,6 +389,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
 - **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
+  - Exposes three streamlined actions: `init` (configure the working root and permissions), `fileQuery` (read/list/search/info via the `operation` field), and `fileModify` (write/append/delete with `operation` plus required `content` or `confirm` flags)
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
@@ -398,7 +399,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 - **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access.
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
-  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`).
+  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`) exposing `init`, `fileQuery`, and `fileModify` actions.
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
   - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
   - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
@@ -1146,13 +1147,20 @@ agent.start({
 
 ### Custom Rules and Guardrails
 
-Provide extra numbered rules to the system prompt using the `rules` parameter. Supply them as a JSON or SLON array so they are injected verbatim.
+Provide extra numbered rules to the system prompt using the `rules` parameter. Supply them as a JSON or SLON array so they are injected verbatim, or specify a file path to load the rules from.
 
 ```javascript
+// Inline rules
 var agent = new MiniA()
 agent.start({
     goal: "Review generated SQL queries",
     rules: "[ 'Never run destructive DDL statements', 'Use markdown tables for final summaries' ]"
+})
+
+// Or load rules from a file
+agent.start({
+    goal: "Review generated SQL queries",
+    rules: "path/to/custom-rules.json"
 })
 ```
 
