@@ -37,10 +37,10 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testDeleteFile
 
-- name: MiniA Utils Tests::FileQuery
+- name: MiniA Utils Tests::FileOps
   from: MiniA Utils Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFileQuery
+  exec: args.func = args.tests.testFileOps
 
 - name: MiniA Utils Tests::FileModify
   from: MiniA Utils Tests::Init
@@ -57,6 +57,51 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMetadata
 
+- name: MiniA Utils Tests::MathOpsCalculate
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMathOpsCalculate
+
+- name: MiniA Utils Tests::MathOpsStatistics
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMathOpsStatistics
+
+- name: MiniA Utils Tests::MathOpsConvert
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMathOpsConvert
+
+- name: MiniA Utils Tests::MathOpsRandom
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMathOpsRandom
+
+- name: MiniA Utils Tests::MathOpsUnknownOperation
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMathOpsUnknownOperation
+
+- name: MiniA Utils Tests::TimeOpsCurrentTime
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTimeOpsCurrentTime
+
+- name: MiniA Utils Tests::TimeOpsConvert
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTimeOpsConvert
+
+- name: MiniA Utils Tests::TimeOpsSleep
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTimeOpsSleep
+
+- name: MiniA Utils Tests::EncodingAndAdvancedParams
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEncodingAndAdvancedParams
+
 include:
 - oJobTest.yaml
 
@@ -72,7 +117,16 @@ todo:
 - MiniA Utils Tests::SearchContent
 - MiniA Utils Tests::GetFileInfo
 - MiniA Utils Tests::DeleteFile
-- MiniA Utils Tests::FileQuery
+- MiniA Utils Tests::FileOps
 - MiniA Utils Tests::FileModify
 - MiniA Utils Tests::PathSecurity
 - MiniA Utils Tests::Metadata
+- MiniA Utils Tests::MathOpsCalculate
+- MiniA Utils Tests::MathOpsStatistics
+- MiniA Utils Tests::MathOpsConvert
+- MiniA Utils Tests::MathOpsRandom
+- MiniA Utils Tests::MathOpsUnknownOperation
+- MiniA Utils Tests::TimeOpsCurrentTime
+- MiniA Utils Tests::TimeOpsConvert
+- MiniA Utils Tests::TimeOpsSleep
+- MiniA Utils Tests::EncodingAndAdvancedParams

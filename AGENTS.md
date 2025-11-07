@@ -14,7 +14,15 @@ Always export `OAF_MODEL="(type: ..., model: ..., key: ...)"` (and optionally `O
 JavaScript executes inside OpenAF; keep two-space indentation and prefer `var` with camelCase names to match the existing code. Class-like helpers use PascalCase (e.g., `MiniA`), internal state uses `_` prefixes, and metrics keys stay snake_case. YAML files follow two-space indents with lower-case keys. Avoid introducing external dependencies without coordination—runtime expects the OpenAF standard library.
 
 ## Testing Guidelines
-No automated test harness exists. Validate new behavior by scripting representative goals (see `USAGE.md`) and capture the agent transcript with `debug=true`. When adding MCP integrations, run the corresponding `mcp-*.yaml` job standalone before wiring it into Mini-A. Document manual verification steps in the PR description, and note any scenarios not exercised.
+Automated tests exist for utility modules under `tests/`. Run the mini-a-utils test suite with `ojob tests/miniAUtils.yaml` to verify file operations, mathematical operations, and time operations. When adding new functionality to `mini-a-utils.js`, extend the corresponding test file (`tests/miniAUtils.js`) and update the job configuration (`tests/miniAUtils.yaml`) with new test cases.
+
+For core agent behavior, validate by scripting representative goals (see `USAGE.md`) and capture the agent transcript with `debug=true`. When adding MCP integrations, run the corresponding `mcp-*.yaml` job standalone before wiring it into Mini-A. Document manual verification steps in the PR description, and note any scenarios not exercised.
+
+Current test coverage includes:
+- **File Operations**: init, readFile, writeFile, listDirectory, searchContent, getFileInfo, deleteFile, fileOps, fileModify, path security
+- **Mathematical Operations**: calculate (add, subtract, multiply, divide, power, sqrt, abs, round), statistics (mean, median, min, max, sum, count), unit conversions, random generation (integer, sequence, choice, boolean, hex)
+- **Time Operations**: current time with timezone/format options, timezone conversions, sleep functionality
+- **Advanced Parameters**: UTF-8 encoding, createMissingDirs, contentLength reporting, append flags
 
 ## Commit & Pull Request Guidelines
 The Git history shows short imperative subjects (`Add usetools option`, `Update package`). Follow that style, keep subjects under ~70 characters, and include focused commits per concern. For pull requests, provide: concise summary of the change, rationale linking to any issue, reproduction or verification commands, and screenshots/terminal captures for UI or interaction updates. Flag configuration impacts (e.g., new environment variables) and call out any follow-up work needed.
