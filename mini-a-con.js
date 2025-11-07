@@ -66,7 +66,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "history", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "summarize", "history", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -500,6 +500,22 @@ try {
     }
   }
 
+  function summarize(ctx) {
+    if (!isObject(activeAgent) || typeof activeAgent.summarizeText !== "function") {
+      return ctx.substring(0, 400)
+    }
+
+    try {
+      var summaryResponse = activeAgent.summarizeText(ctx, { verbose: false })
+      if (isString(summaryResponse) && summaryResponse.trim().length > 0) {
+        return summaryResponse.trim()
+      }
+    } catch (summarizeError) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Summarization failed: " + summarizeError, errorColor))
+    }
+    return ctx.substring(0, 400)
+  }
+
   function compactConversationContext(preserveCount) {
     var stats = refreshConversationStats(activeAgent)
     if (!isObject(stats) || !isArray(stats.entries) || stats.entries.length === 0) {
@@ -585,6 +601,68 @@ try {
       }
     } catch (compactError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to compact conversation: " + compactError, errorColor))
+    }
+  }
+
+  function summarizeConversation(preserveCount) {
+    // First, compact the conversation
+    compactConversationContext(preserveCount)
+
+    // Then generate and display a user-friendly summary of the entire conversation
+    var stats = refreshConversationStats(activeAgent)
+    if (!isObject(stats) || !isArray(stats.entries) || stats.entries.length === 0) {
+      print(colorifyText("No conversation to summarize.", hintColor))
+      return
+    }
+
+    if (!isObject(activeAgent) || typeof activeAgent.summarizeText !== "function") {
+      print(colorifyText("No active agent available. Run a goal first to enable summarization.", hintColor))
+      return
+    }
+
+    var conversationText = []
+    stats.entries.forEach(function(entry) {
+      var role = isString(entry.role) ? entry.role.toUpperCase() : "UNKNOWN"
+      var content = flattenConversationContent(entry.content)
+      conversationText.push(`${role}: ${content}`)
+    })
+
+    var conversationPayload = conversationText.join("\n")
+
+    if (conversationPayload.trim().length === 0) {
+      print(colorifyText("No conversation content to summarize.", hintColor))
+      return
+    }
+
+    try {
+      print(colorifyText("Generating conversation summary...", hintColor))
+      var instructionText = "You are summarizing a conversation between a user and an AI assistant. Provide a clear, concise summary that:\n1) Identifies the main topics discussed\n2) Highlights key decisions or outcomes\n3) Notes any unresolved questions or next steps\n\nFormat the summary in a readable way with bullet points where appropriate."
+
+      var fullSummary = activeAgent.summarizeText(conversationPayload, {
+        verbose: false,
+        instructionText: instructionText
+      })
+
+      if (isString(fullSummary) && fullSummary.trim().length > 0) {
+        print()
+        print(colorifyText("=".repeat(60), accentColor))
+        print(colorifyText("Conversation Summary", "BOLD," + accentColor))
+        print(colorifyText("=".repeat(60), accentColor))
+        print()
+        var _m = jsonParse(fullSummary)
+        if (isMap(_m) && isString(_m.answer)) _m.answer = ow.format.withMD(_m.answer)
+        print(isObject(_m) ? printTree(_m) : ow.format.withMD(fullSummary.trim()))
+        print()
+        print(colorifyText("=".repeat(60), accentColor))
+      } else {
+        print(colorifyText("Unable to generate summary. Response was: " + stringify(fullSummary), errorColor))
+        print(colorifyText("Conversation payload length: " + conversationPayload.length + " characters", hintColor))
+      }
+    } catch (summaryError) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to generate conversation summary: " + summaryError, errorColor))
+      if (isDef(summaryError.stack)) {
+        print(colorifyText("Stack trace: " + summaryError.stack, errorColor))
+      }
     }
   }
 
@@ -997,6 +1075,7 @@ try {
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation", hintColor),
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
+      "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
@@ -1091,6 +1170,20 @@ try {
           print(colorifyText("Usage: /compact [messagesToKeep]", errorColor))
         } else {
           compactConversationContext(parsedKeep)
+        }
+        continue
+      }
+      if (command === "summarize") {
+        summarizeConversation()
+        continue
+      }
+      if (command.indexOf("summarize ") === 0) {
+        var keepValue = command.substring(10).trim()
+        var parsedKeep = parseInt(keepValue, 10)
+        if (isNaN(parsedKeep)) {
+          print(colorifyText("Usage: /summarize [messagesToKeep]", errorColor))
+        } else {
+          summarizeConversation(parsedKeep)
         }
         continue
       }
