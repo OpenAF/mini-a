@@ -113,7 +113,7 @@ files:
 - tests/miniAUtils.yaml
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  AGENTS.md: 8fb8ca99dbc0f0c11ef55ba7b5edd37666f47a8f
+  AGENTS.md: e1fbd909a8817c0a8d853ea795f5fa09e595a273
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: f64fa184aa34261b36e4182c785788437e5ee209
@@ -148,7 +148,7 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 64ab4504b4fba424e8ce696a61d3dccde83f9707
+  mini-a-con.js: 987f048bf6525c3f6f48efd5c91a1f7a235032a4
   mini-a-main.yaml: 4a358bb2b569a8393ac9b8ddbda1599cd9621a02
   mini-a-modes.yaml: 3e9cf81240092c5db5eda1b64ada21a299fafe91
   mini-a-utils.js: 8f18e68735e26d9c3799f32a785d73add4ad84cb
@@ -165,5 +165,5 @@ filesHash:
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
   tests/coreFunctionality.js: b10c42a85394f0ad6f72cebcef540497349080d8
   tests/coreFunctionality.yaml: 0a656733b02a5a4f77139766e42eabddfc4a39ca
-  tests/miniAUtils.js: 9db8baa3744c442296288635e7de03487200cb66
-  tests/miniAUtils.yaml: 7146e12e410c25aff22dcc58fac484a85cd68e7d
+  tests/miniAUtils.js: bb597e6875a4715ad9a890972dff4c784ee02a33
+  tests/miniAUtils.yaml: fa27f97f2234e7f812f61e37f21a9670d83c15ad
