@@ -619,7 +619,10 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
 MiniUtilsTool.prototype.filesystemQuery = function(params) {
   var payload = isObject(params) ? params : {}
   var opValue = payload.operation
-  var normalized = isString(opValue) && opValue.trim().length > 0 ? opValue.trim().toLowerCase() : "read"
+  if (isUnDef(opValue) || !isString(opValue) || opValue.trim().length === 0) {
+    return "[ERROR] operation parameter is required (use: read, list, search, or info)"
+  }
+  var normalized = opValue.trim().toLowerCase()
   var map = {
     read       : "readFile",
     readfile   : "readFile",

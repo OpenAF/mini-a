@@ -605,10 +605,7 @@ try {
   }
 
   function summarizeConversation(preserveCount) {
-    // First, compact the conversation
-    compactConversationContext(preserveCount)
-
-    // Then generate and display a user-friendly summary of the entire conversation
+    // Generate a detailed summary and replace the conversation with it
     var stats = refreshConversationStats(activeAgent)
     if (!isObject(stats) || !isArray(stats.entries) || stats.entries.length === 0) {
       print(colorifyText("No conversation to summarize.", hintColor))
@@ -620,8 +617,31 @@ try {
       return
     }
 
+    var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
+    var entries = stats.entries.slice()
+    var keepSize = Math.min(keepCount, entries.length)
+    var keepTail = entries.slice(entries.length - keepSize)
+    var summarizeUntil = entries.length - keepTail.length
+
+    var preserved = []
+    var summarizeCandidates = []
+    for (var i = 0; i < summarizeUntil; i++) {
+      var entry = entries[i]
+      var role = isString(entry.role) ? entry.role.toLowerCase() : ""
+      if (role === "system" || role === "developer") {
+        preserved.push(entry)
+      } else {
+        summarizeCandidates.push(entry)
+      }
+    }
+
+    if (summarizeCandidates.length === 0) {
+      print(colorifyText("No user or assistant messages to summarize from earlier history.", hintColor))
+      return
+    }
+
     var conversationText = []
-    stats.entries.forEach(function(entry) {
+    summarizeCandidates.forEach(function(entry) {
       var role = isString(entry.role) ? entry.role.toUpperCase() : "UNKNOWN"
       var content = flattenConversationContent(entry.content)
       conversationText.push(`${role}: ${content}`)
@@ -644,16 +664,45 @@ try {
       })
 
       if (isString(fullSummary) && fullSummary.trim().length > 0) {
-        print()
-        print(colorifyText("=".repeat(60), accentColor))
-        print(colorifyText("Conversation Summary", "BOLD," + accentColor))
-        print(colorifyText("=".repeat(60), accentColor))
-        print()
-        var _m = jsonParse(fullSummary)
-        if (isMap(_m) && isString(_m.answer)) _m.answer = ow.format.withMD(_m.answer)
-        print(isObject(_m) ? printTree(_m) : ow.format.withMD(fullSummary.trim()))
-        print()
-        print(colorifyText("=".repeat(60), accentColor))
+        // Replace the conversation with the summary
+        var summaryText = fullSummary.trim()
+        var summaryEntry = {
+          role: "assistant",
+          content: `Conversation summary (${summarizeCandidates.length} messages condensed on ${new Date().toISOString()}):\n\n${summaryText}`
+        }
+
+        var newConversation = preserved.concat([summaryEntry]).concat(keepTail)
+        var convoPath = getConversationPath()
+        if (!isString(convoPath) || convoPath.trim().length === 0) {
+          print(colorifyText("Conversation path is not configured. Use /set conversation <path> first.", hintColor))
+          return
+        }
+
+        io.writeFileJSON(convoPath, { u: new Date(), c: newConversation }, "")
+        if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
+          try { activeAgent.llm.getGPT().setConversation(newConversation) } catch (ignoreSetConversation) { }
+        }
+
+        var previousTokens = stats.totalTokens
+        var updatedStats = refreshConversationStats(activeAgent)
+        var afterTokens = isObject(updatedStats) ? updatedStats.totalTokens : 0
+        var reduction = previousTokens > 0 ? Math.max(0, previousTokens - afterTokens) : 0
+        print(
+          colorifyText("Conversation summarized and replaced. Preserved ", successColor) +
+          colorifyText(String(keepTail.length), numericColor) +
+          colorifyText(" recent message" + (keepTail.length === 1 ? "" : "s") + ".", successColor)
+        )
+        if (previousTokens > 0) {
+          print(
+            colorifyText("Estimated tokens: ~", hintColor) +
+            colorifyText(String(previousTokens), numericColor) +
+            colorifyText(" → ~", hintColor) +
+            colorifyText(String(afterTokens), numericColor) +
+            colorifyText(" (saved ~", hintColor) +
+            colorifyText(String(reduction), numericColor) +
+            colorifyText(").", hintColor)
+          )
+        }
       } else {
         print(colorifyText("Unable to generate summary. Response was: " + stringify(fullSummary), errorColor))
         print(colorifyText("Conversation payload length: " + conversationPayload.length + " characters", hintColor))
