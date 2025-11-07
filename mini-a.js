@@ -4086,107 +4086,32 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     }
 
-    var prototypeNames = Object.getOwnPropertyNames(MiniUtilsTool.prototype)
-    var methodNames = prototypeNames.filter(function(name) {
-      if (name === "constructor") return false
-      if (name.charAt(0) === "_") return false
-      return isFunction(MiniUtilsTool.prototype[name])
+    var metadataByFn = {}
+    if (isFunction(MiniUtilsTool.getMetadataByFn)) {
+      metadataByFn = MiniUtilsTool.getMetadataByFn()
+    } else if (isObject(MiniUtilsTool._metadataByFn)) {
+      metadataByFn = MiniUtilsTool._metadataByFn
+    }
+
+    var methodNames = []
+    if (isFunction(MiniUtilsTool.getExposedMethodNames)) {
+      methodNames = MiniUtilsTool.getExposedMethodNames()
+    } else if (isObject(metadataByFn)) {
+      methodNames = Object.keys(metadataByFn)
+    } else {
+      var prototypeNames = Object.getOwnPropertyNames(MiniUtilsTool.prototype)
+      methodNames = prototypeNames.filter(function(name) {
+        if (name === "constructor") return false
+        if (name.charAt(0) === "_") return false
+        return isFunction(MiniUtilsTool.prototype[name])
+      })
+    }
+
+    methodNames = methodNames.filter(function(name) {
+      return isFunction(fileTool[name])
     })
 
     if (methodNames.length === 0) return __
-
-    var metadataByFn = {
-      init: {
-        name       : "init",
-        description: "Re-initialize the file tool with a new root directory and permissions.",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            root     : { type: "string", description: "Root directory for subsequent operations. Defaults to current directory." },
-            readwrite: { type: "boolean", description: "Enable write/delete operations when true." }
-          }
-        }
-      },
-      readFile: {
-        name       : "readFile",
-        description: "Read the contents and metadata of a file.",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            path    : { type: "string", description: "Path to the target file (relative or absolute)." },
-            encoding: { type: "string", description: "Character encoding to use. Defaults to \"utf-8\"." }
-          },
-          required: ["path"]
-        }
-      },
-      listDirectory: {
-        name       : "listDirectory",
-        description: "List files/directories inside a path.",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            path         : { type: "string", description: "Directory to list. Defaults to root." },
-            includeHidden: { type: "boolean", description: "Include hidden files when true." },
-            recursive    : { type: "boolean", description: "Recursively list contents when true." }
-          }
-        }
-      },
-      searchContent: {
-        name       : "searchContent",
-        description: "Search for text inside files under the root.",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            pattern     : { type: "string", description: "Text or regex to search for." },
-            path        : { type: "string", description: "Starting directory or file. Defaults to root." },
-            regex       : { type: "boolean", description: "Treat pattern as regular expression when true." },
-            caseSensitive: { type: "boolean", description: "Perform case-sensitive search when true." },
-            recursive   : { type: "boolean", description: "Search recursively when true. Defaults to true." },
-            maxResults  : { type: "number", description: "Maximum number of matches to return (0 = no limit)." }
-          },
-          required: ["pattern"]
-        }
-      },
-      getFileInfo: {
-        name       : "getFileInfo",
-        description: "Retrieve metadata about a file or directory.",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            path: { type: "string", description: "Target file or directory path." }
-          },
-          required: ["path"]
-        }
-      },
-      writeFile: {
-        name       : "writeFile",
-        description: "Write or append content to a file (requires readwrite=true).",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            path            : { type: "string", description: "Destination file path." },
-            content         : { type: "string", description: "Content to write to the file." },
-            encoding        : { type: "string", description: "Encoding to use. Defaults to \"utf-8\"." },
-            append          : { type: "boolean", description: "Append to existing file when true." },
-            createMissingDirs: { type: "boolean", description: "Create parent directories when they do not exist. Defaults to true." }
-          },
-          required: ["path", "content"]
-        }
-      },
-      deleteFile: {
-        name       : "deleteFile",
-        description: "Delete a file or directory (requires readwrite=true).",
-        inputSchema: {
-          type      : "object",
-          properties: {
-            path     : { type: "string", description: "File or directory to remove." },
-            confirm  : { type: "boolean", description: "Must be true to confirm deletion." },
-            recursive: { type: "boolean", description: "Delete directories recursively when true." }
-          },
-          required: ["path", "confirm"]
-        }
-      }
-    }
 
     var parent = this
     var formatResponse = function(result) {

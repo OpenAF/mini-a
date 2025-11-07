@@ -620,3 +620,152 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
     return "[ERROR] " + (e.message || String(e))
   }
 }
+
+MiniUtilsTool.prototype.fileQuery = function(params) {
+  var payload = isObject(params) ? params : {}
+  var opValue = payload.operation
+  var normalized = isString(opValue) && opValue.trim().length > 0 ? opValue.trim().toLowerCase() : "read"
+  var map = {
+    read       : "readFile",
+    readfile   : "readFile",
+    get        : "readFile",
+    view       : "readFile",
+    list       : "listDirectory",
+    ls         : "listDirectory",
+    listdirectory: "listDirectory",
+    dir        : "listDirectory",
+    search     : "searchContent",
+    searchcontent: "searchContent",
+    grep       : "searchContent",
+    find       : "searchContent",
+    info       : "getFileInfo",
+    stat       : "getFileInfo",
+    metadata   : "getFileInfo",
+    getfileinfo: "getFileInfo"
+  }
+  var target = map[normalized]
+  if (!target && isString(opValue) && isFunction(this[opValue])) target = opValue
+  if (!target) {
+    return "[ERROR] Unknown file query operation: " + (isString(opValue) ? opValue : normalized)
+  }
+
+  var innerParams = {}
+  for (var key in payload) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue
+    if (key === "operation") continue
+    innerParams[key] = payload[key]
+  }
+
+  try {
+    var handler = this[target]
+    if (!isFunction(handler)) {
+      return "[ERROR] Unsupported file query handler: " + target
+    }
+    return handler.call(this, innerParams)
+  } catch (e) {
+    return "[ERROR] " + (e && e.message ? e.message : String(e))
+  }
+}
+
+MiniUtilsTool.prototype.fileModify = function(params) {
+  var payload = isObject(params) ? params : {}
+  var opValue = payload.operation
+  if (!isString(opValue) || opValue.trim().length === 0) {
+    return "[ERROR] operation is required"
+  }
+  var normalized = opValue.trim().toLowerCase()
+  var map = {
+    write     : "writeFile",
+    writefile : "writeFile",
+    save      : "writeFile",
+    append    : "writeFile",
+    delete    : "deleteFile",
+    remove    : "deleteFile",
+    rm        : "deleteFile",
+    deletefile: "deleteFile"
+  }
+  var target = map[normalized]
+  if (!target && isString(opValue) && isFunction(this[opValue])) target = opValue
+  if (!target) {
+    return "[ERROR] Unknown file modify operation: " + opValue
+  }
+
+  var innerParams = {}
+  for (var key in payload) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue
+    if (key === "operation") continue
+    innerParams[key] = payload[key]
+  }
+  if (normalized === "append" && innerParams.append !== true) {
+    innerParams.append = true
+  }
+
+  try {
+    var handler = this[target]
+    if (!isFunction(handler)) {
+      return "[ERROR] Unsupported file modify handler: " + target
+    }
+    return handler.call(this, innerParams)
+  } catch (e) {
+    return "[ERROR] " + (e && e.message ? e.message : String(e))
+  }
+}
+
+MiniUtilsTool._metadataByFn = {
+  init: {
+    name       : "init",
+    description: "Re-initialize the file tool with a new root directory and permissions.",
+    inputSchema: {
+      type      : "object",
+      properties: {
+        root     : { type: "string", description: "Root directory for subsequent operations. Defaults to current directory." },
+        readwrite: { type: "boolean", description: "Enable write/delete operations when true." }
+      }
+    }
+  },
+  fileQuery: {
+    name       : "fileQuery",
+    description: "Perform read, list, search, or info operations within the configured root.",
+    inputSchema: {
+      type      : "object",
+      properties: {
+        operation    : { type: "string", description: "Operation to execute (read, list, search, info). Defaults to \"read\"." },
+        path         : { type: "string", description: "Target file or directory path." },
+        encoding     : { type: "string", description: "Encoding to use when reading files." },
+        includeHidden: { type: "boolean", description: "Include hidden files on list operations." },
+        recursive    : { type: "boolean", description: "Traverse directories recursively when supported." },
+        pattern      : { type: "string", description: "Pattern to search for when operation=search." },
+        regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation=search." },
+        caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation=search." },
+        maxResults   : { type: "number", description: "Maximum number of search matches to return (0 = no limit)." }
+      }
+    }
+  },
+  fileModify: {
+    name       : "fileModify",
+    description: "Write, append, or delete files and directories (requires readwrite=true for mutations).",
+    inputSchema: {
+      type      : "object",
+      properties: {
+        operation        : { type: "string", description: "Operation to execute (write, append, delete)." },
+        path             : { type: "string", description: "Target file or directory path." },
+        content          : { type: "string", description: "Content to write when operation=write or append." },
+        encoding         : { type: "string", description: "Encoding to use when writing content." },
+        append           : { type: "boolean", description: "Append instead of overwriting when supported." },
+        createMissingDirs: { type: "boolean", description: "Create parent directories when writing files." },
+        confirm          : { type: "boolean", description: "Must be true to confirm deletions." },
+        recursive        : { type: "boolean", description: "Delete directories recursively when true." }
+      },
+      required: ["operation", "path"]
+    }
+  }
+}
+
+MiniUtilsTool.getMetadataByFn = function() {
+  return MiniUtilsTool._metadataByFn || {}
+}
+
+MiniUtilsTool.getExposedMethodNames = function() {
+  var metadata = MiniUtilsTool.getMetadataByFn()
+  return Object.keys(metadata)
+}
