@@ -1,0 +1,78 @@
+jobs:
+- name: MiniA Utils Tests::Init
+  exec: args.tests = require("tests/miniAUtils.js")
+
+- name: MiniA Utils Tests::InitTool
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInit
+
+- name: MiniA Utils Tests::ReadFile
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadFile
+
+- name: MiniA Utils Tests::WriteFile
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteFile
+
+- name: MiniA Utils Tests::ListDirectory
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testListDirectory
+
+- name: MiniA Utils Tests::SearchContent
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchContent
+
+- name: MiniA Utils Tests::GetFileInfo
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGetFileInfo
+
+- name: MiniA Utils Tests::DeleteFile
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDeleteFile
+
+- name: MiniA Utils Tests::FileQuery
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFileQuery
+
+- name: MiniA Utils Tests::FileModify
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFileModify
+
+- name: MiniA Utils Tests::PathSecurity
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPathSecurity
+
+- name: MiniA Utils Tests::Metadata
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMetadata
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Utils Tests::InitTool
+- MiniA Utils Tests::ReadFile
+- MiniA Utils Tests::WriteFile
+- MiniA Utils Tests::ListDirectory
+- MiniA Utils Tests::SearchContent
+- MiniA Utils Tests::GetFileInfo
+- MiniA Utils Tests::DeleteFile
+- MiniA Utils Tests::FileQuery
+- MiniA Utils Tests::FileModify
+- MiniA Utils Tests::PathSecurity
+- MiniA Utils Tests::Metadata
