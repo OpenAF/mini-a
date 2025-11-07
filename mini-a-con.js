@@ -847,8 +847,8 @@ try {
       var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
       var prevLines = Math.ceil(_prevEventLength / termWidth)
       for (var i = 0; i < prevLines; i++) {
-      printnl("\r" + repeat(termWidth, " ") + "\r")
-      if (i < prevLines - 1) printnl("\u001b[1A")
+        printnl("\r" + repeat(termWidth, " ") + "\r")
+        if (i < prevLines - 1) printnl("\u001b[1A")
       }
       printnl("\r")
     }
@@ -860,7 +860,8 @@ try {
     } else {
       _erasePrev()
       printnl(_msg + "\r")
-      _prevEventLength = _msg.length
+      // Store visual length (without ANSI codes) for proper line calculation
+      _prevEventLength = (typeof ansiLength === "function") ? ansiLength(_msg) : _msg.length
     }
     //print(prefix + " " + iconText + " " + message)
   }
