@@ -4220,32 +4220,115 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     }
 
-    var fns = {}
-    var fnsMeta = {}
+    var availableOperations = methodNames.slice()
 
-    methodNames.forEach(function(name) {
+    var operationSummaries = availableOperations.map(function(name) {
       var meta = metadataByFn[name] || {
         name       : name,
         description: "Execute MiniUtilsTool." + name,
         inputSchema: { type: "object" }
       }
-      fnsMeta[name] = meta
-      fns[name] = function(params) {
-        var payload = params
-        if (isUnDef(payload)) payload = {}
+      return {
+        operation  : name,
+        name       : meta.name || name,
+        description: meta.description || "",
+        inputSchema: meta.inputSchema || { type: "object" }
+      }
+    })
+
+    var variantSchemas = operationSummaries.map(function(entry) {
+      var schema = entry.inputSchema
+      var requiredParams = []
+      if (isObject(schema) && isArray(schema.required)) {
+        schema.required.forEach(function(item) {
+          if (requiredParams.indexOf(item) === -1) requiredParams.push(item)
+        })
+      }
+      var variant = {
+        type      : "object",
+        properties: {
+          operation: { const: entry.operation },
+          params   : isObject(schema) ? schema : { type: "object" }
+        },
+        required: ["operation"]
+      }
+      if (requiredParams.length > 0) {
+        variant.required = variant.required.concat(["params"])
+      }
+      return variant
+    })
+
+    var fns = {
+      execute: function(params) {
+        var payload = isObject(params) ? params : {}
+        var opName = payload.operation
+        if (!isString(opName) || availableOperations.indexOf(opName) === -1) {
+          var unknown = isString(opName) ? opName : "(missing)"
+          var invalidMsg = "[ERROR] Unknown operation: " + unknown
+          parent.fnI("warn", `Mini-A utils MCP 'execute' failed: ${invalidMsg}`)
+          return {
+            error  : invalidMsg,
+            content: [{ type: "text", text: invalidMsg }]
+          }
+        }
+
+        if (isDef(payload.params) && !isObject(payload.params)) {
+          var typeErr = "[ERROR] params must be an object when provided"
+          parent.fnI("warn", `Mini-A utils MCP 'execute' failed: ${typeErr}`)
+          return {
+            error  : typeErr,
+            content: [{ type: "text", text: typeErr }]
+          }
+        }
+
+        var argsPayload
+        if (isObject(payload.params)) {
+          argsPayload = payload.params
+        } else {
+          argsPayload = {}
+          Object.keys(payload).forEach(function(key) {
+            if (key === "operation" || key === "params") return
+            argsPayload[key] = payload[key]
+          })
+        }
+
         try {
-          var result = fileTool[name](payload)
+          var result = fileTool[opName](argsPayload)
           return formatResponse(result)
         } catch (err) {
           var message = "[ERROR] " + (err && err.message ? err.message : String(err))
-          parent.fnI("warn", `Mini-A utils MCP '${name}' failed: ${message}`)
+          parent.fnI("warn", `Mini-A utils MCP '${opName}' failed: ${message}`)
           return {
             error  : message,
             content: [{ type: "text", text: message }]
           }
         }
       }
-    })
+    }
+
+    var fnsMeta = {
+      execute: {
+        name       : "execute",
+        description: "Run a Mini-A file utility operation (set 'operation' and optional 'params').",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            operation: {
+              type       : "string",
+              description: "Operation to execute (one of: " + availableOperations.join(", ") + ")",
+              enum       : availableOperations
+            },
+            params: {
+              type       : "object",
+              description: "Parameters for the selected operation. You may also supply them as top-level fields."
+            }
+          },
+          required: ["operation"],
+          anyOf   : variantSchemas
+        },
+        operationDetails: operationSummaries
+      }
+    }
 
     return {
       id     : "mini-a-utils",

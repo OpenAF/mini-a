@@ -388,7 +388,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
-- **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
+- **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations. When registered as MCP tools (`usetools=true`), the utilities surface a single action `mini-a-utils.execute`. Supply an `operation` name (e.g., `readFile`, `listDirectory`, `searchContent`, `writeFile`, `deleteFile`, `init`, `getFileInfo`) and optional `params` map with the arguments expected by that operation. Top-level fields besides `operation` are also accepted as shorthand parameters.
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
