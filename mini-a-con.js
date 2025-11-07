@@ -324,6 +324,7 @@ try {
       tool     : { label: "Tool", tokens: 0, chars: 0, messages: 0 },
       other    : { label: "Other", tokens: 0, chars: 0, messages: 0 }
     }
+    var usedActualStats = false
     var usedEstimator = false
     var safeEstimator = function(text) {
       var content = isString(text) ? text : String(text || "")
@@ -351,7 +352,26 @@ try {
       else bucket = data.other
 
       var content = flattenConversationContent(entry.content)
-      var tokens = content.length > 0 ? safeEstimator(content) : 0
+      var tokens = 0
+
+      // Use actual token stats if available (stored by _attachTokenStatsToConversation)
+      if (isObject(entry._tokenStats)) {
+        if (isNumber(entry._tokenStats.total_tokens) && entry._tokenStats.total_tokens > 0) {
+          tokens = entry._tokenStats.total_tokens
+          usedActualStats = true // Mark as using actual API data
+        } else if (isNumber(entry._tokenStats.prompt_tokens) || isNumber(entry._tokenStats.completion_tokens)) {
+          var prompt = isNumber(entry._tokenStats.prompt_tokens) ? entry._tokenStats.prompt_tokens : 0
+          var completion = isNumber(entry._tokenStats.completion_tokens) ? entry._tokenStats.completion_tokens : 0
+          tokens = prompt + completion
+          usedActualStats = true // Mark as using actual API data
+        }
+      }
+
+      // Fall back to estimation if no actual stats available
+      if (tokens === 0 && content.length > 0) {
+        tokens = safeEstimator(content)
+      }
+
       bucket.tokens += tokens
       bucket.chars += content.length
       bucket.messages += 1
@@ -369,12 +389,14 @@ try {
     var totalTokens = sections.reduce(function(acc, row) { return acc + row.tokens }, 0)
     var totalChars = sections.reduce(function(acc, row) { return acc + row.chars }, 0)
 
+    var estimateMethod = usedActualStats ? "actual" : (usedEstimator ? "model" : "approx")
+
     return {
       sections     : sections,
       totalTokens  : totalTokens,
       totalChars   : totalChars,
       messageCount : conversation.length,
-      estimateMethod: usedEstimator ? "model" : "approx",
+      estimateMethod: estimateMethod,
       entries      : conversation
     }
   }
@@ -422,8 +444,9 @@ try {
 
     print(colorifyText("Conversation context usage", accentColor))
     print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
-    var methodLabel = stats.estimateMethod === "model" ? "model-based" : "approximate"
-    print(colorifyText("Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | Estimated tokens: ~", hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
+    var methodLabel = stats.estimateMethod === "actual" ? "actual from API" : (stats.estimateMethod === "model" ? "model-based" : "approximate")
+    var tokenLabel = stats.estimateMethod === "actual" ? "Total tokens: " : "Estimated tokens: ~"
+    print(colorifyText("Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | " + tokenLabel, hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
     if (isString(stats.path) && stats.path.length > 0) {
       print(colorifyText("Conversation file: " + stats.path, hintColor))
     }

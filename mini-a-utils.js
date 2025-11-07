@@ -9,12 +9,11 @@
  * </odoc>
  */
 var MiniUtilsTool = function(options) {
-  this._FileClass = Packages.java.io.File
   this._initialized = false
   this._root = null
   this._rootWithSep = null
   this._readWrite = false
-  this._separator = String(this._FileClass.separator)
+  this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
   if (isDef(options)) {
     this.init(options)
@@ -38,15 +37,14 @@ var MiniUtilsTool = function(options) {
 MiniUtilsTool.prototype.init = function(options) {
   try {
     if (isUnDef(options)) options = {}
-    if (isString(options)) options = { root: options }
-    var File = this._FileClass
+    if (isString(options) || options instanceof java.lang.String) options = { root: options }
     var rootPath = options.root || "."
-    var rootFile = new File(rootPath)
-    var canonicalRoot = String(rootFile.getCanonicalPath())
-    if (!rootFile.exists()) {
+    var rootFile = io.fileInfo(rootPath)
+    var canonicalRoot = rootFile.canonicalPath
+    if (!io.fileExists(canonicalRoot)) {
       return "[ERROR] Root path not found: " + rootPath
     }
-    if (!rootFile.isDirectory()) {
+    if (!rootFile.isDirectory) {
       return "[ERROR] Root path is not a directory: " + canonicalRoot
     }
 
@@ -57,7 +55,7 @@ MiniUtilsTool.prototype.init = function(options) {
 
     this._root = canonicalRoot
     this._readWrite = options.readwrite === true
-    var sep = String(File.separator)
+    var sep = String(java.io.File.separator)
     this._separator = sep
     if (canonicalRoot.indexOf(sep, canonicalRoot.length - sep.length) === -1) {
       this._rootWithSep = canonicalRoot + sep
@@ -98,10 +96,9 @@ MiniUtilsTool.prototype._toRelative = function(targetPath) {
 }
 
 MiniUtilsTool.prototype._resolve = function(target) {
-  var File = this._FileClass
-  var candidate = new File(target)
+  var candidate = new java.io.File(target)
   if (!candidate.isAbsolute()) {
-    candidate = new File(this._root, target)
+    candidate = new java.io.File(this._root, target)
   }
   var resolved = String(candidate.getCanonicalPath())
   if (!this._withinRoot(resolved)) {
@@ -123,14 +120,13 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
   var recursive = options.recursive === true
   var results = []
   var seen = {}
-  var FileRef = this._FileClass
 
   var pushEntry = function(fullPath) {
     if (!isString(fullPath)) return
     if (!self._withinRoot(fullPath)) return
     if (fullPath === baseDir) return
     if (seen[fullPath]) return
-    var fileObj = new FileRef(fullPath)
+    var fileObj = new java.io.File(fullPath)
     var fileName = String(fileObj.getName())
     if (!includeHidden && (fileObj.isHidden() || fileName.charAt(0) === ".")) return
     var info = io.fileInfo(fullPath)
@@ -160,7 +156,7 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
     }
     if (isString(value)) {
       try {
-        var fromString = new FileRef(isString(ctxDir) ? ctxDir : baseDir, value)
+        var fromString = new java.io.File(isString(ctxDir) ? ctxDir : baseDir, value)
         var resolved = String(fromString.getCanonicalPath())
         pushEntry(resolved)
       } catch (innerErr) {
@@ -172,9 +168,9 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
       var candidate = value.canonicalPath || value.filepath || value.path
       if (isString(candidate)) {
         try {
-          var fileCandidate = new FileRef(candidate)
+          var fileCandidate = new java.io.File(candidate)
           if (!fileCandidate.isAbsolute()) {
-            fileCandidate = new FileRef(isString(ctxDir) ? ctxDir : baseDir, candidate)
+            fileCandidate = new java.io.File(isString(ctxDir) ? ctxDir : baseDir, candidate)
           }
           resolved = String(fileCandidate.getCanonicalPath())
           pushEntry(resolved)
@@ -186,14 +182,14 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
           var parentDir = value.directory
           var baseForName
           if (isString(parentDir)) {
-            baseForName = new FileRef(parentDir)
+            baseForName = new java.io.File(parentDir)
             if (!baseForName.isAbsolute()) {
-              baseForName = new FileRef(isString(ctxDir) ? ctxDir : baseDir, parentDir)
+              baseForName = new java.io.File(isString(ctxDir) ? ctxDir : baseDir, parentDir)
             }
           } else {
-            baseForName = new FileRef(isString(ctxDir) ? ctxDir : baseDir)
+            baseForName = new java.io.File(isString(ctxDir) ? ctxDir : baseDir)
           }
-          resolved = String(new FileRef(baseForName, value.filename).getCanonicalPath())
+          resolved = String(new java.io.File(baseForName, value.filename).getCanonicalPath())
           pushEntry(resolved)
         } catch (innerErr3) {
           resolved = null
@@ -214,11 +210,11 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
 
   var fallbackEnumerate = function(currentDir) {
     try {
-      var listed = io.listFiles(currentDir) || []
+      var listed = io.listFiles(currentDir).files || []
       if (isArray(listed)) {
         listed.forEach(function(entry) {
           try {
-            var childFile = new FileRef(currentDir, entry)
+            var childFile = new java.io.File(currentDir, entry)
             var childPath = String(childFile.getCanonicalPath())
             pushEntry(childPath)
             if (recursive) {
@@ -239,7 +235,7 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
 
   var raw
   try {
-    raw = recursive ? io.listFilesRecursive(baseDir) : io.listFiles(baseDir)
+    raw = recursive ? listFilesRecursive(baseDir) : io.listFiles(baseDir).files
   } catch (e) {
     raw = null
   }
@@ -520,8 +516,7 @@ MiniUtilsTool.prototype.writeFile = function(params) {
     this._ensureInitialized()
     this._ensureWritable("write operations")
     var filePath = this._resolve(params.path)
-    var File = this._FileClass
-    var targetFile = new File(filePath)
+    var targetFile = new java.io.File(filePath)
     var parent = targetFile.getParentFile()
     if (params.createMissingDirs !== false && parent !== null && !parent.exists()) {
       parent.mkdirs()
@@ -619,4 +614,479 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
   } catch (e) {
     return "[ERROR] " + (e.message || String(e))
   }
+}
+
+MiniUtilsTool.prototype.fileQuery = function(params) {
+  var payload = isObject(params) ? params : {}
+  var opValue = payload.operation
+  var normalized = isString(opValue) && opValue.trim().length > 0 ? opValue.trim().toLowerCase() : "read"
+  var map = {
+    read       : "readFile",
+    readfile   : "readFile",
+    get        : "readFile",
+    view       : "readFile",
+    list       : "listDirectory",
+    ls         : "listDirectory",
+    listdirectory: "listDirectory",
+    dir        : "listDirectory",
+    search     : "searchContent",
+    searchcontent: "searchContent",
+    grep       : "searchContent",
+    find       : "searchContent",
+    info       : "getFileInfo",
+    stat       : "getFileInfo",
+    metadata   : "getFileInfo",
+    getfileinfo: "getFileInfo"
+  }
+  var target = map[normalized]
+  if (!target && isString(opValue) && isFunction(this[opValue])) target = opValue
+  if (!target) {
+    return "[ERROR] Unknown file query operation: " + (isString(opValue) ? opValue : normalized)
+  }
+
+  var innerParams = {}
+  for (var key in payload) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue
+    if (key === "operation") continue
+    innerParams[key] = payload[key]
+  }
+
+  try {
+    var handler = this[target]
+    if (!isFunction(handler)) {
+      return "[ERROR] Unsupported file query handler: " + target
+    }
+    return handler.call(this, innerParams)
+  } catch (e) {
+    return "[ERROR] " + (e && e.message ? e.message : String(e))
+  }
+}
+
+MiniUtilsTool.prototype.fileModify = function(params) {
+  var payload = isObject(params) ? params : {}
+  var opValue = payload.operation
+  if (!isString(opValue) || opValue.trim().length === 0) {
+    return "[ERROR] operation is required"
+  }
+  var normalized = opValue.trim().toLowerCase()
+  var map = {
+    write     : "writeFile",
+    writefile : "writeFile",
+    save      : "writeFile",
+    append    : "writeFile",
+    delete    : "deleteFile",
+    remove    : "deleteFile",
+    rm        : "deleteFile",
+    deletefile: "deleteFile"
+  }
+  var target = map[normalized]
+  if (!target && isString(opValue) && isFunction(this[opValue])) target = opValue
+  if (!target) {
+    return "[ERROR] Unknown file modify operation: " + opValue
+  }
+
+  var innerParams = {}
+  for (var key in payload) {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue
+    if (key === "operation") continue
+    innerParams[key] = payload[key]
+  }
+  if (normalized === "append" && innerParams.append !== true) {
+    innerParams.append = true
+  }
+
+  try {
+    var handler = this[target]
+    if (!isFunction(handler)) {
+      return "[ERROR] Unsupported file modify handler: " + target
+    }
+    return handler.call(this, innerParams)
+  } catch (e) {
+    return "[ERROR] " + (e && e.message ? e.message : String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.mathOps(params) : Object</key>
+ * Performs mathematical operations including calculations, statistics, unit conversions, and random number generation.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform (calculate, statistics, convert-unit, random).
+ * - For calculate: `op` (add, subtract, multiply, divide, power, sqrt, abs, round), `values` (array of numbers), `precision` (optional)
+ * - For statistics: `values` (array of numbers), `metrics` (optional array of: mean, median, min, max, sum, count)
+ * - For convert-unit: `value` (number), `fromUnit` (string), `toUnit` (string), `precision` (optional)
+ * - For random: `type` (integer, sequence, choice, boolean, hex), type-specific params (min/max, items, count, seed, etc.)
+ * </odoc>
+ */
+MiniUtilsTool.prototype.mathOps = function(params) {
+  params = params || {}
+  var op = (params.operation || "calculate").toLowerCase()
+
+  try {
+    if (op === "calculate") {
+      var mathOp = (params.op || "add").toLowerCase()
+      var values = params.values || []
+      if (!isArray(values) || values.length === 0) return "[ERROR] values array required"
+
+      var ops = {
+        add: function(v) { return v.reduce(function(a,b){return a+b}, 0) },
+        subtract: function(v) { return v.reduce(function(a,b){return a-b}) },
+        multiply: function(v) { return v.reduce(function(a,b){return a*b}, 1) },
+        divide: function(v) { return v.reduce(function(a,b){if(b===0)throw"Division by zero";return a/b}) },
+        power: function(v) { if(v.length!==2)throw"Power requires 2 values";return Math.pow(v[0],v[1]) },
+        sqrt: function(v) { if(v.length!==1)throw"Sqrt requires 1 value";return Math.sqrt(v[0]) },
+        abs: function(v) { if(v.length!==1)throw"Abs requires 1 value";return Math.abs(v[0]) },
+        round: function(v) { if(v.length!==1)throw"Round requires 1 value";return Math.round(v[0]) }
+      }
+
+      if (!ops[mathOp]) return "[ERROR] Unknown operation: " + mathOp
+      var result = ops[mathOp](values.map(Number))
+      if (isDef(params.precision)) result = Number(result.toFixed(params.precision))
+      return { operation: mathOp, values: values, result: result }
+
+    } else if (op === "statistics") {
+      var vals = (params.values || []).map(Number).sort(function(a,b){return a-b})
+      if (vals.length === 0) return "[ERROR] values array required"
+
+      var sum = vals.reduce(function(a,b){return a+b}, 0)
+      var mean = sum / vals.length
+      var n = vals.length
+      var median = n % 2 === 0 ? (vals[n/2-1] + vals[n/2])/2 : vals[Math.floor(n/2)]
+
+      var all = { count: n, sum: sum, mean: mean, median: median, min: vals[0], max: vals[n-1] }
+      if (isDef(params.metrics) && isArray(params.metrics)) {
+        var result = {}
+        params.metrics.forEach(function(m) { if (all[m]) result[m] = all[m] })
+        return result
+      }
+      return all
+
+    } else if (op === "convert-unit" || op === "convert") {
+      var value = Number(params.value)
+      var from = String(params.fromUnit || "").toLowerCase()
+      var to = String(params.toUnit || "").toLowerCase()
+
+      var conversions = {
+        m: 1, km: 1000, cm: 0.01, mm: 0.001, mi: 1609.344, ft: 0.3048, in: 0.0254,
+        kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495,
+        l: 1, ml: 0.001, gal: 3.78541
+      }
+
+      if (!conversions[from] || !conversions[to]) return "[ERROR] Unknown unit"
+      var result = (value * conversions[from]) / conversions[to]
+      if (isDef(params.precision)) result = Number(result.toFixed(params.precision))
+      return { value: value, fromUnit: from, toUnit: to, result: result }
+
+    } else if (op === "random") {
+      var Random = java.util.Random
+      var seed = params.seed
+      var rng = isDef(seed) ? new Random(Number(seed)) : new Random()
+      var type = (params.type || "integer").toLowerCase()
+
+      if (type === "integer") {
+        var min = Math.ceil(Number(params.min || 0))
+        var max = Math.floor(Number(params.max || 100))
+        if (min > max) return "[ERROR] min must be <= max"
+        var range = max - min + 1
+        var value = min + rng.nextInt(range)
+        return { type: type, min: min, max: max, value: Number(value), seed: isDef(seed) ? Number(seed) : null }
+
+      } else if (type === "sequence") {
+        var start = Math.ceil(Number(params.start || 0))
+        var end = Math.floor(Number(params.end || 10))
+        if (start > end) return "[ERROR] start must be <= end"
+
+        var seq = []
+        for (var i = start; i <= end; i++) seq.push(i)
+        for (var i = seq.length - 1; i > 0; i--) {
+          var j = rng.nextInt(i + 1)
+          var temp = seq[i]; seq[i] = seq[j]; seq[j] = temp
+        }
+
+        var count = isDef(params.count) ? Math.min(seq.length, Math.max(0, params.count)) : seq.length
+        return { type: type, start: start, end: end, count: count, sequence: seq.slice(0, count), seed: isDef(seed) ? Number(seed) : null }
+
+      } else if (type === "choice") {
+        var items = params.items
+        if (!isArray(items) || items.length === 0) return "[ERROR] items array required"
+
+        var count = Math.max(1, Math.floor(Number(params.count || 1)))
+        var unique = params.unique === true
+
+        if (unique && count > items.length) return "[ERROR] count exceeds unique items"
+
+        var results = []
+        if (unique) {
+          var indices = items.map(function(_, i) { return i })
+          for (var i = indices.length - 1; i > 0; i--) {
+            var j = rng.nextInt(i + 1)
+            var temp = indices[i]; indices[i] = indices[j]; indices[j] = temp
+          }
+          for (var i = 0; i < count; i++) results.push(items[indices[i]])
+        } else {
+          for (var i = 0; i < count; i++) results.push(items[rng.nextInt(items.length)])
+        }
+
+        return { type: type, count: count, unique: unique, choices: results, seed: isDef(seed) ? Number(seed) : null }
+
+      } else if (type === "boolean") {
+        var count = Math.max(1, Math.floor(Number(params.count || 1)))
+        var prob = Number(params.probabilityTrue || 0.5)
+        if (prob < 0 || prob > 1) return "[ERROR] probabilityTrue must be 0-1"
+
+        var values = []
+        for (var i = 0; i < count; i++) values.push(rng.nextDouble() < prob)
+        return { type: type, count: count, probabilityTrue: prob, values: values, seed: isDef(seed) ? Number(seed) : null }
+
+      } else if (type === "hex") {
+        var length = Math.max(1, Math.floor(Number(params.length || 16)))
+        var upper = params.uppercase === true
+        var chars = upper ? "0123456789ABCDEF" : "0123456789abcdef"
+
+        var result = ""
+        for (var i = 0; i < length; i++) result += chars.charAt(rng.nextInt(16))
+        return { type: type, length: length, uppercase: upper, value: result, seed: isDef(seed) ? Number(seed) : null }
+      }
+
+      return "[ERROR] Unknown random type: " + type
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.timeOps(params) : Object</key>
+ * Performs time and timezone operations.
+ * The `params` object can have the following properties:
+ * - `operation` (string): The operation to perform (current-time, convert, sleep). Defaults to current-time.
+ * - For current-time: `timezone` (optional IANA timezone), `format` (optional Java time pattern)
+ * - For convert: `targetTimezone` (required), `sourceTimezone` (optional), `datetime` (optional ISO string)
+ * - For sleep: `milliseconds` (required)
+ * </odoc>
+ */
+MiniUtilsTool.prototype.timeOps = function(params) {
+  params = params || {}
+  var op = (params.operation || "current-time").toLowerCase()
+
+  try {
+    if (op === "current-time" || op === "current") {
+      var ZoneId = java.time.ZoneId
+      var ZonedDateTime = java.time.ZonedDateTime
+      var DateTimeFormatter = java.time.format.DateTimeFormatter
+
+      var zone = isDef(params.timezone) ? ZoneId.of(params.timezone) : ZoneId.systemDefault()
+      var now = ZonedDateTime.now(zone)
+      var pattern = params.format || "yyyy-MM-dd'T'HH:mm:ssXXX"
+      var formatter = DateTimeFormatter.ofPattern(pattern)
+
+      return {
+        timezone: String(zone.getId()),
+        iso8601: String(now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)),
+        formatted: String(now.format(formatter)),
+        unixEpochSeconds: Number(now.toEpochSecond()),
+        unixEpochMilliseconds: Number(now.toInstant().toEpochMilli())
+      }
+
+    } else if (op === "convert" || op === "timezone-convert") {
+      if (isUnDef(params.targetTimezone)) return "[ERROR] targetTimezone required"
+
+      var ZoneId = java.time.ZoneId
+      var ZonedDateTime = java.time.ZonedDateTime
+      var DateTimeFormatter = java.time.format.DateTimeFormatter
+
+      var sourceZone = isDef(params.sourceTimezone) ? ZoneId.of(params.sourceTimezone) : ZoneId.systemDefault()
+      var targetZone = ZoneId.of(params.targetTimezone)
+      var dt = isDef(params.datetime) ? ZonedDateTime.parse(params.datetime) : ZonedDateTime.now(sourceZone)
+      var converted = dt.withZoneSameInstant(targetZone)
+
+      return {
+        sourceTimezone: String(sourceZone.getId()),
+        targetTimezone: String(targetZone.getId()),
+        sourceIso8601: String(dt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)),
+        targetIso8601: String(converted.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
+      }
+
+    } else if (op === "sleep") {
+      var duration = Number(params.milliseconds || 0)
+      if (duration < 0) return "[ERROR] milliseconds must be non-negative"
+      sleep(duration, true)
+      return { sleptMilliseconds: duration }
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+MiniUtilsTool._metadataByFn = (function() {
+  var queryReadOps = ["read", "readfile", "get", "view"]
+  var queryListOps = ["list", "ls", "listdirectory", "dir"]
+  var querySearchOps = ["search", "searchcontent", "grep", "find"]
+  var queryInfoOps = ["info", "stat", "metadata", "getfileinfo"]
+  var queryReadInfoOps = queryReadOps.concat(queryInfoOps)
+  var queryAllOps = queryReadOps
+    .concat(queryListOps)
+    .concat(querySearchOps)
+    .concat(queryInfoOps)
+
+  var modifyWriteOps = ["write", "writefile", "save", "append"]
+  var modifyDeleteOps = ["delete", "remove", "rm", "deletefile"]
+  var modifyAllOps = modifyWriteOps.concat(modifyDeleteOps)
+
+  var mathOps = ["calculate", "statistics", "convert-unit", "convert", "random"]
+  var timeOps = ["current-time", "current", "timezone-convert", "sleep"]
+
+  return {
+    init: {
+      name       : "init",
+      description: "Re-initialize the file tool with a new root directory and permissions.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          root     : { type: "string", description: "Root directory for subsequent operations. Defaults to current directory." },
+          readwrite: { type: "boolean", description: "Enable write/delete operations when true." }
+        }
+      }
+    },
+    fileQuery: {
+      name       : "fileQuery",
+      description: "Perform read, list, search, or info operations within the configured root.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation    : {
+            type       : "string",
+            description: "Operation to execute (read, list, search, info). Defaults to \"read\".",
+            enum       : queryAllOps,
+            default    : "read"
+          },
+          path         : { type: "string", description: "Target file or directory path." },
+          encoding     : { type: "string", description: "Encoding to use when reading files." },
+          includeHidden: { type: "boolean", description: "Include hidden files on list operations." },
+          recursive    : { type: "boolean", description: "Traverse directories recursively when supported." },
+          pattern      : { type: "string", description: "Pattern to search for when operation=search." },
+          regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation=search." },
+          caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation=search." },
+          maxResults   : { type: "number", description: "Maximum number of search matches to return (0 = no limit)." }
+        },
+        allOf    : [
+          {
+            if  : { not: { required: ["operation"] } },
+            then: { required: ["path"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: queryReadInfoOps } } },
+            then: { required: ["path"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: querySearchOps } } },
+            then: { required: ["pattern"] }
+          }
+        ]
+      }
+    },
+    fileModify: {
+      name       : "fileModify",
+      description: "Write, append, or delete files and directories (requires readwrite=true for mutations).",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation        : {
+            type       : "string",
+            description: "Operation to execute (write, append, delete).",
+            enum       : modifyAllOps
+          },
+          path             : { type: "string", description: "Target file or directory path." },
+          content          : { type: "string", description: "Content to write when operation=write or append." },
+          encoding         : { type: "string", description: "Encoding to use when writing content." },
+          append           : { type: "boolean", description: "Append instead of overwriting when supported." },
+          createMissingDirs: { type: "boolean", description: "Create parent directories when writing files." },
+          confirm          : { type: "boolean", description: "Must be true to confirm deletions." },
+          recursive        : { type: "boolean", description: "Delete directories recursively when true." }
+        },
+        required : ["operation", "path"],
+        allOf    : [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: modifyWriteOps } } },
+            then: { required: ["content"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: modifyDeleteOps } } },
+            then: { required: ["confirm"] }
+          }
+        ]
+      }
+    },
+    mathOps: {
+      name       : "mathOps",
+      description: "Perform mathematical operations including calculations, statistics, unit conversions, and random number generation.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation type: calculate, statistics, convert-unit, or random.",
+            enum       : mathOps,
+            default    : "calculate"
+          },
+          op           : { type: "string", description: "Math operation for calculate: add, subtract, multiply, divide, power, sqrt, abs, round." },
+          values       : { type: "array", items: { type: "number" }, description: "Array of numbers for calculate or statistics operations." },
+          precision    : { type: "number", description: "Decimal precision for rounding results." },
+          metrics      : { type: "array", items: { type: "string" }, description: "Specific metrics for statistics: mean, median, min, max, sum, count." },
+          value        : { type: "number", description: "Value to convert for convert-unit operation." },
+          fromUnit     : { type: "string", description: "Source unit for conversion (m, km, cm, mm, mi, ft, in, kg, g, lb, oz, l, ml, gal)." },
+          toUnit       : { type: "string", description: "Target unit for conversion." },
+          type         : { type: "string", description: "Random type: integer, sequence, choice, boolean, hex." },
+          min          : { type: "number", description: "Minimum value for random integer." },
+          max          : { type: "number", description: "Maximum value for random integer or sequence end." },
+          start        : { type: "number", description: "Start value for random sequence." },
+          end          : { type: "number", description: "End value for random sequence." },
+          count        : { type: "number", description: "Count of items to generate or select." },
+          items        : { type: "array", description: "Array of items for random choice." },
+          unique       : { type: "boolean", description: "Ensure unique choices when true." },
+          seed         : { type: "number", description: "Seed for deterministic random generation." },
+          probabilityTrue: { type: "number", description: "Probability (0-1) for random boolean generation." },
+          length       : { type: "number", description: "Length of random hex string." },
+          uppercase    : { type: "boolean", description: "Use uppercase for hex string." }
+        },
+        required : []
+      }
+    },
+    timeOps: {
+      name       : "timeOps",
+      description: "Perform time and timezone operations including getting current time, timezone conversions, and sleep.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation     : {
+            type       : "string",
+            description: "Operation type: current-time, convert, or sleep.",
+            enum       : timeOps,
+            default    : "current-time"
+          },
+          timezone       : { type: "string", description: "IANA timezone identifier (e.g., 'America/New_York', 'Europe/London')." },
+          format         : { type: "string", description: "Java time pattern for formatting (e.g., 'yyyy-MM-dd HH:mm:ss')." },
+          targetTimezone : { type: "string", description: "Target timezone for conversion (required for convert operation)." },
+          sourceTimezone : { type: "string", description: "Source timezone for conversion (defaults to system timezone)." },
+          datetime       : { type: "string", description: "ISO 8601 datetime string for conversion (defaults to current time)." },
+          milliseconds   : { type: "number", description: "Duration in milliseconds for sleep operation." }
+        },
+        required : []
+      }
+    }
+  }
+})()
+
+MiniUtilsTool.getMetadataByFn = function() {
+  return MiniUtilsTool._metadataByFn || {}
+}
+
+MiniUtilsTool.getExposedMethodNames = function() {
+  var metadata = MiniUtilsTool.getMetadataByFn()
+  return Object.keys(metadata)
 }
