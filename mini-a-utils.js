@@ -9,12 +9,11 @@
  * </odoc>
  */
 var MiniUtilsTool = function(options) {
-  this._FileClass = Packages.java.io.File
   this._initialized = false
   this._root = null
   this._rootWithSep = null
   this._readWrite = false
-  this._separator = String(this._FileClass.separator)
+  this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
   if (isDef(options)) {
     this.init(options)
@@ -38,15 +37,14 @@ var MiniUtilsTool = function(options) {
 MiniUtilsTool.prototype.init = function(options) {
   try {
     if (isUnDef(options)) options = {}
-    if (isString(options)) options = { root: options }
-    var File = this._FileClass
+    if (isString(options) || options instanceof java.lang.String) options = { root: options }
     var rootPath = options.root || "."
-    var rootFile = new File(rootPath)
-    var canonicalRoot = String(rootFile.getCanonicalPath())
-    if (!rootFile.exists()) {
+    var rootFile = io.fileInfo(rootPath)
+    var canonicalRoot = rootFile.canonicalPath
+    if (!io.fileExists(canonicalRoot)) {
       return "[ERROR] Root path not found: " + rootPath
     }
-    if (!rootFile.isDirectory()) {
+    if (!rootFile.isDirectory) {
       return "[ERROR] Root path is not a directory: " + canonicalRoot
     }
 
@@ -57,7 +55,7 @@ MiniUtilsTool.prototype.init = function(options) {
 
     this._root = canonicalRoot
     this._readWrite = options.readwrite === true
-    var sep = String(File.separator)
+    var sep = String(java.io.File.separator)
     this._separator = sep
     if (canonicalRoot.indexOf(sep, canonicalRoot.length - sep.length) === -1) {
       this._rootWithSep = canonicalRoot + sep
@@ -98,10 +96,9 @@ MiniUtilsTool.prototype._toRelative = function(targetPath) {
 }
 
 MiniUtilsTool.prototype._resolve = function(target) {
-  var File = this._FileClass
-  var candidate = new File(target)
+  var candidate = new java.io.File(target)
   if (!candidate.isAbsolute()) {
-    candidate = new File(this._root, target)
+    candidate = new java.io.File(this._root, target)
   }
   var resolved = String(candidate.getCanonicalPath())
   if (!this._withinRoot(resolved)) {
@@ -123,14 +120,13 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
   var recursive = options.recursive === true
   var results = []
   var seen = {}
-  var FileRef = this._FileClass
 
   var pushEntry = function(fullPath) {
     if (!isString(fullPath)) return
     if (!self._withinRoot(fullPath)) return
     if (fullPath === baseDir) return
     if (seen[fullPath]) return
-    var fileObj = new FileRef(fullPath)
+    var fileObj = new java.io.File(fullPath)
     var fileName = String(fileObj.getName())
     if (!includeHidden && (fileObj.isHidden() || fileName.charAt(0) === ".")) return
     var info = io.fileInfo(fullPath)
@@ -160,7 +156,7 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
     }
     if (isString(value)) {
       try {
-        var fromString = new FileRef(isString(ctxDir) ? ctxDir : baseDir, value)
+        var fromString = new java.io.File(isString(ctxDir) ? ctxDir : baseDir, value)
         var resolved = String(fromString.getCanonicalPath())
         pushEntry(resolved)
       } catch (innerErr) {
@@ -172,9 +168,9 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
       var candidate = value.canonicalPath || value.filepath || value.path
       if (isString(candidate)) {
         try {
-          var fileCandidate = new FileRef(candidate)
+          var fileCandidate = new java.io.File(candidate)
           if (!fileCandidate.isAbsolute()) {
-            fileCandidate = new FileRef(isString(ctxDir) ? ctxDir : baseDir, candidate)
+            fileCandidate = new java.io.File(isString(ctxDir) ? ctxDir : baseDir, candidate)
           }
           resolved = String(fileCandidate.getCanonicalPath())
           pushEntry(resolved)
@@ -186,14 +182,14 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
           var parentDir = value.directory
           var baseForName
           if (isString(parentDir)) {
-            baseForName = new FileRef(parentDir)
+            baseForName = new java.io.File(parentDir)
             if (!baseForName.isAbsolute()) {
-              baseForName = new FileRef(isString(ctxDir) ? ctxDir : baseDir, parentDir)
+              baseForName = new java.io.File(isString(ctxDir) ? ctxDir : baseDir, parentDir)
             }
           } else {
-            baseForName = new FileRef(isString(ctxDir) ? ctxDir : baseDir)
+            baseForName = new java.io.File(isString(ctxDir) ? ctxDir : baseDir)
           }
-          resolved = String(new FileRef(baseForName, value.filename).getCanonicalPath())
+          resolved = String(new java.io.File(baseForName, value.filename).getCanonicalPath())
           pushEntry(resolved)
         } catch (innerErr3) {
           resolved = null
@@ -214,11 +210,11 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
 
   var fallbackEnumerate = function(currentDir) {
     try {
-      var listed = io.listFiles(currentDir) || []
+      var listed = io.listFiles(currentDir).files || []
       if (isArray(listed)) {
         listed.forEach(function(entry) {
           try {
-            var childFile = new FileRef(currentDir, entry)
+            var childFile = new java.io.File(currentDir, entry)
             var childPath = String(childFile.getCanonicalPath())
             pushEntry(childPath)
             if (recursive) {
@@ -239,7 +235,7 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
 
   var raw
   try {
-    raw = recursive ? io.listFilesRecursive(baseDir) : io.listFiles(baseDir)
+    raw = recursive ? listFilesRecursive(baseDir) : io.listFiles(baseDir).files
   } catch (e) {
     raw = null
   }
@@ -520,8 +516,7 @@ MiniUtilsTool.prototype.writeFile = function(params) {
     this._ensureInitialized()
     this._ensureWritable("write operations")
     var filePath = this._resolve(params.path)
-    var File = this._FileClass
-    var targetFile = new File(filePath)
+    var targetFile = new java.io.File(filePath)
     var parent = targetFile.getParentFile()
     if (params.createMissingDirs !== false && parent !== null && !parent.exists()) {
       parent.mkdirs()
