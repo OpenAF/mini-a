@@ -616,7 +616,7 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
   }
 }
 
-MiniUtilsTool.prototype.fileOps = function(params) {
+MiniUtilsTool.prototype.filesystemQuery = function(params) {
   var payload = isObject(params) ? params : {}
   var opValue = payload.operation
   var normalized = isString(opValue) && opValue.trim().length > 0 ? opValue.trim().toLowerCase() : "read"
@@ -641,7 +641,7 @@ MiniUtilsTool.prototype.fileOps = function(params) {
   var target = map[normalized]
   if (!target && isString(opValue) && isFunction(this[opValue])) target = opValue
   if (!target) {
-    return "[ERROR] Unknown file query operation: " + (isString(opValue) ? opValue : normalized)
+    return "[ERROR] Unknown filesystem query operation: " + (isString(opValue) ? opValue : normalized)
   }
 
   var innerParams = {}
@@ -654,7 +654,7 @@ MiniUtilsTool.prototype.fileOps = function(params) {
   try {
     var handler = this[target]
     if (!isFunction(handler)) {
-      return "[ERROR] Unsupported file query handler: " + target
+      return "[ERROR] Unsupported filesystem query handler: " + target
     }
     return handler.call(this, innerParams)
   } catch (e) {
@@ -662,7 +662,7 @@ MiniUtilsTool.prototype.fileOps = function(params) {
   }
 }
 
-MiniUtilsTool.prototype.fileModify = function(params) {
+MiniUtilsTool.prototype.filesystemModify = function(params) {
   var payload = isObject(params) ? params : {}
   var opValue = payload.operation
   if (!isString(opValue) || opValue.trim().length === 0) {
@@ -682,7 +682,7 @@ MiniUtilsTool.prototype.fileModify = function(params) {
   var target = map[normalized]
   if (!target && isString(opValue) && isFunction(this[opValue])) target = opValue
   if (!target) {
-    return "[ERROR] Unknown file modify operation: " + opValue
+    return "[ERROR] Unknown filesystem modify operation: " + opValue
   }
 
   var innerParams = {}
@@ -698,7 +698,7 @@ MiniUtilsTool.prototype.fileModify = function(params) {
   try {
     var handler = this[target]
     if (!isFunction(handler)) {
-      return "[ERROR] Unsupported file modify handler: " + target
+      return "[ERROR] Unsupported filesystem modify handler: " + target
     }
     return handler.call(this, innerParams)
   } catch (e) {
@@ -708,7 +708,7 @@ MiniUtilsTool.prototype.fileModify = function(params) {
 
 /**
  * <odoc>
- * <key>MiniUtilsTool.mathOps(params) : Object</key>
+ * <key>MiniUtilsTool.mathematics(params) : Object</key>
  * Performs mathematical operations including calculations, statistics, unit conversions, and random number generation.
  * The `params` object can have the following properties:
  * - `operation` (string, required): The operation to perform (calculate, statistics, convert-unit, random).
@@ -718,7 +718,7 @@ MiniUtilsTool.prototype.fileModify = function(params) {
  * - For random: `type` (integer, sequence, choice, boolean, hex), type-specific params (min/max, items, count, seed, etc.)
  * </odoc>
  */
-MiniUtilsTool.prototype.mathOps = function(params) {
+MiniUtilsTool.prototype.mathematics = function(params) {
   params = params || {}
   var op = (params.operation || "calculate").toLowerCase()
 
@@ -859,7 +859,7 @@ MiniUtilsTool.prototype.mathOps = function(params) {
 
 /**
  * <odoc>
- * <key>MiniUtilsTool.timeOps(params) : Object</key>
+ * <key>MiniUtilsTool.timeUtilities(params) : Object</key>
  * Performs time and timezone operations.
  * The `params` object can have the following properties:
  * - `operation` (string): The operation to perform (current-time, convert, sleep). Defaults to current-time.
@@ -868,7 +868,7 @@ MiniUtilsTool.prototype.mathOps = function(params) {
  * - For sleep: `milliseconds` (required)
  * </odoc>
  */
-MiniUtilsTool.prototype.timeOps = function(params) {
+MiniUtilsTool.prototype.timeUtilities = function(params) {
   params = params || {}
   var op = (params.operation || "current-time").toLowerCase()
 
@@ -938,8 +938,8 @@ MiniUtilsTool._metadataByFn = (function() {
   var modifyDeleteOps = ["delete", "remove", "rm", "deletefile"]
   var modifyAllOps = modifyWriteOps.concat(modifyDeleteOps)
 
-  var mathOps = ["calculate", "statistics", "convert-unit", "convert", "random"]
-  var timeOps = ["current-time", "current", "timezone-convert", "sleep"]
+  var mathOperationTypes = ["calculate", "statistics", "convert-unit", "convert", "random"]
+  var timeOperationTypes = ["current-time", "current", "timezone-convert", "sleep"]
 
   return {
     init: {
@@ -953,9 +953,9 @@ MiniUtilsTool._metadataByFn = (function() {
         }
       }
     },
-    fileOps: { // Suggested name change for clarity
-      name       : "fileOps",
-      description: "Perform various operations on files and directories within the configured root, including reading, listing, searching, and retrieving information.",
+    filesystemQuery: {
+      name       : "filesystemQuery",
+      description: "Execute read-only filesystem actions such as reading file contents, listing directories, searching text, or retrieving metadata within the configured root.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -990,9 +990,9 @@ MiniUtilsTool._metadataByFn = (function() {
         ]
       }
     },
-    fileModify: { // Suggested name change for clarity
-      name       : "fileModify",
-      description: "Modify files and directories by writing, appending, or deleting them (requires readwrite=true for modifications).",
+    filesystemModify: {
+      name       : "filesystemModify",
+      description: "Perform write, append, or delete operations on files and directories within the configured root (requires readwrite=true).",
       inputSchema: {
         type      : "object",
         properties: {
@@ -1022,16 +1022,16 @@ MiniUtilsTool._metadataByFn = (function() {
         ]
       }
     },
-    mathOps: {
-      name       : "mathOps",
-      description: "Perform mathematical operations including calculations, statistics, unit conversions, and random number generation.",
+    mathematics: {
+      name       : "mathematics",
+      description: "Run mathematical utilities including arithmetic calculations, descriptive statistics, unit conversions, and random value generation.",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
             description: "Operation type: calculate, statistics, convert-unit, or random.",
-            enum       : mathOps,
+            enum       : mathOperationTypes,
             default    : "calculate"
           },
           op           : { type: "string", description: "Math operation for calculate: add, subtract, multiply, divide, power, sqrt, abs, round." },
@@ -1057,16 +1057,16 @@ MiniUtilsTool._metadataByFn = (function() {
         required : []
       }
     },
-    timeOps: {
-      name       : "timeOps",
-      description: "Perform time and timezone operations including getting current time, timezone conversions, and sleep.",
+    timeUtilities: {
+      name       : "timeUtilities",
+      description: "Work with time by returning the current time, converting between time zones, or pausing execution.",
       inputSchema: {
         type      : "object",
         properties: {
           operation     : {
             type       : "string",
             description: "Operation type: current-time, convert, or sleep.",
-            enum       : timeOps,
+            enum       : timeOperationTypes,
             default    : "current-time"
           },
           timezone       : { type: "string", description: "IANA timezone identifier (e.g., 'America/New_York', 'Europe/London')." },

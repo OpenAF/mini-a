@@ -649,6 +649,108 @@ MiniA.prototype._formatTokenStats = function(stats) {
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
 }
 
+/**
+ * Summarize text using the LLM with retry logic and metrics tracking.
+ * This method is designed to condense conversation history or agent notes.
+ *
+ * @param {string} ctx - The text content to summarize
+ * @param {object} options - Optional configuration
+ * @param {boolean} options.verbose - Enable verbose output
+ * @param {boolean} options.debug - Enable debug output
+ * @param {string} options.instructionText - Custom instruction for summarization
+ * @returns {string} The summarized text
+ */
+MiniA.prototype.summarizeText = function(ctx, options) {
+    if (!isString(ctx) || ctx.trim().length === 0) return ""
+
+    var opts = isObject(options) ? options : {}
+    var summarizeLLM = this.llm
+    var llmType = "main"
+
+    var originalTokens = this._estimateTokens(ctx)
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.summaries_original_tokens)) {
+        global.__mini_a_metrics.summaries_original_tokens.getAdd(originalTokens)
+    }
+
+    var instructionText = isString(opts.instructionText) ? opts.instructionText :
+        "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
+
+    var summaryResponseWithStats
+    var self = this
+
+    try {
+        summaryResponseWithStats = this._withExponentialBackoff(function() {
+            // Save current conversation to restore later
+            var gptInstance = summarizeLLM.getGPT()
+            var savedConversation = isObject(gptInstance) && isFunction(gptInstance.getConversation) ? gptInstance.getConversation() : __
+
+            try {
+                // Create a fresh conversation for summarization (avoiding tool conflicts)
+                if (isObject(gptInstance) && isFunction(gptInstance.setConversation)) {
+                    gptInstance.setConversation([
+                        { role: "system", content: instructionText }
+                    ])
+                }
+
+                // Perform summarization
+                if (isFunction(summarizeLLM.promptWithStats)) {
+                    return summarizeLLM.promptWithStats(ctx)
+                }
+                // Fallback if promptWithStats is not available
+                var response = summarizeLLM.prompt(ctx)
+                return { response: response, stats: {} }
+            } finally {
+                // Restore original conversation
+                if (isObject(gptInstance) && isFunction(gptInstance.setConversation) && isDef(savedConversation)) {
+                    gptInstance.setConversation(savedConversation)
+                }
+            }
+        }, {
+            maxAttempts : 3,
+            initialDelay: 250,
+            maxDelay    : 4000,
+            context     : { source: "llm", operation: "summarize" },
+            onRetry     : function(err, attempt, wait, category) {
+                self.fnI("retry", "Summarization attempt " + attempt + " failed (" + category.type + "). Retrying in " + wait + "ms...")
+                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+                    global.__mini_a_metrics.retries.inc()
+                }
+            }
+        })
+    } catch (e) {
+        var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
+        this.fnI("warn", "Summarization failed: " + (summaryError.reason || e))
+        return ctx.substring(0, 400) // Fallback to truncation
+    }
+
+    if (opts.debug) {
+        print(ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides))
+    }
+
+    var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
+    var summaryTokenTotal = this._getTotalTokens(summaryStats)
+
+    if (isObject(global.__mini_a_metrics)) {
+        if (isObject(global.__mini_a_metrics.llm_actual_tokens)) global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
+        if (isObject(global.__mini_a_metrics.llm_normal_tokens)) global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
+        if (isObject(global.__mini_a_metrics.llm_normal_calls)) global.__mini_a_metrics.llm_normal_calls.inc()
+        if (isObject(global.__mini_a_metrics.summaries_made)) global.__mini_a_metrics.summaries_made.inc()
+    }
+
+    var finalTokens = this._estimateTokens(summaryResponseWithStats.response)
+    if (isObject(global.__mini_a_metrics)) {
+        if (isObject(global.__mini_a_metrics.summaries_final_tokens)) global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
+        if (isObject(global.__mini_a_metrics.summaries_tokens_reduced)) global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
+    }
+
+    if (opts.verbose) {
+        var tokenStatsMsg = this._formatTokenStats(summaryStats)
+        this.fnI("output", "Context summarized using " + llmType + " model. " + (tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""))
+    }
+
+    return summaryResponseWithStats.response
+}
+
 // Fast helpers for status checks used across planning code paths
 MiniA.prototype._isStatusDone = function(status) {
   var s = isString(status) ? status.toLowerCase() : ""
@@ -5428,7 +5530,7 @@ MiniA.prototype.init = function(args) {
                   parent.fnI("error", `Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
                   global.__mini_a_metrics.mcp_actions_failed.inc()
                 } else {
-                  parent.fnI("info", `Execution of action '${t}' finished successfully for parameters: ${af.toSLON(a)}`)
+                  parent.fnI("info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${af.toSLON(a)}`)
                   global.__mini_a_metrics.mcp_actions_executed.inc()
                 }
                 if (args.debug) {
