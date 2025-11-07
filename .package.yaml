@@ -51,7 +51,7 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251106'
+version: '20251107'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -68,6 +68,7 @@ files:
 - examples/README.md
 - examples/changelog-gen.yaml
 - examples/document.yaml
+- examples/learn-from-chat.yaml
 - examples/planning-demo.sh
 - examples/summary.yaml
 - mcps/CREATING.md
@@ -108,6 +109,8 @@ files:
 - tests/autoTestAll.yaml
 - tests/coreFunctionality.js
 - tests/coreFunctionality.yaml
+- tests/miniAUtils.js
+- tests/miniAUtils.yaml
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 8fb8ca99dbc0f0c11ef55ba7b5edd37666f47a8f
@@ -117,10 +120,11 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 97faf7da937ce05a31d4329f3ef1c603cf7fecb6
   TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: 90a3c429af0e117b65badbd89545cc20de8c382d
+  USAGE.md: 21d3ccd82a9fc71dc8dd95c69ba978c787ef22a7
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: 4f329832fb682821b7357c5f0a2d4f5f811d29f7
   examples/document.yaml: 19871e428a840eb2b726a4167664a0f27926a66d
+  examples/learn-from-chat.yaml: 37d0b1e07559c4853d0ea6c144d462269068a20d
   examples/planning-demo.sh: 05c0ef0a5f2452466a01e80158434de0ed29a9a3
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
@@ -144,20 +148,22 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: d19429eebc2066082078ba0d645622a294449a17
+  mini-a-con.js: 718cf1856e299be31dabdc0b1a1352e0c79f57b7
   mini-a-main.yaml: 4a358bb2b569a8393ac9b8ddbda1599cd9621a02
   mini-a-modes.yaml: 3e9cf81240092c5db5eda1b64ada21a299fafe91
-  mini-a-utils.js: 0eb2eb0431ca029f11f482c596e604103f064d66
+  mini-a-utils.js: f7fc7cf98a7fb7d9b5611c3ba8ade9ba339d2031
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: ef0f3eed40c8c9b1ad102d37631d021b19354357
-  mini-a.js: b70803d61bc9d93388b75dfc184439c3a88da23e
+  mini-a.js: 3ca6e34237d185fbf97e86238a14ef3aaad9c495
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 6842e7bddb547f9558767c33450980f038782a99
   public/index.md: 475c7278c9bc504b8612a1e7f4ac72f1defc959d
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: a6a8d03e4ebaaea66bfa5b61e5daf702f4909f6a
   tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
-  tests/autoTestAll.allJobs.yaml: 628921dcb7e35c58e8807cfcbaece93b60ce93ff
+  tests/autoTestAll.allJobs.yaml: 91055fe5c42a206a0074f4e3b13f587cbc83fd15
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
   tests/coreFunctionality.js: b10c42a85394f0ad6f72cebcef540497349080d8
   tests/coreFunctionality.yaml: 0a656733b02a5a4f77139766e42eabddfc4a39ca
+  tests/miniAUtils.js: 9db8baa3744c442296288635e7de03487200cb66
+  tests/miniAUtils.yaml: 7146e12e410c25aff22dcc58fac484a85cd68e7d
