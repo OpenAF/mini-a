@@ -19,7 +19,7 @@ Automated tests exist for utility modules under `tests/`. Run the mini-a-utils t
 For core agent behavior, validate by scripting representative goals (see `USAGE.md`) and capture the agent transcript with `debug=true`. When adding MCP integrations, run the corresponding `mcp-*.yaml` job standalone before wiring it into Mini-A. Document manual verification steps in the PR description, and note any scenarios not exercised.
 
 Current test coverage includes:
-- **File Operations**: init, readFile, writeFile, listDirectory, searchContent, getFileInfo, deleteFile, fileOps, fileModify, path security
+- **File Operations**: init, readFile, writeFile, listDirectory, searchContent, getFileInfo, deleteFile, filesystemQuery, filesystemModify, path security
 - **Mathematical Operations**: calculate (add, subtract, multiply, divide, power, sqrt, abs, round), statistics (mean, median, min, max, sum, count), unit conversions, random generation (integer, sequence, choice, boolean, hex)
 - **Time Operations**: current time with timezone/format options, timezone conversions, sleep functionality
 - **Advanced Parameters**: UTF-8 encoding, createMissingDirs, contentLength reporting, append flags
