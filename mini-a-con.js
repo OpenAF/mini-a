@@ -126,7 +126,7 @@ try {
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
     showexecs      : { type: "boolean", default: true, description: "Show shell/exec events in the interaction stream" },
     usetools       : { type: "boolean", default: false, description: "Register MCP tools directly on the model" },
-    useutils       : { type: "boolean", default: false, description: "Enable bundled Mini File Tool utilities" },
+    useutils       : { type: "boolean", default: false, description: "Enable bundled Mini Utils Tool utilities" },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
     usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },

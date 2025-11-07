@@ -123,7 +123,7 @@ help:
     example  : "600000"
     mandatory: false
   - name     : useutils
-    desc     : "Register Mini File Tool utilities as an MCP connection automatically"
+    desc     : "Register Mini Utils Tool utilities as an MCP connection automatically"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]

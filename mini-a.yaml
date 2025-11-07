@@ -123,7 +123,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : useutils
-    desc     : Automatically register Mini File Tool utilities as an MCP connection
+    desc     : Automatically register Mini Utils Tool utilities as an MCP connection
     example  : "true"
     mandatory: false
     options  : ["true", "false"]

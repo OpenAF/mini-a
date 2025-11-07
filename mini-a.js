@@ -5580,7 +5580,7 @@ MiniA.prototype.init = function(args) {
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
- * - useutils (boolean, default=false): Auto-register the Mini File Tool utilities as an MCP dummy server.
+ * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.

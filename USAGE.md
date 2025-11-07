@@ -125,7 +125,7 @@ Mini-A ships with reusable argument bundles so you can switch behaviors without 
 
 - **`shell`** – Read-only shell access (`useshell=true`).
 - **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`).
-- **`shellutils`** – Shell plus the Mini File Tool MCP utilities (`useutils=true usetools=true`).
+- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities (`useutils=true usetools=true`).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
 - **`web`** – Browser UI with tool registration (`usetools=true`).
 - **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and planning enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
@@ -388,7 +388,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
-- **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
+- **`useutils`** (boolean, default: false): Auto-register the Mini Utils Tool utilities as a dummy MCP server for quick file operations
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
@@ -398,7 +398,7 @@ If every stage returns an empty list (or errors), Mini-A logs the issue and fall
 - **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access.
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
-  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`).
+  - `shellutils` – Adds the Mini Utils Tool helpers as an MCP (`useutils=true usetools=true`).
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
   - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
   - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
