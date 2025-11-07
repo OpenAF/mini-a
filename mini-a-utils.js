@@ -616,7 +616,7 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
   }
 }
 
-MiniUtilsTool.prototype.fileQuery = function(params) {
+MiniUtilsTool.prototype.fileOps = function(params) {
   var payload = isObject(params) ? params : {}
   var opValue = payload.operation
   var normalized = isString(opValue) && opValue.trim().length > 0 ? opValue.trim().toLowerCase() : "read"
@@ -944,18 +944,18 @@ MiniUtilsTool._metadataByFn = (function() {
   return {
     init: {
       name       : "init",
-      description: "Re-initialize the file tool with a new root directory and permissions.",
+      description: "Re-initialize the MiniUtilsTool with a new root directory and permissions for file operations.",
       inputSchema: {
         type      : "object",
         properties: {
-          root     : { type: "string", description: "Root directory for subsequent operations. Defaults to current directory." },
-          readwrite: { type: "boolean", description: "Enable write/delete operations when true." }
+          root     : { type: "string", description: "Root directory for subsequent file operations. Defaults to current directory." },
+          readwrite: { type: "boolean", description: "Enable write and delete operations when set to true." }
         }
       }
     },
-    fileQuery: {
-      name       : "fileQuery",
-      description: "Perform read, list, search, or info operations within the configured root.",
+    fileOps: { // Suggested name change for clarity
+      name       : "fileOps",
+      description: "Perform various operations on files and directories within the configured root, including reading, listing, searching, and retrieving information.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -965,14 +965,14 @@ MiniUtilsTool._metadataByFn = (function() {
             enum       : queryAllOps,
             default    : "read"
           },
-          path         : { type: "string", description: "Target file or directory path." },
-          encoding     : { type: "string", description: "Encoding to use when reading files." },
-          includeHidden: { type: "boolean", description: "Include hidden files on list operations." },
+          path         : { type: "string", description: "Target file or directory path for the operation." },
+          encoding     : { type: "string", description: "Character encoding to use when reading files." },
+          includeHidden: { type: "boolean", description: "Include hidden files in list operations when true." },
           recursive    : { type: "boolean", description: "Traverse directories recursively when supported." },
-          pattern      : { type: "string", description: "Pattern to search for when operation=search." },
-          regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation=search." },
-          caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation=search." },
-          maxResults   : { type: "number", description: "Maximum number of search matches to return (0 = no limit)." }
+          pattern      : { type: "string", description: "Pattern to search for when operation is set to search." },
+          regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation is search." },
+          caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation is search." },
+          maxResults   : { type: "number", description: "Maximum number of search matches to return (0 means no limit)." }
         },
         allOf    : [
           {
@@ -990,9 +990,9 @@ MiniUtilsTool._metadataByFn = (function() {
         ]
       }
     },
-    fileModify: {
+    fileModify: { // Suggested name change for clarity
       name       : "fileModify",
-      description: "Write, append, or delete files and directories (requires readwrite=true for mutations).",
+      description: "Modify files and directories by writing, appending, or deleting them (requires readwrite=true for modifications).",
       inputSchema: {
         type      : "object",
         properties: {
@@ -1001,13 +1001,13 @@ MiniUtilsTool._metadataByFn = (function() {
             description: "Operation to execute (write, append, delete).",
             enum       : modifyAllOps
           },
-          path             : { type: "string", description: "Target file or directory path." },
-          content          : { type: "string", description: "Content to write when operation=write or append." },
-          encoding         : { type: "string", description: "Encoding to use when writing content." },
-          append           : { type: "boolean", description: "Append instead of overwriting when supported." },
-          createMissingDirs: { type: "boolean", description: "Create parent directories when writing files." },
-          confirm          : { type: "boolean", description: "Must be true to confirm deletions." },
-          recursive        : { type: "boolean", description: "Delete directories recursively when true." }
+          path             : { type: "string", description: "Target file or directory path for the operation." },
+          content          : { type: "string", description: "Content to write when operation is set to write or append." },
+          encoding         : { type: "string", description: "Character encoding to use when writing content." },
+          append           : { type: "boolean", description: "Append to the file instead of overwriting when supported." },
+          createMissingDirs: { type: "boolean", description: "Create parent directories when writing files if they do not exist." },
+          confirm          : { type: "boolean", description: "Must be true to confirm deletion operations." },
+          recursive        : { type: "boolean", description: "Delete directories and their contents recursively when true." }
         },
         required : ["operation", "path"],
         allOf    : [
