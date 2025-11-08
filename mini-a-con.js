@@ -361,6 +361,40 @@ try {
     return extraArgs
   }
 
+  // Helper function to get file completions
+  function getFileCompletions(partialPath) {
+    var completions = []
+    try {
+      var dirPath = "."
+      var filePrefix = partialPath
+
+      // Split the path into directory and file prefix
+      var lastSlash = partialPath.lastIndexOf("/")
+      if (lastSlash !== -1) {
+        dirPath = partialPath.substring(0, lastSlash)
+        filePrefix = partialPath.substring(lastSlash + 1)
+        if (dirPath.length === 0) dirPath = "/"
+      }
+
+      // List files in the directory
+      if (io.fileExists(dirPath)) {
+        var files = io.listFiles(dirPath)
+        if (isObject(files) && isArray(files.files)) {
+          files.files.forEach(function(file) {
+            if (file.filename.indexOf(filePrefix) === 0) {
+              var fullPath = (dirPath === "." ? "" : dirPath + "/") + file.filename
+              if (file.isDirectory) fullPath += "/"
+              completions.push(fullPath)
+            }
+          })
+        }
+      }
+    } catch(e) {
+      // Ignore errors during file listing
+    }
+    return completions
+  }
+
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
@@ -370,6 +404,22 @@ try {
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
           var uptoCursor = buf.substring(0, cursor)
+
+          // Handle @ file completion (anywhere in the line)
+          var lastAtPos = uptoCursor.lastIndexOf("@")
+          if (lastAtPos !== -1) {
+            var afterAt = uptoCursor.substring(lastAtPos + 1)
+            // Only complete if there's no space after @
+            if (afterAt.indexOf(" ") === -1) {
+              var fileCompletions = getFileCompletions(afterAt)
+              fileCompletions.forEach(function(path) {
+                candidates.add(path)
+              })
+              return candidates.isEmpty() ? -1 : (lastAtPos + 1)
+            }
+          }
+
+          // Only handle slash commands if line starts with /
           if (uptoCursor.indexOf("/") !== 0) return -1
 
           var firstSpace = uptoCursor.indexOf(" ")
@@ -384,6 +434,19 @@ try {
 
           var commandName = uptoCursor.substring(1, firstSpace)
           var lookupName = commandName.toLowerCase()
+
+          // Handle /save command completions (filename)
+          if (lookupName === "save") {
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            var fileCompletions = getFileCompletions(trimmedRemainder)
+            fileCompletions.forEach(function(path) {
+              candidates.add(path)
+            })
+            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
 
           // Handle /stats command completions
           if (lookupName === "stats") {
