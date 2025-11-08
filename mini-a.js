@@ -110,7 +110,8 @@ var MiniA = function() {
     mcp_circuit_breaker_trips: $atomic(0, "long"),
     mcp_circuit_breaker_resets: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
-    mcp_lazy_init_failed: $atomic(0, "long")
+    mcp_lazy_init_failed: $atomic(0, "long"),
+    per_tool_stats: {}
   }
 
   this._SYSTEM_PROMPT = `
@@ -663,7 +664,19 @@ MiniA.prototype.getMetrics = function() {
             circuit_breaker_resets: global.__mini_a_metrics.mcp_circuit_breaker_resets.get(),
             lazy_init_success: global.__mini_a_metrics.mcp_lazy_init_success.get(),
             lazy_init_failed: global.__mini_a_metrics.mcp_lazy_init_failed.get()
-        }
+        },
+        per_tool_usage: (function() {
+            var toolStats = {}
+            Object.keys(global.__mini_a_metrics.per_tool_stats).forEach(function(toolName) {
+                var tool = global.__mini_a_metrics.per_tool_stats[toolName]
+                toolStats[toolName] = {
+                    calls: tool.calls.get(),
+                    successes: tool.successes.get(),
+                    failures: tool.failures.get()
+                }
+            })
+            return toolStats
+        })()
     }
 }
 
@@ -6128,6 +6141,17 @@ MiniA.prototype.init = function(args) {
                   parent._runtime.modelToolCallDetected = true
                 }
                 parent.fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+
+                // Track per-tool call count
+                if (!isObject(global.__mini_a_metrics.per_tool_stats[t])) {
+                  global.__mini_a_metrics.per_tool_stats[t] = {
+                    calls: $atomic(0, "long"),
+                    successes: $atomic(0, "long"),
+                    failures: $atomic(0, "long")
+                  }
+                }
+                global.__mini_a_metrics.per_tool_stats[t].calls.inc()
+
                 if (typeof parent._prepareToolExecution === "function") {
                   var currentCtx = parent._runtime && parent._runtime.currentTool
                   var shouldPrepare = parent._useTools || isUnDef(currentCtx) || isUnDef(currentCtx.stepLabel)
@@ -6144,9 +6168,17 @@ MiniA.prototype.init = function(args) {
                 if (hasError) {
                   parent.fnI("error", `Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
                   global.__mini_a_metrics.mcp_actions_failed.inc()
+                  // Track per-tool failures
+                  if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
+                    global.__mini_a_metrics.per_tool_stats[t].failures.inc()
+                  }
                 } else {
                   parent.fnI("info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${af.toSLON(a)}`)
                   global.__mini_a_metrics.mcp_actions_executed.inc()
+                  // Track per-tool successes
+                  if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
+                    global.__mini_a_metrics.per_tool_stats[t].successes.inc()
+                  }
                 }
                 if (args.debug) {
                   print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )

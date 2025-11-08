@@ -83,11 +83,11 @@ help:
     example  : "/path/to/output.txt"
     mandatory: false
   - name     : knowledge
-    desc     : Additional knowledge or context to provide to the agent (in the form of a string or a path to a text file)
+    desc     : "Additional knowledge or context to provide to the agent (in the form of a string or a path to a text file)"
     example  : "You have access to a Linux shell and can run commands like ls, cat, grep, wc, curl, etc."
     mandatory: false
   - name     : youare
-    desc     : Override the opening "You are ..." persona sentence (string or @file path, alias: youAre) to craft specialized agents
+    desc     : "Override the opening \"You are ...\" persona sentence (string or @file path, alias: youAre) to craft specialized agents"
     example  : "You are a senior firmware analyst focused on reverse engineering embedded devices."
     mandatory: false
   - name     : conversation
@@ -95,7 +95,7 @@ help:
     example  : "/path/to/conversation.json"
     mandatory: false
   - name     : chatyouare
-    desc     : Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true
+    desc     : "Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true"
     example  : "You are an enthusiastic travel concierge specialized in eco-friendly trips."
     mandatory: false
   - name     : libs
