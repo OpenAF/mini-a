@@ -92,6 +92,7 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 
 ## Documentation
 
+- **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
 - **[Usage Guide](USAGE.md)** - Comprehensive guide covering all features
   - [Getting Started](USAGE.md#basic-usage)
   - [Model Configuration](USAGE.md#model-configuration)
