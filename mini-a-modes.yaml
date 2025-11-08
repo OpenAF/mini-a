@@ -25,6 +25,17 @@ modes:
       mcp        : "[(type: ojob, options: (job: ojob.io/ai/mcps/mcp-time)) | (type: ojob, options: (job: ojob.io/ai/mcps/mcp-web)) | (type: ojob, options: (job: ojob.io/ai/mcps/mcp-weather))]"
       mcpdynamic : false
 
+  poweruser:
+    description: "Power user mode"
+    params     :
+      useascii   : true
+      usetools   : true
+      useplanning: true
+      useshell   : true
+      readwrite  : true
+      useutils   : true
+      mcp        : "[(type: ojob, options: (job: ojob.io/ai/mcps/mcp-web))]"
+
   chatbot:
     description: "Chatbot mode"
     params     :
