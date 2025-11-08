@@ -209,7 +209,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "summarize", "history", "model", "stats", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -365,6 +365,7 @@ try {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
       var statsCompletions = ["detailed", "tools"]
+      var lastCompletions = ["md"]
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -391,6 +392,18 @@ try {
             var insertionPoint = cursor - trimmedRemainder.length
 
             statsCompletions.forEach(function(mode) {
+              if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
+            })
+            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
+
+          // Handle /last command completions
+          if (lookupName === "last") {
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            lastCompletions.forEach(function(mode) {
               if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
             })
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
@@ -900,7 +913,7 @@ try {
   }
 
   var sessionOptions = resetOptions()
-  var lastResult = __
+  var lastResult = __, lastOrigResult = __
   var internalParameters = { goalprefix: true }
   var activeAgent = __
   var shutdownHandled = false
@@ -1190,12 +1203,13 @@ try {
         printEvent(event, icon, text, id)
       })
     })
-    var agentResult = __
+    var agentResult = __, agentOrigResult = __
     var stopRequested = false
     try {
       agent.init(_args)
       $tb(function() {
         agentResult = agent.start(_args)
+        agentOrigResult = agent.getOrigAnswer()
       }).stopWhen(function(done) {
         if (done === true) return true
         var rawCode = con.readCharNB()
@@ -1230,6 +1244,7 @@ try {
         return
       }
       lastResult = agentResult
+      lastOrigResult = agentOrigResult
       if (isUnDef(_args.outfile)) {
         //print(colorifyText("\n🏁 Final answer", successColor))
         print()
@@ -1441,7 +1456,8 @@ try {
       "  " + colorifyText("/unset", "BOLD") + colorifyText(" <key>        Clear a parameter", hintColor),
       "  " + colorifyText("/show", "BOLD") + colorifyText(" [prefix]      Display configured parameters (filtered by prefix)", hintColor),
       "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
-      "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
+      "  " + colorifyText("/last", "BOLD") + colorifyText(" [md]          Print the previous final answer (md: raw markdown)", hintColor),
+      "  " + colorifyText("/save", "BOLD") + colorifyText(" [file.md]     Save the last response to a file (default: response.md)", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation and accumulated metrics", hintColor),
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
@@ -1513,13 +1529,65 @@ try {
         print(colorifyText("Parameters reset to defaults.", successColor))
         continue
       }
-      if (command === "last") {
+      if (command === "last" || command.indexOf("last ") === 0) {
         if (isUnDef(lastResult)) {
           print(colorifyText("No goal executed yet.", hintColor))
-        } else if (isObject(lastResult) || isArray(lastResult)) {
-          print(stringify(lastResult, __, "  "))
+          continue
+        }
+
+        // Check for "md" option
+        var printMarkdown = false
+        if (command.indexOf("last ") === 0) {
+          var lastArg = command.substring(5).trim().toLowerCase()
+          if (lastArg === "md") {
+            printMarkdown = true
+          }
+        }
+
+        if (printMarkdown) {
+          // Print raw result without markdown parsing
+          if (isObject(lastOrigResult) || isArray(lastOrigResult)) {
+            print(stringify(lastOrigResult, __, "  "))
+          } else {
+            print(String(lastOrigResult))
+          }
         } else {
-          print(lastResult)
+          // Default behavior - print with formatting
+          if (isObject(lastResult) || isArray(lastResult)) {
+            print(stringify(lastResult, __, "  "))
+          } else {
+            print(lastResult)
+          }
+        }
+        continue
+      }
+      if (command === "save" || command.indexOf("save ") === 0) {
+        if (isUnDef(lastResult)) {
+          print(colorifyText("No goal executed yet. Nothing to save.", hintColor))
+          continue
+        }
+
+        // Parse filename from command
+        var fileName = "response.md"
+        if (command.indexOf("save ") === 0) {
+          var fileArg = command.substring(5).trim()
+          if (fileArg.length > 0) {
+            fileName = fileArg
+          }
+        }
+
+        try {
+          var content = ""
+          if (isObject(lastOrigResult) || isArray(lastOrigResult)) {
+            content = stringify(lastOrigResult, __, "  ")
+          } else {
+            content = String(lastOrigResult)
+          }
+
+          io.writeFileString(fileName, content)
+          print(colorifyText("Response saved to " + fileName + " (" + content.length + " bytes)", successColor))
+        } catch (saveError) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to save file: " + saveError, errorColor))
         }
         continue
       }

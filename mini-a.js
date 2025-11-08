@@ -52,6 +52,7 @@ var MiniA = function() {
   this._defaultAgentPersonaLine = "You are a goal-oriented agent running in background."
   this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
+  this._origAnswer = __
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -3936,6 +3937,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     }
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     if (isString(answer)) answer = "\n" + answer
+    this._origAnswer = answer
     return $o(answer || "(no answer)", args, __, true)
   }
 }
@@ -8015,4 +8017,8 @@ MiniA.prototype._runChatbotMode = function(options) {
     this.state = "stop"
 
     return this._processFinalAnswer(finalAnswer, args)
+}
+
+MiniA.prototype.getOrigAnswer = function() {
+  return this._origAnswer
 }
