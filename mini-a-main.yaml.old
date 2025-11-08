@@ -182,24 +182,26 @@ ojob:
 
 todo:
 - apply-mode-preset
-- (if    ): |
-    toBoolean(args.modelman) == true
-  ((then)):
-  - start-modelman
-  ((else)):
-  - (if    ): |
-      toBoolean(args.web) || toBoolean(args.onport) == true
-    ((then)):
-    - start-web
-    ((else)):
-    - (if): |
-        isDef(args.goal)
-      ((then)):
-      - start-cli
-      ((else)):
-      - start-con
+- choose
 
 jobs:
+# ------------
+- name: choose
+  exec: | #js
+    if (toBoolean(args.modelman) === true) {
+      // Start model management mode
+      $job("start-modelman", args)
+    } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
+      // Start web mode
+      $job("start-web", args)
+    } else if (isDef(args.goal)) {
+      // Start cli mode
+      $job("start-cli", args)
+    } else {
+      // Start console mode
+      $job("start-con", args)
+    }
+
 # -----------------------
 - name: apply-mode-preset
   exec: | #js
