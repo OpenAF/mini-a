@@ -353,7 +353,7 @@ The `start()` method accepts various configuration options:
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
-- **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, falling back to all tools if no clear match is found
+- **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
@@ -374,8 +374,9 @@ Set `usetools=true mcpdynamic=true` when you want Mini-A to narrow the registere
 1. **Keyword heuristics**: quick matching on tool names, descriptions, and goal keywords.
 2. **Low-cost model inference**: if `OAF_LC_MODEL` is configured, the cheaper model proposes a shortlist.
 3. **Primary model inference**: the main model performs the same selection when the low-cost tier does not return results.
+4. **Connection chooser fallback**: when no tools are selected, Mini-A asks the low-cost model (then the primary model if needed) to pick the single most helpful MCP connection and its tools before falling back further.
 
-If every stage returns an empty list (or errors), Mini-A logs the issue and falls back to registering the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. Leave `mcpdynamic` false when you prefer the traditional “register everything” behaviour or when your model lacks tool-calling support.
+Only when every stage returns an empty list (or errors) does Mini-A log the issue and register the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. Leave `mcpdynamic` false when you prefer the traditional “register everything” behaviour or when your model lacks tool-calling support.
 
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)

@@ -16,6 +16,9 @@ var MiniA = function() {
   this._isInitializing = false
   this._id = sha384(nowNano()).substr(0, 8)
   this._mcpConnections = {}
+  this._mcpConnectionInfo = {}
+  this._mcpConnectionAliases = {}
+  this._mcpConnectionAliasToId = {}
   this._shellPrefix = ""
   this._toolCacheSettings = {}
   this._toolInfoByName = {}
@@ -5089,8 +5092,240 @@ Selected tools (JSON array only):`
 }
 
 /**
+ * Ensures metadata is recorded for an MCP connection so it can be referenced in prompts.
+ *
+ * @param {string} connectionId - Internal identifier for the MCP connection
+ * @param {object} config - Raw MCP configuration object
+ * @param {number} index - Zero-based index for the connection
+ */
+MiniA.prototype._ensureMcpConnectionMetadata = function(connectionId, config, index) {
+  if (!isString(connectionId) || connectionId.length === 0) return
+
+  if (!isObject(this._mcpConnectionAliases)) this._mcpConnectionAliases = {}
+  if (!isObject(this._mcpConnectionAliasToId)) this._mcpConnectionAliasToId = {}
+  if (!isObject(this._mcpConnectionInfo)) this._mcpConnectionInfo = {}
+
+  var alias = this._mcpConnectionAliases[connectionId]
+  if (!isString(alias) || alias.length === 0) {
+    var nextIndex = Object.keys(this._mcpConnectionAliases).length + 1
+    alias = `conn${nextIndex}`
+    while (isString(this._mcpConnectionAliasToId[alias])) {
+      nextIndex += 1
+      alias = `conn${nextIndex}`
+    }
+    this._mcpConnectionAliases[connectionId] = alias
+    this._mcpConnectionAliasToId[alias] = connectionId
+  }
+
+  var info = isObject(this._mcpConnectionInfo[connectionId]) ? this._mcpConnectionInfo[connectionId] : {}
+  info.alias = this._mcpConnectionAliases[connectionId]
+  info.label = this._deriveMcpConnectionLabel(config, index)
+  info.description = this._describeMcpConnection(config)
+  this._mcpConnectionInfo[connectionId] = info
+}
+
+/**
+ * Derives a short human-friendly label for an MCP connection.
+ *
+ * @param {object} config - Raw MCP configuration object
+ * @param {number} index - Zero-based index for the connection
+ * @returns {string} Connection label
+ */
+MiniA.prototype._deriveMcpConnectionLabel = function(config, index) {
+  if (isMap(config)) {
+    var candidates = []
+
+    if (isString(config.name) && config.name.trim().length > 0) candidates.push(config.name.trim())
+    if (isString(config.id) && config.id.trim().length > 0) candidates.push(config.id.trim())
+
+    if (isObject(config.serverInfo)) {
+      if (isString(config.serverInfo.title) && config.serverInfo.title.trim().length > 0) {
+        candidates.push(config.serverInfo.title.trim())
+      } else if (isString(config.serverInfo.name) && config.serverInfo.name.trim().length > 0) {
+        candidates.push(config.serverInfo.name.trim())
+      }
+    }
+
+    if (isString(config.description) && config.description.trim().length > 0) candidates.push(config.description.trim())
+    if (isString(config.cmd) && config.cmd.trim().length > 0) candidates.push(config.cmd.trim())
+    if (isString(config.url) && config.url.trim().length > 0) candidates.push(config.url.trim())
+    if (isString(config.path) && config.path.trim().length > 0) candidates.push(config.path.trim())
+
+    if (candidates.length > 0) return candidates[0]
+  }
+
+  return `Connection #${index + 1}`
+}
+
+/**
+ * Builds a descriptive summary for the MCP connection based on known fields.
+ *
+ * @param {object} config - Raw MCP configuration object
+ * @returns {string} Summary description
+ */
+MiniA.prototype._describeMcpConnection = function(config) {
+  if (!isMap(config)) return ""
+
+  var details = []
+  if (isObject(config.serverInfo)) {
+    if (isString(config.serverInfo.name) && config.serverInfo.name.trim().length > 0) {
+      details.push(`server=${config.serverInfo.name.trim()}`)
+    }
+    if (isString(config.serverInfo.title) && config.serverInfo.title.trim().length > 0) {
+      details.push(`title=${config.serverInfo.title.trim()}`)
+    }
+    if (isString(config.serverInfo.version) && config.serverInfo.version.trim().length > 0) {
+      details.push(`version=${config.serverInfo.version.trim()}`)
+    }
+  }
+
+  if (isString(config.description) && config.description.trim().length > 0) details.push(config.description.trim())
+  if (isString(config.cmd) && config.cmd.trim().length > 0) details.push(`cmd=${config.cmd.trim()}`)
+  if (isString(config.url) && config.url.trim().length > 0) details.push(`url=${config.url.trim()}`)
+  if (isString(config.path) && config.path.trim().length > 0) details.push(`path=${config.path.trim()}`)
+
+  var summary = details.join(", ")
+  if (summary.length > 200) summary = summary.substring(0, 197) + "..."
+  return summary
+}
+
+/**
+ * Uses an LLM to choose the best MCP connection and tools for a goal when other heuristics fail.
+ *
+ * @param {string} goal - The user's goal text
+ * @param {Array} allTools - Array of all available MCP tools from all connections
+ * @param {Object} llmInstance - The LLM instance to use
+ * @returns {Array} Array of selected tool names scoped to the chosen connection
+ */
+MiniA.prototype._selectConnectionAndToolsByLLM = function(goal, allTools, llmInstance) {
+  if (!isString(goal) || goal.trim().length === 0 || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) {
+    return []
+  }
+
+  var parent = this
+  var groupedByConnection = {}
+  var connectionOrder = []
+
+  allTools.forEach(function(tool) {
+    var connectionId = parent.mcpToolToConnection[tool.name]
+    if (!isString(connectionId) || connectionId.length === 0) return
+    if (isUnDef(groupedByConnection[connectionId])) {
+      groupedByConnection[connectionId] = []
+      connectionOrder.push(connectionId)
+    }
+    groupedByConnection[connectionId].push(tool)
+  })
+
+  if (connectionOrder.length === 0) return []
+
+  var connectionSummaries = connectionOrder.map(function(connectionId, idx) {
+    var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
+    var alias = isString(info.alias) && info.alias.length > 0
+      ? info.alias
+      : (isObject(parent._mcpConnectionAliases) && isString(parent._mcpConnectionAliases[connectionId])
+        ? parent._mcpConnectionAliases[connectionId]
+        : connectionId.substring(0, 8))
+    var label = isString(info.label) && info.label.length > 0 ? info.label : `Connection #${idx + 1}`
+    var description = isString(info.description) && info.description.length > 0 ? info.description : ""
+
+    var header = `${idx + 1}. Connection ${alias} — ${label} (id: ${connectionId.substring(0, 8)})`
+    var lines = [header]
+    if (description.length > 0) lines.push(`   Summary: ${description}`)
+    lines.push("   Tools:")
+    groupedByConnection[connectionId].forEach(function(tool) {
+      var toolDesc = isString(tool.description) && tool.description.trim().length > 0
+        ? tool.description.trim()
+        : "No description provided"
+      lines.push(`   - ${tool.name}: ${toolDesc}`)
+    })
+
+    return lines.join("\n")
+  }).join("\n\n")
+
+  var prompt = `You are helping Mini-A choose which MCP connection and tool(s) to register for a user's goal.\n\nGoal:\n${goal}\n\nAvailable connections and tools:\n${connectionSummaries}\n\nInstructions:\n- Choose the single connection that best supports the goal.\n- Only include tools that belong to the selected connection.\n- If no connection is useful, respond with connection set to null and tools as [].\n- Respond ONLY with valid JSON following this schema:\n{\n  "connection": "<connection alias or id>",\n  "tools": ["tool_name1", "tool_name2"]\n}\n\nJSON response:`
+
+  var response = llmInstance.prompt(prompt)
+  if (!isString(response)) return []
+
+  response = response.trim()
+  var jsonMatch = response.match(/```(?:json)?\s*({[\s\S]*})\s*```/)
+  if (jsonMatch) {
+    response = jsonMatch[1]
+  } else {
+    var startIdx = response.indexOf("{")
+    var endIdx = response.lastIndexOf("}")
+    if (startIdx >= 0 && endIdx > startIdx) {
+      response = response.substring(startIdx, endIdx + 1)
+    }
+  }
+
+  var parsed
+  try {
+    parsed = JSON.parse(response)
+  } catch (e) {
+    this.fnI("warn", `Connection-level LLM selection returned invalid JSON: ${e.message || e}`)
+    return []
+  }
+
+  if (!isMap(parsed)) return []
+
+  var selectedConnectionKey = parsed.connection
+  var selectedConnectionId = __
+
+  if (isString(selectedConnectionKey) && selectedConnectionKey.trim().length > 0) {
+    var normalized = selectedConnectionKey.trim()
+
+    if (isObject(this._mcpConnectionAliasToId) && isString(this._mcpConnectionAliasToId[normalized])) {
+      selectedConnectionId = this._mcpConnectionAliasToId[normalized]
+    }
+
+    if (isUnDef(selectedConnectionId) && isDef(groupedByConnection[normalized])) {
+      selectedConnectionId = normalized
+    }
+
+    if (isUnDef(selectedConnectionId)) {
+      normalized = normalized.toLowerCase()
+      connectionOrder.some(function(connectionId) {
+        if (isDef(selectedConnectionId)) return true
+        if (connectionId.toLowerCase() === normalized || connectionId.substring(0, normalized.length).toLowerCase() === normalized) {
+          selectedConnectionId = connectionId
+          return true
+        }
+
+        var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
+        if (isString(info.alias) && info.alias.toLowerCase() === normalized) {
+          selectedConnectionId = connectionId
+          return true
+        }
+        if (isString(info.label) && info.label.toLowerCase() === normalized) {
+          selectedConnectionId = connectionId
+          return true
+        }
+        return false
+      })
+    }
+  }
+
+  if (isUnDef(selectedConnectionId) || isUnDef(groupedByConnection[selectedConnectionId])) {
+    return []
+  }
+
+  var candidateTools = isArray(parsed.tools) ? parsed.tools : []
+  var validToolNames = groupedByConnection[selectedConnectionId].map(function(tool) { return tool.name })
+  var filteredTools = candidateTools.filter(function(name) {
+    return validToolNames.indexOf(name) >= 0
+  })
+
+  if (filteredTools.length === 0) {
+    filteredTools = validToolNames
+  }
+
+  return filteredTools
+}
+
+/**
  * Dynamically selects MCP tools based on the goal.
- * Uses a multi-stage approach: keyword matching, low-cost LLM, then regular LLM.
+ * Uses a multi-stage approach: keyword matching, low-cost LLM, primary LLM, then connection-level fallback.
  *
  * @param {string} goal - The user's goal text
  * @param {Array} allTools - Array of all available MCP tools from all connections
@@ -5137,6 +5372,36 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
       }
     } catch (e) {
       this.fnI("warn", `Main LLM tool selection failed: ${e.message || e}`)
+    }
+  }
+
+  // Stage 4: Ask LLM to choose the best connection + tools when the shortlist is empty
+  this.fnI("mcp", "LLM tool shortlist is empty, evaluating connection-level fallback...")
+
+  var connectionFallbackSelection = []
+  if (this._use_lc && isDef(this.lc_llm)) {
+    try {
+      this.fnI("mcp", "Requesting low-cost LLM to choose the best MCP connection and tools...")
+      connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.lc_llm)
+      if (connectionFallbackSelection.length > 0) {
+        this.fnI("done", `Selected ${connectionFallbackSelection.length} tool(s) via low-cost connection chooser: ${connectionFallbackSelection.join(", ")}`)
+        return connectionFallbackSelection
+      }
+    } catch (e) {
+      this.fnI("warn", `Low-cost LLM connection chooser failed: ${e.message || e}`)
+    }
+  }
+
+  if (isDef(this.llm)) {
+    try {
+      this.fnI("mcp", "Requesting primary LLM to choose the best MCP connection and tools...")
+      connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.llm)
+      if (connectionFallbackSelection.length > 0) {
+        this.fnI("done", `Selected ${connectionFallbackSelection.length} tool(s) via connection chooser: ${connectionFallbackSelection.join(", ")}`)
+        return connectionFallbackSelection
+      }
+    } catch (e) {
+      this.fnI("warn", `Primary LLM connection chooser failed: ${e.message || e}`)
     }
   }
 
@@ -5471,10 +5736,13 @@ MiniA.prototype.init = function(args) {
     // Using MCP (single or multiple connections)
     var needMCPInit = false
     if (isUnDef(this._mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
-      needMCPInit = true    
+      needMCPInit = true
       this.mcpTools = []
       this.mcpToolNames = []
       this.mcpToolToConnection = {}
+      this._mcpConnectionInfo = {}
+      this._mcpConnectionAliases = {}
+      this._mcpConnectionAliasToId = {}
     }
     var aggregatedMcpConfigs = []
     if (needMCPInit) {
@@ -5573,6 +5841,8 @@ MiniA.prototype.init = function(args) {
               }
             }
           }
+
+          this._ensureMcpConnectionMetadata(id, mcpConfig, index)
 
           if (args.mcplazy === true && this._lazyMcpConnections[id] !== true && !isExisting) {
             this._lazyMcpConnections[id] = false
