@@ -122,6 +122,31 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 - 4+ steps without meaningful progress
 - Repeating similar thoughts detected
 
+### Managing Model Definitions Interactively
+
+Use the built-in model manager whenever you want to securely store multiple
+LLM definitions and load them on demand:
+
+```bash
+mini-a modelman=true
+```
+
+Key capabilities:
+
+- **Encrypted storage** — Definitions are saved under the `mini-a/models`
+  secure store, optionally protected with a password.
+- **Provider-aware prompts** — The manager understands the specific fields
+  required by OpenAI, Gemini, Anthropic, Ollama, and Bedrock and guides you
+  through the setup.
+- **Reusable exports** — After selecting a saved definition, the manager
+  prints ready-to-copy `export OAF_MODEL="..."` and `export OAF_LC_MODEL="..."`
+  commands.
+- **Import/rename/delete** — Quickly migrate existing definitions, update
+  their names, or prune unused entries.
+
+The flag works with `opack exec mini-a`, the optional `mini-a` alias, and all
+oJob wrappers (for example `ojob mini-a.yaml modelman=true`).
+
 ## Mode Presets
 
 Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones) before applying any explicit flags you provide on the command line.

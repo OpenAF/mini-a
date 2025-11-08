@@ -1,11 +1,16 @@
+// Mini-A model definition manager.
+// Provides an interactive console workflow to create, import, rename,
+// delete, and load encrypted OAF_MODEL/OAF_LC_MODEL configurations.
 plugin("Console")
-// Get command line arguments
+
+// Get command line arguments passed in by oJob or mini-a-con.js.
 var args = isDef(global._args) ? global._args : processExpr(" ")
 
 // Initialize OAF module
 __initializeCon()
 
-// Load additional libraries if specified
+// Load additional libraries if specified. This allows the manager to use
+// the same optional helpers as the main agent when generating model lists.
 if (isDef(args.libs) && args.libs.length > 0) {
     args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
     log(`Loading library: ${lib}...`)
@@ -33,6 +38,8 @@ if (isDef(args.libs) && args.libs.length > 0) {
 }
 
 function buildOAFModelInit(args) {
+    // Base provider metadata used to prompt the user for provider-specific
+    // fields when building a new definition.
     args.init = {
     "providers": [
       "openai",
@@ -83,6 +90,9 @@ function buildOAFModelInit(args) {
 // Build OAF model
 function buildOAFModel(args) {
     buildOAFModelInit(args)
+
+    // Start with the provider selection and carry forward the resulting
+    // configuration as the user answers follow-up prompts.
     var iProvider = args.type, _out = {}
     if (isUnDef(args.type)) {
       iProvider = askChoose("Choose a provider: ", args.init.providers.sort())
@@ -124,13 +134,14 @@ function buildOAFModel(args) {
       }
     }
 
-    // Does it have a model?
+    // Manual fallback when discovery did not return any models.
     if (isUnDef(_out.model) && args.init.options[args.init.providers[iProvider]].includes("model")) {
       _out.model = ask("Enter the model to use (or leave blank for default): ")
       if (_out.model == "") delete _out.model
     }
 
-    // Does it have a options model?
+    // AWS Bedrock definitions use nested options instead of a top-level
+    // model property. Handle the prompt flow separately for clarity.
     if (args.init.providers[iProvider] == "bedrock" && isUnDef(_out.model) && (_out.model == null || _out.model == "")) {
       if (isUnDef(_out)) _out = {}
       if (isUnDef(_out.options)) _out.options = {}
@@ -161,10 +172,11 @@ function buildOAFModel(args) {
       }
     }
 
-    // Timeout
+    // Timeout defaults to 15 minutes to keep parity with the rest of Mini-A.
     _out.timeout = 900000
 
-    // Temperature
+    // Temperature handling differs for Bedrock because its API expects the
+    // value inside `options`.
     if (isDef(args.temperature) && args.init.providers[iProvider] != "bedrock") _out.temperature = args.temperature
     if (isUnDef(args.temperature) && args.init.options[args.init.providers[iProvider]].includes("temperature")) {
       var temp = ask("Enter the temperature (leave blank for default): ")
@@ -187,7 +199,7 @@ function buildOAFModel(args) {
       }
     }
 
-    // max tokens for bedrock
+    // Allow setting the maximum token count for Bedrock models when supported.
     if (args.init.providers[iProvider] == "bedrock") {
       if (isUnDef(_out.options)) _out.options = {}
       if (args.init.options[args.init.providers[iProvider]].includes("options.params.max_tokens")) {
@@ -207,12 +219,14 @@ function mainOAFModel(args) {
     var promptColor  = "FG(41)"
 
     if (!args.__noprint) {
-        const miniaLogo = ` ._ _ ${ansiColor(promptColor, "o")}._ ${ansiColor(promptColor, "o")}   _ 
+        const miniaLogo = ` ._ _ ${ansiColor(promptColor, "o")}._ ${ansiColor(promptColor, "o")}   _
  | | ||| ||~~(_|`
         print(ansiColor("BOLD", miniaLogo) + ansiColor(accentColor, " LLM Model definitions management"))
         print()
     }
 
+    // All definitions are stored under the secure namespace `mini-a/models`.
+    // Optional encryption protects the credentials backing each model.
     var _sec = $sec("mini-a", "models", __, askEncrypt("Enter the password securing LLM models definitions (or leave blank for no password): "))
 
     var _shouldExit = false, _obj = __
@@ -226,6 +240,8 @@ function mainOAFModel(args) {
         }
         if (isMap(_lst)) _lst = _lst.models
         if (isUnDef(_lst)) _lst = []
+        // Combine existing definitions with the available actions shown to the
+        // user. The action ordering is mirrored later in the switch statement.
         var _options = _lst.sort().map(r => "'" + r + "'").concat([ "✨ New definition", "📥 Import definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
         var _action = askChoose("Choose a definition or an action: ", _options)
 
