@@ -51,7 +51,7 @@ name: mini-a
 main: ''
 mainJob: mini-a-main.yaml
 license: Apache 2.0 license
-version: '20251107'
+version: '20251108'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -118,9 +118,9 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: f64fa184aa34261b36e4182c785788437e5ee209
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 97faf7da937ce05a31d4329f3ef1c603cf7fecb6
+  README.md: c06f60ae19a9872b1eef1a2dc5da6867ffe4f7ca
   TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: b450624cc360bf4a735ade3578598c4e303be5d4
+  USAGE.md: eb83a7aa4e3bd902a391638e74d88ae775c43597
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: 4f329832fb682821b7357c5f0a2d4f5f811d29f7
   examples/document.yaml: 19871e428a840eb2b726a4167664a0f27926a66d
