@@ -5671,7 +5671,15 @@ MiniA.prototype.init = function(args) {
       }
     }
 
-    var parseModelConfig = function(rawValue, source) {
+    // Initialize $sec for model definitions if secpass is provided
+    var _sec = __
+    try {
+      _sec = $sec("mini-a", "models", __, args.secpass)
+    } catch(e) {
+      this.fnI("error", `Failed to initialize OpenAF sBucket with provided password: ${e.message}`)
+    }
+
+    var parseModelConfig = function(rawValue, source, isOptional) {
       if (isUnDef(rawValue)) return __
       var parsed = rawValue
       if (isString(parsed)) {
@@ -5680,23 +5688,49 @@ MiniA.prototype.init = function(args) {
         try {
           parsed = af.fromJSSLON(parsed)
         } catch (e) {
-          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-          throw new Error(`Invalid ${source} model configuration: ${errMsg}`)
+          // If JSSLON parsing fails, try as a string reference
+          parsed = rawValue.trim()
         }
       }
+
+      // If result is still a string after JSSLON parsing, try $sec lookup
+      if (!isMap(parsed) && isString(parsed)) {
+        if (isDef(_sec)) {
+          try {
+            var secObj = _sec.get(parsed, "models")
+            if (isDef(secObj) && isMap(secObj)) {
+              return secObj
+            }
+          } catch(e) {
+            // If $sec lookup fails, continue to error handling below
+          }
+        }
+
+        // If we reach here, it's still a string and not found in $sec
+        if (isOptional) {
+          return __
+        } else {
+          throw new Error(`Invalid ${source} model configuration: '${parsed}' is not a valid model definition or reference.`)
+        }
+      }
+
       if (!isMap(parsed)) {
-        throw new Error(`Invalid ${source} model configuration: expected a map/object.`)
+        if (isOptional) {
+          return __
+        } else {
+          throw new Error(`Invalid ${source} model configuration: expected a map/object.`)
+        }
       }
       return parsed
     }
 
     if (isUnDef(this._oaf_model)) {
-      var overrideModel = parseModelConfig(args.model, "model parameter")
+      var overrideModel = parseModelConfig(args.model, "model parameter", true)
       if (isDef(overrideModel)) this._oaf_model = overrideModel
     }
 
     if (isUnDef(this._oaf_model)) {
-      var envModel = parseModelConfig(getEnv("OAF_MODEL"), "OAF_MODEL environment variable")
+      var envModel = parseModelConfig(getEnv("OAF_MODEL"), "OAF_MODEL environment variable", true)
       if (isDef(envModel)) this._oaf_model = envModel
     }
 
@@ -5707,12 +5741,12 @@ MiniA.prototype.init = function(args) {
     }
 
     if (isUnDef(this._oaf_lc_model)) {
-      var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter")
+      var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter", true)
       if (isDef(overrideLcModel)) this._oaf_lc_model = overrideLcModel
     }
 
     if (isUnDef(this._oaf_lc_model)) {
-      var envLcModel = parseModelConfig(getEnv("OAF_LC_MODEL"), "OAF_LC_MODEL environment variable")
+      var envLcModel = parseModelConfig(getEnv("OAF_LC_MODEL"), "OAF_LC_MODEL environment variable", true)
       if (isDef(envLcModel)) this._oaf_lc_model = envLcModel
     }
 
