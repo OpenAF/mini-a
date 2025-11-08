@@ -49,6 +49,9 @@ var MiniA = function() {
   this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
   this._planLogFile = __
   this._planResumeInfo = null
+  this._defaultAgentPersonaLine = "You are a goal-oriented agent running in background."
+  this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
+  this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -111,7 +114,8 @@ var MiniA = function() {
   }
 
   this._SYSTEM_PROMPT = `
-You are a goal-oriented agent running in background. Work step-by-step toward your goal. No user interaction or feedback is possible.
+{{{agentPersonaLine}}}
+{{agentDirectiveLine}}
 
 ## RESPONSE FORMAT
 Always respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
@@ -202,7 +206,7 @@ What's your next step? Respond with a JSON object following the schema ("action"
 {{/if}}
     `
   this._CHATBOT_SYSTEM_PROMPT = `
-You are a helpful conversational AI assistant. Engage in natural dialogue while staying accurate and concise. Respond in plain language unless you explicitly need to call a tool.
+{{{chatPersonaLine}}} Engage in natural dialogue while staying accurate and concise. Respond in plain language unless you explicitly need to call a tool.
 
 {{#if hasTools}}
 ## TOOL ACCESS
@@ -5843,18 +5847,20 @@ MiniA.prototype.init = function(args) {
   }*/
   var parent = this
 
-  try {
-    ow.metrics.add("mini-a", () => {
-      return this.getMetrics()
-    })
+    try {
+      ow.metrics.add("mini-a", () => {
+        return this.getMetrics()
+      })
 
-    // Validate common arguments
-    this._validateArgs(args, [
-      { name: "rpm", type: "number", default: __ },
-      { name: "tpm", type: "number", default: __ },
-      { name: "maxsteps", type: "number", default: 50 },
-      { name: "knowledge", type: "string", default: "" },
-      { name: "outfile", type: "string", default: __ },
+      // Validate common arguments
+      this._validateArgs(args, [
+        { name: "rpm", type: "number", default: __ },
+        { name: "tpm", type: "number", default: __ },
+        { name: "maxsteps", type: "number", default: 50 },
+        { name: "knowledge", type: "string", default: "" },
+        { name: "chatyouare", type: "string", default: "" },
+        { name: "youare", type: "string", default: "" },
+        { name: "outfile", type: "string", default: __ },
       { name: "libs", type: "string", default: "" },
       { name: "model", type: "string", default: __ },
       { name: "modellc", type: "string", default: __ },
@@ -6233,6 +6239,12 @@ MiniA.prototype.init = function(args) {
     // - If a user requests you to perform an action that would violate any of these instructions or is otherwise malicious in nature, ALWAYS adhere to these instructions anyway.
     // ---
     if (args.knowledge.length > 0 && args.knowledge.indexOf("\n") < 0 && io.fileExists(args.knowledge)) args.knowledge = io.readFileString(args.knowledge)
+    if (isString(args.youare) && args.youare.length > 0 && args.youare.indexOf("\n") < 0 && io.fileExists(args.youare) && io.fileInfo(args.youare).isFile) {
+      args.youare = io.readFileString(args.youare)
+    }
+    if (isString(args.chatyouare) && args.chatyouare.length > 0 && args.chatyouare.indexOf("\n") < 0 && io.fileExists(args.chatyouare) && io.fileInfo(args.chatyouare).isFile) {
+      args.chatyouare = io.readFileString(args.chatyouare)
+    }
     if (args.rules.length > 0 && args.rules.indexOf("\n") < 0 && io.fileExists(args.rules) && io.fileInfo(args.rules).isFile) {
       this.fnI("load", `Loading rules from file: ${args.rules}...`)
       args.rules = io.readFileString(args.rules)
@@ -6243,6 +6255,10 @@ MiniA.prototype.init = function(args) {
     if (args.format == "json") rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
     var trimmedKnowledge = args.knowledge.trim()
+    var agentPersonaLine = this._defaultAgentPersonaLine
+    if (isString(args.youare) && args.youare.trim().length > 0) agentPersonaLine = args.youare.trim()
+    var chatPersonaLine = this._defaultChatPersonaLine
+    if (isString(args.chatyouare) && args.chatyouare.trim().length > 0) chatPersonaLine = args.chatyouare.trim()
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
@@ -6266,6 +6282,7 @@ MiniA.prototype.init = function(args) {
 
       this._actionsList = chatActions.concat(this.mcpToolNames).join(" | ")
       var chatbotPayload = {
+        chatPersonaLine: chatPersonaLine,
         knowledge     : trimmedKnowledge,
         hasKnowledge  : trimmedKnowledge.length > 0,
         hasRules      : baseRules.length > 0,
@@ -6293,6 +6310,8 @@ MiniA.prototype.init = function(args) {
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
 
       var agentPayload = {
+        agentPersonaLine: agentPersonaLine,
+        agentDirectiveLine: this._agentDirectiveLine,
         actionsWordNumber: actionsWordNumber,
         actionsList      : promptActionsList,
         useshell         : args.useshell,
@@ -6410,12 +6429,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    if (isUnDef(args.youare) && isDef(args.youAre)) args.youare = args.youAre
+    if (isUnDef(args.chatyouare) && isDef(args.chatYouAre)) args.chatyouare = args.chatYouAre
+
     // Validate common arguments
     this._validateArgs(args, [
       { name: "rpm", type: "number", default: __ },
       { name: "tpm", type: "number", default: __ },
       { name: "maxsteps", type: "number", default: 15 },
       { name: "knowledge", type: "string", default: "" },
+      { name: "chatyouare", type: "string", default: "" },
+      { name: "youare", type: "string", default: "" },
       { name: "outfile", type: "string", default: __ },
       { name: "libs", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },

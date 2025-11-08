@@ -124,6 +124,8 @@ Mini-A ships with complementary components:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `goal` | Objective the agent should achieve | Required |
+| `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step/no-feedback directives automatically) |
+| `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |

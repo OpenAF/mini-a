@@ -17,19 +17,11 @@ todo:
 - Generate CHANGELOG.md
 
 jobs:
-# --------------------------
+# ---------------------------
 - name: Generate CHANGELOG.md
-  args:
-    useshell       : true
-    shellbatch     : true
-    shellallowpipes: true
-    readwrite      : true
-    usetools       : true
-    format         : md
-    outfile        : CHANGELOG.md
-    debug          : false
-    goal           : | #markdown
-      Create a comprehensive CHANGELOG.md file from git commit history following these requirements:
+  to:
+  - (mini-a           ): | #markdown
+      Create or update a comprehensive CHANGELOG.md file from git commit history following these requirements:
 
       Data Collection:
       - Use git commands to retrieve commit history
@@ -92,6 +84,9 @@ jobs:
       - Truncate very long commit messages to 100 characters with "..." if needed
       - Handle merge commits appropriately (you can exclude them or include them as "Other")
       - Ensure the file is valid markdown that renders well in GitHub
-
-  to  :
-  - MiniAgent
+    ((useshell       )): true
+    ((shellbatch     )): true
+    ((shellallowpipes)): true
+    ((readwrite      )): true
+    ((usetools       )): true
+    ((debug          )): false

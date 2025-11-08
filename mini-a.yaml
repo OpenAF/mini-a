@@ -86,9 +86,17 @@ help:
     desc     : Additional knowledge or context to provide to the agent (in the form of a string or a path to a text file)
     example  : "You have access to a Linux shell and can run commands like ls, cat, grep, wc, curl, etc."
     mandatory: false
+  - name     : youare
+    desc     : Override the opening "You are ..." persona sentence (string or @file path, alias: youAre) to craft specialized agents
+    example  : "You are a senior firmware analyst focused on reverse engineering embedded devices."
+    mandatory: false
   - name     : conversation
     desc     : Conversation history file to provide to the agent
     example  : "/path/to/conversation.json"
+    mandatory: false
+  - name     : chatyouare
+    desc     : Override the chatbot persona sentence (string or @file path, alias: chatYouAre) when running with chatbotmode=true
+    example  : "You are an enthusiastic travel concierge specialized in eco-friendly trips."
     mandatory: false
   - name     : libs
     desc     : Comma-separated list of additional OJob libraries to load (e.g., "lib1,lib2")
@@ -254,8 +262,8 @@ ojob:
   - mini-a.js
 
 jobs:
-# ----------------
-- name : CheckEnv
+# -------------------------
+- name : MiniAgent CheckEnv
   exec : | #js
     var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
     if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
@@ -264,7 +272,62 @@ jobs:
 
 - name : MiniAgent
   from :
-  - CheckEnv
+  - MiniAgent CheckEnv
+  typeArgs:
+    noLog   : false
+    shortcut:
+      name  : mini-a
+      keyArg: goal
+      args  :
+        mcp            : mcp
+        verbose        : verbose
+        rpm            : rpm
+        rtm            : rtm
+        tpm            : tpm
+        maxsteps       : maxsteps
+        maxcontext     : maxcontext
+        readwrite      : readwrite
+        debug          : debug
+        useshell       : useshell
+        shell          : shell
+        knowledge      : knowledge
+        youare         : youare
+        chatyouare    : chatyouare
+        outfile        : outfile
+        outputfile     : outputfile
+        libs           : libs
+        model          : model
+        modellc        : modellc
+        conversation   : conversation
+        format         : format
+        raw            : raw
+        shellallow     : shellallow
+        shellbanextra  : shellbanextra
+        shellallowpipes: shellallowpipes
+        shellbatch     : shellbatch
+        shellprefix    : shellprefix
+        toolcachettl   : toolcachettl
+        usetools       : usetools
+        useutils       : useutils
+        usediagrams    : usediagrams
+        usemermaid     : usemermaid
+        usecharts      : usecharts
+        useascii       : useascii
+        mcpdynamic     : mcpdynamic
+        mcplazy        : mcplazy
+        useplanning    : useplanning
+        forceplanning  : forceplanning
+        planmode       : planmode
+        validateplan   : validateplan
+        convertplan    : convertplan
+        resumefailed   : resumefailed
+        chatbotmode    : chatbotmode
+        planfile       : planfile
+        planformat     : planformat
+        plancontent    : plancontent
+        rules          : rules
+        state          : state
+        auditch        : auditch
   check:
     in:
       goal           : isString
@@ -280,6 +343,8 @@ jobs:
       useshell       : toBoolean.isBoolean.default(false)
       shell          : isString.default(__)
       knowledge      : isString.default(__)
+      youare         : isString.default(__)
+      chatyouare     : isString.default(__)
       outfile        : isString.default(__)
       outputfile     : isString.default(__)
       libs           : isString.default(__)

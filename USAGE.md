@@ -341,6 +341,8 @@ The `start()` method accepts various configuration options:
 
 #### Basic Configuration
 - **`maxsteps`** (number, default: 15): Maximum consecutive steps without a successful action before the agent forces a final answer
+- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." / "No user interaction..." directives afterward so autonomy constraints remain intact
+- **`chatyouare`** (string): Override the opening chatbot persona sentence when `chatbotmode=true` (inline text or an `@file` path) without touching the rest of the conversational instructions
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
