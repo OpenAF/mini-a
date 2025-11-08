@@ -242,11 +242,11 @@ function mainOAFModel(args) {
         if (isUnDef(_lst)) _lst = []
         // Combine existing definitions with the available actions shown to the
         // user. The action ordering is mirrored later in the switch statement.
-        var _options = _lst.sort().map(r => "'" + r + "'").concat([ "✨ New definition", "📥 Import definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
+        var _options = _lst.sort().map(r => "'" + r + "'").concat([ "✨ New definition", "📥 Import definition", "📤 Export definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
         var _action = askChoose("Choose a definition or an action: ", _options)
 
         switch(_action) {
-        case _options.length - 5: // New definition
+        case _options.length - 6: // New definition
             print()
             var _name = ask("✨ Name of the new definition: ")
             if (isDef(_name) && _name.length > 0) {
@@ -257,9 +257,10 @@ function mainOAFModel(args) {
                 }
             }
             break
-        case _options.length - 4: // Import definition
+        case _options.length - 5: // Import definition
             print()
             var _name = ask("📥 Name of the definition to import: ")
+            if (isUnDef(_name) || _name.length == 0) break
             var _obj  = ask("📥 Paste the definition content (in SLON/JSON format): ")
             var _obj = af.fromJSSLON(_obj)
             if (isMap(_obj)) {
@@ -267,6 +268,16 @@ function mainOAFModel(args) {
               _sec.set(_name, _obj, "models")
             } else {
               printErr("❌ Invalid definition format.")
+            }
+            break
+        case _options.length - 4: // Export definition
+            print()
+            var _exportName = askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]))
+            if (_exportName < _lst.length) {
+              var _exportDef = _sec.get(_lst[_exportName], "models")
+              print("\n" + ansiColor("FAINT", "─────"))
+              print(af.toCSLON(_exportDef))
+              print(ansiColor("FAINT", "─────") + "\n")
             }
             break
         case _options.length - 3: // Rename existing definition
