@@ -15,6 +15,14 @@ Two steps to use:
    export OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000, temperature: 1)"
    ```
 
+   Use the built-in model manager when you prefer to store encrypted
+   definitions instead of exporting raw environment variables:
+   ```bash
+   mini-a modelman=true
+   ```
+   The manager lets you create, import, rename, and delete reusable
+   definitions that can then be exported as `OAF_MODEL`/`OAF_LC_MODEL` values.
+
 2. Run the console:
    ```bash
    opack exec mini-a
@@ -124,6 +132,7 @@ Mini-A ships with complementary components:
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
+| `modelman` | Launch the interactive model definitions manager | `false` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
