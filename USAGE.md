@@ -34,6 +34,11 @@ All command-line flags documented below work with the console (`opack exec mini-
 
 Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
 
+For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
+
+- `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. Use this when you want to reclaim tokens but keep the high-level context available to the agent.
+- `/summarize [n]` — Requires an active agent session. It asks the model for a detailed recap of the earlier conversation, replaces that portion of the history with the generated summary, prints confirmation in the console, and then keeps the most recent `n` messages appended to the summary (also defaults to 6). Choose this when you want a human-readable digest before moving on.
+
 ### Attaching Files in the Console
 
 The console supports inline file attachments using the `@path/to/file` syntax. When you include file references in your goal, Mini-A automatically reads and includes the file contents as part of the submitted goal.
