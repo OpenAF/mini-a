@@ -303,4 +303,8 @@ function mainOAFModel(args) {
     return _obj
 }
 
-mainOAFModel(args)
+var _result = mainOAFModel(args)
+// Support for being called from mini-a-con.js
+if (isDef(global.__mini_a_con_capture_model)) {
+    global.__mini_a_con_model_result = _result
+}

@@ -5724,7 +5724,7 @@ MiniA.prototype.init = function(args) {
       return parsed
     }
 
-    if (isUnDef(this._oaf_model)) {
+    if (isUnDef(this._oaf_model) || isDef(args.model)) {
       var overrideModel = parseModelConfig(args.model, "model parameter", true)
       if (isDef(overrideModel)) this._oaf_model = overrideModel
     }
@@ -5740,7 +5740,7 @@ MiniA.prototype.init = function(args) {
       throw new Error(_msg)
     }
 
-    if (isUnDef(this._oaf_lc_model)) {
+    if (isUnDef(this._oaf_lc_model) || isDef(args.modellc)) {
       var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter", true)
       if (isDef(overrideLcModel)) this._oaf_lc_model = overrideLcModel
     }
