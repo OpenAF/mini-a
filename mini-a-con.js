@@ -209,7 +209,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "summarize", "history", "model", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "summarize", "history", "model", "stats", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -364,6 +364,7 @@ try {
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
+      var statsCompletions = ["detailed", "tools"]
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -382,6 +383,19 @@ try {
 
           var commandName = uptoCursor.substring(1, firstSpace)
           var lookupName = commandName.toLowerCase()
+
+          // Handle /stats command completions
+          if (lookupName === "stats") {
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            statsCompletions.forEach(function(mode) {
+              if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
+            })
+            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
+
           if (!Object.prototype.hasOwnProperty.call(slashParameterHints, lookupName)) return -1
 
           var remainder = uptoCursor.substring(firstSpace + 1)
@@ -628,6 +642,21 @@ try {
     }
   }
 
+  function resetMetrics() {
+    if (isObject(global.__mini_a_metrics)) {
+      // Reset all atomic counters
+      Object.keys(global.__mini_a_metrics).forEach(function(key) {
+        if (key === "per_tool_stats") {
+          // Reset per-tool stats
+          global.__mini_a_metrics.per_tool_stats = {}
+        } else if (isObject(global.__mini_a_metrics[key]) && typeof global.__mini_a_metrics[key].set === "function") {
+          global.__mini_a_metrics[key].set(0)
+        }
+      })
+      print(colorifyText("Metrics reset successfully.", successColor))
+    }
+  }
+
   function clearConversationHistory() {
     var convoPath = getConversationPath()
     if (!isString(convoPath) || convoPath.trim().length === 0) {
@@ -637,7 +666,8 @@ try {
     try {
       if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
       lastConversationStats = __
-      print(colorifyText("Conversation cleared. Future goals will start fresh.", successColor))
+      resetMetrics()
+      print(colorifyText("Conversation and metrics cleared. Future goals will start fresh.", successColor))
     } catch (clearError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to clear conversation: " + clearError, errorColor))
     }
@@ -1245,6 +1275,154 @@ try {
     }
   }
 
+  function printStats(args) {
+    if (!isObject(activeAgent) || typeof activeAgent.getMetrics !== "function") {
+      print(colorifyText("No active agent available. Run a goal first to collect metrics.", hintColor))
+      return
+    }
+
+    var metrics = activeAgent.getMetrics()
+    if (!isObject(metrics)) {
+      print(colorifyText("Unable to retrieve metrics.", errorColor))
+      return
+    }
+
+    var showDetailed = false
+    var showTools = false
+    if (isString(args)) {
+      var argLower = args.toLowerCase().trim()
+      if (argLower === "detailed" || argLower === "detail" || argLower === "full") {
+        showDetailed = true
+      } else if (argLower === "tools" || argLower === "tool") {
+        showTools = true
+      }
+    }
+
+    print(colorifyText("Mini-A Session Statistics", accentColor))
+    print()
+
+    // Show general stats by default
+    if (!showDetailed && !showTools) {
+      var summaryRows = []
+
+      // Goals
+      if (isObject(metrics.goals)) {
+        summaryRows.push({
+          category: "Goals",
+          metric: "Achieved",
+          value: metrics.goals.achieved || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Failed",
+          value: metrics.goals.failed || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Stopped",
+          value: metrics.goals.stopped || 0
+        })
+      }
+
+      // LLM Calls
+      if (isObject(metrics.llm_calls)) {
+        summaryRows.push({
+          category: "LLM Calls",
+          metric: "Total",
+          value: metrics.llm_calls.total || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Normal",
+          value: metrics.llm_calls.normal || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Low Cost",
+          value: metrics.llm_calls.low_cost || 0
+        })
+      }
+
+      // Actions
+      if (isObject(metrics.actions)) {
+        summaryRows.push({
+          category: "Actions",
+          metric: "MCP Executed",
+          value: metrics.actions.mcp_actions_executed || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "MCP Failed",
+          value: metrics.actions.mcp_actions_failed || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Shell Commands",
+          value: metrics.actions.shell_commands_executed || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Thoughts Made",
+          value: metrics.actions.thoughts_made || 0
+        })
+      }
+
+      // Performance
+      if (isObject(metrics.performance)) {
+        summaryRows.push({
+          category: "Performance",
+          metric: "Steps Taken",
+          value: metrics.performance.steps_taken || 0
+        })
+        if (metrics.performance.total_session_time_ms > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Session Time (s)",
+            value: (metrics.performance.total_session_time_ms / 1000).toFixed(2)
+          })
+        }
+      }
+
+      print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+      print()
+      print(colorifyText("Use '/stats detailed' for all metrics or '/stats tools' for per-tool statistics", hintColor))
+    }
+
+    // Show detailed stats
+    if (showDetailed) {
+      print(colorifyText("Detailed Statistics:", accentColor))
+      print()
+      print(printTree(metrics))
+    }
+
+    // Show per-tool stats
+    if (showTools) {
+      print(colorifyText("Per-Tool Usage Statistics:", accentColor))
+      print()
+
+      if (isObject(metrics.per_tool_usage) && Object.keys(metrics.per_tool_usage).length > 0) {
+        var toolRows = []
+        Object.keys(metrics.per_tool_usage).sort().forEach(function(toolName) {
+          var toolStat = metrics.per_tool_usage[toolName]
+          var successRate = toolStat.calls > 0
+            ? ((toolStat.successes / toolStat.calls) * 100).toFixed(1) + "%"
+            : "N/A"
+          toolRows.push({
+            tool: toolName,
+            calls: toolStat.calls,
+            successes: toolStat.successes,
+            failures: toolStat.failures,
+            success_rate: successRate
+          })
+        })
+
+        print(printTable(toolRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+      } else {
+        print(colorifyText("No per-tool statistics available yet.", hintColor))
+      }
+    }
+  }
+
   function printHelp() {
     var conversationPath = getConversationPath()
     var conversationDisplay = (isString(conversationPath) && conversationPath.length > 0) ? conversationPath : "disabled"
@@ -1264,12 +1442,13 @@ try {
       "  " + colorifyText("/show", "BOLD") + colorifyText(" [prefix]      Display configured parameters (filtered by prefix)", hintColor),
       "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
       "  " + colorifyText("/last", "BOLD") + colorifyText("               Print the previous final answer", hintColor),
-      "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation", hintColor),
+      "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation and accumulated metrics", hintColor),
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
+      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
@@ -1447,6 +1626,15 @@ try {
           delete global.__mini_a_con_model_result
           if (isDef(originalGlobalArgs)) args = originalGlobalArgs
         }
+        continue
+      }
+      if (command === "stats") {
+        printStats()
+        continue
+      }
+      if (command.indexOf("stats ") === 0) {
+        var statsArg = command.substring(6).trim()
+        printStats(statsArg)
         continue
       }
       if (command.indexOf("toggle ") === 0) {
