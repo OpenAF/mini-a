@@ -16,6 +16,9 @@ var MiniA = function() {
   this._isInitializing = false
   this._id = sha384(nowNano()).substr(0, 8)
   this._mcpConnections = {}
+  this._mcpConnectionInfo = {}
+  this._mcpConnectionAliases = {}
+  this._mcpConnectionAliasToId = {}
   this._shellPrefix = ""
   this._toolCacheSettings = {}
   this._toolInfoByName = {}
@@ -91,7 +94,20 @@ var MiniA = function() {
     plans_validated: $atomic(0, "long"),
     plans_validation_failed: $atomic(0, "long"),
     plans_replanned: $atomic(0, "long"),
-    planning_disabled_simple_goal: $atomic(0, "long")
+    planning_disabled_simple_goal: $atomic(0, "long"),
+    tool_selection_dynamic_used: $atomic(0, "long"),
+    tool_selection_keyword: $atomic(0, "long"),
+    tool_selection_llm_lc: $atomic(0, "long"),
+    tool_selection_llm_main: $atomic(0, "long"),
+    tool_selection_connection_chooser_lc: $atomic(0, "long"),
+    tool_selection_connection_chooser_main: $atomic(0, "long"),
+    tool_selection_fallback_all: $atomic(0, "long"),
+    tool_cache_hits: $atomic(0, "long"),
+    tool_cache_misses: $atomic(0, "long"),
+    mcp_circuit_breaker_trips: $atomic(0, "long"),
+    mcp_circuit_breaker_resets: $atomic(0, "long"),
+    mcp_lazy_init_success: $atomic(0, "long"),
+    mcp_lazy_init_failed: $atomic(0, "long")
   }
 
   this._SYSTEM_PROMPT = `
@@ -555,8 +571,9 @@ MiniA.prototype.fnI = function(event, message) {
  * <odoc>
  * <key>MinA.getMetrics() : Object</key>
  * Get all metrics for this Mini-A instance.
- * Returns an object with all metric values including performance, behavior, error tracking, 
- * and separate token usage for normal vs low-cost LLM models.
+ * Returns an object with all metric values including performance, behavior, error tracking,
+ * separate token usage for normal vs low-cost LLM models, dynamic tool selection statistics,
+ * tool caching effectiveness, and MCP resilience indicators (circuit breakers, lazy initialization).
  * </odoc>
  */
 MiniA.prototype.getMetrics = function() {
@@ -619,6 +636,29 @@ MiniA.prototype.getMetrics = function() {
             summaries_tokens_reduced: global.__mini_a_metrics.summaries_tokens_reduced.get(),
             summaries_original_tokens: global.__mini_a_metrics.summaries_original_tokens.get(),
             summaries_final_tokens: global.__mini_a_metrics.summaries_final_tokens.get()
+        },
+        tool_selection: {
+            dynamic_used: global.__mini_a_metrics.tool_selection_dynamic_used.get(),
+            keyword: global.__mini_a_metrics.tool_selection_keyword.get(),
+            llm_lc: global.__mini_a_metrics.tool_selection_llm_lc.get(),
+            llm_main: global.__mini_a_metrics.tool_selection_llm_main.get(),
+            connection_chooser_lc: global.__mini_a_metrics.tool_selection_connection_chooser_lc.get(),
+            connection_chooser_main: global.__mini_a_metrics.tool_selection_connection_chooser_main.get(),
+            fallback_all: global.__mini_a_metrics.tool_selection_fallback_all.get()
+        },
+        tool_cache: {
+            hits: global.__mini_a_metrics.tool_cache_hits.get(),
+            misses: global.__mini_a_metrics.tool_cache_misses.get(),
+            total_requests: global.__mini_a_metrics.tool_cache_hits.get() + global.__mini_a_metrics.tool_cache_misses.get(),
+            hit_rate: (global.__mini_a_metrics.tool_cache_hits.get() + global.__mini_a_metrics.tool_cache_misses.get()) > 0
+                ? (global.__mini_a_metrics.tool_cache_hits.get() / (global.__mini_a_metrics.tool_cache_hits.get() + global.__mini_a_metrics.tool_cache_misses.get()) * 100).toFixed(2) + '%'
+                : '0%'
+        },
+        mcp_resilience: {
+            circuit_breaker_trips: global.__mini_a_metrics.mcp_circuit_breaker_trips.get(),
+            circuit_breaker_resets: global.__mini_a_metrics.mcp_circuit_breaker_resets.get(),
+            lazy_init_success: global.__mini_a_metrics.mcp_lazy_init_success.get(),
+            lazy_init_failed: global.__mini_a_metrics.mcp_lazy_init_failed.get()
         }
     }
 }
@@ -4212,6 +4252,9 @@ MiniA.prototype._isCircuitOpen = function(connectionId) {
   if (now() < state.openUntil) return true
   delete this._mcpCircuitState[connectionId].openUntil
   this._mcpCircuitState[connectionId].failures = 0
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_circuit_breaker_resets)) {
+    global.__mini_a_metrics.mcp_circuit_breaker_resets.inc()
+  }
   return false
 }
 
@@ -4224,6 +4267,9 @@ MiniA.prototype._recordCircuitFailure = function(connectionId, errorInfo) {
   if (state.failures >= 3) {
     var cooldown = 10000
     state.openUntil = now() + cooldown
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_circuit_breaker_trips)) {
+      global.__mini_a_metrics.mcp_circuit_breaker_trips.inc()
+    }
     this.fnI("warn", `Circuit opened for connection '${connectionId}' after repeated failures. Cooling down for ${cooldown}ms.`)
   }
 }
@@ -4550,8 +4596,15 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   if (shouldCache) {
     var cached = this._getToolResultFromCache(cacheKey)
     if (cached.hit) {
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_hits)) {
+        global.__mini_a_metrics.tool_cache_hits.inc()
+      }
       if (isObject(callContext)) callContext.fromCache = true
       return cached.value
+    } else {
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_misses)) {
+        global.__mini_a_metrics.tool_cache_misses.inc()
+      }
     }
   }
 
@@ -4608,9 +4661,15 @@ MiniA.prototype._ensureConnectionInitialized = function(connectionId) {
   try {
     client.initialize()
     this._lazyMcpConnections[connectionId] = false
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_lazy_init_success)) {
+      global.__mini_a_metrics.mcp_lazy_init_success.inc()
+    }
   } catch (e) {
     this.fnI("warn", `Lazy initialization for MCP connection failed: ${e.message}`)
     this._lazyMcpConnections[connectionId] = false
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_lazy_init_failed)) {
+      global.__mini_a_metrics.mcp_lazy_init_failed.inc()
+    }
     throw e
   }
 }
@@ -4950,8 +5009,79 @@ MiniA.prototype._runCommand = function(args) {
 // ============================================================================
 
 /**
+ * Simple stemming function to reduce words to their root form
+ */
+MiniA.prototype._stemWord = function(word) {
+  // Common suffixes in order of priority
+  var suffixes = [
+    { pattern: /ness$/, replacement: '' },
+    { pattern: /ing$/, replacement: '' },
+    { pattern: /ed$/, replacement: '' },
+    { pattern: /es$/, replacement: '' },
+    { pattern: /s$/, replacement: '' },
+    { pattern: /ied$/, replacement: 'y' },
+    { pattern: /ies$/, replacement: 'y' },
+    { pattern: /ation$/, replacement: 'ate' },
+    { pattern: /tion$/, replacement: 't' },
+    { pattern: /er$/, replacement: '' },
+    { pattern: /ly$/, replacement: '' },
+    { pattern: /able$/, replacement: '' },
+    { pattern: /ible$/, replacement: '' }
+  ]
+
+  for (var i = 0; i < suffixes.length; i++) {
+    if (suffixes[i].pattern.test(word) && word.length > 4) {
+      return word.replace(suffixes[i].pattern, suffixes[i].replacement)
+    }
+  }
+  return word
+}
+
+/**
+ * Calculate Levenshtein distance for fuzzy matching
+ */
+MiniA.prototype._levenshteinDistance = function(a, b) {
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+
+  var matrix = []
+  for (var i = 0; i <= b.length; i++) {
+    matrix[i] = [i]
+  }
+  for (var j = 0; j <= a.length; j++) {
+    matrix[0][j] = j
+  }
+
+  for (i = 1; i <= b.length; i++) {
+    for (j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        )
+      }
+    }
+  }
+  return matrix[b.length][a.length]
+}
+
+/**
  * Selects MCP tools by keyword matching against the goal text.
  * Analyzes words in the goal and matches them against tool names and descriptions.
+ *
+ * SIGNIFICANTLY ENHANCED with:
+ * - Stemming for word variations (search/searching/searched)
+ * - Synonym matching (find=search, file=document)
+ * - N-gram extraction (multi-word phrases like "file system")
+ * - Entity/technology detection (.json, python, git, etc.)
+ * - Action verb weighting (create, delete, update get higher scores)
+ * - Position-based keyword importance (earlier words weighted higher)
+ * - Parameter schema matching (check tool inputs against goal entities)
+ * - Fuzzy matching for typos (Levenshtein distance ≤ 2)
+ * - Coverage bonus (tools matching multiple keywords score higher)
  *
  * @param {string} goal - The user's goal text
  * @param {Array} allTools - Array of all available MCP tools from all connections
@@ -4962,55 +5092,213 @@ MiniA.prototype._selectToolsByKeywordMatch = function(goal, allTools) {
     return []
   }
 
-  // Extract meaningful keywords from the goal (filter out common words)
-  var commonWords = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must", "can", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those", "what", "which", "who", "when", "where", "why", "how"]
+  // Enhanced stopwords list (more comprehensive)
+  var stopwords = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must", "can", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those", "what", "which", "who", "when", "where", "why", "how", "all", "each", "every", "some", "any", "few", "more", "most", "other", "such", "only", "own", "same", "than", "too", "very", "just", "now", "then", "here", "there", "also", "please", "want", "need", "like", "make", "use", "using"]
 
-  var goalWords = goal
+  // Action verbs (weighted higher)
+  var actionVerbs = ["create", "delete", "remove", "update", "modify", "edit", "change", "add", "insert", "fetch", "get", "retrieve", "find", "search", "query", "list", "show", "display", "read", "write", "save", "load", "open", "close", "execute", "run", "build", "compile", "deploy", "install", "download", "upload", "send", "receive", "parse", "convert", "transform", "analyze", "process", "generate", "validate", "check", "test", "debug", "fix", "scan", "browse", "navigate", "connect", "disconnect", "start", "stop", "pause", "resume", "rename", "move", "copy", "sync"]
+
+  // Synonym groups for semantic matching
+  var synonymGroups = [
+    ["search", "find", "lookup", "query", "locate", "discover"],
+    ["create", "make", "generate", "build", "produce", "construct"],
+    ["delete", "remove", "erase", "clear", "purge", "destroy"],
+    ["update", "modify", "change", "edit", "alter", "revise"],
+    ["file", "document", "data", "record"],
+    ["folder", "directory", "path"],
+    ["read", "view", "open", "display", "show", "see"],
+    ["write", "save", "store", "persist"],
+    ["list", "enumerate", "catalog", "index"],
+    ["run", "execute", "launch", "start", "invoke"],
+    ["download", "fetch", "pull", "retrieve"],
+    ["upload", "push", "send", "submit"],
+    ["web", "internet", "online", "http", "url"],
+    ["database", "db", "datastore", "storage"],
+    ["analyze", "examine", "inspect", "review", "check"],
+    ["convert", "transform", "translate", "encode", "decode"],
+    ["image", "picture", "photo", "graphic", "img"],
+    ["text", "string", "content", "body"],
+    ["code", "script", "program", "source"]
+  ]
+
+  // Technology/entity patterns
+  var entityPatterns = [
+    { pattern: /\.(json|xml|csv|yaml|yml|txt|md|html|css|js|ts|py|java|rb|go|rs|c|cpp|h|sql|sh|bash)/, type: "filetype" },
+    { pattern: /\b(python|javascript|typescript|java|ruby|golang|rust|cpp|c\+\+|php|swift|kotlin|scala|perl|shell|bash|powershell)\b/i, type: "language" },
+    { pattern: /\b(git|github|gitlab|docker|kubernetes|aws|azure|gcp|jenkins|terraform|ansible)\b/i, type: "devtool" },
+    { pattern: /\b(react|vue|angular|svelte|next|nuxt|express|flask|django|spring|rails)\b/i, type: "framework" },
+    { pattern: /\b(mysql|postgres|postgresql|mongodb|redis|elasticsearch|sqlite|oracle|mssql)\b/i, type: "database" },
+    { pattern: /\b(http|https|api|rest|graphql|websocket|grpc|soap)\b/i, type: "protocol" }
+  ]
+
+  var goalLower = goal.toLowerCase()
+
+  // Extract entities from goal
+  var extractedEntities = []
+  entityPatterns.forEach(ep => {
+    var matches = goalLower.match(ep.pattern)
+    if (matches) {
+      matches.forEach(m => extractedEntities.push({ value: m.toLowerCase().replace(/^\./, ''), type: ep.type }))
+    }
+  })
+
+  // Tokenize goal preserving position info
+  var tokens = goal
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9\s.]/g, " ")
     .split(/\s+/)
-    .filter(w => w.length > 2 && commonWords.indexOf(w) < 0)
+    .map((w, idx) => ({ word: w, position: idx }))
+    .filter(t => t.word.length > 2 && stopwords.indexOf(t.word) < 0)
 
-  if (goalWords.length === 0) {
+  // Extract keywords with metadata
+  var keywords = tokens.map(t => {
+    var stemmed = this._stemWord(t.word)
+    var isAction = actionVerbs.indexOf(t.word) >= 0 || actionVerbs.indexOf(stemmed) >= 0
+    var positionWeight = 1 + (1 / (t.position + 1)) * 0.5  // Earlier words get higher weight
+
+    return {
+      original: t.word,
+      stemmed: stemmed,
+      isAction: isAction,
+      position: t.position,
+      positionWeight: positionWeight
+    }
+  })
+
+  // Extract n-grams (2-grams and 3-grams)
+  var ngrams = []
+  for (var i = 0; i < tokens.length - 1; i++) {
+    var bigram = tokens[i].word + " " + tokens[i + 1].word
+    ngrams.push({ text: bigram, n: 2, position: tokens[i].position })
+
+    if (i < tokens.length - 2) {
+      var trigram = bigram + " " + tokens[i + 2].word
+      ngrams.push({ text: trigram, n: 3, position: tokens[i].position })
+    }
+  }
+
+  if (keywords.length === 0) {
     return []
   }
 
-  // Score each tool based on keyword matches
+  // Helper function to find synonym matches
+  var getSynonyms = function(word) {
+    var syns = [word]
+    for (var i = 0; i < synonymGroups.length; i++) {
+      if (synonymGroups[i].indexOf(word) >= 0) {
+        return synonymGroups[i]
+      }
+    }
+    return syns
+  }
+
+  // Score each tool based on enhanced matching
   var scoredTools = allTools.map(tool => {
     var score = 0
-    var toolText = ((tool.name || "") + " " + (tool.description || "")).toLowerCase()
+    var toolNameLower = (tool.name || "").toLowerCase()
+    var toolDescLower = (tool.description || "").toLowerCase()
+    var toolText = toolNameLower + " " + toolDescLower
 
-    // Check for exact word matches in tool name (higher weight)
-    goalWords.forEach(word => {
-      if ((tool.name || "").toLowerCase().indexOf(word) >= 0) {
-        score += 10
-      }
-      if ((tool.description || "").toLowerCase().indexOf(word) >= 0) {
-        score += 3
-      }
-    })
-
-    // Check for tool name similarity
-    var toolNameWords = (tool.name || "")
-      .toLowerCase()
+    // Tokenize tool name and description
+    var toolNameWords = toolNameLower
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/[_\s-]+/)
       .filter(w => w.length > 2)
+      .map(w => this._stemWord(w))
 
-    toolNameWords.forEach(toolWord => {
-      goalWords.forEach(goalWord => {
-        if (toolWord === goalWord) {
-          score += 15
-        } else if (toolWord.indexOf(goalWord) >= 0 || goalWord.indexOf(toolWord) >= 0) {
-          score += 5
+    var toolDescWords = toolDescLower
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .map(w => this._stemWord(w))
+
+    // 1. N-gram matching (highest priority for multi-word concepts)
+    ngrams.forEach(ng => {
+      if (toolText.indexOf(ng.text) >= 0) {
+        score += ng.n === 3 ? 30 : 20  // Trigrams: 30, bigrams: 20
+      }
+    })
+
+    // 2. Entity matching (file types, languages, technologies)
+    extractedEntities.forEach(entity => {
+      if (toolText.indexOf(entity.value) >= 0) {
+        score += 25  // Strong signal for domain-specific matching
+      }
+      // Check in tool parameters if available
+      if (isMap(tool.inputSchema) && isMap(tool.inputSchema.properties)) {
+        var paramsText = JSON.stringify(tool.inputSchema.properties).toLowerCase()
+        if (paramsText.indexOf(entity.value) >= 0) {
+          score += 15  // Entity appears in tool parameters
+        }
+      }
+    })
+
+    // 3. Keyword matching with stemming and synonyms
+    keywords.forEach(kw => {
+      var kwSynonyms = getSynonyms(kw.stemmed)
+      var matchFound = false
+
+      // Check tool name (highest weight)
+      toolNameWords.forEach(toolWord => {
+        if (toolWord === kw.stemmed || kwSynonyms.indexOf(toolWord) >= 0) {
+          var baseScore = kw.isAction ? 20 : 15  // Action verbs weighted higher
+          score += baseScore * kw.positionWeight
+          matchFound = true
+        } else if (toolWord.indexOf(kw.stemmed) >= 0 || kw.stemmed.indexOf(toolWord) >= 0) {
+          score += 8 * kw.positionWeight  // Partial match
+          matchFound = true
+        } else {
+          // Fuzzy match for typos (max distance 2)
+          var distance = this._levenshteinDistance(toolWord, kw.stemmed)
+          if (distance <= 2 && Math.min(toolWord.length, kw.stemmed.length) >= 5) {
+            score += 6 * kw.positionWeight
+            matchFound = true
+          }
         }
       })
+
+      // Check tool description (medium weight)
+      if (!matchFound) {
+        toolDescWords.forEach(descWord => {
+          if (descWord === kw.stemmed || kwSynonyms.indexOf(descWord) >= 0) {
+            score += (kw.isAction ? 5 : 4) * kw.positionWeight
+            matchFound = true
+          }
+        })
+      }
+
+      // Check original unstemmed words too
+      if (toolText.indexOf(kw.original) >= 0) {
+        score += 3 * kw.positionWeight
+      }
     })
+
+    // 4. Parameter schema semantic matching
+    if (isMap(tool.inputSchema) && isMap(tool.inputSchema.properties)) {
+      var paramNames = Object.keys(tool.inputSchema.properties).join(" ").toLowerCase()
+      keywords.forEach(kw => {
+        if (paramNames.indexOf(kw.stemmed) >= 0) {
+          score += 5  // Keyword appears in parameter names
+        }
+      })
+    }
+
+    // 5. Boost score if multiple keywords match (coverage bonus)
+    var matchedKeywordCount = 0
+    keywords.forEach(kw => {
+      if (toolText.indexOf(kw.stemmed) >= 0 || toolText.indexOf(kw.original) >= 0) {
+        matchedKeywordCount++
+      }
+    })
+    if (matchedKeywordCount > 1) {
+      var coverage = matchedKeywordCount / keywords.length
+      score += coverage * 10  // Up to 10 bonus points for good coverage
+    }
 
     return { tool: tool, score: score }
   })
 
-  // Filter tools with score > 0 and sort by score
+  // Filter tools with score > 0 and sort by score (descending)
   var matchedTools = scoredTools
     .filter(st => st.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -5089,8 +5377,240 @@ Selected tools (JSON array only):`
 }
 
 /**
+ * Ensures metadata is recorded for an MCP connection so it can be referenced in prompts.
+ *
+ * @param {string} connectionId - Internal identifier for the MCP connection
+ * @param {object} config - Raw MCP configuration object
+ * @param {number} index - Zero-based index for the connection
+ */
+MiniA.prototype._ensureMcpConnectionMetadata = function(connectionId, config, index) {
+  if (!isString(connectionId) || connectionId.length === 0) return
+
+  if (!isObject(this._mcpConnectionAliases)) this._mcpConnectionAliases = {}
+  if (!isObject(this._mcpConnectionAliasToId)) this._mcpConnectionAliasToId = {}
+  if (!isObject(this._mcpConnectionInfo)) this._mcpConnectionInfo = {}
+
+  var alias = this._mcpConnectionAliases[connectionId]
+  if (!isString(alias) || alias.length === 0) {
+    var nextIndex = Object.keys(this._mcpConnectionAliases).length + 1
+    alias = `conn${nextIndex}`
+    while (isString(this._mcpConnectionAliasToId[alias])) {
+      nextIndex += 1
+      alias = `conn${nextIndex}`
+    }
+    this._mcpConnectionAliases[connectionId] = alias
+    this._mcpConnectionAliasToId[alias] = connectionId
+  }
+
+  var info = isObject(this._mcpConnectionInfo[connectionId]) ? this._mcpConnectionInfo[connectionId] : {}
+  info.alias = this._mcpConnectionAliases[connectionId]
+  info.label = this._deriveMcpConnectionLabel(config, index)
+  info.description = this._describeMcpConnection(config)
+  this._mcpConnectionInfo[connectionId] = info
+}
+
+/**
+ * Derives a short human-friendly label for an MCP connection.
+ *
+ * @param {object} config - Raw MCP configuration object
+ * @param {number} index - Zero-based index for the connection
+ * @returns {string} Connection label
+ */
+MiniA.prototype._deriveMcpConnectionLabel = function(config, index) {
+  if (isMap(config)) {
+    var candidates = []
+
+    if (isString(config.name) && config.name.trim().length > 0) candidates.push(config.name.trim())
+    if (isString(config.id) && config.id.trim().length > 0) candidates.push(config.id.trim())
+
+    if (isObject(config.serverInfo)) {
+      if (isString(config.serverInfo.title) && config.serverInfo.title.trim().length > 0) {
+        candidates.push(config.serverInfo.title.trim())
+      } else if (isString(config.serverInfo.name) && config.serverInfo.name.trim().length > 0) {
+        candidates.push(config.serverInfo.name.trim())
+      }
+    }
+
+    if (isString(config.description) && config.description.trim().length > 0) candidates.push(config.description.trim())
+    if (isString(config.cmd) && config.cmd.trim().length > 0) candidates.push(config.cmd.trim())
+    if (isString(config.url) && config.url.trim().length > 0) candidates.push(config.url.trim())
+    if (isString(config.path) && config.path.trim().length > 0) candidates.push(config.path.trim())
+
+    if (candidates.length > 0) return candidates[0]
+  }
+
+  return `Connection #${index + 1}`
+}
+
+/**
+ * Builds a descriptive summary for the MCP connection based on known fields.
+ *
+ * @param {object} config - Raw MCP configuration object
+ * @returns {string} Summary description
+ */
+MiniA.prototype._describeMcpConnection = function(config) {
+  if (!isMap(config)) return ""
+
+  var details = []
+  if (isObject(config.serverInfo)) {
+    if (isString(config.serverInfo.name) && config.serverInfo.name.trim().length > 0) {
+      details.push(`server=${config.serverInfo.name.trim()}`)
+    }
+    if (isString(config.serverInfo.title) && config.serverInfo.title.trim().length > 0) {
+      details.push(`title=${config.serverInfo.title.trim()}`)
+    }
+    if (isString(config.serverInfo.version) && config.serverInfo.version.trim().length > 0) {
+      details.push(`version=${config.serverInfo.version.trim()}`)
+    }
+  }
+
+  if (isString(config.description) && config.description.trim().length > 0) details.push(config.description.trim())
+  if (isString(config.cmd) && config.cmd.trim().length > 0) details.push(`cmd=${config.cmd.trim()}`)
+  if (isString(config.url) && config.url.trim().length > 0) details.push(`url=${config.url.trim()}`)
+  if (isString(config.path) && config.path.trim().length > 0) details.push(`path=${config.path.trim()}`)
+
+  var summary = details.join(", ")
+  if (summary.length > 200) summary = summary.substring(0, 197) + "..."
+  return summary
+}
+
+/**
+ * Uses an LLM to choose the best MCP connection and tools for a goal when other heuristics fail.
+ *
+ * @param {string} goal - The user's goal text
+ * @param {Array} allTools - Array of all available MCP tools from all connections
+ * @param {Object} llmInstance - The LLM instance to use
+ * @returns {Array} Array of selected tool names scoped to the chosen connection
+ */
+MiniA.prototype._selectConnectionAndToolsByLLM = function(goal, allTools, llmInstance) {
+  if (!isString(goal) || goal.trim().length === 0 || !isArray(allTools) || allTools.length === 0 || isUnDef(llmInstance)) {
+    return []
+  }
+
+  var parent = this
+  var groupedByConnection = {}
+  var connectionOrder = []
+
+  allTools.forEach(function(tool) {
+    var connectionId = parent.mcpToolToConnection[tool.name]
+    if (!isString(connectionId) || connectionId.length === 0) return
+    if (isUnDef(groupedByConnection[connectionId])) {
+      groupedByConnection[connectionId] = []
+      connectionOrder.push(connectionId)
+    }
+    groupedByConnection[connectionId].push(tool)
+  })
+
+  if (connectionOrder.length === 0) return []
+
+  var connectionSummaries = connectionOrder.map(function(connectionId, idx) {
+    var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
+    var alias = isString(info.alias) && info.alias.length > 0
+      ? info.alias
+      : (isObject(parent._mcpConnectionAliases) && isString(parent._mcpConnectionAliases[connectionId])
+        ? parent._mcpConnectionAliases[connectionId]
+        : connectionId.substring(0, 8))
+    var label = isString(info.label) && info.label.length > 0 ? info.label : `Connection #${idx + 1}`
+    var description = isString(info.description) && info.description.length > 0 ? info.description : ""
+
+    var header = `${idx + 1}. Connection ${alias} — ${label} (id: ${connectionId.substring(0, 8)})`
+    var lines = [header]
+    if (description.length > 0) lines.push(`   Summary: ${description}`)
+    lines.push("   Tools:")
+    groupedByConnection[connectionId].forEach(function(tool) {
+      var toolDesc = isString(tool.description) && tool.description.trim().length > 0
+        ? tool.description.trim()
+        : "No description provided"
+      lines.push(`   - ${tool.name}: ${toolDesc}`)
+    })
+
+    return lines.join("\n")
+  }).join("\n\n")
+
+  var prompt = `You are helping Mini-A choose which MCP connection and tool(s) to register for a user's goal.\n\nGoal:\n${goal}\n\nAvailable connections and tools:\n${connectionSummaries}\n\nInstructions:\n- Choose the single connection that best supports the goal.\n- Only include tools that belong to the selected connection.\n- If no connection is useful, respond with connection set to null and tools as [].\n- Respond ONLY with valid JSON following this schema:\n{\n  "connection": "<connection alias or id>",\n  "tools": ["tool_name1", "tool_name2"]\n}\n\nJSON response:`
+
+  var response = llmInstance.prompt(prompt)
+  if (!isString(response)) return []
+
+  response = response.trim()
+  var jsonMatch = response.match(/```(?:json)?\s*({[\s\S]*})\s*```/)
+  if (jsonMatch) {
+    response = jsonMatch[1]
+  } else {
+    var startIdx = response.indexOf("{")
+    var endIdx = response.lastIndexOf("}")
+    if (startIdx >= 0 && endIdx > startIdx) {
+      response = response.substring(startIdx, endIdx + 1)
+    }
+  }
+
+  var parsed
+  try {
+    parsed = JSON.parse(response)
+  } catch (e) {
+    this.fnI("warn", `Connection-level LLM selection returned invalid JSON: ${e.message || e}`)
+    return []
+  }
+
+  if (!isMap(parsed)) return []
+
+  var selectedConnectionKey = parsed.connection
+  var selectedConnectionId = __
+
+  if (isString(selectedConnectionKey) && selectedConnectionKey.trim().length > 0) {
+    var normalized = selectedConnectionKey.trim()
+
+    if (isObject(this._mcpConnectionAliasToId) && isString(this._mcpConnectionAliasToId[normalized])) {
+      selectedConnectionId = this._mcpConnectionAliasToId[normalized]
+    }
+
+    if (isUnDef(selectedConnectionId) && isDef(groupedByConnection[normalized])) {
+      selectedConnectionId = normalized
+    }
+
+    if (isUnDef(selectedConnectionId)) {
+      normalized = normalized.toLowerCase()
+      connectionOrder.some(function(connectionId) {
+        if (isDef(selectedConnectionId)) return true
+        if (connectionId.toLowerCase() === normalized || connectionId.substring(0, normalized.length).toLowerCase() === normalized) {
+          selectedConnectionId = connectionId
+          return true
+        }
+
+        var info = isObject(parent._mcpConnectionInfo) ? parent._mcpConnectionInfo[connectionId] : {}
+        if (isString(info.alias) && info.alias.toLowerCase() === normalized) {
+          selectedConnectionId = connectionId
+          return true
+        }
+        if (isString(info.label) && info.label.toLowerCase() === normalized) {
+          selectedConnectionId = connectionId
+          return true
+        }
+        return false
+      })
+    }
+  }
+
+  if (isUnDef(selectedConnectionId) || isUnDef(groupedByConnection[selectedConnectionId])) {
+    return []
+  }
+
+  var candidateTools = isArray(parsed.tools) ? parsed.tools : []
+  var validToolNames = groupedByConnection[selectedConnectionId].map(function(tool) { return tool.name })
+  var filteredTools = candidateTools.filter(function(name) {
+    return validToolNames.indexOf(name) >= 0
+  })
+
+  if (filteredTools.length === 0) {
+    filteredTools = validToolNames
+  }
+
+  return filteredTools
+}
+
+/**
  * Dynamically selects MCP tools based on the goal.
- * Uses a multi-stage approach: keyword matching, low-cost LLM, then regular LLM.
+ * Uses a multi-stage approach: keyword matching, low-cost LLM, primary LLM, then connection-level fallback.
  *
  * @param {string} goal - The user's goal text
  * @param {Array} allTools - Array of all available MCP tools from all connections
@@ -5105,9 +5625,16 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
 
   this.fnI("mcp", `Analyzing goal to dynamically select relevant tools from ${allTools.length} available...`)
 
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_dynamic_used)) {
+    global.__mini_a_metrics.tool_selection_dynamic_used.inc()
+  }
+
   // Stage 1: Try keyword-based matching
   var keywordSelected = this._selectToolsByKeywordMatch(goal, allTools)
   if (keywordSelected.length > 0) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_keyword)) {
+      global.__mini_a_metrics.tool_selection_keyword.inc()
+    }
     this.fnI("done", `Selected ${keywordSelected.length} tool(s) via keyword matching: ${keywordSelected.join(", ")}`)
     return keywordSelected
   }
@@ -5119,6 +5646,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
     try {
       var lcSelected = this._selectToolsByLLM(goal, allTools, this.lc_llm)
       if (lcSelected.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_llm_lc)) {
+          global.__mini_a_metrics.tool_selection_llm_lc.inc()
+        }
         this.fnI("done", `Selected ${lcSelected.length} tool(s) via low-cost LLM: ${lcSelected.join(", ")}`)
         return lcSelected
       }
@@ -5132,6 +5662,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
     try {
       var llmSelected = this._selectToolsByLLM(goal, allTools, this.llm)
       if (llmSelected.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_llm_main)) {
+          global.__mini_a_metrics.tool_selection_llm_main.inc()
+        }
         this.fnI("done", `Selected ${llmSelected.length} tool(s) via main LLM: ${llmSelected.join(", ")}`)
         return llmSelected
       }
@@ -5140,7 +5673,46 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
     }
   }
 
+  // Stage 4: Ask LLM to choose the best connection + tools when the shortlist is empty
+  this.fnI("mcp", "LLM tool shortlist is empty, evaluating connection-level fallback...")
+
+  var connectionFallbackSelection = []
+  if (this._use_lc && isDef(this.lc_llm)) {
+    try {
+      this.fnI("mcp", "Requesting low-cost LLM to choose the best MCP connection and tools...")
+      connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.lc_llm)
+      if (connectionFallbackSelection.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_connection_chooser_lc)) {
+          global.__mini_a_metrics.tool_selection_connection_chooser_lc.inc()
+        }
+        this.fnI("done", `Selected ${connectionFallbackSelection.length} tool(s) via low-cost connection chooser: ${connectionFallbackSelection.join(", ")}`)
+        return connectionFallbackSelection
+      }
+    } catch (e) {
+      this.fnI("warn", `Low-cost LLM connection chooser failed: ${e.message || e}`)
+    }
+  }
+
+  if (isDef(this.llm)) {
+    try {
+      this.fnI("mcp", "Requesting primary LLM to choose the best MCP connection and tools...")
+      connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.llm)
+      if (connectionFallbackSelection.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_connection_chooser_main)) {
+          global.__mini_a_metrics.tool_selection_connection_chooser_main.inc()
+        }
+        this.fnI("done", `Selected ${connectionFallbackSelection.length} tool(s) via connection chooser: ${connectionFallbackSelection.join(", ")}`)
+        return connectionFallbackSelection
+      }
+    } catch (e) {
+      this.fnI("warn", `Primary LLM connection chooser failed: ${e.message || e}`)
+    }
+  }
+
   // Fallback: If all methods fail or return empty, return all tools
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_fallback_all)) {
+    global.__mini_a_metrics.tool_selection_fallback_all.inc()
+  }
   this.fnI("warn", `Dynamic tool selection returned no results, registering all ${allTools.length} tools as fallback`)
   return allTools.map(t => t.name)
 }
@@ -5406,7 +5978,15 @@ MiniA.prototype.init = function(args) {
       }
     }
 
-    var parseModelConfig = function(rawValue, source) {
+    // Initialize $sec for model definitions if secpass is provided
+    var _sec = __
+    try {
+      _sec = $sec("mini-a", "models", __, args.secpass)
+    } catch(e) {
+      this.fnI("error", `Failed to initialize OpenAF sBucket with provided password: ${e.message}`)
+    }
+
+    var parseModelConfig = function(rawValue, source, isOptional) {
       if (isUnDef(rawValue)) return __
       var parsed = rawValue
       if (isString(parsed)) {
@@ -5415,23 +5995,49 @@ MiniA.prototype.init = function(args) {
         try {
           parsed = af.fromJSSLON(parsed)
         } catch (e) {
-          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-          throw new Error(`Invalid ${source} model configuration: ${errMsg}`)
+          // If JSSLON parsing fails, try as a string reference
+          parsed = rawValue.trim()
         }
       }
+
+      // If result is still a string after JSSLON parsing, try $sec lookup
+      if (!isMap(parsed) && isString(parsed)) {
+        if (isDef(_sec)) {
+          try {
+            var secObj = _sec.get(parsed, "models")
+            if (isDef(secObj) && isMap(secObj)) {
+              return secObj
+            }
+          } catch(e) {
+            // If $sec lookup fails, continue to error handling below
+          }
+        }
+
+        // If we reach here, it's still a string and not found in $sec
+        if (isOptional) {
+          return __
+        } else {
+          throw new Error(`Invalid ${source} model configuration: '${parsed}' is not a valid model definition or reference.`)
+        }
+      }
+
       if (!isMap(parsed)) {
-        throw new Error(`Invalid ${source} model configuration: expected a map/object.`)
+        if (isOptional) {
+          return __
+        } else {
+          throw new Error(`Invalid ${source} model configuration: expected a map/object.`)
+        }
       }
       return parsed
     }
 
-    if (isUnDef(this._oaf_model)) {
-      var overrideModel = parseModelConfig(args.model, "model parameter")
+    if (isUnDef(this._oaf_model) || isDef(args.model)) {
+      var overrideModel = parseModelConfig(args.model, "model parameter", true)
       if (isDef(overrideModel)) this._oaf_model = overrideModel
     }
 
     if (isUnDef(this._oaf_model)) {
-      var envModel = parseModelConfig(getEnv("OAF_MODEL"), "OAF_MODEL environment variable")
+      var envModel = parseModelConfig(getEnv("OAF_MODEL"), "OAF_MODEL environment variable", true)
       if (isDef(envModel)) this._oaf_model = envModel
     }
 
@@ -5441,13 +6047,13 @@ MiniA.prototype.init = function(args) {
       throw new Error(_msg)
     }
 
-    if (isUnDef(this._oaf_lc_model)) {
-      var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter")
+    if (isUnDef(this._oaf_lc_model) || isDef(args.modellc)) {
+      var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter", true)
       if (isDef(overrideLcModel)) this._oaf_lc_model = overrideLcModel
     }
 
     if (isUnDef(this._oaf_lc_model)) {
-      var envLcModel = parseModelConfig(getEnv("OAF_LC_MODEL"), "OAF_LC_MODEL environment variable")
+      var envLcModel = parseModelConfig(getEnv("OAF_LC_MODEL"), "OAF_LC_MODEL environment variable", true)
       if (isDef(envLcModel)) this._oaf_lc_model = envLcModel
     }
 
@@ -5471,10 +6077,13 @@ MiniA.prototype.init = function(args) {
     // Using MCP (single or multiple connections)
     var needMCPInit = false
     if (isUnDef(this._mcpConnections) || isUnDef(this.mcpTools) || isUnDef(this.mcpToolNames) || isUnDef(this.mcpToolToConnection)) {
-      needMCPInit = true    
+      needMCPInit = true
       this.mcpTools = []
       this.mcpToolNames = []
       this.mcpToolToConnection = {}
+      this._mcpConnectionInfo = {}
+      this._mcpConnectionAliases = {}
+      this._mcpConnectionAliasToId = {}
     }
     var aggregatedMcpConfigs = []
     if (needMCPInit) {
@@ -5573,6 +6182,8 @@ MiniA.prototype.init = function(args) {
               }
             }
           }
+
+          this._ensureMcpConnectionMetadata(id, mcpConfig, index)
 
           if (args.mcplazy === true && this._lazyMcpConnections[id] !== true && !isExisting) {
             this._lazyMcpConnections[id] = false

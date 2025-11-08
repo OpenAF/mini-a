@@ -4,7 +4,150 @@
 
 try {
   plugin("Console")
-  var args = isDef(global._args) ? global._args : processExpr(" ")
+  var args = processExpr(" ")
+
+  // Init
+  if (!(isString(args.libs) && args.libs.trim().length > 0)) {
+    var envLibs = args.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
+    if (isString(envLibs) && envLibs.trim().length > 0) {
+      args.libs = envLibs.trim()
+      //log("Using libs from OAF_MINI_A_LIBS environment variable.")
+    }
+    //global._args = args
+  }
+
+  (function(args) {
+    if (args.__modeApplied === true) return
+    if (!isString(args.mode)) return
+    var modeName = args.mode.trim()
+    if (modeName.length === 0) return
+
+    var modesPath = getOPackPath("mini-a") + "/mini-a-modes.yaml"
+    var presets = {}
+    try {
+      var loaded = io.readFileYAML(modesPath)
+      if (isMap(loaded) && isMap(loaded.modes)) {
+        presets = loaded.modes
+      } else if (isMap(loaded)) {
+        presets = loaded
+      } else {
+        presets = {}
+      }
+    } catch(e) {
+      var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+      logWarn(`Failed to load mode presets for '${modeName}': ${errMsg}`)
+      args.__modeApplied = true
+      return
+    }
+
+    // Load custom modes from user's home directory
+    function resolveCanonicalPath(basePath, fileName) {
+      return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
+    }
+    var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+    var customModesPath = resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml")
+    if (io.fileExists(customModesPath)) {
+      try {
+        var customLoaded = io.readFileYAML(customModesPath)
+        var customPresets = {}
+        if (isMap(customLoaded) && isMap(customLoaded.modes)) {
+          customPresets = customLoaded.modes
+        } else if (isMap(customLoaded)) {
+          customPresets = customLoaded
+        }
+        // Merge custom modes with default modes (custom overrides defaults)
+        if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
+          presets = merge(presets, customPresets)
+        }
+      } catch(e) {
+        var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+        logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
+      }
+    }
+
+    if (!isMap(presets) || Object.keys(presets).length === 0) {
+      logWarn(`Mode '${modeName}' requested but no presets are defined.`)
+      args.__modeApplied = true
+      return
+    }
+
+    var keys = Object.keys(presets)
+    var resolvedKey
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
+      if (key === modeName || key.toLowerCase() === modeName.toLowerCase()) {
+        resolvedKey = key
+        break
+      }
+    }
+
+    if (isUnDef(resolvedKey)) {
+      logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
+      args.__modeApplied = true
+      return
+    }
+
+    var preset = presets[resolvedKey]
+    if (!isMap(preset)) {
+      logWarn(`Mode '${resolvedKey}' preset is invalid.`)
+      args.__modeApplied = true
+      return
+    }
+
+    var applied = []
+    var paramsSource = preset.params
+    var applyParam = function(key, value) {
+      if (isString(key) && key.length > 0) {
+        args[key] = value
+        applied.push(key)
+      }
+    }
+
+    if (isArray(paramsSource)) {
+      paramsSource.forEach(function(entry) {
+        if (!isMap(entry)) return
+        Object.keys(entry).forEach(function(paramKey) {
+          applyParam(paramKey, entry[paramKey])
+        })
+      })
+    } else if (isMap(paramsSource)) {
+      Object.keys(paramsSource).forEach(function(paramKey) {
+        applyParam(paramKey, paramsSource[paramKey])
+      })
+    } else if (isDef(paramsSource)) {
+      logWarn(`Mode '${resolvedKey}' has unsupported params definition.`)
+    }
+
+    var infoMsg = `Mode '${resolvedKey}' enabled`
+    if (isString(preset.description) && preset.description.length > 0) {
+      infoMsg += `: ${preset.description}`
+    }
+    log(infoMsg)
+
+    if (applied.length > 0) {
+      log(`Mode '${resolvedKey}' applied defaults for: ${applied.join(", ")}`)
+    } else {
+      log(`Mode '${resolvedKey}' did not change any arguments (overrides already provided).`)
+    }
+
+    args.mode = resolvedKey
+    args.__modeApplied = true
+  })(args)
+
+  // Choose
+  if (toBoolean(args.modelman) === true) {
+    // Start model management mode
+    load("mini-a-modelman.js")
+    exit(0)
+  } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
+    // Start web mode
+    oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
+    exit(0)
+  } else if (isDef(args.goal)) {
+    // Start cli mode
+    oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
+    exit(0)
+  }
 
   // Helper functions
   // ----------------
@@ -66,7 +209,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "summarize", "history", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "clear", "context", "compact", "summarize", "history", "model", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -1126,6 +1269,7 @@ try {
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
+      "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
@@ -1247,6 +1391,61 @@ try {
           print(colorifyText("Usage: /history [numberOfEntries]", errorColor))
         } else {
           printConversationHistory(parsedCount)
+        }
+        continue
+      }
+      if (command === "model" || command.indexOf("model ") === 0) {
+        var target = "model" // default to model
+        if (command.indexOf("model ") === 0) {
+          var targetArg = command.substring(6).trim().toLowerCase()
+          if (targetArg === "modellc" || targetArg === "lc") {
+            target = "modellc"
+          } else if (targetArg === "model") {
+            target = "model"
+          } else {
+            print(colorifyText("Invalid target. Use 'model' or 'modellc'.", errorColor))
+            continue
+          }
+        }
+        try {
+          // Store original args and set temporary args for model manager
+          var originalGlobalArgs = clone(args)
+          global._args = merge(args, { __noprint: true })
+
+          // Set up result capture mechanism
+          global.__mini_a_con_capture_model = true
+          global.__mini_a_con_model_result = __
+
+          // Load the model manager (which will execute mainOAFModel and store result)
+          var modelManPath = getOPackPath("mini-a") + "/mini-a-modelman.js"
+          load(modelManPath)
+
+          // Get the captured result
+          var selectedModel = global.__mini_a_con_model_result
+
+          // Clean up
+          delete global.__mini_a_con_capture_model
+          delete global.__mini_a_con_model_result
+          args = originalGlobalArgs
+
+          if (isMap(selectedModel)) {
+            sessionOptions[target] = af.toSLON(selectedModel)
+
+            /*if (target == "model") args.model = af.toSLON(selectedModel)
+            else if (target == "lowcost") args.modellc = af.toSLON(selectedModel)*/
+
+            print(colorifyText("Model definition set for " + target + ".", successColor))
+            //print(colorifyText("Value: " + modelSLON, hintColor))
+          } else {
+            print(colorifyText("No model selected.", hintColor))
+          }
+        } catch (modelError) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to load model: " + modelError, errorColor))
+          $err(modelError)
+          // Clean up on error
+          delete global.__mini_a_con_capture_model
+          delete global.__mini_a_con_model_result
+          if (isDef(originalGlobalArgs)) args = originalGlobalArgs
         }
         continue
       }

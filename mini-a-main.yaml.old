@@ -13,6 +13,9 @@ help:
 
     Web example:
       ojob mini-a-main.yaml web=true onport=8888 showExecs=false
+
+    Model management example:
+      ojob mini-a-main.yaml modelman=true
   expects:
   - name     : web
     desc     : Run the Mini-A web interface when true; otherwise start the CLI agent
@@ -151,6 +154,11 @@ help:
     desc     : Apply a predefined argument preset from mini-a-modes.yaml (CLI and web modes)
     example  : shell
     mandatory: false
+  - name     : modelman
+    desc     : Manage LLM model definitions using secure storage
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : onport
     desc     : Port to run the HTTP server on (web mode)
     example  : "8888"
@@ -174,19 +182,26 @@ ojob:
 
 todo:
 - apply-mode-preset
-- (if    ): |
-    toBoolean(args.web) || toBoolean(args.onport) == true
-  ((then)):
-  - start-web
-  ((else)):
-  - (if): |
-      isDef(args.goal)
-    ((then)):
-    - start-cli
-    ((else)):
-    - start-con
+- choose
 
 jobs:
+# ------------
+- name: choose
+  exec: | #js
+    if (toBoolean(args.modelman) === true) {
+      // Start model management mode
+      $job("start-modelman", args)
+    } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
+      // Start web mode
+      $job("start-web", args)
+    } else if (isDef(args.goal)) {
+      // Start cli mode
+      $job("start-cli", args)
+    } else {
+      // Start console mode
+      $job("start-con", args)
+    }
+
 # -----------------------
 - name: apply-mode-preset
   exec: | #js
@@ -331,3 +346,8 @@ jobs:
 - name: start-con
   exec: | #js
     load("mini-a-con.js")
+
+# ---------------------
+- name: start-modelman
+  exec: | #js
+    load("mini-a-modelman.js")
