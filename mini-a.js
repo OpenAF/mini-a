@@ -4953,8 +4953,79 @@ MiniA.prototype._runCommand = function(args) {
 // ============================================================================
 
 /**
+ * Simple stemming function to reduce words to their root form
+ */
+MiniA.prototype._stemWord = function(word) {
+  // Common suffixes in order of priority
+  var suffixes = [
+    { pattern: /ness$/, replacement: '' },
+    { pattern: /ing$/, replacement: '' },
+    { pattern: /ed$/, replacement: '' },
+    { pattern: /es$/, replacement: '' },
+    { pattern: /s$/, replacement: '' },
+    { pattern: /ied$/, replacement: 'y' },
+    { pattern: /ies$/, replacement: 'y' },
+    { pattern: /ation$/, replacement: 'ate' },
+    { pattern: /tion$/, replacement: 't' },
+    { pattern: /er$/, replacement: '' },
+    { pattern: /ly$/, replacement: '' },
+    { pattern: /able$/, replacement: '' },
+    { pattern: /ible$/, replacement: '' }
+  ]
+
+  for (var i = 0; i < suffixes.length; i++) {
+    if (suffixes[i].pattern.test(word) && word.length > 4) {
+      return word.replace(suffixes[i].pattern, suffixes[i].replacement)
+    }
+  }
+  return word
+}
+
+/**
+ * Calculate Levenshtein distance for fuzzy matching
+ */
+MiniA.prototype._levenshteinDistance = function(a, b) {
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+
+  var matrix = []
+  for (var i = 0; i <= b.length; i++) {
+    matrix[i] = [i]
+  }
+  for (var j = 0; j <= a.length; j++) {
+    matrix[0][j] = j
+  }
+
+  for (i = 1; i <= b.length; i++) {
+    for (j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        )
+      }
+    }
+  }
+  return matrix[b.length][a.length]
+}
+
+/**
  * Selects MCP tools by keyword matching against the goal text.
  * Analyzes words in the goal and matches them against tool names and descriptions.
+ *
+ * SIGNIFICANTLY ENHANCED with:
+ * - Stemming for word variations (search/searching/searched)
+ * - Synonym matching (find=search, file=document)
+ * - N-gram extraction (multi-word phrases like "file system")
+ * - Entity/technology detection (.json, python, git, etc.)
+ * - Action verb weighting (create, delete, update get higher scores)
+ * - Position-based keyword importance (earlier words weighted higher)
+ * - Parameter schema matching (check tool inputs against goal entities)
+ * - Fuzzy matching for typos (Levenshtein distance ≤ 2)
+ * - Coverage bonus (tools matching multiple keywords score higher)
  *
  * @param {string} goal - The user's goal text
  * @param {Array} allTools - Array of all available MCP tools from all connections
@@ -4965,55 +5036,213 @@ MiniA.prototype._selectToolsByKeywordMatch = function(goal, allTools) {
     return []
   }
 
-  // Extract meaningful keywords from the goal (filter out common words)
-  var commonWords = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must", "can", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those", "what", "which", "who", "when", "where", "why", "how"]
+  // Enhanced stopwords list (more comprehensive)
+  var stopwords = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must", "can", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those", "what", "which", "who", "when", "where", "why", "how", "all", "each", "every", "some", "any", "few", "more", "most", "other", "such", "only", "own", "same", "than", "too", "very", "just", "now", "then", "here", "there", "also", "please", "want", "need", "like", "make", "use", "using"]
 
-  var goalWords = goal
+  // Action verbs (weighted higher)
+  var actionVerbs = ["create", "delete", "remove", "update", "modify", "edit", "change", "add", "insert", "fetch", "get", "retrieve", "find", "search", "query", "list", "show", "display", "read", "write", "save", "load", "open", "close", "execute", "run", "build", "compile", "deploy", "install", "download", "upload", "send", "receive", "parse", "convert", "transform", "analyze", "process", "generate", "validate", "check", "test", "debug", "fix", "scan", "browse", "navigate", "connect", "disconnect", "start", "stop", "pause", "resume", "rename", "move", "copy", "sync"]
+
+  // Synonym groups for semantic matching
+  var synonymGroups = [
+    ["search", "find", "lookup", "query", "locate", "discover"],
+    ["create", "make", "generate", "build", "produce", "construct"],
+    ["delete", "remove", "erase", "clear", "purge", "destroy"],
+    ["update", "modify", "change", "edit", "alter", "revise"],
+    ["file", "document", "data", "record"],
+    ["folder", "directory", "path"],
+    ["read", "view", "open", "display", "show", "see"],
+    ["write", "save", "store", "persist"],
+    ["list", "enumerate", "catalog", "index"],
+    ["run", "execute", "launch", "start", "invoke"],
+    ["download", "fetch", "pull", "retrieve"],
+    ["upload", "push", "send", "submit"],
+    ["web", "internet", "online", "http", "url"],
+    ["database", "db", "datastore", "storage"],
+    ["analyze", "examine", "inspect", "review", "check"],
+    ["convert", "transform", "translate", "encode", "decode"],
+    ["image", "picture", "photo", "graphic", "img"],
+    ["text", "string", "content", "body"],
+    ["code", "script", "program", "source"]
+  ]
+
+  // Technology/entity patterns
+  var entityPatterns = [
+    { pattern: /\.(json|xml|csv|yaml|yml|txt|md|html|css|js|ts|py|java|rb|go|rs|c|cpp|h|sql|sh|bash)/, type: "filetype" },
+    { pattern: /\b(python|javascript|typescript|java|ruby|golang|rust|cpp|c\+\+|php|swift|kotlin|scala|perl|shell|bash|powershell)\b/i, type: "language" },
+    { pattern: /\b(git|github|gitlab|docker|kubernetes|aws|azure|gcp|jenkins|terraform|ansible)\b/i, type: "devtool" },
+    { pattern: /\b(react|vue|angular|svelte|next|nuxt|express|flask|django|spring|rails)\b/i, type: "framework" },
+    { pattern: /\b(mysql|postgres|postgresql|mongodb|redis|elasticsearch|sqlite|oracle|mssql)\b/i, type: "database" },
+    { pattern: /\b(http|https|api|rest|graphql|websocket|grpc|soap)\b/i, type: "protocol" }
+  ]
+
+  var goalLower = goal.toLowerCase()
+
+  // Extract entities from goal
+  var extractedEntities = []
+  entityPatterns.forEach(ep => {
+    var matches = goalLower.match(ep.pattern)
+    if (matches) {
+      matches.forEach(m => extractedEntities.push({ value: m.toLowerCase().replace(/^\./, ''), type: ep.type }))
+    }
+  })
+
+  // Tokenize goal preserving position info
+  var tokens = goal
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^a-z0-9\s.]/g, " ")
     .split(/\s+/)
-    .filter(w => w.length > 2 && commonWords.indexOf(w) < 0)
+    .map((w, idx) => ({ word: w, position: idx }))
+    .filter(t => t.word.length > 2 && stopwords.indexOf(t.word) < 0)
 
-  if (goalWords.length === 0) {
+  // Extract keywords with metadata
+  var keywords = tokens.map(t => {
+    var stemmed = this._stemWord(t.word)
+    var isAction = actionVerbs.indexOf(t.word) >= 0 || actionVerbs.indexOf(stemmed) >= 0
+    var positionWeight = 1 + (1 / (t.position + 1)) * 0.5  // Earlier words get higher weight
+
+    return {
+      original: t.word,
+      stemmed: stemmed,
+      isAction: isAction,
+      position: t.position,
+      positionWeight: positionWeight
+    }
+  })
+
+  // Extract n-grams (2-grams and 3-grams)
+  var ngrams = []
+  for (var i = 0; i < tokens.length - 1; i++) {
+    var bigram = tokens[i].word + " " + tokens[i + 1].word
+    ngrams.push({ text: bigram, n: 2, position: tokens[i].position })
+
+    if (i < tokens.length - 2) {
+      var trigram = bigram + " " + tokens[i + 2].word
+      ngrams.push({ text: trigram, n: 3, position: tokens[i].position })
+    }
+  }
+
+  if (keywords.length === 0) {
     return []
   }
 
-  // Score each tool based on keyword matches
+  // Helper function to find synonym matches
+  var getSynonyms = function(word) {
+    var syns = [word]
+    for (var i = 0; i < synonymGroups.length; i++) {
+      if (synonymGroups[i].indexOf(word) >= 0) {
+        return synonymGroups[i]
+      }
+    }
+    return syns
+  }
+
+  // Score each tool based on enhanced matching
   var scoredTools = allTools.map(tool => {
     var score = 0
-    var toolText = ((tool.name || "") + " " + (tool.description || "")).toLowerCase()
+    var toolNameLower = (tool.name || "").toLowerCase()
+    var toolDescLower = (tool.description || "").toLowerCase()
+    var toolText = toolNameLower + " " + toolDescLower
 
-    // Check for exact word matches in tool name (higher weight)
-    goalWords.forEach(word => {
-      if ((tool.name || "").toLowerCase().indexOf(word) >= 0) {
-        score += 10
-      }
-      if ((tool.description || "").toLowerCase().indexOf(word) >= 0) {
-        score += 3
-      }
-    })
-
-    // Check for tool name similarity
-    var toolNameWords = (tool.name || "")
-      .toLowerCase()
+    // Tokenize tool name and description
+    var toolNameWords = toolNameLower
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/[_\s-]+/)
       .filter(w => w.length > 2)
+      .map(w => this._stemWord(w))
 
-    toolNameWords.forEach(toolWord => {
-      goalWords.forEach(goalWord => {
-        if (toolWord === goalWord) {
-          score += 15
-        } else if (toolWord.indexOf(goalWord) >= 0 || goalWord.indexOf(toolWord) >= 0) {
-          score += 5
+    var toolDescWords = toolDescLower
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .map(w => this._stemWord(w))
+
+    // 1. N-gram matching (highest priority for multi-word concepts)
+    ngrams.forEach(ng => {
+      if (toolText.indexOf(ng.text) >= 0) {
+        score += ng.n === 3 ? 30 : 20  // Trigrams: 30, bigrams: 20
+      }
+    })
+
+    // 2. Entity matching (file types, languages, technologies)
+    extractedEntities.forEach(entity => {
+      if (toolText.indexOf(entity.value) >= 0) {
+        score += 25  // Strong signal for domain-specific matching
+      }
+      // Check in tool parameters if available
+      if (isMap(tool.inputSchema) && isMap(tool.inputSchema.properties)) {
+        var paramsText = JSON.stringify(tool.inputSchema.properties).toLowerCase()
+        if (paramsText.indexOf(entity.value) >= 0) {
+          score += 15  // Entity appears in tool parameters
+        }
+      }
+    })
+
+    // 3. Keyword matching with stemming and synonyms
+    keywords.forEach(kw => {
+      var kwSynonyms = getSynonyms(kw.stemmed)
+      var matchFound = false
+
+      // Check tool name (highest weight)
+      toolNameWords.forEach(toolWord => {
+        if (toolWord === kw.stemmed || kwSynonyms.indexOf(toolWord) >= 0) {
+          var baseScore = kw.isAction ? 20 : 15  // Action verbs weighted higher
+          score += baseScore * kw.positionWeight
+          matchFound = true
+        } else if (toolWord.indexOf(kw.stemmed) >= 0 || kw.stemmed.indexOf(toolWord) >= 0) {
+          score += 8 * kw.positionWeight  // Partial match
+          matchFound = true
+        } else {
+          // Fuzzy match for typos (max distance 2)
+          var distance = this._levenshteinDistance(toolWord, kw.stemmed)
+          if (distance <= 2 && Math.min(toolWord.length, kw.stemmed.length) >= 5) {
+            score += 6 * kw.positionWeight
+            matchFound = true
+          }
         }
       })
+
+      // Check tool description (medium weight)
+      if (!matchFound) {
+        toolDescWords.forEach(descWord => {
+          if (descWord === kw.stemmed || kwSynonyms.indexOf(descWord) >= 0) {
+            score += (kw.isAction ? 5 : 4) * kw.positionWeight
+            matchFound = true
+          }
+        })
+      }
+
+      // Check original unstemmed words too
+      if (toolText.indexOf(kw.original) >= 0) {
+        score += 3 * kw.positionWeight
+      }
     })
+
+    // 4. Parameter schema semantic matching
+    if (isMap(tool.inputSchema) && isMap(tool.inputSchema.properties)) {
+      var paramNames = Object.keys(tool.inputSchema.properties).join(" ").toLowerCase()
+      keywords.forEach(kw => {
+        if (paramNames.indexOf(kw.stemmed) >= 0) {
+          score += 5  // Keyword appears in parameter names
+        }
+      })
+    }
+
+    // 5. Boost score if multiple keywords match (coverage bonus)
+    var matchedKeywordCount = 0
+    keywords.forEach(kw => {
+      if (toolText.indexOf(kw.stemmed) >= 0 || toolText.indexOf(kw.original) >= 0) {
+        matchedKeywordCount++
+      }
+    })
+    if (matchedKeywordCount > 1) {
+      var coverage = matchedKeywordCount / keywords.length
+      score += coverage * 10  // Up to 10 bonus points for good coverage
+    }
 
     return { tool: tool, score: score }
   })
 
-  // Filter tools with score > 0 and sort by score
+  // Filter tools with score > 0 and sort by score (descending)
   var matchedTools = scoredTools
     .filter(st => st.score > 0)
     .sort((a, b) => b.score - a.score)
