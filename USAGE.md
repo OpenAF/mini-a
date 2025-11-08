@@ -371,12 +371,12 @@ Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, 
 
 Set `usetools=true mcpdynamic=true` when you want Mini-A to narrow the registered MCP tools to only those that look useful for the current goal. The agent evaluates the candidate list in stages:
 
-1. **Keyword heuristics**: quick matching on tool names, descriptions, and goal keywords.
+1. **Keyword heuristics**: advanced matching on tool names, descriptions, and goal keywords using stemming (word root extraction), synonym matching (semantic equivalents), n-gram extraction (multi-word phrases), and fuzzy matching (typo tolerance via Levenshtein distance).
 2. **Low-cost model inference**: if `OAF_LC_MODEL` is configured, the cheaper model proposes a shortlist.
 3. **Primary model inference**: the main model performs the same selection when the low-cost tier does not return results.
 4. **Connection chooser fallback**: when no tools are selected, Mini-A asks the low-cost model (then the primary model if needed) to pick the single most helpful MCP connection and its tools before falling back further.
 
-Only when every stage returns an empty list (or errors) does Mini-A log the issue and register the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. Leave `mcpdynamic` false when you prefer the traditional “register everything” behaviour or when your model lacks tool-calling support.
+Only when every stage returns an empty list (or errors) does Mini-A log the issue and register the full tool catalog so nothing is accidentally hidden. Selection happens per MCP connection, and you will see `mcp` log entries showing which tools were registered. The new `tool_selection` metrics track which selection method was used (keyword, llm_lc, llm_main, connection_chooser, or fallback_all). Leave `mcpdynamic` false when you prefer the traditional "register everything" behaviour or when your model lacks tool-calling support.
 
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
@@ -574,16 +574,23 @@ When the model responds with multiple independent tool calls in the same step, M
 Pair `usetools=true` with `mcpdynamic=true` to let Mini-A narrow the registered tool set via intelligent filtering. This feature is especially useful when working with large MCP catalogs where registering all tools would overwhelm the context window.
 
 **Selection strategy (multi-stage):**
-1. **Keyword heuristics** – Quick matching on tool names, descriptions, and goal keywords
+1. **Keyword heuristics** – Advanced matching on tool names, descriptions, and goal keywords using:
+   - **Stemming** – Reduces words to root forms (search/searching/searched → search)
+   - **Synonym matching** – Recognizes semantic equivalents (find=search, file=document, etc.)
+   - **N-gram extraction** – Captures multi-word phrases like "file system" or "database query"
+   - **Fuzzy matching** – Tolerates typos using Levenshtein distance (≤2 character changes)
 2. **Low-cost LLM inference** – If `OAF_LC_MODEL` is configured, the cheaper model proposes a shortlist
 3. **Primary model inference** – The main model performs selection when the low-cost tier doesn't return results
-4. **Fallback to full catalog** – If all stages return empty, Mini-A registers everything to ensure no tools are hidden
+4. **Connection chooser fallback** – When no tools match, asks LLM to choose the most relevant MCP connection
+5. **Fallback to full catalog** – If all stages return empty, Mini-A registers everything to ensure no tools are hidden
 
 **Benefits:**
-- Reduced context window usage
-- Faster tool registration
+- Reduced context window usage through intelligent filtering
+- Faster tool registration with multi-stage selection
 - Lower token costs for large tool catalogs
+- Semantic understanding beyond exact keyword matches
 - Graceful degradation when filtering fails
+- Detailed metrics tracking selection method effectiveness
 
 ### Tool Caching & Optimization
 
@@ -1312,6 +1319,9 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `performance` | `steps_taken`, `total_session_time_ms`, `avg_step_time_ms`, `max_context_tokens`, `llm_estimated_tokens`, `llm_actual_tokens`, `llm_normal_tokens`, `llm_lc_tokens` | Execution pacing and token consumption for cost analysis. |
 | `behavior_patterns` | `escalations`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that highlight unhealthy loops or parser problems. |
 | `summarization` | `summaries_made`, `summaries_skipped`, `summaries_forced`, `context_summarizations`, `summaries_tokens_reduced`, `summaries_original_tokens`, `summaries_final_tokens` | Auto-summarization activity and token savings. |
+| `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Dynamic tool selection metrics tracking how tools are selected when `mcpdynamic=true`. Shows usage of keyword matching, LLM-based selection (low-cost and main models), connection-level chooser fallbacks, and full catalog fallback. Includes stemming, synonym matching, n-grams, and fuzzy matching capabilities. |
+| `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
+| `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
 
 These counters mirror what is exported via `ow.metrics.add('mini-a', ...)`, so the same structure appears in Prometheus/Grafana when scraped through OpenAF.
 

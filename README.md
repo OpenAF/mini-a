@@ -64,6 +64,10 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 - **Multi-Model Support** - Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
+  - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
+  - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
+  - **Circuit Breakers** - Automatic connection health management with cooldown periods
+  - **Lazy Initialization** - Deferred MCP connection establishment for faster startup (`mcplazy=true`)
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, and more
 - **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing

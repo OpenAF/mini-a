@@ -94,7 +94,20 @@ var MiniA = function() {
     plans_validated: $atomic(0, "long"),
     plans_validation_failed: $atomic(0, "long"),
     plans_replanned: $atomic(0, "long"),
-    planning_disabled_simple_goal: $atomic(0, "long")
+    planning_disabled_simple_goal: $atomic(0, "long"),
+    tool_selection_dynamic_used: $atomic(0, "long"),
+    tool_selection_keyword: $atomic(0, "long"),
+    tool_selection_llm_lc: $atomic(0, "long"),
+    tool_selection_llm_main: $atomic(0, "long"),
+    tool_selection_connection_chooser_lc: $atomic(0, "long"),
+    tool_selection_connection_chooser_main: $atomic(0, "long"),
+    tool_selection_fallback_all: $atomic(0, "long"),
+    tool_cache_hits: $atomic(0, "long"),
+    tool_cache_misses: $atomic(0, "long"),
+    mcp_circuit_breaker_trips: $atomic(0, "long"),
+    mcp_circuit_breaker_resets: $atomic(0, "long"),
+    mcp_lazy_init_success: $atomic(0, "long"),
+    mcp_lazy_init_failed: $atomic(0, "long")
   }
 
   this._SYSTEM_PROMPT = `
@@ -558,8 +571,9 @@ MiniA.prototype.fnI = function(event, message) {
  * <odoc>
  * <key>MinA.getMetrics() : Object</key>
  * Get all metrics for this Mini-A instance.
- * Returns an object with all metric values including performance, behavior, error tracking, 
- * and separate token usage for normal vs low-cost LLM models.
+ * Returns an object with all metric values including performance, behavior, error tracking,
+ * separate token usage for normal vs low-cost LLM models, dynamic tool selection statistics,
+ * tool caching effectiveness, and MCP resilience indicators (circuit breakers, lazy initialization).
  * </odoc>
  */
 MiniA.prototype.getMetrics = function() {
@@ -622,6 +636,29 @@ MiniA.prototype.getMetrics = function() {
             summaries_tokens_reduced: global.__mini_a_metrics.summaries_tokens_reduced.get(),
             summaries_original_tokens: global.__mini_a_metrics.summaries_original_tokens.get(),
             summaries_final_tokens: global.__mini_a_metrics.summaries_final_tokens.get()
+        },
+        tool_selection: {
+            dynamic_used: global.__mini_a_metrics.tool_selection_dynamic_used.get(),
+            keyword: global.__mini_a_metrics.tool_selection_keyword.get(),
+            llm_lc: global.__mini_a_metrics.tool_selection_llm_lc.get(),
+            llm_main: global.__mini_a_metrics.tool_selection_llm_main.get(),
+            connection_chooser_lc: global.__mini_a_metrics.tool_selection_connection_chooser_lc.get(),
+            connection_chooser_main: global.__mini_a_metrics.tool_selection_connection_chooser_main.get(),
+            fallback_all: global.__mini_a_metrics.tool_selection_fallback_all.get()
+        },
+        tool_cache: {
+            hits: global.__mini_a_metrics.tool_cache_hits.get(),
+            misses: global.__mini_a_metrics.tool_cache_misses.get(),
+            total_requests: global.__mini_a_metrics.tool_cache_hits.get() + global.__mini_a_metrics.tool_cache_misses.get(),
+            hit_rate: (global.__mini_a_metrics.tool_cache_hits.get() + global.__mini_a_metrics.tool_cache_misses.get()) > 0
+                ? (global.__mini_a_metrics.tool_cache_hits.get() / (global.__mini_a_metrics.tool_cache_hits.get() + global.__mini_a_metrics.tool_cache_misses.get()) * 100).toFixed(2) + '%'
+                : '0%'
+        },
+        mcp_resilience: {
+            circuit_breaker_trips: global.__mini_a_metrics.mcp_circuit_breaker_trips.get(),
+            circuit_breaker_resets: global.__mini_a_metrics.mcp_circuit_breaker_resets.get(),
+            lazy_init_success: global.__mini_a_metrics.mcp_lazy_init_success.get(),
+            lazy_init_failed: global.__mini_a_metrics.mcp_lazy_init_failed.get()
         }
     }
 }
@@ -4215,6 +4252,9 @@ MiniA.prototype._isCircuitOpen = function(connectionId) {
   if (now() < state.openUntil) return true
   delete this._mcpCircuitState[connectionId].openUntil
   this._mcpCircuitState[connectionId].failures = 0
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_circuit_breaker_resets)) {
+    global.__mini_a_metrics.mcp_circuit_breaker_resets.inc()
+  }
   return false
 }
 
@@ -4227,6 +4267,9 @@ MiniA.prototype._recordCircuitFailure = function(connectionId, errorInfo) {
   if (state.failures >= 3) {
     var cooldown = 10000
     state.openUntil = now() + cooldown
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_circuit_breaker_trips)) {
+      global.__mini_a_metrics.mcp_circuit_breaker_trips.inc()
+    }
     this.fnI("warn", `Circuit opened for connection '${connectionId}' after repeated failures. Cooling down for ${cooldown}ms.`)
   }
 }
@@ -4553,8 +4596,15 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   if (shouldCache) {
     var cached = this._getToolResultFromCache(cacheKey)
     if (cached.hit) {
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_hits)) {
+        global.__mini_a_metrics.tool_cache_hits.inc()
+      }
       if (isObject(callContext)) callContext.fromCache = true
       return cached.value
+    } else {
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_misses)) {
+        global.__mini_a_metrics.tool_cache_misses.inc()
+      }
     }
   }
 
@@ -4611,9 +4661,15 @@ MiniA.prototype._ensureConnectionInitialized = function(connectionId) {
   try {
     client.initialize()
     this._lazyMcpConnections[connectionId] = false
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_lazy_init_success)) {
+      global.__mini_a_metrics.mcp_lazy_init_success.inc()
+    }
   } catch (e) {
     this.fnI("warn", `Lazy initialization for MCP connection failed: ${e.message}`)
     this._lazyMcpConnections[connectionId] = false
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.mcp_lazy_init_failed)) {
+      global.__mini_a_metrics.mcp_lazy_init_failed.inc()
+    }
     throw e
   }
 }
@@ -5569,9 +5625,16 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
 
   this.fnI("mcp", `Analyzing goal to dynamically select relevant tools from ${allTools.length} available...`)
 
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_dynamic_used)) {
+    global.__mini_a_metrics.tool_selection_dynamic_used.inc()
+  }
+
   // Stage 1: Try keyword-based matching
   var keywordSelected = this._selectToolsByKeywordMatch(goal, allTools)
   if (keywordSelected.length > 0) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_keyword)) {
+      global.__mini_a_metrics.tool_selection_keyword.inc()
+    }
     this.fnI("done", `Selected ${keywordSelected.length} tool(s) via keyword matching: ${keywordSelected.join(", ")}`)
     return keywordSelected
   }
@@ -5583,6 +5646,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
     try {
       var lcSelected = this._selectToolsByLLM(goal, allTools, this.lc_llm)
       if (lcSelected.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_llm_lc)) {
+          global.__mini_a_metrics.tool_selection_llm_lc.inc()
+        }
         this.fnI("done", `Selected ${lcSelected.length} tool(s) via low-cost LLM: ${lcSelected.join(", ")}`)
         return lcSelected
       }
@@ -5596,6 +5662,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
     try {
       var llmSelected = this._selectToolsByLLM(goal, allTools, this.llm)
       if (llmSelected.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_llm_main)) {
+          global.__mini_a_metrics.tool_selection_llm_main.inc()
+        }
         this.fnI("done", `Selected ${llmSelected.length} tool(s) via main LLM: ${llmSelected.join(", ")}`)
         return llmSelected
       }
@@ -5613,6 +5682,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
       this.fnI("mcp", "Requesting low-cost LLM to choose the best MCP connection and tools...")
       connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.lc_llm)
       if (connectionFallbackSelection.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_connection_chooser_lc)) {
+          global.__mini_a_metrics.tool_selection_connection_chooser_lc.inc()
+        }
         this.fnI("done", `Selected ${connectionFallbackSelection.length} tool(s) via low-cost connection chooser: ${connectionFallbackSelection.join(", ")}`)
         return connectionFallbackSelection
       }
@@ -5626,6 +5698,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
       this.fnI("mcp", "Requesting primary LLM to choose the best MCP connection and tools...")
       connectionFallbackSelection = this._selectConnectionAndToolsByLLM(goal, allTools, this.llm)
       if (connectionFallbackSelection.length > 0) {
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_connection_chooser_main)) {
+          global.__mini_a_metrics.tool_selection_connection_chooser_main.inc()
+        }
         this.fnI("done", `Selected ${connectionFallbackSelection.length} tool(s) via connection chooser: ${connectionFallbackSelection.join(", ")}`)
         return connectionFallbackSelection
       }
@@ -5635,6 +5710,9 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   }
 
   // Fallback: If all methods fail or return empty, return all tools
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_selection_fallback_all)) {
+    global.__mini_a_metrics.tool_selection_fallback_all.inc()
+  }
   this.fnI("warn", `Dynamic tool selection returned no results, registering all ${allTools.length} tools as fallback`)
   return allTools.map(t => t.name)
 }
