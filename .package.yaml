@@ -51,7 +51,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20251108'
+version: '20251109'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -116,14 +116,14 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: 75188e319bd80403aa2b336a25a8e38628b240e1
+  CHEATSHEET.md: c2afdaeb4e7638524b2b1fb7b9ba16ffa4298da7
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: f64fa184aa34261b36e4182c785788437e5ee209
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: ed6a3cb8e71aea2d82b29eacfa2e8305105d67eb
+  README.md: 63a4cff005ba04f3f9fa6175967ef0dc97fda0eb
   TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: 3c9ba7e5a14d934e2aa3d6494ecf6a9ebbe07f82
+  USAGE.md: f234284337c2c389df1e0cea175916ac1628db64
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
@@ -151,7 +151,7 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 1246660eb3f9953b6d0807c79668f0f6e3a5e30c
+  mini-a-con.js: 3984031df00dfbc1d57224b3580adf821de84eb0
   mini-a-main.yaml.old: a4ece7b69a410fe2adc1938819901255d22c5cbb
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
   mini-a-modes.yaml: 3f65d39f6fca0f947a0cc27a141a63fc4866d176
