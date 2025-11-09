@@ -248,6 +248,11 @@ help:
     desc     : SLON/JSON definition of an audit channel to record agent activity
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
+  - name     : nosetmcpwd
+    desc     : Do not set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
 
 todo:
 - MiniAgent
@@ -328,6 +333,7 @@ jobs:
         rules          : rules
         state          : state
         auditch        : auditch
+        nosetmcpwd     : nosetmcpwd
   check:
     in:
       goal           : isString
@@ -380,6 +386,7 @@ jobs:
       rules          : isString.default(__)
       state          : isString.default(__)
       auditch        : isString.default(__)
+      nosetmcpwd     : toBoolean.isBoolean.default(false)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()

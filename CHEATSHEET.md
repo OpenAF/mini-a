@@ -169,6 +169,7 @@ mini-a goal="find large files" useshell=true shellallowpipes=true
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection |
+| `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
 
 **Single MCP:**
 ```bash
@@ -437,6 +438,17 @@ mini-a chatbotmode=true goal="draft a friendly release note"
 ```bash
 mini-a goal="perform audit" \
   auditch="(type: file, options: (file: '/tmp/mini-a-audit.log'))"
+```
+
+### MCP Working Directory
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
+
+```bash
+# Use system default working directory for MCP commands
+mini-a goal="run command" nosetmcpwd=true
 ```
 
 ### Environment Variables

@@ -5894,7 +5894,8 @@ MiniA.prototype.init = function(args) {
       { name: "updatefreq", type: "string", default: "auto" },
       { name: "updateinterval", type: "number", default: 3 },
       { name: "forceupdates", type: "boolean", default: false },
-      { name: "planlog", type: "string", default: __ }
+      { name: "planlog", type: "string", default: __ },
+      { name: "nosetmcpwd", type: "boolean", default: false }
     ])
 
     // Convert and validate boolean arguments
@@ -5919,6 +5920,7 @@ MiniA.prototype.init = function(args) {
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
+    args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
@@ -5927,6 +5929,16 @@ MiniA.prototype.init = function(args) {
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
 
     this._savePlanNotes = args.saveplannotes
+
+    // Set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location by default
+    if (!args.nosetmcpwd) {
+      if (isUnDef(global.__flags)) global.__flags = {}
+      if (isUnDef(global.__flags.JSONRPC)) global.__flags.JSONRPC = {}
+      if (isUnDef(global.__flags.JSONRPC.cmd)) global.__flags.JSONRPC.cmd = {}
+      if (isUnDef(global.__flags.JSONRPC.cmd.defaultDir)) {
+        global.__flags.JSONRPC.cmd.defaultDir = getOPackPath("mini-a")
+      }
+    }
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
     var visualKnowledge = MiniA.buildVisualKnowledge({
@@ -6488,7 +6500,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "updatefreq", type: "string", default: "auto" },
       { name: "updateinterval", type: "number", default: 3 },
       { name: "forceupdates", type: "boolean", default: false },
-      { name: "planlog", type: "string", default: __ }
+      { name: "planlog", type: "string", default: __ },
+      { name: "nosetmcpwd", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
