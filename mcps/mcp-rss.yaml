@@ -214,6 +214,24 @@ init:
     url : http://feeds.wired.com/wired/index
   - name: zdnet
     url : https://www.zdnet.com/news/rss.xml
+  - name: airbnb
+    url : https://airbnb.tech/feed
+  - name: databricks
+    url : https://www.databricks.com/feed
+  - name: dropbox
+    url : https://dropbox.tech/feed
+  - name: google-research
+    url : https://blog.research.google/atom.xml
+  - name: huggingface
+    url : https://huggingface.co/blog/feed.xml
+  - name: lyft
+    url : https://eng.lyft.com/feed/
+  - name: nvidia
+    url : https://developer.nvidia.com/blog/feed/
+  - name: pinterest
+    url : https://medium.com/feed/pinterest-engineering
+  - name: slack
+    url : https://slack.engineering/feed
 
 jobs:
 # -----------
