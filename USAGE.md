@@ -39,6 +39,8 @@ For conversation management, two history compaction commands mirror the behavior
 - `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. Use this when you want to reclaim tokens but keep the high-level context available to the agent.
 - `/summarize [n]` — Requires an active agent session. It asks the model for a detailed recap of the earlier conversation, replaces that portion of the history with the generated summary, prints confirmation in the console, and then keeps the most recent `n` messages appended to the summary (also defaults to 6). Choose this when you want a human-readable digest before moving on.
 
+Need to revisit or store the most recent response? `/last [md]` reprints the previous final answer so you can copy it (add `md` to emit the raw Markdown instead of the formatted view), and `/save <path>` writes that answer straight to a file. When providing a path, press <kbd>Tab</kbd> to leverage the console's new filesystem auto-completion for slash commands.
+
 ### Attaching Files in the Console
 
 The console supports inline file attachments using the `@path/to/file` syntax. When you include file references in your goal, Mini-A automatically reads and includes the file contents as part of the submitted goal.
@@ -141,6 +143,8 @@ Key capabilities:
 - **Reusable exports** — After selecting a saved definition, the manager
   prints ready-to-copy `export OAF_MODEL="..."` and `export OAF_LC_MODEL="..."`
   commands.
+- **Quick sharing** — Use the dedicated **Export definition** action to print
+  the encrypted definition's SLON/JSON payload for backup or transfer.
 - **Import/rename/delete** — Quickly migrate existing definitions, update
   their names, or prune unused entries.
 
