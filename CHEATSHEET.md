@@ -648,10 +648,14 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/show <prefix>` | Display parameters starting with prefix (e.g., `/show plan`) |
 | `/compact [n]` | Summarize older messages, keep last n exchanges (default: 6) |
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
+| `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
+| `/save <path>` | Save the last final answer to the provided file path |
 | `/help` | Show help information |
 | `/quit` or `/exit` | Exit console |
 
 **File Attachments in Console:**
+
+> **Tip:** Slash commands that accept file paths (like `/save`) now include filesystem tab-completion, so you can press <kbd>Tab</kbd> to auto-complete directories and filenames.
 
 ```bash
 # Single file

@@ -20,8 +20,8 @@ Two steps to use:
    ```bash
    mini-a modelman=true
    ```
-   The manager lets you create, import, rename, and delete reusable
-   definitions that can then be exported as `OAF_MODEL`/`OAF_LC_MODEL` values.
+   The manager lets you create, import, rename, export, and delete reusable
+   definitions that can then be exported as `OAF_MODEL`/`OAF_LC_MODEL` values or copied as raw SLON/JSON for sharing.
 
 2. Run the console:
    ```bash
@@ -32,7 +32,9 @@ Two steps to use:
    opack exec mini-a goal="your goal"
    ```
    If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
-   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window.
+   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
+
+   **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, so you can press <kbd>Tab</kbd> to expand directories and filenames instead of typing the whole path.
 
    **Tip**: Include file contents in your goals using `@path/to/file` syntax (e.g., `Follow these instructions @docs/guide.md`).
 
