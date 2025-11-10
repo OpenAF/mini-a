@@ -157,6 +157,8 @@ export OAF_MODEL="(type: openai, model: gpt-5-mini, key: ..., timeout: 900000, t
 **Google Gemini:**
 ```bash
 export OAF_MODEL="(type: gemini, model: gemini-2.5-flash-lite, key: ..., timeout: 900000, temperature: 0)"
+# Required for Gemini models:
+export OAF_MINI_A_NOJSONPROMPT=true
 ```
 
 **GitHub Models:**

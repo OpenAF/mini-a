@@ -9,7 +9,8 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
-- **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats (default: false). Required for Gemini models due to API restrictions
+- **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the main model (default: false). Required for Gemini models due to API restrictions
+- **OAF_MINI_A_LCNOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the low-cost model (default: false). Required for Gemini low-cost models. Allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
@@ -19,8 +20,10 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 export OAF_MINI_A_CON_HIST_SIZE=1000
 # Optional: Set libraries to load automatically
 export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
-# Optional: Disable JSON prompt methods (required for Gemini models)
+# Optional: Disable JSON prompt methods (required for Gemini main model)
 export OAF_MINI_A_NOJSONPROMPT=true
+# Optional: Disable JSON prompt methods for low-cost model (required for Gemini low-cost model)
+export OAF_MINI_A_LCNOJSONPROMPT=true
 ```
 
 ## Command-Line Execution
@@ -1074,7 +1077,12 @@ export OAF_LC_MODEL="(type: ollama, model: 'llama3', url: 'http://localhost:1143
 ```bash
 export OAF_MODEL="(type: gemini, model: gemini-1.5-pro, key: 'your-gemini-key')"
 export OAF_LC_MODEL="(type: gemini, model: gemini-1.5-flash, key: 'your-gemini-key')"
+# Required for Gemini models due to API restrictions:
+export OAF_MINI_A_NOJSONPROMPT=true
+export OAF_MINI_A_LCNOJSONPROMPT=true
 ```
+
+> **Note**: When using Gemini models, Mini-A will display a warning at startup if the appropriate `OAF_MINI_A_NOJSONPROMPT` or `OAF_MINI_A_LCNOJSONPROMPT` environment variables are not set. These flags disable the JSON prompt methods that are not compatible with Gemini's API restrictions.
 
 **Log Output Examples:**
 

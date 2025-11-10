@@ -459,14 +459,16 @@ mini-a goal="run command" nosetmcpwd=true
 | `OAF_LC_MODEL` | Low-cost model for dual-model optimization |
 | `OAF_MINI_A_CON_HIST_SIZE` | Console history size (default: JLine default) |
 | `OAF_MINI_A_LIBS` | Comma-separated libraries to load automatically |
-| `OAF_MINI_A_NOJSONPROMPT` | Disable promptJSONWithStats, force promptWithStats (default: false). Required for Gemini models due to API restrictions |
+| `OAF_MINI_A_NOJSONPROMPT` | Disable promptJSONWithStats for main model, force promptWithStats (default: false). Required for Gemini models due to API restrictions |
+| `OAF_MINI_A_LCNOJSONPROMPT` | Disable promptJSONWithStats for low-cost model, force promptWithStats (default: false). Required for Gemini low-cost models |
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
 export OAF_MINI_A_CON_HIST_SIZE=1000
 export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
-export OAF_MINI_A_NOJSONPROMPT=true  # Required for Gemini models
+export OAF_MINI_A_NOJSONPROMPT=true  # Required for Gemini main model
+export OAF_MINI_A_LCNOJSONPROMPT=true  # Required for Gemini low-cost model
 ```
 
 ---
