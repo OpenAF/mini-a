@@ -9,6 +9,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
+- **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats (default: false). Required for Gemini models due to API restrictions
 
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
@@ -18,6 +19,8 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 export OAF_MINI_A_CON_HIST_SIZE=1000
 # Optional: Set libraries to load automatically
 export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
+# Optional: Disable JSON prompt methods (required for Gemini models)
+export OAF_MINI_A_NOJSONPROMPT=true
 ```
 
 ## Command-Line Execution

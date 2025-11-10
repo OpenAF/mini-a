@@ -400,6 +400,7 @@ try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
       var statsCompletions = ["detailed", "tools"]
       var lastCompletions = ["md"]
+      var modelCompletions = ["model", "modellc"]
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -468,6 +469,18 @@ try {
 
             lastCompletions.forEach(function(mode) {
               if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
+            })
+            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
+
+          // Handle /model command completions
+          if (lookupName === "model") {
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            modelCompletions.forEach(function(target) {
+              if (target.indexOf(trimmedRemainder) === 0) candidates.add(target)
             })
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
           }

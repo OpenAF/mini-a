@@ -54,6 +54,10 @@ var MiniA = function() {
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
 
+  // Check OAF_MINI_A_NOJSONPROMPT environment variable to disable promptJSONWithStats
+  // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
+  this._noJsonPrompt = toBoolean(getEnv("OAF_MINI_A_NOJSONPROMPT"))
+
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
     llm_lc_calls: $atomic(0, "long"),
@@ -2721,7 +2725,7 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
   try {
     var responseWithStats = this._withExponentialBackoff(() => {
       if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
-      if (isFunction(validatorLLM.promptJSONWithStats)) {
+      if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
         return validatorLLM.promptJSONWithStats(critiquePrompt)
       }
       return validatorLLM.promptWithStats(critiquePrompt)
@@ -2957,7 +2961,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   var responseWithStats = this._withExponentialBackoff(() => {
     if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
     // Use JSON prompt for both json and yaml formats (yaml uses same structure as json)
-    if ((targetFormat === "json" || targetFormat === "yaml") && isFunction(plannerLLM.promptJSONWithStats)) {
+    if (!this._noJsonPrompt && (targetFormat === "json" || targetFormat === "yaml") && isFunction(plannerLLM.promptJSONWithStats)) {
       return plannerLLM.promptJSONWithStats(prompt)
     }
     if (isFunction(plannerLLM.promptWithStats)) return plannerLLM.promptWithStats(prompt)
@@ -6699,11 +6703,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       var instructionText = "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
       var summaryResponseWithStats
+      var self = this
       try {
         summaryResponseWithStats = this._withExponentialBackoff(function() {
           addCall()
           var summarizer = summarizeLLM.withInstructions(instructionText)
-          if (isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(ctx)
+          if (!self._noJsonPrompt && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(ctx)
           return summarizer.promptWithStats(ctx)
         }, {
           maxAttempts : 3,
@@ -7144,7 +7149,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
-          if (isDef(currentLLM.promptJSONWithStats)) {
+          if (!this._noJsonPrompt && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
           }
           return currentLLM.promptWithStats(prompt)
@@ -7220,7 +7225,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           try {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
               addCall()
-              if (isDef(this.llm.promptJSONWithStats)) {
+              if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
                 return this.llm.promptJSONWithStats(prompt)
               }
               return this.llm.promptWithStats(prompt)
@@ -7276,7 +7281,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
-          runtime.context.push(`[OBS ${step + 1}] (error) invalid JSON from model.`)
+          var truncatedResponse = isString(rmsg) && rmsg.length > 500 ? rmsg.substring(0, 500) + "..." : rmsg
+          runtime.context.push(`[OBS ${step + 1}] (error) invalid JSON from model. The model's response was not valid JSON or was not an object/array. Response received: ${stringify(truncatedResponse, __, "")}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "invalid JSON from model",
@@ -7333,7 +7339,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       } else if (isMap(baseMsg) && isArray(baseMsg.action)) {
         baseMsg.action.forEach(addActionMessage)
       } else if (isMap(baseMsg) && !isString(baseMsg.action)) {
-        runtime.context.push(`[OBS ${step + 1}] (error) invalid top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
+        var receivedType = isUnDef(baseMsg.action) ? "undefined" : (isArray(baseMsg.action) ? "array" : typeof baseMsg.action)
+        runtime.context.push(`[OBS ${step + 1}] (error) invalid top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Received 'action' as ${receivedType}: ${stringify(baseMsg.action, __, "")}. Available keys: ${Object.keys(baseMsg).join(", ")}`)
       } else {
         addActionMessage(baseMsg)
       }
@@ -7350,7 +7357,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           continue
         }
 
-        runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
+        var baseMsgInfo = isMap(baseMsg) ? `Object with keys: ${Object.keys(baseMsg).join(", ")}` : (isArray(baseMsg) ? `Empty array` : `Type: ${typeof baseMsg}`)
+        runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Received: ${baseMsgInfo}`)
         this._registerRuntimeError(runtime, {
           category: "permanent",
           message : "missing action from model",
@@ -7402,7 +7410,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var paramsValue = currentMsg.params
 
         if (origActionRaw.length == 0) {
-          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object).`)
+          var msgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
+          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Available keys in this entry: ${msgKeys}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "missing action in multi-action entry",
@@ -7411,7 +7420,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           break
         }
         if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
-          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'thought' from model.`)
+          var currentMsgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
+          var thoughtInfo = isUnDef(currentMsg.thought) && isUnDef(currentMsg.think) ? "no 'thought' or 'think' field" : `'thought'/'think' field is empty or invalid`
+          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "missing thought from model",
@@ -7583,13 +7594,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (args.format != 'md' && args.format != 'raw') {
             answerValue = this._cleanCodeBlocks(answerValue)
             if (!isString(answerValue)) {
-              runtime.context.push(`[OBS ${stepLabel}] (error) invalid top-level 'answer' from model for final action. Needs to be a string.`)
+              var answerType = isUnDef(answerValue) ? "undefined" : (isArray(answerValue) ? "array" : (isMap(answerValue) ? "object" : typeof answerValue))
+              var answerPreview = isUnDef(answerValue) ? "" : ` Received: ${stringify(answerValue, __, "").substring(0, 200)}`
+              runtime.context.push(`[OBS ${stepLabel}] (error) invalid top-level 'answer' from model for final action. Needs to be a string, but received ${answerType}.${answerPreview}`)
             }
           }
 
           var answerToCheck = (args.format == 'raw') ? answerValue : answerValue.trim()
           if (answerToCheck.length == 0) {
-            runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action.`)
+            var answerInfo = isUnDef(currentMsg.answer) ? "field is missing" : "field is empty"
+            runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action. The 'answer' ${answerInfo}. For final actions, you must provide a non-empty 'answer' field.`)
             this._registerRuntimeError(runtime, {
               category: "permanent",
               message : "missing final answer",
@@ -7691,7 +7705,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     try {
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
-        if (isDef(this.llm.promptJSONWithStats)) {
+        if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
           return this.llm.promptJSONWithStats(finalPrompt)
         }
         return this.llm.promptWithStats(finalPrompt)
@@ -7794,7 +7808,7 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       var responseWithStats
       // Use new promptJSONWithStats if available
-      if (isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
@@ -7999,7 +8013,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       beforeCall()
       var fallbackResponseWithStats
-      if (isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
       } else {
         fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
