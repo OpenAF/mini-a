@@ -4842,6 +4842,59 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
   return results
 }
 
+MiniA.prototype._deduplicateContext = function(contextArray) {
+  if (!isArray(contextArray)) return contextArray
+
+  var deduplicated = []
+  var seen = {}
+  var similarityCache = {}
+
+  for (var i = 0; i < contextArray.length; i++) {
+    var entry = contextArray[i]
+    var entryTypeMatch = entry.match(/^\[(\w+)/)
+    var entryType = entryTypeMatch ? entryTypeMatch[1] : "UNKNOWN"
+
+    // Always keep STATE and SUMMARY entries
+    if (entryType === "STATE" || entryType === "SUMMARY") {
+      deduplicated.push(entry)
+      continue
+    }
+
+    // Deduplicate identical entries
+    var normalized = entry.replace(/\d+(\.\d+)?/g, "N").trim()
+    if (seen[normalized]) {
+      if (this.args.debug) {
+        this.fnI("debug", `Skipping duplicate: ${entry.substring(0, 50)}...`)
+      }
+      continue
+    }
+    seen[normalized] = true
+
+    // Deduplicate similar OBS entries (same tool, different results)
+    if (entryType === "OBS") {
+      var toolMatch = entry.match(/\[OBS[\s\d.]+\]\s*\((\w+)\)/)
+      if (toolMatch) {
+        var toolName = toolMatch[1]
+        var cacheKey = entryType + "_" + toolName
+
+        // Keep only last 2 observations per tool
+        if (!similarityCache[cacheKey]) similarityCache[cacheKey] = []
+        similarityCache[cacheKey].push(i)
+
+        if (similarityCache[cacheKey].length > 2) {
+          var oldIdx = similarityCache[cacheKey].shift()
+          // Skip this entry if it's the old one
+          if (i === oldIdx) continue
+        }
+      }
+    }
+
+    deduplicated.push(entry)
+  }
+
+  return deduplicated
+}
+
 MiniA.prototype._callMcpTool = function(toolName, params) {
     var connectionId = isObject(this.mcpToolToConnection) ? this.mcpToolToConnection[toolName] : __
     if (isUnDef(connectionId)) {
@@ -6761,15 +6814,32 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Helper function to check and summarize context during execution
     var checkAndSummarizeContext = () => {
-      if (args.maxcontext > 0) {
-        var contextTokens = this._estimateTokens(runtime.context.join(""))
-        if (contextTokens > args.maxcontext) {
+      // Set smart default if not specified (auto-enable at 50K tokens)
+      var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 50000
+
+      var contextTokens = this._estimateTokens(runtime.context.join(""))
+
+      // Early compression at 60% threshold
+      if (contextTokens > effectiveMaxContext * 0.6) {
+        var compressionRatio = contextTokens > effectiveMaxContext ? 0.3 : 0.5
+        var recentLimit = Math.floor(effectiveMaxContext * compressionRatio)
+
+        // Deduplicate similar observations
+        var originalLength = runtime.context.length
+        var deduped = this._deduplicateContext(runtime.context)
+        if (deduped.length < originalLength) {
+          runtime.context = deduped
+          this.fnI("compress", `Removed ${originalLength - deduped.length} redundant context entries`)
+          contextTokens = this._estimateTokens(runtime.context.join(""))
+        }
+
+        // Summarize if still over threshold (80%)
+        if (contextTokens > effectiveMaxContext * 0.8) {
           this.fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
           var recentContext = []
           var oldContext = []
-          var recentLimit = Math.floor(args.maxcontext * 0.3) // Keep 30% as recent context
           var currentSize = 0
-          
+
           for (var i = runtime.context.length - 1; i >= 0; i--) {
             var entrySize = this._estimateTokens(runtime.context[i])
             if (currentSize + entrySize <= recentLimit) {
@@ -6780,7 +6850,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               break
             }
           }
-          
+
           if (oldContext.length > 0) {
             this.fnI("summarize", `Summarizing conversation history...`)
             global.__mini_a_metrics.context_summarizations.inc()
