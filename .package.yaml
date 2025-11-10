@@ -118,7 +118,7 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: 1c13f40c45432f0269ab3a8cec9adcc8e8365f3e
+  CHEATSHEET.md: f507beae567f20203b3b365983a5efb50b7a5f17
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: f64fa184aa34261b36e4182c785788437e5ee209
@@ -126,8 +126,8 @@ filesHash:
   OPTIMIZATIONS.md: 325b9301aaa48fe7a5858d80faeee09ec9a6d934
   README.md: 29808b52827a81b14bc291a385c982db45dc6baa
   TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: 4fabac6595fd563aa949f2005bb0514830bf3d1b
-  WHATS-NEW.md: 09d3498a2a202875c13ba53dc4920c50fe70101b
+  USAGE.md: 903fd585a2dabbf69ccaf707c6e799b9c45b7300
+  WHATS-NEW.md: 72a32ffdc5023f566251dc65b478ee6d45b472a2
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
@@ -155,14 +155,14 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 04951607a0cd2851c0d04c86e777b33e6225321c
+  mini-a-con.js: a70f9a0003e8c2072f65a7d890e4841dd712198f
   mini-a-main.yaml.old: a4ece7b69a410fe2adc1938819901255d22c5cbb
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
   mini-a-modes.yaml: 93d1fd48f6bca3d657e20be7bd665f6ae4e026e7
   mini-a-utils.js: 8663ea34f3b64d0a5367e4ab6556766332967f11
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 7ce42404786ad8a7f2a8a10cb507cf40aa70a349
-  mini-a.js: 7014b6d149dbb7ed93e61c109b76b26baf7ad8a3
+  mini-a.js: 2ae8086e039a76b25fe26999cfa19aceafad841c
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 971ea1c6a9de90b0b42981c7021d2c3b01cf9eb7
   public/index.md: 475c7278c9bc504b8612a1e7f4ac72f1defc959d
