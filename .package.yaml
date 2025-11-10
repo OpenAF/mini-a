@@ -151,14 +151,14 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 21017c61393b73bc07a305b82533a5497ce1c604
+  mini-a-con.js: 04951607a0cd2851c0d04c86e777b33e6225321c
   mini-a-main.yaml.old: a4ece7b69a410fe2adc1938819901255d22c5cbb
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
   mini-a-modes.yaml: 93d1fd48f6bca3d657e20be7bd665f6ae4e026e7
   mini-a-utils.js: 8663ea34f3b64d0a5367e4ab6556766332967f11
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: cb838c26c0273b40f3190458126f716cfc9848a0
-  mini-a.js: ce32b767739cdd42353634703522968f9612f9f7
+  mini-a.js: 40e2e3e7d995e53ce5c75dabd6bc4bccdd6ae494
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 971ea1c6a9de90b0b42981c7021d2c3b01cf9eb7
   public/index.md: 475c7278c9bc504b8612a1e7f4ac72f1defc959d
