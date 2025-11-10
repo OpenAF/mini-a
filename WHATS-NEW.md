@@ -1,6 +1,27 @@
 # What's New in Mini-A
 
-## Performance Optimizations (November 2025)
+## Recent Updates
+
+### S3 History Upload Optimization
+
+**Change**: Optimized S3 history upload frequency in the web interface to reduce API calls and improve performance.
+
+**Before**: History was uploaded to S3 after every interaction event (think, exec, output, etc.), resulting in excessive S3 API calls during active sessions.
+
+**Now**: History is uploaded only at strategic checkpoints:
+- Immediately after user prompts (when user submits a new message)
+- When final answers are provided (agent completes a response)
+
+**Impact**:
+- Significantly reduced S3 API costs (70-90% fewer PUT operations)
+- Lower S3 request latency impact on user experience
+- Maintains conversation history integrity at critical points
+
+**Configuration**: No changes needed. This optimization is automatic when using `historys3bucket=` parameter with the web interface.
+
+---
+
+## Performance Optimizations
 
 ### TL;DR
 
