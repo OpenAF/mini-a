@@ -4895,6 +4895,28 @@ MiniA.prototype._deduplicateContext = function(contextArray) {
   return deduplicated
 }
 
+MiniA.prototype._assessGoalComplexity = function(goal) {
+  if (!isString(goal) || goal.length === 0) return "medium"
+
+  var tokens = this._estimateTokens(goal)
+  var hasMultiStep = /\band\b|\bthen\b|first.*second|step\s*\d+/i.test(goal)
+  var hasConditions = /\bif\b|\bunless\b|\bwhen\b/i.test(goal)
+  var hasMultipleTasks = /\d+\.\s|\d+\)\s|;\s*\w+|,\s*\w+.*\w+.*\w+/i.test(goal)
+
+  // Complex: Long goals with multiple steps AND conditions, or very long goals
+  if (tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
+    return "complex"
+  }
+
+  // Medium: Moderate length with steps OR conditions, or multiple tasks
+  if (tokens > 100 || hasMultiStep || hasMultipleTasks) {
+    return "medium"
+  }
+
+  // Simple: Short, direct goals
+  return "simple"
+}
+
 MiniA.prototype._callMcpTool = function(toolName, params) {
     var connectionId = isObject(this.mcpToolToConnection) ? this.mcpToolToConnection[toolName] : __
     if (isUnDef(connectionId)) {
@@ -7007,6 +7029,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     var maxSteps = isNumber(args.maxsteps) ? Math.max(0, args.maxsteps) : 0
+
+    // Assess goal complexity for dynamic escalation thresholds
+    var goalComplexity = this._assessGoalComplexity(args.goal)
+    var escalationThresholds = {
+      simple: { errors: 3, thoughts: 5, totalThoughts: 8, stepsWithoutAction: 6 },
+      medium: { errors: 2, thoughts: 4, totalThoughts: 6, stepsWithoutAction: 4 },
+      complex: { errors: 2, thoughts: 3, totalThoughts: 5, stepsWithoutAction: 3 }
+    }
+    var escalationLimits = escalationThresholds[goalComplexity] || escalationThresholds.medium
+
+    if (args.debug || args.verbose) {
+      this.fnI("info", `Goal complexity assessed as: ${goalComplexity}`)
+      this.fnI("info", `Escalation thresholds: errors=${escalationLimits.errors}, thoughts=${escalationLimits.thoughts}, totalThoughts=${escalationLimits.totalThoughts}`)
+    }
+
     var currentToolContext = {}
     this._setCheckpoint("initial", runtime)
     this._prepareToolExecution = info => {
@@ -7187,27 +7224,27 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // Smart escalation logic - use main LLM for complex scenarios
       var shouldEscalate = false
       var escalationReason = ""
-      
+
       if (this._use_lc && step > 0) {
         // Escalate for consecutive errors
-        if (runtime.consecutiveErrors >= 2) {
+        if (runtime.consecutiveErrors >= escalationLimits.errors) {
           shouldEscalate = true
-          escalationReason = `${runtime.consecutiveErrors} consecutive errors`
+          escalationReason = `${runtime.consecutiveErrors} consecutive errors (threshold: ${escalationLimits.errors})`
         }
         // Escalate for too many consecutive thoughts without action
-        else if (runtime.consecutiveThoughts >= 3) {
+        else if (runtime.consecutiveThoughts >= escalationLimits.thoughts) {
           shouldEscalate = true
-          escalationReason = `${runtime.consecutiveThoughts} consecutive thoughts without action`
+          escalationReason = `${runtime.consecutiveThoughts} consecutive thoughts without action (threshold: ${escalationLimits.thoughts})`
         }
         // Escalate if too many thoughts overall (thinking loop)
-        else if (runtime.totalThoughts >= 5 && step > 0) {
-          shouldEscalate = true  
-          escalationReason = `${runtime.totalThoughts} total thoughts indicating thinking loop`
+        else if (runtime.totalThoughts >= escalationLimits.totalThoughts && step > 0) {
+          shouldEscalate = true
+          escalationReason = `${runtime.totalThoughts} total thoughts indicating thinking loop (threshold: ${escalationLimits.totalThoughts})`
         }
         // Escalate if no meaningful actions in recent steps
-        else if (runtime.stepsWithoutAction >= 4) {
+        else if (runtime.stepsWithoutAction >= escalationLimits.stepsWithoutAction) {
           shouldEscalate = true
-          escalationReason = `${runtime.stepsWithoutAction} steps without meaningful progress`
+          escalationReason = `${runtime.stepsWithoutAction} steps without meaningful progress (threshold: ${escalationLimits.stepsWithoutAction})`
         }
         // Escalate if similar thoughts are repeating (stuck pattern)
         else if (runtime.recentSimilarThoughts.length >= 3) {
