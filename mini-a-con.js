@@ -1216,8 +1216,9 @@ try {
     var extra = "", inline = false
 
     var iconText
-    if ((sessionOptions.showexecs && (icon == "⚙️" || icon == "🖥️")) && icon != "📚" && type != "error" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
+    if (( (!sessionOptions.showexecs && icon != "⚙️" && icon != "🖥️") || sessionOptions.showexecs) && icon != "📚" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
       iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (icon.length > 1 ? " " : "  ")
+      inline = false
     } else {
       if (type == "final") {
         iconText = colorifyText("⦿", "RESET," + (eventPalette[type] || accentColor)) + " "
@@ -1236,19 +1237,19 @@ try {
       var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
       var prevLines = Math.ceil(_prevEventLength / termWidth)
       for (var i = 0; i < prevLines; i++) {
-        printnl("\r" + repeat(termWidth, " ") + "\r")
+        printnl("\r" + repeat(termWidth, " "))
         if (i < prevLines - 1) printnl("\u001b[1A")
       }
       printnl("\r")
     }
 
-    if (args.verbose === true || !inline) {
+    if (args.verbose != true && !inline) {
       _erasePrev()
       print(_msg)
       _prevEventLength = __
     } else {
       _erasePrev()
-      printnl(_msg + "\r")
+      printnl("\r" + _msg)
       // Store visual length (without ANSI codes) for proper line calculation
       _prevEventLength = (typeof ansiLength === "function") ? ansiLength(_msg) : _msg.length
     }
