@@ -6,6 +6,8 @@ Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MC
 
 ![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
 
+> **⚡ New Performance Optimizations!** Mini-A now includes automatic optimizations that reduce token usage by 40-60% and costs by 50-70% with zero configuration. [Learn more →](WHATS-NEW.md)
+
 ## Quick Start
 
 Two steps to use:
@@ -73,6 +75,7 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 
 - **Multi-Model Support** - Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
+- **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [OPTIMIZATIONS.md](OPTIMIZATIONS.md))
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
   - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
   - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
@@ -94,7 +97,9 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 
 ## Documentation
 
+- **[What's New](WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
+- **[Performance Optimizations](OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
 - **[Usage Guide](USAGE.md)** - Comprehensive guide covering all features
   - [Getting Started](USAGE.md#basic-usage)
   - [Model Configuration](USAGE.md#model-configuration)

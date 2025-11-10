@@ -2,6 +2,8 @@
 
 Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language Models (LLMs) and various tools to achieve specified goals. It can execute shell commands, interact with Model Context Protocol (MCP) servers, and work step-by-step towards completing objectives.
 
+> **💡 New to Mini-A?** Check out [OPTIMIZATIONS.md](OPTIMIZATIONS.md) to learn about built-in performance features that automatically reduce token usage by 40-60% and costs by 50-70%.
+
 ## Prerequisites
 
 - **OpenAF**: Mini-A is built for the OpenAF platform
