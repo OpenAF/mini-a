@@ -51,7 +51,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20251109'
+version: '20251110'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -116,14 +116,14 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: f8713c70ba75c5bfd1e7c8a991f066c29ba73156
+  CHEATSHEET.md: 9c5ed97cbd2f5c029cb04b25e1cabd02d863e087
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: f64fa184aa34261b36e4182c785788437e5ee209
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 63a4cff005ba04f3f9fa6175967ef0dc97fda0eb
   TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: 8d5ea14bba2dc06e702517f71f65b9d33e561036
+  USAGE.md: 5bd3aa2ed557f428835f0f049fcc4234dc21f397
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
@@ -151,14 +151,14 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 3984031df00dfbc1d57224b3580adf821de84eb0
+  mini-a-con.js: 21017c61393b73bc07a305b82533a5497ce1c604
   mini-a-main.yaml.old: a4ece7b69a410fe2adc1938819901255d22c5cbb
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
   mini-a-modes.yaml: 93d1fd48f6bca3d657e20be7bd665f6ae4e026e7
   mini-a-utils.js: 8663ea34f3b64d0a5367e4ab6556766332967f11
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: cb838c26c0273b40f3190458126f716cfc9848a0
-  mini-a.js: ab7466ace3f9ec12e4f33d8dbc4a23f524185d75
+  mini-a.js: ce32b767739cdd42353634703522968f9612f9f7
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 971ea1c6a9de90b0b42981c7021d2c3b01cf9eb7
   public/index.md: 475c7278c9bc504b8612a1e7f4ac72f1defc959d
