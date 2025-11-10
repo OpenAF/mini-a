@@ -54,6 +54,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-key')"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `maxsteps` | number | `15` | Maximum consecutive steps without progress before forcing final answer |
+| `earlystopthreshold` | number | `3` (5 with LC) | Identical consecutive errors before early stop (auto-adjusts for low-cost models) |
 | `verbose` | boolean | `false` | Enable verbose logging |
 | `debug` | boolean | `false` | Enable debug mode with detailed logs |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |

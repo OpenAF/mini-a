@@ -21,6 +21,52 @@
 
 ---
 
+### Adaptive Early Stop Threshold
+
+**Change**: Early stop guard now dynamically adjusts its threshold based on model tier and escalation status.
+
+**Before**: Fixed threshold of 3 identical consecutive errors before triggering early stop, regardless of whether a low-cost model was being used.
+
+**Now**: Intelligent threshold adjustment:
+- **Default**: 3 identical consecutive errors (unchanged for single-model or post-escalation scenarios)
+- **Low-cost models (pre-escalation)**: Automatically increases to 5 errors
+- **User override**: `earlystopthreshold=N` parameter for explicit control
+
+**Why This Matters**:
+
+With the recent dual-model optimizations, Mini-A aggressively uses low-cost models to reduce costs by 50-70%. However, low-cost models are inherently less reliable and more likely to produce errors like "missing action from model" before successfully completing tasks.
+
+The fixed threshold of 3 errors could trigger early stop *before* the system had a chance to escalate to the main model, defeating the purpose of the dual-model strategy.
+
+**Impact**:
+- ✅ Prevents premature termination with low-cost models
+- ✅ Allows low-cost models more recovery attempts before escalation
+- ✅ Maintains safety guard for actual permanent failures
+- ✅ User-configurable for specific model combinations
+- ✅ Backward compatible (default behavior remains safe)
+
+**Examples**:
+
+```bash
+# Automatic behavior (no configuration needed)
+mini-a goal="complex task"
+# → Uses threshold of 5 with low-cost model
+# → Drops to 3 after escalation to main model
+
+# Override for very reliable models
+mini-a goal="task" earlystopthreshold=2
+
+# Override for flaky models
+mini-a goal="task" earlystopthreshold=7
+```
+
+**When to Override**:
+- **Decrease threshold (2)**: When using highly reliable models that rarely fail
+- **Increase threshold (6-10)**: When using experimental or flaky models that need more recovery attempts
+- **Keep default**: For most use cases with standard OpenAI, Anthropic, or Google models
+
+---
+
 ## Performance Optimizations
 
 ### TL;DR

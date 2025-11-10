@@ -4260,8 +4260,21 @@ MiniA.prototype._triggerEarlyStop = function(runtime, info) {
 
 MiniA.prototype._shouldEarlyStop = function(runtime) {
   if (!isObject(runtime) || !isArray(runtime.errorHistory)) return false
-  if (runtime.errorHistory.length < 3) return false
-  var recent = runtime.errorHistory.slice(-3)
+
+  // Determine dynamic threshold based on model tier and escalation status
+  var baseThreshold = isNumber(runtime.earlyStopThreshold) && runtime.earlyStopThreshold >= 2
+    ? runtime.earlyStopThreshold
+    : 3
+
+  // Increase threshold when using low-cost model before first escalation
+  // This gives low-cost models more chances to recover before triggering early stop
+  var threshold = baseThreshold
+  if (this._use_lc && runtime.hasEscalated !== true) {
+    threshold = baseThreshold + 2
+  }
+
+  if (runtime.errorHistory.length < threshold) return false
+  var recent = runtime.errorHistory.slice(-threshold)
   var baseSig = this._computeErrorSignature(recent[recent.length - 1])
   if (!isString(baseSig) || baseSig.length === 0) return false
   if (runtime.earlyStopSignature === baseSig) return false
@@ -7093,6 +7106,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return __
     }
 
+    // Calculate early stop threshold (default 3, user can override)
+    var baseEarlyStopThreshold = isNumber(args.earlystopthreshold) && args.earlystopthreshold > 0
+      ? Math.max(2, Math.round(args.earlystopthreshold))
+      : 3
+
     var runtime = this._runtime = {
       context             : [],
       consecutiveErrors   : 0,
@@ -7109,6 +7127,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       restoredFromCheckpoint: false,
       successfulActionDetected: false,
       modelToolCallDetected  : false,
+      hasEscalated            : false,
+      earlyStopThreshold      : baseEarlyStopThreshold,
       earlyStopTriggered      : false,
       earlyStopReason         : "",
       earlyStopHandled        : false,
@@ -7369,6 +7389,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (this._use_lc && shouldEscalate && step > 0) {
         this.fnI("warn", `Escalating to main model: ${escalationReason}`)
         global.__mini_a_metrics.escalations.inc()
+        runtime.hasEscalated = true
       }
       
       this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)

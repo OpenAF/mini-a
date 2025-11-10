@@ -287,6 +287,7 @@ try {
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
+    earlystopthreshold: { type: "number", description: "Number of identical consecutive errors before early stop (default: 3, increases to 5 with low-cost models)" },
     toolcachettl   : { type: "number", description: "Default MCP result cache TTL (ms)" },
     goalprefix     : { type: "string", description: "Optional prefix automatically added to every goal" },
     shellprefix    : { type: "string", description: "Prefix applied to each shell command" },
