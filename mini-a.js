@@ -58,6 +58,10 @@ var MiniA = function() {
   // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
   this._noJsonPrompt = toBoolean(getEnv("OAF_MINI_A_NOJSONPROMPT"))
 
+  // Check OAF_MINI_A_LCNOJSONPROMPT environment variable to disable promptJSONWithStats for low-cost model
+  // This allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
+  this._noJsonPromptLC = toBoolean(getEnv("OAF_MINI_A_LCNOJSONPROMPT"))
+
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
     llm_lc_calls: $atomic(0, "long"),
@@ -6098,9 +6102,9 @@ MiniA.prototype.init = function(args) {
       this._use_lc = true
       this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
 
-      // Warn if Gemini model is used without OAF_MINI_A_NOJSONPROMPT=true
-      if (this._oaf_lc_model.type === "gemini" && !this._noJsonPrompt) {
-        this.fnI("warn", `Low-cost model is Gemini: OAF_MINI_A_NOJSONPROMPT should be set to true to avoid issues with Gemini models`)
+      // Warn if Gemini model is used without OAF_MINI_A_LCNOJSONPROMPT=true
+      if (this._oaf_lc_model.type === "gemini" && !this._noJsonPromptLC) {
+        this.fnI("warn", `Low-cost model is Gemini: OAF_MINI_A_LCNOJSONPROMPT should be set to true to avoid issues with Gemini models`)
       }
     } else {
       this._use_lc = false
@@ -7171,7 +7175,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
-          if (!this._noJsonPrompt && isDef(currentLLM.promptJSONWithStats)) {
+          var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
+          if (!noJsonPromptFlag && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
           }
           return currentLLM.promptWithStats(prompt)
