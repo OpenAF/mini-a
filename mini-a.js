@@ -6920,6 +6920,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       earlyStopContextRecorded: false,
       earlyStopSignature      : ""
     }
+
+    // Reset counters between .start() calls
+    this._errorHistory = []
+    if (isObject(global.__mini_a_metrics)) {
+      if (isObject(global.__mini_a_metrics.consecutive_errors)) {
+        global.__mini_a_metrics.consecutive_errors.set(0)
+      }
+      if (isObject(global.__mini_a_metrics.consecutive_thoughts)) {
+        global.__mini_a_metrics.consecutive_thoughts.set(0)
+      }
+    }
+
     var maxSteps = isNumber(args.maxsteps) ? Math.max(0, args.maxsteps) : 0
     var currentToolContext = {}
     this._setCheckpoint("initial", runtime)
