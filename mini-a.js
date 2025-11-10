@@ -176,6 +176,12 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 
 {{#if planning}}
 ## PLANNING:
+{{#if planningExecution}}
+• The execution plan has already been generated. Focus on executing tasks and updating progress.
+• Update step 'status' (pending → in_progress → done → blocked) and 'progress' (0-100) as you work.
+• Mark 'state.plan.meta.needsReplan=true' if obstacles require plan adjustment.
+• Set 'state.plan.meta.overallProgress' to reflect completion percentage.
+{{else}}
 • Maintain 'state.plan' as an object with at least: { "strategy": "simple|tree", "steps": [ ... ], "checkpoints": [...] , "meta": {...} }.
 • Each step entry must include a 'title', 'status' (pending | in_progress | done | blocked), optional 'progress' percentage (0-100) and an optional 'children' array for sub-steps.
 • For simple goals keep strategy="simple" and a short linear task list (no nested children).
@@ -184,6 +190,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Update 'status', 'progress', and checkpoints as work advances; set 'state.plan.meta.overallProgress' to the completion percentage you compute.
 • When obstacles occur set 'state.plan.meta.needsReplan=true', adjust affected steps (e.g., mark as blocked or add alternatives), and rebuild the subtree if required.
 • Keep the plan synchronized with reality - revise titles, ordering, or decomposition whenever you learn new information or the goal changes.
+{{/if}}
 • When a plan file is provided (useplanning=true with planfile=...), append progress updates after meaningful actions. Document what completed, the status, and the result, and add key learnings under "## Knowledge Base" so future runs can resume quickly.
 • Do not allow more than a few steps to pass without updating the plan file. If several steps elapse without an update—or if you approach the max step limit—summarize progress and next actions in the plan immediately.
 • Use clear sections when updating the plan file: start with "---" followed by "## Progress Update - <timestamp>", a "### Completed Task" bullet list, and "### Knowledge for Next Execution" entries.
@@ -317,6 +324,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._lastPlanSnapshot = ""
   this._enablePlanning = false
   this._hasExternalPlan = false
+  this._planningPhase = "none"  // Tracks planning phase: "none" | "planning" | "execution"
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -4928,6 +4936,69 @@ MiniA.prototype._assessGoalComplexity = function(goal) {
   return "simple"
 }
 
+MiniA.prototype._generateInitialPlan = function(args) {
+  if (!isObject(args) || !isString(args.goal)) {
+    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
+  }
+
+  var planPrompt = `GOAL: ${args.goal}
+
+Create a detailed execution plan with:
+1. Strategy (simple or tree)
+2. List of steps with titles and dependencies
+3. Checkpoints for verification
+4. Risk assessment
+
+Respond with valid JSON only:
+{
+  "plan": {
+    "strategy": "simple",
+    "steps": [
+      {"title": "step description", "status": "pending", "progress": 0}
+    ],
+    "checkpoints": ["checkpoint 1", "checkpoint 2"],
+    "meta": {
+      "risks": ["potential risk 1"],
+      "overallProgress": 0
+    }
+  }
+}
+`
+
+  try {
+    // Use low-cost model for planning if available
+    var useLowCost = this._use_lc
+    var llm = useLowCost ? this.lc_llm : this.llm
+    var llmType = useLowCost ? "low-cost" : "main"
+
+    this.fnI("plan", `Generating execution plan using ${llmType} model...`)
+
+    var response
+    var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
+    if (!noJsonPromptFlag && isDef(llm.promptJSONWithStats)) {
+      response = llm.promptJSONWithStats(planPrompt)
+    } else {
+      response = llm.promptWithStats(planPrompt)
+    }
+
+    if (isObject(response) && isObject(response.response)) {
+      var planData = response.response
+      if (isObject(planData.plan)) {
+        this.fnI("plan", `Plan generated successfully (strategy: ${planData.plan.strategy || "simple"})`)
+        return planData
+      }
+    }
+
+    // Fallback if response is malformed
+    this.fnI("warn", "Plan generation returned unexpected format, using default plan structure")
+    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
+
+  } catch (e) {
+    this.fnI("warn", `Plan generation failed: ${e.message || e}. Using default plan structure.`)
+    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
+  }
+}
+
 MiniA.prototype._callMcpTool = function(toolName, params) {
     var connectionId = isObject(this.mcpToolToConnection) ? this.mcpToolToConnection[toolName] : __
     if (isUnDef(connectionId)) {
@@ -6467,7 +6538,8 @@ MiniA.prototype.init = function(args) {
         isMachine        : (isDef(args.format) && args.format != "md"),
         usetools         : this._useTools,
         toolCount        : this.mcpTools.length,
-        planning         : this._enablePlanning
+        planning         : this._enablePlanning,
+        planningExecution: this._enablePlanning && this._planningPhase === "execution"
       }
       this._systemInst = this._getCachedSystemPrompt("agent", agentPayload, this._SYSTEM_PROMPT)
     }
@@ -6943,9 +7015,25 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     this._agentState = isObject(initialState) ? initialState : {}
     if (this._enablePlanning) {
+      // PHASE 1: Generate plan upfront (separate call)
+      this._planningPhase = "planning"
       this._initializePlanningState({ goal: args.goal, args: args })
-      if (isObject(this._agentState) && isUnDef(this._agentState.plan)) this._agentState.plan = []
+
+      // Generate initial plan using dedicated LLM call
+      var planResponse = this._generateInitialPlan(args)
+      if (isObject(planResponse) && isObject(planResponse.plan)) {
+        this._agentState.plan = planResponse.plan
+      } else if (isObject(this._agentState) && isUnDef(this._agentState.plan)) {
+        this._agentState.plan = []
+      }
+
+      // Switch to execution phase (reduces planning overhead in prompts)
+      this._planningPhase = "execution"
       this._handlePlanUpdate()
+
+      if (args.debug || args.verbose) {
+        this.fnI("info", `Planning phase complete, entering execution phase`)
+      }
     }
 
     var modelName = isDef(this._oaf_model.model)
