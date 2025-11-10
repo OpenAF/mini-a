@@ -152,8 +152,17 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "final" - Provide your complete "answer" when goal is achieved
 
 ## MULTI-ACTION SUPPORT:
-• You may set "action" to an array of action objects to chain tools sequentially in one step
-• Each action object must include at least an "action" field and any required fields (e.g., command, params, answer)
+• **RECOMMENDED**: Use action arrays for efficiency when multiple independent operations are needed
+• Set "action" to an array of action objects to execute tools in parallel (or sequentially if dependent)
+• Example: [{"action":"read_file","params":{"path":"a.txt"}}, {"action":"read_file","params":{"path":"b.txt"}}]
+• Each action object must include an "action" field and required fields (command, params, answer)
+• Benefits: Fewer LLM calls, faster execution, reduced token usage
+
+## WHEN TO USE PARALLEL ACTIONS:
+• Reading multiple files simultaneously
+• Calling multiple independent MCP tools
+• Gathering data from different sources at once
+• Performing batch operations (e.g., checking multiple conditions)
 
 {{#if usetools}}
 ## TOOL REGISTRATION:
@@ -248,8 +257,10 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 {{/if}}
 
 ### MULTI-ACTION SUPPORT
-• You can reply with an array of action objects (or set "action" to an array) to run several steps in sequence.
+• For efficiency, you can reply with an array of action objects (or set "action" to an array) to run multiple operations.
+• Example: [{"action":"search","params":{...}}, {"action":"read","params":{...}}] executes both in parallel when possible.
 • Actions execute from top to bottom; include a clear "thought" for each step so the runtime understands your plan.
+• Use this for: reading multiple files, calling several tools, or gathering data from different sources simultaneously.
 
 {{#if hasKnowledge}}
 ## ADDITIONAL CONTEXT
