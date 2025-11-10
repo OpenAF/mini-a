@@ -63,9 +63,11 @@ files:
 - CONTRIBUTING.md
 - EXTERNAL-MCPS.md
 - LICENSE
+- OPTIMIZATIONS.md
 - README.md
 - TESTS_MODELS.md
 - USAGE.md
+- WHATS-NEW.md
 - examples/README.md
 - examples/changelog-gen.yaml
 - examples/document.yaml
@@ -121,9 +123,11 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   EXTERNAL-MCPS.md: f64fa184aa34261b36e4182c785788437e5ee209
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 594f16a0c66fc415b8501c734e976f46e646aedb
+  OPTIMIZATIONS.md: 325b9301aaa48fe7a5858d80faeee09ec9a6d934
+  README.md: 29808b52827a81b14bc291a385c982db45dc6baa
   TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: 39e213d30ec826a5f872322533a0043db1b8d0b0
+  USAGE.md: b55c361126d3822c7d2dc82c68812d1d848e1ae0
+  WHATS-NEW.md: c493f2f6504026ed47352d70378c097a4ee6cfbd
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
