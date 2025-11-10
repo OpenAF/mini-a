@@ -6097,6 +6097,11 @@ MiniA.prototype.init = function(args) {
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
       this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
+
+      // Warn if Gemini model is used without OAF_MINI_A_NOJSONPROMPT=true
+      if (this._oaf_lc_model.type === "gemini" && !this._noJsonPrompt) {
+        this.fnI("warn", `Low-cost model is Gemini: OAF_MINI_A_NOJSONPROMPT should be set to true to avoid issues with Gemini models`)
+      }
     } else {
       this._use_lc = false
     }
@@ -6840,6 +6845,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       ? this._oaf_model.model
       : (isDef(this._oaf_model.options) ? this._oaf_model.options.model : "unknown");
     this.fnI("info", `Using model: ${modelName} (${this._oaf_model.type})`)
+
+    // Warn if Gemini model is used without OAF_MINI_A_NOJSONPROMPT=true
+    if (this._oaf_model.type === "gemini" && !this._noJsonPrompt) {
+      this.fnI("warn", `Model is Gemini: OAF_MINI_A_NOJSONPROMPT should be set to true to avoid issues with Gemini models`)
+    }
 
     // Get model response and parse as JSON
     // Check context size and summarize if too large
