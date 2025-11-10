@@ -403,7 +403,8 @@ todo:
                 }
               }
               global.__res[uuid].push({ event: _e, message: m })
-              if (isFunction(global._mini_a_web_storeHistory)) {
+              // Only sync to S3 after user prompts (not on every event)
+              if (_e == "👤" && isFunction(global._mini_a_web_storeHistory)) {
                 try {
                   global._mini_a_web_storeHistory(uuid)
                 } catch(syncErr) {
