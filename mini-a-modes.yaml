@@ -88,3 +88,23 @@ modes:
       useattach  : true
       historykeep: true
       useplanning: true 
+      mcpproxy   : true
+      mcp        :
+      - type   : ojob
+        options:
+          job: mcps/mcp-web.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-weather.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-rss.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-time.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-fin.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-net.yaml
