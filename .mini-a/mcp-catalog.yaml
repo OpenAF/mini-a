@@ -1,0 +1,533 @@
+# MCP Catalog - In-memory metadata for all built-in MCPs
+# This file contains all MCP definitions loaded at initialization
+
+version: "1.0.0"
+
+# Catalog structure
+structure:
+  categories:
+    - name: "development"
+      description: "Development, coding, and infrastructure tools"
+      subcategories:
+        - name: "filesystem"
+          description: "File system operations and management"
+        - name: "git"
+          description: "Git version control operations"
+        - name: "docker"
+          description: "Container and Docker management"
+        - name: "shell"
+          description: "Shell command execution and scripting"
+        - name: "ssh"
+          description: "Remote SSH operations"
+
+    - name: "data"
+      description: "Data processing, storage, and analysis"
+      subcategories:
+        - name: "databases"
+          description: "Database connections and queries"
+        - name: "apis"
+          description: "API interactions and data fetching"
+        - name: "s3"
+          description: "S3 and object storage operations"
+        - name: "rss"
+          description: "RSS feed processing"
+
+    - name: "ai"
+      description: "AI and machine learning tools"
+      subcategories:
+        - name: "llm-providers"
+          description: "LLM provider integrations"
+        - name: "embeddings"
+          description: "Embedding and vector operations"
+
+    - name: "system"
+      description: "System utilities and monitoring"
+      subcategories:
+        - name: "networking"
+          description: "Network operations and monitoring"
+        - name: "kubernetes"
+          description: "Kubernetes cluster management"
+
+    - name: "utilities"
+      description: "General purpose utilities and helpers"
+      subcategories:
+        - name: "math"
+          description: "Mathematical computations"
+        - name: "time"
+          description: "Time and date operations"
+        - name: "random"
+          description: "Random data generation"
+        - name: "weather"
+          description: "Weather information"
+        - name: "finance"
+          description: "Financial data and calculations"
+        - name: "email"
+          description: "Email operations"
+        - name: "web"
+          description: "Web scraping and operations"
+        - name: "channels"
+          description: "Channel and messaging operations"
+        - name: "oaf"
+          description: "OpenAF framework utilities"
+        - name: "oafp"
+          description: "OpenAF Pipes utilities"
+        - name: "mini-a"
+          description: "Mini-A specific utilities"
+
+# MCP metadata
+mcps:
+  - id: "mcp-db"
+    name: "Database Access MCP"
+    category: "data/databases"
+    description: "JDBC-backed database access for SQL queries with support for multiple database types"
+    capabilities:
+      - "execute SQL queries"
+      - "perform SQL updates"
+      - "batch SQL operations"
+      - "database metadata retrieval"
+    tags: ["database", "sql", "jdbc", "queries", "postgres", "mysql", "oracle"]
+    tool_count: 4
+    estimated_context_tokens: 600
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-db.yaml"]
+      config_options:
+        jdbc: "JDBC connection string (required)"
+        user: "Database user"
+        pass: "Database password"
+        rw: "Allow read/write operations (default is read-only)"
+        libs: "Optional comma separated libraries to preload"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: true
+    security_level: "high"
+    dependencies: []
+
+  - id: "mcp-rss"
+    name: "RSS Feed MCP"
+    category: "data/rss"
+    description: "RSS discovery and retrieval for feed processing and aggregation"
+    capabilities:
+      - "discover RSS feeds"
+      - "fetch RSS content"
+      - "parse feeds"
+      - "feed aggregation"
+    tags: ["rss", "feeds", "xml", "aggregation", "news"]
+    tool_count: 4
+    estimated_context_tokens: 450
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-rss.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-s3"
+    name: "S3 Object Storage MCP"
+    category: "data/s3"
+    description: "S3 and compatible object storage operations for file management in the cloud"
+    capabilities:
+      - "list S3 buckets and objects"
+      - "upload files to S3"
+      - "download files from S3"
+      - "delete S3 objects"
+      - "get object metadata"
+    tags: ["s3", "storage", "cloud", "aws", "objects", "buckets"]
+    tool_count: 7
+    estimated_context_tokens: 750
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-s3.yaml"]
+      config_options:
+        accessKey: "AWS access key"
+        secretKey: "AWS secret key"
+        region: "AWS region"
+        endpoint: "Custom S3 endpoint for S3-compatible storage"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "medium"
+    dependencies: []
+
+  - id: "mcp-file"
+    name: "File Management MCP"
+    category: "development/filesystem"
+    description: "Local file management with read, write, search, and directory operations using OpenAF io utilities"
+    capabilities:
+      - "read files"
+      - "write files"
+      - "list directories"
+      - "search file content"
+      - "delete files"
+      - "move/rename files"
+      - "create directories"
+      - "get file info"
+    tags: ["files", "io", "storage", "filesystem", "directory"]
+    tool_count: 8
+    estimated_context_tokens: 850
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-file.yaml"]
+      config_options:
+        root: "Base directory restricting all file operations"
+        readwrite: "If true, allows write/delete operations (default: false)"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: true
+    security_level: "high"
+    dependencies: []
+
+  - id: "mcp-shell"
+    name: "Shell Execution MCP"
+    category: "development/shell"
+    description: "Controlled local shell command execution with safety guards and timeout support"
+    capabilities:
+      - "execute shell commands"
+      - "run scripts"
+      - "command validation"
+      - "timeout control"
+    tags: ["shell", "command", "execution", "bash", "scripts"]
+    tool_count: 2
+    estimated_context_tokens: 400
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-shell.yaml"]
+      config_options:
+        readwrite: "If true, allows commands that may change state"
+        shellallow: "Comma-separated list of banned commands to allow"
+        shellallowpipes: "Allow pipes and redirection"
+        shellbanextra: "Additional commands to ban"
+        cwd: "Default working directory"
+        timeout: "Default timeout in milliseconds"
+        env: "Environment variables map"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: true
+    security_level: "critical"
+    dependencies: []
+
+  - id: "mcp-ssh"
+    name: "SSH Execution MCP"
+    category: "development/ssh"
+    description: "Secure remote SSH command execution with connection management"
+    capabilities:
+      - "execute remote commands"
+      - "SSH connection management"
+      - "secure remote operations"
+    tags: ["ssh", "remote", "execution", "secure"]
+    tool_count: 3
+    estimated_context_tokens: 450
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-ssh.yaml"]
+      config_options:
+        host: "SSH host"
+        user: "SSH user"
+        pass: "SSH password"
+        key: "SSH private key path"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: true
+    security_level: "critical"
+    dependencies: []
+
+  - id: "mcp-kube"
+    name: "Kubernetes Management MCP"
+    category: "system/kubernetes"
+    description: "Kubernetes cluster management with resource operations and monitoring"
+    capabilities:
+      - "get pods, services, deployments"
+      - "create/update/delete resources"
+      - "get logs"
+      - "execute commands in pods"
+      - "scale deployments"
+    tags: ["kubernetes", "k8s", "containers", "orchestration", "cluster"]
+    tool_count: 12
+    estimated_context_tokens: 1200
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-kube.yaml"]
+      config_options:
+        kubeconfig: "Path to kubeconfig file"
+        context: "Kubernetes context to use"
+        namespace: "Default namespace"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: true
+    security_level: "high"
+    dependencies: []
+
+  - id: "mcp-net"
+    name: "Network Utility MCP"
+    category: "system/networking"
+    description: "Network utilities for testing connectivity, DNS lookup, and network diagnostics"
+    capabilities:
+      - "ping hosts"
+      - "DNS lookup"
+      - "port scanning"
+      - "network diagnostics"
+      - "HTTP requests"
+    tags: ["network", "networking", "dns", "ping", "connectivity"]
+    tool_count: 6
+    estimated_context_tokens: 550
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-net.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-ch"
+    name: "Data Channel MCP"
+    category: "utilities/channels"
+    description: "Data channel operations for message passing and event handling"
+    capabilities:
+      - "create channels"
+      - "publish messages"
+      - "subscribe to channels"
+      - "channel management"
+    tags: ["channels", "messaging", "events", "pubsub"]
+    tool_count: 8
+    estimated_context_tokens: 700
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-ch.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-email"
+    name: "Email Sending MCP"
+    category: "utilities/email"
+    description: "Email sending capabilities with attachment support"
+    capabilities:
+      - "send emails"
+      - "email attachments"
+      - "HTML emails"
+    tags: ["email", "smtp", "sending", "notifications"]
+    tool_count: 2
+    estimated_context_tokens: 350
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-email.yaml"]
+      config_options:
+        smtp_host: "SMTP server host"
+        smtp_port: "SMTP server port"
+        smtp_user: "SMTP username"
+        smtp_pass: "SMTP password"
+        from: "Default from address"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "medium"
+    dependencies: []
+
+  - id: "mcp-fin"
+    name: "Yahoo Finance MCP"
+    category: "utilities/finance"
+    description: "Yahoo Finance market data retrieval for stocks, quotes, and financial information"
+    capabilities:
+      - "stock quotes"
+      - "market data"
+      - "financial information"
+      - "historical data"
+    tags: ["finance", "stocks", "market", "yahoo", "quotes"]
+    tool_count: 4
+    estimated_context_tokens: 450
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-fin.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-math"
+    name: "Mathematical Operations MCP"
+    category: "utilities/math"
+    description: "Mathematical computations and unit conversions with advanced operations"
+    capabilities:
+      - "arithmetic operations"
+      - "unit conversions"
+      - "mathematical functions"
+      - "statistical calculations"
+    tags: ["math", "calculations", "units", "conversions", "statistics"]
+    tool_count: 8
+    estimated_context_tokens: 700
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-math.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-mini-a"
+    name: "Mini-A Agent Runner MCP"
+    category: "utilities/mini-a"
+    description: "Mini-A agent as an MCP server for executing autonomous goals"
+    capabilities:
+      - "run autonomous goals"
+      - "agent execution"
+      - "task automation"
+      - "planning and execution"
+    tags: ["mini-a", "agent", "autonomous", "goals", "automation"]
+    tool_count: 1
+    estimated_context_tokens: 300
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-mini-a.yaml"]
+      config_options:
+        useshell: "Allow shell commands"
+        knowledge: "Additional knowledge or context"
+        rules: "Custom rules array"
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: true
+    security_level: "critical"
+    dependencies: []
+
+  - id: "mcp-oaf"
+    name: "OpenAF Documentation MCP"
+    category: "utilities/oaf"
+    description: "OpenAF, oJob, and oAFp documentation and reference access"
+    capabilities:
+      - "search OpenAF docs"
+      - "function reference"
+      - "code examples"
+      - "API documentation"
+    tags: ["openaf", "documentation", "reference", "api", "ojob"]
+    tool_count: 5
+    estimated_context_tokens: 550
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-oaf.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-oafp"
+    name: "OpenAF Processor MCP"
+    category: "utilities/oafp"
+    description: "OpenAF processor (oafp) runner and documentation for data transformation"
+    capabilities:
+      - "run oafp commands"
+      - "data transformation"
+      - "oafp documentation"
+      - "pipeline operations"
+    tags: ["oafp", "processor", "transformation", "pipeline", "data"]
+    tool_count: 4
+    estimated_context_tokens: 500
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-oafp.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "medium"
+    dependencies: []
+
+  - id: "mcp-random"
+    name: "Random Data Generation MCP"
+    category: "utilities/random"
+    description: "Random data generation including numbers, strings, UUIDs, and mock data"
+    capabilities:
+      - "random numbers"
+      - "random strings"
+      - "UUID generation"
+      - "mock data generation"
+      - "random selections"
+    tags: ["random", "generation", "uuid", "mock", "data"]
+    tool_count: 10
+    estimated_context_tokens: 850
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-random.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-time"
+    name: "Time and Timezone MCP"
+    category: "utilities/time"
+    description: "Time and timezone operations including conversions and formatting"
+    capabilities:
+      - "timezone conversions"
+      - "time formatting"
+      - "date calculations"
+      - "current time in various timezones"
+    tags: ["time", "date", "timezone", "formatting", "conversions"]
+    tool_count: 6
+    estimated_context_tokens: 550
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-time.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-weather"
+    name: "Weather Information MCP"
+    category: "utilities/weather"
+    description: "Weather information retrieval using wttr.in service"
+    capabilities:
+      - "current weather"
+      - "weather forecast"
+      - "location-based weather"
+    tags: ["weather", "forecast", "wttr.in", "climate"]
+    tool_count: 2
+    estimated_context_tokens: 300
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-weather.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []
+
+  - id: "mcp-web"
+    name: "Web Operations MCP"
+    category: "utilities/web"
+    description: "Web search and URL fetching with content extraction"
+    capabilities:
+      - "web search"
+      - "URL fetching"
+      - "content extraction"
+      - "HTML parsing"
+    tags: ["web", "search", "http", "scraping", "fetch"]
+    tool_count: 3
+    estimated_context_tokens: 400
+    connection:
+      type: "stdio"
+      command: "ojob"
+      args: ["mcps/mcp-web.yaml"]
+      config_options:
+        onport: "Optional HTTP port to expose the MCP server"
+    requires_readwrite: false
+    security_level: "low"
+    dependencies: []

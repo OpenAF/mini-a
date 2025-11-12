@@ -1,0 +1,15 @@
+# MCP Usage Tracking
+# Tracks which MCPs are frequently used and loaded together
+# This data drives smart preloading recommendations
+
+# Format: mcp_id -> usage_count
+usage_counts: {}
+
+# Format: [mcp_id1, mcp_id2] -> co_load_count
+co_load_patterns: {}
+
+# Format: keyword -> [mcp_id1, mcp_id2, ...]
+keyword_associations: {}
+
+# Last updated timestamp
+last_updated: null

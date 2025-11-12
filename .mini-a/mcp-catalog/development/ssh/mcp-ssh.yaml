@@ -1,0 +1,24 @@
+id: "mcp-ssh"
+name: "SSH Execution MCP"
+category: "development/ssh"
+description: "Secure remote SSH command execution with connection management"
+capabilities:
+  - "execute remote commands"
+  - "SSH connection management"
+  - "secure remote operations"
+tags: ["ssh", "remote", "execution", "secure"]
+tool_count: 3
+estimated_context_tokens: 450
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-ssh.yaml"]
+  config_options:
+    host: "SSH host"
+    user: "SSH user"
+    pass: "SSH password"
+    key: "SSH private key path"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: true
+security_level: "critical"
+dependencies: []

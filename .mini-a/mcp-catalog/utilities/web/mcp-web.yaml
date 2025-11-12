@@ -1,0 +1,21 @@
+id: "mcp-web"
+name: "Web Operations MCP"
+category: "utilities/web"
+description: "Web search and URL fetching with content extraction"
+capabilities:
+  - "web search"
+  - "URL fetching"
+  - "content extraction"
+  - "HTML parsing"
+tags: ["web", "search", "http", "scraping", "fetch"]
+tool_count: 3
+estimated_context_tokens: 400
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-web.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "low"
+dependencies: []

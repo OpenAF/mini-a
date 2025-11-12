@@ -1,0 +1,26 @@
+id: "mcp-db"
+name: "Database Access MCP"
+category: "data/databases"
+description: "JDBC-backed database access for SQL queries with support for multiple database types"
+capabilities:
+  - "execute SQL queries"
+  - "perform SQL updates"
+  - "batch SQL operations"
+  - "database metadata retrieval"
+tags: ["database", "sql", "jdbc", "queries", "postgres", "mysql", "oracle"]
+tool_count: 4
+estimated_context_tokens: 600
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-db.yaml"]
+  config_options:
+    jdbc: "JDBC connection string (required)"
+    user: "Database user"
+    pass: "Database password"
+    rw: "Allow read/write operations (default is read-only)"
+    libs: "Optional comma separated libraries to preload"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: true
+security_level: "high"
+dependencies: []

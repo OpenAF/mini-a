@@ -4,6 +4,9 @@
 
 ow.loadMetrics()
 
+// Load MCP Catalog system
+loadLib("mini-a-mcp-catalog.js")
+
 /**
  * <odoc>
  * <key>MinA</key>
@@ -24,6 +27,9 @@ var MiniA = function() {
   this._toolInfoByName = {}
   this._lazyMcpConnections = {}
   this._toolCacheDefaultTtl = 300000
+
+  // MCP Catalog will be initialized in init() method
+  this._mcpCatalog = __
   this._systemPromptCacheName = "mini-a.systemPrompts"
   this._toolSchemaCacheName = "mini-a.toolSchemas"
   this._toolResultCacheName = "mini-a.toolResults"
@@ -4491,6 +4497,62 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     })
 
+    // Add MCP Catalog browsing tool
+    if (isDef(parent._mcpCatalog) && !isNull(parent._mcpCatalog)) {
+      fnsMeta['mcp_catalog_browse'] = {
+        name       : 'mcp_catalog_browse',
+        description: 'Browse available MCP servers and their capabilities. Use this to discover and load MCP tools on-demand.',
+        inputSchema: {
+          type      : 'object',
+          properties: {
+            action: {
+              type       : 'string',
+              enum       : ['list_categories', 'search', 'get_details', 'load', 'stats', 'recommend'],
+              description: 'Action to perform: list_categories (browse catalog structure), search (find MCPs by query), get_details (get full metadata for an MCP), load (load an MCP and its tools), stats (get catalog statistics), recommend (get smart recommendations based on goal)'
+            },
+            query: {
+              type       : 'string',
+              description: 'Search query or category path (e.g., "development/git"). Used with list_categories and search actions.'
+            },
+            mcp_id: {
+              type       : 'string',
+              description: 'MCP server ID to get details or load. Used with get_details and load actions.'
+            },
+            goal: {
+              type       : 'string',
+              description: 'Goal text for smart recommendations. Used with recommend action.'
+            },
+            options: {
+              type       : 'object',
+              description: 'Additional options for loading (e.g., config overrides). Used with load action.'
+            }
+          },
+          required  : ['action']
+        }
+      }
+      fns['mcp_catalog_browse'] = function(params) {
+        var payload = params
+        if (isUnDef(payload)) payload = {}
+        if (isUnDef(payload.action)) {
+          return {
+            error  : '[ERROR] Missing required action parameter',
+            content: [{ type: 'text', text: '[ERROR] Missing required action parameter' }]
+          }
+        }
+        try {
+          var result = parent._handleMcpCatalogBrowse(payload.action, payload)
+          return formatResponse(result)
+        } catch (err) {
+          var message = "[ERROR] " + (err && err.message ? err.message : String(err))
+          logWarn(`MCP Catalog browse failed: ${message}`)
+          return {
+            error  : message,
+            content: [{ type: "text", text: message }]
+          }
+        }
+      }
+    }
+
     return {
       id     : "mini-a-utils",
       type   : "dummy",
@@ -5066,6 +5128,179 @@ MiniA.prototype._callMcpTool = function(toolName, params) {
         normalized: isObject(normalized) ? normalized : { display: displayText, hasError: toolCallError },
         error     : toolCallError || (isObject(normalized) && normalized.hasError === true)
     }
+}
+
+/**
+ * Load an MCP from the catalog by creating its connection
+ * @param {object} mcpMetadata - MCP metadata from catalog
+ * @param {object} options - Loading options
+ * @returns {object} Result with success status and tool count
+ */
+MiniA.prototype._loadMcpFromCatalog = function(mcpMetadata, options) {
+  var parent = this
+  options = _$(options, "options").isMap().default({})
+
+  try {
+    if (isUnDef(mcpMetadata.connection)) {
+      return { success: false, error: "No connection config in metadata" }
+    }
+
+    // Build MCP config from metadata
+    var mcpConfig = {
+      cmd: [ mcpMetadata.connection.command ].concat(mcpMetadata.connection.args || [])
+    }
+
+    // Add any config options if provided
+    if (isMap(options.config)) {
+      mcpConfig = merge(mcpConfig, options.config)
+    }
+
+    // Generate connection ID
+    var id = md5(isString(mcpConfig.id) ? mcpConfig.id : stringify(mcpConfig, __, ""))
+
+    // Check if already loaded
+    if (isDef(this._mcpConnections[id])) {
+      return { success: true, tool_count: 0, cached: true }
+    }
+
+    // Create the MCP connection
+    var mcp = $mcp(merge(mcpConfig, {
+      shared: true,
+      preFn : (t, a) => {
+        if (isObject(parent._runtime)) {
+          parent._runtime.modelToolCallDetected = true
+        }
+        parent.fnI("exec", `Executing catalog MCP '${mcpMetadata.id}' tool '${t}'`)
+
+        if (!isObject(global.__mini_a_metrics.per_tool_stats[t])) {
+          global.__mini_a_metrics.per_tool_stats[t] = {
+            calls: $atomic(0, "long"),
+            successes: $atomic(0, "long"),
+            failures: $atomic(0, "long")
+          }
+        }
+        global.__mini_a_metrics.per_tool_stats[t].calls.inc()
+      },
+      posFn : (t, a, r) => {
+        var hasError = isMap(r) && isDef(r.error)
+        if (hasError) {
+          parent.fnI("error", `Catalog MCP tool '${t}' failed`)
+          global.__mini_a_metrics.mcp_actions_failed.inc()
+          if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
+            global.__mini_a_metrics.per_tool_stats[t].failures.inc()
+          }
+        } else {
+          parent.fnI("done", `Catalog MCP tool '${t}' succeeded`)
+          global.__mini_a_metrics.mcp_actions_executed.inc()
+          if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
+            global.__mini_a_metrics.per_tool_stats[t].successes.inc()
+          }
+        }
+      }
+    }))
+
+    // Initialize the connection
+    this._mcpConnections[id] = mcp
+    mcp.initialize()
+
+    // Wrap callTool with caching
+    if (!isFunction(mcp.__miniAOriginalCallTool)) {
+      mcp.__miniAOriginalCallTool = mcp.callTool.bind(mcp)
+      mcp.callTool = (toolName, params, meta) => {
+        var ctx = __
+        if (isObject(meta) && isObject(meta.__miniACallContext)) ctx = meta.__miniACallContext
+        return parent._executeToolWithCache(id, toolName, params, ctx)
+      }
+    }
+
+    // Store metadata
+    this._ensureMcpConnectionMetadata(id, mcpConfig, Object.keys(this._mcpConnections).length - 1)
+
+    // List and register tools
+    var tools = mcp.listTools()
+    if (isDef(tools) && isDef(tools.tools)) {
+      tools = tools.tools
+    } else {
+      return { success: false, error: "Failed to list tools" }
+    }
+
+    if (isUnDef(this.mcpTools)) this.mcpTools = []
+    if (isUnDef(this.mcpToolNames)) this.mcpToolNames = []
+    if (isUnDef(this.mcpToolToConnection)) this.mcpToolToConnection = {}
+
+    tools.forEach(tool => {
+      this.mcpTools.push(tool)
+      this.mcpToolNames.push(tool.name)
+      this.mcpToolToConnection[tool.name] = id
+      this._toolInfoByName[tool.name] = tool
+      this._toolCacheSettings[tool.name] = this._computeToolCacheSettings(tool, this._toolCacheDefaultTtl)
+    })
+
+    this.fnI("done", `Loaded MCP '${mcpMetadata.id}' with ${tools.length} tools from catalog`)
+
+    return { success: true, tool_count: tools.length }
+
+  } catch(e) {
+    return { success: false, error: e.message || String(e) }
+  }
+}
+
+/**
+ * Handle MCP catalog browse operations
+ * @param {string} action - Action to perform (list_categories, search, get_details, load)
+ * @param {object} params - Action parameters
+ * @returns {object} Result of the action
+ */
+MiniA.prototype._handleMcpCatalogBrowse = function(action, params) {
+  if (isUnDef(this._mcpCatalog) || isNull(this._mcpCatalog)) {
+    return { error: "MCP Catalog not initialized" }
+  }
+
+  try {
+    switch(action) {
+      case 'list_categories':
+        return this._mcpCatalog.listCategories(params.query)
+
+      case 'search':
+        if (isUnDef(params.query)) {
+          return { error: "Search query required" }
+        }
+        return { results: this._mcpCatalog.search(params.query) }
+
+      case 'get_details':
+        if (isUnDef(params.mcp_id)) {
+          return { error: "MCP ID required" }
+        }
+        return this._mcpCatalog.getDetails(params.mcp_id)
+
+      case 'load':
+        if (isUnDef(params.mcp_id)) {
+          return { error: "MCP ID required" }
+        }
+        var result = this._mcpCatalog.loadMCP(params.mcp_id, params.options || {})
+
+        // Re-register tools if using tool interface
+        if (result.loaded && this._useTools) {
+          this._registerMcpToolsForGoal({ mcpdynamic: false, goal: "" })
+        }
+
+        return result
+
+      case 'stats':
+        return this._mcpCatalog.getStats()
+
+      case 'recommend':
+        if (isUnDef(params.goal)) {
+          return { error: "Goal required for recommendations" }
+        }
+        return { recommendations: this._mcpCatalog.getPreloadRecommendations(params.goal) }
+
+      default:
+        return { error: "Unknown action: " + action }
+    }
+  } catch(e) {
+    return { error: e.message || String(e) }
+  }
 }
 
 MiniA.prototype._numberInWords = num => {
@@ -6144,6 +6379,18 @@ MiniA.prototype.init = function(args) {
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
+
+    // Initialize MCP Catalog if useutils is enabled
+    if (args.useutils === true && isUnDef(this._mcpCatalog)) {
+      try {
+        this.fnI("🛍️", "Initializing MCP Catalog...")
+        this._mcpCatalog = new MCPCatalog(this)
+        this.fnI("🛍️", "MCP Catalog initialized successfully")
+      } catch (e) {
+        this._mcpCatalog = null
+        this.fnI("warn", "Failed to initialize MCP Catalog: " + (e.message || e))
+      }
+    }
 
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"

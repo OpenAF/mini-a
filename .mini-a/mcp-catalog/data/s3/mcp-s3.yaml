@@ -1,0 +1,26 @@
+id: "mcp-s3"
+name: "S3 Object Storage MCP"
+category: "data/s3"
+description: "S3 and compatible object storage operations for file management in the cloud"
+capabilities:
+  - "list S3 buckets and objects"
+  - "upload files to S3"
+  - "download files from S3"
+  - "delete S3 objects"
+  - "get object metadata"
+tags: ["s3", "storage", "cloud", "aws", "objects", "buckets"]
+tool_count: 7
+estimated_context_tokens: 750
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-s3.yaml"]
+  config_options:
+    accessKey: "AWS access key"
+    secretKey: "AWS secret key"
+    region: "AWS region"
+    endpoint: "Custom S3 endpoint for S3-compatible storage"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "medium"
+dependencies: []

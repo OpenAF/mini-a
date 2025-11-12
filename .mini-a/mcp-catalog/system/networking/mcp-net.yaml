@@ -1,0 +1,22 @@
+id: "mcp-net"
+name: "Network Utility MCP"
+category: "system/networking"
+description: "Network utilities for testing connectivity, DNS lookup, and network diagnostics"
+capabilities:
+  - "ping hosts"
+  - "DNS lookup"
+  - "port scanning"
+  - "network diagnostics"
+  - "HTTP requests"
+tags: ["network", "networking", "dns", "ping", "connectivity"]
+tool_count: 6
+estimated_context_tokens: 550
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-net.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "low"
+dependencies: []

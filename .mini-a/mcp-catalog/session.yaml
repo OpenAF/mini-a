@@ -1,0 +1,8 @@
+# MCP Session Memory
+# Tracks currently loaded MCPs across conversation turns
+# This file is automatically managed by the MCP Catalog system
+
+session_id: null
+started_at: null
+loaded_mcps: []
+last_updated: null

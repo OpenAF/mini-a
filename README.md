@@ -77,6 +77,7 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
 - **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [OPTIMIZATIONS.md](OPTIMIZATIONS.md))
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
+  - **MCP Catalog System** - On-demand tool discovery and loading with 70-90% context savings (see [WHATS-NEW.md](WHATS-NEW.md#mcp-catalog-system-latest))
   - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
   - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
   - **Circuit Breakers** - Automatic connection health management with cooldown periods

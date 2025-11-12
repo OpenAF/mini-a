@@ -1,0 +1,25 @@
+id: "mcp-kube"
+name: "Kubernetes Management MCP"
+category: "system/kubernetes"
+description: "Kubernetes cluster management with resource operations and monitoring"
+capabilities:
+  - "get pods, services, deployments"
+  - "create/update/delete resources"
+  - "get logs"
+  - "execute commands in pods"
+  - "scale deployments"
+tags: ["kubernetes", "k8s", "containers", "orchestration", "cluster"]
+tool_count: 12
+estimated_context_tokens: 1200
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-kube.yaml"]
+  config_options:
+    kubeconfig: "Path to kubeconfig file"
+    context: "Kubernetes context to use"
+    namespace: "Default namespace"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: true
+security_level: "high"
+dependencies: []

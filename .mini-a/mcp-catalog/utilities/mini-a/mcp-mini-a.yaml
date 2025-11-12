@@ -1,0 +1,24 @@
+id: "mcp-mini-a"
+name: "Mini-A Agent Runner MCP"
+category: "utilities/mini-a"
+description: "Mini-A agent as an MCP server for executing autonomous goals"
+capabilities:
+  - "run autonomous goals"
+  - "agent execution"
+  - "task automation"
+  - "planning and execution"
+tags: ["mini-a", "agent", "autonomous", "goals", "automation"]
+tool_count: 1
+estimated_context_tokens: 300
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-mini-a.yaml"]
+  config_options:
+    useshell: "Allow shell commands"
+    knowledge: "Additional knowledge or context"
+    rules: "Custom rules array"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: true
+security_level: "critical"
+dependencies: []

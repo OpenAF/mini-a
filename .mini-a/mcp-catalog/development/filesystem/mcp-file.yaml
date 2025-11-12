@@ -1,0 +1,27 @@
+id: "mcp-file"
+name: "File Management MCP"
+category: "development/filesystem"
+description: "Local file management with read, write, search, and directory operations using OpenAF io utilities"
+capabilities:
+  - "read files"
+  - "write files"
+  - "list directories"
+  - "search file content"
+  - "delete files"
+  - "move/rename files"
+  - "create directories"
+  - "get file info"
+tags: ["files", "io", "storage", "filesystem", "directory"]
+tool_count: 8
+estimated_context_tokens: 850
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-file.yaml"]
+  config_options:
+    root: "Base directory restricting all file operations"
+    readwrite: "If true, allows write/delete operations (default: false)"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: true
+security_level: "high"
+dependencies: []

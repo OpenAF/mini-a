@@ -1,0 +1,21 @@
+id: "mcp-oafp"
+name: "OpenAF Processor MCP"
+category: "utilities/oafp"
+description: "OpenAF processor (oafp) runner and documentation for data transformation"
+capabilities:
+  - "run oafp commands"
+  - "data transformation"
+  - "oafp documentation"
+  - "pipeline operations"
+tags: ["oafp", "processor", "transformation", "pipeline", "data"]
+tool_count: 4
+estimated_context_tokens: 500
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-oafp.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "medium"
+dependencies: []

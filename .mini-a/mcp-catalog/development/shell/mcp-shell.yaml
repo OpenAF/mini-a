@@ -1,0 +1,28 @@
+id: "mcp-shell"
+name: "Shell Execution MCP"
+category: "development/shell"
+description: "Controlled local shell command execution with safety guards and timeout support"
+capabilities:
+  - "execute shell commands"
+  - "run scripts"
+  - "command validation"
+  - "timeout control"
+tags: ["shell", "command", "execution", "bash", "scripts"]
+tool_count: 2
+estimated_context_tokens: 400
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-shell.yaml"]
+  config_options:
+    readwrite: "If true, allows commands that may change state"
+    shellallow: "Comma-separated list of banned commands to allow"
+    shellallowpipes: "Allow pipes and redirection"
+    shellbanextra: "Additional commands to ban"
+    cwd: "Default working directory"
+    timeout: "Default timeout in milliseconds"
+    env: "Environment variables map"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: true
+security_level: "critical"
+dependencies: []

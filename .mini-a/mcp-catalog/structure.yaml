@@ -1,0 +1,74 @@
+# MCP Catalog Structure
+# This file defines the hierarchical organization of MCP servers
+
+categories:
+  - name: "development"
+    description: "Development, coding, and infrastructure tools"
+    subcategories:
+      - name: "filesystem"
+        description: "File system operations and management"
+      - name: "git"
+        description: "Git version control operations"
+      - name: "docker"
+        description: "Container and Docker management"
+      - name: "shell"
+        description: "Shell command execution and scripting"
+      - name: "ssh"
+        description: "Remote SSH operations"
+
+  - name: "data"
+    description: "Data processing, storage, and analysis"
+    subcategories:
+      - name: "databases"
+        description: "Database connections and queries"
+      - name: "apis"
+        description: "API interactions and data fetching"
+      - name: "s3"
+        description: "S3 and object storage operations"
+      - name: "rss"
+        description: "RSS feed processing"
+
+  - name: "ai"
+    description: "AI and machine learning tools"
+    subcategories:
+      - name: "llm-providers"
+        description: "LLM provider integrations"
+      - name: "embeddings"
+        description: "Embedding and vector operations"
+
+  - name: "system"
+    description: "System utilities and monitoring"
+    subcategories:
+      - name: "networking"
+        description: "Network operations and monitoring"
+      - name: "kubernetes"
+        description: "Kubernetes cluster management"
+
+  - name: "utilities"
+    description: "General purpose utilities and helpers"
+    subcategories:
+      - name: "math"
+        description: "Mathematical computations"
+      - name: "time"
+        description: "Time and date operations"
+      - name: "random"
+        description: "Random data generation"
+      - name: "weather"
+        description: "Weather information"
+      - name: "finance"
+        description: "Financial data and calculations"
+      - name: "email"
+        description: "Email operations"
+      - name: "web"
+        description: "Web scraping and operations"
+      - name: "channels"
+        description: "Channel and messaging operations"
+      - name: "oaf"
+        description: "OpenAF framework utilities"
+      - name: "oafp"
+        description: "OpenAF Pipes utilities"
+      - name: "mini-a"
+        description: "Mini-A specific utilities"
+
+# Metadata version for compatibility tracking
+version: "1.0.0"

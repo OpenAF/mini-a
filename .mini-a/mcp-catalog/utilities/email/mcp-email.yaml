@@ -1,0 +1,25 @@
+id: "mcp-email"
+name: "Email Sending MCP"
+category: "utilities/email"
+description: "Email sending capabilities with attachment support"
+capabilities:
+  - "send emails"
+  - "email attachments"
+  - "HTML emails"
+tags: ["email", "smtp", "sending", "notifications"]
+tool_count: 2
+estimated_context_tokens: 350
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-email.yaml"]
+  config_options:
+    smtp_host: "SMTP server host"
+    smtp_port: "SMTP server port"
+    smtp_user: "SMTP username"
+    smtp_pass: "SMTP password"
+    from: "Default from address"
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "medium"
+dependencies: []

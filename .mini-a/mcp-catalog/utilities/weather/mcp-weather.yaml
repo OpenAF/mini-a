@@ -1,0 +1,20 @@
+id: "mcp-weather"
+name: "Weather Information MCP"
+category: "utilities/weather"
+description: "Weather information retrieval using wttr.in service"
+capabilities:
+  - "current weather"
+  - "weather forecast"
+  - "location-based weather"
+tags: ["weather", "forecast", "wttr.in", "climate"]
+tool_count: 2
+estimated_context_tokens: 300
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-weather.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "low"
+dependencies: []

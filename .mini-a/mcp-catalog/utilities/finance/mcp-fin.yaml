@@ -1,0 +1,21 @@
+id: "mcp-fin"
+name: "Yahoo Finance MCP"
+category: "utilities/finance"
+description: "Yahoo Finance market data retrieval for stocks, quotes, and financial information"
+capabilities:
+  - "stock quotes"
+  - "market data"
+  - "financial information"
+  - "historical data"
+tags: ["finance", "stocks", "market", "yahoo", "quotes"]
+tool_count: 4
+estimated_context_tokens: 450
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-fin.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "low"
+dependencies: []

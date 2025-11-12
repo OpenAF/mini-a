@@ -1,0 +1,22 @@
+id: "mcp-random"
+name: "Random Data Generation MCP"
+category: "utilities/random"
+description: "Random data generation including numbers, strings, UUIDs, and mock data"
+capabilities:
+  - "random numbers"
+  - "random strings"
+  - "UUID generation"
+  - "mock data generation"
+  - "random selections"
+tags: ["random", "generation", "uuid", "mock", "data"]
+tool_count: 10
+estimated_context_tokens: 850
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-random.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "low"
+dependencies: []

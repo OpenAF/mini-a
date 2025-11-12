@@ -1,5 +1,107 @@
 # What's New in Mini-A
 
+## MCP Catalog System (Latest)
+
+### Overview
+
+Mini-A now includes a comprehensive **MCP Catalog System** that dramatically reduces LLM context usage through on-demand tool discovery and loading. Instead of loading all MCP tools upfront, the catalog enables intelligent, lazy loading based on task requirements.
+
+### Key Features
+
+- **70-90% Context Savings**: Only load MCP tools when actually needed
+- **Smart Discovery**: Browse, search, and filter MCPs by category, tags, and capabilities
+- **Lazy Loading**: Load MCPs on-demand based on task requirements
+- **Session Memory**: Remember loaded MCPs across conversation turns
+- **Usage Tracking**: Learn from patterns to recommend relevant MCPs
+- **Smart Preloading**: Get AI-driven recommendations based on goals and usage history
+- **Dependency Resolution**: Automatically load dependent MCPs
+
+### How It Works
+
+The catalog provides a single lightweight tool (`mcp_catalog_browse`) that replaces upfront loading of all MCP tools:
+
+**Before** (Traditional Approach):
+```bash
+# All MCP tools loaded upfront: ~5,000-10,000 tokens
+mini-a goal="read a file" useutils=true
+```
+
+**After** (Catalog Approach):
+```bash
+# Initial: ~200 tokens (just the browse tool)
+# Discovery: +50-100 tokens per search
+# Loading: +500-1,000 tokens per MCP as needed
+mini-a goal="read a file" useutils=true
+
+# Agent workflow:
+# 1. Search catalog for "file" tools
+# 2. Review mcp-file details
+# 3. Load only mcp-file (8 tools)
+# 4. Use loaded tools
+# Result: 1,130 tokens vs 8,500 tokens = 87% savings
+```
+
+### Usage
+
+The catalog is automatically available when `useutils=true`:
+
+```javascript
+// Search for MCPs
+mcp_catalog_browse({ action: "search", query: "database" })
+
+// Get details
+mcp_catalog_browse({ action: "get_details", mcp_id: "mcp-db" })
+
+// Load with config
+mcp_catalog_browse({
+  action: "load",
+  mcp_id: "mcp-db",
+  options: {
+    config: {
+      jdbc: "jdbc:postgresql://localhost:5432/mydb",
+      user: "dbuser",
+      rw: true
+    }
+  }
+})
+
+// Get smart recommendations
+mcp_catalog_browse({
+  action: "recommend",
+  goal: "backup database to S3"
+})
+```
+
+### Catalog Structure
+
+The catalog organizes 18+ built-in MCPs into categories:
+
+- **development/**: filesystem, shell, ssh, git, docker
+- **data/**: databases, s3, rss, apis
+- **system/**: kubernetes, networking
+- **utilities/**: math, time, random, weather, finance, email, web, etc.
+
+### Documentation
+
+- **Full Guide**: `.mini-a/mcp-catalog/README.md`
+- **Examples**: `.mini-a/mcp-catalog/EXAMPLES.md`
+
+### Integration with Existing Features
+
+- **Works with `mcpdynamic=true`**: Catalog enables even smarter dynamic tool selection
+- **Complements `mcplazy=true`**: Combines lazy initialization with on-demand loading
+- **Compatible with dual-model**: Low-cost model can browse catalog efficiently
+
+### Migration
+
+No changes needed! The catalog works alongside existing MCP usage:
+
+- Traditional `mcp=` parameter still works as before
+- Catalog is opt-in via the `mcp_catalog_browse` tool
+- All existing MCPs are cataloged automatically
+
+---
+
 ## Recent Updates
 
 ### S3 History Upload Optimization

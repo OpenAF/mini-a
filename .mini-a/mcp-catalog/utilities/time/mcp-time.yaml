@@ -1,0 +1,21 @@
+id: "mcp-time"
+name: "Time and Timezone MCP"
+category: "utilities/time"
+description: "Time and timezone operations including conversions and formatting"
+capabilities:
+  - "timezone conversions"
+  - "time formatting"
+  - "date calculations"
+  - "current time in various timezones"
+tags: ["time", "date", "timezone", "formatting", "conversions"]
+tool_count: 6
+estimated_context_tokens: 550
+connection:
+  type: "stdio"
+  command: "ojob"
+  args: ["mcps/mcp-time.yaml"]
+  config_options:
+    onport: "Optional HTTP port to expose the MCP server"
+requires_readwrite: false
+security_level: "low"
+dependencies: []

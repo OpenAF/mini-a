@@ -1,0 +1,15 @@
+# MCP Dependency Resolution
+# Defines dependencies between MCP servers
+# When an MCP is loaded, its dependencies are automatically loaded first
+
+dependencies:
+  # Example: mcp-mini-a depends on having other MCPs available
+  # mcp-mini-a:
+  #   - mcp-file
+  #   - mcp-shell
+
+  # No default dependencies - will be populated as needed
+  {}
+
+# Circular dependency detection
+circular_check_enabled: true
