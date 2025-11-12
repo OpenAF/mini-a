@@ -6,7 +6,7 @@ Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MC
 
 ![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
 
-> **⚡ New Performance Optimizations!** Mini-A now includes automatic optimizations that reduce token usage by 40-60% and costs by 50-70% with zero configuration. [Learn more →](WHATS-NEW.md)
+> **⚡ New Performance Optimizations!** Mini-A now includes automatic optimizations that reduce token usage by 40-60% and costs by 50-70% with zero configuration. [Learn more →](docs/WHATS-NEW.md)
 
 ## Quick Start
 
@@ -56,6 +56,15 @@ mini-a goal="list all JavaScript files in this directory" useshell=true
 mini-a goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
+**Aggregate MCP tools via proxy (single tool exposed):**
+```bash
+mini-a goal="compare release dates across APIs" \
+  usetools=true mcpproxy=true \
+  mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-fin.yaml')]" \
+  useutils=true
+```
+This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even when multiple MCP servers and the Mini Utils Tool are active. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for a deep dive.
+
 **Chatbot mode:**
 ```bash
 mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
@@ -75,12 +84,13 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 
 - **Multi-Model Support** - Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
-- **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [OPTIMIZATIONS.md](OPTIMIZATIONS.md))
+- **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md))
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
   - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
   - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
   - **Circuit Breakers** - Automatic connection health management with cooldown periods
   - **Lazy Initialization** - Deferred MCP connection establishment for faster startup (`mcplazy=true`)
+  - **Proxy Aggregation** - Collapse all MCP connections (including Mini Utils Tool) into a single `proxy-dispatch` tool to minimize context usage (`mcpproxy=true`)
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, and more
 - **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
@@ -97,9 +107,10 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 
 ## Documentation
 
-- **[What's New](WHATS-NEW.md)** - Latest performance improvements and migration guide
+- **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
-- **[Performance Optimizations](OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
+- **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
+- **[MCP Proxy Guide](docs/MCPPROXY-FEATURE.md)** - How to consolidate multiple MCP connections behind one `proxy-dispatch` tool
 - **[Usage Guide](USAGE.md)** - Comprehensive guide covering all features
   - [Getting Started](USAGE.md#basic-usage)
   - [Model Configuration](USAGE.md#model-configuration)
@@ -111,7 +122,7 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
   - [Metrics and Observability](USAGE.md#metrics-and-observability)
 - **[MCP Documentation](mcps/README.md)** - Built-in MCP servers catalog
 - **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations
-- **[External MCPs](EXTERNAL-MCPS.md)** - Community MCP servers
+- **[External MCPs](mcps/EXTERNAL-MCPS.md)** - Community MCP servers
 - **[Contributing Guide](CONTRIBUTING.md)** - Join the project
 - **[Code of Conduct](CODE_OF_CONDUCT.md)** - Community standards
 
@@ -138,6 +149,7 @@ Mini-A ships with complementary components:
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
+| `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |

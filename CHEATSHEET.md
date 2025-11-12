@@ -168,6 +168,7 @@ mini-a goal="find large files" useshell=true shellallowpipes=true
 | `usetools` | boolean | `false` | Register MCP tools directly on the model instead of in prompt |
 | `mcpdynamic` | boolean | `false` | Analyze goal and only register relevant MCP tools |
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
+| `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
@@ -208,6 +209,14 @@ mini-a goal="analyze local files" \
   mcp="[(cmd: 'ojob mcps/mcp-db.yaml...'), (cmd: 'ojob mcps/mcp-net.yaml...')]" \
   mcplazy=true usetools=true
 ```
+
+**Proxy Aggregation (single tool exposed):**
+```bash
+mini-a goal="compare S3 usage with database stats" \
+  mcp="[(cmd: 'ojob mcps/mcp-s3.yaml bucket=my-bucket'), (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data')]" \
+  usetools=true mcpproxy=true useutils=true
+```
+See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for full workflows and the `proxy-dispatch` action set.
 
 ### Built-in MCPs
 
@@ -707,7 +716,7 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 - **Full Documentation**: [USAGE.md](USAGE.md)
 - **MCP Catalog**: [mcps/README.md](mcps/README.md)
 - **Creating MCPs**: [mcps/CREATING.md](mcps/CREATING.md)
-- **External MCPs**: [EXTERNAL-MCPS.md](EXTERNAL-MCPS.md)
+- **External MCPs**: [EXTERNAL-MCPS.md](mcps/EXTERNAL-MCPS.md)
 - **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Issues**: https://github.com/openaf/mini-a/issues
 - **Email**: openaf@openaf.io

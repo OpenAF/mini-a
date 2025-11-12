@@ -22,15 +22,33 @@ modes:
     description: "Internet access mode"
     params     :
       usetools   : true
-      mcp        : "[(type: ojob, options: (job: mcps/mcp-time.yaml)) | (type: ojob, options: (job: mcps/mcp-web.yaml)) | (type: ojob, options: (job: mcps/mcp-weather.yaml)) ]"
-      mcpdynamic : false
+      mcp        :
+      - type   : ojob
+        options:
+          job: mcps/mcp-time.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-web.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-weather.yaml
+      mcpproxy : true
 
   news:
     description: "News from the internet mode"
     params     :
       usetools   : true
-      mcp        : "[(type: ojob, options: (job: mcps/mcp-time.yaml)) | (type: ojob, options: (job: mcps/mcp-web.yaml)) | (type: ojob, options: (job: mcps/mcp-rss.yaml)) ]"
-      mcpdynamic : false
+      mcp        :
+      - type   : ojob
+        options:
+          job: mcps/mcp-time.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-web.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-rss.yaml
+      mcpproxy : true
 
   poweruser:
     description: "Power user mode"
@@ -41,7 +59,11 @@ modes:
       useshell   : true
       readwrite  : true
       useutils   : true
-      mcp        : "[(type: ojob, options: (job: mcps/mcp-web))]"
+      mcpproxy   : true
+      mcp        : 
+      - type   : ojob
+        options:
+          job: mcps/mcp-web.yaml 
 
   chatbot:
     description: "Chatbot mode"

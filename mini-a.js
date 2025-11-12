@@ -4579,6 +4579,525 @@ MiniA.prototype._createShellMcpConfig = function(args) {
   }
 }
 
+MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
+  try {
+    if (!isArray(mcpConfigs) || mcpConfigs.length === 0) {
+      this.fnI("warn", "No MCP configurations provided to proxy; skipping MCP proxy creation.")
+      return __
+    }
+
+    var parent = this
+
+    // Initialize proxy state similar to mcp-proxy.yaml
+    if (!isObject(global.__mcpProxyState__)) {
+      global.__mcpProxyState__ = {
+        connections       : {},
+        aliasToId         : {},
+        idToAlias         : {},
+        catalog           : [],
+        toolToConnections : {},
+        aliasCounter      : 0,
+        lastUpdated       : now()
+      }
+    }
+
+    if (!isObject(global.__mcpProxyHelpers__)) global.__mcpProxyHelpers__ = {}
+
+    var helpers = global.__mcpProxyHelpers__
+
+    // Define helper functions
+    helpers.deepClone = function(value) {
+      if (isArray(value)) {
+        return value.map(function(item) { return helpers.deepClone(item) })
+      }
+      if (isMap(value)) {
+        var copy = {}
+        Object.keys(value).forEach(function(key) {
+          copy[key] = helpers.deepClone(value[key])
+        })
+        return copy
+      }
+      return value
+    }
+
+    helpers.sanitizeDescriptor = function(value) {
+      if (isUnDef(value)) return value
+      var sensitiveKeys = [
+        "key", "pass", "password", "token", "secret", "authorization", "apikey",
+        "apiKey", "clientsecret", "client_secret", "bearer",
+        "auth", "jwt", "refreshToken"
+      ]
+      var lowerKeys = {}
+      sensitiveKeys.forEach(function(k) { lowerKeys[k.toLowerCase()] = true })
+
+      var sanitize = function(target) {
+        if (isArray(target)) {
+          return target.map(function(item) { return sanitize(item) })
+        }
+        if (isMap(target)) {
+          var result = {}
+          Object.keys(target).forEach(function(key) {
+            var lower = key.toLowerCase()
+            if (lowerKeys[lower]) {
+              result[key] = "***"
+            } else {
+              result[key] = sanitize(target[key])
+            }
+          })
+          return result
+        }
+        return target
+      }
+
+      return sanitize(helpers.deepClone(value))
+    }
+
+    helpers.ensureAlias = function(connectionId) {
+      var state = global.__mcpProxyState__
+      if (!isObject(state)) return connectionId
+      if (isString(state.idToAlias[connectionId])) return state.idToAlias[connectionId]
+      state.aliasCounter = (state.aliasCounter || 0) + 1
+      var alias = "c" + state.aliasCounter
+      state.idToAlias[connectionId] = alias
+      state.aliasToId[alias] = connectionId
+      return alias
+    }
+
+    helpers.resolveConnectionId = function(identifier) {
+      var state = global.__mcpProxyState__
+      if (!isObject(state) || isUnDef(identifier)) return __
+      if (isString(identifier) && identifier.length > 0) {
+        if (isObject(state.connections) && isObject(state.connections[identifier])) return identifier
+        if (isObject(state.aliasToId) && isString(state.aliasToId[identifier])) return state.aliasToId[identifier]
+      }
+      return __
+    }
+
+    helpers.extractTools = function(listResult) {
+      var tools = []
+      var serverInfo = __
+      if (isArray(listResult)) {
+        tools = listResult
+      } else if (isMap(listResult)) {
+        if (isArray(listResult.tools)) tools = listResult.tools
+        if (isDef(listResult.serverInfo)) serverInfo = listResult.serverInfo
+      }
+      if (!isArray(tools)) tools = []
+      return { tools: tools, serverInfo: serverInfo }
+    }
+
+    helpers.rebuildIndexes = function() {
+      var state = global.__mcpProxyState__
+      if (!isObject(state)) return
+      state.catalog = []
+      state.toolToConnections = {}
+      Object.keys(state.connections || {}).forEach(function(id) {
+        var entry = state.connections[id]
+        if (!isObject(entry)) return
+        var alias = entry.alias
+        if (!isArray(entry.tools)) entry.tools = []
+        entry.tools.forEach(function(tool) {
+          var toolClone = helpers.deepClone ? helpers.deepClone(tool) : tool
+          state.catalog.push({
+            connectionId   : id,
+            connectionAlias: alias,
+            tool           : toolClone
+          })
+          if (isMap(state.toolToConnections)) {
+            var toolName = isString(tool.name) ? tool.name : __
+            if (isString(toolName)) {
+              if (!isArray(state.toolToConnections[toolName])) state.toolToConnections[toolName] = []
+              if (state.toolToConnections[toolName].indexOf(id) < 0) {
+                state.toolToConnections[toolName].push(id)
+              }
+            }
+          }
+        })
+      })
+    }
+
+    helpers.refreshConnections = function(targetIds) {
+      var state = global.__mcpProxyState__
+      if (!isObject(state)) return
+      var ids = targetIds
+      if (!isArray(ids) || ids.length === 0) ids = Object.keys(state.connections || {})
+      ids.forEach(function(id) {
+        var entry = state.connections[id]
+        if (!isObject(entry)) return
+        if (!isObject(entry.client) || typeof entry.client.listTools !== "function") return
+        try {
+          var listResult = entry.client.listTools()
+          var extracted = helpers.extractTools(listResult)
+          entry.tools = extracted.tools
+          if (isDef(extracted.serverInfo)) entry.serverInfo = extracted.serverInfo
+          entry.lastRefreshed = now()
+          entry.lastError = __
+        } catch(e) {
+          entry.lastError = e.message
+        }
+      })
+      helpers.rebuildIndexes()
+    }
+
+    // Initialize all downstream MCP connections
+    var state = global.__mcpProxyState__
+    mcpConfigs.forEach(function(descriptor, index) {
+      var configObject = descriptor
+      if (isString(descriptor)) {
+        configObject = af.fromJSSLON(descriptor)
+      }
+      if (!isMap(configObject)) {
+        throw new Error("Invalid MCP descriptor at index " + index + ". Expected map or stringified map.")
+      }
+
+      var connectionId = isString(configObject.id) && configObject.id.length > 0
+        ? configObject.id
+        : md5(stringify(configObject, __, ""))
+
+      var existing = state.connections[connectionId]
+      var client
+
+      if (isObject(existing) && isObject(existing.client)) {
+        client = existing.client
+      } else {
+        client = $mcp(merge(configObject, { shared: true }))
+        try {
+          client.initialize()
+        } catch(e) {
+          throw new Error("Failed to initialize MCP connection #" + (index + 1) + " in proxy: " + e.message)
+        }
+      }
+
+      var listResult
+      try {
+        listResult = client.listTools()
+      } catch(e) {
+        if (isObject(client) && typeof client.destroy === "function") {
+          try { client.destroy() } catch(ignoreDestroy) {}
+        }
+        throw new Error("Failed to list tools for MCP connection #" + (index + 1) + " in proxy: " + e.message)
+      }
+
+      var extracted = helpers.extractTools(listResult)
+      var alias = helpers.ensureAlias(connectionId)
+
+      state.connections[connectionId] = {
+        id                 : connectionId,
+        alias              : alias,
+        client             : client,
+        descriptor         : helpers.deepClone(configObject),
+        sanitizedDescriptor: helpers.sanitizeDescriptor(configObject),
+        tools              : extracted.tools,
+        serverInfo         : extracted.serverInfo,
+        lastRefreshed      : now(),
+        lastError          : __
+      }
+
+      parent.fnI("info", `[mcp-proxy] Connection #${index + 1} ready as '${alias}' with ${extracted.tools.length} tool(s).`)
+    })
+
+    helpers.rebuildIndexes()
+    state.lastUpdated = now()
+
+    // Define the proxy-dispatch function
+    var fns = {
+      "proxy-dispatch": function(params) {
+        var state = global.__mcpProxyState__
+        if (!isObject(state) || Object.keys(state.connections || {}).length === 0) {
+          return { error: "MCP proxy is not initialized or has no active connections." }
+        }
+
+        var helpers = global.__mcpProxyHelpers__ || {}
+        var action = (params.action || "").toLowerCase().trim()
+        var connectionRef = isString(params.connection) ? params.connection.trim() : __
+        var limit = isNumber(params.limit) && params.limit > 0 ? Math.floor(params.limit) : __
+        var includeTools = params.includeTools !== false
+        var includeSchema = params.includeInputSchema === true
+        var includeAnnotations = params.includeAnnotations !== false
+
+        var resolveConnectionId = function(identifier) {
+          if (typeof helpers.resolveConnectionId === "function") {
+            return helpers.resolveConnectionId(identifier)
+          }
+          if (!isString(identifier) || identifier.length === 0) return __
+          if (isObject(state.connections) && isObject(state.connections[identifier])) return identifier
+          if (isObject(state.aliasToId) && isString(state.aliasToId[identifier])) return state.aliasToId[identifier]
+          return __
+        }
+
+        var refreshTargets = []
+        if (params.refresh === true) {
+          if (isString(connectionRef) && connectionRef.length > 0) {
+            var resolvedId = resolveConnectionId(connectionRef)
+            if (isUnDef(resolvedId)) {
+              return { error: "Unknown connection identifier '" + connectionRef + "' supplied for refresh." }
+            }
+            refreshTargets = [ resolvedId ]
+          }
+          if (refreshTargets.length === 0) refreshTargets = Object.keys(state.connections || {})
+          if (typeof helpers.refreshConnections === "function") {
+            helpers.refreshConnections(refreshTargets)
+          }
+        }
+
+        var buildToolSummary = function(tool) {
+          if (!isMap(tool)) return tool
+          var summary = { name: tool.name, description: tool.description }
+          if (includeSchema && isDef(tool.inputSchema)) summary.inputSchema = helpers.deepClone ? helpers.deepClone(tool.inputSchema) : tool.inputSchema
+          if (includeAnnotations && isDef(tool.annotations)) summary.annotations = helpers.deepClone ? helpers.deepClone(tool.annotations) : tool.annotations
+          if (isDef(tool.parameters) && includeSchema) summary.parameters = helpers.deepClone ? helpers.deepClone(tool.parameters) : tool.parameters
+          return summary
+        }
+
+        var formatConnection = function(entry) {
+          if (!isObject(entry)) return entry
+          var response = {
+            id           : entry.id,
+            alias        : entry.alias,
+            serverInfo   : isDef(entry.serverInfo) ? (helpers.deepClone ? helpers.deepClone(entry.serverInfo) : entry.serverInfo) : __,
+            lastRefreshed: entry.lastRefreshed,
+            lastError    : entry.lastError,
+            descriptor   : isDef(entry.sanitizedDescriptor)
+              ? (helpers.deepClone ? helpers.deepClone(entry.sanitizedDescriptor) : entry.sanitizedDescriptor)
+              : __
+          }
+          if (includeTools) {
+            response.tools = (isArray(entry.tools) ? entry.tools : []).map(buildToolSummary)
+            response.toolCount = response.tools.length
+          } else {
+            response.toolCount = isArray(entry.tools) ? entry.tools.length : 0
+          }
+          return response
+        }
+
+        if (action === "list") {
+          var targetIds = []
+          if (isString(connectionRef) && connectionRef.length > 0) {
+            var resolved = resolveConnectionId(connectionRef)
+            if (isUnDef(resolved)) {
+              return { error: "Unknown connection identifier '" + connectionRef + "'." }
+            }
+            targetIds.push(resolved)
+          } else {
+            targetIds = Object.keys(state.connections || {})
+          }
+
+          var connections = targetIds.map(function(id) {
+            return formatConnection(state.connections[id])
+          })
+
+          return {
+            action         : "list",
+            totalConnections: connections.length,
+            connections    : connections,
+            content: [{ type: "text", text: stringify({ action: "list", totalConnections: connections.length, connections: connections }, __, "") }]
+          }
+        }
+
+        if (action === "search") {
+          var query = isString(params.query) ? params.query.trim() : ""
+          if (query.length === 0) {
+            return { error: "Search action requires a non-empty 'query' value." }
+          }
+          var queryLower = query.toLowerCase()
+
+          var searchableIds = []
+          if (isString(connectionRef) && connectionRef.length > 0) {
+            var resolvedSearchId = resolveConnectionId(connectionRef)
+            if (isUnDef(resolvedSearchId)) {
+              return { error: "Unknown connection identifier '" + connectionRef + "'." }
+            }
+            searchableIds.push(resolvedSearchId)
+          } else {
+            searchableIds = Object.keys(state.connections || {})
+          }
+
+          var results = []
+          searchableIds.forEach(function(id) {
+            var entry = state.connections[id]
+            if (!isObject(entry) || !isArray(entry.tools)) return
+            entry.tools.forEach(function(tool) {
+              var matchedFields = []
+              if (isString(tool.name) && tool.name.toLowerCase().indexOf(queryLower) >= 0) matchedFields.push("name")
+              if (isString(tool.description) && tool.description.toLowerCase().indexOf(queryLower) >= 0) matchedFields.push("description")
+              if (isMap(tool.annotations)) {
+                Object.keys(tool.annotations).forEach(function(key) {
+                  var value = tool.annotations[key]
+                  if (isString(value) && value.toLowerCase().indexOf(queryLower) >= 0) {
+                    matchedFields.push("annotations." + key)
+                  }
+                })
+              }
+              if (includeSchema && isDef(tool.inputSchema)) {
+                var schemaString = stringify(tool.inputSchema, __, "")
+                if (isString(schemaString) && schemaString.toLowerCase().indexOf(queryLower) >= 0) {
+                  matchedFields.push("inputSchema")
+                }
+              }
+              if (matchedFields.length === 0) return
+              results.push({
+                connection: {
+                  id    : entry.id,
+                  alias : entry.alias,
+                  serverInfo: isDef(entry.serverInfo) ? (helpers.deepClone ? helpers.deepClone(entry.serverInfo) : entry.serverInfo) : __
+                },
+                tool   : buildToolSummary(tool),
+                matchedFields: matchedFields
+              })
+            })
+          })
+
+          if (isNumber(limit) && limit > 0 && results.length > limit) {
+            results = results.slice(0, limit)
+          }
+
+          return {
+            action      : "search",
+            query       : query,
+            totalMatches: results.length,
+            results     : results,
+            content: [{ type: "text", text: stringify({ action: "search", query: query, totalMatches: results.length, results: results }, __, "") }]
+          }
+        }
+
+        if (action === "call") {
+          var toolName = isString(params.tool) ? params.tool.trim() : ""
+          if (toolName.length === 0) {
+            return { error: "Call action requires a 'tool' name." }
+          }
+
+          var connectionId
+          if (isString(connectionRef) && connectionRef.length > 0) {
+            connectionId = resolveConnectionId(connectionRef)
+            if (isUnDef(connectionId)) {
+              return { error: "Unknown connection identifier '" + connectionRef + "'." }
+            }
+          } else {
+            var mapping = state.toolToConnections || {}
+            var candidates = mapping[toolName]
+            if (!isArray(candidates) || candidates.length === 0) {
+              return { error: "Tool '" + toolName + "' is not available on any registered connection." }
+            }
+            if (candidates.length > 1) {
+              return { error: "Tool '" + toolName + "' is available on multiple connections. Specify the 'connection' parameter." }
+            }
+            connectionId = candidates[0]
+          }
+
+          var target = state.connections[connectionId]
+          if (!isObject(target) || !isObject(target.client) || typeof target.client.callTool !== "function") {
+            return { error: "Selected connection is not available or does not expose callable tools." }
+          }
+
+          var inputArgs = isMap(params.arguments) ? params.arguments : {}
+          var meta = isMap(params.meta) ? params.meta : __
+
+          try {
+            var result = isDef(meta)
+              ? target.client.callTool(toolName, inputArgs, meta)
+              : target.client.callTool(toolName, inputArgs)
+            return {
+              action    : "call",
+              connection: {
+                id    : target.id,
+                alias : target.alias,
+                serverInfo: isDef(target.serverInfo) ? (helpers.deepClone ? helpers.deepClone(target.serverInfo) : target.serverInfo) : __
+              },
+              tool      : toolName,
+              arguments : inputArgs,
+              result    : result,
+              content: [{ type: "text", text: stringify(result, __, "") }]
+            }
+          } catch(e) {
+            return {
+              action    : "call",
+              connection: { id: target.id, alias: target.alias },
+              tool      : toolName,
+              error     : e.message || String(e),
+              content: [{ type: "text", text: "Error: " + (e.message || String(e)) }]
+            }
+          }
+        }
+
+        return { error: "Unsupported action '" + params.action + "'. Use list, search, or call." }
+      }
+    }
+
+    var fnsMeta = {
+      "proxy-dispatch": {
+        name       : "proxy-dispatch",
+        description: "Interact with downstream MCP connections aggregated by this proxy. Supports listing available tools, searching metadata, and calling specific tools on a target connection.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            action: {
+              type       : "string",
+              description: "Operation to perform: list, search, or call.",
+              enum       : [ "list", "search", "call" ]
+            },
+            connection: {
+              type       : "string",
+              description: "Optional connection identifier or alias. When omitted, actions operate across all registered connections."
+            },
+            query: {
+              type       : "string",
+              description: "Search text applied to tool names, descriptions, and annotations."
+            },
+            tool: {
+              type       : "string",
+              description: "Name of the tool to invoke when action is 'call'."
+            },
+            arguments: {
+              type       : "object",
+              description: "Input arguments forwarded to the downstream MCP tool when action is 'call'."
+            },
+            meta: {
+              type       : "object",
+              description: "Optional metadata object forwarded to the downstream MCP call."
+            },
+            limit: {
+              type       : "integer",
+              description: "Maximum number of results to return for 'search' actions.",
+              minimum    : 1
+            },
+            includeTools: {
+              type       : "boolean",
+              description: "Include tool metadata in 'list' responses (default true)."
+            },
+            includeInputSchema: {
+              type       : "boolean",
+              description: "Include each tool input schema in responses (default false)."
+            },
+            includeAnnotations: {
+              type       : "boolean",
+              description: "Include tool annotations in responses (default true)."
+            },
+            refresh: {
+              type       : "boolean",
+              description: "Refresh tool metadata from downstream MCPs before executing the action."
+            }
+          },
+          required: [ "action" ]
+        }
+      }
+    }
+
+    return {
+      id     : "mini-a-mcp-proxy",
+      type   : "dummy",
+      options: {
+        name   : "mini-a-mcp-proxy",
+        fns    : fns,
+        fnsMeta: fnsMeta
+      }
+    }
+  } catch (e) {
+    var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
+    this.fnI("warn", `Failed to prepare Mini-A MCP proxy: ${errMsg}`)
+    return __
+  }
+}
+
 MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
   var info = isObject(tool) ? tool : {}
   var annotations = isObject(info.annotations) ? info.annotations : {}
@@ -6319,10 +6838,23 @@ MiniA.prototype.init = function(args) {
         var shellMcpConfig = this._createShellMcpConfig(args)
         if (isMap(shellMcpConfig)) aggregatedMcpConfigs.push(shellMcpConfig)
       }
+
+      // If mcpproxy is enabled, wrap all MCP configs into a single proxy
+      if (toBoolean(args.mcpproxy) === true && aggregatedMcpConfigs.length > 0) {
+        this.fnI("mcp", `MCP proxy mode enabled. Aggregating ${aggregatedMcpConfigs.length} MCP connection(s) into a single proxy...`)
+        var proxyConfig = this._createMcpProxyConfig(aggregatedMcpConfigs, args)
+        if (isMap(proxyConfig)) {
+          aggregatedMcpConfigs = [proxyConfig]
+        } else {
+          this.fnI("warn", "Failed to create MCP proxy. Falling back to direct connections.")
+        }
+      }
     }
 
     if (needMCPInit && aggregatedMcpConfigs.length > 0) {
-      this.fnI("mcp", `${args.mcplazy ? "Preparing" : "Initializing"} ${aggregatedMcpConfigs.length} MCP connection(s)...`)
+      if (toBoolean(args.mcpproxy) !== true) {
+        this.fnI("mcp", `${args.mcplazy ? "Preparing" : "Initializing"} ${aggregatedMcpConfigs.length} MCP connection(s)...`)
+      }
 
       aggregatedMcpConfigs.forEach((mcpConfig, index) => {
         try {

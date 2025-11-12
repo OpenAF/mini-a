@@ -97,6 +97,7 @@ try {
     var applied = []
     var paramsSource = preset.params
     var applyParam = function(key, value) {
+      if (isObject(value)) value = af.toSLON(value)
       if (isString(key) && key.length > 0) {
         args[key] = value
         applied.push(key)
@@ -262,12 +263,15 @@ try {
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
     raw            : { type: "boolean", default: false, description: "Return raw LLM output without formatting adjustments" },
+    youare         : { type: "string", description: "Override the opening 'You are...' sentence in the agent prompt" },
+    chatyouare     : { type: "string", description: "Override the opening chatbot persona sentence when chatbotmode=true" },
     useshell       : { type: "boolean", default: false, description: "Allow shell command execution" },
+    shell          : { type: "string", description: "Prefix applied to every shell command" },
     readwrite      : { type: "boolean", default: false, description: "Allow write operations during shell commands" },
     checkall       : { type: "boolean", default: false, description: "Ask for confirmation before shell commands" },
     shellbatch     : { type: "boolean", default: false, description: "Automatically approve shell commands" },
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
-    showexecs      : { type: "boolean", default: true, description: "Show shell/exec events in the interaction stream" },
+    showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     usetools       : { type: "boolean", default: false, description: "Register MCP tools directly on the model" },
     useutils       : { type: "boolean", default: false, description: "Enable bundled Mini Utils Tool utilities" },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
@@ -276,12 +280,15 @@ try {
     useascii       : { type: "boolean", default: false, description: "Enable ASCII-based visuals in knowledge prompt" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
+    validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
     resumefailed   : { type: "boolean", default: false, description: "Attempt to resume the last failed goal on startup" },
     forceplanning  : { type: "boolean", default: false, description: "Force planning even when heuristics would skip it" },
     chatbotmode    : { type: "boolean", default: false, description: "Run Mini-A in chatbot mode" },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
+    mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
+    nosetmcpwd     : { type: "boolean", default: false, description: "Prevent automatic MCP working directory configuration" },
     rpm            : { type: "number", description: "Requests per minute limit" },
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
     tpm            : { type: "number", description: "Tokens per minute limit" },

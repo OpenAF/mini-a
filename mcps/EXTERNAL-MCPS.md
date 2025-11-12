@@ -67,4 +67,4 @@ mini-a goal="search for information about Lisbon and tell me the current time th
 - **Mixed sources**: Combine STDIO MCPs (including Docker-based), HTTP remote MCPs, and built-in MCPs seamlessly.
 - **Connection management**: The proxy handles initialization, tool caching, and connection health for all downstream servers.
 
-See [mcps/README.md](mcps/README.md#mcp-proxy) for detailed `mcp-proxy` documentation and additional examples.
+See [README.md](README.md#mcp-proxy) for detailed `mcp-proxy` documentation and additional examples.

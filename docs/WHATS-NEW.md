@@ -397,8 +397,16 @@ mini-a goal="read ALL config files simultaneously and compare"
 ## Learning More
 
 - **[OPTIMIZATIONS.md](OPTIMIZATIONS.md)** - Complete technical documentation
-- **[USAGE.md](USAGE.md)** - Full configuration guide
-- **[mini-a-analysis.md](mini-a-analysis.md)** - Technical analysis and implementation details
+- **[USAGE.md](../USAGE.md)** - Full configuration guide
+
+---
+
+## Related Documentation
+
+- **[Quick Reference Cheatsheet](../CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
+- **[Usage Guide](../USAGE.md)** - Comprehensive guide covering all features
+- **[MCP Documentation](../mcps/README.md)** - Built-in MCP servers catalog
+- **[External MCPs](../mcps/EXTERNAL-MCPS.md)** - Community MCP servers
 
 ---
 

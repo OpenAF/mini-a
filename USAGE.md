@@ -2,7 +2,7 @@
 
 Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language Models (LLMs) and various tools to achieve specified goals. It can execute shell commands, interact with Model Context Protocol (MCP) servers, and work step-by-step towards completing objectives.
 
-> **💡 New to Mini-A?** Check out [OPTIMIZATIONS.md](OPTIMIZATIONS.md) to learn about built-in performance features that automatically reduce token usage by 40-60% and costs by 50-70%.
+> **💡 New to Mini-A?** Check out [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md) to learn about built-in performance features that automatically reduce token usage by 40-60% and costs by 50-70%.
 
 ## Prerequisites
 
@@ -395,6 +395,7 @@ The `start()` method accepts various configuration options:
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
 - **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
+- **`mcpproxy`** (boolean, default: false): Aggregate all MCP connections (including `mcp="..."` and `useutils=true`) through a single proxy interface that exposes a `proxy-dispatch` tool. This reduces context usage by presenting only one tool to the LLM instead of exposing all tools from all connections individually. The LLM can use `proxy-dispatch` to list, search, and call tools across all downstream MCP connections. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for flow diagrams and advanced usage notes.
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
 ```javascript
@@ -403,6 +404,13 @@ mcp: "(cmd: 'docker run --rm -i mcp/dockerhub')"
 
 // Multiple MCP connections
 mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa', timeout: 5000) ]"
+
+// Using MCP proxy to reduce context usage
+// All connections are aggregated through a single proxy-dispatch tool
+mcpproxy: true
+usetools: true
+mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-time.yaml') ]"
+useutils: true
 ```
 
 Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit cache settings). When detected, Mini-A caches results keyed by tool name and parameters for the configured TTL, reusing outputs on subsequent steps to avoid redundant calls.
@@ -1382,3 +1390,13 @@ log(agent.getMetrics())
 ```
 
 To poll the OpenAF registry directly, use `ow.metrics.get("mini-a")` from another job or expose it through your usual monitoring bridge.
+
+## Related Documentation
+
+- **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
+- **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
+- **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
+- **[MCP Documentation](mcps/README.md)** - Built-in MCP servers catalog
+- **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations
+- **[External MCPs](mcps/EXTERNAL-MCPS.md)** - Community MCP servers
+- **[Contributing Guide](CONTRIBUTING.md)** - Join the project

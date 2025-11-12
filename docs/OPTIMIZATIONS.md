@@ -569,9 +569,8 @@ A: Your setting takes precedence. New behavior only applies when `maxcontext` is
 
 ## Additional Resources
 
-- [Usage Guide](USAGE.md) - Complete configuration reference
-- [Analysis Document](mini-a-analysis.md) - Detailed technical analysis
-- [CHEATSHEET](CHEATSHEET.md) - Quick parameter reference
+- [Usage Guide](../USAGE.md) - Complete configuration reference
+- [CHEATSHEET](../CHEATSHEET.md) - Quick parameter reference
 - [GitHub Issues](https://github.com/openaf/mini-a/issues) - Report problems or request features
 
 ---
