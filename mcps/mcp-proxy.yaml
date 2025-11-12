@@ -1,4 +1,4 @@
-# Author: OpenAI Assistant
+# Author: OpenAI Assistant, Nuno Aguiar
 help:
   text   : A STDIO/HTTP MCP proxy server aggregating multiple downstream MCP connections
   expects:
