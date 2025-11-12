@@ -398,6 +398,7 @@ MiniA.buildVisualKnowledge = function(options) {
   }
 
   if (useCharts) {
+    __flags.MD_CHART = true
     visualParts.push(
       "Charts (strict format):\n" +
       "  - Wrap only the config object inside ```chart``` (aliases: chartjs, chart.js).\n" +

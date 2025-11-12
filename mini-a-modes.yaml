@@ -8,9 +8,11 @@ modes:
   shellrw:
     description: "Read-write mode for shell commands"
     params     :
-      useshell : true
-      useutils : true
-      readwrite: true
+      useshell       : true
+      useutils       : true
+      readwrite      : true
+      shellallowpipes: true
+      shellbatch     : true
 
   utils:
     description: "Utilities mode"
