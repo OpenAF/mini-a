@@ -61,13 +61,13 @@ files:
 - CHEATSHEET.md
 - CODE_OF_CONDUCT.md
 - CONTRIBUTING.md
-- EXTERNAL-MCPS.md
 - LICENSE
-- OPTIMIZATIONS.md
 - README.md
-- TESTS_MODELS.md
 - USAGE.md
-- WHATS-NEW.md
+- docs/MCPPROXY-FEATURE.md
+- docs/OPTIMIZATIONS.md
+- docs/TESTS_MODELS.md
+- docs/WHATS-NEW.md
 - examples/README.md
 - examples/changelog-gen.yaml
 - examples/document.yaml
@@ -75,6 +75,7 @@ files:
 - examples/planning-demo.sh
 - examples/summary.yaml
 - mcps/CREATING.md
+- mcps/EXTERNAL-MCPS.md
 - mcps/README.md
 - mcps/mcp-ch.yaml
 - mcps/mcp-db.yaml
@@ -119,16 +120,16 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: f507beae567f20203b3b365983a5efb50b7a5f17
+  CHEATSHEET.md: 20aaec4a36089cbeeb57781ec372e18c720c72bf
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
-  EXTERNAL-MCPS.md: 891a54fde5df8f946fafdb9f7a3413f99fe9187b
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  OPTIMIZATIONS.md: 325b9301aaa48fe7a5858d80faeee09ec9a6d934
-  README.md: 29808b52827a81b14bc291a385c982db45dc6baa
-  TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  USAGE.md: 903fd585a2dabbf69ccaf707c6e799b9c45b7300
-  WHATS-NEW.md: 72a32ffdc5023f566251dc65b478ee6d45b472a2
+  README.md: 52f27ca1bf15805d714ee334faaf8e63e5a8a2e6
+  USAGE.md: 24624f9eb2ad3d23f6d264c9dd9076a37ead86ef
+  docs/MCPPROXY-FEATURE.md: 593734b6da8b6ec9bd44929cd1fd190395042969
+  docs/OPTIMIZATIONS.md: 16030f3ab1f71043331504be554b98d7839f394d
+  docs/TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
+  docs/WHATS-NEW.md: f90cac539e1223560fb397f0a884a0f226de66cd
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
@@ -136,6 +137,7 @@ filesHash:
   examples/planning-demo.sh: 05c0ef0a5f2452466a01e80158434de0ed29a9a3
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
+  mcps/EXTERNAL-MCPS.md: f8dfb43a10c6512979314303d1151db54d22b476
   mcps/README.md: 190ef895d2af2976e811993889e60f42fef5f443
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
@@ -157,14 +159,14 @@ filesHash:
   mcps/mcp-time.yaml: fb1a07bd28cf5284bb4178694411d4a8a736ba33
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: a70f9a0003e8c2072f65a7d890e4841dd712198f
+  mini-a-con.js: f63c5b4c687fee88a9e3a32b19fb0aff98f22d02
   mini-a-main.yaml.old: a4ece7b69a410fe2adc1938819901255d22c5cbb
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
-  mini-a-modes.yaml: 93d1fd48f6bca3d657e20be7bd665f6ae4e026e7
+  mini-a-modes.yaml: fea8f5fc7c404a3509a71877941740590acaecf1
   mini-a-utils.js: 8663ea34f3b64d0a5367e4ab6556766332967f11
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 7ce42404786ad8a7f2a8a10cb507cf40aa70a349
-  mini-a.js: 2ae8086e039a76b25fe26999cfa19aceafad841c
+  mini-a.js: 4767b164711a5681a2b100b33f92e13ffa9928c1
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 971ea1c6a9de90b0b42981c7021d2c3b01cf9eb7
   public/index.md: 475c7278c9bc504b8612a1e7f4ac72f1defc959d
