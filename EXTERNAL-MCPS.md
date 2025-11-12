@@ -43,3 +43,28 @@ mini-a goal="use the private MCP" \
 ```
 
 Prefer environment variables for sensitive data and confirm the external MCP's rate limits before automating high-frequency calls.
+
+## Aggregating multiple MCPs with mcp-proxy
+
+When working with multiple external MCPs (or a mix of external and built-in MCPs), you can use `mcp-proxy` to aggregate them into a single unified endpoint. This simplifies configuration and provides a centralized interface for discovering and calling tools across all connected MCP servers.
+
+### Example: Aggregate external and built-in MCPs
+
+```bash
+# Start mcp-proxy aggregating Wikipedia, DuckDuckGo, and built-in mcp-time
+ojob mcps/mcp-proxy.yaml onport=9000 \
+  mcp="[(cmd: 'docker run --rm -i mcp/wikipedia-mcp'), (cmd: 'docker run --rm -i mcp/duckduckgo'), (cmd: 'ojob mcps/mcp-time.yaml')]"
+
+# Now use the proxy with Mini-A
+mini-a goal="search for information about Lisbon and tell me the current time there" \
+  mcp="(type: remote, url: 'http://localhost:9000/mcp')" rpm=20
+```
+
+### Benefits of using mcp-proxy
+
+- **Unified discovery**: List and search tools across all downstream MCPs with a single `proxy-dispatch` call.
+- **Simplified configuration**: Connect once to the proxy instead of managing multiple MCP connections.
+- **Mixed sources**: Combine STDIO MCPs (including Docker-based), HTTP remote MCPs, and built-in MCPs seamlessly.
+- **Connection management**: The proxy handles initialization, tool caching, and connection health for all downstream servers.
+
+See [mcps/README.md](mcps/README.md#mcp-proxy) for detailed `mcp-proxy` documentation and additional examples.
