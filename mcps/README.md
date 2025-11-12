@@ -17,6 +17,7 @@
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-shell  | Local shell execution MCP       | STDIO/HTTP       | (included) | [mcp-shell.yaml](mcp-shell.yaml)   |
 | mcp-mini-a | Mini-A agent runner MCP         | STDIO/HTTP       | (included) | [mcp-mini-a.yaml](mcp-mini-a.yaml) |
+| mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oafp   | OpenAF processor (oafp) runner & docs MCP | STDIO/HTTP | (included) | [mcp-oafp.yaml](mcp-oafp.yaml)   |
 | mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
@@ -35,6 +36,68 @@ See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contrib
 
 ```bash
 oafp in=mcp data="(cmd: 'ojob mcps/mcp-mini-a.yaml', tool: run-goal, params: (goal: 'summarize README.md', format: 'md', useplanning: true))"
+```
+
+#### mcp-proxy
+
+`mcp-proxy` aggregates multiple downstream MCP connections (STDIO or HTTP remote) into a single unified MCP server. This enables you to expose a consolidated set of tools from various MCP sources through one endpoint, simplifying integration with LLMs and other MCP clients.
+
+Key arguments:
+
+- `mcp` (required): JSSLON string describing one MCP connection or an array of MCP connection descriptors. Each descriptor follows the same format used with Mini-A's `mcp=` parameter.
+- `onport` (optional): Start an HTTP MCP server on the specified port.
+- `libs` (optional): Comma-separated libraries or `@oPack/library.js` references to preload before connecting (useful for custom helpers or drivers).
+
+The proxy exposes a single powerful tool:
+
+- `proxy-dispatch`: Interact with downstream MCP connections. Supports three actions:
+  - `list`: List all registered connections and their tools (optionally filter by connection).
+  - `search`: Search for tools across connections using a text query that matches against tool names, descriptions, and annotations.
+  - `call`: Invoke a specific tool on a target connection (automatically resolves which connection hosts the tool if unambiguous).
+
+Available parameters for `proxy-dispatch`:
+
+- `action` (required): One of `list`, `search`, or `call`.
+- `connection` (optional): Connection identifier or alias to scope the action.
+- `query` (optional): Search text for `search` action.
+- `tool` (optional): Tool name for `call` action.
+- `arguments` (optional): Input arguments to forward to the downstream tool when calling.
+- `meta` (optional): Metadata object forwarded to the downstream MCP call.
+- `limit` (optional): Maximum number of results for `search` actions.
+- `includeTools`, `includeInputSchema`, `includeAnnotations` (optional): Control verbosity of returned metadata.
+- `refresh` (optional): Refresh tool metadata from downstream MCPs before executing the action.
+
+Example — aggregate multiple STDIO MCPs and call remotely:
+
+```bash
+# Start the proxy as an HTTP server aggregating mcp-time and mcp-net
+ojob mcps/mcp-proxy.yaml onport=9090 \
+  mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-net.yaml')]"
+
+# List all available connections and their tools
+oafp in=mcp data="(type: remote, url: 'http://localhost:9090/mcp', tool: proxy-dispatch, params: (action: list))"
+
+# Search for tools related to 'time'
+oafp in=mcp data="(type: remote, url: 'http://localhost:9090/mcp', tool: proxy-dispatch, params: (action: search, query: 'time'))"
+
+# Call a specific tool through the proxy
+oafp in=mcp data="(type: remote, url: 'http://localhost:9090/mcp', tool: proxy-dispatch, params: (action: call, tool: 'current-time'))"
+```
+
+Example — mix STDIO and remote MCPs:
+
+```bash
+# Aggregate a local MCP and a remote one
+ojob mcps/mcp-proxy.yaml onport=8080 \
+  mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (type: remote, url: 'http://external.mcp.local:1234/mcp')]"
+```
+
+Example — use with Mini-A to access aggregated tools:
+
+```bash
+# The proxy can simplify mcp= configuration by consolidating multiple sources
+mini-a goal="what time is it in Tokyo and what is my public IP?" \
+  mcp="(type: remote, url: 'http://localhost:9090/mcp')" rpm=20
 ```
 
 #### mcp-db
