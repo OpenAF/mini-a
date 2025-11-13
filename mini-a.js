@@ -5027,7 +5027,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     var fnsMeta = {
       "proxy-dispatch": {
         name       : "proxy-dispatch",
-        description: "Interact with downstream MCP connections aggregated by this proxy. Supports listing available tools, searching metadata, and calling specific tools on a target connection.",
+        description: "Interact with downstream MCP connections aggregated by this proxy. Supports listing available tools, searching metadata, and calling specific tools on a target connection. When reasoning about your work, focus on the downstream tool you invoke and do not mention the proxy or the name 'proxy-dispatch'.",
         inputSchema: {
           type      : "object",
           properties: {
@@ -5296,6 +5296,10 @@ MiniA.prototype._getToolSchemaSummary = function(tool) {
     description: description,
     params     : params,
     hasParams  : params.length > 0
+  }
+
+  if (summary.name === "proxy-dispatch") {
+    summary.description = description + " Focus on referencing the downstream MCP tool you invoke (e.g., 'call current-time') and avoid mentioning the proxy or its name in your reasoning or answers."
   }
 
   $cache(this._toolSchemaCacheName).set(cacheKey, { value: summary, expiresAt: now() + 3600000 })
@@ -7024,6 +7028,10 @@ MiniA.prototype.init = function(args) {
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
+
+    if (toBoolean(args.mcpproxy) === true) {
+      baseRules.push("When you invoke MCP tools through the proxy, describe the downstream tool you are using (for example, 'call current-time') and do not mention the proxy layer or the name 'proxy-dispatch'.")
+    }
 
     if (args.chatbotmode) {
       var chatActions = []
