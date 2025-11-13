@@ -253,7 +253,148 @@ Optional flags when starting the server:
 
 Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
 
-### Web UI via Docker
+## Running Mini-A in Docker
+
+Mini-A can run inside a Docker container for isolated execution, portability, and consistent deployment across environments. The container supports three main usage patterns: CLI console, web interface, and goal-based execution.
+
+### Docker Container Usage Patterns
+
+#### Pattern 1: CLI Console Mode
+
+Run Mini-A as an interactive console inside a container. This is useful for quick experimentation or when you want the console interface without installing OpenAF locally.
+
+**Basic console:**
+```bash
+docker run --rm -ti \
+  -e OPACKS=mini-a \
+  -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000, temperature: 1)" \
+  openaf/oaf:edge
+```
+
+**Console with shell access and volume mount:**
+```bash
+docker run --rm -ti \
+  -v $(pwd):/work \
+  -w /work \
+  -e OPACKS=mini-a \
+  -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/oaf:edge \
+  useshell=true
+```
+
+**Console with AWS Bedrock:**
+```bash
+docker run --rm -ti \
+  -v $(pwd):/work \
+  -e OPACKS=aws,mini-a \
+  -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'openai.gpt-oss-20b-1:0', temperature: 0), timeout: 900000)" \
+  -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN \
+  openaf/oaf:edge \
+  useshell=true libs="@AWS/aws.js"
+```
+
+#### Pattern 2: Web Interface Mode
+
+Start Mini-A as a web server for browser-based interaction. This provides a rich UI with support for diagrams, charts, file attachments, and conversation history.
+
+**Basic web interface:**
+```bash
+docker run -d --rm \
+  -e OPACKS=mini-a \
+  -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345
+```
+
+**Web interface with multiple MCPs and full features:**
+```bash
+docker run -d --rm \
+  -e OPACKS="Mermaid,mini-a" \
+  -e OPACK_EXEC="mini-a" \
+  -e mcp="[(type:ojob,options:(job:mcps/mcp-web.yaml))|(type:ojob,options:(job:mcps/mcp-weather.yaml))|(type:ojob,options:(job:mcps/mcp-fin.yaml))|(type:ojob,options:(job:mcps/mcp-math.yaml))|(type:ojob,options:(job:mcps/mcp-net.yaml))|(type:ojob,options:(job:mcps/mcp-time.yaml))]" \
+  -e OAF_FLAGS="(MD_DARKMODE: 'auto')" \
+  -e OAF_MODEL="(type: openai, key: '...', url: 'https://api.groq.com/openai', model: openai/gpt-oss-20b, timeout: 900000, temperature: 0)" \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345 usecharts=true usediagrams=true usetools=true mcpproxy=true
+```
+
+**Web interface with history and attachments:**
+```bash
+docker run -d --rm \
+  -v $(pwd)/history:/tmp/history \
+  -e OPACKS=mini-a \
+  -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345 chatbotmode=true \
+  usehistory=true historykeep=true historypath=/tmp/history \
+  useattach=true usediagrams=true usecharts=true
+```
+
+#### Pattern 3: Goal-Based Execution
+
+Run Mini-A to achieve a specific goal and exit. This is ideal for automation, CI/CD pipelines, or scheduled tasks.
+
+**Simple goal execution:**
+```bash
+docker run --rm \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml \
+  goal="generate a report of system metrics" \
+  useshell=true
+```
+
+**Goal with file access:**
+```bash
+docker run --rm \
+  -v $(pwd):/work \
+  -w /work \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml \
+  goal="analyze all JavaScript files and create a summary" \
+  useshell=true outfile=/work/summary.md
+```
+
+**Goal with MCP integration:**
+```bash
+docker run --rm \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml \
+  goal="what time is it in Sydney and Tokyo?" \
+  mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
+```
+
+**Goal with planning and multiple MCPs:**
+```bash
+docker run --rm \
+  -v $(pwd):/work \
+  -w /work \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-4, key: 'your-key', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml \
+  goal="research latest tech trends and create a comprehensive report" \
+  mcp="[(cmd: 'ojob mcps/mcp-web.yaml'), (cmd: 'ojob mcps/mcp-time.yaml')]" \
+  useplanning=true planfile=/work/plan.md \
+  outfile=/work/report.md usetools=true mcpproxy=true
+```
+
+### Web UI via Docker (Provider-Specific Examples)
 
 Run the Mini‑A browser UI inside a container by passing the proper `OAF_MODEL` configuration for your LLM provider and exposing port `12345`. The following examples mount a `history/` directory from the host so conversation transcripts persist across runs.
 

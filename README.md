@@ -44,6 +44,38 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 
 For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
+### Running in Docker
+
+Mini-A can run in Docker containers for isolated execution and portability:
+
+**CLI console:**
+```bash
+docker run --rm -ti \
+  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/oaf:edge
+```
+
+**Web interface:**
+```bash
+docker run -d --rm \
+  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/oaf:edge onport=12345
+```
+
+**Goal execution:**
+```bash
+docker run --rm \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml goal="your goal here" useshell=true
+```
+
+See [USAGE.md](USAGE.md#running-mini-a-in-docker) for comprehensive Docker examples including multiple MCPs, AWS Bedrock, planning workflows, and more.
+
 ### Simple Examples
 
 **List files:**

@@ -553,6 +553,82 @@ mini-a goal="catalog files" useshell=true shell="sandbox-exec -f /usr/share/sand
 
 ---
 
+## Docker Usage
+
+Mini-A can run inside Docker containers for isolated execution and portability.
+
+### CLI Console in Docker
+
+```bash
+# Basic console
+docker run --rm -ti \
+  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/oaf:edge
+
+# Console with file access
+docker run --rm -ti \
+  -v $(pwd):/work -w /work \
+  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/oaf:edge useshell=true
+```
+
+### Web Interface in Docker
+
+```bash
+# Basic web UI
+docker run -d --rm \
+  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/oaf:edge onport=12345
+
+# Full-featured web UI with multiple MCPs
+docker run -d --rm \
+  -e OPACKS="Mermaid,mini-a" -e OPACK_EXEC=mini-a \
+  -e mcp="[(type:ojob,options:(job:mcps/mcp-web.yaml))|(type:ojob,options:(job:mcps/mcp-time.yaml))|(type:ojob,options:(job:mcps/mcp-fin.yaml))]" \
+  -e OAF_MODEL="(type: openai, key: '...', model: gpt-5-mini, timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/oaf:edge \
+  onport=12345 usecharts=true usediagrams=true usetools=true mcpproxy=true
+```
+
+### Goal-Based Execution in Docker
+
+```bash
+# Simple goal
+docker run --rm \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml goal="your goal here" useshell=true
+
+# Goal with file output
+docker run --rm \
+  -v $(pwd):/work -w /work \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml \
+  goal="analyze code and create report" useshell=true outfile=/work/report.md
+
+# Goal with MCPs and planning
+docker run --rm \
+  -v $(pwd):/work -w /work \
+  -e OPACKS=mini-a \
+  -e OAF_MODEL="(type: openai, model: gpt-4, key: '...', timeout: 900000)" \
+  openaf/oaf:edge \
+  ojob mini-a/mini-a.yaml \
+  goal="research and report on topic" \
+  mcp="[(cmd: 'ojob mcps/mcp-web.yaml')]" \
+  useplanning=true planfile=/work/plan.md outfile=/work/report.md
+```
+
+See [USAGE.md](USAGE.md#running-mini-a-in-docker) for comprehensive Docker examples.
+
+---
+
 ## Common Examples
 
 ### File Analysis
