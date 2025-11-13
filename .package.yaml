@@ -98,7 +98,6 @@ files:
 - mcps/mcp-weather.yaml
 - mcps/mcp-web.yaml
 - mini-a-con.js
-- mini-a-main.yaml.old
 - mini-a-modelman.js
 - mini-a-modes.yaml
 - mini-a-utils.js
@@ -160,7 +159,6 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
   mini-a-con.js: f63c5b4c687fee88a9e3a32b19fb0aff98f22d02
-  mini-a-main.yaml.old: a4ece7b69a410fe2adc1938819901255d22c5cbb
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
   mini-a-modes.yaml: b6ee969437ab941c0f3192f12a55e3da82c4c3e4
   mini-a-utils.js: 8663ea34f3b64d0a5367e4ab6556766332967f11
