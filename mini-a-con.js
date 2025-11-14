@@ -684,25 +684,90 @@ try {
       return
     }
 
-    var rows = stats.sections.map(function(section) {
-      var share = stats.totalTokens > 0 ? section.tokens / stats.totalTokens : 0
-      return {
-        segment : section.section,
-        tokens  : section.tokens,
-        share   : (share * 100).toFixed(1) + "%",
-        messages: section.messages,
-        //bar     : ow.format.string.progress(section.tokens, stats.totalTokens, 0, 20, "█", "░")
-        bar     : colorifyText(ow.format.string.progress(section.tokens, stats.totalTokens, 0, 35), "RESET")
+    // Define colors and patterns for each section type
+    var sectionStyles = {
+      "System"    : { color: "FG(117)", pattern: "█", label: "System" },
+      "User"      : { color: "FG(147)", pattern: "▓", label: "User" },
+      "Assistant" : { color: "FG(218)", pattern: "▒", label: "Assistant" },
+      "Tool"      : { color: "FG(155)", pattern: "░", label: "Tool" },
+      "Other"     : { color: "FG(249)", pattern: "·", label: "Other" }
+    }
+
+    print(colorifyText("Conversation context usage", accentColor))
+    print()
+
+    // Calculate available width for the bar (reserve some space for borders and padding)
+    var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+    var barWidth = Math.max(40, termWidth - 4)  // Reserve 4 chars for borders/padding
+
+    // Build the horizontal bar
+    var barSegments = []
+    var totalTokens = stats.totalTokens > 0 ? stats.totalTokens : 1
+
+    stats.sections.forEach(function(section) {
+      if (section.tokens > 0) {
+        var proportion = section.tokens / totalTokens
+        var segmentWidth = Math.max(1, Math.round(proportion * barWidth))
+        var style = sectionStyles[section.section] || sectionStyles["Other"]
+
+        barSegments.push({
+          width: segmentWidth,
+          color: style.color,
+          pattern: style.pattern,
+          section: section
+        })
       }
     })
 
-    print(colorifyText("Conversation context usage", accentColor))
-    print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+    // Adjust widths to exactly match barWidth (handle rounding differences)
+    var currentTotal = barSegments.reduce(function(sum, seg) { return sum + seg.width }, 0)
+    if (currentTotal !== barWidth && barSegments.length > 0) {
+      // Adjust the largest segment
+      var largestIdx = 0
+      var largestWidth = 0
+      barSegments.forEach(function(seg, idx) {
+        if (seg.width > largestWidth) {
+          largestWidth = seg.width
+          largestIdx = idx
+        }
+      })
+      barSegments[largestIdx].width += (barWidth - currentTotal)
+    }
+
+    // Render the bar
+    var barLine = ""
+    barSegments.forEach(function(seg) {
+      var segment = ""
+      for (var i = 0; i < seg.width; i++) {
+        segment += seg.pattern
+      }
+      barLine += colorifyText(segment, seg.color)
+    })
+
+    print("  " + barLine)
+    print()
+
+    // Print legend with details
+    stats.sections.forEach(function(section) {
+      if (section.tokens > 0) {
+        var style = sectionStyles[section.section] || sectionStyles["Other"]
+        var share = stats.totalTokens > 0 ? (section.tokens / stats.totalTokens * 100).toFixed(1) : "0.0"
+        var icon = colorifyText(style.pattern + style.pattern, style.color)
+        var label = colorifyText(section.section.padEnd(10), hintColor)
+        var tokens = colorifyText(String(section.tokens).padStart(6), numericColor)
+        var percentage = colorifyText((share + "%").padStart(6), hintColor)
+        var msgs = colorifyText("(" + section.messages + " msg" + (section.messages === 1 ? "" : "s") + ")", "FG(249)")
+
+        print("  " + icon + " " + label + "  " + tokens + " tokens " + percentage + "  " + msgs)
+      }
+    })
+
+    print()
     var methodLabel = stats.estimateMethod === "actual" ? "actual from API" : (stats.estimateMethod === "model" ? "model-based" : "approximate")
     var tokenLabel = stats.estimateMethod === "actual" ? "Total tokens: " : "Estimated tokens: ~"
-    print(colorifyText("Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | " + tokenLabel, hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
+    print(colorifyText("  Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | " + tokenLabel, hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
     if (isString(stats.path) && stats.path.length > 0) {
-      print(colorifyText("Conversation file: " + stats.path, hintColor))
+      print(colorifyText("  Conversation file: " + stats.path, hintColor))
     }
   }
 
