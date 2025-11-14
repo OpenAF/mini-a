@@ -4,6 +4,36 @@
 
 The `mcpproxy=true` option enables aggregation of multiple MCP (Model Context Protocol) connections through a single proxy interface. This feature reduces the total context spent by exposing only one tool (`proxy-dispatch`) to the LLM instead of presenting all tools from all connections individually.
 
+```mermaid
+flowchart LR
+  subgraph Upstream LLM
+    LLM[LLM]
+  end
+  subgraph Mini-A Proxy Layer
+    Proxy[proxy-dispatch]
+  end
+  subgraph Downstream Connections
+    Utils[Mini Utils Tool]
+    Time[MCP: Time]
+    Fin[MCP: Finance]
+    Custom[MCP: Custom Server]
+  end
+  LLM -->|Single tool registration| Proxy
+  Proxy -->|List/Search/Call| Utils
+  Proxy --> Time
+  Proxy --> Fin
+  Proxy --> Custom
+  Utils -->|Results| Proxy
+  Time -->|Time data| Proxy
+  Fin -->|Rates| Proxy
+  Custom -->|Domain output| Proxy
+  Proxy -->|Aggregated response| LLM
+  classDef layer fill:#14b8a6,stroke:#0f766e,color:#083344,stroke-width:2px
+  classDef downstream fill:#ccfbf1,stroke:#0f766e,color:#0f172a
+  class Proxy layer
+  class Utils,Time,Fin,Custom downstream
+```
+
 ## Benefits
 
 1. **Reduced Context Usage**: Instead of registering dozens of tools from multiple MCP servers, only a single `proxy-dispatch` tool is exposed to the LLM

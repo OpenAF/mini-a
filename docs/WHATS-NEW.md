@@ -81,6 +81,21 @@ Mini-A now includes **automatic performance optimizations** that reduce token us
 
 **Action required**: None! Benefits are automatic.
 
+```mermaid
+journey
+  title Experience with Mini-A Optimizations
+  section Before
+    Manual context tuning: 3
+    Fixed escalation thresholds: 2
+    Sequential tool calls: 2
+    Planning overhead each step: 1
+  section After
+    Automatic context management: 5
+    Adaptive escalation by complexity: 5
+    Parallel-ready prompts: 4
+    Lightweight execution guidance: 4
+```
+
 ---
 
 ## What Changed?
