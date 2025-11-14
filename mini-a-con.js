@@ -1588,33 +1588,34 @@ try {
     }
     if (trimmed.charAt(0) === '/') {
       var command = trimmed.substring(1).trim()
+      var commandLower = command.toLowerCase()
       if (command.length === 0) {
         printHelp()
         continue
       }
-      if (command === "help") {
+      if (commandLower === "help") {
         printHelp()
         continue
       }
-      if (command === "exit" || command === "quit") {
+      if (commandLower === "exit" || commandLower === "quit") {
         break
       }
-      if (command === "show") {
+      if (commandLower === "show") {
         describeOptions()
         continue
       }
-      if (command.indexOf("show ") === 0) {
+      if (commandLower.indexOf("show ") === 0) {
         var prefixFilter = command.substring(5).trim()
         describeOptions(prefixFilter.length > 0 ? prefixFilter : __)
         continue
       }
-      if (command === "reset") {
+      if (commandLower === "reset") {
         sessionOptions = resetOptions()
         lastConversationStats = __
         print(colorifyText("Parameters reset to defaults.", successColor))
         continue
       }
-      if (command === "last" || command.indexOf("last ") === 0) {
+      if (commandLower === "last" || commandLower.indexOf("last ") === 0) {
         if (isUnDef(lastResult)) {
           print(colorifyText("No goal executed yet.", hintColor))
           continue
@@ -1646,7 +1647,7 @@ try {
         }
         continue
       }
-      if (command === "save" || command.indexOf("save ") === 0) {
+      if (commandLower === "save" || commandLower.indexOf("save ") === 0) {
         if (isUnDef(lastResult)) {
           print(colorifyText("No goal executed yet. Nothing to save.", hintColor))
           continue
@@ -1654,7 +1655,7 @@ try {
 
         // Parse filename from command
         var fileName = "response.md"
-        if (command.indexOf("save ") === 0) {
+        if (commandLower.indexOf("save ") === 0) {
           var fileArg = command.substring(5).trim()
           if (fileArg.length > 0) {
             fileName = fileArg
@@ -1676,19 +1677,19 @@ try {
         }
         continue
       }
-      if (command === "clear") {
+      if (commandLower === "clear") {
         clearConversationHistory()
         continue
       }
-      if (command === "context") {
+      if (commandLower === "context") {
         printContextSummary()
         continue
       }
-      if (command === "compact") {
+      if (commandLower === "compact") {
         compactConversationContext()
         continue
       }
-      if (command.indexOf("compact ") === 0) {
+      if (commandLower.indexOf("compact ") === 0) {
         var keepValue = command.substring(8).trim()
         var parsedKeep = parseInt(keepValue, 10)
         if (isNaN(parsedKeep)) {
@@ -1698,11 +1699,11 @@ try {
         }
         continue
       }
-      if (command === "summarize") {
+      if (commandLower === "summarize") {
         summarizeConversation()
         continue
       }
-      if (command.indexOf("summarize ") === 0) {
+      if (commandLower.indexOf("summarize ") === 0) {
         var keepValue = command.substring(10).trim()
         var parsedKeep = parseInt(keepValue, 10)
         if (isNaN(parsedKeep)) {
@@ -1712,11 +1713,11 @@ try {
         }
         continue
       }
-      if (command === "history") {
+      if (commandLower === "history") {
         printConversationHistory()
         continue
       }
-      if (command.indexOf("history ") === 0) {
+      if (commandLower.indexOf("history ") === 0) {
         var countArg = command.substring(8).trim()
         var parsedCount = parseInt(countArg, 10)
         if (isNaN(parsedCount)) {
@@ -1726,9 +1727,9 @@ try {
         }
         continue
       }
-      if (command === "model" || command.indexOf("model ") === 0) {
+      if (commandLower === "model" || commandLower.indexOf("model ") === 0) {
         var target = "model" // default to model
-        if (command.indexOf("model ") === 0) {
+        if (commandLower.indexOf("model ") === 0) {
           var targetArg = command.substring(6).trim().toLowerCase()
           if (targetArg === "modellc" || targetArg === "lc") {
             target = "modellc"
@@ -1781,24 +1782,24 @@ try {
         }
         continue
       }
-      if (command === "stats") {
+      if (commandLower === "stats") {
         printStats()
         continue
       }
-      if (command.indexOf("stats ") === 0) {
+      if (commandLower.indexOf("stats ") === 0) {
         var statsArg = command.substring(6).trim()
         printStats(statsArg)
         continue
       }
-      if (command.indexOf("toggle ") === 0) {
+      if (commandLower.indexOf("toggle ") === 0) {
         toggleOption(command.substring(7).trim())
         continue
       }
-      if (command.indexOf("unset ") === 0) {
+      if (commandLower.indexOf("unset ") === 0) {
         unsetOption(command.substring(6).trim())
         continue
       }
-      if (command.indexOf("set ") === 0) {
+      if (commandLower.indexOf("set ") === 0) {
         var content = command.substring(4)
         var match = content.match(/^(\w+)(?:\s*=\s*|\s+)([\s\S]+)$/)
         if (!match) {
