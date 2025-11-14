@@ -51,7 +51,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20251113'
+version: '20251114'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -64,6 +64,7 @@ files:
 - LICENSE
 - README.md
 - USAGE.md
+- docs/LEARN.md
 - docs/MCPPROXY-FEATURE.md
 - docs/OPTIMIZATIONS.md
 - docs/TESTS_MODELS.md
@@ -123,12 +124,13 @@ filesHash:
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: a71620d0dccb81344df2e968ccfc9ec1ea878543
+  README.md: cfca18e603c6be3b178e42aef1787b0bedd75976
   USAGE.md: 7c7a6b824e6ea71176b83168e5fa90af471d3550
-  docs/MCPPROXY-FEATURE.md: 593734b6da8b6ec9bd44929cd1fd190395042969
-  docs/OPTIMIZATIONS.md: 16030f3ab1f71043331504be554b98d7839f394d
-  docs/TESTS_MODELS.md: 8c09f3ca8112e4b8bd007fc096fcac8946d25cf7
-  docs/WHATS-NEW.md: f90cac539e1223560fb397f0a884a0f226de66cd
+  docs/LEARN.md: a927a43eabfe5e7e831628beac9dcd3a2323cb05
+  docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
+  docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
+  docs/TESTS_MODELS.md: 2b181ec2a6517a9f87082eb8546408efb1363fb5
+  docs/WHATS-NEW.md: e7baec1aba11c34b148e88b9c1fdbd6caca950eb
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
