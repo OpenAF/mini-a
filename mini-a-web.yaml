@@ -246,7 +246,7 @@ todo:
       }
       // Start Mini-A interaction in a non-blocking way
       $doV(() => {
-        var uuid = _res.uuid, lma
+        var uuid = _res.uuid, lma, isNewConversation = false
         if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
           delete global.__planState[ uuid ]
         }
@@ -256,6 +256,7 @@ todo:
 
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
+          isNewConversation = true
           // If history does not exist but we have history in memory, rebuild it
           if (global.__usehistory && !global._mini_a_web_historyExists(uuid) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
             // Try rebuilding
@@ -423,11 +424,17 @@ todo:
           lma = global.__conversations[ uuid ]
         }
 
-        var _rma = lma.start(merge(global.maArgs, {
+        // Only load conversation from file/S3 if this is a new MiniA instance
+        // Otherwise use the in-memory conversation to preserve tool results
+        var startArgs = merge(global.maArgs, {
           goal        : postData.prompt,
-          raw         : true,
-          conversation: global._mini_a_web_loadFile(_hfile)
-        }))
+          raw         : true
+        })
+        // Only pass conversation parameter for new conversations to avoid overwriting in-memory state
+        if (isNewConversation) {
+          startArgs.conversation = global._mini_a_web_loadFile(_hfile)
+        }
+        var _rma = lma.start(startArgs)
 
         if (isDef(_rma.answer)) {
           var trimmedAnswer = _rma.answer.trim();
