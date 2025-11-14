@@ -11,8 +11,8 @@ Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MC
 ```mermaid
 flowchart LR
   User((You)) -->|Goal & Parameters| MiniA[Mini-A Orchestrator]
-  MiniA -->|Reasoning & Planning| LLM["LLM Models\n(Main & Low-Cost)"]
-  MiniA -->|Tool Invocations| MCP["MCP Servers\n(Time, Finance, etc.)"]
+  MiniA -->|Reasoning & Planning| LLM["LLM Models (Main & Low-Cost)"]
+  MiniA -->|Tool Invocations| MCP["MCP Servers (Time, Finance, etc.)"]
   MiniA -->|Shell Tasks| Shell["Optional Shell"]
   MCP -->|Structured Data| MiniA
   Shell -->|Command Output| MiniA
