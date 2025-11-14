@@ -409,6 +409,7 @@ try {
       var statsCompletions = ["detailed", "tools"]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc"]
+      var contextCompletions = ["llm", "analyze"]
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -489,6 +490,18 @@ try {
 
             modelCompletions.forEach(function(target) {
               if (target.indexOf(trimmedRemainder) === 0) candidates.add(target)
+            })
+            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
+
+          // Handle /context command completions
+          if (lookupName === "context") {
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            contextCompletions.forEach(function(option) {
+              if (option.indexOf(trimmedRemainder) === 0) candidates.add(option)
             })
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
           }
@@ -674,7 +687,78 @@ try {
     return analysis
   }
 
-  function printContextSummary(agentInstance) {
+  function getTokenAnalysisFromLLM(agentInstance, entries) {
+    if (!isObject(agentInstance)) {
+      return __
+    }
+
+    // Select LLM: prefer low-cost if available, otherwise use main
+    var analyzeLLM = (isObject(agentInstance.lc_llm)) ? agentInstance.lc_llm : agentInstance.llm
+    if (!isObject(analyzeLLM) || typeof analyzeLLM.prompt !== "function") {
+      return __
+    }
+
+    // Build a prompt asking the LLM to analyze token counts
+    var analysisPrompt = "Analyze the following conversation and provide a breakdown of token counts by message role category.\n\n"
+    analysisPrompt += "Categories:\n"
+    analysisPrompt += "- System: Messages with role 'system' or 'developer'\n"
+    analysisPrompt += "- User: Messages with role 'user'\n"
+    analysisPrompt += "- Assistant: Messages with role 'assistant'\n"
+    analysisPrompt += "- Tool: Messages with role 'tool', 'function', or 'observation'\n"
+    analysisPrompt += "- Other: Any other message types\n\n"
+    analysisPrompt += "Conversation:\n"
+    analysisPrompt += "---\n"
+
+    entries.forEach(function(entry, idx) {
+      var role = isString(entry.role) ? entry.role : "unknown"
+      var content = flattenConversationContent(entry.content)
+      var preview = content.length > 200 ? content.substring(0, 200) + "..." : content
+      analysisPrompt += "Message " + (idx + 1) + " [" + role + "]: " + preview + "\n"
+    })
+
+    analysisPrompt += "---\n\n"
+    analysisPrompt += "Return ONLY a JSON object with this exact structure (no markdown, no explanation):\n"
+    analysisPrompt += "{\n"
+    analysisPrompt += "  \"system_tokens\": <number>,\n"
+    analysisPrompt += "  \"user_tokens\": <number>,\n"
+    analysisPrompt += "  \"assistant_tokens\": <number>,\n"
+    analysisPrompt += "  \"tool_tokens\": <number>,\n"
+    analysisPrompt += "  \"other_tokens\": <number>,\n"
+    analysisPrompt += "  \"total_tokens\": <number>\n"
+    analysisPrompt += "}"
+
+    try {
+      var response
+      if (typeof analyzeLLM.promptWithStats === "function") {
+        var result = analyzeLLM.promptWithStats(analysisPrompt)
+        response = isObject(result) ? result.response : result
+      } else {
+        response = analyzeLLM.prompt(analysisPrompt)
+      }
+
+      if (!isString(response) || response.trim().length === 0) {
+        return __
+      }
+
+      // Try to extract JSON from response (handle markdown code blocks)
+      var jsonMatch = response.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) {
+        return __
+      }
+
+      var parsed = JSON.parse(jsonMatch[0])
+      if (!isObject(parsed)) {
+        return __
+      }
+
+      return parsed
+    } catch (analysisError) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" LLM token analysis failed: " + analysisError, errorColor))
+      return __
+    }
+  }
+
+  function printContextSummary(agentInstance, useLLMAnalysis) {
     var stats = refreshConversationStats(agentInstance)
     if (!isObject(stats) || stats.messageCount === 0) {
       print(colorifyText("No active conversation found. Run a goal first to populate context.", hintColor))
@@ -682,6 +766,35 @@ try {
         print(colorifyText("Conversation path: " + stats.path, hintColor))
       }
       return
+    }
+
+    // If LLM analysis is requested, try to get it
+    var llmAnalysis = __
+    if (useLLMAnalysis === true) {
+      if (!isObject(agentInstance)) {
+        print(colorifyText("No active agent available. LLM analysis requires an active session.", hintColor))
+        print(colorifyText("Run a goal first, then use '/context llm' or '/context analyze'.", hintColor))
+        return
+      }
+
+      print(colorifyText("Requesting token analysis from LLM...", hintColor))
+      llmAnalysis = getTokenAnalysisFromLLM(agentInstance, stats.entries)
+
+      if (!isObject(llmAnalysis)) {
+        print(colorifyText("LLM analysis failed. Falling back to internal estimates.", hintColor))
+        useLLMAnalysis = false
+      } else {
+        // Override stats with LLM analysis
+        stats.sections = [
+          { section: "System", tokens: llmAnalysis.system_tokens || 0, chars: 0, messages: stats.sections[0].messages },
+          { section: "User", tokens: llmAnalysis.user_tokens || 0, chars: 0, messages: stats.sections[1].messages },
+          { section: "Assistant", tokens: llmAnalysis.assistant_tokens || 0, chars: 0, messages: stats.sections[2].messages },
+          { section: "Tool", tokens: llmAnalysis.tool_tokens || 0, chars: 0, messages: stats.sections[3].messages },
+          { section: "Other", tokens: llmAnalysis.other_tokens || 0, chars: 0, messages: stats.sections[4].messages }
+        ]
+        stats.totalTokens = llmAnalysis.total_tokens || 0
+        stats.estimateMethod = "llm"
+      }
     }
 
     // Define colors and patterns for each section type
@@ -763,8 +876,8 @@ try {
     })
 
     print()
-    var methodLabel = stats.estimateMethod === "actual" ? "actual from API" : (stats.estimateMethod === "model" ? "model-based" : "approximate")
-    var tokenLabel = stats.estimateMethod === "actual" ? "Total tokens: " : "Estimated tokens: ~"
+    var methodLabel = stats.estimateMethod === "llm" ? "analyzed by LLM" : (stats.estimateMethod === "actual" ? "actual from API" : (stats.estimateMethod === "model" ? "model-based" : "approximate"))
+    var tokenLabel = (stats.estimateMethod === "actual" || stats.estimateMethod === "llm") ? "Total tokens: " : "Estimated tokens: ~"
     print(colorifyText("  Total messages: ", hintColor) + colorifyText(String(stats.messageCount), numericColor) + colorifyText(" | " + tokenLabel, hintColor) + colorifyText(String(stats.totalTokens), numericColor) + colorifyText(" (" + methodLabel + ")", hintColor))
     if (isString(stats.path) && stats.path.length > 0) {
       print(colorifyText("  Conversation file: " + stats.path, hintColor))
@@ -1747,7 +1860,16 @@ try {
         continue
       }
       if (commandLower === "context") {
-        printContextSummary()
+        printContextSummary(activeAgent, false)
+        continue
+      }
+      if (commandLower.indexOf("context ") === 0) {
+        var contextArg = command.substring(8).trim().toLowerCase()
+        if (contextArg === "llm" || contextArg === "analyze") {
+          printContextSummary(activeAgent, true)
+        } else {
+          print(colorifyText("Usage: /context [llm|analyze]", errorColor))
+        }
         continue
       }
       if (commandLower === "compact") {

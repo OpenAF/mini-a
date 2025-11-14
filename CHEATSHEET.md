@@ -748,6 +748,8 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 |---------|-------------|
 | `/show` | Display all current parameters |
 | `/show <prefix>` | Display parameters starting with prefix (e.g., `/show plan`) |
+| `/context` | Show visual token usage breakdown (using internal estimates or API stats) |
+| `/context llm` or `/context analyze` | Analyze conversation tokens using LLM (prefers low-cost model if configured) |
 | `/compact [n]` | Summarize older messages, keep last n exchanges (default: 6) |
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
