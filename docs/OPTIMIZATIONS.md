@@ -15,7 +15,7 @@ graph TD
   Context -->|Compress history| Outcome
   Escalation -->|Choose optimal model| Outcome
   Parallel -->|Batch operations| Outcome
-  Planning -->|Separate plan & execution| Outcome[(Lower Tokens\nFewer Calls\nFaster Results)]
+  Planning -->|Separate plan & execution| Outcome[(Lower Tokens / Fewer Calls / Faster Results)]
   classDef primary fill:#f97316,stroke:#9a3412,stroke-width:2px,color:#fff
   classDef effect fill:#fde68a,stroke:#92400e,color:#78350f
   class Context,Escalation,Parallel,Planning primary
