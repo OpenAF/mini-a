@@ -8,6 +8,23 @@ Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MC
 
 > **⚡ New Performance Optimizations!** Mini-A now includes automatic optimizations that reduce token usage by 40-60% and costs by 50-70% with zero configuration. [Learn more →](docs/WHATS-NEW.md)
 
+```mermaid
+flowchart LR
+  User((You)) -->|Goal & Parameters| MiniA[Mini-A Orchestrator]
+  MiniA -->|Reasoning & Planning| LLM["LLM Models (Main & Low-Cost)"]
+  MiniA -->|Tool Invocations| MCP["MCP Servers (Time, Finance, etc.)"]
+  MiniA -->|Shell Tasks| Shell["Optional Shell"]
+  MCP -->|Structured Data| MiniA
+  Shell -->|Command Output| MiniA
+  LLM -->|Thoughts & Drafts| MiniA
+  MiniA -->|Final Response| User
+  classDef node fill:#2563eb,stroke:#1e3a8a,stroke-width:2px,color:#fff
+  classDef peripheral fill:#bfdbfe,stroke:#1d4ed8,color:#1e3a8a
+  class User node
+  class MiniA node
+  class LLM,MCP,Shell peripheral
+```
+
 ## Quick Start
 
 Two steps to use:
