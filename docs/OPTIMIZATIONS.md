@@ -6,6 +6,22 @@ Mini-A includes several built-in performance optimizations designed to reduce to
 
 ## Overview of Optimizations
 
+```mermaid
+graph TD
+  Start((Goal Entered)) --> Context[Automatic Context Management]
+  Start --> Escalation[Dynamic Escalation]
+  Start --> Parallel[Parallel Action Prompting]
+  Start --> Planning[Two-Phase Planning]
+  Context -->|Compress history| Outcome
+  Escalation -->|Choose optimal model| Outcome
+  Parallel -->|Batch operations| Outcome
+  Planning -->|Separate plan & execution| Outcome[(Lower Tokens\nFewer Calls\nFaster Results)]
+  classDef primary fill:#f97316,stroke:#9a3412,stroke-width:2px,color:#fff
+  classDef effect fill:#fde68a,stroke:#92400e,color:#78350f
+  class Context,Escalation,Parallel,Planning primary
+  class Outcome effect
+```
+
 | Feature | Token Savings | Call Reduction | User Action Required |
 |---------|--------------|----------------|---------------------|
 | **Automatic Context Management** | 30-50% | - | None (automatic) |
