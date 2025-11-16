@@ -834,6 +834,46 @@
         border-color: #242629;
     }
 
+    /* Webkit Scrollbar for Light Mode */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: #f1f1f1; /* Light background color */
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background-color: #ccc; /* Lighter shade for the thumb */
+        border-radius: 4px;
+        border: 1px solid #f1f1f1; /* Border matching track color */
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background-color: #b3b3b3; /* Darker on hover */
+    }
+
+    /* Webkit Scrollbar for Dark Mode */
+    body.markdown-body-dark ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    body.markdown-body-dark ::-webkit-scrollbar-track {
+        background: #0f1115; /* Dark background color */
+    }
+
+    body.markdown-body-dark ::-webkit-scrollbar-thumb {
+        background-color: #2d3238; /* Darker shade for the thumb */
+        border-radius: 4px;
+        border: 1px solid #0f1115; /* Border matching track color */
+    }
+
+    body.markdown-body-dark ::-webkit-scrollbar-thumb:hover {
+        background-color: #4a5058; /* Even darker on hover */
+    }
+
     body.markdown-body-dark #closeHistoryBtn:hover {
         background: rgba(51,144,255,0.25);
         color: var(--accent);
