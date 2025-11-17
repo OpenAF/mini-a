@@ -290,6 +290,16 @@ MiniUtilsTool.prototype.readFile = function(params) {
     }
     var encoding = params.encoding || "utf-8"
     var content = io.readFileString(filePath, encoding)
+
+    if (params.compact === true) {
+      return {
+        relativePath: this._toRelative(details.canonicalPath || filePath),
+        size: details.size,
+        encoding: encoding,
+        content: content
+      }
+    }
+
     details.path = isString(details.canonicalPath) ? details.canonicalPath : filePath
     details.relativePath = this._toRelative(details.path)
     details.encoding = encoding
@@ -326,10 +336,34 @@ MiniUtilsTool.prototype.listDirectory = function(params) {
     }
     var includeHidden = params.includeHidden === true
     var recursive = params.recursive === true
-    return this._listEntries(dirPath, {
+    var entries = this._listEntries(dirPath, {
       recursive: recursive,
       includeHidden: includeHidden
     })
+
+    if (params.compact === true) {
+      var fileCount = 0
+      var dirCount = 0
+      var compactEntries = entries.map(function(entry) {
+        if (entry.isDirectory) dirCount++
+        if (entry.isFile) fileCount++
+        return {
+          name: entry.filename,
+          relativePath: entry.relativePath,
+          isDirectory: entry.isDirectory,
+          isFile: entry.isFile,
+          size: entry.size
+        }
+      })
+      return {
+        count: entries.length,
+        files: fileCount,
+        directories: dirCount,
+        items: compactEntries
+      }
+    }
+
+    return entries
   } catch (e) {
     return "[ERROR] " + (e.message || String(e))
   }
@@ -429,11 +463,15 @@ MiniUtilsTool.prototype.searchContent = function(params) {
           }
           if (matched) {
             collected++
+            var preview = line
+            if (params.compact === true && preview.length > 100) {
+              preview = preview.substring(0, 100) + "..."
+            }
             results.push({
               path: entry.filepath,
               relativePath: entry.relativePath,
               line: i + 1,
-              preview: line
+              preview: preview
             })
             break
           }
@@ -444,9 +482,18 @@ MiniUtilsTool.prototype.searchContent = function(params) {
       return maxResults > 0 && collected >= maxResults
     })
 
-    return results.filter(function(r) {
+    var filtered = results.filter(function(r) {
       return r != null && isMap(r)
     })
+
+    if (params.compact === true) {
+      return {
+        count: filtered.length,
+        matches: filtered
+      }
+    }
+
+    return filtered
   } catch (e) {
     return "[ERROR] " + (e.message || String(e))
   }
@@ -479,6 +526,17 @@ MiniUtilsTool.prototype.getFileInfo = function(params) {
     if (isUnDef(info)) {
       return "[ERROR] Unable to retrieve file info: " + params.path
     }
+
+    if (params.compact === true) {
+      return {
+        relativePath: this._toRelative(info.canonicalPath || filePath),
+        isFile: info.isFile,
+        isDirectory: info.isDirectory,
+        size: info.size,
+        lastModified: isDef(info.lastModified) ? new Date(info.lastModified) : __
+      }
+    }
+
     info.path = isString(info.canonicalPath) ? info.canonicalPath : filePath
     info.relativePath = this._toRelative(info.path)
     return info
@@ -926,6 +984,694 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
   }
 }
 
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.textUtilities(params) : Object</key>
+ * Performs text and data transformation operations.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform.
+ * - For encode/decode: `data` (string/bytes), `format` (base64, hex, url, html)
+ * - For hash: `data` (string), `algorithm` (md5, sha1, sha256, sha384, sha512)
+ * - For format conversion: `data` (string/object), source/target formats
+ * - For text operations: operation-specific parameters
+ * </odoc>
+ */
+MiniUtilsTool.prototype.textUtilities = function(params) {
+  params = params || {}
+  var op = (params.operation || "").toLowerCase()
+
+  try {
+    // Encoding/Decoding operations
+    if (op === "encode") {
+      var format = (params.format || "base64").toLowerCase()
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+
+      if (format === "base64") {
+        var bytes = isString(data) ? af.fromString2Bytes(data) : data
+        return { format: "base64", result: af.fromBytes2String(af.toBase64Bytes(bytes)) }
+      } else if (format === "hex") {
+        var bytes = isString(data) ? af.fromString2Bytes(data) : data
+        return { format: "hex", result: af.fromBytes2String(af.fromBytes2HexString(bytes)) }
+      } else if (format === "url") {
+        return { format: "url", result: encodeURIComponent(String(data)) }
+      } else if (format === "html") {
+        var encoded = String(data)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;")
+        return { format: "html", result: encoded }
+      }
+      return "[ERROR] Unknown encoding format: " + format
+
+    } else if (op === "decode") {
+      var format = (params.format || "base64").toLowerCase()
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+
+      if (format === "base64") {
+        return { format: "base64", result: af.fromBytes2String(af.fromBase64(data)) }
+      } else if (format === "hex") {
+        return { format: "hex", result: af.fromBytes2String(af.fromHexString2Bytes(data)) }
+      } else if (format === "url") {
+        return { format: "url", result: decodeURIComponent(String(data)) }
+      } else if (format === "html") {
+        var decoded = String(data)
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&amp;/g, "&")
+        return { format: "html", result: decoded }
+      }
+      return "[ERROR] Unknown decoding format: " + format
+
+    } else if (op === "hash") {
+      var algorithm = (params.algorithm || "sha256").toLowerCase()
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+
+      var result
+      if (algorithm === "md5") result = md5(data)
+      else if (algorithm === "sha1") result = sha1(data)
+      else if (algorithm === "sha256") result = sha256(data)
+      else if (algorithm === "sha384") result = sha384(data)
+      else if (algorithm === "sha512") result = sha512(data)
+      else return "[ERROR] Unknown hash algorithm: " + algorithm
+
+      return { algorithm: algorithm, hash: result }
+
+    } else if (op === "json-to-yaml" || op === "json2yaml") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+      var obj = isString(data) ? af.fromJson(data) : data
+      return { format: "yaml", result: af.toYAML(obj) }
+
+    } else if (op === "yaml-to-json" || op === "yaml2json") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+      var obj = isString(data) ? af.fromYAML(data) : data
+      var compact = params.compact === true
+      return { format: "json", result: af.toJson(obj, compact ? "" : undefined) }
+
+    } else if (op === "csv-to-json" || op === "csv2json") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+      ow.loadFormat()
+      var csv = new CSV()
+      var lines = String(data).split(/\r?\n/)
+      var tempFile = ".temp_csv_" + nowNano() + ".csv"
+      try {
+        io.writeFileString(tempFile, data)
+        var result = csv.fromFile2Array(tempFile)
+        io.rm(tempFile)
+        return { format: "json", result: result }
+      } catch (e) {
+        try { io.rm(tempFile) } catch (e2) {}
+        throw e
+      }
+
+    } else if (op === "json-to-csv" || op === "json2csv") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+      var arr = isString(data) ? af.fromJson(data) : data
+      if (!isArray(arr)) return "[ERROR] data must be an array"
+      ow.loadFormat()
+      var csv = new CSV()
+      var tempFile = ".temp_csv_" + nowNano() + ".csv"
+      try {
+        csv.fromArray2File(arr, tempFile, params.fields)
+        var result = io.readFileString(tempFile)
+        io.rm(tempFile)
+        return { format: "csv", result: result }
+      } catch (e) {
+        try { io.rm(tempFile) } catch (e2) {}
+        throw e
+      }
+
+    } else if (op === "diff") {
+      var text1 = params.text1
+      var text2 = params.text2
+      if (isUnDef(text1) || isUnDef(text2)) return "[ERROR] text1 and text2 are required"
+
+      var lines1 = String(text1).split(/\r?\n/)
+      var lines2 = String(text2).split(/\r?\n/)
+      var differences = []
+      var maxLines = Math.max(lines1.length, lines2.length)
+
+      for (var i = 0; i < maxLines; i++) {
+        var line1 = i < lines1.length ? lines1[i] : undefined
+        var line2 = i < lines2.length ? lines2[i] : undefined
+        if (line1 !== line2) {
+          differences.push({
+            line: i + 1,
+            text1: line1,
+            text2: line2
+          })
+        }
+      }
+
+      return {
+        totalLines1: lines1.length,
+        totalLines2: lines2.length,
+        differenceCount: differences.length,
+        differences: differences
+      }
+
+    } else if (op === "template" || op === "templify") {
+      var template = params.template
+      var data = params.data || {}
+      if (isUnDef(template)) return "[ERROR] template is required"
+
+      return { result: templify(template, data) }
+
+    } else if (op === "replace") {
+      var text = params.text
+      var pattern = params.pattern
+      var replacement = params.replacement
+      if (isUnDef(text) || isUnDef(pattern) || isUnDef(replacement)) {
+        return "[ERROR] text, pattern, and replacement are required"
+      }
+
+      var flags = params.caseSensitive === true ? "g" : "gi"
+      var regex = params.regex === true ? new RegExp(pattern, flags) : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
+      return { result: String(text).replace(regex, replacement) }
+
+    } else if (op === "extract") {
+      var text = params.text
+      var pattern = params.pattern
+      if (isUnDef(text) || isUnDef(pattern)) return "[ERROR] text and pattern are required"
+
+      var flags = params.caseSensitive === true ? "" : "i"
+      var regex = new RegExp(pattern, flags)
+      var match = String(text).match(regex)
+      return { matches: match || [] }
+
+    } else if (op === "split") {
+      var text = params.text
+      var delimiter = params.delimiter
+      if (isUnDef(text)) return "[ERROR] text is required"
+      if (isUnDef(delimiter)) delimiter = ","
+
+      var regex = params.regex === true ? new RegExp(delimiter) : delimiter
+      var parts = String(text).split(regex)
+      return { count: parts.length, parts: parts }
+
+    } else if (op === "join") {
+      var array = params.array
+      var delimiter = params.delimiter
+      if (isUnDef(array)) return "[ERROR] array is required"
+      if (!isArray(array)) return "[ERROR] array must be an array"
+      if (isUnDef(delimiter)) delimiter = ","
+
+      return { result: array.join(delimiter) }
+
+    } else if (op === "trim") {
+      var text = params.text
+      if (isUnDef(text)) return "[ERROR] text is required"
+
+      var chars = params.characters
+      var result = String(text)
+      if (isDef(chars)) {
+        var pattern = "[" + chars.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "]"
+        result = result.replace(new RegExp("^" + pattern + "+"), "")
+        result = result.replace(new RegExp(pattern + "+$"), "")
+      } else {
+        result = result.trim()
+      }
+      return { result: result }
+
+    } else if (op === "line-count") {
+      var text = params.text
+      if (isUnDef(text)) return "[ERROR] text is required"
+      var lines = String(text).split(/\r?\n/)
+      return { count: lines.length }
+
+    } else if (op === "word-count") {
+      var text = params.text
+      if (isUnDef(text)) return "[ERROR] text is required"
+      var words = String(text).trim().split(/\s+/).filter(function(w) { return w.length > 0 })
+      return { count: words.length }
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.pathUtilities(params) : Object</key>
+ * Performs path manipulation operations without filesystem access.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform (join, resolve, parse, dirname, basename, extname, normalize, relative, is-absolute).
+ * - Operation-specific parameters
+ * </odoc>
+ */
+MiniUtilsTool.prototype.pathUtilities = function(params) {
+  params = params || {}
+  var op = (params.operation || "").toLowerCase()
+
+  try {
+    if (op === "join") {
+      var paths = params.paths
+      if (!isArray(paths)) return "[ERROR] paths array is required"
+      if (paths.length === 0) return { result: "" }
+
+      var result = String(paths[0] || "")
+      for (var i = 1; i < paths.length; i++) {
+        var file = new java.io.File(result, String(paths[i]))
+        result = String(file.getPath())
+      }
+      return { result: result }
+
+    } else if (op === "resolve") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      var file = new java.io.File(path)
+      return {
+        absolute: String(file.getAbsolutePath()),
+        canonical: String(file.getCanonicalPath())
+      }
+
+    } else if (op === "parse") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      var file = new java.io.File(path)
+      var name = String(file.getName())
+      var parent = file.getParent()
+      var lastDot = name.lastIndexOf(".")
+
+      return {
+        dir: parent ? String(parent) : "",
+        base: name,
+        name: lastDot > 0 ? name.substring(0, lastDot) : name,
+        ext: lastDot > 0 ? name.substring(lastDot) : ""
+      }
+
+    } else if (op === "dirname") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      var parent = new java.io.File(path).getParent()
+      return { result: parent ? String(parent) : "" }
+
+    } else if (op === "basename") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      var name = String(new java.io.File(path).getName())
+
+      if (params.removeExtension === true) {
+        var lastDot = name.lastIndexOf(".")
+        if (lastDot > 0) name = name.substring(0, lastDot)
+      }
+
+      return { result: name }
+
+    } else if (op === "extname") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      var name = String(new java.io.File(path).getName())
+      var lastDot = name.lastIndexOf(".")
+
+      return { result: lastDot > 0 ? name.substring(lastDot) : "" }
+
+    } else if (op === "normalize") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      return { result: String(new java.io.File(path).getPath()) }
+
+    } else if (op === "relative") {
+      var from = params.from
+      var to = params.to
+      if (isUnDef(from) || isUnDef(to)) return "[ERROR] from and to are required"
+
+      var fromPath = java.nio.file.Paths.get(from)
+      var toPath = java.nio.file.Paths.get(to)
+      var relative = fromPath.relativize(toPath)
+
+      return { result: String(relative) }
+
+    } else if (op === "is-absolute") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      return { result: new java.io.File(path).isAbsolute() }
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.filesystemBatch(params) : Array</key>
+ * Executes multiple filesystem operations in a single call.
+ * The `params` object can have the following properties:
+ * - `operations` (array, required): Array of operation objects, each with `type` and `params`
+ * - `stopOnError` (boolean, optional): Stop execution on first error. Defaults to false.
+ * - `compact` (boolean, optional): Return compact results. Defaults to false.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.filesystemBatch = function(params) {
+  params = params || {}
+  var operations = params.operations
+  if (!isArray(operations)) return "[ERROR] operations array is required"
+
+  var stopOnError = params.stopOnError === true
+  var compact = params.compact === true
+  var results = []
+  var self = this
+
+  try {
+    this._ensureInitialized()
+
+    for (var i = 0; i < operations.length; i++) {
+      var op = operations[i]
+      if (!isMap(op) || !isString(op.type)) {
+        results.push({ error: "Invalid operation at index " + i, success: false })
+        if (stopOnError) break
+        continue
+      }
+
+      var opType = op.type.toLowerCase()
+      var opParams = op.params || {}
+      if (compact) opParams.compact = true
+
+      var result
+      try {
+        if (opType === "read" || opType === "readfile") {
+          result = this.readFile(opParams)
+        } else if (opType === "list" || opType === "listdirectory") {
+          result = this.listDirectory(opParams)
+        } else if (opType === "search" || opType === "searchcontent") {
+          result = this.searchContent(opParams)
+        } else if (opType === "info" || opType === "getfileinfo") {
+          result = this.getFileInfo(opParams)
+        } else {
+          result = "[ERROR] Unknown operation type: " + opType
+        }
+
+        if (isString(result) && result.indexOf("[ERROR]") === 0) {
+          results.push({ error: result, success: false, operation: opType })
+          if (stopOnError) break
+        } else {
+          results.push({ data: result, success: true, operation: opType })
+        }
+      } catch (e) {
+        results.push({ error: e.message || String(e), success: false, operation: opType })
+        if (stopOnError) break
+      }
+    }
+
+    return {
+      totalOperations: operations.length,
+      completed: results.length,
+      results: results
+    }
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.validationUtilities(params) : Object</key>
+ * Validates data formats and tests conditions.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform (validate-json, validate-yaml, validate-regex, validate-url, test-regex, file-exists).
+ * - Operation-specific parameters
+ * </odoc>
+ */
+MiniUtilsTool.prototype.validationUtilities = function(params) {
+  params = params || {}
+  var op = (params.operation || "").toLowerCase()
+
+  try {
+    if (op === "validate-json") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+
+      try {
+        af.fromJson(data)
+        return { valid: true, format: "json" }
+      } catch (e) {
+        return { valid: false, format: "json", error: e.message || String(e) }
+      }
+
+    } else if (op === "validate-yaml") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+
+      try {
+        af.fromYAML(data)
+        return { valid: true, format: "yaml" }
+      } catch (e) {
+        return { valid: false, format: "yaml", error: e.message || String(e) }
+      }
+
+    } else if (op === "validate-regex") {
+      var pattern = params.pattern
+      if (isUnDef(pattern)) return "[ERROR] pattern is required"
+
+      try {
+        new RegExp(pattern)
+        return { valid: true, pattern: pattern }
+      } catch (e) {
+        return { valid: false, pattern: pattern, error: e.message || String(e) }
+      }
+
+    } else if (op === "validate-url") {
+      var url = params.url
+      if (isUnDef(url)) return "[ERROR] url is required"
+
+      try {
+        new java.net.URL(url)
+        return { valid: true, url: url }
+      } catch (e) {
+        return { valid: false, url: url, error: e.message || String(e) }
+      }
+
+    } else if (op === "test-regex") {
+      var pattern = params.pattern
+      var text = params.text
+      if (isUnDef(pattern) || isUnDef(text)) return "[ERROR] pattern and text are required"
+
+      try {
+        var flags = params.caseSensitive === true ? "" : "i"
+        var regex = new RegExp(pattern, flags)
+        var matches = String(text).match(regex)
+        return {
+          matches: matches !== null,
+          pattern: pattern,
+          matchedText: matches ? matches[0] : null,
+          allMatches: matches || []
+        }
+      } catch (e) {
+        return { valid: false, error: e.message || String(e) }
+      }
+
+    } else if (op === "file-exists") {
+      var path = params.path
+      if (isUnDef(path)) return "[ERROR] path is required"
+
+      try {
+        this._ensureInitialized()
+        var filePath = this._resolve(path)
+        return { exists: io.fileExists(filePath), path: this._toRelative(filePath) }
+      } catch (e) {
+        return { exists: false, error: e.message || String(e) }
+      }
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.systemInfo(params) : Object</key>
+ * Retrieves system information about the execution environment.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform (environment, platform, cwd, user, memory, disk).
+ * - For environment: `filter` (optional string) - regex to filter env vars
+ * </odoc>
+ */
+MiniUtilsTool.prototype.systemInfo = function(params) {
+  params = params || {}
+  var op = (params.operation || "platform").toLowerCase()
+
+  try {
+    if (op === "environment" || op === "env") {
+      var filter = params.filter
+      var envVars = {}
+      var env = java.lang.System.getenv()
+      var iterator = env.entrySet().iterator()
+
+      while (iterator.hasNext()) {
+        var entry = iterator.next()
+        var key = String(entry.getKey())
+        var value = String(entry.getValue())
+
+        if (isDef(filter)) {
+          var regex = new RegExp(filter, "i")
+          if (regex.test(key)) {
+            envVars[key] = value
+          }
+        } else {
+          envVars[key] = value
+        }
+      }
+
+      return { environment: envVars, count: Object.keys(envVars).length }
+
+    } else if (op === "platform") {
+      return {
+        os: String(java.lang.System.getProperty("os.name")),
+        version: String(java.lang.System.getProperty("os.version")),
+        arch: String(java.lang.System.getProperty("os.arch")),
+        javaVersion: String(java.lang.System.getProperty("java.version")),
+        separator: String(java.io.File.separator),
+        pathSeparator: String(java.io.File.pathSeparator)
+      }
+
+    } else if (op === "cwd") {
+      return { cwd: String(java.lang.System.getProperty("user.dir")) }
+
+    } else if (op === "user") {
+      return {
+        name: String(java.lang.System.getProperty("user.name")),
+        home: String(java.lang.System.getProperty("user.home"))
+      }
+
+    } else if (op === "memory") {
+      var runtime = java.lang.Runtime.getRuntime()
+      return {
+        totalMemory: Number(runtime.totalMemory()),
+        freeMemory: Number(runtime.freeMemory()),
+        maxMemory: Number(runtime.maxMemory()),
+        usedMemory: Number(runtime.totalMemory() - runtime.freeMemory())
+      }
+
+    } else if (op === "disk") {
+      this._ensureInitialized()
+      var rootFile = new java.io.File(this._root)
+      return {
+        totalSpace: Number(rootFile.getTotalSpace()),
+        freeSpace: Number(rootFile.getFreeSpace()),
+        usableSpace: Number(rootFile.getUsableSpace()),
+        path: this._root
+      }
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.kvStore(params) : Object</key>
+ * Simple key-value store for temporary data storage during execution.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform (set, get, delete, list, clear).
+ * - For set: `key` (string), `value` (any), `ttl` (optional milliseconds)
+ * - For get/delete: `key` (string)
+ * </odoc>
+ */
+MiniUtilsTool.prototype.kvStore = function(params) {
+  params = params || {}
+  var op = (params.operation || "").toLowerCase()
+
+  // Initialize store if not exists
+  if (isUnDef(this._kvStore)) {
+    this._kvStore = {}
+  }
+
+  try {
+    if (op === "set") {
+      var key = params.key
+      var value = params.value
+      if (isUnDef(key)) return "[ERROR] key is required"
+      if (isUnDef(value)) return "[ERROR] value is required"
+
+      var entry = { value: value, timestamp: nowNano() }
+      if (isDef(params.ttl) && Number(params.ttl) > 0) {
+        entry.expiresAt = nowNano() + (Number(params.ttl) * 1000000)
+      }
+
+      this._kvStore[key] = entry
+      return { key: key, stored: true }
+
+    } else if (op === "get") {
+      var key = params.key
+      if (isUnDef(key)) return "[ERROR] key is required"
+
+      var entry = this._kvStore[key]
+      if (isUnDef(entry)) {
+        return { key: key, found: false }
+      }
+
+      // Check TTL
+      if (isDef(entry.expiresAt) && nowNano() > entry.expiresAt) {
+        delete this._kvStore[key]
+        return { key: key, found: false, expired: true }
+      }
+
+      return { key: key, found: true, value: entry.value }
+
+    } else if (op === "delete") {
+      var key = params.key
+      if (isUnDef(key)) return "[ERROR] key is required"
+
+      var existed = isDef(this._kvStore[key])
+      delete this._kvStore[key]
+      return { key: key, deleted: existed }
+
+    } else if (op === "list") {
+      var keys = []
+      var now = nowNano()
+
+      for (var key in this._kvStore) {
+        if (!this._kvStore.hasOwnProperty(key)) continue
+        var entry = this._kvStore[key]
+
+        // Skip expired entries
+        if (isDef(entry.expiresAt) && now > entry.expiresAt) {
+          delete this._kvStore[key]
+          continue
+        }
+
+        keys.push(key)
+      }
+
+      return { count: keys.length, keys: keys }
+
+    } else if (op === "clear") {
+      var count = Object.keys(this._kvStore).length
+      this._kvStore = {}
+      return { cleared: count }
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
 MiniUtilsTool._metadataByFn = (function() {
   var queryReadOps = ["read", "readfile", "get", "view"]
   var queryListOps = ["list", "ls", "listdirectory", "dir"]
@@ -944,6 +1690,25 @@ MiniUtilsTool._metadataByFn = (function() {
   var mathOperationTypes = ["calculate", "statistics", "convert-unit", "convert", "random"]
   var timeOperationTypes = ["current-time", "current", "timezone-convert", "sleep"]
 
+  // Text utilities operation types
+  var textEncodeOps = ["encode", "decode"]
+  var textHashOps = ["hash"]
+  var textConvertOps = ["json-to-yaml", "json2yaml", "yaml-to-json", "yaml2json", "csv-to-json", "csv2json", "json-to-csv", "json2csv"]
+  var textManipOps = ["diff", "template", "templify", "replace", "extract", "split", "join", "trim", "line-count", "word-count"]
+  var textAllOps = textEncodeOps.concat(textHashOps).concat(textConvertOps).concat(textManipOps)
+
+  // Path utilities operation types
+  var pathOps = ["join", "resolve", "parse", "dirname", "basename", "extname", "normalize", "relative", "is-absolute"]
+
+  // Validation utilities operation types
+  var validationOps = ["validate-json", "validate-yaml", "validate-regex", "validate-url", "test-regex", "file-exists"]
+
+  // System info operation types
+  var systemInfoOps = ["environment", "env", "platform", "cwd", "user", "memory", "disk"]
+
+  // KV store operation types
+  var kvStoreOps = ["set", "get", "delete", "list", "clear"]
+
   return {
     init: {
       name       : "init",
@@ -958,7 +1723,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     filesystemQuery: {
       name       : "filesystemQuery",
-      description: "Execute read-only filesystem actions such as reading file contents, listing directories, searching text, or retrieving metadata within the configured root.",
+      description: "Read files, list directories, search text, get file info. Use for: viewing code, finding files, searching content, checking if files exist. Supports compact mode to reduce response size.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -975,7 +1740,8 @@ MiniUtilsTool._metadataByFn = (function() {
           pattern      : { type: "string", description: "Pattern to search for when operation is set to search." },
           regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation is search." },
           caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation is search." },
-          maxResults   : { type: "number", description: "Maximum number of search matches to return (0 means no limit)." }
+          maxResults   : { type: "number", description: "Maximum number of search matches to return (0 means no limit)." },
+          compact      : { type: "boolean", description: "Return compact results with minimal metadata to save context." }
         },
         allOf    : [
           {
@@ -995,7 +1761,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     filesystemModify: {
       name       : "filesystemModify",
-      description: "Perform write, append, or delete operations on files and directories within the configured root (requires readwrite=true).",
+      description: "Write, append, or delete files and directories. Use for: creating files, modifying content, cleaning up. Requires readwrite=true initialization.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -1027,7 +1793,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     mathematics: {
       name       : "mathematics",
-      description: "Run mathematical utilities including arithmetic calculations, descriptive statistics, unit conversions, and random value generation.",
+      description: "Perform calculations, statistics, unit conversions, random generation. Use for: computing values, analyzing datasets, converting units, generating test data.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -1062,7 +1828,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     timeUtilities: {
       name       : "timeUtilities",
-      description: "Work with time by returning the current time, converting between time zones, or pausing execution.",
+      description: "Get current time, convert timezones, pause execution. Use for: timestamps, timezone conversions, scheduling delays, time formatting.",
       inputSchema: {
         type      : "object",
         properties: {
@@ -1080,6 +1846,137 @@ MiniUtilsTool._metadataByFn = (function() {
           milliseconds   : { type: "number", description: "Duration in milliseconds for sleep operation." }
         },
         required : []
+      }
+    },
+    textUtilities: {
+      name       : "textUtilities",
+      description: "Transform text and data: encode/decode (base64, hex, url, html), hash (md5, sha256), convert formats (JSON/YAML/CSV), manipulate strings. Use for: encoding data, hashing, format conversion, text processing, template rendering.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation  : {
+            type       : "string",
+            description: "Operation type: encode, decode, hash, json-to-yaml, yaml-to-json, csv-to-json, json-to-csv, diff, template, replace, extract, split, join, trim, line-count, word-count.",
+            enum       : textAllOps
+          },
+          data       : { type: "string", description: "Data to process (text, JSON, YAML, CSV, etc.)." },
+          format     : { type: "string", description: "Encoding format for encode/decode: base64, hex, url, html." },
+          algorithm  : { type: "string", description: "Hash algorithm: md5, sha1, sha256, sha384, sha512." },
+          text       : { type: "string", description: "Text input for text operations." },
+          text1      : { type: "string", description: "First text for diff operation." },
+          text2      : { type: "string", description: "Second text for diff operation." },
+          template   : { type: "string", description: "Template string with {{variable}} placeholders." },
+          pattern    : { type: "string", description: "Pattern for replace/extract operations." },
+          replacement: { type: "string", description: "Replacement text for replace operation." },
+          delimiter  : { type: "string", description: "Delimiter for split/join operations." },
+          array      : { type: "array", description: "Array for join operation." },
+          characters : { type: "string", description: "Characters to trim." },
+          regex      : { type: "boolean", description: "Treat pattern as regular expression." },
+          caseSensitive: { type: "boolean", description: "Case-sensitive operations." },
+          compact    : { type: "boolean", description: "Compact JSON output." },
+          fields     : { type: "array", description: "CSV fields to include." }
+        },
+        required : ["operation"]
+      }
+    },
+    pathUtilities: {
+      name       : "pathUtilities",
+      description: "Manipulate file paths without filesystem access: join, resolve, parse, get dirname/basename/extension. Use for: path construction, path parsing, checking path types.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation      : {
+            type       : "string",
+            description: "Operation type: join, resolve, parse, dirname, basename, extname, normalize, relative, is-absolute.",
+            enum       : pathOps
+          },
+          path           : { type: "string", description: "Path to process." },
+          paths          : { type: "array", items: { type: "string" }, description: "Array of path segments to join." },
+          from           : { type: "string", description: "Source path for relative operation." },
+          to             : { type: "string", description: "Target path for relative operation." },
+          removeExtension: { type: "boolean", description: "Remove extension from basename." }
+        },
+        required : ["operation"]
+      }
+    },
+    filesystemBatch: {
+      name       : "filesystemBatch",
+      description: "Execute multiple filesystem operations in one call to reduce roundtrips. Use for: batch reading files, checking multiple paths, efficient multi-file operations.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operations : {
+            type       : "array",
+            description: "Array of operations to execute.",
+            items      : {
+              type      : "object",
+              properties: {
+                type  : { type: "string", description: "Operation type: read, list, search, info." },
+                params: { type: "object", description: "Parameters for the operation." }
+              },
+              required : ["type"]
+            }
+          },
+          stopOnError: { type: "boolean", description: "Stop processing on first error." },
+          compact    : { type: "boolean", description: "Return compact results." }
+        },
+        required : ["operations"]
+      }
+    },
+    validationUtilities: {
+      name       : "validationUtilities",
+      description: "Validate data formats and test conditions: JSON/YAML syntax, regex patterns, URLs, file existence. Use for: validating input, checking syntax, testing patterns before use.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation    : {
+            type       : "string",
+            description: "Operation type: validate-json, validate-yaml, validate-regex, validate-url, test-regex, file-exists.",
+            enum       : validationOps
+          },
+          data         : { type: "string", description: "Data to validate (JSON/YAML string)." },
+          pattern      : { type: "string", description: "Regex pattern to validate or test." },
+          text         : { type: "string", description: "Text to test against pattern." },
+          url          : { type: "string", description: "URL to validate." },
+          path         : { type: "string", description: "File path to check existence." },
+          caseSensitive: { type: "boolean", description: "Case-sensitive regex testing." }
+        },
+        required : ["operation"]
+      }
+    },
+    systemInfo: {
+      name       : "systemInfo",
+      description: "Get system information: environment variables, platform details, current directory, user info, memory/disk usage. Use for: understanding execution environment, checking resources, getting system context.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation type: environment, platform, cwd, user, memory, disk.",
+            enum       : systemInfoOps,
+            default    : "platform"
+          },
+          filter   : { type: "string", description: "Regex filter for environment variables." }
+        },
+        required : []
+      }
+    },
+    kvStore: {
+      name       : "kvStore",
+      description: "Simple key-value store for temporary data during execution. Use for: caching results, maintaining state between operations, storing intermediate data.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation type: set, get, delete, list, clear.",
+            enum       : kvStoreOps
+          },
+          key      : { type: "string", description: "Key for set/get/delete operations." },
+          value    : { description: "Value to store (any type)." },
+          ttl      : { type: "number", description: "Time-to-live in milliseconds." }
+        },
+        required : ["operation"]
       }
     }
   }
