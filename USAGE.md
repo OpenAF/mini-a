@@ -40,6 +40,8 @@ Mini-A now ships with an interactive console so you can start the agent directly
 
 All command-line flags documented below work with the console (`opack exec mini-a` / `mini-a`) as well as `mini-a.sh` and `mini-a.yaml`.
 
+Need a quick reference of every option? Run `mini-a -h` (or `mini-a --help`) to print the colorized console help followed by a table of shared Mini-A arguments sourced directly from `mini-a.js`. That listing mirrors the parameter catalog below, so it is always up to date with the agent’s runtime defaults.
+
 Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
 
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):

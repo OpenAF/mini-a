@@ -51,6 +51,7 @@ Two steps to use:
    opack exec mini-a goal="your goal"
    ```
    If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
+   For a colorized overview of every console, web, and planning flag (including shared Mini-A arguments), run `mini-a -h` or `mini-a --help`; the console prints the CLI-specific switches followed by the auto-generated table of core agent parameters.
    Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
 
    **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, so you can press <kbd>Tab</kbd> to expand directories and filenames instead of typing the whole path.
