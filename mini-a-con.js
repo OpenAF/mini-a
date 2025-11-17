@@ -6,6 +6,23 @@ try {
   plugin("Console")
   var args = processExpr(" ")
 
+  function hasHelpFlag(map) {
+    if (!isObject(map)) return false
+    var helpKeys = ["--help", "-h", "help", "h", "/?"]
+    var found = false
+    Object.keys(map).some(function(key) {
+      var normalized = String(key || "").toLowerCase()
+      if (helpKeys.indexOf(normalized) >= 0) {
+        found = true
+        return true
+      }
+      return false
+    })
+    return found
+  }
+
+  var helpRequested = hasHelpFlag(args)
+
   // Init
   if (!(isString(args.libs) && args.libs.trim().length > 0)) {
     var envLibs = args.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
@@ -16,138 +33,140 @@ try {
     //global._args = args
   }
 
-  (function(args) {
-    if (args.__modeApplied === true) return
-    if (!isString(args.mode)) return
-    var modeName = args.mode.trim()
-    if (modeName.length === 0) return
+  if (!helpRequested) {
+    (function(args) {
+      if (args.__modeApplied === true) return
+      if (!isString(args.mode)) return
+      var modeName = args.mode.trim()
+      if (modeName.length === 0) return
 
-    var modesPath = getOPackPath("mini-a") + "/mini-a-modes.yaml"
-    var presets = {}
-    try {
-      var loaded = io.readFileYAML(modesPath)
-      if (isMap(loaded) && isMap(loaded.modes)) {
-        presets = loaded.modes
-      } else if (isMap(loaded)) {
-        presets = loaded
-      } else {
-        presets = {}
-      }
-    } catch(e) {
-      var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-      logWarn(`Failed to load mode presets for '${modeName}': ${errMsg}`)
-      args.__modeApplied = true
-      return
-    }
-
-    // Load custom modes from user's home directory
-    function resolveCanonicalPath(basePath, fileName) {
-      return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
-    }
-    var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-    var customModesPath = resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml")
-    if (io.fileExists(customModesPath)) {
+      var modesPath = getOPackPath("mini-a") + "/mini-a-modes.yaml"
+      var presets = {}
       try {
-        var customLoaded = io.readFileYAML(customModesPath)
-        var customPresets = {}
-        if (isMap(customLoaded) && isMap(customLoaded.modes)) {
-          customPresets = customLoaded.modes
-        } else if (isMap(customLoaded)) {
-          customPresets = customLoaded
-        }
-        // Merge custom modes with default modes (custom overrides defaults)
-        if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
-          presets = merge(presets, customPresets)
+        var loaded = io.readFileYAML(modesPath)
+        if (isMap(loaded) && isMap(loaded.modes)) {
+          presets = loaded.modes
+        } else if (isMap(loaded)) {
+          presets = loaded
+        } else {
+          presets = {}
         }
       } catch(e) {
         var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-        logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
+        logWarn(`Failed to load mode presets for '${modeName}': ${errMsg}`)
+        args.__modeApplied = true
+        return
       }
-    }
 
-    if (!isMap(presets) || Object.keys(presets).length === 0) {
-      logWarn(`Mode '${modeName}' requested but no presets are defined.`)
-      args.__modeApplied = true
-      return
-    }
-
-    var keys = Object.keys(presets)
-    var resolvedKey
-    for (var i = 0; i < keys.length; i++) {
-      var key = keys[i]
-      if (key === modeName || key.toLowerCase() === modeName.toLowerCase()) {
-        resolvedKey = key
-        break
+      // Load custom modes from user's home directory
+      function resolveCanonicalPath(basePath, fileName) {
+        return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
       }
-    }
-
-    if (isUnDef(resolvedKey)) {
-      logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
-      args.__modeApplied = true
-      return
-    }
-
-    var preset = presets[resolvedKey]
-    if (!isMap(preset)) {
-      logWarn(`Mode '${resolvedKey}' preset is invalid.`)
-      args.__modeApplied = true
-      return
-    }
-
-    var applied = []
-    var paramsSource = preset.params
-    var applyParam = function(key, value) {
-      if (isObject(value)) value = af.toSLON(value)
-      if (isString(key) && key.length > 0) {
-        args[key] = value
-        applied.push(key)
+      var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+      var customModesPath = resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml")
+      if (io.fileExists(customModesPath)) {
+        try {
+          var customLoaded = io.readFileYAML(customModesPath)
+          var customPresets = {}
+          if (isMap(customLoaded) && isMap(customLoaded.modes)) {
+            customPresets = customLoaded.modes
+          } else if (isMap(customLoaded)) {
+            customPresets = customLoaded
+          }
+          // Merge custom modes with default modes (custom overrides defaults)
+          if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
+            presets = merge(presets, customPresets)
+          }
+        } catch(e) {
+          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+          logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
+        }
       }
-    }
 
-    if (isArray(paramsSource)) {
-      paramsSource.forEach(function(entry) {
-        if (!isMap(entry)) return
-        Object.keys(entry).forEach(function(paramKey) {
-          applyParam(paramKey, entry[paramKey])
+      if (!isMap(presets) || Object.keys(presets).length === 0) {
+        logWarn(`Mode '${modeName}' requested but no presets are defined.`)
+        args.__modeApplied = true
+        return
+      }
+
+      var keys = Object.keys(presets)
+      var resolvedKey
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i]
+        if (key === modeName || key.toLowerCase() === modeName.toLowerCase()) {
+          resolvedKey = key
+          break
+        }
+      }
+
+      if (isUnDef(resolvedKey)) {
+        logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
+        args.__modeApplied = true
+        return
+      }
+
+      var preset = presets[resolvedKey]
+      if (!isMap(preset)) {
+        logWarn(`Mode '${resolvedKey}' preset is invalid.`)
+        args.__modeApplied = true
+        return
+      }
+
+      var applied = []
+      var paramsSource = preset.params
+      var applyParam = function(key, value) {
+        if (isObject(value)) value = af.toSLON(value)
+        if (isString(key) && key.length > 0) {
+          args[key] = value
+          applied.push(key)
+        }
+      }
+
+      if (isArray(paramsSource)) {
+        paramsSource.forEach(function(entry) {
+          if (!isMap(entry)) return
+          Object.keys(entry).forEach(function(paramKey) {
+            applyParam(paramKey, entry[paramKey])
+          })
         })
-      })
-    } else if (isMap(paramsSource)) {
-      Object.keys(paramsSource).forEach(function(paramKey) {
-        applyParam(paramKey, paramsSource[paramKey])
-      })
-    } else if (isDef(paramsSource)) {
-      logWarn(`Mode '${resolvedKey}' has unsupported params definition.`)
+      } else if (isMap(paramsSource)) {
+        Object.keys(paramsSource).forEach(function(paramKey) {
+          applyParam(paramKey, paramsSource[paramKey])
+        })
+      } else if (isDef(paramsSource)) {
+        logWarn(`Mode '${resolvedKey}' has unsupported params definition.`)
+      }
+
+      var infoMsg = `Mode '${resolvedKey}' enabled`
+      if (isString(preset.description) && preset.description.length > 0) {
+        infoMsg += `: ${preset.description}`
+      }
+      log(infoMsg)
+
+      if (applied.length > 0) {
+        log(`Mode '${resolvedKey}' applied defaults for: ${applied.join(", ")}`)
+      } else {
+        log(`Mode '${resolvedKey}' did not change any arguments (overrides already provided).`)
+      }
+
+      args.mode = resolvedKey
+      args.__modeApplied = true
+    })(args)
+
+    // Choose
+    if (toBoolean(args.modelman) === true) {
+      // Start model management mode
+      load("mini-a-modelman.js")
+      exit(0)
+    } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
+      // Start web mode
+      oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
+      exit(0)
+    } else if (isDef(args.goal)) {
+      // Start cli mode
+      oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
+      exit(0)
     }
-
-    var infoMsg = `Mode '${resolvedKey}' enabled`
-    if (isString(preset.description) && preset.description.length > 0) {
-      infoMsg += `: ${preset.description}`
-    }
-    log(infoMsg)
-
-    if (applied.length > 0) {
-      log(`Mode '${resolvedKey}' applied defaults for: ${applied.join(", ")}`)
-    } else {
-      log(`Mode '${resolvedKey}' did not change any arguments (overrides already provided).`)
-    }
-
-    args.mode = resolvedKey
-    args.__modeApplied = true
-  })(args)
-
-  // Choose
-  if (toBoolean(args.modelman) === true) {
-    // Start model management mode
-    load("mini-a-modelman.js")
-    exit(0)
-  } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
-    // Start web mode
-    oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
-    exit(0)
-  } else if (isDef(args.goal)) {
-    // Start cli mode
-    oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
-    exit(0)
   }
 
   // Helper functions
@@ -324,6 +343,99 @@ try {
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
   var sessionParameterNames = Object.keys(parameterDefinitions).sort()
+
+  var cliPrimaryOptionKeys = {
+    mode: true,
+    libs: true,
+    goal: true,
+    onport: true,
+    web: true,
+    modelman: true,
+    resume: true,
+    conversation: true,
+    "--help": true,
+    "-h": true
+  }
+
+  function formatDefaultValue(value) {
+    if (isUnDef(value)) return ""
+    if (isString(value)) return value
+    if (isNumber(value) || isBoolean(value)) return String(value)
+    try {
+      return af.toSLON(value)
+    } catch(ignoreFormat) {
+      return String(value)
+    }
+  }
+
+  function buildSharedArgumentRows() {
+    if (!isObject(parameterDefinitions)) return []
+    var rows = []
+    Object.keys(parameterDefinitions).sort().forEach(function(name) {
+      if (Object.prototype.hasOwnProperty.call(cliPrimaryOptionKeys, name)) return
+      var def = parameterDefinitions[name] || {}
+      rows.push({
+        Argument   : name,
+        Type       : isString(def.type) ? def.type : "",
+        Default    : Object.prototype.hasOwnProperty.call(def, "default") ? formatDefaultValue(def.default) : "",
+        Description: isString(def.description) ? def.description : ""
+      })
+    })
+    return rows
+  }
+
+  function printCliHelp() {
+    function printOption(option, description, maxLength) {
+      print("  " + colorifyText(option, accentColor) + repeat(maxLength - option.length, " ") + " " + colorifyText("  " + description, hintColor))
+    }
+
+    print(colorifyText("Mini-A (version " + $from($m4a(getOPackLocalDB())).equals("name", "mini-a").at(0).version + ") options:\n", "BOLD"))
+
+    const options = [
+      { option: "mode=<name>", description: "Apply one of the presets defined in mini-a-modes." },
+      { option: "libs=<list>", description: "Comma-separated libs to load before launching." },
+      { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
+      { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
+      { option: "modelman=true", description: "Start the model manager instead of the console experience." },
+      { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
+      { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
+      { option: "--help | -h", description: "Show this help text." }
+    ]
+
+    var maxOptionLength = options.reduce(function(max, opt) {
+      return Math.max(max, opt.option.length)
+    }, 0)
+    options.forEach(function(opt) {
+      printOption(opt.option, opt.description, maxOptionLength)
+    })
+
+    var sharedRows = buildSharedArgumentRows()
+    if (sharedRows.length > 0) {
+      print("")
+      print(colorifyText("Shared Mini-A arguments (common across modules):", "BOLD") + "\n")
+      print(printTable(sharedRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi ? "utf" : __), __, true, false, true))
+    }
+
+    print("")
+    print(colorifyText("Examples:", "BOLD") + "\n")
+    const examples = [
+      { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
+      { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
+      { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." }
+    ]
+
+    var maxCmdLength = examples.reduce(function(max, ex) {
+      return Math.max(max, ex.cmd.length)
+    }, 0)
+    examples.forEach(function(ex) {
+      printOption(ex.cmd, ex.desc, maxCmdLength)
+    })
+  }
+
+  if (helpRequested) {
+    printCliHelp()
+    exit(0)
+  }
 
   function coerceDefaultValue(def, rawValue, key) {
     if (!isDef(def) || isUnDef(rawValue)) return undefined
