@@ -6,6 +6,8 @@ Mini-A is a minimalist autonomous agent that uses LLMs, shell commands and/or MC
 
 ![/.github/mini-a-web-screenshot1.jpg](/.github/mini-a-web-screenshot1.jpg)
 
+![/.github/mini-a-con-screenshot.png](/.github/mini-a-con-screenshot.png)
+
 > **⚡ New Performance Optimizations!** Mini-A now includes automatic optimizations that reduce token usage by 40-60% and costs by 50-70% with zero configuration. [Learn more →](docs/WHATS-NEW.md)
 
 ```mermaid
