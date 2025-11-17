@@ -81,10 +81,22 @@ function buildMCPConfig(args) {
     return _config
 }
 
+// Helper function to print elapsed time
+function printElapsedTime(startTime, operation) {
+    var endTime = now()
+    var elapsed = endTime - startTime
+    print(ansiColor("FAINT", "⏱  " + operation + " took " + elapsed + "ms"))
+}
+
 // List MCP tools
-function listMCPTools(mcpClient) {
+function listMCPTools(mcpClient, showElapsed) {
     try {
+        var startTime = now()
         var tools = mcpClient.listTools()
+        if (showElapsed) {
+            printElapsedTime(startTime, "List tools")
+        }
+
         if (isUnDef(tools) || isUnDef(tools.tools) || tools.tools.length == 0) {
             print("\n📭 No tools available from this MCP server.\n")
             return []
@@ -251,7 +263,11 @@ function callMCPTool(mcpClient, tool, params, sessionOptions) {
         }
         print()
 
+        var startTime = now()
         var result = mcpClient.callTool(tool.name, params)
+        if (sessionOptions.showtimeelapsed) {
+            printElapsedTime(startTime, "Call tool '" + tool.name + "'")
+        }
 
         print(ansiColor("BOLD,FG(34)", "✅ Result:"))
         print(ansiColor("FAINT", "─────────────────────"))
@@ -261,7 +277,11 @@ function callMCPTool(mcpClient, tool, params, sessionOptions) {
         } else if (isString(result)) {
             print(result)
         } else {
-            print(ansiColor("FAINT", stringify(result, __, "")))
+            var resultStr = stringify(result, __, "")
+            if (sessionOptions.showlimitcallanswer > 0 && resultStr.length > sessionOptions.showlimitcallanswer) {
+                resultStr = resultStr.substring(0, sessionOptions.showlimitcallanswer) + "..."
+            }
+            print(ansiColor("FAINT", resultStr))
             if (sessionOptions.tryparsetoolresult) {
                 print(ansiColor("FAINT", "─────────────────────"))
                 if (isDef(result.content) && result.content.length > 0 && isDef(result.content[0].text)) {
@@ -299,7 +319,9 @@ function mainMCPTest(args) {
     var optionDefinitions = {
         tryparsetoolresult: { type: "boolean", default: true, description: "Parse and display tool result content as tree when available" },
         toolchoosesize: { type: "number", default: 8, description: "Number of items to display in tool selection menus" },
-        debug: { type: "boolean", default: false, description: "Enable debug mode for MCP connections" }
+        debug: { type: "boolean", default: false, description: "Enable debug mode for MCP connections" },
+        showtimeelapsed: { type: "boolean", default: false, description: "Show elapsed time for MCP operations (list tools, call tools, etc.)" },
+        showlimitcallanswer: { type: "number", default: 0, description: "Limit the printed string length of call tool results (0 = no limit)" }
     }
 
     // Initialize session options with defaults
@@ -366,7 +388,11 @@ function mainMCPTest(args) {
                 }
                 print("🔌 Connecting to MCP server from mcp= parameter...")
                 _mcpClient = $mcp(_currentConfig)
+                var startTime = now()
                 _mcpClient.initialize()
+                if (sessionOptions.showtimeelapsed) {
+                    printElapsedTime(startTime, "Initialize MCP connection")
+                }
                 print("✅ Connected successfully!\n")
             } catch(e) {
                 print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
@@ -408,7 +434,11 @@ function mainMCPTest(args) {
                 }
                 print("🔌 Connecting to MCP server from mcp= parameter...")
                 _mcpClient = $mcp(_currentConfig)
+                var startTime = now()
                 _mcpClient.initialize()
+                if (sessionOptions.showtimeelapsed) {
+                    printElapsedTime(startTime, "Initialize MCP connection")
+                }
                 print("✅ Connected successfully!\n")
             } catch(e) {
                 print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
@@ -481,7 +511,11 @@ function mainMCPTest(args) {
                 }
                 print("🔌 Connecting to MCP server from mcp= parameter...")
                 _mcpClient = $mcp(config)
+                var startTime = now()
                 _mcpClient.initialize()
+                if (sessionOptions.showtimeelapsed) {
+                    printElapsedTime(startTime, "Initialize MCP connection")
+                }
                 _currentConfig = config
                 print("✅ Connected successfully!\n")
             }
@@ -545,7 +579,11 @@ function mainMCPTest(args) {
                     print("\n🔌 Connecting to MCP server...")
                     try {
                         _mcpClient = $mcp(config)
+                        var startTime = now()
                         _mcpClient.initialize()
+                        if (sessionOptions.showtimeelapsed) {
+                            printElapsedTime(startTime, "Initialize MCP connection")
+                        }
                         _currentConfig = config
                         print("✅ Connected successfully!\n")
                     } catch(e) {
@@ -558,13 +596,17 @@ function mainMCPTest(args) {
                 if (isUnDef(_mcpClient)) {
                     print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP connection. Please create a new connection first.", errorColor) + "\n")
                 } else {
-                    listMCPTools(_mcpClient)
+                    listMCPTools(_mcpClient, sessionOptions.showtimeelapsed)
                 }
             } else if (optionText.indexOf("Call a tool") >= 0) {
                 if (isUnDef(_mcpClient)) {
                     print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP connection. Please create a new connection first.", errorColor) + "\n")
                 } else {
+                    var startTime = now()
                     var tools = _mcpClient.listTools()
+                    if (sessionOptions.showtimeelapsed) {
+                        printElapsedTime(startTime, "List tools")
+                    }
                     if (isUnDef(tools) || isUnDef(tools.tools) || tools.length == 0) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No tools available.", errorColor) + "\n")
                     } else {
@@ -587,7 +629,11 @@ function mainMCPTest(args) {
                 if (isUnDef(_mcpClient)) {
                     print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP connection. Please create a new connection first.", errorColor) + "\n")
                 } else {
+                    var startTime = now()
                     var tools = _mcpClient.listTools()
+                    if (sessionOptions.showtimeelapsed) {
+                        printElapsedTime(startTime, "List tools")
+                    }
                     if (isUnDef(tools) || isUnDef(tools.tools) || tools.length == 0) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No tools available.", errorColor) + "\n")
                     } else {
