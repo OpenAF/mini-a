@@ -158,6 +158,10 @@ try {
       // Start model management mode
       load("mini-a-modelman.js")
       exit(0)
+    } else if (toBoolean(args.mcptest) === true) {
+      // Start MCP test mode
+      load("mini-a-mcptest.js")
+      exit(0)
     } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
       // Start web mode
       oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
@@ -351,6 +355,7 @@ try {
     onport: true,
     web: true,
     modelman: true,
+    mcptest: true,
     resume: true,
     conversation: true,
     "--help": true,
@@ -397,6 +402,7 @@ try {
       { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
+      { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
       { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." }
@@ -421,7 +427,8 @@ try {
     const examples = [
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
-      { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." }
+      { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
+      { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." }
     ]
 
     var maxCmdLength = examples.reduce(function(max, ex) {

@@ -108,6 +108,11 @@ mini-a goal="list all JavaScript files in this directory" useshell=true
 mini-a goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
+**Testing MCP servers interactively:**
+```bash
+mini-a mcptest=true mcp="(cmd: 'ojob mcps/mcp-time.yaml')"
+```
+
 **Aggregate MCP tools via proxy (single tool exposed):**
 ```bash
 mini-a goal="compare release dates across APIs" \
@@ -131,6 +136,60 @@ mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
    ```
 3. Set your model configuration (see Quick Start above)
 4. Start using Mini-A via `opack exec mini-a` (or the `mini-a` alias if you added it)!
+
+## Testing MCP Servers
+
+Mini-A includes an interactive MCP server testing tool that helps you test and debug MCP servers before integrating them into your workflows.
+
+### Using the MCP Tester
+
+Launch the MCP tester console:
+```bash
+mini-a mcptest=true
+```
+
+Or connect to an MCP server directly:
+```bash
+mini-a mcptest=true mcp="(cmd: 'ojob mcps/mcp-time.yaml')"
+```
+
+For HTTP remote MCP servers:
+```bash
+mini-a mcptest=true mcp="(type: remote, url: 'http://localhost:9090/mcp')"
+```
+
+### MCP Tester Features
+
+The interactive tester provides:
+
+- **Connection Management** - Connect to both STDIO (local command) and HTTP Remote MCP servers
+- **Tool Discovery** - List all available tools from the connected MCP server
+- **Tool Inspection** - View detailed information about tool parameters, types, and descriptions
+- **Interactive Tool Calling** - Call any MCP tool with custom parameters through guided prompts
+- **Configuration Options** - Adjust settings like debug mode, tool selection display size, and result parsing
+- **Library Loading** - Load additional OpenAF libraries for extended functionality using `libs=` parameter
+
+### Available Options
+
+- `mcp` - MCP server configuration (SLON/JSON string or object)
+- `libs` - Comma-separated list of libraries to load (e.g., `libs="@mini-a/custom.js,helper.js"`)
+- `debug` - Enable debug mode for detailed MCP connection logging (can be toggled in the interactive menu)
+
+### Example Session
+
+```bash
+# Launch the tester
+mini-a mcptest=true
+
+# 1. Choose "New connection"
+# 2. Select "STDIO (local command)"
+# 3. Enter: ojob mcps/mcp-time.yaml
+# 4. Choose "List tools" to see available tools
+# 5. Choose "Call a tool" to test a specific tool
+# 6. Follow the prompts to enter parameters
+```
+
+The tester includes automatic cleanup with shutdown handlers to properly close MCP connections when exiting.
 
 ## Features
 
@@ -184,6 +243,7 @@ Mini-A ships with complementary components:
 
 - **`mini-a.yaml`** - Core oJob definition that implements the agent workflow
 - **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
+- **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
