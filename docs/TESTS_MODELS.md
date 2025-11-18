@@ -41,6 +41,7 @@ Using just shell commands without any tooling APIs both in agent and chatbot mod
 | claude-haiku-3 | ✅ | ✅ | ❌ | ✅ |    
 | claude-haiku-4.5 | ✅ | ✅ | ❌ | ✅ |
 | claude-sonnet-4.5 | ✅ | ✅ | ✅ | ✅ |  
+| gemini-3-pro | ✅ | ✅ | ❌ | ❌ |
 | openai/gpt-oss-20b | ✅ | ✅ | ❌ | ❌ |
 | openai/gpt-oss-120b | ✅ | ✅ | ✅ | ❌ |
 | llama-3.1-8b | ❌ | ❌ | ❌ | ❌ |
@@ -70,6 +71,7 @@ Consistent ✅ rows indicate the model can gather filesystem context, summarize 
 | claude-3-haiku | ✅ | ❌ | ✅ | ✅ |
 | claude-haiku-4.5 | ✅ | ✅ | ❌ | ❌ |
 | claude-sonnet-4.5 | ✅ | ✅ | ✅ | ✅ |   
+| gemini-3-pro | ✅ | ✅ | ❌ | ❌ |
 | openai/gpt-oss-20b | ✅ | ✅ | ❌ | ✅ |
 | openai/gpt-oss-120b | ✅ | ✅ | ❌ | ❌ |
 | amazon nova pro   | ✅ | ❌ | ❌ | ❌ |
