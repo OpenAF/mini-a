@@ -210,7 +210,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Plan Validation** - LLM-based critique validates plans before execution
   - **Dynamic Replanning** - Automatic plan adjustments when obstacles occur
   - **Phase Verification** - Auto-generated verification tasks ensure phase completion
-- **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets)
+  - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets); set `OAF_MINI_A_MODE` to pick a default when `mode=` is omitted
 - **Conversation Persistence** - Save and resume conversations across sessions
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking

@@ -33,6 +33,11 @@ try {
     //global._args = args
   }
 
+  if (!(isString(args.mode) && args.mode.trim().length > 0)) {
+    var envMode = args.OAF_MINI_A_MODE || getEnv("OAF_MINI_A_MODE")
+    if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
+  }
+
   if (!helpRequested) {
     (function(args) {
       if (args.__modeApplied === true) return
