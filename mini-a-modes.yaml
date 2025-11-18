@@ -13,6 +13,7 @@ modes:
       readwrite      : true
       shellallowpipes: true
       shellbatch     : true
+      showexecs      : true
 
   utils:
     description: "Utilities mode"
@@ -57,7 +58,7 @@ modes:
     params     :
       useascii   : true
       usetools   : true
-      useplanning: true
+      useplanning: false
       useshell   : true
       readwrite  : true
       useutils   : true
@@ -82,12 +83,12 @@ modes:
     params     :
       usediagrams: true
       usecharts  : true
-      useascii   : true
+      useascii   : false
       usetools   : true
       usehistory : true
       useattach  : true
       historykeep: true
-      useplanning: true 
+      useplanning: false 
       mcpproxy   : true
       mcp        :
       - type   : ojob

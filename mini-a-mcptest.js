@@ -285,7 +285,12 @@ function callMCPTool(mcpClient, tool, params, sessionOptions) {
             if (sessionOptions.tryparsetoolresult) {
                 print(ansiColor("FAINT", "─────────────────────"))
                 if (isDef(result.content) && result.content.length > 0 && isDef(result.content[0].text)) {
-                    print(printTree(jsonParse(result.content[0].text)))
+                    var _m = jsonParse(result.content[0].text)
+                    if (isString(_m)) {
+                        print(ow.format.withMD(_m))
+                    } else {
+                        print(printTree(_m))
+                    }
                 }
             }
         }

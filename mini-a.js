@@ -45,11 +45,12 @@ var MiniA = function() {
   this._resumeFailedTasks = false
   this._loadedPlanPayload = null
   this._savePlanNotes = false
+  this._useToolsActual = false
   this._planUpdateConfig = { frequency: "auto", interval: 3, force: false, logFile: null }
   this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
   this._planLogFile = __
   this._planResumeInfo = null
-  this._defaultAgentPersonaLine = "You are a goal-oriented agent running in background."
+  this._defaultAgentPersonaLine = "You are a decisive, action-oriented agent that executes efficiently."
   this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
@@ -130,7 +131,7 @@ var MiniA = function() {
 ## RESPONSE FORMAT
 Always respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
 {
-    "thought": "your reasoning for this step",
+    "thought": "brief next step (1 sentence max, keep it minimal)",
     "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
     "command": "required when action=shell or action entry uses shell: POSIX command to execute",{{/if}}
     "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}{{#if actionsList}}",
@@ -152,24 +153,73 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "final" - Provide your complete "answer" when goal is achieved
 
 ## MULTI-ACTION SUPPORT:
-• **RECOMMENDED**: Use action arrays for efficiency when multiple independent operations are needed
-• Set "action" to an array of action objects to execute tools in parallel (or sequentially if dependent)
-• Example: [{"action":"read_file","params":{"path":"a.txt"}}, {"action":"read_file","params":{"path":"b.txt"}}]
+• Use action arrays when you need multiple{{#if useshell}} shell commands or{{/if}} custom actions in one response
+• Set "action" to an array of action objects{{#if useshell}}, for example: [{"action":"shell","command":"ls"}, {"action":"shell","command":"pwd"}]{{/if}}{{#if actionsList}}
+• Example with custom actions: [{"action":"read_file","params":{"path":"a.txt"}}, {"action":"read_file","params":{"path":"b.txt"}}]{{/if}}
 • Each action object must include an "action" field and required fields (command, params, answer)
-• Benefits: Fewer LLM calls, faster execution, reduced token usage
+{{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
-## WHEN TO USE PARALLEL ACTIONS:
-• Reading multiple files simultaneously
-• Calling multiple independent MCP tools
-• Gathering data from different sources at once
-• Performing batch operations (e.g., checking multiple conditions)
+## WHEN TO USE ACTION ARRAYS:{{#if useshell}}
+• Running multiple shell commands{{/if}}{{#if actionsList}}
+• Executing multiple custom actions{{/if}}
+{{#if usetoolsActual}}• **NOT for MCP tools** - use function calling for those{{/if}}
 
-{{#if usetools}}
-## TOOL REGISTRATION:
-• {{toolCount}} MCP tools are registered directly with the model; invoke them by naming the tool in "action" and supply the required params.
+{{#if usetoolsActual}}
+## MCP TOOL ACCESS (FUNCTION CALLING):
+• {{toolCount}} MCP tools are available through the 'proxy-dispatch' function
+• **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
+• The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
-{{/if}}
+### How to call MCP tools:
+1. Use function calling with tool name: "proxy-dispatch"
+2. Provide arguments with this structure:
+   {
+     "action": "call",
+     "tool": "tool-name",
+     "arguments": { /* tool-specific parameters */ }
+   }
+3. Optional: specify "connection" if you need a specific MCP server
+
+### Example MCP tool call:
+Function name: "proxy-dispatch"
+Arguments: {
+  "action": "call",
+  "tool": "find-rss-url",
+  "arguments": {
+    "query": "CNN"
+  }
+}
+
+### Listing available tools:
+Function name: "proxy-dispatch"
+Arguments: {
+  "action": "list",
+  "includeTools": true
+}
+{{else}}{{#if usetools}}
+## MCP TOOL ACCESS (ACTION-BASED):
+• {{toolCount}} MCP tools are available as action types
+• Call MCP tools through the JSON "action" field, just like shell or custom actions
+• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | [MCP tool name] | "final"
+
+### How to call MCP tools:
+Use the action field with the tool name and provide parameters in the params field:
+{
+  "thought": "brief description",
+  "action": "tool-name",
+  "params": { /* tool-specific parameters */ }
+}
+
+### Example MCP tool call:
+{
+  "thought": "Search for RSS feeds",
+  "action": "find-rss-url",
+  "params": {
+    "query": "CNN"
+  }
+}
+{{/if}}{{/if}}
 ## STATE MANAGEMENT:
 • You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
@@ -196,33 +246,79 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Use clear sections when updating the plan file: start with "---" followed by "## Progress Update - <timestamp>", a "### Completed Task" bullet list, and "### Knowledge for Next Execution" entries.
 {{/if}}
 
-## EXAMPLE:
- 
-### Prompt
+## EXAMPLES:
+
+### Example 1: Direct Knowledge (GOOD - minimal thought)
+**Prompt**: GOAL: what is the capital of France?
+**Response**:
 \`\`\`
-GOAL: what is the capital of France?
-
-CURRENT_STATE:
-{}
-
-PROGRESS SO FAR:
-[STATE] {}
-
-What's your next step? Respond with a JSON object following the schema ("action" may be a string or an array of action objects). 
+{ "thought": "I know this directly", "action": "final", "answer": "The capital of France is Paris." }
 \`\`\`
 
-### Answer
+### Example 2: Tool Usage (GOOD - action-oriented){{#if useshell}}
+**Prompt**: GOAL: what files are in the current directory?
+**Response**:
 \`\`\`
-{ "thought": "The user is asking for the capital of France. I know this information directly. The goal is achieved and I should provide the final answer.", "action": "final", "answer": "The capital of France is Paris." }
+{ "thought": "list directory", "action": "shell", "command": "ls -la" }
+\`\`\`{{/if}}
+
+### Example 3: Overthinking (BAD - avoid this)
+**Prompt**: GOAL: what is the capital of France?
+**Response** ❌:
 \`\`\`
+{ "thought": "The user is asking for the capital of France. I know this information directly without needing to use any tools or commands. The goal is achieved and I should provide the final answer with the information.", "action": "final", "answer": "The capital of France is Paris." }
+\`\`\`
+{{#if usetoolsActual}}
+
+### Example 4: MCP Tool Usage (CORRECT - Function Calling)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Step 1 - JSON Response**:
+\`\`\`
+{ "thought": "Search for CNN RSS feed", "action": "think" }
+\`\`\`
+**Step 1 - Function Call** (separate from JSON):
+\`\`\`
+Function: "proxy-dispatch"
+Arguments: {
+  "action": "call",
+  "tool": "find-rss-url",
+  "arguments": { "query": "CNN" }
+}
+\`\`\`
+**Step 2 - After receiving tool result**:
+\`\`\`
+{ "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
+\`\`\`
+
+### Example 5: MCP Tool Usage (WRONG - Don't do this)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response** ❌:
+\`\`\`
+{ "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
+\`\`\`
+**Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with "proxy-dispatch".
+{{else}}{{#if usetools}}
+
+### Example 4: MCP Tool Usage (CORRECT - Action-Based)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response**:
+\`\`\`
+{ "thought": "Search for CNN RSS feed", "action": "find-rss-url", "params": {"query": "CNN"} }
+\`\`\`
+**After receiving result**:
+\`\`\`
+{ "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
+\`\`\`
+{{/if}}{{/if}}
 
 ## RULES:
-1. Always include "thought" and "action" fields
-2. Always be concise and to the point
-3. Use tools only when necessary
-4. Work incrementally toward your goal
-5. Respond with valid JSON only - no extra text{{#if markdown}}
-6. The JSON response "answer" property should always be in markdown format{{/if}}{{#each rules}}
+1. Keep "thought" to 1 short sentence; omit details when action is obvious
+2. Prefer immediate action over prolonged analysis
+3. Use "think" action ONLY when you need to plan or reason about alternatives
+4. Use tools and shell commands directly when the task is clear
+5. Work incrementally - execute first, refine later
+6. Respond with valid JSON only - no extra text{{#if markdown}}
+7. The JSON response "answer" property should always be in markdown format{{/if}}{{#each rules}}
 {{{this}}}
 {{/each}}
 
@@ -1257,56 +1353,10 @@ MiniA.prototype._normalizePlanItems = function(plan) {
   return normalized.filter(entry => isString(entry.title) && entry.title.length > 0)
 }
 
-MiniA.prototype._assessGoalComplexity = function(goalText, args) {
-  var text = isString(goalText) ? goalText.trim() : stringify(goalText, __, "")
-  var words = text.length > 0 ? text.split(/\s+/).filter(Boolean) : []
-  var sentences = text.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 0)
-  var bulletMatches = text.match(/(^|\n)\s*(?:[-*]|\d+\.)/g)
-  var connectorMatches = text.match(/\b(and|then|after|before|while|followed by|next)\b/gi)
-  var technicalMatches = text.match(/\b(implement|deploy|debug|investigate|refactor|analysis|design|validate|benchmark|migrate|integrate)\b/gi)
-  var externalRefs = text.match(/https?:\/\//gi)
-
-  var score = 0
-  if (words.length > 12) score += 1
-  if (words.length > 40) score += 2
-  if (sentences.length > 1) score += 2
-  if (sentences.length > 3) score += 1
-  if (bulletMatches && bulletMatches.length > 0) score += 2
-  if (connectorMatches && connectorMatches.length > 1) score += 2
-  if (technicalMatches && technicalMatches.length > 0) score += 2
-  if (externalRefs && externalRefs.length > 0) score += 1
-
-  var keywords = ["investigate", "deploy", "automate", "diagnose", "prototype", "comprehensive", "multi-step", "workflow", "pipeline", "end-to-end", "script", "test", "document", "summarize"]
-  var keywordHits = 0
-  for (var i = 0; i < keywords.length; i++) {
-    if (text.toLowerCase().indexOf(keywords[i]) >= 0) keywordHits++
-  }
-  score += Math.min(3, keywordHits)
-
-  var level = "trivial"
-  if (score <= 1) level = "trivial"
-  else if (score <= 3) level = "easy"
-  else if (score <= 5) level = "moderate"
-  else if (score <= 7) level = "complex"
-  else level = "very_complex"
-
-  return {
-    text           : text,
-    wordCount      : words.length,
-    sentenceCount  : sentences.length,
-    hasBullets     : !!bulletMatches,
-    connectors     : connectorMatches ? connectorMatches.length : 0,
-    technicalTerms : technicalMatches ? technicalMatches.length : 0,
-    score          : score,
-    level          : level,
-    keywords       : keywords.filter(k => text.toLowerCase().indexOf(k) >= 0)
-  }
-}
-
 MiniA.prototype._selectPlanningStrategy = function(analysis, args) {
   if (!isObject(analysis)) return "off"
-  if (analysis.level === "trivial" || analysis.level === "easy") return "off"
-  if (analysis.level === "moderate") return "simple"
+  if (analysis.level === "simple") return "off"
+  if (analysis.level === "medium") return "simple"
   return "tree"
 }
 
@@ -5027,7 +5077,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     var fnsMeta = {
       "proxy-dispatch": {
         name       : "proxy-dispatch",
-        description: "Interact with downstream MCP connections aggregated by this proxy. Supports listing available tools, searching metadata, and calling specific tools on a target connection. When reasoning about your work, focus on the downstream tool you invoke and do not mention the proxy or the name 'proxy-dispatch'.",
+        description: "Interact with downstream MCP connections aggregated by this proxy. Supports listing available tools (action='list'), searching metadata (action='search'), and calling specific tools (action='call' with tool name and arguments). Use this function to invoke any MCP tool.",
         inputSchema: {
           type      : "object",
           properties: {
@@ -5299,7 +5349,7 @@ MiniA.prototype._getToolSchemaSummary = function(tool) {
   }
 
   if (summary.name === "proxy-dispatch") {
-    summary.description = description + " Focus on referencing the downstream MCP tool you invoke (e.g., 'call current-time') and avoid mentioning the proxy or its name in your reasoning or answers."
+    summary.description = description + " Always use function calling (not the JSON action field) to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
   }
 
   $cache(this._toolSchemaCacheName).set(cacheKey, { value: summary, expiresAt: now() + 3600000 })
@@ -5452,88 +5502,28 @@ MiniA.prototype._deduplicateContext = function(contextArray) {
 }
 
 MiniA.prototype._assessGoalComplexity = function(goal) {
-  if (!isString(goal) || goal.length === 0) return "medium"
+  if (!isString(goal) || goal.length === 0) return { level: "medium" }
 
   var tokens = this._estimateTokens(goal)
   var hasMultiStep = /\band\b|\bthen\b|first.*second|step\s*\d+/i.test(goal)
   var hasConditions = /\bif\b|\bunless\b|\bwhen\b/i.test(goal)
   var hasMultipleTasks = /\d+\.\s|\d+\)\s|;\s*\w+|,\s*\w+.*\w+.*\w+/i.test(goal)
 
+  var level
   // Complex: Long goals with multiple steps AND conditions, or very long goals
   if (tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
-    return "complex"
+    level = "complex"
   }
-
   // Medium: Moderate length with steps OR conditions, or multiple tasks
-  if (tokens > 100 || hasMultiStep || hasMultipleTasks) {
-    return "medium"
+  else if (tokens > 100 || hasMultiStep || hasMultipleTasks) {
+    level = "medium"
   }
-
   // Simple: Short, direct goals
-  return "simple"
-}
-
-MiniA.prototype._generateInitialPlan = function(args) {
-  if (!isObject(args) || !isString(args.goal)) {
-    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
+  else {
+    level = "simple"
   }
 
-  var planPrompt = `GOAL: ${args.goal}
-
-Create a detailed execution plan with:
-1. Strategy (simple or tree)
-2. List of steps with titles and dependencies
-3. Checkpoints for verification
-4. Risk assessment
-
-Respond with valid JSON only:
-{
-  "plan": {
-    "strategy": "simple",
-    "steps": [
-      {"title": "step description", "status": "pending", "progress": 0}
-    ],
-    "checkpoints": ["checkpoint 1", "checkpoint 2"],
-    "meta": {
-      "risks": ["potential risk 1"],
-      "overallProgress": 0
-    }
-  }
-}
-`
-
-  try {
-    // Use low-cost model for planning if available
-    var useLowCost = this._use_lc
-    var llm = useLowCost ? this.lc_llm : this.llm
-    var llmType = useLowCost ? "low-cost" : "main"
-
-    this.fnI("plan", `Generating execution plan using ${llmType} model...`)
-
-    var response
-    var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
-    if (!noJsonPromptFlag && isDef(llm.promptJSONWithStats)) {
-      response = llm.promptJSONWithStats(planPrompt)
-    } else {
-      response = llm.promptWithStats(planPrompt)
-    }
-
-    if (isObject(response) && isObject(response.response)) {
-      var planData = response.response
-      if (isObject(planData.plan)) {
-        this.fnI("plan", `Plan generated successfully (strategy: ${planData.plan.strategy || "simple"})`)
-        return planData
-      }
-    }
-
-    // Fallback if response is malformed
-    this.fnI("warn", "Plan generation returned unexpected format, using default plan structure")
-    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
-
-  } catch (e) {
-    this.fnI("warn", `Plan generation failed: ${e.message || e}. Using default plan structure.`)
-    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
-  }
+  return { level: level }
 }
 
 MiniA.prototype._callMcpTool = function(toolName, params) {
@@ -6475,8 +6465,14 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
 
     var parent = this
     var registerMcpTools = function(llmInstance) {
-      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") return llmInstance
+      // Check if LLM actually supports function calling
+      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
+        parent.fnI("warn", "usetools=true but model doesn't support function calling. Falling back to action-based mode.")
+        parent._useToolsActual = false  // Track actual capability
+        return llmInstance
+      }
 
+      parent._useToolsActual = true  // Function calling is supported
       var updated = llmInstance
       parent.fnI("info", `Registering MCP tools on LLM via tool interface...`)
 
@@ -6528,8 +6524,11 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       ? `${selectedToolNames.length} dynamically selected`
       : `${this.mcpTools.length}`
     this.fnI("mcp", `Registered ${toolCountMsg} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
-  } else if (useDynamicSelection) {
-    this.fnI("mcp", "Dynamic MCP selection requested, but MCP tool interface is disabled or no tools are available.")
+  } else {
+    this._useToolsActual = false  // No tools or usetools=false
+    if (useDynamicSelection) {
+      this.fnI("mcp", "Dynamic MCP selection requested, but MCP tool interface is disabled or no tools are available.")
+    }
   }
 
   this._applySystemInstructions(args)
@@ -7077,8 +7076,8 @@ MiniA.prototype.init = function(args) {
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
 
-    if (toBoolean(args.mcpproxy) === true) {
-      baseRules.push("When you invoke MCP tools through the proxy, describe the downstream tool you are using (for example, 'call current-time') and do not mention the proxy layer or the name 'proxy-dispatch'.")
+    if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
+      baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
     }
 
     if (args.chatbotmode) {
@@ -7139,6 +7138,7 @@ MiniA.prototype.init = function(args) {
         actionsdesc      : promptActionsDesc,
         isMachine        : (isDef(args.format) && args.format != "md"),
         usetools         : this._useTools,
+        usetoolsActual   : this._useToolsActual,
         toolCount        : this.mcpTools.length,
         planning         : this._enablePlanning,
         planningExecution: this._enablePlanning && this._planningPhase === "execution"
@@ -7745,10 +7745,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       medium: { errors: 2, thoughts: 4, totalThoughts: 6, stepsWithoutAction: 4 },
       complex: { errors: 2, thoughts: 3, totalThoughts: 5, stepsWithoutAction: 3 }
     }
-    var escalationLimits = escalationThresholds[goalComplexity] || escalationThresholds.medium
+    var goalComplexityLevel = goalComplexity && goalComplexity.level ? goalComplexity.level : "medium"
+    var escalationLimits = escalationThresholds[goalComplexityLevel] || escalationThresholds.medium
 
     if (args.debug || args.verbose) {
-      this.fnI("info", `Goal complexity assessed as: ${goalComplexity}`)
+      this.fnI("info", `Goal complexity assessed as: ${goalComplexityLevel}`)
       this.fnI("info", `Escalation thresholds: errors=${escalationLimits.errors}, thoughts=${escalationLimits.thoughts}, totalThoughts=${escalationLimits.totalThoughts}`)
     }
 
