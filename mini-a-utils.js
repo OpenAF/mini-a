@@ -1081,7 +1081,6 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
       if (isUnDef(data)) return "[ERROR] data is required"
       ow.loadFormat()
       var csv = new CSV()
-      var lines = String(data).split(/\r?\n/)
       var tempFile = ".temp_csv_" + nowNano() + ".csv"
       try {
         io.writeFileString(tempFile, data)
