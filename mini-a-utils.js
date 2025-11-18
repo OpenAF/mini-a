@@ -1351,7 +1351,6 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
   var stopOnError = params.stopOnError === true
   var compact = params.compact === true
   var results = []
-  var self = this
 
   try {
     this._ensureInitialized()
