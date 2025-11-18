@@ -1352,56 +1352,10 @@ MiniA.prototype._normalizePlanItems = function(plan) {
   return normalized.filter(entry => isString(entry.title) && entry.title.length > 0)
 }
 
-MiniA.prototype._assessGoalComplexity = function(goalText, args) {
-  var text = isString(goalText) ? goalText.trim() : stringify(goalText, __, "")
-  var words = text.length > 0 ? text.split(/\s+/).filter(Boolean) : []
-  var sentences = text.split(/[.!?\n]+/).map(s => s.trim()).filter(s => s.length > 0)
-  var bulletMatches = text.match(/(^|\n)\s*(?:[-*]|\d+\.)/g)
-  var connectorMatches = text.match(/\b(and|then|after|before|while|followed by|next)\b/gi)
-  var technicalMatches = text.match(/\b(implement|deploy|debug|investigate|refactor|analysis|design|validate|benchmark|migrate|integrate)\b/gi)
-  var externalRefs = text.match(/https?:\/\//gi)
-
-  var score = 0
-  if (words.length > 12) score += 1
-  if (words.length > 40) score += 2
-  if (sentences.length > 1) score += 2
-  if (sentences.length > 3) score += 1
-  if (bulletMatches && bulletMatches.length > 0) score += 2
-  if (connectorMatches && connectorMatches.length > 1) score += 2
-  if (technicalMatches && technicalMatches.length > 0) score += 2
-  if (externalRefs && externalRefs.length > 0) score += 1
-
-  var keywords = ["investigate", "deploy", "automate", "diagnose", "prototype", "comprehensive", "multi-step", "workflow", "pipeline", "end-to-end", "script", "test", "document", "summarize"]
-  var keywordHits = 0
-  for (var i = 0; i < keywords.length; i++) {
-    if (text.toLowerCase().indexOf(keywords[i]) >= 0) keywordHits++
-  }
-  score += Math.min(3, keywordHits)
-
-  var level = "trivial"
-  if (score <= 1) level = "trivial"
-  else if (score <= 3) level = "easy"
-  else if (score <= 5) level = "moderate"
-  else if (score <= 7) level = "complex"
-  else level = "very_complex"
-
-  return {
-    text           : text,
-    wordCount      : words.length,
-    sentenceCount  : sentences.length,
-    hasBullets     : !!bulletMatches,
-    connectors     : connectorMatches ? connectorMatches.length : 0,
-    technicalTerms : technicalMatches ? technicalMatches.length : 0,
-    score          : score,
-    level          : level,
-    keywords       : keywords.filter(k => text.toLowerCase().indexOf(k) >= 0)
-  }
-}
-
 MiniA.prototype._selectPlanningStrategy = function(analysis, args) {
   if (!isObject(analysis)) return "off"
-  if (analysis.level === "trivial" || analysis.level === "easy") return "off"
-  if (analysis.level === "moderate") return "simple"
+  if (analysis.level === "simple") return "off"
+  if (analysis.level === "medium") return "simple"
   return "tree"
 }
 
@@ -5547,88 +5501,28 @@ MiniA.prototype._deduplicateContext = function(contextArray) {
 }
 
 MiniA.prototype._assessGoalComplexity = function(goal) {
-  if (!isString(goal) || goal.length === 0) return "medium"
+  if (!isString(goal) || goal.length === 0) return { level: "medium" }
 
   var tokens = this._estimateTokens(goal)
   var hasMultiStep = /\band\b|\bthen\b|first.*second|step\s*\d+/i.test(goal)
   var hasConditions = /\bif\b|\bunless\b|\bwhen\b/i.test(goal)
   var hasMultipleTasks = /\d+\.\s|\d+\)\s|;\s*\w+|,\s*\w+.*\w+.*\w+/i.test(goal)
 
+  var level
   // Complex: Long goals with multiple steps AND conditions, or very long goals
   if (tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
-    return "complex"
+    level = "complex"
   }
-
   // Medium: Moderate length with steps OR conditions, or multiple tasks
-  if (tokens > 100 || hasMultiStep || hasMultipleTasks) {
-    return "medium"
+  else if (tokens > 100 || hasMultiStep || hasMultipleTasks) {
+    level = "medium"
   }
-
   // Simple: Short, direct goals
-  return "simple"
-}
-
-MiniA.prototype._generateInitialPlan = function(args) {
-  if (!isObject(args) || !isString(args.goal)) {
-    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
+  else {
+    level = "simple"
   }
 
-  var planPrompt = `GOAL: ${args.goal}
-
-Create a detailed execution plan with:
-1. Strategy (simple or tree)
-2. List of steps with titles and dependencies
-3. Checkpoints for verification
-4. Risk assessment
-
-Respond with valid JSON only:
-{
-  "plan": {
-    "strategy": "simple",
-    "steps": [
-      {"title": "step description", "status": "pending", "progress": 0}
-    ],
-    "checkpoints": ["checkpoint 1", "checkpoint 2"],
-    "meta": {
-      "risks": ["potential risk 1"],
-      "overallProgress": 0
-    }
-  }
-}
-`
-
-  try {
-    // Use low-cost model for planning if available
-    var useLowCost = this._use_lc
-    var llm = useLowCost ? this.lc_llm : this.llm
-    var llmType = useLowCost ? "low-cost" : "main"
-
-    this.fnI("plan", `Generating execution plan using ${llmType} model...`)
-
-    var response
-    var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
-    if (!noJsonPromptFlag && isDef(llm.promptJSONWithStats)) {
-      response = llm.promptJSONWithStats(planPrompt)
-    } else {
-      response = llm.promptWithStats(planPrompt)
-    }
-
-    if (isObject(response) && isObject(response.response)) {
-      var planData = response.response
-      if (isObject(planData.plan)) {
-        this.fnI("plan", `Plan generated successfully (strategy: ${planData.plan.strategy || "simple"})`)
-        return planData
-      }
-    }
-
-    // Fallback if response is malformed
-    this.fnI("warn", "Plan generation returned unexpected format, using default plan structure")
-    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
-
-  } catch (e) {
-    this.fnI("warn", `Plan generation failed: ${e.message || e}. Using default plan structure.`)
-    return { plan: { strategy: "simple", steps: [], checkpoints: [] } }
-  }
+  return { level: level }
 }
 
 MiniA.prototype._callMcpTool = function(toolName, params) {
@@ -7850,10 +7744,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       medium: { errors: 2, thoughts: 4, totalThoughts: 6, stepsWithoutAction: 4 },
       complex: { errors: 2, thoughts: 3, totalThoughts: 5, stepsWithoutAction: 3 }
     }
-    var escalationLimits = escalationThresholds[goalComplexity] || escalationThresholds.medium
+    var goalComplexityLevel = goalComplexity && goalComplexity.level ? goalComplexity.level : "medium"
+    var escalationLimits = escalationThresholds[goalComplexityLevel] || escalationThresholds.medium
 
     if (args.debug || args.verbose) {
-      this.fnI("info", `Goal complexity assessed as: ${goalComplexity}`)
+      this.fnI("info", `Goal complexity assessed as: ${goalComplexityLevel}`)
       this.fnI("info", `Escalation thresholds: errors=${escalationLimits.errors}, thoughts=${escalationLimits.thoughts}, totalThoughts=${escalationLimits.totalThoughts}`)
     }
 

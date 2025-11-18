@@ -16,10 +16,10 @@
   exports.testGoalAssessment = function() {
     var agent = createAgent()
     var simple = agent._assessGoalComplexity("List two colors")
-    ow.test.assert(["trivial", "easy"].indexOf(simple.level) >= 0, true, "Simple goal should be trivial or easy")
+    ow.test.assert(simple.level === "simple", true, "Simple goal should be simple")
     var complexGoal = "Design, implement, and validate a data pipeline with error handling and documentation"
     var complex = agent._assessGoalComplexity(complexGoal)
-    ow.test.assert(["complex", "very_complex"].indexOf(complex.level) >= 0, true, "Complex goal should be flagged")
+    ow.test.assert(["medium", "complex"].indexOf(complex.level) >= 0, true, "Complex goal should be flagged")
   }
 
   exports.testSimplePlanGeneration = function() {

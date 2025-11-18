@@ -58,7 +58,7 @@ modes:
     params     :
       useascii   : true
       usetools   : true
-      useplanning: true
+      useplanning: false
       useshell   : true
       readwrite  : true
       useutils   : true
