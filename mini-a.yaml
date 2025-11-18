@@ -261,6 +261,19 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : model
+    desc     : Override the OAF_MODEL environment variable with a custom model configuration (string or JSON/SLON map)
+    example  : "anthropic/claude-3-5-sonnet-20241022"
+    mandatory: false
+  - name     : modellc
+    desc     : Override the low-cost model configuration used for summarization and tool selection (string or JSON/SLON map)
+    example  : "anthropic/claude-3-5-haiku-20241022"
+    mandatory: false
+  - name     : saveplannotes
+    desc     : Save execution notes back to the plan file after execution
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
 
 todo:
 - MiniAgent
@@ -344,6 +357,7 @@ jobs:
         debugch        : debugch
         debuglcch      : debuglcch
         nosetmcpwd     : nosetmcpwd
+        saveplannotes  : saveplannotes
   check:
     in:
       goal           : isString
@@ -399,6 +413,7 @@ jobs:
       debugch        : isString.default(__)
       debuglcch      : isString.default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)
+      saveplannotes  : toBoolean.isBoolean.default(false)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
