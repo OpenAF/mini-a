@@ -45,6 +45,7 @@ var MiniA = function() {
   this._resumeFailedTasks = false
   this._loadedPlanPayload = null
   this._savePlanNotes = false
+  this._useToolsActual = false
   this._planUpdateConfig = { frequency: "auto", interval: 3, force: false, logFile: null }
   this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
   this._planLogFile = __
