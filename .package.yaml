@@ -125,8 +125,8 @@ filesHash:
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 5ac59c2d8384ca98ac41819f3496e57c1c7ca746
-  USAGE.md: fc629aea62db6be3052e6782383c36f2f78ef958
+  README.md: f9a0b7fcd2d98fda647c2d8d595da54ef6b6add8
+  USAGE.md: 754977f39cebeb9fcbbf34efcfd39f372c35690a
   docs/LEARN.md: a927a43eabfe5e7e831628beac9dcd3a2323cb05
   docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
@@ -161,7 +161,7 @@ filesHash:
   mcps/mcp-time.yaml: 617dc07ce4e9bfb603a77d17429dc4b57accb3a4
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 540dfbfc64b7ba603a3bc64e025340a7d665e5df
+  mini-a-con.js: 275d4ad8279f64df35c0e1721bce0576317f3b25
   mini-a-mcptest.js: 56c2c94146fafe37845c65d5db746f2a6094de56
   mini-a-modelman.js: ba8f43e293b0902fcd2d084a81944d95800bcfe1
   mini-a-modes.yaml: e5bbd71edc73422c2d334ecdd5166e2c2a50c50b
