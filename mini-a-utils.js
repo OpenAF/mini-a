@@ -15,9 +15,9 @@ var MiniUtilsTool = function(options) {
   this._readWrite = false
   this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
-  if (isDef(options)) {
+  //if (isDef(options)) {
     this.init(options)
-  }
+  //}
 }
 
 /**
