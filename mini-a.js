@@ -6465,14 +6465,31 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
 
     var parent = this
     var registerMcpTools = function(llmInstance) {
-      // Check if LLM actually supports function calling
-      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
-        parent.fnI("warn", "usetools=true but model doesn't support function calling. Falling back to action-based mode.")
-        parent._useToolsActual = false  // Track actual capability
-        return llmInstance
-      }
+      // Check if we're using mcpproxy - if so, force function calling mode
+      var usingMcpProxy = toBoolean(args.mcpproxy) === true
+      var hasMcpProxyConnection = Object.keys(parent._mcpConnections || {}).some(function(id) {
+        return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
+      })
 
-      parent._useToolsActual = true  // Function calling is supported
+      // When mcpproxy=true, always use function calling mode regardless of LLM support
+      // NOTE: _useToolsActual is already pre-set before init() to ensure correct prompt template
+      if (usingMcpProxy && hasMcpProxyConnection) {
+        parent.fnI("info", "MCP proxy mode enabled - using function calling for proxy-dispatch tool.")
+        parent._useToolsActual = true  // Confirm function calling mode for proxy (already set before init)
+
+        // Even if LLM doesn't have withMcpTools, proceed with registration
+        // The proxy-dispatch tool will be registered via the OpenAI functions format
+        if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
+          parent.fnI("warn", "Model doesn't have withMcpTools method, but proxy-dispatch tool should still be registered via functions interface.")
+        }
+      } else if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
+        // Check if LLM actually supports function calling (non-proxy mode)
+        parent.fnI("warn", "usetools=true but model doesn't support function calling. Falling back to action-based mode.")
+        parent._useToolsActual = false  // Confirm action-based mode
+        return llmInstance
+      } else {
+        parent._useToolsActual = true  // Confirm function calling is supported
+      }
       var updated = llmInstance
       parent.fnI("info", `Registering MCP tools on LLM via tool interface...`)
 
@@ -7599,6 +7616,29 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (args.knowledgeUpdated === true) {
         this._isInitialized = false
       }
+
+    // Pre-determine _useToolsActual BEFORE init() to ensure correct prompt template
+    var usingMcpProxy = toBoolean(args.mcpproxy) === true
+    var hasMcpProxyConnection = Object.keys(this._mcpConnections || {}).some(function(id) {
+      return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
+    })
+
+    if (usingMcpProxy && hasMcpProxyConnection) {
+      // MCP proxy mode always uses function calling
+      this._useToolsActual = true
+      this.fnI("info", "Pre-setting _useToolsActual=true for MCP proxy mode before init()")
+    } else if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
+      // Check if LLM supports function calling (non-proxy mode)
+      this._useToolsActual = isDef(this.llm) && typeof this.llm.withMcpTools === "function"
+      if (!this._useToolsActual) {
+        this.fnI("info", "Pre-setting _useToolsActual=false (LLM doesn't support function calling)")
+      } else {
+        this.fnI("info", "Pre-setting _useToolsActual=true (LLM supports function calling)")
+      }
+    } else {
+      // No tools or usetools=false
+      this._useToolsActual = false
+    }
 
     this.init(args)
     this._registerMcpToolsForGoal(args)
