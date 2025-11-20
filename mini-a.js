@@ -6497,6 +6497,13 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
         var client = parent._mcpConnections[connectionId]
         if (isUnDef(client)) return
 
+        // Skip proxy connection if mcpproxy is not enabled
+        var isProxyConnection = connectionId === md5("mini-a-mcp-proxy") || connectionId.indexOf("mini-a-mcp-proxy") >= 0
+        if (isProxyConnection && !usingMcpProxy) {
+          parent.fnI("info", `Skipping proxy connection ${connectionId.substring(0, 8)} because mcpproxy=false`)
+          return
+        }
+
         try {
           var result
           var connectionToolNames = parent.mcpTools
