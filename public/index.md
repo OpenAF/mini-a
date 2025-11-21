@@ -1,6 +1,25 @@
 <script src="showdown.min.js?raw=true"></script>
-<!-- Chart.js (v4 UMD) -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<!-- Chart.js (try local, fallback to CDN) -->
+<script>
+    (function loadChartJS() {
+        var script = document.createElement('script');
+        script.src = '/js/chart.js';
+        script.onload = function() {
+            window.ChartJSLoaded = true;
+            console.log('Chart.js loaded from local /js/chart.js');
+        };
+        script.onerror = function() {
+            var cdnScript = document.createElement('script');
+            cdnScript.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+            cdnScript.onload = function() {
+                window.ChartJSLoaded = true;
+                console.log('Chart.js loaded from CDN');
+            };
+            document.head.appendChild(cdnScript);
+        };
+        document.head.appendChild(script);
+    })();
+</script>
 <!-- Time adapter (bundle includes date-fns) -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <!-- Boxplot (scoped package name!) -->
@@ -33,15 +52,31 @@
     window.__chartjs_plugins_loaded = true;
 </script>
 <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({ 
+    // Try local first, fallback to CDN
+    let mermaid;
+    try {
+        mermaid = await import('/js/mermaid.js');
+        console.log('Mermaid loaded from local server');
+    } catch (error) {
+        console.warn('Local mermaid failed, loading from CDN:', error);
+        mermaid = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
+        console.log('Mermaid loaded from CDN');
+    }
+    
+    // Handle both default export and named exports
+    const mermaidLib = mermaid.default || mermaid;
+    
+    // Detect initial theme based on body classes or system preference
+    const initialDark = document.body.classList.contains('markdown-body-dark') || 
+                        (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    mermaidLib.initialize({ 
         startOnLoad: false,
-        theme: 'default',
+        theme: initialDark ? 'dark' : 'default',
         themeVariables: {
-            darkMode: false
+            darkMode: initialDark
         }
     });
-    window.mermaid = mermaid;
+    window.mermaid = mermaidLib;
 </script>
 <script>
     document.title = 'Chat Interface';
@@ -129,6 +164,11 @@
                 historyBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.35)';
                 historyBtn.style.border = '1px solid rgba(255,255,255,0.08)';
             }
+
+            // Re-render mermaid diagrams with dark theme
+            if (typeof reRenderMermaidDiagrams === 'function') {
+                reRenderMermaidDiagrams().catch(err => console.error('Failed to re-render mermaid diagrams:', err));
+            }
         } else {
             // Apply light mode styles
             document.body.classList.remove('markdown-body-dark', 'hljs_dark', 'njsmap_dark');
@@ -197,6 +237,11 @@
                 historyBtn.style.color = '#0d47a1';
                 historyBtn.style.border = 'none';
                 historyBtn.style.boxShadow = '0 2px 6px rgba(13,71,161,0.15)';
+            }
+
+            // Re-render mermaid diagrams with light theme
+            if (typeof reRenderMermaidDiagrams === 'function') {
+                reRenderMermaidDiagrams().catch(err => console.error('Failed to re-render mermaid diagrams:', err));
             }
         }
     }
@@ -2175,6 +2220,45 @@
             }
         } catch (error) {
             console.error('Mermaid rendering error:', error);
+        }
+    }
+
+    async function reRenderMermaidDiagrams() {
+        if (typeof window.mermaid === 'undefined') return;
+
+        try {
+            // Update theme based on current dark mode state
+            const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+            await window.mermaid.initialize({
+                startOnLoad: false,
+                theme: isDark ? 'dark' : 'default',
+                themeVariables: {
+                    darkMode: isDark
+                },
+                suppressErrorRendering: true
+            });
+
+            // Find all rendered mermaid diagram containers
+            const mermaidContainers = resultsDiv.querySelectorAll('.mermaid-diagram[data-mermaid-source]');
+
+            for (let i = 0; i < mermaidContainers.length; i++) {
+                const container = mermaidContainers[i];
+                const code = container.getAttribute('data-mermaid-source');
+                if (!code) continue;
+
+                try {
+                    // Update container background
+                    container.style.background = isDark ? '#0f1115' : '#f8f9fa';
+
+                    // Re-render the diagram with new theme
+                    const { svg } = await window.mermaid.render('mermaid-rerender-' + Date.now() + '-' + i, code);
+                    container.innerHTML = svg;
+                } catch (error) {
+                    console.error('Failed to re-render Mermaid diagram:', error);
+                }
+            }
+        } catch (error) {
+            console.error('Mermaid re-rendering error:', error);
         }
     }
 

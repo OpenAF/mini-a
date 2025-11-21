@@ -473,7 +473,16 @@ MiniA.buildVisualKnowledge = function(options) {
   if (!useDiagrams && !useCharts && !useAscii) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
-  if (existingKnowledge.indexOf("Visual output guidance (concise):") >= 0) return ""
+  // Check if visual guidance already exists AND matches current flags
+  if (existingKnowledge.indexOf("Visual output guidance (concise):") >= 0) {
+    var hasDiagrams = existingKnowledge.indexOf("Diagrams:") >= 0
+    var hasCharts = existingKnowledge.indexOf("Charts (strict format):") >= 0
+    var hasAscii = existingKnowledge.indexOf("ASCII/UTF-8 visuals") >= 0
+    // Only return early if existing guidance matches current flags
+    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii) {
+      return ""
+    }
+  }
 
   var visualParts = []
 
@@ -481,15 +490,29 @@ MiniA.buildVisualKnowledge = function(options) {
     "Visual output guidance (concise):\n\n" +
     "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
     "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
-    "- Never mention the technical implementation (Mermaid, Chart.js, ANSI codes, etc.); refer only to the visual type."
+    "- In your explanatory text and captions, refer only to the visual type (e.g., 'diagram', 'chart', 'table') without mentioning the technical implementation (Mermaid, Chart.js, ANSI codes, etc.)."
   )
 
   if (useDiagrams) {
     visualParts.push(
       "Diagrams:\n" +
-      "  - Use ```mermaid``` fences for flows (`graph TD`), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, mindmap, or pie charts.\n" +
-      "  - Keep node labels concise and prefer directional edges for processes.\n" +
-      "  - CRITICAL: Always wrap all labels in double quotes (e.g., A[\"Label text\"] not A[Label text]) to avoid syntax errors."
+      "  - Use ```mermaid``` fences. Supported types (Mermaid 11.12.1): flowchart / graph (graph TD|LR|TB), sequenceDiagram, classDiagram, stateDiagram / stateDiagram-v2, erDiagram, journey (user journey), gantt, pie, requirementDiagram, gitGraph, mindmap, timeline, quadrantChart, zenUML (use for use-case diagrams), sankey (USE near CSV syntax), XYChart (for scatter plots), block (for block diagrams), packet (for network diagrams), kanban (for Kanban boards), architecture-beta (for system architecture diagrams), radar-beta (for radar charts) and treemap-meta (for treemap diagrams)\n" +
+      "  - CRITICAL RULE: Only use diagram types listed above. If uncertain about a type, default to flowchart or sequenceDiagram.\n" +
+      "  - Keep labels concise; prefer directional edges for processes.\n" +
+      "  - CRITICAL SYNTAX REQUIREMENT: ALWAYS wrap ALL node/box labels in DOUBLE QUOTES without exception:\n" +
+      "    • CORRECT: A[\"Label\"], B(\"Label\"), C{\"Decision\"}, D[[\"Subroutine\"]], E[(\"Database\")]\n" +
+      "    • WRONG: A[Label], B(Label with spaces), C{Decision?}\n" +
+      "    • Edge labels can optionally use quotes: -->|\"label\"| or -->|label|\n" +
+      "    • This applies to EVERY node definition - no exceptions even for simple labels\n" +
+      "  - Escape inner quotes with backslashes: A[\"He said \\\"hello\\\"\"]\n" +
+      "  - CRITICAL: Do NOT use \"\\n\"; use \"<br>\" instead (e.g., A[\"First line<br>Second line\"]).\n" +
+      "  - Avoid stray backticks, unmatched brackets, or unescaped quotes inside labels.\n" +
+      "  - Common syntax patterns:\n" +
+      "    • Flowchart: A[\"Start\"] --> B[\"Process\"] --> C{\"Decision\"} -->|\"Yes\"| D[\"End\"]\n" +
+      "    • Direction aliases: TD/TB (top-down), LR (left-right), RL (right-left), BT (bottom-top)\n" +
+      "    • Subgraphs for grouping: subgraph \"Group Name\" ... end\n" +
+      "    • Sequence diagram: participant A as \"User\" (always quote participant aliases)\n" +
+      "  - For large diagrams, group logically with subgraphs and avoid excessive inline styling (can cause rendering issues)."
     )
   }
 
@@ -504,22 +527,38 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - Use only static values; do not include functions or dynamic callbacks (no `ctx => ...`, no `function(){}`); configs are treated as data and code is not executed.\n" +
       "  - Provide complete, deterministic data inline (no async or fetching).\n" +
       "  - IMPORTANT: When working with datetime values, keep them as strings in ISO format or as timestamp numbers. Do not use Date objects or date parsing functions in the chart configuration.\n\n" +
-      "Available chart plugins/types (preloaded):\n" +
+      "Available core chart types (Chart.js 4.5.1):\n" +
+      "  - bar\n" +
+      "  - line (use fill for area charts)\n" +
+      "  - scatter\n" +
+      "  - bubble\n" +
+      "  - pie\n" +
+      "  - doughnut\n" +
+      "  - polarArea\n" +
+      "  - radar\n" +
+      "  - mixed (combine dataset types e.g. bar + line)\n\n" +
+      "Preloaded plugin chart types:\n" +
       "  - chartjs-adapter-date-fns (time scale; use scales.{x|y}.type='time' with ISO date strings)\n" +
       "  - @sgratzl/chartjs-chart-boxplot (types: 'boxplot', 'violin')\n" +
       "  - chartjs-chart-treemap (type: 'treemap')\n" +
       "  - chartjs-chart-sankey (type: 'sankey')\n" +
       "  - chartjs-chart-matrix (type: 'matrix')\n" +
       "  - chartjs-chart-graph (type: 'graph')\n" +
-      "  - chartjs-chart-geo (types: 'choropleth', 'bubbleMap')"
+      "  - chartjs-chart-geo (types: 'choropleth', 'bubbleMap')\n" +
+      "  - chartjs-chart-financial (types: 'candlestick', 'ohlc')\n" +
+      "  - chartjs-chart-wordcloud (type: 'wordcloud')\n" +
+      "  - chartjs-chart-sunburst (type: 'sunburst')\n" +
+      "\n" +
+      "CRITICAL RULE: Only use chart types listed above. If uncertain about a type, default to bar or line.\n"
     )
   }
 
   if (useAscii) {
     visualParts.push(
       "ASCII/UTF-8 visuals with ANSI colors:\n" +
-      "  - ALWAYS prefer markdown tables for tabular data (using | and - characters).\n" +
-      "  - Use full UTF-8 characters for non-tabular visuals: box-drawing (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬), arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇).\n" +
+      "  - For tabular data with rows and columns: ALWAYS use markdown tables (using | and - characters).\n" +
+      "  - For non-tabular visuals (diagrams, panels, containers): Use UTF-8 box-drawing characters (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬).\n" +
+      "  - Additional UTF-8 characters: arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇).\n" +
       "  - Leverage emoji strategically: status indicators (✅❌⚠️🔴🟢🟡), workflow symbols (🔄🔁⏸️▶️⏹️), category icons (📁📂📄🔧⚙️🔑🔒), and semantic markers (💡🎯🚀⭐🏆).\n" +
       "  - Apply ANSI color codes for semantic highlighting (ONLY outside markdown code blocks):\n" +
       "    • Errors/critical: \\u001b[31m (red), \\u001b[1;31m (bold red)\n" +
@@ -530,14 +569,13 @@ MiniA.buildVisualKnowledge = function(options) {
       "    • Backgrounds: \\u001b[41m (red bg), \\u001b[42m (green bg), \\u001b[43m (yellow bg), \\u001b[44m (blue bg)\n" +
       "    • Always reset with \\u001b[0m after colored text\n" +
       "    • Combine codes with semicolons: \\u001b[1;32;4m (bold green underline)\n" +
-      "    • IMPORTANT: Never use ANSI codes inside markdown code blocks (```); color only plain text output\n" +
+      "    • IMPORTANT: ANSI codes work only in plain text areas. Never use ANSI codes inside markdown code blocks (```) as they will not render.\n" +
       "  - Create hierarchical structures with indentation and tree symbols (├── └── │ ─).\n" +
       "  - Design progress bars using blocks (█▓▒░), fractions (▏▎▍▌▋▊▉), or percentage indicators.\n" +
       "  - Use spinners/activity indicators: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ or ◐◓◑◒ or ⣾⣽⣻⢿⡿⣟⣯⣷.\n" +
-      "  - Use UTF-8 box-drawing for diagrams, panels, or containers, NOT for tables.\n" +
-      "  - Combine ANSI colors with markdown tables by coloring cell content, not borders.\n" +
+      "  - For markdown tables: You can apply ANSI color codes to cell content (the text inside cells), but not to table borders.\n" +
       "  - Use color gradients for metrics: green→yellow→red based on thresholds.\n" +
-      "  - Assume output is terminal monospaced font; align visuals accordingly not needing a markdown code block."
+      "  - UTF-8 visuals should be displayed in plain text (not in code blocks) to preserve ANSI coloring and proper terminal rendering."
     )
   }
 
@@ -565,7 +603,7 @@ MiniA.buildVisualKnowledge = function(options) {
     checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ANSI-enhanced ASCII table or emoticon map as fallback."
     nextIndex++
   }
-  checklist += "\n\nIf a visual truly does not apply (e.g., purely narrative requests), explain why before falling back to text-only output."
+  checklist += "\n\nIf no visual type above applies to the user's request (e.g., purely narrative or conversational queries), you may provide text-only output without explanation."
 
   visualParts.push(checklist)
 
