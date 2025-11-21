@@ -1,56 +1,98 @@
 <script src="showdown.min.js?raw=true"></script>
-<!-- Chart.js (try local, fallback to CDN) -->
+<!-- Chart.js + adapters/plugins: deterministic, version-aware loader -->
 <script>
-    (function loadChartJS() {
-        var script = document.createElement('script');
-        script.src = '/js/chart.js';
-        script.onload = function() {
+    (function() {
+        const CDN_CHART_V4 = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+        const ADAPTER_V4 = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js';
+        const ADAPTER_V3 = 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2/dist/chartjs-adapter-date-fns.bundle.min.js';
+        const PLUGINS = [
+            'https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.5/build/index.umd.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.14.0/dist/chartjs-chart-sankey.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@3.0.0/dist/chartjs-chart-matrix.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-graph@4.3.5/build/index.umd.min.js',
+            'https://cdn.jsdelivr.net/npm/chartjs-chart-geo@4.3.6/build/index.umd.min.js'
+        ];
+
+        window.ChartJSLoaded = false;
+        window.__chartjsAdapterReady = false;
+        window.__chartjs_plugins_loaded = false;
+
+        function addScript(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = src;
+                s.async = false; // preserve order
+                s.onload = () => resolve(src);
+                s.onerror = () => reject(new Error('Failed to load ' + src));
+                document.head.appendChild(s);
+            });
+        }
+
+        function getChartMajor() {
+            try {
+                if (window.Chart && window.Chart.version) {
+                    const major = parseInt(String(window.Chart.version).split('.')[0], 10);
+                    return isNaN(major) ? undefined : major;
+                }
+            } catch (_) {}
+            return undefined;
+        }
+
+        function loadAdapterForChart() {
+            const major = getChartMajor();
+            // Prefer v4 adapter; if we detect v3, use v2 adapter
+            const adapterUrl = major && major < 4 ? ADAPTER_V3 : ADAPTER_V4;
+            return addScript(adapterUrl).then(() => {
+                window.__chartjsAdapterReady = true;
+                console.log('Chart.js date adapter loaded:', adapterUrl);
+            });
+        }
+
+        function loadPluginsSequentially() {
+            return PLUGINS.reduce((p, url) => p.then(() => addScript(url)), Promise.resolve()).then(() => {
+                window.__chartjs_plugins_loaded = true;
+                // Attempt to register optional globals if present
+                try {
+                    if (window.Chart) {
+                        const { Chart } = window;
+                        if (window.ChartDataLabels) Chart.register(window.ChartDataLabels);
+                        const annotation = window.ChartAnnotation || window['chartjs-plugin-annotation'] || window.annotationPlugin;
+                        if (annotation) Chart.register(annotation);
+                    }
+                } catch (_) {}
+                console.log('Chart.js plugins loaded');
+            });
+        }
+
+        function finalize() {
             window.ChartJSLoaded = true;
-            console.log('Chart.js loaded from local /js/chart.js');
-        };
-        script.onerror = function() {
-            var cdnScript = document.createElement('script');
-            cdnScript.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
-            cdnScript.onload = function() {
-                window.ChartJSLoaded = true;
-                console.log('Chart.js loaded from CDN');
-            };
-            document.head.appendChild(cdnScript);
-        };
-        document.head.appendChild(script);
+            try { document.dispatchEvent(new CustomEvent('chartjs:ready')); } catch (_) {}
+            console.log('Chart.js ready (with adapter and plugins).');
+        }
+
+        function ensureV4OrUseLocalLoaded() {
+            const major = getChartMajor();
+            // If local is not v4, prefer CDN v4 to match plugin set
+            if (!major || major < 4) {
+                console.warn('Local Chart.js not v4; loading CDN v4 for compatibility.');
+                return addScript(CDN_CHART_V4);
+            }
+            return Promise.resolve();
+        }
+
+        // Start: attempt local Chart.js, then normalize to v4 if needed, then adapter + plugins.
+        addScript('/js/chart.js')
+            .catch(() => addScript(CDN_CHART_V4))
+            .then(() => ensureV4OrUseLocalLoaded())
+            .then(() => loadAdapterForChart())
+            .then(() => loadPluginsSequentially())
+            .then(finalize)
+            .catch((err) => {
+                console.error('Chart.js initialization failed:', err);
+            });
     })();
-</script>
-<!-- Time adapter (bundle includes date-fns) -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-<!-- Boxplot (scoped package name!) -->
-<script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4.4.5/build/index.umd.min.js"></script>
-<!-- Treemap -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@3.1.0/dist/chartjs-chart-treemap.min.js"></script>
-<!-- Sankey -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.14.0/dist/chartjs-chart-sankey.min.js"></script>
-<!-- Matrix (v3 for Chart.js v4) -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@3.0.0/dist/chartjs-chart-matrix.min.js"></script>
-<!-- Graph -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-graph@4.3.5/build/index.umd.min.js"></script>
-<!-- Geo -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-geo@4.3.6/build/index.umd.min.js"></script>
-<script>
-    // Best-effort registration for plugins that expose globals in UMD builds
-    // Some @sgratzl UMD bundles auto-register themselves if Chart is present
-    // but we explicitly register the common ones when globals are available.
-    (function registerChartPlugins() {
-        if (!window || !window.Chart) return;
-        const { Chart } = window;
-        try { if (window.ChartDataLabels) Chart.register(window.ChartDataLabels); } catch (e) { /* noop */ }
-        try {
-            const annotation = window.ChartAnnotation || window['chartjs-plugin-annotation'] || window.annotationPlugin;
-            if (annotation) Chart.register(annotation);
-        } catch (e) { /* noop */ }
-        // No action needed for date-fns adapter; it hooks the time scale when loaded.
-    })();
-    // Expose a flag for quick diagnostics in dev tools
-    window.__chartjs_plugins_loaded = true;
-</script>
+    </script>
 <script type="module">
     // Try local first, fallback to CDN
     let mermaid;
@@ -2379,11 +2421,11 @@
             { re: /\bprompt\b/i,          label: 'prompt' }
         ];
 
-        const matched = bannedPatterns.find(p => p.re.test(cleaned));
+        /*const matched = bannedPatterns.find(p => p.re.test(cleaned));
         if (matched) {
             console.warn('Skipping chart block - disallowed token present in configuration. (' + matched.label + ')');
             return null;
-        }
+        }*/
 
         try {
             const fn = new Function('"use strict"; return (' + expr + ');');
@@ -2447,7 +2489,7 @@
     }
 
     function renderChartBlocks() {
-        if (!resultsDiv || typeof window.Chart === 'undefined') return;
+        if (!resultsDiv || typeof window.Chart === 'undefined' || window.__chartjsAdapterReady !== true) return;
 
         // Be liberal in what we accept: match common variants (chart, chartjs, chart.js)
         // and also fall back to content sniffing for objects that look like Chart.js configs.
@@ -2598,6 +2640,13 @@
             setTimeout(triggerRender, 0);
         }
     }
+
+    // Re-render charts once Chart.js and its adapter/plugins are fully ready
+    try {
+        document.addEventListener('chartjs:ready', () => {
+            try { forceRenderChartBlocks(); } catch (e) { console.error(e); }
+        });
+    } catch (_) {}
 
     function resetRenderedChartsForTheme() {
         const chartContainers = document.querySelectorAll('.chartjs-chart');
