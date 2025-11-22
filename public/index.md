@@ -328,6 +328,7 @@
         position: relative;
         max-width: 100%;
         overflow-x: auto;
+        zoom: 1.1;
     }
 
     .chartjs-chart canvas {
@@ -923,8 +924,8 @@
 
     /* Webkit Scrollbar for Light Mode */
     ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 10px;
+        height: 10px;
     }
 
     ::-webkit-scrollbar-track {
@@ -941,10 +942,18 @@
         background-color: #b3b3b3; /* Darker on hover */
     }
 
+    /*body.markdown-body {
+        font-size: 14px;
+    }
+
+    body.markdown-body-dark {
+        font-size: 14px;
+    }*/
+
     /* Webkit Scrollbar for Dark Mode */
     body.markdown-body-dark ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
+        width: 10px;
+        height: 10px;
     }
 
     body.markdown-body-dark ::-webkit-scrollbar-track {
@@ -2310,6 +2319,15 @@
             window.Chart.defaults.color = isDark ? '#e6e6e6' : '#1b1d25';
             window.Chart.defaults.borderColor = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.15)';
             window.Chart.defaults.backgroundColor = isDark ? 'rgba(51,144,255,0.18)' : 'rgba(0,123,255,0.12)';
+            
+            // Configure hover colors to ensure proper theme support
+            if (window.Chart.defaults.plugins && window.Chart.defaults.plugins.tooltip) {
+                window.Chart.defaults.plugins.tooltip.backgroundColor = isDark ? 'rgba(30,30,30,0.95)' : 'rgba(255,255,255,0.95)';
+                window.Chart.defaults.plugins.tooltip.titleColor = isDark ? '#e6e6e6' : '#1b1d25';
+                window.Chart.defaults.plugins.tooltip.bodyColor = isDark ? '#e6e6e6' : '#1b1d25';
+                window.Chart.defaults.plugins.tooltip.borderColor = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.15)';
+                window.Chart.defaults.plugins.tooltip.borderWidth = 1;
+            }
         } catch (error) {
             console.error('Failed to configure Chart.js defaults:', error);
         }

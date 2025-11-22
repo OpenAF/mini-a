@@ -109,3 +109,9 @@ modes:
       - type   : ojob
         options:
           job: mcps/mcp-net.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-oaf.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-oafp.yaml
