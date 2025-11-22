@@ -616,7 +616,7 @@ function mainMCPTest(args) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No tools available.", errorColor) + "\n")
                     } else {
                         tools = tools.tools
-                        var toolNames = tools.map(t => t.name).concat(["🔙 Cancel"])
+                        var toolNames = tools.map(t => t.name).sort().concat(["🔙 Cancel"])
                         var toolIdx = askChoose("Choose a tool to call: ", toolNames, sessionOptions.toolchoosesize)
 
                         if (toolIdx < tools.length) {
@@ -643,7 +643,7 @@ function mainMCPTest(args) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No tools available.", errorColor) + "\n")
                     } else {
                         tools = tools.tools
-                        var toolNames = tools.map(t => t.name).concat(["🔙 Cancel"])
+                        var toolNames = tools.map(t => t.name).sort().concat(["🔙 Cancel"])
                         var toolIdx = askChoose("Choose a tool to inspect: ", toolNames, sessionOptions.toolchoosesize)
 
                         if (toolIdx < tools.length) {
@@ -678,7 +678,7 @@ function mainMCPTest(args) {
                     var optionChoices = optionKeys.map(function(key) {
                         var currentValue = sessionOptions[key]
                         return key + repeat(maxOptionLength - key.length, " ") + " (currently: " + currentValue + ")"
-                    }).concat(["🔙 Cancel"])
+                    }).sort().concat(["🔙 Cancel"])
 
                     var optionIdx = askChoose("Choose an option to toggle: ", optionChoices)
 
@@ -700,7 +700,7 @@ function mainMCPTest(args) {
                         var def = optionDefinitions[key]
                         var currentValue = sessionOptions[key]
                         return key + repeat(maxOptionLength - key.length, " ") + " (" + def.type + ", currently: " + currentValue + ")"
-                    }).concat(["🔙 Cancel"])
+                    }).sort().concat(["🔙 Cancel"])
 
                     var setOptionIdx = askChoose("Choose an option to set: ", allOptionChoices)
 
