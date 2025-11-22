@@ -34,11 +34,11 @@ flowchart TD
    ```
 3. **Set the primary LLM model** by exporting `OAF_MODEL`. Replace the placeholders with your vendor, model, and key:
    ```bash
-   export OAF_MODEL="(type: openai, model: gpt-4o-mini, key: 'sk-...', timeout: 900000, temperature: 0.8)"
+   export OAF_MODEL="(type: openai, model: gpt-5.1, key: 'sk-...', timeout: 900000, temperature: 0.8)"
    ```
 4. *(Optional)* **Set a secondary low-cost model** for dual-model optimization:
    ```bash
-   export OAF_LC_MODEL="(type: openai, model: gpt-4o-mini, key: 'sk-...', temperature: 0.3)"
+   export OAF_LC_MODEL="(type: openai, model: gpt-5.1, key: 'sk-...', temperature: 0.3)"
    ```
 5. Confirm the configuration:
    ```bash

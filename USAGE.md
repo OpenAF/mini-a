@@ -1236,8 +1236,8 @@ export OAF_LC_MODEL="(type: ollama, model: 'llama3', url: 'http://localhost:1143
 #### Google Gemini Dual Setup
 
 ```bash
-export OAF_MODEL="(type: gemini, model: gemini-1.5-pro, key: 'your-gemini-key')"
-export OAF_LC_MODEL="(type: gemini, model: gemini-1.5-flash, key: 'your-gemini-key')"
+export OAF_MODEL="(type: gemini, model: gemini-2.5-pro, key: 'your-gemini-key')"
+export OAF_LC_MODEL="(type: gemini, model: gemini-2.5-flash, key: 'your-gemini-key')"
 # Required for Gemini models due to API restrictions:
 export OAF_MINI_A_NOJSONPROMPT=true
 export OAF_MINI_A_LCNOJSONPROMPT=true
