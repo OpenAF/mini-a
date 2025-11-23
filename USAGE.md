@@ -179,7 +179,7 @@ Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mo
 - **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities (`useutils=true usetools=true`).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
 - **`web`** – Browser UI with tool registration (`usetools=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and planning enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, and ASCII sketches enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
 
 ### Creating Custom Presets
 
@@ -254,7 +254,7 @@ Optional flags when starting the server:
 
 - `showexecs=true` to show executed commands in the interaction stream
 - `logpromptheaders=origin,referer` to log selected incoming headers for debugging
-- `usediagrams=false` / `usecharts=false` / `useascii=false` to disable Mermaid, Chart.js, or ASCII sketch guidance when running headless
+- `usediagrams=false` / `usecharts=false` / `useascii=false` / `usemaps=false` to disable Mermaid, Chart.js, ASCII sketch, or Leaflet map guidance when running headless
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
 - `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
@@ -332,7 +332,7 @@ docker run -d --rm \
   -e OAF_MODEL="(type: openai, key: '...', url: 'https://api.groq.com/openai', model: openai/gpt-oss-20b, timeout: 900000, temperature: 0)" \
   -p 12345:12345 \
   openaf/oaf:edge \
-  onport=12345 usecharts=true usediagrams=true usetools=true mcpproxy=true
+  onport=12345 usecharts=true usediagrams=true usemaps=true usetools=true mcpproxy=true
 ```
 
 **Web interface with history and attachments:**
@@ -346,7 +346,7 @@ docker run -d --rm \
   openaf/oaf:edge \
   onport=12345 chatbotmode=true \
   usehistory=true historykeep=true historypath=/tmp/history \
-  useattach=true usediagrams=true usecharts=true
+  useattach=true usediagrams=true usecharts=true usemaps=true
 ```
 
 #### Pattern 3: Goal-Based Execution
@@ -590,6 +590,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **ANSI color codes**: Semantic highlighting for errors (red), success (green), warnings (yellow), info (blue/cyan), with support for bold, underline, backgrounds, and combined styles. Colors are applied outside markdown code blocks for proper terminal rendering
   - **Markdown tables**: Preferred format for tabular data with colored cell content for enhanced readability
   - **Progress indicators**: Block characters (█▓▒░), fractions (▏▎▍▌▋▊▉), spinners (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏), and percentage displays with color gradients
+- **`usemaps`** (boolean, default: false): Prime the model to emit ```leaflet``` blocks that describe interactive maps (center coordinates, zoom, markers, layers). The console transcript preserves the fenced JSON, and the web UI auto-renders the configuration with Leaflet tiles, themed popups, and transparent markers.
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
@@ -607,7 +608,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`) exposing `init`, `filesystemQuery`, and `filesystemModify` actions.
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
   - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
-  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`).
+  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 

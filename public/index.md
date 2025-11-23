@@ -120,6 +120,32 @@
     });
     window.mermaid = mermaidLib;
 </script>
+<!-- Leaflet.js for interactive maps -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script>
+    // Wait for Leaflet to load and configure it
+    (function() {
+        function checkLeaflet() {
+            if (typeof L !== 'undefined') {
+                // Fix icon path for markers
+                delete L.Icon.Default.prototype._getIconUrl;
+                L.Icon.Default.mergeOptions({
+                    iconRetinaUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+                    iconUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png',
+                    shadowUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png',
+                });
+
+                window.LeafletLoaded = true;
+                console.log('Leaflet.js loaded and configured successfully');
+                try { document.dispatchEvent(new CustomEvent('leaflet:ready')); } catch (_) {}
+            } else {
+                setTimeout(checkLeaflet, 100);
+            }
+        }
+        checkLeaflet();
+    })();
+</script>
 <script>
     document.title = 'Chat Interface';
     var _isD
@@ -335,6 +361,56 @@
         display: block;
         width: 100%;
         height: auto !important;
+    }
+
+    /* ========== LEAFLET MAPS ========== */
+    .leaflet-map {
+        width: 100%;
+        height: 450px;
+        margin: 1em 0;
+    }
+
+    /* Ensure marker icons have transparent backgrounds */
+    .leaflet-marker-icon,
+    .leaflet-marker-icon img {
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    /* Marker shadow styling */
+    .leaflet-marker-shadow {
+        opacity: 0.4;
+    }
+
+    /* Dark mode styling for Leaflet */
+    body.markdown-body-dark .leaflet-tile-pane {
+        filter: brightness(0.85);
+    }
+
+    /* Leaflet popup styling for dark mode */
+    body.markdown-body-dark .leaflet-popup-content-wrapper,
+    body.markdown-body-dark .leaflet-popup-tip {
+        background: #1a1d21;
+        color: #e6e6e6;
+        border: 1px solid #242629;
+    }
+
+    /* Leaflet controls styling for dark mode */
+    body.markdown-body-dark .leaflet-bar {
+        background-color: #1a1d21;
+        border: 1px solid #242629;
+    }
+
+    body.markdown-body-dark .leaflet-bar a {
+        background-color: #1a1d21;
+        color: #e6e6e6;
+        border-bottom: 1px solid #242629;
+    }
+
+    body.markdown-body-dark .leaflet-bar a:hover {
+        background-color: #242629;
     }
 
     /* ========== INPUT SECTION ========== */
@@ -1944,6 +2020,7 @@
         // This ensures the content height is final
         await renderMermaidDiagrams();
         await renderChartBlocks();
+        renderLeafletMaps();
 
         lastContentUpdateTime = Date.now();
 
@@ -2310,6 +2387,242 @@
             }
         } catch (error) {
             console.error('Mermaid re-rendering error:', error);
+        }
+    }
+
+    /* ========== LEAFLET MAPS RENDERING ========== */
+
+    function renderLeafletMaps() {
+        if (typeof L === 'undefined') return;
+
+        try {
+            // Find all code blocks with language 'leaflet'
+            const leafletBlocks = resultsDiv.querySelectorAll('pre code.language-leaflet, pre code.leaflet');
+
+            for (let i = 0; i < leafletBlocks.length; i++) {
+                const block = leafletBlocks[i];
+                if (block.dataset.leafletRendered === 'true') continue;
+
+                const code = block.textContent;
+                const pre = block.parentElement;
+
+                try {
+                    // Parse the configuration
+                    let config;
+                    try {
+                        config = JSON.parse(code);
+                    } catch (parseError) {
+                        console.error('Failed to parse Leaflet map configuration:', parseError);
+                        block.dataset.leafletRendered = 'true';
+                        continue;
+                    }
+
+                    // Validate required fields
+                    if (!config.center || !Array.isArray(config.center) || config.center.length !== 2) {
+                        console.error('Invalid or missing center in Leaflet config');
+                        block.dataset.leafletRendered = 'true';
+                        continue;
+                    }
+
+                    // Create map container
+                    const mapContainer = document.createElement('div');
+                    mapContainer.className = 'leaflet-map';
+                    const mapId = 'leaflet-map-' + Date.now() + '-' + i;
+                    mapContainer.id = mapId;
+
+                    // Store config for re-rendering
+                    mapContainer.setAttribute('data-leaflet-config', code);
+
+                    // Replace the pre/code block with map container
+                    pre.replaceWith(mapContainer);
+
+                    // Wait for container to be rendered before initializing map
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            const zoom = config.zoom || 13;
+
+                            // Simple map initialization
+                            const map = L.map(mapId).setView(config.center, zoom);
+
+                            // Add tile layer - simple configuration
+                            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                            }).addTo(map);
+
+                            // Create custom icon with explicit URLs
+                            const defaultIcon = L.icon({
+                                iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                                iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+                                shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                                iconSize: [25, 41],
+                                iconAnchor: [12, 41],
+                                popupAnchor: [1, -34],
+                                shadowSize: [41, 41]
+                            });
+
+                            // Add markers if provided
+                            if (config.markers && Array.isArray(config.markers)) {
+                                config.markers.forEach(marker => {
+                                    if (marker.lat && marker.lon) {
+                                        const m = L.marker([marker.lat, marker.lon], { icon: defaultIcon }).addTo(map);
+                                        if (marker.popup) {
+                                            m.bindPopup(marker.popup);
+                                        }
+                                    }
+                                });
+                            }
+
+                            // Add layers if provided
+                            if (config.layers && Array.isArray(config.layers)) {
+                                config.layers.forEach(layer => {
+                                    if (layer.type === 'circle' && layer.center && layer.radius) {
+                                        L.circle(layer.center, {
+                                            color: layer.color || '#3388ff',
+                                            fillColor: layer.fillColor || layer.color || '#3388ff',
+                                            fillOpacity: layer.fillOpacity || 0.2,
+                                            radius: layer.radius
+                                        }).addTo(map);
+                                    } else if (layer.type === 'polyline' && layer.points) {
+                                        L.polyline(layer.points, {
+                                            color: layer.color || '#3388ff',
+                                            weight: layer.weight || 3
+                                        }).addTo(map);
+                                    } else if (layer.type === 'polygon' && layer.points) {
+                                        L.polygon(layer.points, {
+                                            color: layer.color || '#3388ff',
+                                            fillColor: layer.fillColor || layer.color || '#3388ff',
+                                            fillOpacity: layer.fillOpacity || 0.2
+                                        }).addTo(map);
+                                    } else if (layer.type === 'rectangle' && layer.bounds) {
+                                        L.rectangle(layer.bounds, {
+                                            color: layer.color || '#3388ff',
+                                            fillColor: layer.fillColor || layer.color || '#3388ff',
+                                            fillOpacity: layer.fillOpacity || 0.2
+                                        }).addTo(map);
+                                    }
+                                });
+                            }
+
+                            // Apply options if provided
+                            if (config.options) {
+                                if (config.options.scrollWheelZoom === false) {
+                                    map.scrollWheelZoom.disable();
+                                }
+                                if (config.options.dragging === false) {
+                                    map.dragging.disable();
+                                }
+                            }
+
+                            // Store map instance for cleanup
+                            mapContainer.__leafletInstance = map;
+                            block.dataset.leafletRendered = 'true';
+                        });
+                    });
+
+                } catch (error) {
+                    console.error('Failed to render Leaflet map:', error);
+                    block.dataset.leafletRendered = 'true';
+                }
+            }
+        } catch (error) {
+            console.error('Leaflet rendering error:', error);
+        }
+    }
+
+    function reRenderLeafletMaps() {
+        if (typeof L === 'undefined') return;
+
+        try {
+            // Find all rendered map containers
+            const mapContainers = resultsDiv.querySelectorAll('.leaflet-map[data-leaflet-config]');
+
+            mapContainers.forEach((container, i) => {
+                const config = container.getAttribute('data-leaflet-config');
+                if (!config) return;
+
+                try {
+                    // Remove existing map
+                    if (container.__leafletInstance) {
+                        container.__leafletInstance.remove();
+                        delete container.__leafletInstance;
+                    }
+
+                    // Parse config
+                    const mapConfig = JSON.parse(config);
+
+                    // Re-initialize the map - simple configuration
+                    const zoom = mapConfig.zoom || 13;
+                    const map = L.map(container.id).setView(mapConfig.center, zoom);
+
+                    // Add tile layer
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    }).addTo(map);
+
+                    // Re-add markers
+                    if (mapConfig.markers && Array.isArray(mapConfig.markers)) {
+                        mapConfig.markers.forEach(marker => {
+                            if (marker.lat && marker.lon) {
+                                const m = L.marker([marker.lat, marker.lon]).addTo(map);
+                                if (marker.popup) {
+                                    m.bindPopup(marker.popup);
+                                }
+                            }
+                        });
+                    }
+
+                    // Re-add layers
+                    if (mapConfig.layers && Array.isArray(mapConfig.layers)) {
+                        mapConfig.layers.forEach(layer => {
+                            if (layer.type === 'circle' && layer.center && layer.radius) {
+                                const opts = {
+                                    color: layer.color || '#3388ff',
+                                    fillColor: layer.fillColor || layer.color || '#3388ff',
+                                    fillOpacity: layer.fillOpacity || 0.2,
+                                    radius: layer.radius
+                                };
+                                L.circle(layer.center, opts).addTo(map);
+                            } else if (layer.type === 'polyline' && layer.points) {
+                                const opts = {
+                                    color: layer.color || '#3388ff',
+                                    weight: layer.weight || 3
+                                };
+                                L.polyline(layer.points, opts).addTo(map);
+                            } else if (layer.type === 'polygon' && layer.points) {
+                                const opts = {
+                                    color: layer.color || '#3388ff',
+                                    fillColor: layer.fillColor || layer.color || '#3388ff',
+                                    fillOpacity: layer.fillOpacity || 0.2
+                                };
+                                L.polygon(layer.points, opts).addTo(map);
+                            } else if (layer.type === 'rectangle' && layer.bounds) {
+                                const opts = {
+                                    color: layer.color || '#3388ff',
+                                    fillColor: layer.fillColor || layer.color || '#3388ff',
+                                    fillOpacity: layer.fillOpacity || 0.2
+                                };
+                                L.rectangle(layer.bounds, opts).addTo(map);
+                            }
+                        });
+                    }
+
+                    // Re-apply options
+                    if (mapConfig.options) {
+                        if (mapConfig.options.scrollWheelZoom === false) {
+                            map.scrollWheelZoom.disable();
+                        }
+                        if (mapConfig.options.dragging === false) {
+                            map.dragging.disable();
+                        }
+                    }
+
+                    container.__leafletInstance = map;
+                } catch (error) {
+                    console.error('Failed to re-render Leaflet map:', error);
+                }
+            });
+        } catch (error) {
+            console.error('Leaflet re-rendering error:', error);
         }
     }
 
@@ -3876,6 +4189,10 @@
         if (typeof renderChartBlocks === 'function') {
             resetRenderedChartsForTheme();
             setTimeout(() => renderChartBlocks(), 120);
+        }
+
+        if (typeof reRenderLeafletMaps === 'function') {
+            setTimeout(() => reRenderLeafletMaps(), 140);
         }
     }
 

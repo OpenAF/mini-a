@@ -469,8 +469,9 @@ MiniA.buildVisualKnowledge = function(options) {
   var useDiagrams = _$(toBoolean(options.useDiagrams), "options.useDiagrams").isBoolean().default(false)
   var useCharts = _$(toBoolean(options.useCharts), "options.useCharts").isBoolean().default(false)
   var useAscii = _$(toBoolean(options.useAscii), "options.useAscii").isBoolean().default(false)
+  var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
 
-  if (!useDiagrams && !useCharts && !useAscii) return ""
+  if (!useDiagrams && !useCharts && !useAscii && !useMaps) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
   // Check if visual guidance already exists AND matches current flags
@@ -478,8 +479,9 @@ MiniA.buildVisualKnowledge = function(options) {
     var hasDiagrams = existingKnowledge.indexOf("Diagrams:") >= 0
     var hasCharts = existingKnowledge.indexOf("Charts (strict format):") >= 0
     var hasAscii = existingKnowledge.indexOf("ASCII/UTF-8 visuals") >= 0
+    var hasMaps = existingKnowledge.indexOf("Interactive Maps:") >= 0
     // Only return early if existing guidance matches current flags
-    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii) {
+    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps) {
       return ""
     }
   }
@@ -490,7 +492,7 @@ MiniA.buildVisualKnowledge = function(options) {
     "Visual output guidance (concise):\n\n" +
     "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
     "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
-    "- In your explanatory text and captions, refer only to the visual type (e.g., 'diagram', 'chart', 'table') without mentioning the technical implementation (Mermaid, Chart.js, ANSI codes, etc.)."
+    "- In your explanatory text and captions, refer only to the visual type (e.g., 'diagram', 'chart', 'table', 'map') without mentioning the technical implementation (Mermaid, Chart.js, Leaflet, ANSI codes, etc.)."
   )
 
   if (useDiagrams) {
@@ -579,6 +581,45 @@ MiniA.buildVisualKnowledge = function(options) {
     )
   }
 
+  if (useMaps) {
+    visualParts.push(
+      "Interactive Maps:\n" +
+      "  - Use ```leaflet``` fences to define interactive maps with Leaflet.js (v1.9.4).\n" +
+      "  - Provide map configuration as JSON with the following structure:\n" +
+      "    • center: [lat, lon] - Map center coordinates (required)\n" +
+      "    • zoom: number - Initial zoom level 1-18 (required, default: 13)\n" +
+      "    • markers: array of {lat, lon, popup?, icon?} - Points of interest (optional)\n" +
+      "    • layers: array of layer definitions (optional)\n" +
+      "    • options: {scrollWheelZoom?, dragging?, etc.} - Map interaction options (optional)\n" +
+      "  - Available marker icon types: 'default', 'red', 'green', 'blue', 'orange', 'yellow', 'violet', 'grey', 'black'\n" +
+      "  - Supported layer types:\n" +
+      "    • circle: {type: 'circle', center: [lat, lon], radius: meters, color?, fillColor?, fillOpacity?}\n" +
+      "    • polyline: {type: 'polyline', points: [[lat, lon], ...], color?, weight?}\n" +
+      "    • polygon: {type: 'polygon', points: [[lat, lon], ...], color?, fillColor?, fillOpacity?}\n" +
+      "    • rectangle: {type: 'rectangle', bounds: [[lat1, lon1], [lat2, lon2]], color?, fillColor?}\n" +
+      "  - Example configuration:\n" +
+      "    ```leaflet\n" +
+      "    {\n" +
+      "      \"center\": [51.505, -0.09],\n" +
+      "      \"zoom\": 13,\n" +
+      "      \"markers\": [\n" +
+      "        {\"lat\": 51.5, \"lon\": -0.09, \"popup\": \"London\", \"icon\": \"red\"},\n" +
+      "        {\"lat\": 51.51, \"lon\": -0.1, \"popup\": \"Nearby location\"}\n" +
+      "      ],\n" +
+      "      \"layers\": [\n" +
+      "        {\"type\": \"circle\", \"center\": [51.508, -0.11], \"radius\": 500, \"color\": \"red\", \"fillOpacity\": 0.3}\n" +
+      "      ]\n" +
+      "    }\n" +
+      "    ```\n" +
+      "  - CRITICAL RULES:\n" +
+      "    • Coordinates must be in [latitude, longitude] format with valid ranges: lat [-90, 90], lon [-180, 180]\n" +
+      "    • Use only static configuration values (no functions or callbacks)\n" +
+      "    • Provide complete data inline (no external fetching)\n" +
+      "    • Keep JSON valid and properly formatted\n" +
+      "  - Use maps for: geographic data, location visualization, spatial relationships, route planning, regional analysis, facility locations, coverage areas"
+    )
+  }
+
   var checklist = "\n\nVisual selection checklist:"
   var nextIndex = 1
   if (useDiagrams) {
@@ -601,6 +642,12 @@ MiniA.buildVisualKnowledge = function(options) {
     checklist += "\n" + nextIndex + ". Lists or comparisons -> Colored bullet points with semantic emoji (✅❌⚠️) and UTF-8 symbols."
     nextIndex++
     checklist += "\n" + nextIndex + ". When visuals are optional but helpful -> ANSI-enhanced ASCII table or emoticon map as fallback."
+    nextIndex++
+  }
+  if (useMaps) {
+    checklist += "\n" + nextIndex + ". Geographic data or locations -> interactive map with markers and layers."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". Spatial relationships or coverage areas -> map with circles, polygons, or polylines."
     nextIndex++
   }
   checklist += "\n\nIf no visual type above applies to the user's request (e.g., purely narrative or conversational queries), you may provide text-only output without explanation."
@@ -3668,7 +3715,7 @@ MiniA.prototype._handlePlanUpdate = function() {
 MiniA.prototype._cleanCodeBlocks = function(text) {
     if (!isString(text)) return text
     var trimmed = String(text).trim()
-    const isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid");
+    const isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet");
     if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
         return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
     }
@@ -3957,8 +4004,8 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (codeBlockMatch) {
       var lang = (codeBlockMatch[1] || "").toLowerCase()
       var body = codeBlockMatch[2]
-      // Preserve fences for visual languages like chart/chartjs and mermaid so the UI can render them
-      if (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid") {
+      // Preserve fences for visual languages like chart/chartjs, mermaid, and leaflet so the UI can render them
+      if (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet") {
         // keep original fenced block
         answer = trimmed
       } else {
@@ -6676,6 +6723,7 @@ MiniA.prototype.init = function(args) {
     args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
+    args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -6710,6 +6758,7 @@ MiniA.prototype.init = function(args) {
       useDiagrams: args.usediagrams,
       useCharts: args.usecharts,
       useAscii: args.useascii,
+      useMaps: args.usemaps,
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {

@@ -215,6 +215,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **Enhanced Visual Output** - UTF-8 box-drawing characters, ANSI color codes, and emoji for rich terminal displays (`useascii=true`)
+- **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
 
 ## Documentation
 
@@ -265,6 +266,7 @@ Mini-A ships with complementary components:
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |
+| `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |

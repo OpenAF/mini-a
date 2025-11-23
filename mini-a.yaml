@@ -155,6 +155,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usemaps
+    desc     : Encourage Leaflet.js interactive maps by priming the agent with map guidance
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : mcpdynamic
     desc     : Enable dynamic tool selection instead of registering all MCP tools (analyzes goal to select relevant tools)
     example  : "false"
@@ -339,6 +344,7 @@ jobs:
         usemermaid     : usemermaid
         usecharts      : usecharts
         useascii       : useascii
+        usemaps        : usemaps
         mcpdynamic     : mcpdynamic
         mcplazy        : mcplazy
         useplanning    : useplanning
