@@ -64,6 +64,8 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 
 For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
+> HTML Export Save Dialog: When using the Web UI's "Download conversation as HTML" feature, Chromium-based browsers (Chrome, Edge, Brave, etc.) will show a native save dialog leveraging the File System Access API so you can choose the exact filename and path. If the API is unavailable or you cancel the dialog, Mini-A falls back to a standard browser download. Safari does not yet support this API; to be prompted for a location there, enable "Ask where to save each file before downloading" in Safari preferences.
+
 ### Running in Docker
 
 Mini-A can run in Docker containers for isolated execution and portability:
@@ -205,7 +207,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, and more
 - **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
-- **Web UI** - Lightweight embedded chat interface for interactive use
+- **Web UI** - Lightweight embedded chat interface for interactive use with clipboard controls for Markdown and static HTML exports
 - **Planning Mode** - Generate and execute structured task plans for complex goals
   - **Plan Validation** - LLM-based critique validates plans before execution
   - **Dynamic Replanning** - Automatic plan adjustments when obstacles occur

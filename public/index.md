@@ -1381,6 +1381,14 @@
                     <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
                 </svg>
             </button>
+            <button id="exportHtmlBtn" title="Download conversation as HTML" aria-label="Download conversation as HTML" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 3h9l5 5v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
+                    <polyline points="13 3 13 8 18 8"></polyline>
+                    <path d="M9 13h6"></path>
+                    <path d="M9 17h6"></path>
+                </svg>
+            </button>
         </div>
     </div>
     <details id="planPanel" class="plan-panel" hidden>
@@ -1586,6 +1594,7 @@
     const copyActions = document.getElementById('copyActions');
     const copyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
     const copyConversationBtn = document.getElementById('copyConversationBtn');
+    const exportHtmlBtn = document.getElementById('exportHtmlBtn');
 
     applyAttachmentAvailability(false);
 
@@ -1948,6 +1957,110 @@
         }
     }
 
+    async function handleExportHtml() {
+        try {
+            var fileUuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : '');
+            var safeUuid = (fileUuid && ('' + fileUuid).trim().length > 0) ? ('' + fileUuid).trim() : 'session';
+            var filename = 'conversation-' + safeUuid + '.html';
+
+            // Prepare Save File Picker first to preserve user gesture
+            let savedViaPicker = false;
+            let pickerHandle = null;
+            let pickerCancelled = false;
+            if (typeof window !== 'undefined' && window.showSaveFilePicker) {
+                try {
+                    pickerHandle = await window.showSaveFilePicker({
+                        suggestedName: filename,
+                        types: [
+                            {
+                                description: 'HTML File',
+                                accept: { 'text/html': ['.html'] }
+                            }
+                        ]
+                    });
+                } catch (pickerErr) {
+                    if (pickerErr && pickerErr.name === 'AbortError') {
+                        pickerCancelled = true; // user cancelled: do nothing
+                    } else {
+                        console.warn('showSaveFilePicker unavailable or blocked, will fallback after conversion.', pickerErr);
+                    }
+                }
+            }
+
+            if (pickerCancelled) {
+                return; // user explicitly cancelled save dialog
+            }
+
+            const { raw, html } = await ensureConversationContentForCopy();
+            var sourceText = '';
+            if (raw && raw.trim().length > 0) {
+                sourceText = raw;
+            } else if (html) {
+                sourceText = extractPlainTextFromHtml(html);
+            }
+
+            var markdownText = removeEventMarkerLines(sourceText).trim();
+            if (!markdownText) {
+                throw new Error('No conversation available to export.');
+            }
+
+            const response = await fetch('/md2html', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ markdown: markdownText })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to convert markdown to HTML.');
+            }
+
+            const data = await response.json();
+            var htmlPayload = data && data.html;
+            if (!htmlPayload) {
+                throw new Error('Conversion response missing HTML content.');
+            }
+
+            if (pickerHandle) {
+                try {
+                    const writable = await pickerHandle.createWritable();
+                    await writable.write(htmlPayload);
+                    await writable.close();
+                    savedViaPicker = true;
+                } catch (writeErr) {
+                    console.warn('Writing via save picker failed, falling back to download link.', writeErr);
+                }
+            }
+
+            // Fallback: traditional anchor download (will trigger browser's download UI)
+            if (!savedViaPicker) {
+                var blob = new Blob([htmlPayload], { type: 'text/html;charset=utf-8' });
+                var url = URL.createObjectURL(blob);
+                var link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                setTimeout(() => {
+                    URL.revokeObjectURL(url);
+                    document.body.removeChild(link);
+                }, 0);
+            }
+
+            const btn = document.getElementById('exportHtmlBtn');
+            if (btn) {
+                const originalTitle = btn.title;
+                btn.title = savedViaPicker ? 'Saved!' : 'Downloaded!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.title = originalTitle;
+                    btn.classList.remove('copied');
+                }, 1500);
+            }
+        } catch (error) {
+            console.error('Failed to export HTML:', error);
+        }
+    }
+
     async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
@@ -1983,6 +2096,14 @@
                         <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
                     </svg>
                 </button>
+                <button id="exportHtmlBtn" title="Download conversation as HTML" aria-label="Download conversation as HTML" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 3h9l5 5v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
+                        <polyline points="13 3 13 8 18 8"></polyline>
+                        <path d="M9 13h6"></path>
+                        <path d="M9 17h6"></path>
+                    </svg>
+                </button>
             </div>`;
         resultsDiv.insertAdjacentHTML('beforeend', scrollBtnHTML);
         resultsDiv.insertAdjacentHTML('beforeend', copyActionsHTML);
@@ -2004,11 +2125,15 @@
         // Reattach event listeners for copy actions
         const newCopyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
         const newCopyConversationBtn = document.getElementById('copyConversationBtn');
+        const newExportHtmlBtn = document.getElementById('exportHtmlBtn');
         if (newCopyLastAnswerBtn) {
             newCopyLastAnswerBtn.addEventListener('click', handleCopyLastAnswer);
         }
         if (newCopyConversationBtn) {
             newCopyConversationBtn.addEventListener('click', handleCopyConversation);
+        }
+        if (newExportHtmlBtn) {
+            newExportHtmlBtn.addEventListener('click', handleExportHtml);
         }
 
         // Show/hide copy actions based on processing state
@@ -4114,6 +4239,10 @@
 
         if (copyConversationBtn) {
             copyConversationBtn.addEventListener('click', handleCopyConversation);
+        }
+
+        if (exportHtmlBtn) {
+            exportHtmlBtn.addEventListener('click', handleExportHtml);
         }
 
         // Start ping system

@@ -2,6 +2,19 @@
 
 ## Recent Updates
 
+### HTML transcript export
+
+**Change**: Added a dedicated **Copy to HTML** control to the web interface along with a `/md2html` endpoint that renders the full conversation Markdown as static HTML via `ow.template.html.genStaticVersion4MD()`.
+
+**Usage**:
+- Click the new button next to the existing clipboard actions to download a `conversation-<uuid>.html` file.
+- The browser requests the `/md2html` endpoint with the transcript Markdown and receives ready-to-save HTML.
+
+**Metrics**:
+- HTML exports are tracked under the `mini-a-web` metrics namespace via the `html_exports` counter, visible through the existing `httpdMetrics` scrape target.
+
+---
+
 ### S3 History Upload Optimization
 
 **Change**: Optimized S3 history upload frequency in the web interface to reduce API calls and improve performance.
