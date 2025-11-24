@@ -46,6 +46,7 @@ var MiniA = function() {
   this._loadedPlanPayload = null
   this._savePlanNotes = false
   this._useToolsActual = false
+  this._useMcpProxy = false
   this._planUpdateConfig = { frequency: "auto", interval: 3, force: false, logFile: null }
   this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
   this._planLogFile = __
@@ -164,8 +165,9 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Executing multiple custom actions{{/if}}
 {{#if usetoolsActual}}• **NOT for MCP tools** - use function calling for those{{/if}}
 
+{{#if useMcpProxy}}
 {{#if usetoolsActual}}
-## MCP TOOL ACCESS (FUNCTION CALLING):
+## MCP TOOL ACCESS (PROXY-DISPATCH FUNCTION CALLING):
 • {{toolCount}} MCP tools are available through the 'proxy-dispatch' function
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
@@ -197,6 +199,55 @@ Arguments: {
   "action": "list",
   "includeTools": true
 }
+{{else}}
+## MCP TOOL ACCESS (PROXY-DISPATCH ACTION-BASED):
+• {{toolCount}} MCP tools are available through the 'proxy-dispatch' action
+• Call the proxy-dispatch tool through the JSON "action" field
+• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "proxy-dispatch" | "final"
+
+### How to call MCP tools:
+Use the action field with "proxy-dispatch" and provide tool details in params:
+{
+  "thought": "brief description",
+  "action": "proxy-dispatch",
+  "params": {
+    "action": "call",
+    "tool": "tool-name",
+    "arguments": { /* tool-specific parameters */ }
+  }
+}
+
+### Example MCP tool call:
+{
+  "thought": "Search for RSS feeds",
+  "action": "proxy-dispatch",
+  "params": {
+    "action": "call",
+    "tool": "find-rss-url",
+    "arguments": {
+      "query": "CNN"
+    }
+  }
+}
+{{/if}}
+{{else}}
+{{#if usetoolsActual}}
+## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
+• {{toolCount}} MCP tools are available via direct function calling
+• **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
+• The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• Each tool has its own function signature - call tools directly by their name
+• Tool schemas are provided via the tool interface, so keep prompts concise.
+
+### How to call MCP tools:
+1. Use function calling with the actual tool name (e.g., "find-rss-url")
+2. Provide the tool's required parameters directly
+
+### Example MCP tool call:
+Function name: "find-rss-url"
+Arguments: {
+  "query": "CNN"
+}
 {{else}}{{#if usetools}}
 ## MCP TOOL ACCESS (ACTION-BASED):
 • {{toolCount}} MCP tools are available as action types
@@ -220,6 +271,7 @@ Use the action field with the tool name and provide parameters in the params fie
   }
 }
 {{/if}}{{/if}}
+{{/if}}
 ## STATE MANAGEMENT:
 • You can persist and update structured state in the 'state' object at each step.
 • To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
@@ -268,9 +320,10 @@ Use the action field with the tool name and provide parameters in the params fie
 \`\`\`
 { "thought": "The user is asking for the capital of France. I know this information directly without needing to use any tools or commands. The goal is achieved and I should provide the final answer with the information.", "action": "final", "answer": "The capital of France is Paris." }
 \`\`\`
+{{#if useMcpProxy}}
 {{#if usetoolsActual}}
 
-### Example 4: MCP Tool Usage (CORRECT - Function Calling)
+### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Step 1 - JSON Response**:
 \`\`\`
@@ -296,7 +349,48 @@ Arguments: {
 \`\`\`
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
 \`\`\`
-**Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with "proxy-dispatch".
+**Why wrong**: MCP tools cannot be invoked directly. You must use function calling with "proxy-dispatch".
+{{else}}
+
+### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Action-Based)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response**:
+\`\`\`
+{ "thought": "Search for CNN RSS feed", "action": "proxy-dispatch", "params": {"action": "call", "tool": "find-rss-url", "arguments": {"query": "CNN"}} }
+\`\`\`
+**After receiving result**:
+\`\`\`
+{ "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
+\`\`\`
+{{/if}}
+{{else}}
+{{#if usetoolsActual}}
+
+### Example 4: MCP Tool Usage (CORRECT - Direct Function Calling)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Step 1 - JSON Response**:
+\`\`\`
+{ "thought": "Search for CNN RSS feed", "action": "think" }
+\`\`\`
+**Step 1 - Function Call** (separate from JSON):
+\`\`\`
+Function: "find-rss-url"
+Arguments: {
+  "query": "CNN"
+}
+\`\`\`
+**Step 2 - After receiving tool result**:
+\`\`\`
+{ "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
+\`\`\`
+
+### Example 5: MCP Tool Usage (WRONG - Don't do this)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response** ❌:
+\`\`\`
+{ "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
+\`\`\`
+**Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with the tool name.
 {{else}}{{#if usetools}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Action-Based)
@@ -310,6 +404,7 @@ Arguments: {
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
 \`\`\`
 {{/if}}{{/if}}
+{{/if}}
 
 ## RULES:
 1. Keep "thought" to 1 short sentence; omit details when action is obvious
@@ -6556,6 +6651,9 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
         return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
       })
 
+      // Set proxy mode flag
+      parent._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
+
       // When mcpproxy=true, always use function calling mode regardless of LLM support
       // NOTE: _useToolsActual is already pre-set before init() to ensure correct prompt template
       if (usingMcpProxy && hasMcpProxyConnection) {
@@ -7250,6 +7348,7 @@ MiniA.prototype.init = function(args) {
         isMachine        : (isDef(args.format) && args.format != "md"),
         usetools         : this._useTools,
         usetoolsActual   : this._useToolsActual,
+        useMcpProxy      : this._useMcpProxy,
         toolCount        : this.mcpTools.length,
         planning         : this._enablePlanning,
         planningExecution: this._enablePlanning && this._planningPhase === "execution"
@@ -7717,10 +7816,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
     })
 
+    // Set proxy mode flag early
+    this._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
+
     if (usingMcpProxy && hasMcpProxyConnection) {
-      // MCP proxy mode always uses function calling
-      this._useToolsActual = true
-      this.fnI("info", "Pre-setting _useToolsActual=true for MCP proxy mode before init()")
+      // MCP proxy mode: useToolsActual depends on whether usetools=true
+      this._useToolsActual = this._useTools === true
+      this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()")
     } else if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
       // Check if LLM supports function calling (non-proxy mode)
       this._useToolsActual = isDef(this.llm) && typeof this.llm.withMcpTools === "function"
