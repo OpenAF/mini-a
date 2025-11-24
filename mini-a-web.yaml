@@ -594,6 +594,30 @@ todo:
       return ow.server.httpd.reply({ error: e.toString() })
     }
 
+# Convert markdown to static HTML
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /md2html
+  ((execURI      )): | #js
+    try {
+      var postData = jsonParse(request.files.postData)
+      var markdown = (isDef(postData.markdown) ? ("" + postData.markdown) : "").trim()
+
+      if (markdown.length == 0) {
+        return ow.server.httpd.reply({ error: "markdown is required" })
+      }
+
+      var html = ow.template.html.genStaticVersion4MD(markdown)
+
+      if (isDef(global.__webMetrics) && isDef(global.__webMetrics.html_exports) && isFunction(global.__webMetrics.html_exports.inc)) {
+        try { global.__webMetrics.html_exports.inc() } catch(ignore) {}
+      }
+
+      return ow.server.httpd.reply({ html: html })
+    } catch(e) {
+      printErr(e)
+      return ow.server.httpd.reply({ error: e.toString() })
+    }
+
 # Load history for a session
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /load-history
@@ -728,6 +752,16 @@ jobs:
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
     global.__planState = {}
+    if (isUnDef(global.__webMetrics)) {
+      global.__webMetrics = { html_exports: $atomic(0, "long") }
+      try {
+        ow.metrics.add("mini-a-web", () => {
+          return { html_exports: global.__webMetrics.html_exports.get() }
+        })
+      } catch(metricsErr) {
+        logErr(metricsErr)
+      }
+    }
     if (global.__usehistory && isString(global.__historypath)) {
       try {
         io.mkdir(global.__historypath)

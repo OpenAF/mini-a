@@ -205,7 +205,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, and more
 - **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
-- **Web UI** - Lightweight embedded chat interface for interactive use
+- **Web UI** - Lightweight embedded chat interface for interactive use with clipboard controls for Markdown and static HTML exports
 - **Planning Mode** - Generate and execute structured task plans for complex goals
   - **Plan Validation** - LLM-based critique validates plans before execution
   - **Dynamic Replanning** - Automatic plan adjustments when obstacles occur
