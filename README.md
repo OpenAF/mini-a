@@ -64,6 +64,8 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 
 For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
+> HTML Export Save Dialog: When using the Web UI's "Download conversation as HTML" feature, Chromium-based browsers (Chrome, Edge, Brave, etc.) will show a native save dialog leveraging the File System Access API so you can choose the exact filename and path. If the API is unavailable or you cancel the dialog, Mini-A falls back to a standard browser download. Safari does not yet support this API; to be prompted for a location there, enable "Ask where to save each file before downloading" in Safari preferences.
+
 ### Running in Docker
 
 Mini-A can run in Docker containers for isolated execution and portability:
