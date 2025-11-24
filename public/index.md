@@ -1959,6 +1959,38 @@
 
     async function handleExportHtml() {
         try {
+            var fileUuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : '');
+            var safeUuid = (fileUuid && ('' + fileUuid).trim().length > 0) ? ('' + fileUuid).trim() : 'session';
+            var filename = 'conversation-' + safeUuid + '.html';
+
+            // Prepare Save File Picker first to preserve user gesture
+            let savedViaPicker = false;
+            let pickerHandle = null;
+            let pickerCancelled = false;
+            if (typeof window !== 'undefined' && window.showSaveFilePicker) {
+                try {
+                    pickerHandle = await window.showSaveFilePicker({
+                        suggestedName: filename,
+                        types: [
+                            {
+                                description: 'HTML File',
+                                accept: { 'text/html': ['.html'] }
+                            }
+                        ]
+                    });
+                } catch (pickerErr) {
+                    if (pickerErr && pickerErr.name === 'AbortError') {
+                        pickerCancelled = true; // user cancelled: do nothing
+                    } else {
+                        console.warn('showSaveFilePicker unavailable or blocked, will fallback after conversion.', pickerErr);
+                    }
+                }
+            }
+
+            if (pickerCancelled) {
+                return; // user explicitly cancelled save dialog
+            }
+
             const { raw, html } = await ensureConversationContentForCopy();
             var sourceText = '';
             if (raw && raw.trim().length > 0) {
@@ -1988,26 +2020,36 @@
                 throw new Error('Conversion response missing HTML content.');
             }
 
-            var fileUuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : '');
-            var safeUuid = (fileUuid && ('' + fileUuid).trim().length > 0) ? ('' + fileUuid).trim() : 'session';
-            var filename = 'conversation-' + safeUuid + '.html';
+            if (pickerHandle) {
+                try {
+                    const writable = await pickerHandle.createWritable();
+                    await writable.write(htmlPayload);
+                    await writable.close();
+                    savedViaPicker = true;
+                } catch (writeErr) {
+                    console.warn('Writing via save picker failed, falling back to download link.', writeErr);
+                }
+            }
 
-            var blob = new Blob([htmlPayload], { type: 'text/html;charset=utf-8' });
-            var url = URL.createObjectURL(blob);
-            var link = document.createElement('a');
-            link.href = url;
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            setTimeout(() => {
-                URL.revokeObjectURL(url);
-                document.body.removeChild(link);
-            }, 0);
+            // Fallback: traditional anchor download (will trigger browser's download UI)
+            if (!savedViaPicker) {
+                var blob = new Blob([htmlPayload], { type: 'text/html;charset=utf-8' });
+                var url = URL.createObjectURL(blob);
+                var link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                setTimeout(() => {
+                    URL.revokeObjectURL(url);
+                    document.body.removeChild(link);
+                }, 0);
+            }
 
             const btn = document.getElementById('exportHtmlBtn');
             if (btn) {
                 const originalTitle = btn.title;
-                btn.title = 'Downloaded!';
+                btn.title = savedViaPicker ? 'Saved!' : 'Downloaded!';
                 btn.classList.add('copied');
                 setTimeout(() => {
                     btn.title = originalTitle;
