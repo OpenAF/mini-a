@@ -355,6 +355,20 @@ mini-a goal="review SQL queries" \
 mini-a goal="implement feature" \
   knowledge=@requirements.txt
 
+# Load knowledge using command substitution
+mini-a goal="implement feature following project guidelines" \
+  knowledge="$(cat KNOWLEDGE.md)"
+
+# Load rules from file using command substitution
+mini-a goal="review code" \
+  rules="$(cat RULES.md)"
+
+# Load both knowledge and rules from files
+mini-a goal="refactor project following standards" \
+  knowledge="$(cat project-context.md)" \
+  rules="$(cat coding-standards.md)" \
+  useshell=true
+
 # Custom persona
 mini-a goal="analyze firmware" \
   youare="You are a senior firmware analyst focused on reverse engineering embedded devices."
@@ -364,7 +378,7 @@ mini-a goal="help plan vacation" \
   chatbotmode=true \
   chatyouare="You are an enthusiastic travel concierge specialized in eco-friendly trips."
 
-# Custom rules
+# Custom rules (inline)
 mini-a goal="query database" \
   rules='["Never run destructive DDL statements", "Use markdown tables for summaries"]'
 
@@ -557,21 +571,28 @@ mini-a goal="catalog files" useshell=true shell="sandbox-exec -f /usr/share/sand
 
 Mini-A can run inside Docker containers for isolated execution and portability.
 
+**Recommended:** Use the `openaf/mini-a` image for the simplest approach.
+
 ### CLI Console in Docker
 
 ```bash
 # Basic console
 docker run --rm -ti \
-  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
-  openaf/oaf:edge
+  openaf/mini-a
+
+# Console with MCP and custom rules
+docker run --rm -ti \
+  -e OAF_MODEL=$OAF_MODEL -e OAF_LC_MODEL=$OAF_LC_MODEL \
+  openaf/mini-a \
+  mcp="(cmd: 'ojob mcps/mcp-time.yaml')" \
+  rules="- the default time zone is Asia/Tokyo"
 
 # Console with file access
 docker run --rm -ti \
   -v $(pwd):/work -w /work \
-  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
-  openaf/oaf:edge useshell=true
+  openaf/mini-a useshell=true
 ```
 
 ### Web Interface in Docker
@@ -579,18 +600,16 @@ docker run --rm -ti \
 ```bash
 # Basic web UI
 docker run -d --rm \
-  -e OPACKS=mini-a -e OPACK_EXEC=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
   -p 12345:12345 \
-  openaf/oaf:edge onport=12345
+  openaf/mini-a onport=12345
 
 # Full-featured web UI with multiple MCPs
 docker run -d --rm \
-  -e OPACKS="Mermaid,mini-a" -e OPACK_EXEC=mini-a \
-  -e mcp="[(type:ojob,options:(job:mcps/mcp-web.yaml))|(type:ojob,options:(job:mcps/mcp-time.yaml))|(type:ojob,options:(job:mcps/mcp-fin.yaml))]" \
   -e OAF_MODEL="(type: openai, key: '...', model: gpt-5-mini, timeout: 900000)" \
   -p 12345:12345 \
-  openaf/oaf:edge \
+  openaf/mini-a \
+  mcp="[(cmd: 'ojob mcps/mcp-web.yaml'), (cmd: 'ojob mcps/mcp-time.yaml')]" \
   onport=12345 usecharts=true usediagrams=true usetools=true mcpproxy=true
 ```
 
@@ -599,31 +618,28 @@ docker run -d --rm \
 ```bash
 # Simple goal
 docker run --rm \
-  -e OPACKS=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
-  openaf/oaf:edge \
-  ojob mini-a/mini-a.yaml goal="your goal here" useshell=true
+  openaf/mini-a \
+  goal="your goal here" useshell=true
 
 # Goal with file output
 docker run --rm \
   -v $(pwd):/work -w /work \
-  -e OPACKS=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
-  openaf/oaf:edge \
-  ojob mini-a/mini-a.yaml \
+  openaf/mini-a \
   goal="analyze code and create report" useshell=true outfile=/work/report.md
 
 # Goal with MCPs and planning
 docker run --rm \
   -v $(pwd):/work -w /work \
-  -e OPACKS=mini-a \
   -e OAF_MODEL="(type: openai, model: gpt-4, key: '...', timeout: 900000)" \
-  openaf/oaf:edge \
-  ojob mini-a/mini-a.yaml \
+  openaf/mini-a \
   goal="research and report on topic" \
   mcp="[(cmd: 'ojob mcps/mcp-web.yaml')]" \
   useplanning=true planfile=/work/plan.md outfile=/work/report.md
 ```
+
+**Advanced:** For custom oPack combinations, use `openaf/oaf:edge` with `OPACKS=mini-a` and `OPACK_EXEC=mini-a`.
 
 See [USAGE.md](USAGE.md#running-mini-a-in-docker) for comprehensive Docker examples.
 

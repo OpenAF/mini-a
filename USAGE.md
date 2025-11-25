@@ -266,7 +266,78 @@ Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/
 
 Mini-A can run inside a Docker container for isolated execution, portability, and consistent deployment across environments. The container supports three main usage patterns: CLI console, web interface, and goal-based execution.
 
-### Docker Container Usage Patterns
+### Simple Docker Usage (Recommended)
+
+For most use cases, the `openaf/mini-a` image provides the simplest way to run Mini-A as it comes with Mini-A pre-installed:
+
+**Basic CLI console:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/mini-a
+```
+
+**Console with MCP servers and custom rules:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL=$OAF_MODEL \
+  -e OAF_LC_MODEL=$OAF_LC_MODEL \
+  openaf/mini-a \
+  mcp="(cmd: 'ojob mcps/mcp-time.yaml')" \
+  rules="- the default time zone is Asia/Tokyo"
+```
+
+**Console with knowledge and rules loaded from files:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL=$OAF_MODEL \
+  -v $(pwd):/work -w /work \
+  openaf/mini-a \
+  knowledge="$(cat KNOWLEDGE.md)" \
+  rules="$(cat RULES.md)"
+```
+
+**Web interface:**
+```bash
+docker run -d --rm \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/mini-a onport=12345
+```
+
+**Goal execution:**
+```bash
+docker run --rm \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/mini-a \
+  goal="your goal here" useshell=true
+```
+
+**With volume mounts for file access:**
+```bash
+docker run --rm -ti \
+  -v $(pwd):/work \
+  -w /work \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/mini-a \
+  goal="analyze all JavaScript files" useshell=true
+```
+
+**Multiple MCP servers with proxy aggregation:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'your-key', timeout: 900000)" \
+  openaf/mini-a \
+  goal="compare time zones and financial data" \
+  mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-fin.yaml')]" \
+  usetools=true mcpproxy=true
+```
+
+### Advanced Docker Usage (Custom oPack Combinations)
+
+For advanced scenarios requiring custom OpenAF installations or specific oPack combinations beyond mini-a, use the `openaf/oaf:edge` base image with the `OPACKS` environment variable.
+
+#### Docker Container Usage Patterns
 
 #### Pattern 1: CLI Console Mode
 
@@ -1412,9 +1483,53 @@ agent.start({
 // Or load rules from a file
 agent.start({
     goal: "Review generated SQL queries",
-    rules: "path/to/custom-rules.json"
+    rules: "path/to/custom-rules.md"
 })
 ```
+
+### Loading Knowledge and Rules from Files
+
+When using the CLI or Docker, you can load knowledge and rules from files using shell command substitution:
+
+**Load knowledge from file:**
+```bash
+mini-a goal="implement authentication feature" \
+  knowledge="$(cat KNOWLEDGE.md)" \
+  useshell=true
+```
+
+**Load rules from file:**
+```bash
+mini-a goal="review SQL queries" \
+  rules="$(cat RULES.md)" \
+  mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data')"
+```
+
+**Load both knowledge and rules:**
+```bash
+mini-a goal="refactor codebase following standards" \
+  knowledge="$(cat project-context.md)" \
+  rules="$(cat coding-standards.md)" \
+  useshell=true readwrite=true
+```
+
+**In Docker with file loading:**
+```bash
+docker run --rm -ti \
+  -v $(pwd):/work -w /work \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/mini-a \
+  goal="implement feature following guidelines" \
+  knowledge="$(cat /work/KNOWLEDGE.md)" \
+  rules="$(cat /work/RULES.md)" \
+  useshell=true
+```
+
+This approach is useful when:
+- Knowledge or rules are too large to pass inline
+- You want to version control your knowledge/rules separately
+- You need to share the same context across multiple Mini-A invocations
+- You're automating Mini-A execution in scripts or CI/CD pipelines
 
 ### Rate Limited Usage
 

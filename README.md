@@ -68,7 +68,58 @@ For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model se
 
 ### Running in Docker
 
-Mini-A can run in Docker containers for isolated execution and portability:
+Mini-A can run in Docker containers for isolated execution and portability.
+
+#### Simple Docker Usage (Recommended)
+
+The `openaf/mini-a` image comes with Mini-A pre-installed for immediate use:
+
+**CLI console:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/mini-a
+```
+
+**Console with MCP servers and custom rules:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL=$OAF_MODEL \
+  -e OAF_LC_MODEL=$OAF_LC_MODEL \
+  openaf/mini-a \
+  mcp="(cmd: 'ojob mcps/mcp-time.yaml')" \
+  rules="- the default time zone is Asia/Tokyo"
+```
+
+**Console with knowledge and rules loaded from files:**
+```bash
+docker run --rm -ti \
+  -e OAF_MODEL=$OAF_MODEL \
+  -v $(pwd):/work -w /work \
+  openaf/mini-a \
+  knowledge="$(cat KNOWLEDGE.md)" \
+  rules="$(cat RULES.md)"
+```
+
+**Web interface:**
+```bash
+docker run -d --rm \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/mini-a onport=12345
+```
+
+**Goal execution:**
+```bash
+docker run --rm \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  openaf/mini-a \
+  goal="your goal here" useshell=true
+```
+
+#### Advanced Docker Usage
+
+For custom OpenAF installations or specific oPack combinations, use the base image:
 
 **CLI console:**
 ```bash
