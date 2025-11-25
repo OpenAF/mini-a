@@ -51,7 +51,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20251124'
+version: '20251125'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -121,12 +121,12 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: 6c7289abb6ba2e147f16105396878f7c8e67a143
+  CHEATSHEET.md: 910bccbc03a4cf6e404e09f83b27f904bf0c1ad2
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 637743d92d17bfdf7038befa1d6192ea2836caae
-  USAGE.md: ba6e1ce4131901bbe89e1138c31071b6d0d51b45
+  README.md: 489226f2ce394a1ed8201619537bf7d1d2160482
+  USAGE.md: 315242f3603848b1d9a8c75346b7c82de29736a0
   docs/LEARN.md: 11d23bb7be82208cad17b948fac68bfdd7602cf7
   docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
