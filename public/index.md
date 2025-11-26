@@ -82,7 +82,7 @@
         }
 
         // Start: attempt local Chart.js, then normalize to v4 if needed, then adapter + plugins.
-        addScript('/js/chart.js')
+        addScript('js/chart.js')
             .catch(() => addScript(CDN_CHART_V4))
             .then(() => ensureV4OrUseLocalLoaded())
             .then(() => loadAdapterForChart())
@@ -97,7 +97,7 @@
     // Try local first, fallback to CDN
     let mermaid;
     try {
-        mermaid = await import('/js/mermaid.js');
+        mermaid = await import('js/mermaid.js');
         console.log('Mermaid loaded from local server');
     } catch (error) {
         console.warn('Local mermaid failed, loading from CDN:', error);
@@ -4260,9 +4260,9 @@
     // Initialize the application
     initializeUI();
 </script>
-<script src="/js/mdtablesort.js"></script>
+<script src="js/mdtablesort.js"></script>
 <script>if (_isD) document.querySelectorAll('pre code').forEach((block) => { block.classList.add('hljs_dark') })</script>
-<script src="/js/mdcodeclip.js"></script>
+<script src="js/mdcodeclip.js"></script>
 <script>
     /* ========== DARK MODE INTEGRATION ========== */
     function __syncAttachmentModalTheme() {
