@@ -140,6 +140,15 @@ help:
     desc     : "SLON/JSON definition of an audit channel for Mini-A interaction logs"
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
+  - name     : usememory
+    desc     : "SLON/JSON definition for the medium/long-term memory channel passed to $ch().create"
+    example  : "(type: file, options: (file: '/tmp/mini-a-memory.json'))"
+    mandatory: false
+  - name     : memoryro
+    desc     : "Set the memory MCP tool to read-only (recall only)"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
 
 include:
 - oJobHTTPd.yaml
@@ -741,6 +750,8 @@ jobs:
       chatbotmode    : toBoolean().isBoolean().default(false)
       format         : isString().default(__)
       auditch        : isString().default(__)
+      usememory      : isString().default(__)
+      memoryro       : toBoolean().isBoolean().default(false)
   exec : | #js
     global.__res = {}
     global.__usehistory = args.usehistory
