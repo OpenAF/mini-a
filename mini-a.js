@@ -55,6 +55,9 @@ var MiniA = function() {
   this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
+  this._memoryChannelName = "_mini_a_memory_channel"
+  this._memoryEnabled = false
+  this._memoryReadOnly = false
 
   // Check OAF_MINI_A_NOJSONPROMPT environment variable to disable promptJSONWithStats
   // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
@@ -122,6 +125,11 @@ var MiniA = function() {
     mcp_circuit_breaker_resets: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
     mcp_lazy_init_failed: $atomic(0, "long"),
+    memory_remember_calls: $atomic(0, "long"),
+    memory_recall_calls: $atomic(0, "long"),
+    memory_forget_calls: $atomic(0, "long"),
+    memory_errors: $atomic(0, "long"),
+    memory_readonly_blocks: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -946,6 +954,13 @@ MiniA.prototype.getMetrics = function() {
             summaries_tokens_reduced: global.__mini_a_metrics.summaries_tokens_reduced.get(),
             summaries_original_tokens: global.__mini_a_metrics.summaries_original_tokens.get(),
             summaries_final_tokens: global.__mini_a_metrics.summaries_final_tokens.get()
+        },
+        memory: {
+            remembers: global.__mini_a_metrics.memory_remember_calls.get(),
+            recalls: global.__mini_a_metrics.memory_recall_calls.get(),
+            forgets: global.__mini_a_metrics.memory_forget_calls.get(),
+            errors: global.__mini_a_metrics.memory_errors.get(),
+            read_only_blocks: global.__mini_a_metrics.memory_readonly_blocks.get()
         },
         tool_selection: {
             dynamic_used: global.__mini_a_metrics.tool_selection_dynamic_used.get(),
@@ -4738,6 +4753,110 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
   }
 }
 
+MiniA.prototype._createMemoryMcpConfig = function() {
+  if (this._memoryEnabled !== true) return __
+
+  var parent = this
+  var channel = $ch(this._memoryChannelName)
+
+  var memoryFn = function(params) {
+    var payload = isObject(params) ? params : {}
+    var action = isString(payload.action) ? payload.action.toLowerCase().trim() : ""
+    var key = isString(payload.key) ? payload.key : __
+    var readOnly = parent._memoryReadOnly === true
+
+    if (!isString(action) || action.length === 0) {
+      var missingActionMsg = "[ERROR] Missing required 'action' (remember|recall|forget)"
+      global.__mini_a_metrics.memory_errors.inc()
+      return { error: missingActionMsg, content: [{ type: "text", text: missingActionMsg }] }
+    }
+
+    if (!isString(key) || key.length === 0) {
+      var missingKeyMsg = "[ERROR] Missing required 'key' to identify the memory entry"
+      global.__mini_a_metrics.memory_errors.inc()
+      return { error: missingKeyMsg, content: [{ type: "text", text: missingKeyMsg }] }
+    }
+
+    var normalizedAction = action
+    if (["remember", "store", "save", "set"].indexOf(action) >= 0) normalizedAction = "remember"
+    if (["recall", "get", "retrieve"].indexOf(action) >= 0) normalizedAction = "recall"
+    if (["forget", "delete", "unset", "remove"].indexOf(action) >= 0) normalizedAction = "forget"
+
+    try {
+      if (readOnly && (normalizedAction === "remember" || normalizedAction === "forget")) {
+        var readOnlyMsg = "[ERROR] Memory is read-only; recalling is allowed but updates are blocked"
+        global.__mini_a_metrics.memory_errors.inc()
+        global.__mini_a_metrics.memory_readonly_blocks.inc()
+        return { error: readOnlyMsg, content: [{ type: "text", text: readOnlyMsg }] }
+      }
+
+      if (normalizedAction === "remember") {
+        var entry = {
+          value   : payload.value,
+          metadata: isObject(payload.metadata) ? payload.metadata : __,
+          tags    : isArray(payload.tags) ? payload.tags : __,
+          updated : now()
+        }
+        channel.set(key, entry)
+        global.__mini_a_metrics.memory_remember_calls.inc()
+        return { content: [{ type: "text", text: `Stored memory for '${key}'.` }] }
+      }
+
+      if (normalizedAction === "recall") {
+        var result = channel.get(key)
+        global.__mini_a_metrics.memory_recall_calls.inc()
+        if (isUnDef(result)) {
+          return { content: [{ type: "text", text: `No memory found for '${key}'.` }] }
+        }
+        return { content: [{ type: "text", text: stringify(result, __, "") }] }
+      }
+
+      if (normalizedAction === "forget") {
+        channel.unset(key)
+        global.__mini_a_metrics.memory_forget_calls.inc()
+        return { content: [{ type: "text", text: `Removed memory for '${key}'.` }] }
+      }
+
+      var invalidMsg = `[ERROR] Unsupported memory action '${action}'. Use remember, recall, or forget.`
+      global.__mini_a_metrics.memory_errors.inc()
+      return { error: invalidMsg, content: [{ type: "text", text: invalidMsg }] }
+    } catch (err) {
+      var errMsg = `[ERROR] ${err && err.message ? err.message : err}`
+      parent.fnI("warn", `Memory MCP failed: ${errMsg}`)
+      global.__mini_a_metrics.memory_errors.inc()
+      return { error: errMsg, content: [{ type: "text", text: errMsg }] }
+    }
+  }
+
+  return {
+    id     : "mini-a-memory",
+    type   : "dummy",
+    options: {
+      name   : "mini-a-memory",
+      fns    : { memory: memoryFn },
+      fnsMeta: {
+        memory: {
+          name       : "memory",
+          description: parent._memoryReadOnly === true
+            ? "Medium/long-term memory helper (read-only recall)."
+            : "Medium/long-term memory helper. Use action=remember to store, recall to retrieve, or forget to remove.",
+          inputSchema: {
+            type      : "object",
+            required  : ["action", "key"],
+            properties: {
+              action  : { type: "string", description: "remember | recall | forget" },
+              key     : { type: "string", description: "Memory label to access." },
+              value   : { description: "Content to store when action=remember.", oneOf: [ { type: "string" }, { type: "object" }, { type: "array" }, { type: "number" }, { type: "boolean" } ] },
+              metadata: { type: "object", description: "Optional metadata when remembering." },
+              tags    : { type: "array", items: { type: "string" }, description: "Optional tags to organize memories." }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 MiniA.prototype._createShellMcpConfig = function(args) {
   try {
     if (toBoolean(args.useshell) !== true) return __
@@ -6790,14 +6909,16 @@ MiniA.prototype.init = function(args) {
       { name: "conversation", type: "string", default: __ },
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
-      { name: "shellbanextra", type: "string", default: "" },
-      { name: "toolcachettl", type: "number", default: __ },
-      { name: "mcplazy", type: "boolean", default: false },
-      { name: "auditch", type: "string", default: __ },
-      { name: "debugch", type: "string", default: __ },
-      { name: "debuglcch", type: "string", default: __ },
-      { name: "planfile", type: "string", default: __ },
-      { name: "planformat", type: "string", default: __ },
+        { name: "shellbanextra", type: "string", default: "" },
+        { name: "toolcachettl", type: "number", default: __ },
+        { name: "mcplazy", type: "boolean", default: false },
+        { name: "auditch", type: "string", default: __ },
+        { name: "usememory", type: "string", default: __ },
+        { name: "memoryro", type: "boolean", default: false },
+        { name: "debugch", type: "string", default: __ },
+        { name: "debuglcch", type: "string", default: __ },
+        { name: "planfile", type: "string", default: __ },
+        { name: "planformat", type: "string", default: __ },
       { name: "forceplanning", type: "boolean", default: false },
       { name: "saveplannotes", type: "boolean", default: false },
       { name: "outputfile", type: "string", default: __ },
@@ -6822,6 +6943,7 @@ MiniA.prototype.init = function(args) {
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
+    args.memoryro = _$(toBoolean(args.memoryro), "args.memoryro").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -6879,6 +7001,8 @@ MiniA.prototype.init = function(args) {
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
 
+    this._memoryReadOnly = args.memoryro === true
+
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
     if (isUnDef(args.format)) args.format = "md"
@@ -6920,6 +7044,21 @@ MiniA.prototype.init = function(args) {
         } catch (e) {
           this.fnI("error", `Failed to create audit channel: ${e.message}`)
         }
+      }
+    }
+
+    this._memoryEnabled = false
+    if (isDef(args.usememory) && args.usememory.length > 0) {
+      var _memorychm = af.fromJSSLON(args.usememory)
+      if (isMap(_memorychm)) {
+        try {
+          $ch(this._memoryChannelName).create(isDef(_memorychm.type) ? _memorychm.type : "simple", isMap(_memorychm.options) ? _memorychm.options : {})
+          this._memoryEnabled = true
+        } catch (e) {
+          this.fnI("warn", `Failed to create memory channel: ${e.message}`)
+        }
+      } else {
+        this.fnI("warn", "Invalid usememory definition; expected a map with type/options for $ch().create")
       }
     }
 
@@ -7092,6 +7231,11 @@ MiniA.prototype.init = function(args) {
       if (args.useutils === true) {
         var utilsMcpConfig = this._createUtilsMcpConfig(args)
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
+      }
+
+      if (this._memoryEnabled === true) {
+        var memoryMcpConfig = this._createMemoryMcpConfig()
+        if (isMap(memoryMcpConfig)) aggregatedMcpConfigs.push(memoryMcpConfig)
       }
 
       // Auto-register a dummy MCP for shell execution when both usetools and useshell are enabled
@@ -7285,6 +7429,14 @@ MiniA.prototype.init = function(args) {
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
 
+    if (this._memoryEnabled === true) {
+      if (this._memoryReadOnly === true) {
+        baseRules.push("Memory tool is read-only: use action=recall to retrieve entries; remember and forget are blocked.")
+      } else {
+        baseRules.push("Use the 'memory' tool for medium/long-term recall tasks: action=remember to store, recall to retrieve, forget to remove entries.")
+      }
+    }
+
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
     }
@@ -7387,6 +7539,8 @@ MiniA.prototype.init = function(args) {
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
  * - conversation (string, optional): Path to a file to load/save conversation history.
+ * - usememory (string, optional): JSSLON/SLON definition of a $ch channel used by the `memory` MCP tool for remember/recall/forget operations.
+ * - memoryro (boolean, default=false): When true, the memory tool becomes read-only (only action=recall works).
  * - raw (boolean, default=false): If true, returns the final answer as a raw string instead of formatted output.
  * - checkall (boolean, default=false): If true, asks for confirmation before executing any shell command.
  * - maxcontext (number, optional): Maximum context size in tokens. If the conversation exceeds this size, it will be summarized.
@@ -7477,6 +7631,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: __ },
       { name: "shellbanextra", type: "string", default: __ },
+      { name: "usememory", type: "string", default: __ },
+      { name: "memoryro", type: "boolean", default: false },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
       { name: "outputfile", type: "string", default: __ },
@@ -7500,6 +7656,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.memoryro = _$(toBoolean(args.memoryro), "args.memoryro").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -7545,6 +7702,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
+    this._memoryReadOnly = args.memoryro === true
     this._sessionArgs = args
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 

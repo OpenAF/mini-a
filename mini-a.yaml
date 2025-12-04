@@ -253,6 +253,15 @@ help:
     desc     : SLON/JSON definition of an audit channel to record agent activity
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
+  - name     : usememory
+    desc     : SLON/JSON definition of a memory channel for medium/long-term recall (passed to $ch().create)
+    example  : "(type: file, options: (file: '/tmp/mini-a-memory.json'))"
+    mandatory: false
+  - name     : memoryro
+    desc     : Make the memory MCP tool read-only (recall only; remember/forget blocked)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : debugch
     desc     : SLON/JSON definition of a debug channel for LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"
@@ -360,6 +369,7 @@ jobs:
         rules          : rules
         state          : state
         auditch        : auditch
+        usememory      : usememory
         debugch        : debugch
         debuglcch      : debuglcch
         nosetmcpwd     : nosetmcpwd
@@ -395,6 +405,7 @@ jobs:
       shellbatch     : toBoolean.isBoolean.default(false)
       shellprefix    : isString.default(__)
       toolcachettl   : toNumber.isNumber.default(__)
+      usememory      : isString.default(__)
       usetools       : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(false)
       usediagrams    : toBoolean.isBoolean.default(false)

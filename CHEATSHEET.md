@@ -458,10 +458,13 @@ mini-a chatbotmode=true goal="draft a friendly release note"
 | Parameter | Description |
 |-----------|-------------|
 | `auditch` | SLON/JSON definition of audit channel to record agent activity |
+| `usememory` | SLON/JSON definition of memory channel powering the `memory` MCP tool (remember/recall/forget) |
+| `memoryro` | Boolean flag to keep the memory tool read-only (recall only) |
 
 ```bash
 mini-a goal="perform audit" \
   auditch="(type: file, options: (file: '/tmp/mini-a-audit.log'))"
+  usememory="(type: file, options: (file: '/tmp/mini-a-memory.json'))"
 ```
 
 ### MCP Working Directory

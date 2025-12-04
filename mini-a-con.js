@@ -347,7 +347,9 @@ try {
     format         : { type: "string", description: "Final answer format (md|json)" },
     model          : { type: "string", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
-    auditch        : { type: "string", description: "Audit channel definition" }
+    auditch        : { type: "string", description: "Audit channel definition" },
+    usememory      : { type: "string", description: "Memory channel definition (JSSLON/SLON)" },
+    memoryro       : { type: "boolean", description: "Make the memory MCP tool read-only (recall only)" }
   }
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
