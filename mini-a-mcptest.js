@@ -109,7 +109,7 @@ function listMCPTools(mcpClient, showElapsed) {
         tools.forEach((tool, idx) => {
             print(ansiColor("FG(41)", `[${idx + 1}] ${tool.name}`))
             if (isDef(tool.description)) {
-                print("    " + ansiColor("FAINT", tool.description))
+                print("    " + ansiColor("FAINT,ITALIC", tool.description))
             }
             if (isDef(tool.inputSchema) && isDef(tool.inputSchema.properties)) {
                 var props = Object.keys(tool.inputSchema.properties)
@@ -130,7 +130,7 @@ function listMCPTools(mcpClient, showElapsed) {
 // Show tool details
 function showToolDetails(tool) {
     print("\n" + ansiColor("BOLD,FG(41)", "Tool: " + tool.name))
-    print(ansiColor("FAINT", "─────────────────────"))
+    print(ansiColor("FAINT", repeat(tool.name.length, "─")))
 
     if (isDef(tool.description)) {
         print(ansiColor("FG(248)", "Description: ") + tool.description)
@@ -151,13 +151,13 @@ function showToolDetails(tool) {
                     print("    " + ansiColor("FAINT", "Type: ") + prop.type)
                 }
                 if (isDef(prop.description)) {
-                    print("    " + ansiColor("FAINT", prop.description))
+                    print("    " + ansiColor("FAINT,ITALIC", prop.description))
                 }
                 if (isDef(prop.enum)) {
                     print("    " + ansiColor("FAINT", "Allowed: ") + prop.enum.join(", "))
                 }
                 if (isDef(prop.example)) {
-                    print("    " + ansiColor("FAINT", "Example: ") + prop.example)
+                    print("    " + ansiColor("FAINT", "Example: ") + (isObject(prop.example) ? af.toCSLON(prop.example) : prop.example))
                 }
             })
         }
@@ -196,7 +196,7 @@ function buildToolParams(tool) {
             promptMsg += ansiColor("FAINT", " (" + prop.type + ")")
         }
         if (isDef(prop.description)) {
-            print("  " + ansiColor("FAINT", prop.description))
+            print("  " + ansiColor("FAINT,ITALIC", prop.description))
         }
 
         var value = ask(promptMsg + ": ")
@@ -620,7 +620,7 @@ function mainMCPTest(args) {
                         var toolIdx = askChoose("Choose a tool to call: ", toolNames, sessionOptions.toolchoosesize)
 
                         if (toolIdx < tools.length) {
-                            var tool = tools[toolIdx]
+                            var tool = tools.filter(t => t.name == toolNames[toolIdx])[0]
                             showToolDetails(tool)
 
                             var params = buildToolParams(tool)
@@ -647,7 +647,7 @@ function mainMCPTest(args) {
                         var toolIdx = askChoose("Choose a tool to inspect: ", toolNames, sessionOptions.toolchoosesize)
 
                         if (toolIdx < tools.length) {
-                            showToolDetails(tools[toolIdx])
+                            showToolDetails(tools.filter(t => t.name == toolNames[toolIdx])[0])
                         }
                     }
                 }
@@ -683,7 +683,7 @@ function mainMCPTest(args) {
                     var optionIdx = askChoose("Choose an option to toggle: ", optionChoices)
 
                     if (optionIdx < optionKeys.length) {
-                        toggleOption(optionKeys[optionIdx])
+                        toggleOption(optionKeys.filter((k) => optionChoices[optionIdx].startsWith(k))[0])
                         print()
                     }
                 }
@@ -705,7 +705,7 @@ function mainMCPTest(args) {
                     var setOptionIdx = askChoose("Choose an option to set: ", allOptionChoices)
 
                     if (setOptionIdx < allOptionKeys.length) {
-                        var selectedKey = allOptionKeys[setOptionIdx]
+                        var selectedKey = allOptionKeys.filter((k) => allOptionChoices[setOptionIdx].startsWith(k))[0]
                         var def = optionDefinitions[selectedKey]
                         var newValue = ask("Enter new value for " + selectedKey + " (" + def.type + "): ")
 
