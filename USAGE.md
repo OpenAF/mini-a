@@ -1045,6 +1045,14 @@ mini-a goal="list the latest invoices in our S3 bucket" \
   mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=finance-archive prefix=invoices/', timeout: 5000)"
 ```
 
+#### Office Documents (mcp-office)
+```bash
+# Read XLSX/DOCX content; add readwrite=true to enable write operations
+mini-a goal="pull the first 10 rows from the Finance sheet" \
+  mcp="(cmd: 'ojob mcps/mcp-office.yaml root=./data', timeout: 5000)" \
+  knowledge="- prefer xlsx-read-table with sheet='Finance' startColumn='A' startRow=1 maxRows=10"
+```
+
 #### RSS Monitoring (mcp-rss)
 ```bash
 mini-a goal="summarize the last five posts from the OpenAI blog" \

@@ -20,6 +20,7 @@
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oafp   | OpenAF processor (oafp) runner & docs MCP | STDIO/HTTP | (included) | [mcp-oafp.yaml](mcp-oafp.yaml)   |
+| mcp-office | Office file utilities (XLSX/DOCX via plugin-XLS) | STDIO/HTTP | plugin-XLS | [mcp-office.yaml](mcp-office.yaml) |
 | mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
 | mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
 | mcp-weather| Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |

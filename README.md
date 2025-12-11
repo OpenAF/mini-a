@@ -255,7 +255,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Circuit Breakers** - Automatic connection health management with cooldown periods
   - **Lazy Initialization** - Deferred MCP connection establishment for faster startup (`mcplazy=true`)
   - **Proxy Aggregation** - Collapse all MCP connections (including Mini Utils Tool) into a single `proxy-dispatch` tool to minimize context usage (`mcpproxy=true`)
-- **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, and more
+- **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, office documents, and more
 - **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
 - **Web UI** - Lightweight embedded chat interface for interactive use with clipboard controls for Markdown and static HTML exports
