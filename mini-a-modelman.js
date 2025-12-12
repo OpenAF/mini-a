@@ -95,7 +95,7 @@ function buildOAFModel(args) {
     // configuration as the user answers follow-up prompts.
     var iProvider = args.type, _out = {}
     if (isUnDef(args.type)) {
-      iProvider = askChoose("Choose a provider: ", args.init.providers.sort())
+      iProvider = askChoose("Choose a provider: ", args.init.providers.sort(), 8)
     }
     _out.type = args.init.providers[iProvider]
 
@@ -120,12 +120,12 @@ function buildOAFModel(args) {
         if (_models != null && _models.length > 0) {
           if (isDef(_models[0].id)) {
             var _m = _models.map(r => r.id).sort()
-            var _id = askChoose( "Choose a model: ", _m )
+            var _id = askChoose( "Choose a model: ", _m, 8 )
             _out.model = _m[_id]
           }
           if (isDef(_models[0].name)) {
             var _m = _models.map(r => r.name).map(r => r.replace(/^models\//, "")).sort()
-            var _name = askChoose( "Choose a model: ", _m )
+            var _name = askChoose( "Choose a model: ", _m, 8 )
             _out.model = _m[_name]
           }
         }
@@ -156,12 +156,12 @@ function buildOAFModel(args) {
       if (_models != null && _models.length > 0) {
         if (isDef(_models[0].modelId)) {
           var _m = _models.map(r => r.modelId).sort()
-          var _modelId = askChoose( "Choose a model: ", _m )
+          var _modelId = askChoose( "Choose a model: ", _m, 8 )
           _out.options.model = _m[_modelId]
         }
         if (isDef(_models[0].name)) {
           var _m = _models.map(r => r.name).map(r => r.replace(/^models\//, "")).sort()
-          var _name = askChoose( "Choose a model: ", _m )
+          var _name = askChoose( "Choose a model: ", _m, 8 )
           _out.options.model = _m[_name]
         }
       }
@@ -242,10 +242,13 @@ function mainOAFModel(args) {
         if (isUnDef(_lst)) _lst = []
         // Combine existing definitions with the available actions shown to the
         // user. The action ordering is mirrored later in the switch statement.
-        var _options = _lst.sort().map(r => "'" + r + "'").concat([ "✨ New definition", "📥 Import definition", "📤 Export definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
-        var _action = askChoose("Choose a definition or an action: ", _options)
+        var _options = _lst.sort().map(r => "🤖 " + r).concat([ "───", "✨ New definition", "📥 Import definition", "📤 Export definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
+        var _action = askChoose("Choose a definition or an action: ", _options, 8)
 
         switch(_action) {
+        case _options.length - 6 - 1: // Separator
+            // Do nothing
+            break
         case _options.length - 6: // New definition
             print()
             var _name = ask("✨ Name of the new definition: ")
@@ -272,7 +275,7 @@ function mainOAFModel(args) {
             break
         case _options.length - 4: // Export definition
             print()
-            var _exportName = askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]))
+            var _exportName = askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]), 8)
             if (_exportName < _lst.length) {
               var _exportDef = _sec.get(_lst[_exportName], "models")
               print("\n" + ansiColor("FAINT", "─────"))
@@ -282,7 +285,7 @@ function mainOAFModel(args) {
             break
         case _options.length - 3: // Rename existing definition
             print()
-            var _oldName = askChoose("✏️ Choose a definition to rename: ", _lst.sort().concat([ "🔙 Go back" ]))
+            var _oldName = askChoose("✏️ Choose a definition to rename: ", _lst.sort().concat([ "🔙 Go back" ]), 8)
             if (_oldName < _lst.length) {
             var _newName = ask("✨ New name for the definition '" + _lst[_oldName] + "': ")
                 if (isDef(_newName) && _newName.length > 0) {
@@ -294,7 +297,7 @@ function mainOAFModel(args) {
             }
             break
         case _options.length - 2: // Delete existing definitions
-            selectedIndexes = askChooseMultiple("🗑️  Choose definitions to delete (use space to select, enter to confirm): ", _lst.sort())
+            selectedIndexes = askChooseMultiple("🗑️  Choose definitions to delete (use space to select, enter to confirm): ", _lst.sort(), 8)
             if (selectedIndexes.length > 0) {
                 print("✖️ Deleting definitions...")
                 selectedIndexes.forEach(defName => {
