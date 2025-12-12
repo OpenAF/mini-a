@@ -7014,6 +7014,18 @@ MiniA.prototype.init = function(args) {
       this._use_lc = false
     }
 
+    var needsBedrock = function(modelConfig) {
+      return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "bedrock"
+    }
+
+    if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model)) {
+      print("BEDROCK!!")
+      includeOPack("AWS")
+      loadLib("aws.js")
+    } else {
+      print("no bedrock...")
+    }
+
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
 
