@@ -7019,11 +7019,8 @@ MiniA.prototype.init = function(args) {
     }
 
     if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model)) {
-      print("BEDROCK!!")
       includeOPack("AWS")
       loadLib("aws.js")
-    } else {
-      print("no bedrock...")
     }
 
     this.llm = $llm(this._oaf_model)
