@@ -2147,6 +2147,11 @@
         await renderChartBlocks();
         renderLeafletMaps();
 
+        // Initialize table sorters for any tables in the new content
+        if (typeof initializeTableSorters === 'function') {
+            initializeTableSorters();
+        }
+
         lastContentUpdateTime = Date.now();
 
         if (wasAtBottom) {
@@ -4337,3 +4342,4 @@
     bindThemeListener(window.matchMedia('(prefers-color-scheme: dark)'));
     bindThemeListener(window.matchMedia('(prefers-color-scheme: light)'));
 </script>
+<script src="/js/mdtablesort.js"></script>
