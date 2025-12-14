@@ -101,6 +101,8 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | Gemini     | gemini-2.5-flash   | ```export OAF_MODEL="(type: gemini, model: gemini-2.5-flash, key: 'your-key', timeout: 900000, temperature: 0)"``` |
 | Gemini     | gemini-3-pro            | ```export OAF_MODEL="(type: gemini, key: your-google-ai-key, model: gemini-3-pro-preview, timeout: 900000, temperature: 0)"``` |
 | GitHub     | gpt-5-nano              | ```export OAF_MODEL="(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')"``` |
+| Grok       | grok-4-1-fast-reasoning | ```export OAF_MODEL="( type: openai, key: 'xai-...', url: 'https://api.x.ai', model: grok-4-1-fast-reasoning, timeout: 900000, temperature: 0, noSystem: false)"``` |
+| Grok       | grok-4-1-fast-non-reasoning | ```export OAF_MODEL="( type: openai, key: 'xai-...', url: 'https://api.x.ai', model: grok-4-1-fast-non-reasoning, timeout: 900000, temperature: 0, noSystem: false)"``` | 
 | Groq       | openaf/gpt-oss-120b     | ```export OAF_MODEL="(type: openai, key: 'your-grok-key', url: 'https://api.groq.com/openai', model: openai/gpt-oss-120b, timeout: 900000, temperature: 0)"``` |
 | Groq       | openaf/gpt-oss-20b      | ```export OAF_MODEL="(type: openai, key: 0your-grok-key', url: 'https://api.groq.com/openai', model: openai/gpt-oss-20b, timeout: 900000, temperature: 0)"``` |
 | Ollama     | gemma3                  | ```export OAF_MODEL="(type: ollama, model: 'gemma3', url: 'http://localhost:11434', timeout: 900000)"``` |
