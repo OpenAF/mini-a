@@ -87,30 +87,29 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 
 ### Provider Examples
 
-**OpenAI:**
-```bash
-export OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'sk-...', timeout: 900000, temperature: 1)"
-```
-
-**Google Gemini:**
-```bash
-export OAF_MODEL="(type: gemini, model: gemini-2.5-flash-lite, key: 'your-key', timeout: 900000, temperature: 0)"
-```
-
-**GitHub Models:**
-```bash
-export OAF_MODEL="(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')"
-```
-
-**AWS Bedrock:**
-```bash
-export OAF_MODEL="(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))"
-```
-
-**Ollama (Local):**
-```bash
-export OAF_MODEL="(type: ollama, model: 'gemma3', url: 'http://localhost:11434', timeout: 900000)"
-```
+| Provider   | Model                   | Example |
+|------------|-------------------------|---------|
+| Anthropic  | claude-haiku-4.5        | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-haiku-4-5-20251001, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
+| Anthropic  | claude-opus-4.5         | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-opus-4-5-20251101, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
+| Anthropic  | claude-sonnet-4.5       | ```export OAF_MODEL="(type: anthropic, key: '...', model: claude-sonnet-4-5-20250929, timeout: 900000, temperature: 0, params: (max_tokens: 64000))" ``` |
+| Bedrock    | claude-haiku-4.5        | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
+| Bedrock    | claude-sonnet-4.5       | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
+| Bedrock    | ministral-3-8b          | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: mistral.ministral-3-8b-instruct, temperature: 0), timeout: 900000)"``` |
+| Bedrock    | nova-2-lite             | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.amazon.nova-2-lite-v1:0', temperature: 0), timeout: 900000)"``` |
+| Bedrock    | nova-pro-v1             | ```export OAF_MODEL="(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))" ``` |
+| Bedrock    | opus-4.5                | ```OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-opus-4-5-20251101-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
+| Gemini     | gemini-2.5-flash   | ```export OAF_MODEL="(type: gemini, model: gemini-2.5-flash, key: 'your-key', timeout: 900000, temperature: 0)"``` |
+| Gemini     | gemini-3-pro            | ```export OAF_MODEL="(type: gemini, key: your-google-ai-key, model: gemini-3-pro-preview, timeout: 900000, temperature: 0)"``` |
+| GitHub     | gpt-5-nano              | ```export OAF_MODEL="(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')"``` |
+| Groq       | openaf/gpt-oss-120b     | ```export OAF_MODEL="(type: openai, key: 'your-grok-key', url: 'https://api.groq.com/openai', model: openai/gpt-oss-120b, timeout: 900000, temperature: 0)"``` |
+| Groq       | openaf/gpt-oss-20b      | ```export OAF_MODEL="(type: openai, key: 0your-grok-key', url: 'https://api.groq.com/openai', model: openai/gpt-oss-20b, timeout: 900000, temperature: 0)"``` |
+| Ollama     | gemma3                  | ```export OAF_MODEL="(type: ollama, model: 'gemma3', url: 'http://localhost:11434', timeout: 900000)"``` |
+| Ollama     | devstral-2:123b-cloud   | ```export OAF_MODEL="(type: ollama, model: 'devstral-2:123b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
+| Ollama     | deepseek-r1:8b          | ```export OAF_MODEL="(type: ollama, model: 'deepseek-r1:8b', url: 'http://localhost:11434', timeout: 900000)"``` |
+| Ollama     | qwen3-coder:480b-cloud  | ```export OAF_MODEL="(type: ollama, model: 'qwen3-coder:480b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
+| Ollama     | ministral-3:14b-cloud   | ```export OAF_MODEL="(type: ollama, model: 'ministral-3:14b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
+| OpenAI     | gpt-5-mini              | ```export OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'sk-...', timeout: 900000, temperature: 1)"``` |
+| OpenAI     | gpt-5.2                 | ```export OAF_MODEL="(type: openai, key: 'sk-...', model: gpt-5.2, timeout: 900000, temperature: 1)"``` |
 
 **Dual-Model (Cost Optimization):**
 ```bash
