@@ -305,6 +305,7 @@ mini-a goal="simple task" forceplanning=true planfile=plan.md
 | `usemermaid` | boolean | `false` | Alias for `usediagrams` |
 | `usecharts` | boolean | `false` | Encourage Chart.js charts in output |
 | `useascii` | boolean | `false` | Encourage enhanced UTF-8/ANSI visual output with colors and emojis |
+| `usemaps` | boolean | `false` | Encourage Leaflet JSON blocks for interactive maps (renders in console transcript and web UI) |
 | `format` | string | `md` | Output format (`md` or `json`) |
 | `outputfile` | string | - | Alternative key for `outfile`, used mainly during plan conversions |
 
@@ -326,6 +327,10 @@ mini-a goal="extract data" format=json useshell=true
 # Combine visual features
 mini-a goal="create comprehensive report" \
   usediagrams=true usecharts=true useascii=true
+
+# Interactive map guidance
+mini-a goal="show meetup locations on a map" \
+  usemaps=true usecharts=true
 ```
 
 ---
