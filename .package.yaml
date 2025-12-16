@@ -28,6 +28,7 @@ scripts:
     print("  5) Optional Unix alias 'mini-a' to run opack exec mini-a:")
     print("       Bash: echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.bashrc && . ~/.bashrc")
     print("       Zsh:  echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.zshrc && . ~/.zshrc")
+    print("       sh:   echo 'alias mini-a=\"opack exec mini-a\"' >> ~/.profile && . ~/.profile")
     print("     Or create a portable wrapper:")
     print("       mkdir -p ~/.local/bin && printf '#!/usr/bin/env sh\\nopack exec mini-a \"$@\"\\n' > ~/.local/bin/mini-a && chmod +x ~/.local/bin/mini-a")
     print("       Ensure ~/.local/bin is on your PATH")
