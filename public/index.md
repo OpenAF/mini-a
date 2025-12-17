@@ -1123,6 +1123,47 @@
         opacity: 0.6;
     }
 
+    .copy-actions button[data-tooltip]::before {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        z-index: 20;
+    }
+
+    .copy-actions button[data-tooltip]::after {
+        content: '';
+        position: absolute;
+        bottom: calc(100% + 2px);
+        left: 50%;
+        transform: translateX(-50%);
+        border-width: 6px 6px 0 6px;
+        border-style: solid;
+        border-color: rgba(0, 0, 0, 0.85) transparent transparent transparent;
+        opacity: 0;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+        z-index: 20;
+    }
+
+    .copy-actions button[data-tooltip]:hover::before,
+    .copy-actions button[data-tooltip]:focus-visible::before,
+    .copy-actions button[data-tooltip]:hover::after,
+    .copy-actions button[data-tooltip]:focus-visible::after {
+        opacity: 1;
+        transform: translate(-50%, -2px);
+    }
+
     .copy-actions button:hover {
         background: var(--panel-bg);
         box-shadow: none;
@@ -1369,19 +1410,33 @@
         </button>
         <!-- Copy actions -->
         <div id="copyActions" class="copy-actions">
-            <button id="copyLastAnswerBtn" title="Copy last answer" aria-label="Copy last answer" type="button">
+            <button id="copyLastAnswerBtn" title="Copy last answer" aria-label="Copy last answer" data-tooltip="Copy last answer" type="button">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                 </svg>
             </button>
-            <button id="copyConversationBtn" title="Copy entire conversation" aria-label="Copy entire conversation" type="button">
+            <button id="copyConversationBtn" title="Copy entire conversation" aria-label="Copy entire conversation" data-tooltip="Copy entire conversation" type="button">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
                     <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
                 </svg>
             </button>
-            <button id="exportHtmlBtn" title="Download conversation as HTML" aria-label="Download conversation as HTML" type="button">
+            <button id="branchConversationBtn" title="Branch into new conversation" aria-label="Branch into new conversation" data-tooltip="Branch into new conversation" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 3v6a6 6 0 0 0 6 6h6" />
+                    <circle cx="6" cy="3" r="2"></circle>
+                    <circle cx="18" cy="15" r="2"></circle>
+                </svg>
+            </button>
+            <button id="retryAnswerBtn" title="Refresh/Try again" aria-label="Refresh/Try again" data-tooltip="Refresh / try again" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+            </button>
+            <button id="exportHtmlBtn" title="Download conversation as HTML" aria-label="Download conversation as HTML" data-tooltip="Download conversation as HTML" type="button">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 3h9l5 5v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
                     <polyline points="13 3 13 8 18 8"></polyline>
@@ -1550,6 +1605,8 @@
     let isScrollingProgrammatically = false;
     let lastContentUpdateTime = 0;
     let lastSubmittedPrompt = '';
+    let lastFinishedPrompt = '';
+    let lastKnownHistory = [];
     let activeHistoryId = null;
     let historyEnabled = true;
     let attachmentsEnabled = false;
@@ -1594,6 +1651,8 @@
     const copyActions = document.getElementById('copyActions');
     const copyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
     const copyConversationBtn = document.getElementById('copyConversationBtn');
+    const branchConversationBtn = document.getElementById('branchConversationBtn');
+    const retryAnswerBtn = document.getElementById('retryAnswerBtn');
     const exportHtmlBtn = document.getElementById('exportHtmlBtn');
 
     applyAttachmentAvailability(false);
@@ -1700,6 +1759,74 @@
         return filtered.join('\n');
     }
 
+    function sanitizeHistoryEvents(events) {
+        if (!Array.isArray(events)) return [];
+        return events.map(ev => {
+            if (!ev || typeof ev.event === 'undefined') return null;
+            const sanitized = { event: ev.event };
+            if (typeof ev.message !== 'undefined' && ev.message !== null) {
+                sanitized.message = typeof ev.message === 'string' ? ev.message : JSON.stringify(ev.message);
+            }
+            return sanitized;
+        }).filter(Boolean);
+    }
+
+    function getCurrentConversationEvents() {
+        const memoryHistory = sanitizeHistoryEvents(lastKnownHistory);
+        if (memoryHistory.length > 0) return memoryHistory;
+
+        const entries = loadStoredHistory();
+        if (activeHistoryId) {
+            const entry = entries.find(item => item.id === activeHistoryId);
+            if (entry && entry.events) return sanitizeHistoryEvents(entry.events);
+        }
+
+        const activeUuid = currentSessionUuid || (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
+        if (activeUuid) {
+            const entry = entries.find(item => item.uuid === activeUuid);
+            if (entry && entry.events) return sanitizeHistoryEvents(entry.events);
+        }
+
+        return [];
+    }
+
+    function extractLastUserPromptFromEvents(events) {
+        if (!Array.isArray(events)) return '';
+        for (let i = events.length - 1; i >= 0; i--) {
+            const ev = events[i];
+            const key = ev && typeof ev.event === 'string' ? ev.event : '';
+            if (key === '👤' || key === 'user') {
+                return typeof ev.message === 'string' ? ev.message : '';
+            }
+        }
+        return '';
+    }
+
+    function removeLastAssistantFromEvents(events) {
+        const sanitized = sanitizeHistoryEvents(events);
+        const isUserEvent = (name) => name === '👤' || name === 'user';
+        const isAssistantEvent = (name) => name === 'final' || name === 'assistant' || name === '🤖';
+
+        for (let i = sanitized.length - 1; i >= 0; i--) {
+            const key = sanitized[i] && typeof sanitized[i].event === 'string' ? sanitized[i].event : '';
+            if (isAssistantEvent(key) || (!isUserEvent(key) && key)) {
+                sanitized.splice(i, sanitized.length - i);
+                break;
+            }
+        }
+
+        return sanitized;
+    }
+
+    function generateNewSessionUuid() {
+        try {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+        } catch (_) { /* ignore */ }
+        return 'branched-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
+    }
+
     function copyToClipboard(text) {
         function manualCopy(value) {
             if (typeof window === 'undefined' || typeof window.prompt !== 'function') return false;
@@ -1800,6 +1927,9 @@
 
             const data = await response.json();
             lastRawContent = data.content || '';
+            if (Array.isArray(data.history)) {
+                lastKnownHistory = sanitizeHistoryEvents(data.history);
+            }
             return { raw: lastRawContent, html: cachedHtml };
         } catch (error) {
             console.error('Failed to refresh conversation for copy:', error);
@@ -2061,6 +2191,104 @@
         }
     }
 
+    async function handleBranchConversation() {
+        try {
+            const events = getCurrentConversationEvents();
+            if (!events.length) {
+                console.warn('No conversation available to branch.');
+                return;
+            }
+
+            const newUuid = generateNewSessionUuid();
+            const prompt = extractLastUserPromptFromEvents(events) || lastFinishedPrompt || lastSubmittedPrompt;
+            const content = lastRawContent || '';
+            const entry = { uuid: newUuid, events, prompt, content, status: conversationFinished ? 'finished' : 'in-progress' };
+
+            await sendHistoryToServer(entry);
+
+            lastKnownHistory = events;
+            currentSessionUuid = newUuid;
+            if (typeof window !== 'undefined') {
+                window.mini_a_session_uuid = newUuid;
+            }
+            activeHistoryId = null;
+            lastRawContent = content;
+            conversationFinished = events.some(ev => ev && (ev.event === 'final' || ev.event === 'assistant' || ev.event === '🤖'));
+
+            const preprocessed = preprocessChartBlocks(content);
+            const htmlContent = converter.makeHtml(preprocessed);
+            await updateResultsContent(htmlContent);
+            try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+            forceRenderChartBlocks();
+            if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+            __refreshDarkMode();
+            resetPlanPanel();
+            stopPing();
+            startPing();
+            updateCopyActionsVisibility();
+        } catch (error) {
+            console.error('Failed to branch conversation:', error);
+        }
+    }
+
+    async function handleRetryLastAnswer() {
+        if (isProcessing) return;
+
+        try {
+            const events = getCurrentConversationEvents();
+            if (!events.length) {
+                console.warn('No conversation available to retry.');
+                return;
+            }
+
+            const trimmedEvents = removeLastAssistantFromEvents(events);
+            const promptForRetry = extractLastUserPromptFromEvents(trimmedEvents) || lastFinishedPrompt || lastSubmittedPrompt;
+            if (!promptForRetry || !promptForRetry.trim()) {
+                console.warn('No prompt available to retry.');
+                return;
+            }
+
+            const retryUuid = currentSessionUuid || getOrCreateSessionUuid();
+            currentSessionUuid = retryUuid;
+            if (typeof window !== 'undefined') {
+                window.mini_a_session_uuid = retryUuid;
+            }
+
+            lastSubmittedPrompt = promptForRetry;
+            lastFinishedPrompt = promptForRetry;
+
+            await sendHistoryToServer({ uuid: retryUuid, events: trimmedEvents, prompt: promptForRetry });
+
+            lastKnownHistory = trimmedEvents;
+            lastRawContent = '';
+            lastRenderedHtml = '';
+            conversationFinished = false;
+            autoScrollEnabled = true;
+            activeHistoryId = null;
+
+            await updateResultsContent('<p>Retrying last goal...</p>');
+            forceRenderChartBlocks();
+            resetPlanPanel();
+            try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+
+            const response = await fetch('/prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ prompt: promptForRetry, uuid: retryUuid })
+            });
+
+            if (!response.ok) throw new Error('Failed to resubmit prompt');
+
+            await response.json();
+            startProcessing();
+            startPolling();
+        } catch (error) {
+            console.error('Failed to retry conversation:', error);
+            await updateResultsContent('<p style="color: red;">Failed to refresh the last answer. Please try again.</p>');
+            forceRenderChartBlocks();
+        }
+    }
+
     async function updateResultsContent(htmlContent) {
         if (!resultsDiv) return;
 
@@ -2084,19 +2312,33 @@
             </button>`;
         const copyActionsHTML = `
             <div id="copyActions" class="copy-actions">
-                <button id="copyLastAnswerBtn" title="Copy last answer" aria-label="Copy last answer" type="button">
+                <button id="copyLastAnswerBtn" title="Copy last answer" aria-label="Copy last answer" data-tooltip="Copy last answer" type="button">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                     </svg>
                 </button>
-                <button id="copyConversationBtn" title="Copy entire conversation" aria-label="Copy entire conversation" type="button">
+                <button id="copyConversationBtn" title="Copy entire conversation" aria-label="Copy entire conversation" data-tooltip="Copy entire conversation" type="button">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
                         <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
                     </svg>
                 </button>
-                <button id="exportHtmlBtn" title="Download conversation as HTML" aria-label="Download conversation as HTML" type="button">
+                <button id="branchConversationBtn" title="Branch into new conversation" aria-label="Branch into new conversation" data-tooltip="Branch into new conversation" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 3v6a6 6 0 0 0 6 6h6" />
+                        <circle cx="6" cy="3" r="2"></circle>
+                        <circle cx="18" cy="15" r="2"></circle>
+                    </svg>
+                </button>
+                <button id="retryAnswerBtn" title="Refresh/Try again" aria-label="Refresh/Try again" data-tooltip="Refresh / try again" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                </button>
+                <button id="exportHtmlBtn" title="Download conversation as HTML" aria-label="Download conversation as HTML" data-tooltip="Download conversation as HTML" type="button">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 3h9l5 5v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
                         <polyline points="13 3 13 8 18 8"></polyline>
@@ -2125,12 +2367,20 @@
         // Reattach event listeners for copy actions
         const newCopyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
         const newCopyConversationBtn = document.getElementById('copyConversationBtn');
+        const newBranchConversationBtn = document.getElementById('branchConversationBtn');
+        const newRetryAnswerBtn = document.getElementById('retryAnswerBtn');
         const newExportHtmlBtn = document.getElementById('exportHtmlBtn');
         if (newCopyLastAnswerBtn) {
             newCopyLastAnswerBtn.addEventListener('click', handleCopyLastAnswer);
         }
         if (newCopyConversationBtn) {
             newCopyConversationBtn.addEventListener('click', handleCopyConversation);
+        }
+        if (newBranchConversationBtn) {
+            newBranchConversationBtn.addEventListener('click', handleBranchConversation);
+        }
+        if (newRetryAnswerBtn) {
+            newRetryAnswerBtn.addEventListener('click', handleRetryLastAnswer);
         }
         if (newExportHtmlBtn) {
             newExportHtmlBtn.addEventListener('click', handleExportHtml);
@@ -3538,6 +3788,10 @@
         activeHistoryId = entry.id;
         await sendHistoryToServer(entry);
 
+        lastKnownHistory = sanitizeHistoryEvents(entry.events || []);
+        const historyPrompt = extractLastUserPromptFromEvents(lastKnownHistory);
+        if (historyPrompt) lastFinishedPrompt = historyPrompt;
+
         if (typeof window !== 'undefined') {
             window.mini_a_session_uuid = entry.uuid;
         }
@@ -3580,6 +3834,11 @@
             if (!response.ok) throw new Error('Failed to load current conversation');
 
             const data = await response.json();
+            if (Array.isArray(data.history)) {
+                lastKnownHistory = sanitizeHistoryEvents(data.history);
+                const historyPrompt = extractLastUserPromptFromEvents(lastKnownHistory);
+                if (historyPrompt) lastFinishedPrompt = historyPrompt;
+            }
             // Only update plan panel if conversation is not finished
             if (data && data.status !== 'finished' && !conversationFinished) {
                 updatePlanPanel(data.plan);
@@ -3945,6 +4204,7 @@
         if (!finalPrompt.trim()) return;
 
         lastSubmittedPrompt = finalPrompt;
+        lastFinishedPrompt = finalPrompt;
         activeHistoryId = null;
 
         try {
@@ -3983,6 +4243,12 @@
 
                 const data = await response.json();
 
+                if (Array.isArray(data.history)) {
+                    lastKnownHistory = sanitizeHistoryEvents(data.history);
+                    const historyPrompt = extractLastUserPromptFromEvents(lastKnownHistory);
+                    if (historyPrompt) lastFinishedPrompt = historyPrompt;
+                }
+
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
@@ -4009,6 +4275,7 @@
                             activeHistoryId = savedEntry.id;
                         }
                     }
+                    lastFinishedPrompt = lastSubmittedPrompt || lastFinishedPrompt;
                     lastSubmittedPrompt = '';
                     removePreview();
                     // Force close and hide plan panel when final answer is provided
@@ -4090,6 +4357,9 @@
         promptInput.value = '';
         clearAttachments();
         lastRawContent = '';
+        lastKnownHistory = [];
+        lastFinishedPrompt = '';
+        lastSubmittedPrompt = '';
         hideScrollToBottomButton();
 
         try {
@@ -4244,6 +4514,14 @@
 
         if (copyConversationBtn) {
             copyConversationBtn.addEventListener('click', handleCopyConversation);
+        }
+
+        if (branchConversationBtn) {
+            branchConversationBtn.addEventListener('click', handleBranchConversation);
+        }
+
+        if (retryAnswerBtn) {
+            retryAnswerBtn.addEventListener('click', handleRetryLastAnswer);
         }
 
         if (exportHtmlBtn) {
