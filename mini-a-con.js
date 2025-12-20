@@ -120,7 +120,7 @@ try {
       var applied = []
       var paramsSource = preset.params
       var applyParam = function(key, value) {
-        if (isObject(value)) value = af.toSLON(value)
+        if (isObject(value) || isArray(value)) value = af.toSLON(value)
         if (isString(key) && key.length > 0) {
           args[key] = value
           applied.push(key)
