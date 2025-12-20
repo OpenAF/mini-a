@@ -56,7 +56,17 @@ version: '20251220'
 dependencies:
   openaf: '>=20250915'
 files:
+- .claude/settings.local.json
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+- .github/mini-a-con-screenshot.png
+- .github/mini-a-web-screenshot1.jpg
+- .github/version.svg
+- .github/workflows/github-action.yml
 - .odoc.db
+- .openaf_precompiled/.t8-20251219
+- .openaf_precompiled/mini-a-utils_js.class
+- .openaf_precompiled/mini-a_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -121,7 +131,17 @@ files:
 - tests/miniAUtils.js
 - tests/miniAUtils.yaml
 filesHash:
+  .claude/settings.local.json: bec5b6235b96706adf0f256321e30960f1ab993a
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  .github/mini-a-con-screenshot.png: cb5fdf4b3013f482abbe9e4b358e6f0137a741e0
+  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
+  .github/version.svg: 6a046af754e2b981c3b9d31f1563a95c840413e6
+  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20251219: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a-utils_js.class: e8bcb4ba11cb603e4db8ca0b6910ebb6b98385d5
+  .openaf_precompiled/mini-a_js.class: 98b28f9898eb064c909b9a8f82eea35abfea51cc
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
   CHEATSHEET.md: 299f99c684f37f968261920c791f2dfd7779ab9d
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
@@ -174,7 +194,7 @@ filesHash:
   mini-a.js: 67c549944dd147ddba5ee9bb27d1480958d7a462
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 66d8bc73b1b8fb79aa3491a2a8ac63b3a8a5e8a8
-  public/index.md: 0f7f623b2dc24f23ad9258b20184e16affaacc64
+  public/index.md: d8bcb9a61e8d14a6a66cac48fca9cca2e5a45160
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 8e0fefd35f96a3dfa4513f8721c31a1f751f25d4
   tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b

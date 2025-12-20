@@ -1,0 +1,28 @@
+Reviewed $do/$doV in ../openaf/js/openaf.js: they wrap oPromise and use pooled/virtual threads but don’t expose a clean cancellation hook. Given A2A needs
+  explicit cancel signaling, I kept the current Threads-based async runner so we can flip agent.state = "stop" and track run state deterministically. If you
+  prefer, I can refactor the A2A server to $doV and adjust cancel semantics.
+
+  A2A client is now wired into Mini‑A with a new a2a config and action handlers so the agent can call remote peers; docs/usage updated accordingly.
+
+  Changes:
+
+  - Added A2A client connections in mini-a.js, plus actions a2a-run-goal, a2a-status, a2a-cancel, a2a-send and prompt exposure.
+  - Added a2a arg to CLI/job config in mini-a.yaml and mini-a-con.js.
+  - Documented A2A usage in README.md and USAGE.md.
+
+  Files updated:
+
+  - mini-a.js
+  - mini-a.yaml
+  - mini-a-con.js
+  - README.md
+  - USAGE.md
+
+  Not run:
+
+  - No tests executed.
+
+  Suggested next steps:
+
+  1. mini-a a2aonport=9091
+  2. mini-a goal="delegate a summary" a2a="(type: remote, url: 'http://localhost:9091/a2a')"

@@ -19,6 +19,11 @@ var MiniA = function() {
   this._mcpConnectionInfo = {}
   this._mcpConnectionAliases = {}
   this._mcpConnectionAliasToId = {}
+  this._a2aConnections = {}
+  this._a2aConnectionInfo = {}
+  this._a2aConnectionAliases = {}
+  this._a2aConnectionAliasToId = {}
+  this._a2aActionNames = []
   this._shellPrefix = ""
   this._toolCacheSettings = {}
   this._toolInfoByName = {}
@@ -5538,6 +5543,51 @@ MiniA.prototype._getToolSchemaSummary = function(tool) {
   return summary
 }
 
+MiniA.prototype._getA2aActionSummaries = function() {
+  var baseParams = [{
+    name       : "connection",
+    type       : "string",
+    description: "Optional A2A connection id or alias to target."
+  }]
+  return [
+    {
+      name       : "a2a-run-goal",
+      description: "Run a goal on a remote Mini-A A2A server.",
+      params     : [
+        { name: "goal", type: "string", description: "Goal for the remote agent to achieve." },
+        { name: "async", type: "boolean", description: "If true, run asynchronously and return a runId." },
+        { name: "format", type: "string", description: "Optional output format (md, json, raw)." }
+      ].concat(baseParams),
+      hasParams  : true
+    },
+    {
+      name       : "a2a-status",
+      description: "Get status (and result when complete) for a remote run.",
+      params     : [
+        { name: "runId", type: "string", description: "Run identifier returned by a2a-run-goal." }
+      ].concat(baseParams),
+      hasParams  : true
+    },
+    {
+      name       : "a2a-cancel",
+      description: "Request cancellation of a remote run.",
+      params     : [
+        { name: "runId", type: "string", description: "Run identifier to cancel." }
+      ].concat(baseParams),
+      hasParams  : true
+    },
+    {
+      name       : "a2a-send",
+      description: "Send a message payload to a remote run (optional use).",
+      params     : [
+        { name: "runId", type: "string", description: "Run identifier to send a message to." },
+        { name: "message", type: "string", description: "Message content to send." }
+      ].concat(baseParams),
+      hasParams  : true
+    }
+  ]
+}
+
 MiniA.prototype._getCachedSystemPrompt = function(templateKey, payload, template) {
   var serialized = this._stableStringify(payload)
   var cacheKey = md5(`${templateKey}::${serialized}`)
@@ -6303,6 +6353,84 @@ MiniA.prototype._ensureMcpConnectionMetadata = function(connectionId, config, in
 }
 
 /**
+ * Ensures metadata is recorded for an A2A connection so it can be referenced in prompts.
+ *
+ * @param {string} connectionId - Internal identifier for the A2A connection
+ * @param {object} config - Raw A2A configuration object
+ * @param {number} index - Zero-based index for the connection
+ */
+MiniA.prototype._ensureA2aConnectionMetadata = function(connectionId, config, index) {
+  if (!isString(connectionId) || connectionId.length === 0) return
+
+  if (!isObject(this._a2aConnectionAliases)) this._a2aConnectionAliases = {}
+  if (!isObject(this._a2aConnectionAliasToId)) this._a2aConnectionAliasToId = {}
+  if (!isObject(this._a2aConnectionInfo)) this._a2aConnectionInfo = {}
+
+  var alias = this._a2aConnectionAliases[connectionId]
+  if (!isString(alias) || alias.length === 0) {
+    var nextIndex = Object.keys(this._a2aConnectionAliases).length + 1
+    alias = `a2a${nextIndex}`
+    while (isString(this._a2aConnectionAliasToId[alias])) {
+      nextIndex += 1
+      alias = `a2a${nextIndex}`
+    }
+    this._a2aConnectionAliases[connectionId] = alias
+    this._a2aConnectionAliasToId[alias] = connectionId
+  }
+
+  var info = isObject(this._a2aConnectionInfo[connectionId]) ? this._a2aConnectionInfo[connectionId] : {}
+  info.alias = this._a2aConnectionAliases[connectionId]
+  info.label = this._deriveMcpConnectionLabel(config, index)
+  info.description = this._describeMcpConnection(config)
+  this._a2aConnectionInfo[connectionId] = info
+}
+
+MiniA.prototype._resolveA2aConnectionId = function(identifier) {
+  if (!isString(identifier) || identifier.trim().length === 0) return __
+  var normalized = identifier.trim()
+  if (isObject(this._a2aConnections) && isObject(this._a2aConnections[normalized])) return normalized
+  if (isObject(this._a2aConnectionAliasToId) && isString(this._a2aConnectionAliasToId[normalized])) {
+    return this._a2aConnectionAliasToId[normalized]
+  }
+  return __
+}
+
+MiniA.prototype._getA2aConnection = function(params) {
+  if (!isObject(this._a2aConnections) || Object.keys(this._a2aConnections).length === 0) return __
+  params = isObject(params) ? params : {}
+  var selected = __
+  if (isString(params.connection)) {
+    selected = this._resolveA2aConnectionId(params.connection)
+  }
+  if (isUnDef(selected)) {
+    selected = Object.keys(this._a2aConnections)[0]
+  }
+  var client = this._a2aConnections[selected]
+  return isObject(client) ? { id: selected, client: client } : __
+}
+
+MiniA.prototype._callA2a = function(action, params) {
+  var connection = this._getA2aConnection(params)
+  if (!isObject(connection)) {
+    throw new Error("No A2A connections are available.")
+  }
+  var payload = isObject(params) ? merge({}, params) : {}
+  delete payload.connection
+  switch (action) {
+    case "a2a-run-goal":
+      return connection.client.exec("a2a.run_goal", payload)
+    case "a2a-status":
+      return connection.client.exec("a2a.status", { runId: payload.runId })
+    case "a2a-cancel":
+      return connection.client.exec("a2a.cancel", { runId: payload.runId })
+    case "a2a-send":
+      return connection.client.exec("a2a.send", { runId: payload.runId, message: payload.message })
+    default:
+      throw new Error("Unknown A2A action: " + action)
+  }
+}
+
+/**
  * Derives a short human-friendly label for an MCP connection.
  *
  * @param {object} config - Raw MCP configuration object
@@ -6807,7 +6935,8 @@ MiniA.prototype.init = function(args) {
       { name: "updateinterval", type: "number", default: 3 },
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
-      { name: "nosetmcpwd", type: "boolean", default: false }
+      { name: "nosetmcpwd", type: "boolean", default: false },
+      { name: "a2a", type: "string", default: __ }
     ])
 
     // Convert and validate boolean arguments
@@ -7264,6 +7393,42 @@ MiniA.prototype.init = function(args) {
       this.fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
     }
 
+    // Using A2A connections (JSON-RPC)
+    if (isUnDef(this._a2aConnections)) {
+      this._a2aConnections = {}
+      this._a2aConnectionInfo = {}
+      this._a2aConnectionAliases = {}
+      this._a2aConnectionAliasToId = {}
+    }
+    this._a2aActionNames = []
+    if (isDef(args.a2a)) {
+      var parsedA2aConfigs = af.fromJSSLON(args.a2a)
+      if (!isArray(parsedA2aConfigs)) parsedA2aConfigs = [parsedA2aConfigs]
+      if (parsedA2aConfigs.length > 0) {
+        this.fnI("info", `Initializing ${parsedA2aConfigs.length} A2A connection(s)...`)
+      }
+      parsedA2aConfigs.forEach((a2aConfig, index) => {
+        try {
+          var a2aId = md5(isString(a2aConfig.id) ? a2aConfig.id : stringify(a2aConfig, __, ""))
+          if (!isObject(this._a2aConnections[a2aId])) {
+            this._a2aConnections[a2aId] = $jsonrpc(merge(a2aConfig, { shared: true }))
+          }
+          this._ensureA2aConnectionMetadata(a2aId, a2aConfig, index)
+          try {
+            this._a2aConnections[a2aId].exec("a2a.initialize", {})
+          } catch (initErr) {
+            this.fnI("warn", `A2A connection #${index + 1} initialize failed: ${initErr.message || initErr}`)
+          }
+          this.fnI("done", `A2A connection #${index + 1} ready.`)
+        } catch (e) {
+          this.fnI("error", `Failed to initialize A2A connection #${index + 1}: ${e.message || e}`)
+        }
+      })
+    }
+    if (isObject(this._a2aConnections) && Object.keys(this._a2aConnections).length > 0) {
+      this._a2aActionNames = ["a2a-run-goal", "a2a-status", "a2a-cancel", "a2a-send"]
+    }
+
     // Provide system prompt instructions
     // knowledge example:
     // ---
@@ -7321,6 +7486,8 @@ MiniA.prototype.init = function(args) {
     }
 
     if (args.chatbotmode) {
+      var a2aActionNames = isArray(this._a2aActionNames) ? this._a2aActionNames.slice() : []
+      var a2aActionDetails = a2aActionNames.length > 0 ? this._getA2aActionSummaries() : []
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
       var chatToolsList = this.mcpToolNames.join(", ")
@@ -7337,16 +7504,26 @@ MiniA.prototype.init = function(args) {
         })
       }
 
-      this._actionsList = chatActions.concat(this.mcpToolNames).join(" | ")
+      if (a2aActionDetails.length > 0) {
+        chatbotToolDetails = chatbotToolDetails.concat(a2aActionDetails)
+      }
+
+      var combinedChatToolNames = this.mcpToolNames.slice()
+      if (a2aActionNames.length > 0) combinedChatToolNames = combinedChatToolNames.concat(a2aActionNames)
+      if (combinedChatToolNames.length > 0) {
+        chatToolsList = combinedChatToolNames.join(", ")
+      }
+
+      this._actionsList = chatActions.concat(combinedChatToolNames).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
         knowledge     : trimmedKnowledge,
         hasKnowledge  : trimmedKnowledge.length > 0,
         hasRules      : baseRules.length > 0,
         rules         : baseRules,
-        hasTools      : this.mcpTools.length > 0,
-        toolCount     : this.mcpTools.length,
-        toolsPlural   : this.mcpTools.length !== 1,
+        hasTools      : combinedChatToolNames.length > 0,
+        toolCount     : combinedChatToolNames.length,
+        toolsPlural   : combinedChatToolNames.length !== 1,
         toolsList     : chatToolsList,
         hasToolDetails: chatbotToolDetails.length > 0,
         toolDetails   : chatbotToolDetails,
@@ -7356,8 +7533,15 @@ MiniA.prototype.init = function(args) {
       this._systemInst = this._getCachedSystemPrompt("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT)
     } else {
       var promptActionsDesc = this._useTools ? [] : this.mcpTools.map(tool => this._getToolSchemaSummary(tool))
-      var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
-      var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+      if (isArray(this._a2aActionNames) && this._a2aActionNames.length > 0) {
+        promptActionsDesc = promptActionsDesc.concat(this._getA2aActionSummaries())
+      }
+      var promptActionNames = this._useTools ? [] : this.mcpTools.map(r => r.name)
+      if (isArray(this._a2aActionNames) && this._a2aActionNames.length > 0) {
+        promptActionNames = promptActionNames.concat(this._a2aActionNames)
+      }
+      var promptActionsList = promptActionNames.join(" | ")
+      var actionsWordNumber = this._numberInWords(1 + promptActionNames.length)
 
       this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
         actionsList: promptActionsList,
@@ -8556,6 +8740,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
         var stepLabel = `${step + 1}${stepSuffix}`
         var isKnownTool = this.mcpToolToConnection && isDef(this.mcpToolToConnection[origActionRaw])
+        var isA2aAction = isArray(this._a2aActionNames) && this._a2aActionNames.indexOf(action) >= 0
 
         global.__mini_a_metrics.thoughts_made.inc()
 
@@ -8674,6 +8859,46 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
           runtime.lastActions.push(`shell: ${commandValue}`)
           if (runtime.lastActions.length > 3) runtime.lastActions.shift()
+
+          checkAndSummarizeContext()
+          continue
+        }
+
+        if (isA2aAction && action != "final") {
+          if (isDef(paramsValue) && !isMap(paramsValue)) {
+            flushToolActions()
+            runtime.context.push(`[OBS ${stepLabel}] (${action}) missing or invalid 'params' from model.`)
+            this._registerRuntimeError(runtime, {
+              category: "permanent",
+              message : `${action} missing params`,
+              context : { step: stepLabel, tool: action }
+            })
+            break
+          }
+
+          flushToolActions()
+          try {
+            var a2aResult = this._callA2a(action, paramsValue)
+            runtime.context.push(`[ACT ${stepLabel}] ${action}: ${stringify(paramsValue, __, "")}`)
+            runtime.context.push(`[OBS ${stepLabel}] ${stringify(a2aResult, __, "")}`)
+
+            runtime.consecutiveThoughts = 0
+            runtime.stepsWithoutAction = 0
+            runtime.totalThoughts = Math.max(0, runtime.totalThoughts - 1)
+            runtime.recentSimilarThoughts = []
+            global.__mini_a_metrics.consecutive_thoughts.set(0)
+            runtime.successfulActionDetected = true
+
+            runtime.lastActions.push(`${action}: ${stringify(paramsValue, __, "")}`)
+            if (runtime.lastActions.length > 3) runtime.lastActions.shift()
+          } catch (a2aError) {
+            runtime.context.push(`[OBS ${stepLabel}] (${action}) failed: ${a2aError.message || a2aError}`)
+            this._registerRuntimeError(runtime, {
+              category: "permanent",
+              message : `${action} failed`,
+              context : { step: stepLabel, tool: action, error: a2aError.message || a2aError }
+            })
+          }
 
           checkAndSummarizeContext()
           continue

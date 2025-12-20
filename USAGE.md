@@ -636,6 +636,21 @@ useutils: true
 
 Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit cache settings). When detected, Mini-A caches results keyed by tool name and parameters for the configured TTL, reusing outputs on subsequent steps to avoid redundant calls.
 
+#### A2A (Agent-to-Agent) Integration
+- **`a2a`** (string): A2A JSON-RPC configuration in SLON/JSON format (single object or array for multiple connections)
+- **`a2aonport`** (string): Launch the A2A JSON-RPC server on the specified port and exit
+
+```bash
+# Start a local A2A server
+mini-a a2aonport=9091
+
+# Delegate a goal to the A2A server (agent will use a2a-run-goal)
+mini-a goal="delegate summarization to a remote agent" \
+  a2a="(type: remote, url: 'http://localhost:9091/a2a')"
+```
+
+When A2A is configured, the agent can call `a2a-run-goal` (supports `async=true`), `a2a-status`, `a2a-cancel`, and `a2a-send` actions to coordinate with remote Mini-A instances.
+
 ##### Dynamic MCP tool selection
 
 Set `usetools=true mcpdynamic=true` when you want Mini-A to narrow the registered MCP tools to only those that look useful for the current goal. The agent evaluates the candidate list in stages:

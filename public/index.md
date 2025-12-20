@@ -1138,7 +1138,7 @@
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.2s ease, transform 0.2s ease;
-        z-index: 20;
+        z-index: 10000;
     }
 
     .copy-actions button[data-tooltip]::after {
@@ -1153,7 +1153,7 @@
         opacity: 0;
         transition: opacity 0.2s ease, transform 0.2s ease;
         pointer-events: none;
-        z-index: 20;
+        z-index: 10000;
     }
 
     .copy-actions button[data-tooltip]:hover::before,

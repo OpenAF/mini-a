@@ -167,6 +167,11 @@ try {
       // Start MCP test mode
       load("mini-a-mcptest.js")
       exit(0)
+    } else if (isDef(args.a2aonport)) {
+      // Start A2A JSON-RPC server
+      args.onport = args.a2aonport
+      oJobRunFile(getOPackPath("mini-a") + "/mini-a-a2a.yaml", args, genUUID(), __, false)
+      exit(0)
     } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
       // Start web mode
       oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
@@ -329,6 +334,7 @@ try {
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
+    a2a            : { type: "string", description: "A2A JSON-RPC connection definition (SLON/JSON)" },
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
@@ -358,6 +364,7 @@ try {
     libs: true,
     goal: true,
     onport: true,
+    a2aonport: true,
     web: true,
     modelman: true,
     mcptest: true,
@@ -406,6 +413,7 @@ try {
       { option: "libs=<list>", description: "Comma-separated libs to load before launching." },
       { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
+      { option: "a2aonport=<port>", description: "Start the Mini-A A2A JSON-RPC server on the provided port." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
       { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
@@ -432,6 +440,7 @@ try {
     const examples = [
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
+      { cmd: "mini-a a2aonport=9091", desc: "# Start A2A JSON-RPC server on port 9091." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
       { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." }
     ]

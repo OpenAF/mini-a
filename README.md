@@ -161,6 +161,13 @@ mini-a goal="list all JavaScript files in this directory" useshell=true
 mini-a goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
+**A2A (agent-to-agent) server + delegation:**
+```bash
+mini-a a2aonport=9091
+mini-a goal="delegate to a remote agent" \
+  a2a="(type: remote, url: 'http://localhost:9091/a2a')"
+```
+
 **Testing MCP servers interactively:**
 ```bash
 mini-a mcptest=true mcp="(cmd: 'ojob mcps/mcp-time.yaml')"

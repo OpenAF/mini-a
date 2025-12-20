@@ -20,6 +20,10 @@ help:
     desc     : A MCP connection object (or array of objects) using OpenAF's $mcp() function in SLON or JSON format
     example  : "(url: 'http://127.0.0.1:17879/mcp', type: remote, debug: false)"
     mandatory: false
+  - name     : a2a
+    desc     : A2A JSON-RPC connection object (or array) using OpenAF's $jsonrpc() function in SLON or JSON format
+    example  : "(url: 'http://127.0.0.1:17879/a2a', type: remote, debug: false)"
+    mandatory: false
   - name     : mcplazy
     desc     : Initialize MCP connections lazily on first use instead of during startup
     example  : "true"
@@ -253,6 +257,10 @@ help:
     desc     : SLON/JSON definition of an audit channel to record agent activity
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
+  - name     : a2aonport
+    desc     : Start the A2A JSON-RPC server on the provided port and exit
+    example  : "8889"
+    mandatory: false
   - name     : debugch
     desc     : SLON/JSON definition of a debug channel for LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"
@@ -281,6 +289,7 @@ help:
     options  : ["true", "false"]
 
 todo:
+- MiniAgent A2A Redirect
 - MiniAgent
 
 ojob:
@@ -294,6 +303,14 @@ ojob:
 
 jobs:
 # -------------------------
+- name : MiniAgent A2A Redirect
+  exec : | #js
+    if (isDef(args.a2aonport)) {
+      args.onport = args.a2aonport
+      ow.oJob.runFile(getOPackPath("mini-a") + "/mini-a-a2a.yaml", args, genUUID(), __, false)
+      exit(0)
+    }
+
 - name : MiniAgent CheckEnv
   exec : | #js
     var hasModelOverride = isDef(args) && isDef(args.model) && ((isString(args.model) && args.model.trim().length > 0) || isMap(args.model))
@@ -311,6 +328,7 @@ jobs:
       keyArg: goal
       args  :
         mcp            : mcp
+        a2a            : a2a
         verbose        : verbose
         rpm            : rpm
         rtm            : rtm
@@ -368,6 +386,7 @@ jobs:
     in:
       goal           : isString
       mcp            : isString.default(__)
+      a2a            : isString.default(__)
       verbose        : toBoolean.isBoolean.default(false)
       rpm            : toNumber.isNumber.default(__)
       rtm            : toNumber.isNumber.default(__)
@@ -416,6 +435,7 @@ jobs:
       rules          : isString.default(__)
       state          : isString.default(__)
       auditch        : isString.default(__)
+      a2aonport      : isString.default(__)
       debugch        : isString.default(__)
       debuglcch      : isString.default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)

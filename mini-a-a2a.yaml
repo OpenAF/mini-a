@@ -1,0 +1,331 @@
+# Author: Nuno Aguiar
+help:
+  text   : Mini-A JSON-RPC server for agent-to-agent (A2A) communication.
+  expects:
+  - name     : onport
+    desc     : If defined starts the A2A JSON-RPC server on the provided port
+    example  : "8888"
+    mandatory: false
+  - name     : knowledge
+    desc     : Knowledge pack or path to preload for each goal (server launch only)
+    example  : "- prefer bullet lists"
+    mandatory: false
+  - name     : rules
+    desc     : Custom rules to enforce on every run (string or JSON, server launch only)
+    example  : "[ 'avoid-shell' ]"
+    mandatory: false
+  - name     : libs
+    desc     : Comma-separated list of additional OJob libraries to load (server launch only)
+    example  : "lib1,lib2"
+    mandatory: false
+  - name     : model
+    desc     : Override the OAF_MODEL environment variable (server launch only)
+    example  : "anthropic/claude-3-5-sonnet-20241022"
+    mandatory: false
+  - name     : modellc
+    desc     : Override the low-cost model configuration (server launch only)
+    example  : "anthropic/claude-3-5-haiku-20241022"
+    mandatory: false
+
+todo:
+- Init
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdService ): "${onport:-8080}"
+    ((uri          )): /a2a
+    ((execURI      )): | #js
+      var port = isDef(args.onport) ? args.onport : 8080
+      return ow.server.httpd.replyJSONRPC(
+        global.__ojobHttp[port],
+        request,
+        global.__mini_a_a2a_fns || {},
+        logErr,
+        log
+      )
+  - (httpdService ): "${onport:-8080}"
+    ((uri          )): /info
+    ((execURI      )): | #js
+      return ow.server.httpd.reply(global.__mini_a_a2a_info || {})
+  ((else)):
+  - A2A STDIO
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  - mini-a
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mini-a-a2a.pid
+    killPrevious: true
+  loadLibs    :
+  - mini-a.js
+
+include:
+- oJobHTTPd.yaml
+
+jobs:
+# -----------
+- name : Init
+  exec : | #js
+    if (isUnDef(global.__mini_a_a2a_defaults)) {
+      global.__mini_a_a2a_defaults = merge({}, args)
+    }
+
+    var hasModelOverride = isDef(global.__mini_a_a2a_defaults)
+      && isDef(global.__mini_a_a2a_defaults.model)
+      && ((isString(global.__mini_a_a2a_defaults.model) && global.__mini_a_a2a_defaults.model.trim().length > 0)
+        || isMap(global.__mini_a_a2a_defaults.model)
+        || isArray(global.__mini_a_a2a_defaults.model))
+
+    if (isUnDef(getEnv("OAF_MODEL")) && !hasModelOverride) {
+      throw "OAF_MODEL environment variable not set. Provide model= with your configuration or export OAF_MODEL before using A2A."
+    }
+
+    if (isUnDef(global.__mini_a_a2a_runs)) global.__mini_a_a2a_runs = {}
+
+    global.__mini_a_a2a_info = {
+      name       : "mini-a-a2a",
+      title      : "Mini-A A2A JSON-RPC server",
+      version    : "1.0.0",
+      capabilities: {
+        async: true,
+        methods: [ "a2a.initialize", "a2a.run_goal", "a2a.status", "a2a.cancel", "a2a.send" ]
+      }
+    }
+
+    var normalizeRunArgs = function(params) {
+      var baseArgs = {}
+      if (isObject(global.__mini_a_a2a_defaults)) {
+        baseArgs = jsonParse(stringify(global.__mini_a_a2a_defaults, __, ""), __, __, true)
+      }
+
+      var incomingArgs = jsonParse(stringify(params || {}, __, ""), __, __, true)
+      var allowedRemoteKeys = {
+        goal        : true,
+        format      : true,
+        raw         : true,
+        chatbotmode : true,
+        useplanning : true,
+        updatefreq  : true,
+        updateinterval: true,
+        forceupdates: true,
+        planlog     : true,
+        planmode    : true,
+        planformat  : true,
+        convertplan : true
+      }
+
+      var mergedArgs = merge({}, baseArgs)
+      Object.keys(incomingArgs).forEach(function(key) {
+        if (allowedRemoteKeys[key] === true) {
+          mergedArgs[key] = incomingArgs[key]
+        }
+      })
+
+      var preparedArgs = merge({}, mergedArgs)
+
+      var booleanKeys = [
+        "usetools", "useutils", "mcpdynamic", "mcplazy", "useshell", "readwrite",
+        "shellallowpipes", "shellbatch", "checkall", "verbose", "debug", "raw",
+        "chatbotmode", "useplanning", "forceupdates", "planmode", "convertplan", "resumefailed"
+      ]
+      booleanKeys.forEach(function(key) {
+        if (isDef(preparedArgs[key])) {
+          preparedArgs[key] = toBoolean(preparedArgs[key])
+        }
+      })
+
+      var numberKeys = [ "rpm", "rtm", "tpm", "maxsteps", "maxcontext", "toolcachettl" ]
+      numberKeys.forEach(function(key) {
+        if (isDef(preparedArgs[key])) {
+          preparedArgs[key] = toNumber(preparedArgs[key])
+        }
+      })
+
+      if (isDef(preparedArgs.mcp) && !isString(preparedArgs.mcp)) {
+        preparedArgs.mcp = stringify(preparedArgs.mcp, __, "")
+      }
+
+      return preparedArgs
+    }
+
+    var recordRun = function(runId, data) {
+      var entry = isObject(global.__mini_a_a2a_runs[runId]) ? global.__mini_a_a2a_runs[runId] : {}
+      global.__mini_a_a2a_runs[runId] = merge(entry, data)
+      return global.__mini_a_a2a_runs[runId]
+    }
+
+    plugin("Threads")
+
+    var startAsyncRun = function(preparedArgs, runId) {
+      var threadHost = new Threads()
+      var uuid = threadHost.addThread(function() {
+        var agent = new MiniA()
+        recordRun(runId, { agent: agent, thread: threadHost, threadId: uuid })
+        var current = global.__mini_a_a2a_runs[runId] || {}
+        if (current.cancelRequested === true) {
+          recordRun(runId, {
+            status    : "canceled",
+            finishedAt: new Date().toISOString()
+          })
+          return
+        }
+        try {
+          agent.init(preparedArgs)
+          var result = agent.start(preparedArgs)
+          var metrics = agent.getMetrics()
+          var finalStatus = (global.__mini_a_a2a_runs[runId] || {}).cancelRequested === true ? "canceled" : "completed"
+          recordRun(runId, {
+            status    : finalStatus,
+            finishedAt: new Date().toISOString(),
+            result    : result,
+            metrics   : metrics
+          })
+        } catch (e) {
+          var errMsg = (isDef(e) && isDef(e.message)) ? e.message : String(e)
+          recordRun(runId, {
+            status    : "failed",
+            finishedAt: new Date().toISOString(),
+            error     : errMsg
+          })
+        }
+      })
+      recordRun(runId, { thread: threadHost, threadId: uuid })
+      threadHost.start()
+    }
+
+    global.__mini_a_a2a_fns = {
+      "a2a.initialize": params => global.__mini_a_a2a_info,
+      "a2a.run_goal": params => {
+        var preparedArgs = normalizeRunArgs(params)
+        if (!isString(preparedArgs.goal) || preparedArgs.goal.trim().length === 0) {
+          throw "Missing goal parameter."
+        }
+
+        var runId = genUUID()
+        var asyncMode = toBoolean(params && params.async)
+        recordRun(runId, {
+          id        : runId,
+          status    : asyncMode ? "running" : "starting",
+          goal      : preparedArgs.goal,
+          startedAt : new Date().toISOString()
+        })
+
+        if (asyncMode === true) {
+          startAsyncRun(preparedArgs, runId)
+          return {
+            runId : runId,
+            status: "running"
+          }
+        }
+
+        try {
+          var agent = new MiniA()
+          agent.init(preparedArgs)
+          var result = agent.start(preparedArgs)
+          var metrics = agent.getMetrics()
+          recordRun(runId, {
+            status    : "completed",
+            finishedAt: new Date().toISOString(),
+            result    : result,
+            metrics   : metrics
+          })
+          return {
+            runId  : runId,
+            status : "completed",
+            result : result,
+            metrics: metrics
+          }
+        } catch (e) {
+          var errMsg = (isDef(e) && isDef(e.message)) ? e.message : String(e)
+          recordRun(runId, {
+            status    : "failed",
+            finishedAt: new Date().toISOString(),
+            error     : errMsg
+          })
+          return {
+            runId : runId,
+            status: "failed",
+            error : errMsg
+          }
+        }
+      },
+      "a2a.status": params => {
+        params = _$(params, "params").isMap().default({})
+        var runId = params.runId
+        if (!isString(runId) || runId.trim().length === 0) {
+          return { status: "error", message: "runId is required." }
+        }
+        var entry = global.__mini_a_a2a_runs[runId]
+        if (!isObject(entry)) {
+          return { status: "not_found", runId: runId }
+        }
+        var response = {
+          runId     : runId,
+          status    : entry.status,
+          goal      : entry.goal,
+          startedAt : entry.startedAt,
+          finishedAt: entry.finishedAt,
+          error     : entry.error
+        }
+        if (entry.status === "completed" || entry.status === "canceled") {
+          response.result = entry.result
+          response.metrics = entry.metrics
+        }
+        return response
+      },
+      "a2a.cancel": params => {
+        params = _$(params, "params").isMap().default({})
+        var runId = params.runId
+        if (!isString(runId) || runId.trim().length === 0) {
+          return { status: "error", message: "runId is required." }
+        }
+        var entry = global.__mini_a_a2a_runs[runId]
+        if (!isObject(entry)) {
+          return { status: "not_found", runId: runId }
+        }
+        if (entry.status === "completed" || entry.status === "failed" || entry.status === "canceled") {
+          return { runId: runId, status: entry.status }
+        }
+        recordRun(runId, { status: "cancel_requested", cancelRequested: true })
+        if (isObject(entry.agent)) {
+          entry.agent.state = "stop"
+        }
+        return { runId: runId, status: "cancel_requested" }
+      },
+      "a2a.send": params => {
+        params = _$(params, "params").isMap().default({})
+        var runId = params.runId
+        var message = params.message
+        if (!isString(runId) || runId.trim().length === 0) {
+          return { status: "error", message: "runId is required." }
+        }
+        if (!isString(message) || message.trim().length === 0) {
+          return { status: "error", message: "message is required." }
+        }
+        var entry = global.__mini_a_a2a_runs[runId]
+        if (!isObject(entry)) {
+          return { status: "not_found", runId: runId }
+        }
+        if (!isArray(entry.messages)) entry.messages = []
+        entry.messages.push({ at: new Date().toISOString(), message: message })
+        return { runId: runId, status: "accepted" }
+      }
+    }
+
+# ----------------------
+- name : A2A STDIO
+  exec : | #js
+    ow.loadServer()
+    io.pipeLn(line => {
+      var request = jsonParse(line)
+      var response = ow.server.jsonRPC(request, global.__mini_a_a2a_fns || {})
+      sprint(response, "")
+    })
