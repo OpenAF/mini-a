@@ -168,7 +168,8 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 {{#if useMcpProxy}}
 {{#if usetoolsActual}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH FUNCTION CALLING):
-• {{toolCount}} MCP tools are available through the 'proxy-dispatch' function
+• {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
+• Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Tool schemas are provided via the tool interface, so keep prompts concise.
@@ -201,7 +202,8 @@ Arguments: {
 }
 {{else}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH ACTION-BASED):
-• {{toolCount}} MCP tools are available through the 'proxy-dispatch' action
+• {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
+• Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • Call the proxy-dispatch tool through the JSON "action" field
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "proxy-dispatch" | "final"
 
@@ -7298,6 +7300,26 @@ MiniA.prototype.init = function(args) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
     }
 
+    var proxyToolsList = ""
+    var proxyToolCount = this.mcpTools.length
+    if (this._useMcpProxy === true && isObject(global.__mcpProxyState__)) {
+      var proxyState = global.__mcpProxyState__
+      var proxyNames = []
+      if (isMap(proxyState.toolToConnections)) {
+        proxyNames = Object.keys(proxyState.toolToConnections)
+      } else if (isArray(proxyState.catalog)) {
+        proxyNames = proxyState.catalog
+          .map(entry => isMap(entry) && isMap(entry.tool) ? entry.tool.name : __)
+          .filter(name => isString(name) && name.length > 0)
+      }
+      proxyNames = proxyNames.filter(name => name !== "proxy-dispatch")
+      proxyNames.sort()
+      if (proxyNames.length > 0) {
+        proxyToolCount = proxyNames.length
+        proxyToolsList = proxyNames.join(", ")
+      }
+    }
+
     if (args.chatbotmode) {
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
@@ -7359,6 +7381,8 @@ MiniA.prototype.init = function(args) {
         usetoolsActual   : this._useToolsActual,
         useMcpProxy      : this._useMcpProxy,
         toolCount        : this.mcpTools.length,
+        proxyToolCount   : proxyToolCount,
+        proxyToolsList   : proxyToolsList,
         planning         : this._enablePlanning,
         planningExecution: this._enablePlanning && this._planningPhase === "execution"
       }
