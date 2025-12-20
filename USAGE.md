@@ -562,6 +562,15 @@ var result = agent.start({
 log(result)
 ```
 
+### Stopping a Mini-A Agent
+
+```javascript
+// Stop an in-flight agent run (optionally with a reason)
+agent.stop("User requested cancellation")
+```
+
+Call `stop()` to halt execution and transition the agent to the `stop` state. If the agent already completed successfully, the stop call logs the request without counting it as a stopped goal.
+
 ## Configuration Options
 
 The `start()` method accepts various configuration options:
