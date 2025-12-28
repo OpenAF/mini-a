@@ -6845,12 +6845,9 @@ MiniA.prototype.init = function(args) {
 
     // Set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location by default
     if (!args.nosetmcpwd) {
-      if (isUnDef(global.__flags)) global.__flags = {}
-      if (isUnDef(global.__flags.JSONRPC)) global.__flags.JSONRPC = {}
-      if (isUnDef(global.__flags.JSONRPC.cmd)) global.__flags.JSONRPC.cmd = {}
-      if (isUnDef(global.__flags.JSONRPC.cmd.defaultDir)) {
-        global.__flags.JSONRPC.cmd.defaultDir = getOPackPath("mini-a")
-      }
+      if (isUnDef(__flags.JSONRPC)) __flags.JSONRPC = {}
+      if (isUnDef(__flags.JSONRPC.cmd)) __flags.JSONRPC.cmd = {}
+      __flags.JSONRPC.cmd.defaultDir = getOPackPath("mini-a")
     }
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
