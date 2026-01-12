@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20251228'
+version: '20260112'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -70,6 +70,7 @@ files:
 - docs/OPTIMIZATIONS.md
 - docs/TESTS_MODELS.md
 - docs/WHATS-NEW.md
+- docs/backend-endpoints.md
 - examples/README.md
 - examples/changelog-gen.yaml
 - examples/document.yaml
@@ -134,6 +135,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
   docs/WHATS-NEW.md: 189f85f01d9e6fe51112dba10804a23a57476419
+  docs/backend-endpoints.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   examples/README.md: 0d77434a52d4b21fdd033d980086fa530964e9d8
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
