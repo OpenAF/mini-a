@@ -1064,6 +1064,17 @@ try {
     }
     try {
       if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
+      // Also clear the in-memory conversation from the active agent
+      if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
+        try {
+          var gpt = activeAgent.llm.getGPT()
+          if (typeof gpt.clearConversation === "function") {
+            gpt.clearConversation()
+          } else if (typeof gpt.setConversation === "function") {
+            gpt.setConversation([])
+          }
+        } catch(ignoreClearError) {}
+      }
       lastConversationStats = __
       resetMetrics()
       print(colorifyText("Conversation and metrics cleared. Future goals will start fresh.", successColor))
