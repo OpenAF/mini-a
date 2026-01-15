@@ -23,7 +23,8 @@
 | mcp-office | Office file utilities (XLSX/DOCX via plugin-XLS) | STDIO/HTTP | plugin-XLS | [mcp-office.yaml](mcp-office.yaml) |
 | mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
 | mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
-| mcp-weather| Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
+| mcp-telco  | Telecommunications utilities MCP (country codes, phone number info) | STDIO/HTTP | (included) | [mcp-telco.yaml](mcp-telco.yaml)   |
+| mcp-weather | Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
 | mcp-web    | Web search and URL fetching MCP | STDIO/HTTP       | (included) | [mcp-web.yaml](mcp-web.yaml)       |
 | mcp-math   | Mathematical operations and unit conversions | STDIO/HTTP | (included) | [mcp-math.yaml](mcp-math.yaml)     |
 
@@ -406,6 +407,41 @@ Example — upload a processed artifact (write mode):
 mini-a goal="publish sanitized metrics" \
   mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=ops-data readwrite=true', timeout: 5000)" \
   knowledge="- encode uploads as base64 when calling s3-put-object" rpm=20
+```
+
+#### mcp-telco
+
+`mcp-telco` provides telecommunications utilities including country information lookup by calling code and detailed phone number parsing using Google's libphonenumber library.
+
+Arguments:
+
+- `onport` (optional): start an HTTP MCP server on the specified port.
+
+Tools:
+
+- `country-by-code`: Retrieve country information for a given calling code.
+  - Input: `code` (string, required) - The country calling code without the leading '+' (e.g., "1" for US/Canada).
+- `phone-number-info`: Parse and analyze phone numbers to extract region, carrier, validity, and formatting details.
+  - Input: `number` (string, required) - Phone number in E.164 or national format (e.g., "+14155552671").
+  - Input: `country` (string, optional, default "US") - The country/region code from which the number is dialed.
+
+Example — look up country information by calling code:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-telco.yaml', tool: country-by-code, params: (code: '44'))"
+```
+
+Example — analyze a phone number:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-telco.yaml', tool: phone-number-info, params: (number: '+14155552671', country: 'US'))"
+```
+
+Example — use with Mini-A to validate phone numbers:
+
+```bash
+mini-a goal="validate and format the phone number +442071234567" \
+  mcp="(cmd: 'ojob mcps/mcp-telco.yaml', timeout: 5000)" rpm=20
 ```
 
 #### mcp-fin
