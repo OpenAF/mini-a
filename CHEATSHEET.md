@@ -226,6 +226,7 @@ See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for full workflows and 
 | `mcp-db` | Database access | `mcp="(cmd: 'ojob mcps/mcp-db.yaml jdbc=jdbc:h2:./data user=sa pass=sa')"` |
 | `mcp-time` | Time/timezone utilities | `mcp="(cmd: 'ojob mcps/mcp-time.yaml')"` |
 | `mcp-net` | Network utilities | `mcp="(cmd: 'ojob mcps/mcp-net.yaml')"` |
+| `mcp-telco` | Telecommunications utilities | `mcp="(cmd: 'ojob mcps/mcp-telco.yaml')"` |
 | `mcp-ssh` | SSH execution | `mcp="(cmd: 'ojob mcps/mcp-ssh.yaml ssh=ssh://user:pass@host:22')"` |
 | `mcp-s3` | S3 operations | `mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=my-bucket prefix=files/')"` |
 | `mcp-rss` | RSS feeds | `mcp="(cmd: 'ojob mcps/mcp-rss.yaml')"` |
