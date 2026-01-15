@@ -285,7 +285,20 @@ function callMCPTool(mcpClient, tool, params, sessionOptions) {
             if (sessionOptions.tryparsetoolresult) {
                 print(ansiColor("FAINT", "─────────────────────"))
                 if (isDef(result)) {
-                    var _m = jsonParse(result)
+                    var _m = clone(result)
+                    traverse(_m, (aK, aV, aP, aO) => {
+                        if (isString(aV) && aV.trim().startsWith("{") && aV.trim().endsWith("}")) {
+                            try {
+                                var _parsed = jsonParse(aV)
+                                aO[aK] = _parsed
+                            } catch(e) {}
+                        } else if (isString(aV) && aV.trim().startsWith("[") && aV.trim().endsWith("]")) {
+                            try {
+                                var _parsedArr = jsonParse(aV)
+                                aO[aK] = _parsedArr
+                            } catch(e) {}
+                        }
+                    })
                     if (isString(_m)) {
                         print(ow.format.withMD(_m))
                     } else {
