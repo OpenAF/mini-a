@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260114'
+version: '20260115'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -167,7 +167,7 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
   mini-a-con.js: 0ab9f0c5335b3d9d590336b73333b0e9e9c87608
-  mini-a-mcptest.js: ac5ea8c3674041c38e7dd2a820165545e77dfbb4
+  mini-a-mcptest.js: 276675bf192fc9431f9096e6854714b635ee2c48
   mini-a-modelman.js: 0a370c6136052b77edd66fa0cfe44c2cbab62a68
   mini-a-modes.yaml: dc2afd2c85038214db9d5421f2f3a0b8c3adbdc6
   mini-a-utils.js: f5c4efca4b28c4eec29afb15d2d6766eb6485036
