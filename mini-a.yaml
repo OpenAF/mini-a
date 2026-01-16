@@ -111,6 +111,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : showthinking
+    desc     : Surface XML-tagged thinking blocks in model responses as thought logs
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : debug
     desc     : Enable debug mode
     example  : "false"
@@ -332,6 +337,7 @@ jobs:
         conversation   : conversation
         format         : format
         raw            : raw
+        showthinking   : showthinking
         shellallow     : shellallow
         shellbanextra  : shellbanextra
         shellallowpipes: shellallowpipes
@@ -389,6 +395,7 @@ jobs:
       conversation   : isString.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
+      showthinking   : toBoolean.isBoolean.default(false)
       shellallow     : isString.default(__)
       shellbanextra  : isString.default(__)
       shellallowpipes: toBoolean.isBoolean.default(false)

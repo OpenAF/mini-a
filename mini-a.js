@@ -3820,6 +3820,149 @@ MiniA.prototype._cleanCodeBlocks = function(text) {
 }
 
 /**
+ * Extract possible text segments from raw LLM responses across vendors.
+ */
+MiniA.prototype._extractResponseTextCandidates = function(rawResponse) {
+    var texts = []
+    var addText = value => {
+        if (isUnDef(value)) return
+        if (isString(value)) {
+            var cleaned = String(value)
+            if (cleaned.trim().length > 0) texts.push(cleaned)
+        }
+    }
+    var addFromParts = parts => {
+        if (!isArray(parts)) return
+        parts.forEach(part => {
+            if (isString(part)) {
+                addText(part)
+            } else if (isMap(part)) {
+                addText(part.text)
+                addText(part.content)
+            }
+        })
+    }
+
+    if (isString(rawResponse)) addText(rawResponse)
+    if (isMap(rawResponse)) {
+        addText(rawResponse.response)
+        addText(rawResponse.content)
+        addText(rawResponse.completion)
+        addText(rawResponse.text)
+        addText(rawResponse.output)
+        addText(rawResponse.output_text)
+
+        if (isMap(rawResponse.message)) {
+            addText(rawResponse.message.content)
+            addFromParts(rawResponse.message.content)
+        }
+        addFromParts(rawResponse.content)
+
+        if (isArray(rawResponse.choices)) {
+            rawResponse.choices.forEach(choice => {
+                if (isUnDef(choice)) return
+                addText(choice.text)
+                if (isMap(choice.message)) {
+                    addText(choice.message.content)
+                    addFromParts(choice.message.content)
+                }
+                if (isMap(choice.delta)) {
+                    addText(choice.delta.content)
+                }
+                addFromParts(choice.content)
+            })
+        }
+
+        if (isArray(rawResponse.candidates)) {
+            rawResponse.candidates.forEach(candidate => {
+                if (isUnDef(candidate)) return
+                if (isMap(candidate.content)) {
+                    addText(candidate.content.text)
+                    addFromParts(candidate.content.parts)
+                }
+                addText(candidate.output)
+                addText(candidate.text)
+            })
+        }
+
+        if (isArray(rawResponse.messages)) {
+            rawResponse.messages.forEach(message => {
+                if (isUnDef(message)) return
+                addText(message.content)
+                addFromParts(message.content)
+            })
+        }
+    }
+
+    if (texts.length === 0 && isMap(rawResponse)) {
+        addText(stringify(rawResponse, __, ""))
+    }
+
+    return texts
+}
+
+MiniA.prototype._extractPrimaryResponseText = function(rawResponse) {
+    var candidates = this._extractResponseTextCandidates(rawResponse)
+    if (isArray(candidates) && candidates.length > 0) return candidates[0]
+    return rawResponse
+}
+
+MiniA.prototype._extractThinkingBlocksFromResponse = function(rawResponse) {
+    var candidates = this._extractResponseTextCandidates(rawResponse)
+    if (!isArray(candidates) || candidates.length === 0) return []
+
+    var allowedTags = {
+        think: true,
+        thinking: true,
+        thought: true,
+        thoughts: true,
+        analysis: true,
+        reasoning: true,
+        rationale: true,
+        plan: true,
+        scratchpad: true,
+        chainofthought: true,
+        thinkingprocess: true,
+        innerthought: true,
+        innermonologue: true,
+        assistantthoughts: true,
+        reflection: true,
+        selfreflection: true,
+        deliberation: true
+    }
+
+    var normalizeTag = tag => String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+    var contentMatches = []
+    var seen = {}
+    var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
+
+    candidates.join("\n").replace(tagPattern, (match, tag, content) => {
+        var normalized = normalizeTag(tag)
+        if (!allowedTags[normalized]) return match
+        var trimmed = (content || "").toString().trim()
+        if (trimmed.length === 0) return match
+        if (!seen[trimmed]) {
+            seen[trimmed] = true
+            contentMatches.push(trimmed)
+        }
+        return match
+    })
+
+    return contentMatches
+}
+
+MiniA.prototype._logThinkingBlocks = function(rawResponse) {
+    var blocks = this._extractThinkingBlocksFromResponse(rawResponse)
+    if (!isArray(blocks) || blocks.length === 0) return
+    blocks.forEach(block => {
+        this._logMessageWithCounter("thought", block)
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made)) {
+            global.__mini_a_metrics.thoughts_made.inc()
+        }
+    })
+}
+
+/**
  * Extract an embedded final action payload from an answer field when present.
  */
 MiniA.prototype._extractEmbeddedFinalAction = function(answerPayload) {
@@ -6816,6 +6959,7 @@ MiniA.prototype.init = function(args) {
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
+    args.showthinking = _$(toBoolean(args.showthinking), "args.showthinking").isBoolean().default(false)
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
@@ -8259,6 +8403,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
           var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
+          var jsonFlag = !noJsonPromptFlag
+          if (args.showthinking && isDef(currentLLM.rawPromptWithStats)) {
+            return currentLLM.rawPromptWithStats(prompt, __, __, jsonFlag)
+          }
           if (!noJsonPromptFlag && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
           }
@@ -8311,6 +8459,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       var rmsg = responseWithStats.response
+      if (args.showthinking) {
+        this._logThinkingBlocks(responseWithStats.response)
+        if (!isString(rmsg)) {
+          var extractedText = this._extractPrimaryResponseText(responseWithStats.response)
+          if (isString(extractedText)) {
+            rmsg = extractedText
+          }
+        }
+      }
       var tokenStatsMsg = this._formatTokenStats(stats)
       this.fnI("output", `${llmType.charAt(0).toUpperCase() + llmType.slice(1)} model responded. ${tokenStatsMsg}`)
 
@@ -8335,6 +8492,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           try {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
               addCall()
+              var jsonFlag = !this._noJsonPrompt
+              if (args.showthinking && isDef(this.llm.rawPromptWithStats)) {
+                return this.llm.rawPromptWithStats(prompt, __, __, jsonFlag)
+              }
               if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
                 return this.llm.promptJSONWithStats(prompt)
               }
@@ -8378,6 +8539,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._attachTokenStatsToConversation(fallbackStats, this.llm)
 
           rmsg = fallbackResponseWithStats.response
+          if (args.showthinking) {
+            this._logThinkingBlocks(fallbackResponseWithStats.response)
+            if (!isString(rmsg)) {
+              var fallbackText = this._extractPrimaryResponseText(fallbackResponseWithStats.response)
+              if (isString(fallbackText)) {
+                rmsg = fallbackText
+              }
+            }
+          }
           stats = fallbackStats
           tokenStatsMsg = this._formatTokenStats(stats)
           this.fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
@@ -8815,6 +8985,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     try {
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
+        var jsonFlag = !this._noJsonPrompt
+        if (args.showthinking && isDef(this.llm.rawPromptWithStats)) {
+          return this.llm.rawPromptWithStats(finalPrompt, __, __, jsonFlag)
+        }
         if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
           return this.llm.promptJSONWithStats(finalPrompt)
         }
@@ -8851,7 +9025,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     global.__mini_a_metrics.llm_normal_tokens.getAdd(finalTokenTotal)
     global.__mini_a_metrics.llm_normal_calls.inc()
     
-    var res = jsonParse(finalResponseWithStats.response, __, __, true)
+    if (args.showthinking) {
+      this._logThinkingBlocks(finalResponseWithStats.response)
+    }
+    var finalResponseText = finalResponseWithStats.response
+    if (args.showthinking && !isString(finalResponseText)) {
+      var extractedFinalText = this._extractPrimaryResponseText(finalResponseWithStats.response)
+      if (isString(extractedFinalText)) finalResponseText = extractedFinalText
+    }
+    var res = jsonParse(finalResponseText, __, __, true)
     var finalTokenStatsMsg = this._formatTokenStats(finalStats)
     this.fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 
@@ -8918,7 +9100,10 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       var responseWithStats
       // Use new promptJSONWithStats if available
-      if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      if (args.showthinking && isDef(this.llm.rawPromptWithStats)) {
+        var jsonFlag = !this._noJsonPrompt && args.format == "json"
+        responseWithStats = this.llm.rawPromptWithStats(pendingPrompt, __, __, jsonFlag)
+      } else if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
@@ -8945,6 +9130,15 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
 
       var rawResponse = responseWithStats.response
+      if (args.showthinking) {
+        this._logThinkingBlocks(responseWithStats.response)
+      }
+      if (args.showthinking && !isString(rawResponse)) {
+        var extractedChatbotText = this._extractPrimaryResponseText(responseWithStats.response)
+        if (isString(extractedChatbotText)) {
+          rawResponse = extractedChatbotText
+        }
+      }
       var handled = false
       var parsedResponse = __
 
