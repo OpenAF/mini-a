@@ -114,6 +114,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | Ollama     | ministral-3:14b-cloud   | ```export OAF_MODEL="(type: ollama, model: 'ministral-3:14b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
 | OpenAI     | gpt-5-mini              | ```export OAF_MODEL="(type: openai, model: gpt-5-mini, key: 'sk-...', timeout: 900000, temperature: 1)"``` |
 | OpenAI     | gpt-5.2                 | ```export OAF_MODEL="(type: openai, key: 'sk-...', model: gpt-5.2, timeout: 900000, temperature: 1)"``` |
+| Scaleway   | gpt-oss-120b            | ```export OAF_MODEL="(type: openai, url: 'https://api.scaleway.ai', key: '123-abc-xyz', model: gpt-oss-120b)"``` |
 
 **Dual-Model (Cost Optimization):**
 ```bash
