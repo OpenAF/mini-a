@@ -180,6 +180,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : planstyle
+    desc     : Planning style - simple (flat sequential steps) or legacy (phase-based hierarchical)
+    example  : "simple"
+    mandatory: false
+    options  : ["simple", "legacy"]
   - name     : planmode
     desc     : Run Mini-A in plan-only mode (produce or convert plans without executing)
     example  : "false"

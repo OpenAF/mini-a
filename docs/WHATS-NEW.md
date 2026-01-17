@@ -2,6 +2,78 @@
 
 ## Recent Updates
 
+### Simple Plan Style (planstyle parameter)
+
+**Change**: Introduced a new `planstyle` parameter that controls how Mini-A generates and executes task plans. The default is now `simple` which produces flat, sequential task lists instead of the previous phase-based hierarchical plans.
+
+**Why This Matters**:
+
+The previous planning system generated complex phase-based plans with nested plan/execute/validate triplets:
+```markdown
+## Phase 1: Setup
+- [ ] Plan approach for: Setup environment
+- [ ] Execute: Install dependencies
+- [ ] Validate results for: Setup complete
+```
+
+This structure was difficult for models to follow consistently, leading to:
+- Models skipping steps or working on multiple tasks simultaneously
+- Confusion about which step was "current"
+- Plan drift where models deviated from the plan structure
+
+**New Simple Style** (default):
+
+Plans are now flat numbered lists with explicit step tracking:
+```
+1. Read existing API code structure
+2. Create user routes in src/routes/users.js
+3. Add input validation middleware
+4. Write unit tests for user endpoints
+5. Run tests and verify all pass
+```
+
+Each step:
+- Is a single, concrete action completable in 1-3 tool calls
+- Starts with an action verb (Read, Create, Update, Run, Verify)
+- Is self-contained without referencing other steps
+
+**Step-Focused Execution**:
+
+The agent now receives explicit directives in every prompt:
+```
+PLAN STATUS: Step 2 of 5
+CURRENT TASK: "Create user routes in src/routes/users.js"
+
+COMPLETED:
+1. Read existing API code structure [DONE]
+
+REMAINING (do not work on these yet):
+3. Add input validation middleware
+4. Write unit tests for user endpoints
+5. Run tests and verify all pass
+
+INSTRUCTIONS: Focus ONLY on completing step 2.
+```
+
+**Impact**:
+- More reliable plan following across different models
+- Clearer progress tracking
+- Reduced plan drift
+- Simpler debugging and logging
+
+**Usage**:
+```bash
+# Default simple style (recommended)
+mini-a goal="Build a REST API" useplanning=true useshell=true
+
+# Legacy phase-based style (for compatibility)
+mini-a goal="Build a REST API" useplanning=true planstyle=legacy useshell=true
+```
+
+**Configuration**: Use `planstyle=simple` (default) for flat sequential plans, or `planstyle=legacy` for the original phase-based hierarchical structure.
+
+---
+
 ### HTML transcript export
 
 **Change**: Added a dedicated **Copy to HTML** control to the web interface along with a `/md2html` endpoint that renders the full conversation Markdown as static HTML via `ow.template.html.genStaticVersion4MD()`.

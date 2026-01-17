@@ -280,9 +280,34 @@ Use the action field with the tool name and provide parameters in the params fie
 
 {{#if planning}}
 ## PLANNING:
+{{#if simplePlanStyle}}
+{{#if currentStepContext}}
+### CURRENT TASK
+You are executing step {{currentStep}} of {{totalSteps}}: "{{currentTask}}"
+
+RULES:
+1. Focus ONLY on completing step {{currentStep}}
+2. When done with this step, include in your response: "state": { "plan": { "currentStep": {{nextStep}} } }
+3. Do NOT skip ahead or work on future steps
+4. If blocked, set status to "blocked": "state": { "plan": { "steps": [{ "id": {{currentStep}}, "status": "blocked", "blockedReason": "..." }] } }
+
+{{#if completedSteps}}
+COMPLETED:
+{{completedSteps}}
+{{/if}}
+{{#if remainingSteps}}
+REMAINING (do not work on these yet):
+{{remainingSteps}}
+{{/if}}
+{{else}}
+• A flat sequential plan will be generated. Execute tasks one at a time in order.
+• Update state.plan.currentStep when completing each step.
+• Mark step status as "done" when complete, "blocked" if unable to proceed.
+{{/if}}
+{{else}}
 {{#if planningExecution}}
 • The execution plan has already been generated. Focus on executing tasks and updating progress.
-• Update step 'status' (pending → in_progress → done → blocked) and 'progress' (0-100) as you work.
+• Update step 'status' (pending -> in_progress -> done -> blocked) and 'progress' (0-100) as you work.
 • Mark 'state.plan.meta.needsReplan=true' if obstacles require plan adjustment.
 • Set 'state.plan.meta.overallProgress' to reflect completion percentage.
 {{else}}
@@ -294,6 +319,7 @@ Use the action field with the tool name and provide parameters in the params fie
 • Update 'status', 'progress', and checkpoints as work advances; set 'state.plan.meta.overallProgress' to the completion percentage you compute.
 • When obstacles occur set 'state.plan.meta.needsReplan=true', adjust affected steps (e.g., mark as blocked or add alternatives), and rebuild the subtree if required.
 • Keep the plan synchronized with reality - revise titles, ordering, or decomposition whenever you learn new information or the goal changes.
+{{/if}}
 {{/if}}
 • When a plan file is provided (useplanning=true with planfile=...), append progress updates after meaningful actions. Document what completed, the status, and the result, and add key learnings under "## Knowledge Base" so future runs can resume quickly.
 • Do not allow more than a few steps to pass without updating the plan file. If several steps elapse without an update—or if you approach the max step limit—summarize progress and next actions in the plan immediately.
@@ -1269,6 +1295,24 @@ MiniA.prototype._normalizePlanItems = function(plan) {
     }
   }
 
+  // Handle version 3 simple plans (flat sequential steps)
+  if (isObject(plan) && plan.version === 3 && isArray(plan.steps)) {
+    return plan.steps.map(function(step, idx) {
+      var status = step.status || "pending"
+      var title = step.task || step.title || "(no description)"
+      var id = step.id || (idx + 1)
+      return {
+        title: title,
+        status: status,
+        rawStatus: status,
+        progress: status === "done" ? 1 : (status === "in_progress" ? 0.5 : 0),
+        depth: 0,
+        checkpoint: false,
+        id: id
+      }
+    })
+  }
+
   var extractItems = function(value) {
     if (isUnDef(value)) return []
     if (isArray(value)) return value
@@ -1682,6 +1726,8 @@ MiniA.prototype._parseMarkdownPlan = function(markdown) {
   var plan = this._ensurePlanFooter({ goal: "", phases: [] })
   var currentPhase = __
   var currentSection = ""
+  // Track numbered list items for simple plan format (version 3)
+  var numberedSteps = []
 
   for (var i = 0; i < lines.length; i++) {
     var raw = lines[i]
@@ -1720,6 +1766,22 @@ MiniA.prototype._parseMarkdownPlan = function(markdown) {
       } else {
         currentSection = "other"
         currentPhase = __
+      }
+      continue
+    }
+
+    // Detect numbered list items for simple plan format: "1. Task", "2. Task", etc.
+    // Also handles: "1) Task", "1 - Task", "1: Task"
+    var numberedMatch = line.match(/^(\d+)[\.\)\-:]\s+(.+)$/)
+    if (numberedMatch && currentSection !== "dependencies" && currentSection !== "knowledge" && currentSection !== "notes" && currentSection !== "history") {
+      var stepNum = parseInt(numberedMatch[1], 10)
+      var taskDesc = numberedMatch[2].trim()
+      if (taskDesc.length > 0) {
+        numberedSteps.push({
+          id: stepNum,
+          task: taskDesc,
+          status: "pending"
+        })
       }
       continue
     }
@@ -1794,15 +1856,106 @@ MiniA.prototype._parseMarkdownPlan = function(markdown) {
     plan.knowledgeBase = plan.notes.slice()
   }
 
+  // If we found numbered steps but no phases, this is a simple plan format
+  // Convert to version 3 plan structure
+  if (numberedSteps.length > 0 && plan.phases.length === 0) {
+    // Sort steps by id to ensure correct order
+    numberedSteps.sort(function(a, b) { return a.id - b.id })
+    // Re-number steps sequentially starting from 1
+    for (var s = 0; s < numberedSteps.length; s++) {
+      numberedSteps[s].id = s + 1
+    }
+    return {
+      version: 3,
+      goal: plan.goal || "",
+      steps: numberedSteps,
+      currentStep: 1,
+      meta: { createdAt: now(), style: "simple" },
+      // Preserve footer sections
+      dependencies: plan.dependencies || [],
+      knowledgeBase: plan.knowledgeBase || [],
+      notes: plan.notes || [],
+      executionHistory: plan.executionHistory || []
+    }
+  }
+
   return this._ensurePlanFooter(plan)
 }
 
 MiniA.prototype._serializeMarkdownPlan = function(plan) {
-  plan = this._ensurePlanFooter(isObject(plan) ? clone(plan, true) : {})
+  if (!isObject(plan)) plan = {}
   if (!isString(plan.goal) || plan.goal.length === 0) plan.goal = "Goal"
   var lines = []
   lines.push(`# Plan: ${plan.goal}`)
 
+  // Handle version 3 simple plans with steps (numbered list format)
+  if (plan.version === 3 && isArray(plan.steps) && plan.steps.length > 0) {
+    lines.push("")
+    for (var si = 0; si < plan.steps.length; si++) {
+      var step = plan.steps[si]
+      var stepId = isNumber(step.id) ? step.id : (si + 1)
+      var taskText = isString(step.task) ? step.task : `Step ${stepId}`
+      var statusMarker = ""
+      if (step.status === "done" || step.status === "completed") {
+        statusMarker = " [DONE]"
+      } else if (step.status === "in_progress") {
+        statusMarker = " [IN PROGRESS]"
+      } else if (step.status === "skipped") {
+        statusMarker = " [SKIPPED]"
+      }
+      lines.push(`${stepId}. ${taskText}${statusMarker}`)
+    }
+
+    // Add footer sections for version 3 plans
+    lines.push("")
+    lines.push("## Dependencies")
+    var deps = isArray(plan.dependencies) ? plan.dependencies : []
+    if (deps.length === 0) {
+      lines.push("- None")
+    } else {
+      for (var d = 0; d < deps.length; d++) {
+        lines.push(`- ${deps[d]}`)
+      }
+    }
+
+    lines.push("")
+    lines.push("## Knowledge Base")
+    var kb = isArray(plan.knowledgeBase) ? plan.knowledgeBase : []
+    if (kb.length === 0) {
+      lines.push("- No knowledge captured yet.")
+    } else {
+      for (var k = 0; k < kb.length; k++) {
+        lines.push(`- ${kb[k]}`)
+      }
+    }
+
+    lines.push("")
+    lines.push("## Notes for Future Agents")
+    var notes = isArray(plan.notes) ? plan.notes : []
+    if (notes.length === 0) {
+      lines.push("- No additional notes yet.")
+    } else {
+      for (var n = 0; n < notes.length; n++) {
+        lines.push(`- ${notes[n]}`)
+      }
+    }
+
+    lines.push("")
+    lines.push("## Execution History")
+    var history = isArray(plan.executionHistory) ? plan.executionHistory : []
+    if (history.length === 0) {
+      lines.push("- No execution recorded yet.")
+    } else {
+      for (var h = 0; h < history.length; h++) {
+        lines.push(`- ${history[h]}`)
+      }
+    }
+
+    return lines.join("\n").trim() + "\n"
+  }
+
+  // Legacy phase-based format
+  plan = this._ensurePlanFooter(clone(plan, true))
   if (!isArray(plan.phases)) plan.phases = []
   for (var i = 0; i < plan.phases.length; i++) {
     var phase = plan.phases[i]
@@ -2684,8 +2837,45 @@ MiniA.prototype._summarizeRecentContext = function(runtime) {
   if (!isObject(runtime) || !isArray(runtime.context) || runtime.context.length === 0) return "(no observations yet)"
   var tail = runtime.context.slice(-3)
   var joined = tail.join(" | ")
-  if (joined.length > 800) return joined.substring(0, 800) + "…"
+  if (joined.length > 800) return joined.substring(0, 800) + "..."
   return joined
+}
+
+/**
+ * Inject current step context for simple plan style (version 3 plans).
+ * This adds a clear "you are on step X" directive to the prompt.
+ */
+MiniA.prototype._injectSimplePlanStepContext = function(prompt) {
+  if (!this._enablePlanning || !isString(prompt)) return prompt
+  if (!this._isSimplePlanStyle()) return prompt
+
+  var plan = isObject(this._agentState) ? this._agentState.plan : null
+  var stepContext = this._buildStepContext(plan)
+  if (!stepContext || !stepContext.currentStepContext) return prompt
+
+  var lines = []
+  lines.push("")
+  lines.push("---")
+  lines.push("PLAN STATUS: Step " + stepContext.currentStep + " of " + stepContext.totalSteps)
+  lines.push("CURRENT TASK: \"" + stepContext.currentTask + "\"")
+
+  if (stepContext.completedSteps && stepContext.completedSteps.length > 0) {
+    lines.push("")
+    lines.push("COMPLETED:")
+    lines.push(stepContext.completedSteps)
+  }
+
+  if (stepContext.remainingSteps && stepContext.remainingSteps.length > 0) {
+    lines.push("")
+    lines.push("REMAINING (do not work on these yet):")
+    lines.push(stepContext.remainingSteps)
+  }
+
+  lines.push("")
+  lines.push("INSTRUCTIONS: Focus ONLY on completing step " + stepContext.currentStep + ". When done, update state.plan.currentStep to " + stepContext.nextStep + " and mark the step status as 'done'.")
+  lines.push("---")
+
+  return prompt + lines.join("\n")
 }
 
 MiniA.prototype._collectSessionKnowledgeForPlan = function() {
@@ -3053,6 +3243,97 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
 }
 
 MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
+  var planstyle = isString(args.planstyle) ? args.planstyle.toLowerCase() : "simple"
+  var useLegacy = (planstyle === "legacy")
+
+  // New simple planning prompt - flat sequential steps
+  if (!useLegacy) {
+    return this._buildSimplePlanningPrompt(args, insights, format)
+  }
+
+  // Legacy planning prompt - phase-based hierarchical
+  return this._buildLegacyPlanningPrompt(args, insights, format)
+}
+
+// New simple planning prompt for flat sequential task lists
+MiniA.prototype._buildSimplePlanningPrompt = function(args, insights, format) {
+  var sections = []
+  sections.push("You are a task planner. Create a SIMPLE, SEQUENTIAL list of concrete tasks.")
+  sections.push("")
+  sections.push("RULES:")
+  sections.push("1. Each task = ONE specific action completable in 1-3 tool calls")
+  sections.push("2. Tasks are numbered 1, 2, 3... and will be executed IN ORDER")
+  sections.push("3. NO phases, NO nesting, NO sub-tasks - just a flat numbered list")
+  sections.push("4. Each task starts with an action verb: Read, Create, Update, Run, Verify, etc.")
+  sections.push("5. Tasks must be self-contained - do not reference other task numbers")
+  sections.push("6. Generate 3-10 tasks (no more, no less)")
+  sections.push("")
+
+  sections.push("## Goal")
+  sections.push(insights.goal)
+
+  if (isString(insights.summary) && insights.summary.length > 0) {
+    sections.push("")
+    sections.push("## Context")
+    sections.push(insights.summary)
+  }
+
+  if (isString(insights.knowledge) && insights.knowledge.length > 0) {
+    sections.push("")
+    sections.push("## Background")
+    sections.push(insights.knowledge.slice(0, 2000))
+  }
+
+  if (isArray(insights.environment) && insights.environment.length > 0) {
+    sections.push("")
+    sections.push("## Environment")
+    sections.push(insights.environment.join("\n"))
+  }
+
+  sections.push("")
+  sections.push("## Examples")
+  sections.push("")
+  sections.push("BAD (too vague): \"Set up the environment\"")
+  sections.push("GOOD: \"Install npm dependencies by running npm install\"")
+  sections.push("")
+  sections.push("BAD (multiple actions): \"Create user model and add validation and write tests\"")
+  sections.push("GOOD: \"Create user model in src/models/user.js with name and email fields\"")
+  sections.push("")
+  sections.push("BAD (references other tasks): \"Continue from task 2\"")
+  sections.push("GOOD: \"Add email validation to the user model\"")
+
+  sections.push("")
+  sections.push("## Output Format")
+
+  if (format === "json" || format === "yaml") {
+    sections.push("Return a JSON object:")
+    sections.push("```json")
+    sections.push("{")
+    sections.push("  \"goal\": \"<clear goal statement>\",")
+    sections.push("  \"steps\": [")
+    sections.push("    { \"id\": 1, \"task\": \"<first concrete task>\", \"status\": \"pending\" },")
+    sections.push("    { \"id\": 2, \"task\": \"<second concrete task>\", \"status\": \"pending\" },")
+    sections.push("    ...")
+    sections.push("  ],")
+    sections.push("  \"currentStep\": 1")
+    sections.push("}")
+    sections.push("```")
+  } else {
+    sections.push("Return a simple numbered list:")
+    sections.push("")
+    sections.push("# Plan: <goal>")
+    sections.push("")
+    sections.push("1. <First concrete task>")
+    sections.push("2. <Second concrete task>")
+    sections.push("3. <Third concrete task>")
+    sections.push("...")
+  }
+
+  return sections.join("\n")
+}
+
+// Legacy planning prompt - phase-based hierarchical (for backwards compatibility)
+MiniA.prototype._buildLegacyPlanningPrompt = function(args, insights, format) {
   var sections = []
   sections.push("You are Mini-A's dedicated planning specialist. Your role is to generate a precise, structured, and executable plan that another Mini-A instance will use to accomplish the goal.")
   sections.push("")
@@ -3136,18 +3417,18 @@ MiniA.prototype._buildPlanningPrompt = function(args, insights, format) {
       "## Execution History\n" +
       "- Initially empty; will be populated during execution\n\n" +
       "TASK QUALITY CHECKLIST:\n" +
-      "✓ Each task starts with an action verb (Create, Update, Test, Deploy, etc.)\n" +
-      "✓ Tasks are specific enough that completion is unambiguous\n" +
-      "✓ Complex tasks flag 'suggestSubplan: true' for detailed breakdown\n" +
-      "✓ Dependencies are explicitly stated (not assumed)\n" +
-      "✓ Verification steps are included for critical deliverables"
+      "- Each task starts with an action verb (Create, Update, Test, Deploy, etc.)\n" +
+      "- Tasks are specific enough that completion is unambiguous\n" +
+      "- Complex tasks flag 'suggestSubplan: true' for detailed breakdown\n" +
+      "- Dependencies are explicitly stated (not assumed)\n" +
+      "- Verification steps are included for critical deliverables"
   }
 
   sections.push("\n## Requirements for Creating Effective Plans")
   sections.push("")
   sections.push("PHASE ORGANIZATION:")
   sections.push("- Create 3-7 sequential phases with clear, descriptive names")
-  sections.push("- Order phases logically: setup → implementation → testing → deployment")
+  sections.push("- Order phases logically: setup -> implementation -> testing -> deployment")
   sections.push("- Each phase should represent a meaningful milestone")
   sections.push("- No empty phases - every phase must have at least one task")
   sections.push("")
@@ -3367,16 +3648,50 @@ MiniA.prototype._runValidationMode = function(planPayload, args, controls) {
   }
 }
 
-MiniA.prototype._buildSimplePlan = function(goalText, context) {
+MiniA.prototype._buildSimplePlan = function(goalText, context, useLegacy) {
   var trimmed = isString(goalText) ? goalText.trim() : stringify(goalText, __, "")
-  var parts = trimmed.split(/(?:\n+|;|\.\s+)/).map(p => p.trim()).filter(p => p.length > 0)
+
+  // New simple format (version 3) - flat sequential steps
+  if (!useLegacy) {
+    // Split goal into discrete tasks by common delimiters
+    var parts = trimmed.split(/[;\n]|(?:,\s*(?:then|and|after)\s+)/i)
+      .map(function(p) { return p.trim() })
+      .filter(function(p) { return p.length > 5 })
+
+    // If too few parts, use the whole goal as single task for LLM to expand
+    if (parts.length < 2) parts = [trimmed]
+    // Limit to 10 steps max
+    if (parts.length > 10) parts = parts.slice(0, 10)
+
+    var steps = parts.map(function(task, i) {
+      return {
+        id: i + 1,
+        task: task,
+        status: "pending"
+      }
+    })
+
+    return {
+      version: 3,
+      goal: trimmed,
+      steps: steps,
+      currentStep: 1,
+      meta: {
+        createdAt: now(),
+        style: "simple"
+      }
+    }
+  }
+
+  // Legacy format (version 2) - for backwards compatibility
+  var parts = trimmed.split(/(?:\n+|;|\.\s+)/).map(function(p) { return p.trim() }).filter(function(p) { return p.length > 0 })
   if (parts.length === 0) parts = [trimmed]
   if (parts.length > 5) parts = parts.slice(0, 5)
 
   var steps = []
   for (var i = 0; i < parts.length; i++) {
     steps.push({
-      id        : `S${i + 1}`,
+      id        : "S" + (i + 1),
       title     : parts[i],
       status    : "pending",
       progress  : 0,
@@ -3387,7 +3702,7 @@ MiniA.prototype._buildSimplePlan = function(goalText, context) {
   if (steps.length < 3) {
     steps = [
       { id: "S1", title: "Review goal and constraints", status: "pending", progress: 0 },
-      { id: "S2", title: `Execute task: ${trimmed}`, status: "pending", progress: 0, checkpoint: true },
+      { id: "S2", title: "Execute task: " + trimmed, status: "pending", progress: 0, checkpoint: true },
       { id: "S3", title: "Verify outcome and prepare final answer", status: "pending", progress: 0 }
     ]
   }
@@ -3396,8 +3711,8 @@ MiniA.prototype._buildSimplePlan = function(goalText, context) {
   for (var j = 0; j < steps.length; j++) {
     if (steps[j].checkpoint === true || j === steps.length - 1) {
       checkpoints.push({
-        id        : `C${j + 1}`,
-        title     : `Checkpoint ${j + 1}: ${steps[j].title}`,
+        id        : "C" + (j + 1),
+        title     : "Checkpoint " + (j + 1) + ": " + steps[j].title,
         status    : "pending",
         linkedStep: steps[j].id
       })
@@ -3420,9 +3735,16 @@ MiniA.prototype._buildSimplePlan = function(goalText, context) {
   }
 }
 
-MiniA.prototype._buildDecomposedPlan = function(goalText, context) {
+MiniA.prototype._buildDecomposedPlan = function(goalText, context, useLegacy) {
   var trimmed = isString(goalText) ? goalText.trim() : stringify(goalText, __, "")
-  var rawSegments = trimmed.split(/(?:\n+|;|\.\s+|\bthen\b|\band\b|\bafter\b|\bnext\b)/i).map(p => p.trim()).filter(p => p.length > 0)
+
+  // New simple mode - use flat plan structure instead of tree
+  if (!useLegacy) {
+    return this._buildSimplePlan(goalText, context, false)
+  }
+
+  // Legacy tree format (version 2) - for backwards compatibility
+  var rawSegments = trimmed.split(/(?:\n+|;|\.\s+|\bthen\b|\band\b|\bafter\b|\bnext\b)/i).map(function(p) { return p.trim() }).filter(function(p) { return p.length > 0 })
   if (rawSegments.length === 0) rawSegments = [trimmed]
   if (rawSegments.length > 6) rawSegments = rawSegments.slice(0, 6)
 
@@ -3441,13 +3763,13 @@ MiniA.prototype._buildDecomposedPlan = function(goalText, context) {
     }
 
     var childSteps = [
-      { id: `G${i + 1}-1`, title: `Plan approach for: ${segment}`, status: "pending", progress: 0 },
-      { id: `G${i + 1}-2`, title: `Execute: ${segment}`, status: "pending", progress: 0, checkpoint: true, requires: requires.slice() },
-      { id: `G${i + 1}-3`, title: `Validate results for: ${segment}`, status: "pending", progress: 0 }
+      { id: "G" + (i + 1) + "-1", title: "Plan approach for: " + segment, status: "pending", progress: 0 },
+      { id: "G" + (i + 1) + "-2", title: "Execute: " + segment, status: "pending", progress: 0, checkpoint: true, requires: requires.slice() },
+      { id: "G" + (i + 1) + "-3", title: "Validate results for: " + segment, status: "pending", progress: 0 }
     ]
 
     var step = {
-      id       : `G${i + 1}`,
+      id       : "G" + (i + 1),
       title    : segment,
       status   : "pending",
       progress : 0,
@@ -3457,8 +3779,8 @@ MiniA.prototype._buildDecomposedPlan = function(goalText, context) {
     steps.push(step)
 
     checkpoints.push({
-      id        : `G${i + 1}-C`,
-      title     : `Confirm ${segment}`,
+      id        : "G" + (i + 1) + "-C",
+      title     : "Confirm " + segment,
       status    : "pending",
       linkedStep: childSteps[1].id
     })
@@ -3488,9 +3810,14 @@ MiniA.prototype._buildDecomposedPlan = function(goalText, context) {
 }
 
 MiniA.prototype._generateInitialPlan = function(goalText, strategy, args) {
+  // Determine if using legacy plan style (phase-based) or new simple style (flat sequential)
+  var planstyle = isString(args.planstyle) ? args.planstyle.toLowerCase() : "simple"
+  var useLegacy = (planstyle === "legacy")
+
   var baseKey = {
     goal    : isString(goalText) ? goalText.trim() : stringify(goalText, __, ""),
     strategy: strategy,
+    planstyle: planstyle,
     useshell: toBoolean(args.useshell),
     tools   : this.mcpToolNames.slice().sort()
   }
@@ -3501,8 +3828,8 @@ MiniA.prototype._generateInitialPlan = function(goalText, strategy, args) {
   }
 
   var plan
-  if (strategy === "tree") plan = this._buildDecomposedPlan(goalText, args)
-  else plan = this._buildSimplePlan(goalText, args)
+  if (strategy === "tree") plan = this._buildDecomposedPlan(goalText, args, useLegacy)
+  else plan = this._buildSimplePlan(goalText, args, useLegacy)
 
   $cache(this._planCacheName).set(cacheKey, { value: plan, expiresAt: now() + 900000 })
   return jsonParse(stringify(plan, __, ""), __, __, true)
@@ -3546,6 +3873,125 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
   }
 
   return { valid: issues.length === 0, issues: issues }
+}
+
+/**
+ * Build step context for simple plan style (version 3 plans).
+ * Returns an object with template variables for the system prompt.
+ */
+MiniA.prototype._buildStepContext = function(plan) {
+  if (!isObject(plan) || plan.version !== 3 || !isArray(plan.steps)) {
+    return null
+  }
+
+  var currentStep = isNumber(plan.currentStep) ? plan.currentStep : 1
+  var totalSteps = plan.steps.length
+
+  if (currentStep > totalSteps) {
+    return null // Plan is complete
+  }
+
+  var currentTaskObj = plan.steps.find(function(s) { return s.id === currentStep })
+  var currentTask = currentTaskObj ? (currentTaskObj.task || currentTaskObj.title || "") : ""
+
+  // Build completed steps list
+  var completedList = []
+  for (var i = 0; i < plan.steps.length; i++) {
+    var step = plan.steps[i]
+    if (step.status === "done" || step.id < currentStep) {
+      var taskText = step.task || step.title || ""
+      completedList.push(step.id + ". " + taskText + " [DONE]")
+    }
+  }
+
+  // Build remaining steps list
+  var remainingList = []
+  for (var j = 0; j < plan.steps.length; j++) {
+    var step = plan.steps[j]
+    if (step.id > currentStep && step.status !== "done") {
+      var taskText = step.task || step.title || ""
+      remainingList.push(step.id + ". " + taskText)
+    }
+  }
+
+  return {
+    currentStepContext: true,
+    currentStep: currentStep,
+    totalSteps: totalSteps,
+    currentTask: currentTask,
+    nextStep: currentStep < totalSteps ? currentStep + 1 : currentStep,
+    completedSteps: completedList.length > 0 ? completedList.join("\n") : "",
+    remainingSteps: remainingList.length > 0 ? remainingList.join("\n") : ""
+  }
+}
+
+/**
+ * Check if the current plan uses simple style (version 3).
+ */
+MiniA.prototype._isSimplePlanStyle = function() {
+  if (!isObject(this._agentState) || !isObject(this._agentState.plan)) {
+    return false
+  }
+  return this._agentState.plan.version === 3
+}
+
+/**
+ * Merge plan updates from model response into existing version 3 plan.
+ * This allows the model to update currentStep and step statuses without
+ * replacing the entire plan structure.
+ */
+MiniA.prototype._mergeSimplePlanUpdate = function(planUpdate) {
+  if (!isObject(this._agentState) || !isObject(this._agentState.plan)) return
+  if (!isObject(planUpdate)) return
+
+  var plan = this._agentState.plan
+  if (plan.version !== 3) return
+
+  // Update currentStep if provided
+  if (isNumber(planUpdate.currentStep) && planUpdate.currentStep > 0) {
+    plan.currentStep = planUpdate.currentStep
+  }
+
+  // Merge step updates if provided
+  if (isArray(planUpdate.steps)) {
+    for (var i = 0; i < planUpdate.steps.length; i++) {
+      var stepUpdate = planUpdate.steps[i]
+      if (!isObject(stepUpdate)) continue
+
+      var stepId = stepUpdate.id
+      if (!isNumber(stepId) && !isString(stepId)) continue
+
+      // Find matching step in existing plan
+      var existingStep = plan.steps.find(function(s) {
+        return s.id === stepId || s.id === Number(stepId)
+      })
+
+      if (existingStep) {
+        // Update status if provided
+        if (isString(stepUpdate.status)) {
+          existingStep.status = stepUpdate.status
+        }
+        // Update blocked reason if provided
+        if (isString(stepUpdate.blockedReason)) {
+          existingStep.blockedReason = stepUpdate.blockedReason
+        }
+        // Update result if provided
+        if (isString(stepUpdate.result)) {
+          existingStep.result = stepUpdate.result
+        }
+      }
+    }
+  }
+
+  // Handle direct status update for current step
+  if (isString(planUpdate.status) && isNumber(plan.currentStep)) {
+    var currentStepObj = plan.steps.find(function(s) {
+      return s.id === plan.currentStep
+    })
+    if (currentStepObj) {
+      currentStepObj.status = planUpdate.status
+    }
+  }
 }
 
 MiniA.prototype._initializePlanningState = function(options) {
@@ -3733,7 +4179,17 @@ MiniA.prototype._handlePlanUpdate = function() {
     if (!this._enablePlanning) return
     if (!isObject(this._agentState)) return
 
-    var planItems = this._normalizePlanItems(this._agentState.plan)
+    var plan = this._agentState.plan
+    if (!isObject(plan)) return
+
+    // Handle version 3 simple plans (flat sequential steps)
+    if (plan.version === 3) {
+        this._handleSimplePlanUpdate(plan)
+        return
+    }
+
+    // Legacy plan handling (version 2 with phases and children)
+    var planItems = this._normalizePlanItems(plan)
     if (planItems.length === 0) {
         if (this._lastPlanSnapshot.length > 0) {
             this._logMessageWithCounter("plan", "Plan cleared (no active tasks)")
@@ -3743,9 +4199,9 @@ MiniA.prototype._handlePlanUpdate = function() {
     }
 
   // Auto-mark phase completion if all its child tasks are done but phase not yet marked
-  if (isObject(this._agentState.plan) && isArray(this._agentState.plan.steps)) {
-    for (var ap = 0; ap < this._agentState.plan.steps.length; ap++) {
-      var phaseNode = this._agentState.plan.steps[ap]
+  if (isArray(plan.steps)) {
+    for (var ap = 0; ap < plan.steps.length; ap++) {
+      var phaseNode = plan.steps[ap]
       if (!isObject(phaseNode) || !isArray(phaseNode.children)) continue
       var childCount = phaseNode.children.length
       if (childCount === 0) continue
@@ -3761,20 +4217,18 @@ MiniA.prototype._handlePlanUpdate = function() {
         phaseNode.status = 'done'
         phaseNode.progress = 100
         // Record execution history internally
-        if (!isObject(this._agentState.plan.meta)) this._agentState.plan.meta = {}
-        if (!isArray(this._agentState.plan.meta.executionHistory)) this._agentState.plan.meta.executionHistory = []
-        this._agentState.plan.meta.executionHistory.push({ at: new Date().toISOString(), phases: [ap+1], summary: 'Auto-marked phase ' + (ap+1) + ' complete (all tasks done).' })
+        if (!isObject(plan.meta)) plan.meta = {}
+        if (!isArray(plan.meta.executionHistory)) plan.meta.executionHistory = []
+        plan.meta.executionHistory.push({ at: new Date().toISOString(), phases: [ap+1], summary: 'Auto-marked phase ' + (ap+1) + ' complete (all tasks done).' })
       }
     }
   }
 
-    if (isObject(this._agentState.plan)) {
-        if (!isObject(this._agentState.plan.meta)) this._agentState.plan.meta = {}
-        this._agentState.plan.meta.overallProgress = this._planningProgress.overall
-        this._agentState.plan.meta.completedSteps = this._planningProgress.completed
-        this._agentState.plan.meta.totalSteps = this._planningProgress.total
-        this._agentState.plan.meta.checkpoints = this._planningProgress.checkpoints
-    }
+    if (!isObject(plan.meta)) plan.meta = {}
+    plan.meta.overallProgress = this._planningProgress.overall
+    plan.meta.completedSteps = this._planningProgress.completed
+    plan.meta.totalSteps = this._planningProgress.total
+    plan.meta.checkpoints = this._planningProgress.checkpoints
 
     var snapshot = stringify(planItems, __, "")
     if (snapshot === this._lastPlanSnapshot) return
@@ -3784,18 +4238,18 @@ MiniA.prototype._handlePlanUpdate = function() {
     var lines = []
     for (var i = 0; i < planItems.length; i++) {
         var entry = planItems[i]
-        var statusInfo = statusIcons[entry.status] || statusIcons[entry.rawStatus] || { icon: "•", label: entry.status || "pending" }
-        var text = `${i + 1}. ${statusInfo.icon} ${entry.title}`
+        var statusInfo = statusIcons[entry.status] || statusIcons[entry.rawStatus] || { icon: ".", label: entry.status || "pending" }
+        var text = (i + 1) + ". " + statusInfo.icon + " " + entry.title
         if (isString(statusInfo.label) && statusInfo.label.length > 0) {
-            text += ` – ${statusInfo.label}`
+            text += " - " + statusInfo.label
         }
         lines.push(text)
     }
 
     if (isObject(this._planningProgress)) {
-        var progressLine = `Progress: ${this._planningProgress.overall}% (${this._planningProgress.completed}/${this._planningProgress.total} steps)`
+        var progressLine = "Progress: " + this._planningProgress.overall + "% (" + this._planningProgress.completed + "/" + this._planningProgress.total + " steps)"
         if (isObject(this._planningProgress.checkpoints) && this._planningProgress.checkpoints.total > 0) {
-            progressLine += `, checkpoints ${this._planningProgress.checkpoints.reached}/${this._planningProgress.checkpoints.total}`
+            progressLine += ", checkpoints " + this._planningProgress.checkpoints.reached + "/" + this._planningProgress.checkpoints.total
         }
         lines.push(progressLine)
     }
@@ -3804,6 +4258,79 @@ MiniA.prototype._handlePlanUpdate = function() {
     this._logMessageWithCounter("plan", "\n" + message)
     this._lastPlanSnapshot = snapshot
     this._persistExternalPlan()
+}
+
+/**
+ * Handle plan updates for version 3 simple plans (flat sequential steps).
+ */
+MiniA.prototype._handleSimplePlanUpdate = function(plan) {
+    if (!isObject(plan) || !isArray(plan.steps)) return
+
+    var statusIcons = this._getStatusIcons()
+    var currentStep = isNumber(plan.currentStep) ? plan.currentStep : 1
+    var totalSteps = plan.steps.length
+    var completedCount = 0
+    var lines = []
+
+    // Auto-advance currentStep if current step is done
+    for (var i = 0; i < plan.steps.length; i++) {
+        var step = plan.steps[i]
+        if (!isObject(step)) continue
+
+        // Mark as done based on status
+        if (this._isStatusDone(step.status)) {
+            completedCount++
+        }
+
+        // Get display info
+        var statusInfo = statusIcons[step.status] || { icon: ".", label: step.status || "pending" }
+        var taskText = step.task || step.title || "(no description)"
+        var stepNum = step.id || (i + 1)
+        var line = stepNum + ". " + statusInfo.icon + " " + taskText
+
+        // Highlight current step
+        if (stepNum === currentStep && step.status !== "done") {
+            line += " <-- CURRENT"
+        }
+
+        lines.push(line)
+    }
+
+    // Auto-advance currentStep if current step is marked done
+    var currentStepObj = plan.steps.find(function(s) { return s.id === currentStep })
+    if (currentStepObj && this._isStatusDone(currentStepObj.status) && currentStep < totalSteps) {
+        plan.currentStep = currentStep + 1
+        this.fnI("plan", "Step " + currentStep + " completed, advancing to step " + plan.currentStep)
+    }
+
+    // Update progress tracking
+    var progress = totalSteps > 0 ? Math.round((completedCount / totalSteps) * 100) : 0
+    this._planningProgress = {
+        overall: progress,
+        completed: completedCount,
+        total: totalSteps,
+        checkpoints: { reached: completedCount, total: totalSteps }
+    }
+
+    // Update plan meta
+    if (!isObject(plan.meta)) plan.meta = {}
+    plan.meta.overallProgress = progress
+    plan.meta.completedSteps = completedCount
+    plan.meta.totalSteps = totalSteps
+
+    // Add progress line
+    lines.push("")
+    lines.push("Progress: " + progress + "% (" + completedCount + "/" + totalSteps + " steps)")
+    if (plan.currentStep && plan.currentStep <= totalSteps) {
+        lines.push("Current step: " + plan.currentStep)
+    }
+
+    var snapshot = stringify(plan.steps, __, "")
+    if (snapshot !== this._lastPlanSnapshot) {
+        this._logMessageWithCounter("plan", "\n" + lines.join("\n"))
+        this._lastPlanSnapshot = snapshot
+        this._persistExternalPlan()
+    }
 }
 
 /**
@@ -7507,6 +8034,10 @@ MiniA.prototype.init = function(args) {
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
 
+      // Build step context for simple plan style
+      var simplePlanStyle = this._isSimplePlanStyle()
+      var stepContext = simplePlanStyle ? this._buildStepContext(this._agentState ? this._agentState.plan : null) : null
+
       var agentPayload = {
         agentPersonaLine: agentPersonaLine,
         agentDirectiveLine: this._agentDirectiveLine,
@@ -7525,7 +8056,16 @@ MiniA.prototype.init = function(args) {
         proxyToolCount   : proxyToolCount,
         proxyToolsList   : proxyToolsList,
         planning         : this._enablePlanning,
-        planningExecution: this._enablePlanning && this._planningPhase === "execution"
+        planningExecution: this._enablePlanning && this._planningPhase === "execution",
+        // Simple plan style variables
+        simplePlanStyle  : simplePlanStyle,
+        currentStepContext: stepContext ? stepContext.currentStepContext : false,
+        currentStep      : stepContext ? stepContext.currentStep : 1,
+        totalSteps       : stepContext ? stepContext.totalSteps : 0,
+        currentTask      : stepContext ? stepContext.currentTask : "",
+        nextStep         : stepContext ? stepContext.nextStep : 1,
+        completedSteps   : stepContext ? stepContext.completedSteps : "",
+        remainingSteps   : stepContext ? stepContext.remainingSteps : ""
       }
       this._systemInst = this._getCachedSystemPrompt("agent", agentPayload, this._SYSTEM_PROMPT)
     }
@@ -8031,12 +8571,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this._planningPhase = "planning"
       this._initializePlanningState({ goal: args.goal, args: args })
 
-      // Generate initial plan using dedicated LLM call
-      var planResponse = this._generateInitialPlan(args)
-      if (isObject(planResponse) && isObject(planResponse.plan)) {
-        this._agentState.plan = planResponse.plan
-      } else if (isObject(this._agentState) && isUnDef(this._agentState.plan)) {
-        this._agentState.plan = []
+      // Generate initial plan using dedicated LLM call (only if no external plan loaded)
+      if (!this._hasExternalPlan) {
+        var strategy = this._planningStrategy
+        if (!isString(strategy) || strategy.length === 0 || strategy === "off") strategy = "simple"
+        var planResponse = this._generateInitialPlan(args.goal, strategy, args)
+        if (isObject(planResponse) && isObject(planResponse.plan)) {
+          this._agentState.plan = planResponse.plan
+        } else if (isObject(planResponse)) {
+          this._agentState.plan = planResponse
+        } else if (isObject(this._agentState) && isUnDef(this._agentState.plan)) {
+          this._agentState.plan = []
+        }
       }
 
       // Switch to execution phase (reduces planning overhead in prompts)
@@ -8336,6 +8882,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         state  : stateSnapshot
       })
       prompt = this._maybeInjectPlanReminder(prompt, runtime.currentStepNumber, maxSteps)
+      prompt = this._injectSimplePlanStepContext(prompt)
 
       var contextTokens = this._estimateTokens(runtime.context.join(""))
       global.__mini_a_metrics.max_context_tokens.set(Math.max(global.__mini_a_metrics.max_context_tokens.get(), contextTokens))
@@ -8404,8 +8951,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           addCall()
           var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
           var jsonFlag = !noJsonPromptFlag
-          if (args.showthinking && isDef(currentLLM.rawPromptWithStats)) {
-            return currentLLM.rawPromptWithStats(prompt, __, __, jsonFlag)
+          if (args.showthinking) {
+            if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) {
+              return currentLLM.promptJSONWithStatsRaw(prompt)
+            } else if (isDef(currentLLM.rawPromptWithStats)) {
+              return currentLLM.rawPromptWithStats(prompt, __, __, jsonFlag)
+            }
           }
           if (!noJsonPromptFlag && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
@@ -8460,8 +9011,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       var rmsg = responseWithStats.response
       if (args.showthinking) {
-        this._logThinkingBlocks(responseWithStats.response)
-        if (!isString(rmsg)) {
+        // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
+        var rawForThinking = isDef(responseWithStats.raw) ? responseWithStats.raw : responseWithStats.response
+        this._logThinkingBlocks(rawForThinking)
+        // Only need to extract text if using legacy path where response is raw string
+        if (isUnDef(responseWithStats.raw) && !isString(rmsg)) {
           var extractedText = this._extractPrimaryResponseText(responseWithStats.response)
           if (isString(extractedText)) {
             rmsg = extractedText
@@ -8493,8 +9047,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
               addCall()
               var jsonFlag = !this._noJsonPrompt
-              if (args.showthinking && isDef(this.llm.rawPromptWithStats)) {
-                return this.llm.rawPromptWithStats(prompt, __, __, jsonFlag)
+              if (args.showthinking) {
+                if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
+                  return this.llm.promptJSONWithStatsRaw(prompt)
+                } else if (isDef(this.llm.rawPromptWithStats)) {
+                  return this.llm.rawPromptWithStats(prompt, __, __, jsonFlag)
+                }
               }
               if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
                 return this.llm.promptJSONWithStats(prompt)
@@ -8540,8 +9098,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
           rmsg = fallbackResponseWithStats.response
           if (args.showthinking) {
-            this._logThinkingBlocks(fallbackResponseWithStats.response)
-            if (!isString(rmsg)) {
+            // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
+            var fallbackRawForThinking = isDef(fallbackResponseWithStats.raw) ? fallbackResponseWithStats.raw : fallbackResponseWithStats.response
+            this._logThinkingBlocks(fallbackRawForThinking)
+            // Only need to extract text if using legacy path where response is raw string
+            if (isUnDef(fallbackResponseWithStats.raw) && !isString(rmsg)) {
               var fallbackText = this._extractPrimaryResponseText(fallbackResponseWithStats.response)
               if (isString(fallbackText)) {
                 rmsg = fallbackText
@@ -8590,7 +9151,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (isMap(baseMsg) && isDef(baseMsg.state)) {
         var extractedState = parseStatePayload(baseMsg.state)
         if (isObject(extractedState)) {
-          this._agentState = extractedState
+          // For version 3 plans, merge plan updates instead of replacing entirely
+          if (this._enablePlanning && this._isSimplePlanStyle() && isObject(extractedState.plan)) {
+            this._mergeSimplePlanUpdate(extractedState.plan)
+            // Merge other state fields except plan
+            var otherState = Object.assign({}, extractedState)
+            delete otherState.plan
+            Object.assign(this._agentState, otherState)
+          } else {
+            this._agentState = extractedState
+          }
           updatedStateSnapshot = stringify(this._agentState, __, "")
           stateUpdatedThisStep = true
           if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
@@ -8986,8 +9556,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
         var jsonFlag = !this._noJsonPrompt
-        if (args.showthinking && isDef(this.llm.rawPromptWithStats)) {
-          return this.llm.rawPromptWithStats(finalPrompt, __, __, jsonFlag)
+        if (args.showthinking) {
+          if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
+            return this.llm.promptJSONWithStatsRaw(finalPrompt)
+          } else if (isDef(this.llm.rawPromptWithStats)) {
+            return this.llm.rawPromptWithStats(finalPrompt, __, __, jsonFlag)
+          }
         }
         if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
           return this.llm.promptJSONWithStats(finalPrompt)
@@ -9026,10 +9600,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     global.__mini_a_metrics.llm_normal_calls.inc()
     
     if (args.showthinking) {
-      this._logThinkingBlocks(finalResponseWithStats.response)
+      // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
+      var finalRawForThinking = isDef(finalResponseWithStats.raw) ? finalResponseWithStats.raw : finalResponseWithStats.response
+      this._logThinkingBlocks(finalRawForThinking)
     }
     var finalResponseText = finalResponseWithStats.response
-    if (args.showthinking && !isString(finalResponseText)) {
+    // Only need to extract text if using legacy path where response is raw string
+    if (args.showthinking && isUnDef(finalResponseWithStats.raw) && !isString(finalResponseText)) {
       var extractedFinalText = this._extractPrimaryResponseText(finalResponseWithStats.response)
       if (isString(extractedFinalText)) finalResponseText = extractedFinalText
     }
@@ -9099,10 +9676,16 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
 
       var responseWithStats
-      // Use new promptJSONWithStats if available
-      if (args.showthinking && isDef(this.llm.rawPromptWithStats)) {
+      // Use new promptJSONWithStatsRaw if available for showthinking
+      if (args.showthinking) {
         var jsonFlag = !this._noJsonPrompt && args.format == "json"
-        responseWithStats = this.llm.rawPromptWithStats(pendingPrompt, __, __, jsonFlag)
+        if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
+          responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
+        } else if (isDef(this.llm.rawPromptWithStats)) {
+          responseWithStats = this.llm.rawPromptWithStats(pendingPrompt, __, __, jsonFlag)
+        } else {
+          responseWithStats = this.llm.promptWithStats(pendingPrompt)
+        }
       } else if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
@@ -9131,9 +9714,12 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       var rawResponse = responseWithStats.response
       if (args.showthinking) {
-        this._logThinkingBlocks(responseWithStats.response)
+        // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
+        var chatbotRawForThinking = isDef(responseWithStats.raw) ? responseWithStats.raw : responseWithStats.response
+        this._logThinkingBlocks(chatbotRawForThinking)
       }
-      if (args.showthinking && !isString(rawResponse)) {
+      // Only need to extract text if using legacy path where response is raw string
+      if (args.showthinking && isUnDef(responseWithStats.raw) && !isString(rawResponse)) {
         var extractedChatbotText = this._extractPrimaryResponseText(responseWithStats.response)
         if (isString(extractedChatbotText)) {
           rawResponse = extractedChatbotText
