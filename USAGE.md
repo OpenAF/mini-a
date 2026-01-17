@@ -589,6 +589,7 @@ The `start()` method accepts various configuration options:
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
+- **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` to prefill a bundle of related flags
@@ -602,6 +603,7 @@ The `start()` method accepts various configuration options:
 - **`resumefailed`** (boolean, default: false): Resume execution from the last failed task when re-running Mini-A against a partially completed plan file.
 - **`convertplan`** (boolean, default: false): Perform a one-off format conversion instead of running the agent. Requires `planfile=` (input) and `outputfile=` (target path) and preserves notes/execution history across Markdown/JSON/YAML.
 - **`forceplanning`** (boolean, default: false): Force planning to be enabled even if the complexity assessment suggests it's not needed. Overrides the automatic planning strategy selection.
+- **`planstyle`** (string, default: `simple`): Controls the plan structure style. Use `simple` for flat sequential task lists (recommended for better model compliance) or `legacy` for phase-based hierarchical plans with nested tasks. The simple style generates numbered steps that models can follow more reliably.
 - **`saveplannotes`** (boolean, default: false): When enabled, persist execution notes, critique results, and dynamic adjustments within the plan file structure. Useful for maintaining a complete audit trail of plan evolution.
 - **`updatefreq`** (string, default: `auto`): Controls how often Mini-A writes progress to `planfile`. Accepted values are `auto` (every `updateinterval` steps), `always` (after every qualifying action), `checkpoints` (25/50/75/100% of `maxsteps`), or `never`.
 - **`updateinterval`** (number, default: `3`): Step interval used when `updatefreq=auto`. Mini-A updates the plan after this many steps without a recorded update.
@@ -730,6 +732,61 @@ Switching back to the default agent mode is as simple as omitting the flag (or s
 Enable `useplanning=true` (while keeping `chatbotmode=false`) whenever you want Mini-A to surface a live task plan that evolves with the session. The agent classifies the goal up front—trivial and easy goals automatically disable planning, moderate goals receive a short linear checklist, and complex goals trigger a nested "tree" plan with checkpoints. Provide `planfile=plan.md` (or `.json`) to reuse a pre-generated plan; Mini-A keeps task checkboxes in sync as execution progresses.
 
 Use `planmode=true` when you only need Mini-A to design the plan. The runtime gathers context using the low-cost model (when available), asks the primary model for the final structured plan, writes the result to `planfile` (if supplied), prints it, and exits.
+
+### Plan Styles
+
+Mini-A supports two plan styles controlled by the `planstyle` parameter:
+
+#### Simple Style (Default)
+
+The **simple** style (`planstyle=simple`) generates flat, sequential task lists that models follow more reliably:
+
+```
+1. Read existing API code structure
+2. Create user routes in src/routes/users.js
+3. Add input validation middleware
+4. Write unit tests for user endpoints
+5. Run tests and verify all pass
+```
+
+Each step:
+- Is a single, concrete action completable in 1-3 tool calls
+- Starts with an action verb (Read, Create, Update, Run, Verify)
+- Is self-contained without referencing other steps
+- Has a clear completion criteria
+
+The agent receives explicit "you are on step X of Y" directives and must complete each step before advancing. This reduces plan drift and improves cross-model reliability.
+
+**Example usage:**
+```bash
+ojob mini-a.yaml goal="Build a REST API with user endpoints" useplanning=true useshell=true
+```
+
+#### Legacy Style
+
+The **legacy** style (`planstyle=legacy`) preserves the original phase-based hierarchical structure:
+
+```markdown
+## Phase 1: Setup
+- [ ] Plan approach for: Setup environment
+- [ ] Execute: Install dependencies
+- [ ] Validate results for: Setup complete
+
+## Phase 2: Implementation
+- [ ] Plan approach for: Create API routes
+- [ ] Execute: Implement user endpoints
+- [ ] Validate results for: Routes working
+```
+
+Each phase contains nested plan/execute/validate triplets with checkpoints. Use this style when you need:
+- Complex multi-phase projects with clear milestones
+- Compatibility with existing phase-based plan files
+- Detailed dependency tracking between phases
+
+**Example usage:**
+```bash
+ojob mini-a.yaml goal="Build a REST API" useplanning=true planstyle=legacy useshell=true
+```
 
 ### Plan Validation
 

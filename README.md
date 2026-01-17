@@ -325,6 +325,7 @@ Mini-A ships with complementary components:
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
+| `showthinking` | Surface XML-tagged thinking blocks from model responses as thought logs | `false` |
 | `verbose` / `debug` | Enable detailed logging | `false` |
 
 For the complete list and detailed explanations, see the [Usage Guide](USAGE.md#configuration-options).

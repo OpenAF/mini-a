@@ -111,6 +111,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : showthinking
+    desc     : Surface XML-tagged thinking blocks in model responses as thought logs
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : debug
     desc     : Enable debug mode
     example  : "false"
@@ -175,6 +180,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : planstyle
+    desc     : Planning style - simple (flat sequential steps) or legacy (phase-based hierarchical)
+    example  : "simple"
+    mandatory: false
+    options  : ["simple", "legacy"]
   - name     : planmode
     desc     : Run Mini-A in plan-only mode (produce or convert plans without executing)
     example  : "false"
@@ -332,6 +342,7 @@ jobs:
         conversation   : conversation
         format         : format
         raw            : raw
+        showthinking   : showthinking
         shellallow     : shellallow
         shellbanextra  : shellbanextra
         shellallowpipes: shellallowpipes
@@ -389,6 +400,7 @@ jobs:
       conversation   : isString.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
+      showthinking   : toBoolean.isBoolean.default(false)
       shellallow     : isString.default(__)
       shellbanextra  : isString.default(__)
       shellallowpipes: toBoolean.isBoolean.default(false)

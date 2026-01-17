@@ -258,6 +258,7 @@ See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for full workflows and 
 | `resumefailed` | boolean | `false` | Resume from last failed task on startup |
 | `convertplan` | boolean | `false` | Convert plan format and exit |
 | `forceplanning` | boolean | `false` | Force planning even when heuristics would skip it |
+| `planstyle` | string | `simple` | Plan style: `simple` (flat sequential) or `legacy` (phase-based) |
 | `planfile` | string | - | Path to load or save plan file (`.md`, `.json`, `.yaml`) |
 | `planformat` | string | - | Plan format override (`markdown`, `json`, `yaml`) |
 | `plancontent` | string | - | Inline plan definition (Markdown or JSON content) |
@@ -295,6 +296,10 @@ mini-a planfile=plan.md outputfile=plan.json convertplan=true planformat=json
 
 # Force planning for simple goal
 mini-a goal="simple task" forceplanning=true planfile=plan.md
+
+# Use legacy phase-based planning style
+mini-a goal="complex multi-phase project" \
+  useplanning=true planstyle=legacy useshell=true planfile=plan.md
 ```
 
 ---
