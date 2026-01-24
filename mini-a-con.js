@@ -307,6 +307,7 @@ try {
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
     usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },
     useascii       : { type: "boolean", default: false, description: "Enable ASCII-based visuals in knowledge prompt" },
+    usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
@@ -1528,11 +1529,19 @@ try {
     error  : errorColor,
     warn   : "FG(214)",
     info   : hintColor,
-    plan   : "FG(135)"
+    plan   : "FG(135)",
+    stream : "RESET"
   }
 
   var _prevEventLength = __
   function printEvent(type, icon, message, id) {
+    // Handle streaming output with markdown formatting
+    if (type == "stream") {
+      // Apply markdown formatting to the streamed content
+      var formatted = ow.format.withMD(message)
+      printnl(formatted)
+      return
+    }
     // Ignore user events
     if (type == "user") return
     var extra = "", inline = false
@@ -1645,14 +1654,25 @@ try {
       lastResult = agentResult
       lastOrigResult = agentOrigResult
       if (isUnDef(_args.outfile)) {
-        //print(colorifyText("\n🏁 Final answer", successColor))
-        print()
-        if (isObject(lastResult) || isArray(lastResult)) {
-          print(stringify(lastResult, __, "  "))
-        } else if (isString(lastResult)) {
-          print(lastResult)
-        } else if (isDef(lastResult)) {
-          print(stringify(lastResult, __, ""))
+        // Skip duplicate output if streaming was used - content already displayed
+        if (!_args.usestream) {
+          //print(colorifyText("\n🏁 Final answer", successColor))
+          print()
+          if (isObject(lastResult) || isArray(lastResult)) {
+            print(stringify(lastResult, __, "  "))
+          } else if (isString(lastResult)) {
+            print(lastResult)
+          } else if (isDef(lastResult)) {
+            print(stringify(lastResult, __, ""))
+          }
+        } else {
+          // Add newline after streaming output before prompt
+          // Also ensure newline if there was an inline event pending
+          if (isDef(_prevEventLength)) {
+            print()  // Move to new line after inline event
+            _prevEventLength = __
+          }
+          //print()
         }
       } else {
         print(colorifyText("Final answer written to " + _args.outfile, successColor))

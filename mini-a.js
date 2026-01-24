@@ -833,6 +833,12 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
     log("[" + this._id + "] " + extra + _e + " " + _m)
   })
 
+  // Handle streaming output directly without formatting
+  if (e === "stream") {
+    cFn("", m, this._id)
+    return
+  }
+
   var _e = ""
   switch(e) {
   case "user"     : _e = "👤"; break
@@ -1037,6 +1043,171 @@ MiniA.prototype._formatTokenStats = function(stats) {
     if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
     if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
+}
+
+/**
+ * Create a streaming delta handler that detects the "answer" field in JSON responses
+ * and streams content with markdown-aware buffering. Buffers content until complete
+ * markdown elements (code blocks, tables) are finished before outputting.
+ * Handles escape sequences and closing quotes properly.
+ */
+MiniA.prototype._createStreamDeltaHandler = function(args) {
+    var self = this
+    var jsonBuffer = ""         // Buffer for finding "answer" field
+    var contentBuffer = ""      // Buffer for decoded content
+    var streamingAnswer = false
+    var answerDetected = false
+    var escapeNext = false
+    var inCodeBlock = false     // Track if inside ``` code block
+    var inTable = false         // Track if inside a table
+    var codeBlockBuffer = ""    // Buffer code blocks until complete
+    var tableBuffer = ""        // Buffer table rows until complete
+    var firstOutput = true      // Track if first output (for initial newline)
+
+    // Decode a character considering escape sequences
+    function decodeChar(ch) {
+        if (escapeNext) {
+            escapeNext = false
+            if (ch == 'n') return "\n"
+            else if (ch == 't') return "\t"
+            else if (ch == '"') return "\""
+            else if (ch == '\\') return "\\"
+            else return ch
+        } else if (ch == '\\') {
+            escapeNext = true
+            return null
+        }
+        return ch
+    }
+
+    // Flush buffered content to output
+    function flushContent(text) {
+        if (text.length > 0) {
+            // Add initial newline before first output
+            if (firstOutput) {
+                self.fnI("stream", "\n")
+                firstOutput = false
+            }
+            self.fnI("stream", text)
+        }
+    }
+
+    // Process decoded content with markdown awareness
+    function processContent(decoded) {
+        contentBuffer += decoded
+
+        // Process line by line
+        while (true) {
+            var newlineIdx = contentBuffer.indexOf("\n")
+            if (newlineIdx === -1) break
+
+            var line = contentBuffer.substring(0, newlineIdx)
+            contentBuffer = contentBuffer.substring(newlineIdx + 1)
+            var trimmedLine = line.trim()
+
+            // Check for code block start/end
+            if (trimmedLine.indexOf("```") === 0) {
+                if (!inCodeBlock) {
+                    // Starting a code block - buffer it
+                    inCodeBlock = true
+                    codeBlockBuffer = line + "\n"
+                } else {
+                    // Ending a code block - flush entire block
+                    codeBlockBuffer += line + "\n"
+                    flushContent(codeBlockBuffer)
+                    codeBlockBuffer = ""
+                    inCodeBlock = false
+                }
+                continue
+            }
+
+            // If inside code block, buffer the line
+            if (inCodeBlock) {
+                codeBlockBuffer += line + "\n"
+                continue
+            }
+
+            // Check for table row (starts with |)
+            if (trimmedLine.indexOf("|") === 0) {
+                if (!inTable) {
+                    inTable = true
+                    tableBuffer = ""
+                }
+                tableBuffer += line + "\n"
+                continue
+            }
+
+            // If we were in a table and hit a non-table line, flush table
+            if (inTable) {
+                flushContent(tableBuffer)
+                tableBuffer = ""
+                inTable = false
+            }
+
+            // Normal line - output immediately
+            flushContent(line + "\n")
+        }
+    }
+
+    // Flush remaining buffers at end of answer
+    function flushRemaining() {
+        if (codeBlockBuffer.length > 0) flushContent(codeBlockBuffer)
+        if (tableBuffer.length > 0) flushContent(tableBuffer)
+        if (contentBuffer.length > 0) flushContent(contentBuffer)
+        flushContent("\n\n")
+    }
+
+    // Process raw JSON chunk to extract answer content
+    function processChunk(chunk) {
+        for (var i = 0; i < chunk.length; i++) {
+            var c = chunk[i]
+
+            if (!streamingAnswer) {
+                // Still looking for "answer" field
+                jsonBuffer += c
+                if (!answerDetected) {
+                    var answerMatch = jsonBuffer.match(/"answer"\s*:\s*"/)
+                    if (answerMatch) {
+                        answerDetected = true
+                        streamingAnswer = true
+                        // Process any content after the opening quote
+                        var idx = jsonBuffer.indexOf(answerMatch[0]) + answerMatch[0].length
+                        var content = jsonBuffer.substring(idx)
+                        jsonBuffer = ""
+                        for (var j = 0; j < content.length; j++) {
+                            var ch = content[j]
+                            // Check for unescaped closing quote before decoding
+                            if (ch == '"' && !escapeNext) {
+                                streamingAnswer = false
+                                flushRemaining()
+                                return
+                            }
+                            var decoded = decodeChar(ch)
+                            if (decoded !== null) {
+                                processContent(decoded)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Streaming answer content - check for unescaped closing quote first
+                if (c == '"' && !escapeNext) {
+                    // End of answer string
+                    streamingAnswer = false
+                    flushRemaining()
+                    return
+                }
+                var decoded = decodeChar(c)
+                if (decoded !== null) {
+                    processContent(decoded)
+                }
+            }
+        }
+    }
+
+    return function onDelta(chunk, payload) {
+        processChunk(chunk)
+    }
 }
 
 /**
@@ -8214,6 +8385,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -8945,6 +9117,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
 
+      // Create streaming delta handler if streaming is enabled
+      var onDelta = args.usestream ? this._createStreamDeltaHandler(args) : null
+      var canStream = args.usestream && isFunction(currentLLM.promptStreamWithStats)
+
       var responseWithStats
       try {
         responseWithStats = this._withExponentialBackoff(() => {
@@ -8952,11 +9128,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
           var jsonFlag = !noJsonPromptFlag
           if (args.showthinking) {
+            // Streaming not compatible with showthinking - use regular prompts
             if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) {
               return currentLLM.promptJSONWithStatsRaw(prompt)
             } else if (isDef(currentLLM.rawPromptWithStats)) {
               return currentLLM.rawPromptWithStats(prompt, __, __, jsonFlag)
             }
+          }
+          if (canStream && !noJsonPromptFlag) {
+            return currentLLM.promptStreamJSONWithStats(prompt, __, __, __, __, onDelta)
+          } else if (canStream) {
+            return currentLLM.promptStreamWithStats(prompt, __, __, __, __, __, onDelta)
           }
           if (!noJsonPromptFlag && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
@@ -9676,8 +9858,13 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
 
       var responseWithStats
+      // Create streaming delta handler if streaming is enabled
+      var onDelta = args.usestream ? this._createStreamDeltaHandler(args) : null
+      var canStream = args.usestream && isFunction(this.llm.promptStreamWithStats)
+
       // Use new promptJSONWithStatsRaw if available for showthinking
       if (args.showthinking) {
+        // Streaming not compatible with showthinking - use regular prompts
         var jsonFlag = !this._noJsonPrompt && args.format == "json"
         if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
           responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
@@ -9686,6 +9873,10 @@ MiniA.prototype._runChatbotMode = function(options) {
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
+      } else if (canStream && !this._noJsonPrompt && args.format == "json") {
+        responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
+      } else if (canStream) {
+        responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
       } else if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
