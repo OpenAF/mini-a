@@ -2397,8 +2397,19 @@
         // Show/hide copy actions based on processing state
         updateCopyActionsVisibility();
 
+        // Re-add preview if still processing (prevents flicker during streaming)
+        if (isProcessing && !conversationFinished) {
+            const existingPreview = document.getElementById(PREVIEW_ID);
+            if (!existingPreview) {
+                const previewEl = document.createElement('div');
+                previewEl.id = PREVIEW_ID;
+                previewEl.className = 'preview';
+                resultsDiv.appendChild(previewEl);
+            }
+        }
+
         bindUserAttachmentPreviews();
-        
+
         // Wait for Mermaid rendering to complete before scrolling
         // This ensures the content height is final
         await renderMermaidDiagrams();
