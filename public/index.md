@@ -1238,6 +1238,31 @@
         100% { background-position: -200% 50%; }
     }
 
+    /* ========== STREAMING ANIMATION ========== */
+    @keyframes streamFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(2px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .streaming-content {
+        animation: streamFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Prevent animation jitter on frequent updates */
+    .streaming-content * {
+        animation: none !important;
+    }
+
+    .streaming-content.streaming-content {
+        animation: streamFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
     /* ========== PLAN PANEL ========== */
     .plan-panel {
         margin-top: 0.6rem;
@@ -2305,11 +2330,48 @@
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
 
         destroyRenderedCharts();
-        
+
         // Post-process to restore any chart blocks that were preprocessed
         const processedHtml = postprocessChartBlocks(htmlContent);
+
+        // Track if content is being streamed
+        const isStreaming = streamActive && !conversationFinished;
+        const contentChanged = processedHtml !== lastRenderedHtml;
+        const hadContent = lastRenderedHtml.length > 0;
+
         lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
+
+        // Apply streaming class and animation
+        if (isStreaming) {
+            resultsDiv.classList.add('streaming');
+
+            // Get the last content element (before buttons)
+            const contentElements = Array.from(resultsDiv.children).filter(el =>
+                el.id !== 'scrollToBottomBtn' &&
+                el.id !== 'copyActions' &&
+                !el.classList.contains('preview')
+            );
+
+            if (contentElements.length > 0 && contentChanged && hadContent) {
+                const lastElement = contentElements[contentElements.length - 1];
+
+                // Remove animation class from all elements first
+                resultsDiv.querySelectorAll('.streaming-content').forEach(el => {
+                    el.classList.remove('streaming-content');
+                });
+
+                // Add animation to last element
+                lastElement.classList.add('streaming-content');
+            }
+        } else {
+            resultsDiv.classList.remove('streaming');
+
+            // Clean up animation classes
+            resultsDiv.querySelectorAll('.streaming-content').forEach(el => {
+                el.classList.remove('streaming-content');
+            });
+        }
         
         // Re-add scroll button and copy actions
         const scrollBtnHTML = `
@@ -4354,6 +4416,14 @@
         if (streamRenderTimer) {
             clearTimeout(streamRenderTimer);
             streamRenderTimer = null;
+        }
+
+        // Clean up streaming animations
+        if (resultsDiv) {
+            resultsDiv.classList.remove('streaming');
+            resultsDiv.querySelectorAll('.streaming-content').forEach(el => {
+                el.classList.remove('streaming-content');
+            });
         }
     }
 
