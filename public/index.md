@@ -1618,6 +1618,12 @@
     let planResizeHandlerBound = false;
     let lastRawContent = '';
     let lastRenderedHtml = '';
+    let lastRenderedRaw = '';
+    let streamEnabled = false;
+    let streamActive = false;
+    let streamSource = null;
+    let streamBuffer = '';
+    let streamRenderTimer = null;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -2262,6 +2268,7 @@
             lastKnownHistory = trimmedEvents;
             lastRawContent = '';
             lastRenderedHtml = '';
+            lastRenderedRaw = '';
             conversationFinished = false;
             autoScrollEnabled = true;
             activeHistoryId = null;
@@ -2281,6 +2288,7 @@
 
             await response.json();
             startProcessing();
+            if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
         } catch (error) {
             console.error('Failed to retry conversation:', error);
@@ -2408,6 +2416,20 @@
             autoScrollEnabled = true;
             scrollResultsToBottom();
         }
+    }
+
+    async function renderRawContent(rawContent) {
+        const nextContent = rawContent || '';
+        if (nextContent === lastRenderedRaw) return;
+
+        const preprocessed = preprocessChartBlocks(nextContent);
+        const htmlContent = converter.makeHtml(preprocessed);
+        await updateResultsContent(htmlContent);
+        try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+        forceRenderChartBlocks();
+        if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+        __refreshDarkMode();
+        lastRenderedRaw = nextContent;
     }
 
     function escapeHtml(str) {
@@ -3566,6 +3588,7 @@
     async function configureFeatureAvailability() {
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
+        let shouldEnableStream = false;
 
         try {
             const response = await fetch('/info', {
@@ -3583,12 +3606,16 @@
             if (typeof data.useattach === 'boolean') {
                 shouldEnableAttachments = data.useattach;
             }
+            if (typeof data.usestream === 'boolean') {
+                shouldEnableStream = data.usestream;
+            }
         } catch (error) {
             console.error('Unable to determine feature availability:', error);
         }
 
         applyHistoryAvailability(shouldEnableHistory);
         applyAttachmentAvailability(shouldEnableAttachments);
+        streamEnabled = shouldEnableStream;
 
         if (historyEnabled) {
             refreshHistoryPanel();
@@ -3785,6 +3812,8 @@
             stopProcessing();
         }
 
+        stopStream();
+
         activeHistoryId = entry.id;
         await sendHistoryToServer(entry);
 
@@ -3871,6 +3900,7 @@
                 if (fileInput) fileInput.disabled = true;
                 addPreview();
                 if (!pollingInterval) startPolling();
+                if (streamEnabled) startStream(uuid);
             }
         } catch (error) {
             console.error('Error refreshing conversation view:', error);
@@ -4170,6 +4200,8 @@
             clearInterval(pollingInterval);
             pollingInterval = null;
         }
+
+        stopStream();
         
         if (currentSessionUuid) {
             fetch('/result', {
@@ -4220,7 +4252,9 @@
 
             await response.json();
             lastRawContent = '';
+            lastRenderedRaw = '';
             startProcessing();
+            if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
 
         } catch (error) {
@@ -4257,18 +4291,20 @@
                 // Only update content if it has actually changed to prevent chart flickering
                 const rawContent = data.content || '';
                 if (rawContent !== lastRawContent) {
-                    const preprocessed = preprocessChartBlocks(rawContent);
-                    const htmlContent = converter.makeHtml(preprocessed);
-                    await updateResultsContent(htmlContent);
-                    hljs.highlightAll();
-                    forceRenderChartBlocks();
-                    if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
-                    __refreshDarkMode();
                     lastRawContent = rawContent;
+                    if (streamActive) {
+                        scheduleStreamRender();
+                    } else {
+                        await renderRawContent(rawContent);
+                    }
                 }
 
                 if (data.status === 'finished') {
                     conversationFinished = true;
+                    streamActive = false;
+                    streamBuffer = '';
+                    stopStream();
+                    await renderRawContent(rawContent);
                     if (currentSessionUuid && historyEnabled !== false) {
                         const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, data);
                         if (savedEntry) {
@@ -4295,6 +4331,68 @@
                 stopProcessing();
             }
         }, 1500);
+    }
+
+    function stopStream() {
+        if (streamSource) {
+            try { streamSource.close(); } catch (e) { /* ignore */ }
+            streamSource = null;
+        }
+        streamActive = false;
+        streamBuffer = '';
+        if (streamRenderTimer) {
+            clearTimeout(streamRenderTimer);
+            streamRenderTimer = null;
+        }
+    }
+
+    function scheduleStreamRender() {
+        if (!streamActive) return;
+        if (streamRenderTimer) return;
+        streamRenderTimer = setTimeout(async () => {
+            streamRenderTimer = null;
+            const combined = (lastRawContent || '') + streamBuffer;
+            await renderRawContent(combined);
+        }, 80);
+    }
+
+    function startStream(uuid) {
+        if (!streamEnabled) return;
+        if (!uuid) return;
+        if (typeof EventSource === 'undefined') return;
+
+        stopStream();
+        streamActive = true;
+        streamBuffer = '';
+
+        const streamUrl = '/stream?uuid=' + encodeURIComponent(uuid);
+        streamSource = new EventSource(streamUrl);
+        streamSource.addEventListener('stream', (event) => {
+            if (!event || !event.data) return;
+            let payload = {};
+            try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
+            const chunk = payload.message || '';
+            if (!chunk) return;
+            streamBuffer += chunk;
+            scheduleStreamRender();
+        });
+        streamSource.addEventListener('plan', (event) => {
+            if (!event || !event.data) return;
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload && payload.plan) updatePlanPanel(payload.plan);
+            } catch (e) { /* ignore */ }
+        });
+        streamSource.addEventListener('done', () => {
+            streamActive = false;
+            streamBuffer = '';
+            stopStream();
+        });
+        streamSource.addEventListener('error', (event) => {
+            console.error('SSE error:', event);
+            streamActive = false;
+            stopStream();
+        });
     }
 
     /* ========== PING MANAGEMENT ========== */
@@ -4357,6 +4455,7 @@
         promptInput.value = '';
         clearAttachments();
         lastRawContent = '';
+        lastRenderedRaw = '';
         lastKnownHistory = [];
         lastFinishedPrompt = '';
         lastSubmittedPrompt = '';
