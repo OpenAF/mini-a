@@ -100,6 +100,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | Bedrock    | opus-4.5                | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-opus-4-5-20251101-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
 | Cerebras   | gpt-oss-120b            | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.cerebras.ai', model: gpt-oss-120b, timeout: 900000, temperature: 0, noSystem: false)``` |
 | Cerebras   | zai-glm-4.7             | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.cerebras.ai', model: zai-glm-4.7, timeout: 900000, temperature: 0, noSystem: false)``` |
+| EuQuai     | euquai-fusion-v1 | ```(type: openai, key: '...', url: 'https://api.euqai.eu', model: euqai-fusion-v1, timeout: 900000, temperature: 0)``` |
 | Gemini     | gemini-2.5-flash   | ```export OAF_MODEL="(type: gemini, model: gemini-2.5-flash, key: 'your-key', timeout: 900000, temperature: 0)"``` |
 | Gemini     | gemini-3-pro            | ```export OAF_MODEL="(type: gemini, key: your-google-ai-key, model: gemini-3-pro-preview, timeout: 900000, temperature: 0)"``` |
 | GitHub     | gpt-5-nano              | ```export OAF_MODEL="(type: openai, url: 'https://models.github.ai/inference', model: openai/gpt-5-nano, key: $(gh auth token), timeout: 900000, temperature: 1, apiVersion: '')"``` |
