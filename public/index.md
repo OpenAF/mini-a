@@ -2291,14 +2291,16 @@
             await sendHistoryToServer({ uuid: retryUuid, events: trimmedEvents, prompt: promptForRetry });
 
             lastKnownHistory = trimmedEvents;
-            lastRawContent = '';
+            // Don't clear lastRawContent to keep conversation visible
             lastRenderedHtml = '';
             lastRenderedRaw = '';
             conversationFinished = false;
             autoScrollEnabled = true;
             activeHistoryId = null;
 
-            await updateResultsContent('<p>Retrying last goal...</p>');
+            // Show retrying message but keep previous content visible
+            const retryMessage = '<p style="opacity: 0.7;">Retrying last goal...</p>';
+            await renderRawContent(lastRawContent + retryMessage);
             forceRenderChartBlocks();
             resetPlanPanel();
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -4298,6 +4300,36 @@
     }
 
     /* ========== API FUNCTIONS ========== */
+    function formatUserPromptHtml(prompt) {
+        // Format user message similar to server-side __formatUserMessage
+        let text = prompt || '';
+        const attachments = [];
+
+        // Extract and replace attachment blocks
+        text = text.replace(/```attachment\s+([^\n]+)\n([\s\S]*?)```/gm, (_, name, content) => {
+            const cleanName = (name || '').replace(/[\r\n]+/g, ' ').trim();
+            const cleanContent = (content || '').replace(/\r\n/g, '\n');
+            attachments.push({ name: cleanName, content: cleanContent });
+            return '§§ATTACHMENT_' + (attachments.length - 1) + '§§';
+        });
+
+        // Escape HTML and convert newlines to <br>
+        let html = escapeHtml(text).replace(/\n/g, '<br>');
+
+        // Replace attachment placeholders with buttons
+        attachments.forEach((att, idx) => {
+            const placeholder = '§§ATTACHMENT_' + idx + '§§';
+            const safeName = att.name || 'attachment.txt';
+            const safeNameHtml = escapeHtml(safeName);
+            const encoded = btoa(unescape(encodeURIComponent(att.content || '')));
+            const language = safeName.includes('.') ? safeName.split('.').pop() : 'text';
+            const button = `<button class="user-attachment" type="button" data-name="${escapeHtml(safeName)}" data-language="${escapeHtml(language)}" data-content="${escapeHtml(encoded)}">📎 ${safeNameHtml}</button>`;
+            html = html.replace(placeholder, button);
+        });
+
+        return html;
+    }
+
     async function handleSubmit() {
         if (isProcessing) {
             await stopProcessing();
@@ -4315,6 +4347,12 @@
         try {
             if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid();
 
+            // Add user prompt to display immediately
+            const userPromptHtml = formatUserPromptHtml(finalPrompt);
+            const userPromptDiv = `<div style="text-align: right;"><i><div style="display: inline-block; text-align: left;">${userPromptHtml}</div> 👤</i>\n<br><br></div>`;
+            lastRawContent += userPromptDiv;
+            await renderRawContent(lastRawContent);
+
             const response = await fetch('/prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -4324,7 +4362,6 @@
             if (!response.ok) throw new Error('Failed to submit prompt');
 
             await response.json();
-            lastRawContent = '';
             lastRenderedRaw = '';
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
@@ -4337,18 +4374,17 @@
         }
     }
 
-    function startPolling() {
-        pollingInterval = setInterval(async () => {
-            try {
-                const response = await fetch('/result', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                    body: JSON.stringify({ uuid: currentSessionUuid })
-                });
+    async function pollOnce() {
+        try {
+            const response = await fetch('/result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ uuid: currentSessionUuid })
+            });
 
-                if (!response.ok) throw new Error('Failed to fetch results');
+            if (!response.ok) throw new Error('Failed to fetch results');
 
-                const data = await response.json();
+            const data = await response.json();
 
                 if (Array.isArray(data.history)) {
                     lastKnownHistory = sanitizeHistoryEvents(data.history);
@@ -4366,7 +4402,9 @@
                 if (rawContent !== lastRawContent) {
                     lastRawContent = rawContent;
                     if (streamActive) {
-                        scheduleStreamRender();
+                        // During streaming, just update lastRawContent
+                        // SSE events will trigger renders using lastRawContent + streamBuffer
+                        // This avoids re-rendering/flickering previous answers
                     } else {
                         await renderRawContent(rawContent);
                     }
@@ -4397,13 +4435,19 @@
                     addPreview();
                 }
                 
-            } catch (error) {
-                console.error('Error fetching results:', error);
-                await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
-                forceRenderChartBlocks();
-                stopProcessing();
-            }
-        }, 1500);
+        } catch (error) {
+            console.error('Error fetching results:', error);
+            await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+            forceRenderChartBlocks();
+            stopProcessing();
+        }
+    }
+
+    function startPolling() {
+        // Poll immediately to get user prompt ASAP
+        pollOnce();
+        // Then poll every 1.5 seconds
+        pollingInterval = setInterval(pollOnce, 1500);
     }
 
     function stopStream() {
@@ -4432,7 +4476,9 @@
         if (streamRenderTimer) return;
         streamRenderTimer = setTimeout(async () => {
             streamRenderTimer = null;
-            const combined = (lastRawContent || '') + streamBuffer;
+            // Use lastRawContent from polling (includes previous conversation + user prompt)
+            // plus streamBuffer (SSE delta tokens) to avoid re-rendering/flickering
+            const combined = lastRawContent + streamBuffer;
             await renderRawContent(combined);
         }, 80);
     }
