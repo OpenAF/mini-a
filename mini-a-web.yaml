@@ -659,7 +659,8 @@ todo:
       try { 
         writer.write("error", { message: String(e) }) 
       } catch(writeErr) {
-        log("Failed to write error response for SSE" + (isDef(uuid) ? " " + uuid : "") + ": " + writeErr)
+        // Log both the original error and the write failure for complete context
+        log("SSE error" + (isDef(uuid) ? " for " + uuid : "") + ": " + e + " | Failed to write error response: " + writeErr)
       }
     } finally {
       // Clean up on exit (normal or error); periodic job handles edge cases
@@ -1173,7 +1174,8 @@ jobs:
     for (var uuid in global.__sseQueues) {
       var queue = global.__sseQueues[uuid]
       // Remove queues that are closed or haven't been updated within the timeout period
-      if (isDef(queue) && (queue.closed || (isDef(queue.updated) && Date.now() - queue.updated > sseTimeoutMs))) {
+      // Also remove queues with no timestamp (defensive - shouldn't happen in normal flow)
+      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (Date.now() - queue.updated > sseTimeoutMs))) {
         sseToDelete.push(uuid)
       }
     }
