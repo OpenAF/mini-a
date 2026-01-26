@@ -621,8 +621,9 @@ todo:
 - (httpdSSE       ): "${onport:-8888}"
   ((uri          )): /stream
   ((execSSE      )): | #js
+    var uuid = __
     try {
-      var uuid = isDef(request.params) ? request.params.uuid : __
+      uuid = isDef(request.params) ? request.params.uuid : __
       if (isUnDef(uuid) || String(uuid).length == 0) {
         writer.write("error", { message: "uuid is required" })
         return
@@ -649,9 +650,18 @@ todo:
         }
         sleep(100)
       }
-      if (isDef(global.__sseQueues[uuid])) delete global.__sseQueues[uuid]
     } catch(e) {
-      writer.write("error", { message: String(e) })
+      // Mark queue as closed on error (e.g., client disconnect)
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+        global.__sseQueues[uuid].closed = true
+        global.__sseQueues[uuid].updated = Date.now()
+      }
+      try { writer.write("error", { message: String(e) }) } catch(writeErr) {}
+    } finally {
+      // Clean up on normal exit; periodic job handles abrupt disconnections
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid]) && global.__sseQueues[uuid].closed) {
+        delete global.__sseQueues[uuid]
+      }
     }
 
 # Convert markdown to static HTML
@@ -1145,6 +1155,21 @@ jobs:
         }
       }
       log("Cleaned up session " + uuid)
+    }
+
+    // Clean up stale SSE queues (prevent memory leaks from abrupt disconnections)
+    var sseToDelete = []
+    for (var uuid in global.__sseQueues) {
+      var queue = global.__sseQueues[uuid]
+      // Remove queues that are closed or haven't been updated in the last 2 minutes
+      if (isDef(queue) && (queue.closed || (now() - queue.updated > 120000))) {
+        sseToDelete.push(uuid)
+      }
+    }
+    for (var i = 0; i < sseToDelete.length; i++) {
+      var uuid = sseToDelete[i]
+      delete global.__sseQueues[uuid]
+      log("Cleaned up SSE queue " + uuid)
     }
 
 # ---------------------------------------
