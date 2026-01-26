@@ -11,6 +11,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usestream
+    desc     : Stream LLM tokens in real-time via SSE
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : logpromptheaders
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
@@ -163,7 +168,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -247,6 +252,9 @@ todo:
       // Start Mini-A interaction in a non-blocking way
       $doV(() => {
         var uuid = _res.uuid, lma, isNewConversation = false
+        if (global.__usestream && isFunction(global._mini_a_web_initSSE)) {
+          global._mini_a_web_initSSE(uuid)
+        }
         if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
           delete global.__planState[ uuid ]
         }
@@ -284,6 +292,12 @@ todo:
           }))
           lma.setInteractionFn( (e, m) => {
             try {
+              if (e == "stream") {
+                if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                  global._mini_a_web_ssePush(uuid, "stream", { message: m })
+                }
+                return
+              }
               var _e = ""
               switch(e) {
               case "user"     : _e = "👤"; break
@@ -389,6 +403,9 @@ todo:
                         active     : normalized.length > 0,
                         updated    : Date.now()
                       }
+                      if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                        global._mini_a_web_ssePush(uuid, "plan", { plan: global.__planState[uuid] })
+                      }
                     } else {
                       if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
                     }
@@ -401,6 +418,9 @@ todo:
                 if (isDef(global.__planState[uuid])) {
                   log(`[${uuid}] ${_e} Plan closed`)
                   delete global.__planState[uuid]
+                }
+                if (_e == "🛑" && global.__usestream && isFunction(global._mini_a_web_sseClose)) {
+                  global._mini_a_web_sseClose(uuid, "stopped")
                 }
               }
               global.__res[uuid].push({ event: _e, message: m })
@@ -444,6 +464,9 @@ todo:
           }
         }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        if (global.__usestream && isFunction(global._mini_a_web_sseClose)) {
+          global._mini_a_web_sseClose(uuid, "finished")
+        }
         if (isFunction(global._mini_a_web_storeHistory)) {
           try {
             global._mini_a_web_storeHistory(uuid)
@@ -594,6 +617,63 @@ todo:
       return ow.server.httpd.reply({ error: e.toString() })
     }
 
+# Stream events via SSE
+- (httpdSSE       ): "${onport:-8888}"
+  ((uri          )): /stream
+  ((execSSE      )): | #js
+    var uuid = __
+    try {
+      uuid = isDef(request.params) ? request.params.uuid : __
+      if (isUnDef(uuid) || String(uuid).length == 0) {
+        writer.write("error", { message: "uuid is required" })
+        return
+      }
+      if (isUnDef(global.__sseQueues[uuid])) {
+        global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
+      }
+      var idx = 0
+      var lastPing = Date.now()
+      writer.write("ready", { status: "ok", uuid: uuid })
+      while (true) {
+        var queue = global.__sseQueues[uuid]
+        if (isUnDef(queue)) break
+        while (idx < queue.events.length) {
+          var entry = queue.events[idx]
+          writer.write(entry.event, entry.data)
+          idx++
+          lastPing = Date.now()
+        }
+        if (queue.closed) break
+        if ((Date.now() - lastPing) > 15000) {
+          writer.write("ping", { ts: Date.now() })
+          lastPing = Date.now()
+        }
+        sleep(100)
+      }
+    } catch(e) {
+      // Mark queue as closed on error (e.g., client disconnect)
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+        global.__sseQueues[uuid].closed = true
+        global.__sseQueues[uuid].updated = Date.now()
+      }
+      try { 
+        writer.write("error", { message: String(e) }) 
+      } catch(writeErr) {
+        // Log both the original error and the write failure for complete context
+        log("SSE error" + (isDef(uuid) ? " for " + uuid : "") + ": " + e + " | Failed to write error response: " + writeErr)
+      }
+    } finally {
+      // Clean up on exit (normal or error); periodic job handles edge cases
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+        // Queue.closed is true in two cases:
+        // 1. Normal completion: _mini_a_web_sseClose() sets closed=true, loop exits
+        // 2. Error/disconnect: catch block sets closed=true
+        if (global.__sseQueues[uuid].closed) {
+          delete global.__sseQueues[uuid]
+        }
+      }
+    }
+
 # Convert markdown to static HTML
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /md2html
@@ -713,6 +793,7 @@ jobs:
   check:
     in:
       showexecs       : toBoolean().isBoolean().default(false)
+      usestream       : toBoolean().isBoolean().default(false)
       logpromptheaders: isString().default("")
       maxcontext      : toNumber().isNumber().default(200000)
       usehistory      : toBoolean().isBoolean().default(false)
@@ -749,9 +830,11 @@ jobs:
     global.__conversations = {}
     global.__lastActivity = { }
     global.__showexecs = args.showexecs
+    global.__usestream = args.usestream
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
     global.__planState = {}
+    global.__sseQueues = {}
     if (isUnDef(global.__webMetrics)) {
       global.__webMetrics = { html_exports: $atomic(0, "long") }
       try {
@@ -830,6 +913,33 @@ jobs:
         return uuid
       }
       return __
+    }
+
+    global._mini_a_web_initSSE = (uuid) => {
+      if (isUnDef(uuid)) return
+      global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
+    }
+
+    global._mini_a_web_ssePush = (uuid, event, data) => {
+      if (!global.__usestream) return
+      if (isUnDef(uuid) || isUnDef(event)) return
+      if (isUnDef(global.__sseQueues[uuid])) {
+        global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
+      }
+      global.__sseQueues[uuid].events.push({ event: event, data: data })
+      global.__sseQueues[uuid].updated = Date.now()
+    }
+
+    global._mini_a_web_sseClose = (uuid, status) => {
+      if (!global.__usestream) return
+      if (isUnDef(uuid)) return
+      if (isUnDef(global.__sseQueues[uuid])) {
+        global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
+      }
+      if (global.__sseQueues[uuid].closed === true) return
+      global.__sseQueues[uuid].events.push({ event: "done", data: { status: status || "finished" } })
+      global.__sseQueues[uuid].closed = true
+      global.__sseQueues[uuid].updated = Date.now()
     }
 
     global._mini_a_web_buildHistoryPayload = (uuid) => {
@@ -1033,6 +1143,7 @@ jobs:
     interval: 300000  # every 5 minutes
   args :
     historyretention: toNumber().isNumber().default(600)  # 10 minutes
+    ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
   exec : | #js
     var toDelete = []
     for (var uuid in global.__lastActivity) {
@@ -1055,6 +1166,24 @@ jobs:
         }
       }
       log("Cleaned up session " + uuid)
+    }
+
+    // Clean up stale SSE queues (prevent memory leaks from abrupt disconnections)
+    var sseTimeoutMs = args.ssequeuetimeout * 1000
+    var sseNow = Date.now()
+    var sseToDelete = []
+    for (var uuid in global.__sseQueues) {
+      var queue = global.__sseQueues[uuid]
+      // Remove queues that are closed or haven't been updated within the timeout period
+      // Also remove queues with no timestamp (defensive - shouldn't happen in normal flow)
+      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (sseNow - queue.updated > sseTimeoutMs))) {
+        sseToDelete.push(uuid)
+      }
+    }
+    for (var i = 0; i < sseToDelete.length; i++) {
+      var uuid = sseToDelete[i]
+      delete global.__sseQueues[uuid]
+      log("Cleaned up SSE queue " + uuid)
     }
 
 # ---------------------------------------

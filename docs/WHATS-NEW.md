@@ -2,6 +2,81 @@
 
 ## Recent Updates
 
+### Real-Time Token Streaming (usestream parameter)
+
+**Change**: Introduced real-time token streaming support via the `usestream` parameter, allowing LLM responses to be displayed incrementally as they are generated rather than waiting for complete responses.
+
+**Why This Matters**:
+
+Previously, users had to wait for the entire LLM response to complete before seeing any output. For long responses (complex reasoning, detailed analyses, large code blocks), this created significant perceived latency and made it difficult to know if the agent was still working.
+
+**How It Works**:
+
+**Console Mode:**
+```bash
+mini-a goal="explain quantum computing in detail" usestream=true
+```
+
+Tokens appear progressively with markdown formatting applied in real-time. The implementation includes:
+- Intelligent buffering for code blocks (waits for closing ```) and tables (buffers lines starting with |)
+- Proper escape sequence handling (\n, \t, \", \\) in JSON responses
+- Clean formatting with initial newline before first output
+
+**Web UI Mode:**
+```bash
+./mini-a-web.sh onport=8888 usestream=true
+```
+
+Uses Server-Sent Events (SSE) for real-time delivery:
+- Dedicated `/stream` endpoint for SSE connections
+- Progressive rendering with 80ms debounced updates for smooth display
+- Automatic connection management and cleanup
+- Fallback to polling when streaming completes
+
+**Technical Implementation**:
+
+The feature introduces:
+- `_createStreamDeltaHandler()` method with markdown-aware buffering
+- `promptStreamWithStats()` and `promptStreamJSONWithStats()` streaming methods
+- SSE infrastructure in web server (`_mini_a_web_initSSE`, `_mini_a_web_ssePush`, `_mini_a_web_sseClose`)
+- Smart content detection that identifies the "answer" field in JSON responses
+- Buffer flushing for complete markdown elements (code blocks, tables, remaining content)
+
+**Benefits**:
+- ✅ Immediate visual feedback showing the agent is actively working
+- ✅ Reduced perceived latency for long responses
+- ✅ Better user experience during complex reasoning tasks
+- ✅ No duplicate output (streaming and final answer properly coordinated)
+- ✅ Smooth rendering without visual artifacts
+
+**Limitations**:
+- Not compatible with `showthinking=true` mode (falls back to non-streaming)
+- Requires model support for streaming APIs (`promptStreamWithStats` methods)
+- Web UI requires EventSource browser support
+
+**Configuration**:
+```bash
+# Console with streaming
+mini-a goal="your goal" usestream=true
+
+# Web UI with streaming
+./mini-a-web.sh onport=8888 usestream=true
+
+# Combined with other features
+mini-a goal="analyze files" usestream=true useshell=true useplanning=true
+```
+
+**What You'll Notice**:
+- Text appears incrementally as the LLM generates it
+- Code blocks and tables render smoothly once complete
+- Console shows formatted markdown progressively
+- Web UI updates with debounced rendering for optimal performance
+- No waiting for complete response before seeing output
+
+**Impact**: Significantly improved user experience with better perceived performance and immediate feedback during LLM generation.
+
+---
+
 ### Simple Plan Style (planstyle parameter)
 
 **Change**: Introduced a new `planstyle` parameter that controls how Mini-A generates and executes task plans. The default is now `simple` which produces flat, sequential task lists instead of the previous phase-based hierarchical plans.

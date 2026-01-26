@@ -1238,6 +1238,31 @@
         100% { background-position: -200% 50%; }
     }
 
+    /* ========== STREAMING ANIMATION ========== */
+    @keyframes streamFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(2px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .streaming-content {
+        animation: streamFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Prevent animation jitter on frequent updates */
+    .streaming-content * {
+        animation: none !important;
+    }
+
+    .streaming-content.streaming-content {
+        animation: streamFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
     /* ========== PLAN PANEL ========== */
     .plan-panel {
         margin-top: 0.6rem;
@@ -1618,6 +1643,12 @@
     let planResizeHandlerBound = false;
     let lastRawContent = '';
     let lastRenderedHtml = '';
+    let lastRenderedRaw = '';
+    let streamEnabled = false;
+    let streamActive = false;
+    let streamSource = null;
+    let streamBuffer = '';
+    let streamRenderTimer = null;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -2260,13 +2291,16 @@
             await sendHistoryToServer({ uuid: retryUuid, events: trimmedEvents, prompt: promptForRetry });
 
             lastKnownHistory = trimmedEvents;
-            lastRawContent = '';
+            // Don't clear lastRawContent to keep conversation visible
             lastRenderedHtml = '';
+            lastRenderedRaw = '';
             conversationFinished = false;
             autoScrollEnabled = true;
             activeHistoryId = null;
 
-            await updateResultsContent('<p>Retrying last goal...</p>');
+            // Show retrying message but keep previous content visible
+            const retryMessage = '<p style="opacity: 0.7;">Retrying last goal...</p>';
+            await renderRawContent(lastRawContent + retryMessage);
             forceRenderChartBlocks();
             resetPlanPanel();
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -2281,6 +2315,7 @@
 
             await response.json();
             startProcessing();
+            if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
         } catch (error) {
             console.error('Failed to retry conversation:', error);
@@ -2297,11 +2332,48 @@
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
 
         destroyRenderedCharts();
-        
+
         // Post-process to restore any chart blocks that were preprocessed
         const processedHtml = postprocessChartBlocks(htmlContent);
+
+        // Track if content is being streamed
+        const isStreaming = streamActive && !conversationFinished;
+        const contentChanged = processedHtml !== lastRenderedHtml;
+        const hadContent = lastRenderedHtml.length > 0;
+
         lastRenderedHtml = processedHtml;
         resultsDiv.innerHTML = processedHtml;
+
+        // Apply streaming class and animation
+        if (isStreaming) {
+            resultsDiv.classList.add('streaming');
+
+            // Get the last content element (before buttons)
+            const contentElements = Array.from(resultsDiv.children).filter(el =>
+                el.id !== 'scrollToBottomBtn' &&
+                el.id !== 'copyActions' &&
+                !el.classList.contains('preview')
+            );
+
+            if (contentElements.length > 0 && contentChanged && hadContent) {
+                const lastElement = contentElements[contentElements.length - 1];
+
+                // Remove animation class from all elements first
+                resultsDiv.querySelectorAll('.streaming-content').forEach(el => {
+                    el.classList.remove('streaming-content');
+                });
+
+                // Add animation to last element
+                lastElement.classList.add('streaming-content');
+            }
+        } else {
+            resultsDiv.classList.remove('streaming');
+
+            // Clean up animation classes
+            resultsDiv.querySelectorAll('.streaming-content').forEach(el => {
+                el.classList.remove('streaming-content');
+            });
+        }
         
         // Re-add scroll button and copy actions
         const scrollBtnHTML = `
@@ -2389,8 +2461,19 @@
         // Show/hide copy actions based on processing state
         updateCopyActionsVisibility();
 
+        // Re-add preview if still processing (prevents flicker during streaming)
+        if (isProcessing && !conversationFinished) {
+            const existingPreview = document.getElementById(PREVIEW_ID);
+            if (!existingPreview) {
+                const previewEl = document.createElement('div');
+                previewEl.id = PREVIEW_ID;
+                previewEl.className = 'preview';
+                resultsDiv.appendChild(previewEl);
+            }
+        }
+
         bindUserAttachmentPreviews();
-        
+
         // Wait for Mermaid rendering to complete before scrolling
         // This ensures the content height is final
         await renderMermaidDiagrams();
@@ -2408,6 +2491,20 @@
             autoScrollEnabled = true;
             scrollResultsToBottom();
         }
+    }
+
+    async function renderRawContent(rawContent) {
+        const nextContent = rawContent || '';
+        if (nextContent === lastRenderedRaw) return;
+
+        const preprocessed = preprocessChartBlocks(nextContent);
+        const htmlContent = converter.makeHtml(preprocessed);
+        await updateResultsContent(htmlContent);
+        try { hljs.highlightAll(); } catch (e) { /* ignore */ }
+        forceRenderChartBlocks();
+        if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
+        __refreshDarkMode();
+        lastRenderedRaw = nextContent;
     }
 
     function escapeHtml(str) {
@@ -3566,6 +3663,7 @@
     async function configureFeatureAvailability() {
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
+        let shouldEnableStream = false;
 
         try {
             const response = await fetch('/info', {
@@ -3583,12 +3681,16 @@
             if (typeof data.useattach === 'boolean') {
                 shouldEnableAttachments = data.useattach;
             }
+            if (typeof data.usestream === 'boolean') {
+                shouldEnableStream = data.usestream;
+            }
         } catch (error) {
             console.error('Unable to determine feature availability:', error);
         }
 
         applyHistoryAvailability(shouldEnableHistory);
         applyAttachmentAvailability(shouldEnableAttachments);
+        streamEnabled = shouldEnableStream;
 
         if (historyEnabled) {
             refreshHistoryPanel();
@@ -3785,6 +3887,8 @@
             stopProcessing();
         }
 
+        stopStream();
+
         activeHistoryId = entry.id;
         await sendHistoryToServer(entry);
 
@@ -3871,6 +3975,7 @@
                 if (fileInput) fileInput.disabled = true;
                 addPreview();
                 if (!pollingInterval) startPolling();
+                if (streamEnabled) startStream(uuid);
             }
         } catch (error) {
             console.error('Error refreshing conversation view:', error);
@@ -4170,6 +4275,8 @@
             clearInterval(pollingInterval);
             pollingInterval = null;
         }
+
+        stopStream();
         
         if (currentSessionUuid) {
             fetch('/result', {
@@ -4193,6 +4300,36 @@
     }
 
     /* ========== API FUNCTIONS ========== */
+    function formatUserPromptHtml(prompt) {
+        // Format user message similar to server-side __formatUserMessage
+        let text = prompt || '';
+        const attachments = [];
+
+        // Extract and replace attachment blocks
+        text = text.replace(/```attachment\s+([^\n]+)\n([\s\S]*?)```/gm, (_, name, content) => {
+            const cleanName = (name || '').replace(/[\r\n]+/g, ' ').trim();
+            const cleanContent = (content || '').replace(/\r\n/g, '\n');
+            attachments.push({ name: cleanName, content: cleanContent });
+            return '§§ATTACHMENT_' + (attachments.length - 1) + '§§';
+        });
+
+        // Escape HTML and convert newlines to <br>
+        let html = escapeHtml(text).replace(/\n/g, '<br>');
+
+        // Replace attachment placeholders with buttons
+        attachments.forEach((att, idx) => {
+            const placeholder = '§§ATTACHMENT_' + idx + '§§';
+            const safeName = att.name || 'attachment.txt';
+            const safeNameHtml = escapeHtml(safeName);
+            const encoded = btoa(unescape(encodeURIComponent(att.content || '')));
+            const language = safeName.includes('.') ? safeName.split('.').pop() : 'text';
+            const button = `<button class="user-attachment" type="button" data-name="${escapeHtml(safeName)}" data-language="${escapeHtml(language)}" data-content="${escapeHtml(encoded)}">📎 ${safeNameHtml}</button>`;
+            html = html.replace(placeholder, button);
+        });
+
+        return html;
+    }
+
     async function handleSubmit() {
         if (isProcessing) {
             await stopProcessing();
@@ -4210,6 +4347,12 @@
         try {
             if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid();
 
+            // Add user prompt to display immediately
+            const userPromptHtml = formatUserPromptHtml(finalPrompt);
+            const userPromptDiv = `<div style="text-align: right;"><i><div style="display: inline-block; text-align: left;">${userPromptHtml}</div> 👤</i>\n<br><br></div>`;
+            lastRawContent += userPromptDiv;
+            await renderRawContent(lastRawContent);
+
             const response = await fetch('/prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -4219,8 +4362,9 @@
             if (!response.ok) throw new Error('Failed to submit prompt');
 
             await response.json();
-            lastRawContent = '';
+            lastRenderedRaw = '';
             startProcessing();
+            if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
 
         } catch (error) {
@@ -4230,18 +4374,17 @@
         }
     }
 
-    function startPolling() {
-        pollingInterval = setInterval(async () => {
-            try {
-                const response = await fetch('/result', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                    body: JSON.stringify({ uuid: currentSessionUuid })
-                });
+    async function pollOnce() {
+        try {
+            const response = await fetch('/result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                body: JSON.stringify({ uuid: currentSessionUuid })
+            });
 
-                if (!response.ok) throw new Error('Failed to fetch results');
+            if (!response.ok) throw new Error('Failed to fetch results');
 
-                const data = await response.json();
+            const data = await response.json();
 
                 if (Array.isArray(data.history)) {
                     lastKnownHistory = sanitizeHistoryEvents(data.history);
@@ -4257,18 +4400,22 @@
                 // Only update content if it has actually changed to prevent chart flickering
                 const rawContent = data.content || '';
                 if (rawContent !== lastRawContent) {
-                    const preprocessed = preprocessChartBlocks(rawContent);
-                    const htmlContent = converter.makeHtml(preprocessed);
-                    await updateResultsContent(htmlContent);
-                    hljs.highlightAll();
-                    forceRenderChartBlocks();
-                    if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
-                    __refreshDarkMode();
                     lastRawContent = rawContent;
+                    if (streamActive) {
+                        // During streaming, just update lastRawContent
+                        // SSE events will trigger renders using lastRawContent + streamBuffer
+                        // This avoids re-rendering/flickering previous answers
+                    } else {
+                        await renderRawContent(rawContent);
+                    }
                 }
 
                 if (data.status === 'finished') {
                     conversationFinished = true;
+                    streamActive = false;
+                    streamBuffer = '';
+                    stopStream();
+                    await renderRawContent(rawContent);
                     if (currentSessionUuid && historyEnabled !== false) {
                         const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, data);
                         if (savedEntry) {
@@ -4288,13 +4435,91 @@
                     addPreview();
                 }
                 
-            } catch (error) {
-                console.error('Error fetching results:', error);
-                await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
-                forceRenderChartBlocks();
-                stopProcessing();
-            }
-        }, 1500);
+        } catch (error) {
+            console.error('Error fetching results:', error);
+            await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
+            forceRenderChartBlocks();
+            stopProcessing();
+        }
+    }
+
+    function startPolling() {
+        // Poll immediately to get user prompt ASAP
+        pollOnce();
+        // Then poll every 1.5 seconds
+        pollingInterval = setInterval(pollOnce, 1500);
+    }
+
+    function stopStream() {
+        if (streamSource) {
+            try { streamSource.close(); } catch (e) { /* ignore */ }
+            streamSource = null;
+        }
+        streamActive = false;
+        streamBuffer = '';
+        if (streamRenderTimer) {
+            clearTimeout(streamRenderTimer);
+            streamRenderTimer = null;
+        }
+
+        // Clean up streaming animations
+        if (resultsDiv) {
+            resultsDiv.classList.remove('streaming');
+            resultsDiv.querySelectorAll('.streaming-content').forEach(el => {
+                el.classList.remove('streaming-content');
+            });
+        }
+    }
+
+    function scheduleStreamRender() {
+        if (!streamActive) return;
+        if (streamRenderTimer) return;
+        streamRenderTimer = setTimeout(async () => {
+            streamRenderTimer = null;
+            // Use lastRawContent from polling (includes previous conversation + user prompt)
+            // plus streamBuffer (SSE delta tokens) to avoid re-rendering/flickering
+            const combined = lastRawContent + streamBuffer;
+            await renderRawContent(combined);
+        }, 80);
+    }
+
+    function startStream(uuid) {
+        if (!streamEnabled) return;
+        if (!uuid) return;
+        if (typeof EventSource === 'undefined') return;
+
+        stopStream();
+        streamActive = true;
+        streamBuffer = '';
+
+        const streamUrl = '/stream?uuid=' + encodeURIComponent(uuid);
+        streamSource = new EventSource(streamUrl);
+        streamSource.addEventListener('stream', (event) => {
+            if (!event || !event.data) return;
+            let payload = {};
+            try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
+            const chunk = payload.message || '';
+            if (!chunk) return;
+            streamBuffer += chunk;
+            scheduleStreamRender();
+        });
+        streamSource.addEventListener('plan', (event) => {
+            if (!event || !event.data) return;
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload && payload.plan) updatePlanPanel(payload.plan);
+            } catch (e) { /* ignore */ }
+        });
+        streamSource.addEventListener('done', () => {
+            streamActive = false;
+            streamBuffer = '';
+            stopStream();
+        });
+        streamSource.addEventListener('error', (event) => {
+            console.error('SSE error:', event);
+            streamActive = false;
+            stopStream();
+        });
     }
 
     /* ========== PING MANAGEMENT ========== */
@@ -4357,6 +4582,7 @@
         promptInput.value = '';
         clearAttachments();
         lastRawContent = '';
+        lastRenderedRaw = '';
         lastKnownHistory = [];
         lastFinishedPrompt = '';
         lastSubmittedPrompt = '';

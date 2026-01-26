@@ -255,6 +255,7 @@ Optional flags when starting the server:
 - `showexecs=true` to show executed commands in the interaction stream
 - `logpromptheaders=origin,referer` to log selected incoming headers for debugging
 - `usediagrams=false` / `usecharts=false` / `useascii=false` / `usemaps=false` to disable Mermaid, Chart.js, ASCII sketch, or Leaflet map guidance when running headless
+- `usestream=true` to enable real-time token streaming via Server-Sent Events (SSE) for live response display
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
 - `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
@@ -673,6 +674,13 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **Markdown tables**: Preferred format for tabular data with colored cell content for enhanced readability
   - **Progress indicators**: Block characters (█▓▒░), fractions (▏▎▍▌▋▊▉), spinners (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏), and percentage displays with color gradients
 - **`usemaps`** (boolean, default: false): Prime the model to emit ```leaflet``` blocks that describe interactive maps (center coordinates, zoom, markers, layers). The console transcript preserves the fenced JSON, and the web UI auto-renders the configuration with Leaflet tiles, themed popups, and transparent markers.
+- **`usestream`** (boolean, default: false): Enable real-time token streaming where LLM responses are displayed incrementally as they arrive. When enabled:
+  - **Console mode**: Tokens are formatted with markdown and displayed immediately with smooth rendering
+  - **Web UI mode**: Uses Server-Sent Events (SSE) to push tokens to the browser for real-time display
+  - **Intelligent buffering**: Buffers code blocks, tables, and other markdown elements until complete before rendering to prevent visual artifacts
+  - **Escape handling**: Properly processes escape sequences and closing quotes in streamed JSON responses
+  - **Performance**: Reduces perceived latency by showing progress before the full response completes
+  - **Compatibility**: Not compatible with `showthinking=true` mode (falls back to non-streaming)
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
@@ -893,6 +901,48 @@ agent.start({
 ## Advanced Features
 
 Mini-A includes several advanced capabilities to optimize performance and resource usage when working with MCP tools and large-scale operations.
+
+### Real-Time Token Streaming
+
+Enable `usestream=true` to display LLM responses as they are generated, providing immediate feedback and reducing perceived latency.
+
+**How it works:**
+- Tokens are streamed from the LLM as they arrive
+- Markdown elements are buffered intelligently to prevent visual artifacts
+- Code blocks and tables are displayed only when complete
+- Escape sequences in JSON responses are properly handled
+
+**Console mode:**
+```bash
+mini-a goal="explain quantum computing" usestream=true
+```
+
+Tokens appear incrementally with markdown formatting applied in real-time.
+
+**Web UI mode:**
+```bash
+./mini-a-web.sh onport=8888 usestream=true
+```
+
+The browser receives tokens via Server-Sent Events (SSE) and renders them progressively with debounced updates (80ms) for smooth display.
+
+**Benefits:**
+- Immediate visual feedback shows the agent is working
+- Faster perceived response time for long answers
+- Better user experience during complex reasoning
+- Reduced waiting time before seeing results
+
+**Limitations:**
+- Not compatible with `showthinking=true` mode
+- Falls back to non-streaming for raw prompt methods
+- Requires model support for streaming APIs
+
+**Technical details:**
+- Uses `promptStreamWithStats` and `promptStreamJSONWithStats` methods
+- Implements markdown-aware buffering for code blocks (``` delimiters) and tables (lines starting with |)
+- Detects and properly handles escape sequences (\n, \t, \", \\) in streamed JSON
+- Adds initial newline before first output for clean formatting
+- Flushes remaining buffers when streaming completes
 
 ### Parallel Tool Execution
 
@@ -1406,6 +1456,53 @@ When using dual-model configuration, you'll see clear indicators of which model 
 ⚠️  Low-cost model produced invalid JSON, retrying with main model...
 ```
 
+### 8. Real-Time Streaming Examples
+
+#### Console Streaming
+
+```javascript
+var agent = new MiniA()
+var result = agent.start({
+    goal: "Explain the theory of relativity in simple terms",
+    usestream: true,
+    maxsteps: 10
+})
+// Tokens will be displayed progressively as they arrive
+```
+
+```bash
+# Command-line usage
+mini-a goal="write a detailed project analysis" usestream=true useshell=true
+```
+
+#### Web UI Streaming
+
+```bash
+# Start web server with streaming enabled
+./mini-a-web.sh onport=8888 usestream=true
+
+# Or using Docker
+docker run -d --rm \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/mini-a onport=12345 usestream=true
+```
+
+**What happens:**
+- Console: Tokens appear with markdown formatting applied in real-time
+- Web UI: Uses Server-Sent Events (SSE) for progressive display with debounced rendering
+- Code blocks and tables buffer until complete for clean rendering
+- No duplicate output (streaming content suppresses final answer echo)
+
+**Benefits:**
+- Immediate feedback showing the agent is working
+- Reduced perceived latency for long responses
+- Better user experience during complex reasoning
+
+**Compatibility:**
+- Not compatible with `showthinking=true` (falls back to non-streaming)
+- Requires model support for streaming APIs
+
 ## Event Handling
 
 Mini-A provides events during execution that you can handle with a custom interaction function:
@@ -1430,6 +1527,7 @@ agent.start({
 - **`shell`**: Shell command execution
 - **`think`**: Agent thinking/reasoning
 - **`final`**: Final answer provided
+- **`stream`**: Real-time token streaming output (when `usestream=true`)
 - **`input`**: Input to LLM
 - **`output`**: Output from LLM
 - **`thought`**: Agent's thought process

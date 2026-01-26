@@ -109,6 +109,14 @@ docker run -d --rm \
   openaf/mini-a onport=12345
 ```
 
+**Web interface with streaming:**
+```bash
+docker run -d --rm \
+  -e OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000)" \
+  -p 12345:12345 \
+  openaf/mini-a onport=12345 usestream=true
+```
+
 **Goal execution:**
 ```bash
 docker run --rm \
@@ -180,6 +188,11 @@ This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even 
 mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
 ```
 
+**Real-time streaming:**
+```bash
+mini-a goal="explain the history of computing" usestream=true
+```
+
 ## Installation
 
 1. Install OpenAF from [openaf.io](https://openaf.io)
@@ -249,6 +262,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Multi-Model Support** - Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
 - **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md))
+- **Real-Time Streaming** - Display LLM tokens as they arrive with markdown-aware buffering for smooth rendering (`usestream=true`)
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
   - **Dynamic Tool Selection** - Intelligent filtering of MCP tools using stemming, synonyms, n-grams, and fuzzy matching (`mcpdynamic=true`)
   - **Tool Caching** - Smart caching for deterministic and read-only tools to avoid redundant operations
@@ -320,6 +334,7 @@ Mini-A ships with complementary components:
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
+| `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |

@@ -165,6 +165,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usestream
+    desc     : Enable streaming output - display LLM tokens as they arrive in real-time
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : mcpdynamic
     desc     : Enable dynamic tool selection instead of registering all MCP tools (analyzes goal to select relevant tools)
     example  : "false"
@@ -356,6 +361,7 @@ jobs:
         usecharts      : usecharts
         useascii       : useascii
         usemaps        : usemaps
+        usestream      : usestream
         mcpdynamic     : mcpdynamic
         mcplazy        : mcplazy
         useplanning    : useplanning
@@ -413,6 +419,7 @@ jobs:
       usemermaid     : toBoolean.isBoolean.default(false)
       usecharts      : toBoolean.isBoolean.default(false)
       useascii       : toBoolean.isBoolean.default(false)
+      usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcplazy        : toBoolean.isBoolean.default(false)
       useplanning    : toBoolean.isBoolean.default(false)
