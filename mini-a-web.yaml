@@ -1170,12 +1170,13 @@ jobs:
 
     // Clean up stale SSE queues (prevent memory leaks from abrupt disconnections)
     var sseTimeoutMs = args.ssequeuetimeout * 1000
+    var sseNow = Date.now()
     var sseToDelete = []
     for (var uuid in global.__sseQueues) {
       var queue = global.__sseQueues[uuid]
       // Remove queues that are closed or haven't been updated within the timeout period
       // Also remove queues with no timestamp (defensive - shouldn't happen in normal flow)
-      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (Date.now() - queue.updated > sseTimeoutMs))) {
+      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (sseNow - queue.updated > sseTimeoutMs))) {
         sseToDelete.push(uuid)
       }
     }
