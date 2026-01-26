@@ -1064,6 +1064,10 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     var tableBuffer = ""        // Buffer table rows until complete
     var tableHeaderSeen = false // Track if table header separator was seen
     var firstOutput = true      // Track if first output (for initial newline)
+    
+    // Regex to match valid markdown table separator lines (e.g., | --- | :---: | ---: |)
+    // Requires: starting |, one or more columns with dashes (optional alignment colons), ending |
+    var TABLE_SEPARATOR_REGEX = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
 
     // Decode a character considering escape sequences
     function decodeChar(ch) {
@@ -1136,8 +1140,8 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
 
             // Check for table row (starts with |)
             if (trimmedLine.indexOf("|") === 0) {
-                // Check if this is a table header separator line (contains dashes and pipes)
-                var isSeparator = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/.test(trimmedLine)
+                // Check if this is a table header separator line
+                var isSeparator = TABLE_SEPARATOR_REGEX.test(trimmedLine)
                 
                 if (!inTable) {
                     // Starting potential table
@@ -1181,14 +1185,8 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
 
             // If we were in a table and hit a non-table line
             if (inTable) {
-                if (tableHeaderSeen) {
-                    // Valid table ends - flush it
-                    flushContent(tableBuffer)
-                } else {
-                    // We buffered a potential header but never saw separator
-                    // Not a valid table - flush as regular content
-                    flushContent(tableBuffer)
-                }
+                // Flush buffered content (valid table or non-table lines with |)
+                flushContent(tableBuffer)
                 tableBuffer = ""
                 inTable = false
                 tableHeaderSeen = false
