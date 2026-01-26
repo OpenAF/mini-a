@@ -659,7 +659,7 @@ todo:
       try { 
         writer.write("error", { message: String(e) }) 
       } catch(writeErr) {
-        log("Failed to write error response for SSE " + uuid + ": " + writeErr)
+        log("Failed to write error response for SSE" + (isDef(uuid) ? " " + uuid : "") + ": " + writeErr)
       }
     } finally {
       // Clean up on exit (normal or error); periodic job handles edge cases
@@ -1142,6 +1142,7 @@ jobs:
     interval: 300000  # every 5 minutes
   args :
     historyretention: toNumber().isNumber().default(600)  # 10 minutes
+    ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
   exec : | #js
     var toDelete = []
     for (var uuid in global.__lastActivity) {
@@ -1167,11 +1168,12 @@ jobs:
     }
 
     // Clean up stale SSE queues (prevent memory leaks from abrupt disconnections)
+    var sseTimeoutMs = args.ssequeuetimeout * 1000
     var sseToDelete = []
     for (var uuid in global.__sseQueues) {
       var queue = global.__sseQueues[uuid]
-      // Remove queues that are closed or haven't been updated in the last 2 minutes
-      if (isDef(queue) && (queue.closed || (Date.now() - queue.updated > 120000))) {
+      // Remove queues that are closed or haven't been updated within the timeout period
+      if (isDef(queue) && (queue.closed || (Date.now() - queue.updated > sseTimeoutMs))) {
         sseToDelete.push(uuid)
       }
     }
