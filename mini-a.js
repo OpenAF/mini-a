@@ -1108,17 +1108,23 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
             // Check for code block start/end
             if (trimmedLine.indexOf("```") === 0) {
                 if (!inCodeBlock) {
-                    // Starting a code block - buffer it
+                    // Starting a code block - buffer it (may include language specifier)
                     inCodeBlock = true
                     codeBlockBuffer = line + "\n"
-                } else {
+                    continue
+                }
+
+                // We are inside a code block already. Only treat a bare ``` as the closing fence.
+                if (trimmedLine === "```") {
                     // Ending a code block - flush entire block
                     codeBlockBuffer += line + "\n"
                     flushContent(codeBlockBuffer)
                     codeBlockBuffer = ""
                     inCodeBlock = false
+                    continue
                 }
-                continue
+                // Lines starting with ``` but not exactly ``` inside a code block
+                // are treated as normal content.
             }
 
             // If inside code block, buffer the line
