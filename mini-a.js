@@ -1062,7 +1062,12 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     var inTable = false         // Track if inside a table
     var codeBlockBuffer = ""    // Buffer code blocks until complete
     var tableBuffer = ""        // Buffer table rows until complete
+    var tableHeaderSeen = false // Track if table header separator was seen
     var firstOutput = true      // Track if first output (for initial newline)
+    
+    // Regex to match valid markdown table separator lines (e.g., | --- | :---: | ---: |)
+    // Requires: starting |, one or more columns with dashes (optional alignment colons), ending |
+    var TABLE_SEPARATOR_REGEX = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
 
     // Decode a character considering escape sequences
     function decodeChar(ch) {
@@ -1135,19 +1140,56 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
 
             // Check for table row (starts with |)
             if (trimmedLine.indexOf("|") === 0) {
+                // Check if this is a table header separator line
+                var isSeparator = TABLE_SEPARATOR_REGEX.test(trimmedLine)
+                
                 if (!inTable) {
+                    // Starting potential table
+                    if (isSeparator) {
+                        // This is a separator without a header - not a valid table
+                        // Output immediately as regular content
+                        flushContent(line + "\n")
+                        continue
+                    }
+                    // Buffer first line - might be table header
                     inTable = true
-                    tableBuffer = ""
+                    tableBuffer = line + "\n"
+                    tableHeaderSeen = false
+                    continue
                 }
+                
+                // Already in table - check if this is the separator
+                if (!tableHeaderSeen) {
+                    if (isSeparator) {
+                        // Found the separator - now we know it's a valid table
+                        tableHeaderSeen = true
+                        tableBuffer += line + "\n"
+                        continue
+                    } else {
+                        // Second line is not a separator - not a valid table
+                        // Flush the buffered header as regular content
+                        flushContent(tableBuffer)
+                        // And flush current line
+                        flushContent(line + "\n")
+                        tableBuffer = ""
+                        inTable = false
+                        tableHeaderSeen = false
+                        continue
+                    }
+                }
+                
+                // tableHeaderSeen is true - valid table continues
                 tableBuffer += line + "\n"
                 continue
             }
 
-            // If we were in a table and hit a non-table line, flush table
+            // If we were in a table and hit a non-table line
             if (inTable) {
+                // Flush buffered content (valid table or non-table lines with |)
                 flushContent(tableBuffer)
                 tableBuffer = ""
                 inTable = false
+                tableHeaderSeen = false
             }
 
             // Normal line - output immediately
