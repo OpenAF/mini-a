@@ -1173,7 +1173,7 @@ jobs:
     for (var uuid in global.__sseQueues) {
       var queue = global.__sseQueues[uuid]
       // Remove queues that are closed or haven't been updated within the timeout period
-      if (isDef(queue) && (queue.closed || (Date.now() - queue.updated > sseTimeoutMs))) {
+      if (isDef(queue) && (queue.closed || (isDef(queue.updated) && Date.now() - queue.updated > sseTimeoutMs))) {
         sseToDelete.push(uuid)
       }
     }
