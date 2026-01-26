@@ -664,7 +664,9 @@ todo:
     } finally {
       // Clean up on exit (normal or error); periodic job handles edge cases
       if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
-        // Always delete if closed, or if loop completed normally
+        // Queue.closed is true in two cases:
+        // 1. Normal completion: _mini_a_web_sseClose() sets closed=true, loop exits
+        // 2. Error/disconnect: catch block sets closed=true
         if (global.__sseQueues[uuid].closed) {
           delete global.__sseQueues[uuid]
         }
@@ -1169,7 +1171,7 @@ jobs:
     for (var uuid in global.__sseQueues) {
       var queue = global.__sseQueues[uuid]
       // Remove queues that are closed or haven't been updated in the last 2 minutes
-      if (isDef(queue) && (queue.closed || (now() - queue.updated > 120000))) {
+      if (isDef(queue) && (queue.closed || (Date.now() - queue.updated > 120000))) {
         sseToDelete.push(uuid)
       }
     }
