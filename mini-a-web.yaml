@@ -621,8 +621,9 @@ todo:
 - (httpdSSE       ): "${onport:-8888}"
   ((uri          )): /stream
   ((execSSE      )): | #js
+    var uuid = __
     try {
-      var uuid = isDef(request.params) ? request.params.uuid : __
+      uuid = isDef(request.params) ? request.params.uuid : __
       if (isUnDef(uuid) || String(uuid).length == 0) {
         writer.write("error", { message: "uuid is required" })
         return
@@ -649,9 +650,28 @@ todo:
         }
         sleep(100)
       }
-      if (isDef(global.__sseQueues[uuid])) delete global.__sseQueues[uuid]
     } catch(e) {
-      writer.write("error", { message: String(e) })
+      // Mark queue as closed on error (e.g., client disconnect)
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+        global.__sseQueues[uuid].closed = true
+        global.__sseQueues[uuid].updated = Date.now()
+      }
+      try { 
+        writer.write("error", { message: String(e) }) 
+      } catch(writeErr) {
+        // Log both the original error and the write failure for complete context
+        log("SSE error" + (isDef(uuid) ? " for " + uuid : "") + ": " + e + " | Failed to write error response: " + writeErr)
+      }
+    } finally {
+      // Clean up on exit (normal or error); periodic job handles edge cases
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+        // Queue.closed is true in two cases:
+        // 1. Normal completion: _mini_a_web_sseClose() sets closed=true, loop exits
+        // 2. Error/disconnect: catch block sets closed=true
+        if (global.__sseQueues[uuid].closed) {
+          delete global.__sseQueues[uuid]
+        }
+      }
     }
 
 # Convert markdown to static HTML
@@ -1123,6 +1143,7 @@ jobs:
     interval: 300000  # every 5 minutes
   args :
     historyretention: toNumber().isNumber().default(600)  # 10 minutes
+    ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
   exec : | #js
     var toDelete = []
     for (var uuid in global.__lastActivity) {
@@ -1145,6 +1166,24 @@ jobs:
         }
       }
       log("Cleaned up session " + uuid)
+    }
+
+    // Clean up stale SSE queues (prevent memory leaks from abrupt disconnections)
+    var sseTimeoutMs = args.ssequeuetimeout * 1000
+    var sseNow = Date.now()
+    var sseToDelete = []
+    for (var uuid in global.__sseQueues) {
+      var queue = global.__sseQueues[uuid]
+      // Remove queues that are closed or haven't been updated within the timeout period
+      // Also remove queues with no timestamp (defensive - shouldn't happen in normal flow)
+      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (sseNow - queue.updated > sseTimeoutMs))) {
+        sseToDelete.push(uuid)
+      }
+    }
+    for (var i = 0; i < sseToDelete.length; i++) {
+      var uuid = sseToDelete[i]
+      delete global.__sseQueues[uuid]
+      log("Cleaned up SSE queue " + uuid)
     }
 
 # ---------------------------------------
