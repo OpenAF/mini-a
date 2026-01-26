@@ -97,6 +97,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | Bedrock    | ministral-3-8b          | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: mistral.ministral-3-8b-instruct, temperature: 0), timeout: 900000)"``` |
 | Bedrock    | nova-2-lite             | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.amazon.nova-2-lite-v1:0', temperature: 0), timeout: 900000)"``` |
 | Bedrock    | nova-pro-v1             | ```export OAF_MODEL="(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))" ``` |
+| Bedrock    | gpt-oss-120b | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'openai.gpt-oss-120b-1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
 | Bedrock    | opus-4.5                | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-opus-4-5-20251101-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
 | Cerebras   | gpt-oss-120b            | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.cerebras.ai', model: gpt-oss-120b, timeout: 900000, temperature: 0, noSystem: false)``` |
 | Cerebras   | zai-glm-4.7             | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.cerebras.ai', model: zai-glm-4.7, timeout: 900000, temperature: 0, noSystem: false)``` |
