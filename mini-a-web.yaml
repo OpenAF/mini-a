@@ -656,11 +656,18 @@ todo:
         global.__sseQueues[uuid].closed = true
         global.__sseQueues[uuid].updated = Date.now()
       }
-      try { writer.write("error", { message: String(e) }) } catch(writeErr) {}
+      try { 
+        writer.write("error", { message: String(e) }) 
+      } catch(writeErr) {
+        log("Failed to write error response for SSE " + uuid + ": " + writeErr)
+      }
     } finally {
-      // Clean up on normal exit; periodic job handles abrupt disconnections
-      if (isDef(uuid) && isDef(global.__sseQueues[uuid]) && global.__sseQueues[uuid].closed) {
-        delete global.__sseQueues[uuid]
+      // Clean up on exit (normal or error); periodic job handles edge cases
+      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+        // Always delete if closed, or if loop completed normally
+        if (global.__sseQueues[uuid].closed) {
+          delete global.__sseQueues[uuid]
+        }
       }
     }
 
