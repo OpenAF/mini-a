@@ -237,6 +237,9 @@
             if (typeof reRenderMermaidDiagrams === 'function') {
                 reRenderMermaidDiagrams().catch(err => console.error('Failed to re-render mermaid diagrams:', err));
             }
+            if (typeof reRenderPlotlyCharts === 'function') {
+                reRenderPlotlyCharts().catch(err => console.error('Failed to re-render Plotly charts:', err));
+            }
         } else {
             // Apply light mode styles
             document.body.classList.remove('markdown-body-dark', 'hljs_dark', 'njsmap_dark');
@@ -311,6 +314,9 @@
             if (typeof reRenderMermaidDiagrams === 'function') {
                 reRenderMermaidDiagrams().catch(err => console.error('Failed to re-render mermaid diagrams:', err));
             }
+            if (typeof reRenderPlotlyCharts === 'function') {
+                reRenderPlotlyCharts().catch(err => console.error('Failed to re-render Plotly charts:', err));
+            }
         }
     }
 </script>
@@ -361,6 +367,20 @@
         display: block;
         width: 100%;
         height: auto !important;
+    }
+
+    .plotly-chart {
+        margin: 1.5rem auto;
+        padding: 1rem;
+        border-radius: 0.6rem;
+        background: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        max-width: 100%;
+    }
+
+    body.markdown-body-dark .plotly-chart {
+        background: #0f1115;
+        border: 1px solid #242629;
     }
 
     /* ========== LEAFLET MAPS ========== */
@@ -1562,6 +1582,8 @@
         properties: 'ini', gradle: 'groovy', dockerfile: 'dockerfile', makefile: 'makefile', cmake: 'cmake', r: 'r', lua: 'lua', swift: 'swift', scala: 'scala'
     };
     const PLAN_DONE_STATUSES = new Set(['done', 'complete', 'completed', 'finished', 'success']);
+    const SETTINGS_ENDPOINT = '/settings';
+    const PLOTLY_CDN = 'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.30.0/plotly.min.js';
 
     /* ========== CHART PREPROCESSING ========== */
     let chartBlockStore = [];
@@ -1649,6 +1671,11 @@
     let streamSource = null;
     let streamBuffer = '';
     let streamRenderTimer = null;
+    let miniASettings = { useplotly: false };
+    let miniASettingsLoaded = false;
+    let miniASettingsPromise = null;
+    let plotlyLoadPromise = null;
+    let plotlyResizeHandlerBound = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -1733,6 +1760,64 @@
         }
     }
 
+    function loadExternalScript(url) {
+        return new Promise((resolve, reject) => {
+            if (typeof document === 'undefined') {
+                reject(new Error('Document is unavailable for script loading.'));
+                return;
+            }
+            const script = document.createElement('script');
+            script.src = url;
+            script.async = false;
+            script.onload = () => resolve(url);
+            script.onerror = () => reject(new Error('Failed to load ' + url));
+            document.head.appendChild(script);
+        });
+    }
+
+    async function loadMiniASettings() {
+        if (miniASettingsLoaded) return miniASettings;
+        if (miniASettingsPromise) return miniASettingsPromise;
+
+        miniASettingsPromise = fetch(SETTINGS_ENDPOINT, { method: 'GET' })
+            .then(response => response.ok ? response.json() : {})
+            .then(data => {
+                if (data && typeof data === 'object') {
+                    miniASettings = Object.assign({}, miniASettings, data);
+                }
+                miniASettingsLoaded = true;
+                return miniASettings;
+            })
+            .catch(error => {
+                console.warn('Failed to load UI settings:', error);
+                miniASettingsLoaded = true;
+                return miniASettings;
+            });
+
+        return miniASettingsPromise;
+    }
+
+    async function ensurePlotlyReady() {
+        const settings = await loadMiniASettings();
+        if (!settings || settings.useplotly !== true) return false;
+        if (typeof window !== 'undefined' && window.Plotly) return true;
+        if (!plotlyLoadPromise) {
+            plotlyLoadPromise = loadExternalScript(PLOTLY_CDN)
+                .then(() => {
+                    if (typeof window !== 'undefined') {
+                        window.PlotlyLoaded = true;
+                        try { document.dispatchEvent(new CustomEvent('plotly:ready')); } catch (_) {}
+                    }
+                    return true;
+                })
+                .catch(error => {
+                    console.error('Plotly.js failed to load:', error);
+                    return false;
+                });
+        }
+        return plotlyLoadPromise;
+    }
+
     function destroyRenderedCharts() {
         if (!resultsDiv) return;
         const containers = resultsDiv.querySelectorAll('.chartjs-chart');
@@ -1749,6 +1834,21 @@
             }
             if (container.__chartCanvasPrefs) {
                 delete container.__chartCanvasPrefs;
+            }
+        });
+    }
+
+    function destroyRenderedPlotly() {
+        if (!resultsDiv || typeof window === 'undefined' || typeof window.Plotly === 'undefined') return;
+        const containers = resultsDiv.querySelectorAll('.plotly-chart');
+        containers.forEach(container => {
+            try {
+                window.Plotly.purge(container);
+            } catch (error) {
+                console.error('Failed to purge Plotly instance:', error);
+            }
+            if (container.__plotlyConfig) {
+                delete container.__plotlyConfig;
             }
         });
     }
@@ -2332,6 +2432,7 @@
         const wasScrollBtnVisible = (currentScrollBtn && currentScrollBtn.classList.contains('show')) || !autoScrollEnabled;
 
         destroyRenderedCharts();
+        destroyRenderedPlotly();
 
         // Post-process to restore any chart blocks that were preprocessed
         const processedHtml = postprocessChartBlocks(htmlContent);
@@ -2478,6 +2579,7 @@
         // This ensures the content height is final
         await renderMermaidDiagrams();
         await renderChartBlocks();
+        await renderPlotlyBlocks();
         renderLeafletMaps();
 
         // Initialize table sorters for any tables in the new content
@@ -2502,6 +2604,7 @@
         await updateResultsContent(htmlContent);
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
+        forceRenderPlotlyBlocks();
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         lastRenderedRaw = nextContent;
@@ -3423,6 +3526,113 @@
         });
     }
 
+    function tryParsePlotlyConfig(raw) {
+        if (!raw) return null;
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+        try {
+            return JSON.parse(trimmed);
+        } catch (error) {
+            console.warn('Plotly block is not valid JSON:', error);
+            return null;
+        }
+    }
+
+    function applyPlotlyTheme(config, isDark) {
+        if (!config || typeof config !== 'object') return config;
+        config.layout = config.layout || {};
+        const layout = config.layout;
+        if (typeof layout.paper_bgcolor === 'undefined') {
+            layout.paper_bgcolor = isDark ? '#0f1115' : '#f8f9fa';
+        }
+        if (typeof layout.plot_bgcolor === 'undefined') {
+            layout.plot_bgcolor = isDark ? '#0f1115' : '#f8f9fa';
+        }
+        layout.font = layout.font || {};
+        if (!layout.font.color) {
+            layout.font.color = isDark ? '#e6e6e6' : '#1b1d25';
+        }
+        return config;
+    }
+
+    function resizePlotlyCharts() {
+        if (typeof window === 'undefined' || typeof window.Plotly === 'undefined') return;
+        const containers = document.querySelectorAll('.plotly-chart');
+        containers.forEach(container => {
+            try {
+                if (window.Plotly.Plots && typeof window.Plotly.Plots.resize === 'function') {
+                    window.Plotly.Plots.resize(container);
+                }
+            } catch (error) {
+                console.error('Failed to resize Plotly chart:', error);
+            }
+        });
+    }
+
+    async function renderPlotlyBlocks() {
+        if (!resultsDiv) return;
+        const blocks = Array.from(resultsDiv.querySelectorAll('pre code.language-plotly, pre code.plotly'));
+        if (blocks.length === 0) return;
+
+        const ready = await ensurePlotlyReady();
+        if (!ready || typeof window.Plotly === 'undefined') return;
+
+        if (!plotlyResizeHandlerBound && typeof window !== 'undefined') {
+            window.addEventListener('resize', resizePlotlyCharts);
+            plotlyResizeHandlerBound = true;
+        }
+
+        const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+
+        blocks.forEach(block => {
+            const pre = block.parentElement;
+            if (!pre) return;
+
+            const raw = (block.textContent || '').trim();
+            if (!raw) return;
+
+            const parsed = tryParsePlotlyConfig(raw);
+            if (!parsed || !Array.isArray(parsed.data)) {
+                console.warn('Skipping Plotly block - missing "data" array.');
+                return;
+            }
+
+            const themed = applyPlotlyTheme(parsed, isDark);
+            themed.config = themed.config && typeof themed.config === 'object' ? themed.config : {};
+            if (typeof themed.config.responsive === 'undefined') themed.config.responsive = true;
+
+            const container = document.createElement('div');
+            container.className = 'plotly-chart';
+            container.setAttribute('data-plotly-source', raw);
+            container.__plotlyConfig = themed;
+
+            const title = themed.layout && (typeof themed.layout.title === 'string' ? themed.layout.title : themed.layout.title && themed.layout.title.text);
+            if (title) {
+                container.setAttribute('aria-label', title);
+            } else {
+                container.setAttribute('aria-label', 'plotly chart');
+            }
+            container.setAttribute('role', 'img');
+
+            if (pre.parentElement) {
+                pre.parentElement.insertBefore(container, pre);
+            } else {
+                pre.replaceWith(container);
+            }
+
+            try {
+                window.Plotly.newPlot(container, themed.data, themed.layout || {}, themed.config || {});
+                if (Array.isArray(themed.frames) && themed.frames.length > 0 && typeof window.Plotly.addFrames === 'function') {
+                    window.Plotly.addFrames(container, themed.frames);
+                }
+                pre.remove();
+            } catch (error) {
+                console.error('Failed to render Plotly block:', error);
+                container.remove();
+            }
+        });
+    }
+
     /**
      * Attempts to force re-rendering of all Chart.js blocks.
      * 
@@ -3440,6 +3650,27 @@
             } catch (error) {
                 console.error('Failed to force Chart.js rendering:', error);
             }
+            if (typeof renderPlotlyBlocks === 'function') {
+                renderPlotlyBlocks().catch(error => {
+                    console.error('Failed to force Plotly rendering:', error);
+                });
+            }
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(triggerRender);
+        } else {
+            setTimeout(triggerRender, 0);
+        }
+    }
+
+    function forceRenderPlotlyBlocks() {
+        if (typeof renderPlotlyBlocks !== 'function') return;
+
+        const triggerRender = () => {
+            renderPlotlyBlocks().catch(error => {
+                console.error('Failed to force Plotly rendering:', error);
+            });
         };
 
         if (typeof requestAnimationFrame === 'function') {
@@ -3453,6 +3684,12 @@
     try {
         document.addEventListener('chartjs:ready', () => {
             try { forceRenderChartBlocks(); } catch (e) { console.error(e); }
+        });
+    } catch (_) {}
+
+    try {
+        document.addEventListener('plotly:ready', () => {
+            try { forceRenderPlotlyBlocks(); } catch (e) { console.error(e); }
         });
     } catch (_) {}
 
@@ -3490,6 +3727,34 @@
             code.textContent = container.getAttribute('data-mermaid-source') || '';
             pre.appendChild(code);
             container.replaceWith(pre);
+        });
+    }
+
+    async function reRenderPlotlyCharts() {
+        if (typeof window === 'undefined' || typeof window.Plotly === 'undefined') return;
+        const containers = document.querySelectorAll('.plotly-chart[data-plotly-source]');
+        if (containers.length === 0) return;
+        const ready = await ensurePlotlyReady();
+        if (!ready) return;
+
+        const isDark = document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark);
+        containers.forEach(container => {
+            const raw = container.getAttribute('data-plotly-source');
+            if (!raw) return;
+            const parsed = tryParsePlotlyConfig(raw);
+            if (!parsed || !Array.isArray(parsed.data)) return;
+            const themed = applyPlotlyTheme(parsed, isDark);
+            themed.config = themed.config && typeof themed.config === 'object' ? themed.config : {};
+            if (typeof themed.config.responsive === 'undefined') themed.config.responsive = true;
+
+            try {
+                window.Plotly.react(container, themed.data, themed.layout || {}, themed.config || {});
+                if (Array.isArray(themed.frames) && themed.frames.length > 0 && typeof window.Plotly.addFrames === 'function') {
+                    window.Plotly.addFrames(container, themed.frames);
+                }
+            } catch (error) {
+                console.error('Failed to re-render Plotly chart:', error);
+            }
         });
     }
 

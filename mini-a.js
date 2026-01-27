@@ -591,20 +591,22 @@ MiniA.buildVisualKnowledge = function(options) {
   options = _$(options, "options").isMap().default({})
   var useDiagrams = _$(toBoolean(options.useDiagrams), "options.useDiagrams").isBoolean().default(false)
   var useCharts = _$(toBoolean(options.useCharts), "options.useCharts").isBoolean().default(false)
+  var usePlotly = _$(toBoolean(options.usePlotly), "options.usePlotly").isBoolean().default(false)
   var useAscii = _$(toBoolean(options.useAscii), "options.useAscii").isBoolean().default(false)
   var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
 
-  if (!useDiagrams && !useCharts && !useAscii && !useMaps) return ""
+  if (!useDiagrams && !useCharts && !usePlotly && !useAscii && !useMaps) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
   // Check if visual guidance already exists AND matches current flags
   if (existingKnowledge.indexOf("Visual output guidance (concise):") >= 0) {
     var hasDiagrams = existingKnowledge.indexOf("Diagrams:") >= 0
     var hasCharts = existingKnowledge.indexOf("Charts (strict format):") >= 0
+    var hasPlotly = existingKnowledge.indexOf("Plotly charts (strict format):") >= 0
     var hasAscii = existingKnowledge.indexOf("ASCII/UTF-8 visuals") >= 0
     var hasMaps = existingKnowledge.indexOf("Interactive Maps:") >= 0
     // Only return early if existing guidance matches current flags
-    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps) {
+    if (useDiagrams === hasDiagrams && useCharts === hasCharts && usePlotly === hasPlotly && useAscii === hasAscii && useMaps === hasMaps) {
       return ""
     }
   }
@@ -615,7 +617,7 @@ MiniA.buildVisualKnowledge = function(options) {
     "Visual output guidance (concise):\n\n" +
     "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
     "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
-    "- In your explanatory text and captions, refer only to the visual type (e.g., 'diagram', 'chart', 'table', 'map') without mentioning the technical implementation (Mermaid, Chart.js, Leaflet, ANSI codes, etc.)."
+    "- In your explanatory text and captions, refer only to the visual type (e.g., 'diagram', 'chart', 'table', 'map') without mentioning the technical implementation (Mermaid, Chart.js, Plotly, Leaflet, ANSI codes, etc.)."
   )
 
   if (useDiagrams) {
@@ -675,6 +677,22 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - chartjs-chart-sunburst (type: 'sunburst')\n" +
       "\n" +
       "CRITICAL RULE: Only use chart types listed above. If uncertain about a type, default to bar or line.\n"
+    )
+  }
+
+  if (usePlotly) {
+    visualParts.push(
+      "Plotly charts (strict format):\n" +
+      "  - Wrap a SINGLE JSON object inside ```plotly``` fences.\n" +
+      "  - Required keys: `data` (array of traces). Optional: `layout`, `config`, `frames`.\n" +
+      "  - Provide valid JSON only (double-quoted keys/strings). Never include functions, references, or code.\n" +
+      "  - Keep data inline and deterministic (no external fetches).\n" +
+      "  - Use explicit trace types and arrays for x/y values.\n" +
+      "  - Example skeleton:\n" +
+      "    ```plotly\n" +
+      "    {\"data\": [{\"type\": \"bar\", \"x\": [\"A\",\"B\"], \"y\": [10, 20]}], \"layout\": {\"title\": \"Example\"}}\n" +
+      "    ```\n" +
+      "  - Common trace types (Plotly 2.x): bar, scatter, line, pie, histogram, box, violin, heatmap, area, bubble (scatter with marker.size).\n"
     )
   }
 
@@ -755,6 +773,10 @@ MiniA.buildVisualKnowledge = function(options) {
     checklist += "\n" + nextIndex + ". Comparisons or trends -> bar or line chart."
     nextIndex++
     checklist += "\n" + nextIndex + ". Composition or ratios -> pie or doughnut chart."
+    nextIndex++
+  }
+  if (usePlotly) {
+    checklist += "\n" + nextIndex + ". Interactive or multi-series visuals -> Plotly chart."
     nextIndex++
   }
   if (useAscii) {
@@ -4558,7 +4580,7 @@ MiniA.prototype._handleSimplePlanUpdate = function(plan) {
 MiniA.prototype._cleanCodeBlocks = function(text) {
     if (!isString(text)) return text
     var trimmed = String(text).trim()
-    const isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet");
+    const isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet") || trimmed.startsWith("```plotly");
     if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
         return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
     }
@@ -4990,8 +5012,8 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (codeBlockMatch) {
       var lang = (codeBlockMatch[1] || "").toLowerCase()
       var body = codeBlockMatch[2]
-      // Preserve fences for visual languages like chart/chartjs, mermaid, and leaflet so the UI can render them
-      if (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet") {
+      // Preserve fences for visual languages like chart/chartjs, mermaid, leaflet, and plotly so the UI can render them
+      if (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet" || lang === "plotly") {
         // keep original fenced block
         answer = trimmed
       } else {
@@ -7712,6 +7734,7 @@ MiniA.prototype.init = function(args) {
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
+    args.useplotly = _$(toBoolean(args.useplotly), "args.useplotly").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
@@ -7744,6 +7767,7 @@ MiniA.prototype.init = function(args) {
     var visualKnowledge = MiniA.buildVisualKnowledge({
       useDiagrams: args.usediagrams,
       useCharts: args.usecharts,
+      usePlotly: args.useplotly,
       useAscii: args.useascii,
       useMaps: args.usemaps,
       existingKnowledge: baseKnowledge

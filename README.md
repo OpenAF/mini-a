@@ -283,6 +283,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **Enhanced Visual Output** - UTF-8 box-drawing characters, ANSI color codes, and emoji for rich terminal displays (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
+- **Plotly Charts** - Prompt the agent to emit Plotly.js chart blocks that the web UI renders interactively (`useplotly=true`)
 
 ## Documentation
 
@@ -334,6 +335,7 @@ Mini-A ships with complementary components:
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
+| `useplotly` | Encourage Plotly.js chart outputs for interactive visualizations | `false` |
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |

@@ -155,6 +155,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useplotly
+    desc     : Encourage Plotly.js outputs by priming the agent with Plotly chart guidance
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useascii
     desc     : Encourage ASCII sketches in the generated knowledge prompt
     example  : "true"
@@ -359,6 +364,7 @@ jobs:
         usediagrams    : usediagrams
         usemermaid     : usemermaid
         usecharts      : usecharts
+        useplotly      : useplotly
         useascii       : useascii
         usemaps        : usemaps
         usestream      : usestream
@@ -418,6 +424,7 @@ jobs:
       usediagrams    : toBoolean.isBoolean.default(false)
       usemermaid     : toBoolean.isBoolean.default(false)
       usecharts      : toBoolean.isBoolean.default(false)
+      useplotly      : toBoolean.isBoolean.default(false)
       useascii       : toBoolean.isBoolean.default(false)
       usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)

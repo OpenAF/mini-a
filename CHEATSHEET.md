@@ -315,6 +315,7 @@ mini-a goal="complex multi-phase project" \
 | `usediagrams` | boolean | `false` | Encourage Mermaid diagrams in output |
 | `usemermaid` | boolean | `false` | Alias for `usediagrams` |
 | `usecharts` | boolean | `false` | Encourage Chart.js charts in output |
+| `useplotly` | boolean | `false` | Encourage Plotly.js charts in output |
 | `useascii` | boolean | `false` | Encourage enhanced UTF-8/ANSI visual output with colors and emojis |
 | `usemaps` | boolean | `false` | Encourage Leaflet JSON blocks for interactive maps (renders in console transcript and web UI) |
 | `format` | string | `md` | Output format (`md` or `json`) |
@@ -328,6 +329,9 @@ mini-a goal="document workflow" usediagrams=true
 
 # Generate with Chart.js visualizations
 mini-a goal="analyze sales data" usecharts=true useshell=true
+
+# Generate with Plotly charts
+mini-a goal="visualize forecast spread" useplotly=true
 
 # Enhanced terminal output with colors and emojis
 mini-a goal="system status report" useascii=true useshell=true
