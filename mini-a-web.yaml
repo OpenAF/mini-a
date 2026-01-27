@@ -79,6 +79,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useplotly
+    desc     : "Boolean to enable/disable Plotly chart generation (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useascii
     desc     : "Boolean to enable/disable ASCII art sketch generation (default: false)"
     example  : "true"
@@ -698,6 +703,19 @@ todo:
       return ow.server.httpd.reply({ error: e.toString() })
     }
 
+# Expose UI settings
+- (httpdService   ): "${onport:-8888}"
+  ((uri          )): /settings
+  ((execURI      )): | #js
+    try {
+      return ow.server.httpd.reply({
+        useplotly: global.__useplotly === true
+      })
+    } catch(e) {
+      printErr(e)
+      return ow.server.httpd.reply({ error: e.toString() })
+    }
+
 # Load history for a session
 - (httpdService   ): "${onport:-8888}"
   ((uri          )): /load-history
@@ -807,6 +825,7 @@ jobs:
       planlog         : isString().default(__)
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
+      useplotly       : toBoolean().isBoolean().default(false)
       useascii        : toBoolean().isBoolean().default(false)
       historys3bucket : isString().default(__)
       historys3prefix : isString().default("")
@@ -833,6 +852,7 @@ jobs:
     global.__usestream = args.usestream
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
+    global.__useplotly = args.useplotly
     global.__planState = {}
     global.__sseQueues = {}
     if (isUnDef(global.__webMetrics)) {

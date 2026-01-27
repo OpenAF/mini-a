@@ -306,6 +306,7 @@ try {
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
     usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },
+    useplotly      : { type: "boolean", default: false, description: "Encourage Plotly charts in knowledge prompt" },
     useascii       : { type: "boolean", default: false, description: "Enable ASCII-based visuals in knowledge prompt" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
