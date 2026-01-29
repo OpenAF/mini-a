@@ -294,6 +294,73 @@
     }
   }
 
+  exports.testGlobQuery = function() {
+    var testDir = createTestDir()
+    try {
+      io.writeFileString(testDir + java.io.File.separator + "alpha.txt", "alpha")
+      io.writeFileString(testDir + java.io.File.separator + "beta.log", "beta")
+      io.mkdir(testDir + java.io.File.separator + "nested")
+      io.writeFileString(testDir + java.io.File.separator + "nested" + java.io.File.separator + "gamma.txt", "gamma")
+
+      var tool = new MiniUtilsTool(testDir)
+      var result = tool.filesystemQuery({ operation: "glob", pattern: "**/*.txt" })
+      ow.test.assert(isArray(result), true, "Glob should return array")
+      ow.test.assert(result.length === 2, true, "Glob should match txt files")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
+  exports.testEditFile = function() {
+    var testDir = createTestDir()
+    try {
+      var tool = new MiniUtilsTool({ root: testDir, readwrite: true })
+      io.writeFileString(testDir + java.io.File.separator + "edit.txt", "Hello World")
+
+      var result = tool.filesystemModify({
+        operation: "edit",
+        path: "edit.txt",
+        pattern: "World",
+        replacement: "Mini-A"
+      })
+      ow.test.assert(isMap(result), true, "Edit should return result object")
+      ow.test.assert(result.replacements === 1, true, "Edit should report replacements")
+      var content = io.readFileString(testDir + java.io.File.separator + "edit.txt")
+      ow.test.assert(content === "Hello Mini-A", true, "Edit should update file content")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
+  exports.testWebFetch = function() {
+    var testDir = createTestDir()
+    try {
+      var tool = new MiniUtilsTool()
+      var testFile = testDir + java.io.File.separator + "web.txt"
+      io.writeFileString(testFile, "Web Fetch Content")
+      var url = new java.io.File(testFile).toURI().toURL().toString()
+
+      var result = tool.textUtilities({ operation: "webfetch", url: url })
+      ow.test.assert(isMap(result), true, "Webfetch should return result object")
+      ow.test.assert(result.body.indexOf("Web Fetch Content") >= 0, true, "Webfetch should read content")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
+  exports.testTodoOps = function() {
+    var tool = new MiniUtilsTool()
+
+    var writeResult = tool.kvStore({ operation: "todo-write", items: ["first", "second"] })
+    ow.test.assert(writeResult.count === 2, true, "Should write todo items")
+
+    var appendResult = tool.kvStore({ operation: "todo-write", item: "third", append: true })
+    ow.test.assert(appendResult.count === 3, true, "Should append todo items")
+
+    var readResult = tool.kvStore({ operation: "todo-read" })
+    ow.test.assert(readResult.count === 3, true, "Should read todo items")
+  }
+
   exports.testPathSecurity = function() {
     var testDir = createTestDir()
     var outsideDir = createTestDir()
@@ -336,6 +403,15 @@
     ow.test.assert(methods.indexOf("filesystemModify") >= 0, true, "Should include filesystemModify method")
     ow.test.assert(methods.indexOf("mathematics") >= 0, true, "Should include mathematics method")
     ow.test.assert(methods.indexOf("timeUtilities") >= 0, true, "Should include timeUtilities method")
+
+    var queryOps = metadata.filesystemQuery.inputSchema.properties.operation.enum || []
+    ow.test.assert(queryOps.indexOf("glob") >= 0, true, "Should include glob operation in filesystemQuery")
+    var modifyOps = metadata.filesystemModify.inputSchema.properties.operation.enum || []
+    ow.test.assert(modifyOps.indexOf("edit") >= 0, true, "Should include edit operation in filesystemModify")
+    var textOps = metadata.textUtilities.inputSchema.properties.operation.enum || []
+    ow.test.assert(textOps.indexOf("webfetch") >= 0, true, "Should include webfetch operation in textUtilities")
+    var kvOps = metadata.kvStore.inputSchema.properties.operation.enum || []
+    ow.test.assert(kvOps.indexOf("todo-write") >= 0, true, "Should include todo-write operation in kvStore")
   }
 
   exports.testMathOpsCalculate = function() {

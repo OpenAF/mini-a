@@ -47,6 +47,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testFileModify
 
+- name: MiniA Utils Tests::GlobQuery
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGlobQuery
+
+- name: MiniA Utils Tests::EditFile
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEditFile
+
+- name: MiniA Utils Tests::WebFetch
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWebFetch
+
+- name: MiniA Utils Tests::TodoOps
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTodoOps
+
 - name: MiniA Utils Tests::PathSecurity
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -119,6 +139,10 @@ todo:
 - MiniA Utils Tests::DeleteFile
 - MiniA Utils Tests::FileOps
 - MiniA Utils Tests::FileModify
+- MiniA Utils Tests::GlobQuery
+- MiniA Utils Tests::EditFile
+- MiniA Utils Tests::WebFetch
+- MiniA Utils Tests::TodoOps
 - MiniA Utils Tests::PathSecurity
 - MiniA Utils Tests::Metadata
 - MiniA Utils Tests::MathOpsCalculate
