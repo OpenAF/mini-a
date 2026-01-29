@@ -1620,14 +1620,19 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
 
     for (var i = 0; i < operations.length; i++) {
       var op = operations[i]
-      if (!isMap(op) || !isString(op.type)) {
+      var rawType = isMap(op) ? (isString(op.type) ? op.type : op.operation) : null
+      if (!isMap(op) || !isString(rawType)) {
         results.push({ error: "Invalid operation at index " + i, success: false })
         if (stopOnError) break
         continue
       }
 
-      var opType = op.type.toLowerCase()
-      var opParams = op.params || {}
+      var opType = rawType.toLowerCase()
+      var opParams = isMap(op.params) ? op.params : {}
+      Object.keys(op).forEach(function(key) {
+        if (key === "type" || key === "operation" || key === "params") return
+        if (isUnDef(opParams[key])) opParams[key] = op[key]
+      })
       if (compact) opParams.compact = true
 
       var result
