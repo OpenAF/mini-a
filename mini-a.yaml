@@ -106,6 +106,14 @@ help:
     desc     : Maximum context size in tokens (if exceeded, conversation will be summarized)
     example  : "200000"
     mandatory: false
+  - name     : validationgoal
+    desc     : Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, defaults maxcycles=3)
+    example  : "Validate: includes sources, covers tradeoffs, provides a recommendation"
+    mandatory: false
+  - name     : valgoal
+    desc     : Alias for validationgoal
+    example  : "Validate: includes sources, covers tradeoffs, provides a recommendation"
+    mandatory: false
   - name     : raw
     desc     : Whether to return raw output without formatting
     example  : "false"
@@ -354,6 +362,8 @@ jobs:
         shellbatch     : shellbatch
         shellprefix    : shellprefix
         toolcachettl   : toolcachettl
+        validationgoal : validationgoal
+        valgoal        : valgoal
         usetools       : usetools
         useutils       : useutils
         usediagrams    : usediagrams
@@ -413,6 +423,8 @@ jobs:
       shellbatch     : toBoolean.isBoolean.default(false)
       shellprefix    : isString.default(__)
       toolcachettl   : toNumber.isNumber.default(__)
+      validationgoal : isString.default(__)
+      valgoal        : isString.default(__)
       usetools       : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(false)
       usediagrams    : toBoolean.isBoolean.default(false)
@@ -443,6 +455,7 @@ jobs:
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
     if (isDef(args.usemermaid) && isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
+    if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
     if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
     if (isUnDef(args.format)) args.format = "md"
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format

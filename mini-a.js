@@ -10251,6 +10251,7 @@ MiniA.prototype._runChatbotMode = function(options) {
  * Initialize deep research state from args
  */
 MiniA.prototype._initDeepResearch = function(args) {
+  if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
   if (isString(args.validationgoal) && args.validationgoal.length > 0 && args.validationgoal.indexOf("\n") < 0 && io.fileExists(args.validationgoal) && io.fileInfo(args.validationgoal).isFile) {
     this.fnI("load", `Loading validationgoal from file: ${args.validationgoal}...`)
     args.validationgoal = io.readFileString(args.validationgoal)

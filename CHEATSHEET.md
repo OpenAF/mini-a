@@ -317,10 +317,11 @@ Set `OAF_VAL_MODEL` to use a dedicated validation model; otherwise the main mode
 | `deepresearch` | boolean | `false` | Enable iterative research with validation cycles |
 | `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
 | `validationgoal` | string | - | Quality criteria for validating research outcomes (string or file path; implies `deepresearch=true`, defaults `maxcycles=3`) |
+| `valgoal` | string | - | Alias for `validationgoal` |
 | `validationthreshold` | string | `PASS` | Validation threshold (`PASS` or score-based like `score>=0.7`) |
 | `persistlearnings` | boolean | `true` | Carry forward learnings between cycles |
 
-`validationgoal` accepts inline text or a single-line file path; when a file path is provided, Mini-A loads the file contents.
+`validationgoal` (or `valgoal`) accepts inline text or a single-line file path; when a file path is provided, Mini-A loads the file contents.
 
 **Examples:**
 
@@ -344,6 +345,12 @@ mini-a goal="Competitive analysis of project management SaaS tools" \
   maxcycles=3 \
   validationgoal="Validate: covers top 5 tools, includes pricing, features comparison, customer reviews" \
   useplanning=true
+
+# Alias usage
+mini-a goal="Research database indexing strategies" \
+  deepresearch=true \
+  maxcycles=3 \
+  valgoal="Validate: compares B-tree vs LSM, includes benchmarks, recommends scenarios"
 
 # Technical documentation with specific requirements
 mini-a goal="Document migration strategy from Python 2 to Python 3" \

@@ -923,6 +923,7 @@ Deep research mode runs a loop of research-validate-learn cycles:
 | `deepresearch` | boolean | `false` | Enable deep research mode with iterative validation |
 | `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
 | `validationgoal` | string | - | Validation criteria for evaluating research quality (string or file path; implies `deepresearch=true`, defaults `maxcycles=3`) |
+| `valgoal` | string | - | Alias for `validationgoal` |
 | `validationthreshold` | string | `"PASS"` | Required validation verdict (`"PASS"` or score-based like `"score>=0.7"`) |
 | `persistlearnings` | boolean | `true` | Whether to carry learnings from previous cycles forward |
 
@@ -942,6 +943,12 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
   validationgoal="Validate: includes statistical data, covers solar/wind/hydro, has trend projections" \
   mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
 
+# Alias usage
+mini-a goal="Research database indexing strategies" \
+  deepresearch=true \
+  maxcycles=3 \
+  valgoal="Validate: compares B-tree vs LSM, includes benchmarks, recommends scenarios"
+
 # Score-based validation threshold
 mini-a goal="Technical comparison of cloud providers" \
   deepresearch=true \
@@ -952,14 +959,14 @@ mini-a goal="Technical comparison of cloud providers" \
 
 ### Validation Goals
 
-The `validationgoal` parameter defines your quality criteria. It can be:
+The `validationgoal` parameter (alias: `valgoal`) defines your quality criteria. It can be:
 
 - **Checklist-based**: "Validate: includes X, Y, and Z"
 - **Coverage-based**: "Ensure all major topics are covered with citations"
 - **Score-based**: "Rate 1-10 on: accuracy, depth, clarity"
 - **Specific requirements**: "Must include at least 5 real-world examples with dates"
 
-`validationgoal` accepts either inline text or a file path (single-line path); when a file path is provided, Mini-A loads the file contents.
+`validationgoal` (or `valgoal`) accepts either inline text or a file path (single-line path); when a file path is provided, Mini-A loads the file contents.
 
 Examples:
 ```bash

@@ -825,6 +825,7 @@ jobs:
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)
+      valgoal        : isString().default(__)
       validationthreshold: isString().default("PASS")
       persistlearnings: toBoolean().isBoolean().default(true)
   exec : | #js
@@ -855,6 +856,8 @@ jobs:
         io.mkdir(global.__historypath)
       } catch(ignore) {}
     }
+
+    if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
 
     global.__historys3bucket = args.historys3bucket
     global.__historys3client = __
