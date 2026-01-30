@@ -306,6 +306,62 @@ mini-a goal="complex multi-phase project" \
 
 ---
 
+## Deep Research Mode
+
+Set `OAF_VAL_MODEL` to use a dedicated validation model; otherwise the main model is used.
+
+### Deep Research Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `deepresearch` | boolean | `false` | Enable iterative research with validation cycles |
+| `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
+| `validationgoal` | string | - | Quality criteria for validating research outcomes (string or file path; implies `deepresearch=true`, defaults `maxcycles=3`) |
+| `validationthreshold` | string | `PASS` | Validation threshold (`PASS` or score-based like `score>=0.7`) |
+| `persistlearnings` | boolean | `true` | Carry forward learnings between cycles |
+
+`validationgoal` accepts inline text or a single-line file path; when a file path is provided, Mini-A loads the file contents.
+
+**Examples:**
+
+```bash
+# Basic deep research with quality validation
+mini-a goal="Research quantum computing applications in drug discovery" \
+  deepresearch=true \
+  maxcycles=5 \
+  validationgoal="Validate: covers at least 3 specific applications with real-world examples and citations"
+
+# Academic research with score threshold
+mini-a goal="Survey recent advances in transformer architectures for NLP" \
+  deepresearch=true \
+  maxcycles=4 \
+  validationgoal="Rate 1-10: coverage of papers (2023-2024), technical depth, citation quality" \
+  validationthreshold="score>=0.8"
+
+# Market analysis with comprehensive criteria
+mini-a goal="Competitive analysis of project management SaaS tools" \
+  deepresearch=true \
+  maxcycles=3 \
+  validationgoal="Validate: covers top 5 tools, includes pricing, features comparison, customer reviews" \
+  useplanning=true
+
+# Technical documentation with specific requirements
+mini-a goal="Document migration strategy from Python 2 to Python 3" \
+  deepresearch=true \
+  maxcycles=5 \
+  validationgoal="Ensure: step-by-step process, common pitfalls, testing strategy, rollback plan" \
+  useshell=true
+
+# With MCP tools for comprehensive data gathering
+mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
+  deepresearch=true \
+  maxcycles=3 \
+  validationgoal="Validate: includes statistical data, covers solar/wind/hydro, has trend projections" \
+  mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
+```
+
+---
+
 ## Visual & Output
 
 ### Visual Parameters
@@ -498,6 +554,7 @@ mini-a goal="run command" nosetmcpwd=true
 |----------|-------------|
 | `OAF_MODEL` | Primary LLM model configuration |
 | `OAF_LC_MODEL` | Low-cost model for dual-model optimization |
+| `OAF_VAL_MODEL` | Dedicated validation model for deep research scoring |
 | `OAF_MINI_A_CON_HIST_SIZE` | Console history size (default: JLine default) |
 | `OAF_MINI_A_LIBS` | Comma-separated libraries to load automatically |
 | `OAF_MINI_A_NOJSONPROMPT` | Disable promptJSONWithStats for main model, force promptWithStats (default: false). Required for Gemini models due to API restrictions |
@@ -506,6 +563,7 @@ mini-a goal="run command" nosetmcpwd=true
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
+export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: '...')"
 export OAF_MINI_A_CON_HIST_SIZE=1000
 export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
 export OAF_MINI_A_NOJSONPROMPT=true  # Required for Gemini main model

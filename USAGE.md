@@ -9,6 +9,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
+- **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
 - **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the main model (default: false). Required for Gemini models due to API restrictions
@@ -18,6 +19,8 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 # Optional: Set a low-cost model for routine operations
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+# Optional: Set a dedicated validation model for deep research scoring
+export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: 'your-api-key')"
 # Optional: Set console history size
 export OAF_MINI_A_CON_HIST_SIZE=1000
 # Optional: Set libraries to load automatically
@@ -896,6 +899,188 @@ agent.start({
     useshell   : true,
     useplanning: true
 })
+```
+
+## Deep Research Mode
+
+Enable `deepresearch=true` to run iterative research cycles where Mini-A refines its research through multiple attempts, each validated against specific quality criteria. This mode is ideal for comprehensive research tasks that benefit from progressive refinement.
+
+You can set `OAF_VAL_MODEL` to route the validation step to a dedicated model; otherwise the main model is used.
+
+### How It Works
+
+Deep research mode runs a loop of research-validate-learn cycles:
+
+1. **Research**: Mini-A executes your goal using standard agent capabilities
+2. **Validate**: The output is evaluated against your validation criteria using LLM-based assessment
+3. **Learn**: If validation fails, learnings are extracted and fed into the next cycle
+4. **Iterate**: The process repeats until validation passes or max cycles is reached
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `deepresearch` | boolean | `false` | Enable deep research mode with iterative validation |
+| `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
+| `validationgoal` | string | - | Validation criteria for evaluating research quality (string or file path; implies `deepresearch=true`, defaults `maxcycles=3`) |
+| `validationthreshold` | string | `"PASS"` | Required validation verdict (`"PASS"` or score-based like `"score>=0.7"`) |
+| `persistlearnings` | boolean | `true` | Whether to carry learnings from previous cycles forward |
+
+### Basic Usage
+
+```bash
+# Research with quality validation
+mini-a goal="Research quantum computing applications in drug discovery" \
+  deepresearch=true \
+  maxcycles=5 \
+  validationgoal="Validate: covers at least 3 specific applications with real-world examples and citations"
+
+# With MCP tools for comprehensive research
+mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
+  deepresearch=true \
+  maxcycles=3 \
+  validationgoal="Validate: includes statistical data, covers solar/wind/hydro, has trend projections" \
+  mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
+
+# Score-based validation threshold
+mini-a goal="Technical comparison of cloud providers" \
+  deepresearch=true \
+  maxcycles=4 \
+  validationgoal="Rate 1-10 on: completeness, accuracy, actionability" \
+  validationthreshold="score>=0.7"
+```
+
+### Validation Goals
+
+The `validationgoal` parameter defines your quality criteria. It can be:
+
+- **Checklist-based**: "Validate: includes X, Y, and Z"
+- **Coverage-based**: "Ensure all major topics are covered with citations"
+- **Score-based**: "Rate 1-10 on: accuracy, depth, clarity"
+- **Specific requirements**: "Must include at least 5 real-world examples with dates"
+
+`validationgoal` accepts either inline text or a file path (single-line path); when a file path is provided, Mini-A loads the file contents.
+
+Examples:
+```bash
+# Checklist validation
+validationgoal="Validate: covers benefits, limitations, cost analysis, and security considerations"
+
+# Coverage validation
+validationgoal="Ensure comprehensive coverage of all major JavaScript frameworks with pros/cons"
+
+# Quality validation
+validationgoal="Rate on scale 1-10: technical accuracy, practical examples, citation quality"
+```
+
+### Validation Thresholds
+
+Control when a research cycle is considered successful:
+
+- **`"PASS"`** (default): Simple pass/fail based on LLM verdict
+- **`"score>=0.7"`**: Requires validation score of 0.7 or higher (0-1 scale)
+- **`">=7"`**: Requires score of 7 or higher (automatically normalized to 0-1 scale)
+
+### Cycle Behavior
+
+Each cycle:
+1. Receives accumulated learnings from previous attempts
+2. Executes the full research goal with enhanced context
+3. Gets validated against the validation criteria
+4. Extracts specific issues, feedback, and suggestions for improvement
+
+If validation **passes**:
+- Research stops immediately (even if under `maxcycles`)
+- Final output includes cycle metadata showing early success
+
+If validation **fails**:
+- Learnings are extracted and accumulated
+- Next cycle receives enhanced knowledge with previous feedback
+- Process continues until validation passes or `maxcycles` is reached
+
+### Output Format
+
+Deep research results include:
+
+```markdown
+# Deep Research Results
+
+**Cycles Completed:** 3/5
+**Final Verdict:** PASS
+
+## Research Output
+[Your final research content]
+
+## Cycle History
+### Cycle 1
+- **Verdict:** REVISE
+- **Score:** 0.6
+- **Feedback:** Missing specific citations and real-world examples
+
+### Cycle 2
+- **Verdict:** REVISE
+- **Score:** 0.75
+- **Feedback:** Good improvement but needs more depth on cost analysis
+
+### Cycle 3
+- **Verdict:** PASS
+- **Score:** 0.9
+- **Feedback:** Comprehensive coverage with strong citations
+
+## Key Learnings
+- Issue: Needed more specific citations from peer-reviewed sources
+- Suggestion: Include quantitative data with dates
+- Feedback: Add real-world case studies with outcomes
+```
+
+### Metrics
+
+Deep research mode tracks several metrics accessible via `getMetrics()`:
+
+- `deep_research_sessions`: Total deep research sessions started
+- `deep_research_cycles`: Total cycles executed across all sessions
+- `deep_research_validations_passed`: Cycles that passed validation
+- `deep_research_validations_failed`: Cycles that failed validation
+- `deep_research_early_success`: Sessions that passed before reaching max cycles
+- `deep_research_max_cycles_reached`: Sessions that hit the cycle limit
+
+### Best Practices
+
+1. **Clear validation criteria**: Make your `validationgoal` specific and measurable
+2. **Reasonable cycle limits**: Start with 3-5 cycles; more isn't always better
+3. **Combine with planning**: Use `useplanning=true` to track progress within each cycle
+4. **Use MCP tools**: Enable relevant research tools for comprehensive data gathering
+5. **Score thresholds**: Use score-based thresholds when you need graduated quality levels
+
+### Advanced Examples
+
+**Academic Research:**
+```bash
+mini-a goal="Survey recent advances in transformer architectures for NLP" \
+  deepresearch=true \
+  maxcycles=4 \
+  validationgoal="Rate 1-10: coverage of papers (2023-2024), technical depth, citation quality" \
+  validationthreshold="score>=0.8" \
+  mcp="(cmd: 'docker run --rm -i mcp/arxiv-mcp')"
+```
+
+**Market Analysis:**
+```bash
+mini-a goal="Competitive analysis of project management SaaS tools" \
+  deepresearch=true \
+  maxcycles=3 \
+  validationgoal="Validate: covers top 5 tools, includes pricing, features comparison, customer reviews" \
+  useplanning=true
+```
+
+**Technical Documentation:**
+```bash
+mini-a goal="Document migration strategy from Python 2 to Python 3" \
+  deepresearch=true \
+  maxcycles=5 \
+  validationgoal="Ensure: step-by-step process, common pitfalls, testing strategy, rollback plan" \
+  validationthreshold="PASS" \
+  useshell=true
 ```
 
 ## Advanced Features
