@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260126'
+version: '20260130'
 dependencies:
   openaf: '>=20250915'
 files:
