@@ -825,7 +825,7 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
  * <odoc>
  * <key>MinA.defaultInteractionFn(event, message, cFn)</key>
  * Default interaction function that logs events to the console with emojis.
- * Event types: exec, shell, think, final, input, output, thought, size, rate, mcp, done, error, libs, info, load, warn
+ * Event types: exec, shell, think, final, input, output, thought, size, rate, mcp, done, error, libs, info, load, warn, deepresearch
  * </odoc>
  */
 MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
@@ -859,6 +859,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "rate"     : _e = "⏳"; break
   case "mcp"      : _e = "🤖"; break
   case "plan"     : _e = "🗺️"; break
+  case "deepresearch": _e = "🔍"; break
   case "done"     : _e = "✅"; break
   case "error"    : _e = "❌"; break
   case "libs"     : _e = "📚"; break
@@ -887,7 +888,7 @@ MiniA.prototype.getId = function() {
  * <key>MinA.setInteractionFn(fn) : Function</key>
  * Set a custom interaction function to handle events.
  * The function should accept two parameters: event type and message.
- * Event types: exec, shell, think, final, input, output, thought, size, rate, mcp, done, error, libs, info, load, warn
+ * Event types: exec, shell, think, final, input, output, thought, size, rate, mcp, done, error, libs, info, load, warn, deepresearch
  * </odoc>
  */
 MiniA.prototype.setInteractionFn = function(afn) {
@@ -3378,7 +3379,7 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
   var planText = this._convertPlanObject(plan, format)
   if (!isString(planText) || planText.trim().length === 0) return
 
-  var validatorLLM = this.llm
+  var validatorLLM = (this._use_val && isObject(this.val_llm)) ? this.val_llm : this.llm
   if (!isObject(validatorLLM) || (typeof validatorLLM.promptWithStats !== "function" && typeof validatorLLM.promptJSONWithStats !== "function")) return
 
   var critiquePrompt = "You generated the following execution plan. Critically evaluate it BEFORE running the tasks." +
@@ -7909,17 +7910,30 @@ MiniA.prototype.init = function(args) {
       this._use_lc = false
     }
 
+    if (isUnDef(this._oaf_val_model)) {
+      var envValModel = parseModelConfig(getEnv("OAF_VAL_MODEL"), "OAF_VAL_MODEL environment variable", true)
+      if (isDef(envValModel)) this._oaf_val_model = envValModel
+    }
+
+    if (isMap(this._oaf_val_model)) {
+      this._use_val = true
+      this.fnI("info", `Validation model enabled: ${this._oaf_val_model.model} (${this._oaf_val_model.type})`)
+    } else {
+      this._use_val = false
+    }
+
     var needsBedrock = function(modelConfig) {
       return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "bedrock"
     }
 
-    if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model)) {
+    if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model) || needsBedrock(this._oaf_val_model)) {
       includeOPack("AWS")
       loadLib("aws.js")
     }
 
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
+    if (this._use_val) this.val_llm = $llm(this._oaf_val_model)
 
     // Check the need to init debugch for main LLM
     if (isDef(args.debugch) && args.debugch.length > 0) {
@@ -8371,9 +8385,15 @@ MiniA.prototype.start = function(args) {
             
             // Check if we reached max cycles without passing
             if (deepResearchState.finalVerdict !== "PASS") {
-                deepResearchState.finalVerdict = "MAX_CYCLES_REACHED"
-                global.__mini_a_metrics.deep_research_max_cycles_reached.inc()
-                this.fnI("deepresearch", `[Deep Research] Reached max cycles (${deepResearchState.maxCycles}) without passing validation`)
+                var cyclesCompleted = isArray(deepResearchState.cycleHistory) ? deepResearchState.cycleHistory.length : deepResearchState.currentCycle
+                if (cyclesCompleted >= deepResearchState.maxCycles) {
+                    deepResearchState.finalVerdict = "MAX_CYCLES_REACHED"
+                    global.__mini_a_metrics.deep_research_max_cycles_reached.inc()
+                    this.fnI("deepresearch", `[Deep Research] Reached max cycles (${deepResearchState.maxCycles}) without passing validation`)
+                } else {
+                    deepResearchState.finalVerdict = "STOPPED_EARLY"
+                    this.fnI("deepresearch", `[Deep Research] Stopped early after ${cyclesCompleted}/${deepResearchState.maxCycles} cycles without passing validation`)
+                }
             }
             
             // Format the final result with cycle metadata
@@ -10231,11 +10251,21 @@ MiniA.prototype._runChatbotMode = function(options) {
  * Initialize deep research state from args
  */
 MiniA.prototype._initDeepResearch = function(args) {
-  var enabled = toBoolean(args.deepresearch) === true
+  if (isString(args.validationgoal) && args.validationgoal.length > 0 && args.validationgoal.indexOf("\n") < 0 && io.fileExists(args.validationgoal) && io.fileInfo(args.validationgoal).isFile) {
+    this.fnI("load", `Loading validationgoal from file: ${args.validationgoal}...`)
+    args.validationgoal = io.readFileString(args.validationgoal)
+  }
+  var validationGoal = isString(args.validationgoal) && args.validationgoal.length > 0 ? args.validationgoal : null
+  var enabled = toBoolean(args.deepresearch) === true || validationGoal !== null
   if (!enabled) return null
 
+  if (!toBoolean(args.deepresearch) && validationGoal) {
+    args.deepresearch = true
+    if (!isNumber(args.maxcycles)) args.maxcycles = 3
+    this.fnI("info", "validationgoal set; enabling deep research with maxcycles=3")
+  }
+
   var maxCycles = isNumber(args.maxcycles) ? Math.max(1, args.maxcycles) : 3
-  var validationGoal = isString(args.validationgoal) && args.validationgoal.length > 0 ? args.validationgoal : null
   var validationThreshold = isString(args.validationthreshold) && args.validationthreshold.length > 0 ? args.validationthreshold : "PASS"
   var persistLearnings = isUnDef(args.persistlearnings) ? true : toBoolean(args.persistlearnings)
 
@@ -10450,10 +10480,12 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   var cycleStartTime = now()
   var researchOutput
   var originalIsInitialized = this._isInitialized
+  var originalState = this.state
   
   try {
     // Force re-init for each cycle
     this._isInitialized = false
+    if (originalState === "stop") this.state = "idle"
     
     researchOutput = this._startInternal(argsForCycle, cycleStartTime)
   } catch (cycleErr) {
@@ -10462,6 +10494,11 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   } finally {
     // Always restore initialization state
     this._isInitialized = originalIsInitialized
+    if (originalState === "stop") {
+      this.state = "idle"
+    } else {
+      this.state = originalState
+    }
   }
 
   var cycleTime = now() - cycleStartTime
@@ -10559,10 +10596,11 @@ MiniA.prototype._formatDeepResearchResult = function(deepResearchState, finalOut
   if (!isObject(deepResearchState)) return finalOutput
 
   var sections = []
+  var cyclesCompleted = isArray(deepResearchState.cycleHistory) ? deepResearchState.cycleHistory.length : deepResearchState.currentCycle
   
   sections.push("# Deep Research Results")
   sections.push("")
-  sections.push(`**Cycles Completed:** ${deepResearchState.currentCycle}/${deepResearchState.maxCycles}`)
+  sections.push(`**Cycles Completed:** ${cyclesCompleted}/${deepResearchState.maxCycles}`)
   
   if (deepResearchState.finalVerdict) {
     sections.push(`**Final Verdict:** ${deepResearchState.finalVerdict}`)

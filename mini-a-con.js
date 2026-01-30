@@ -352,7 +352,7 @@ try {
     auditch        : { type: "string", description: "Audit channel definition" },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
-    validationgoal : { type: "string", description: "Validation criteria for deep research outcomes" },
+    validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
     validationthreshold: { type: "string", default: "PASS", description: "Required validation verdict (e.g., 'PASS' or 'score>=0.7')" },
     persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" }
   }

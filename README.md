@@ -35,6 +35,7 @@ Two steps to use:
    ```bash
    export OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000, temperature: 1)"
    ```
+   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode.
 
    Use the built-in model manager when you prefer to store encrypted
    definitions instead of exporting raw environment variables:
@@ -382,6 +383,8 @@ export OAF_MODEL="(type: ollama, model: 'gemma3', url: 'http://ollama.local', ti
 export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"
 # Low-cost model for routine operations
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
+# Optional validation model for deep research scoring
+export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: '...')"
 ```
 
 For more model configurations and recommendations, see [USAGE.md](USAGE.md#model-configuration).

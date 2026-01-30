@@ -308,15 +308,19 @@ mini-a goal="complex multi-phase project" \
 
 ## Deep Research Mode
 
+Set `OAF_VAL_MODEL` to use a dedicated validation model; otherwise the main model is used.
+
 ### Deep Research Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `deepresearch` | boolean | `false` | Enable iterative research with validation cycles |
 | `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
-| `validationgoal` | string | - | Quality criteria for validating research outcomes (required when `deepresearch=true`) |
+| `validationgoal` | string | - | Quality criteria for validating research outcomes (string or file path; implies `deepresearch=true`, defaults `maxcycles=3`) |
 | `validationthreshold` | string | `PASS` | Validation threshold (`PASS` or score-based like `score>=0.7`) |
 | `persistlearnings` | boolean | `true` | Carry forward learnings between cycles |
+
+`validationgoal` accepts inline text or a single-line file path; when a file path is provided, Mini-A loads the file contents.
 
 **Examples:**
 
@@ -550,6 +554,7 @@ mini-a goal="run command" nosetmcpwd=true
 |----------|-------------|
 | `OAF_MODEL` | Primary LLM model configuration |
 | `OAF_LC_MODEL` | Low-cost model for dual-model optimization |
+| `OAF_VAL_MODEL` | Dedicated validation model for deep research scoring |
 | `OAF_MINI_A_CON_HIST_SIZE` | Console history size (default: JLine default) |
 | `OAF_MINI_A_LIBS` | Comma-separated libraries to load automatically |
 | `OAF_MINI_A_NOJSONPROMPT` | Disable promptJSONWithStats for main model, force promptWithStats (default: false). Required for Gemini models due to API restrictions |
@@ -558,6 +563,7 @@ mini-a goal="run command" nosetmcpwd=true
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
+export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: '...')"
 export OAF_MINI_A_CON_HIST_SIZE=1000
 export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
 export OAF_MINI_A_NOJSONPROMPT=true  # Required for Gemini main model

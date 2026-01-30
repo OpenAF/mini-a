@@ -40,7 +40,11 @@ flowchart TD
    ```bash
    export OAF_LC_MODEL="(type: openai, model: gpt-5.1, key: 'sk-...', temperature: 0.3)"
    ```
-5. Confirm the configuration:
+5. *(Optional)* **Set a dedicated validation model** for deep research scoring:
+   ```bash
+   export OAF_VAL_MODEL="(type: openai, model: gpt-5.1-mini, key: 'sk-...', temperature: 0)"
+   ```
+6. Confirm the configuration:
    ```bash
    echo $OAF_MODEL
    ```

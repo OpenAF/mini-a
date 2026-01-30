@@ -9,6 +9,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OpenAF**: Mini-A is built for the OpenAF platform
 - **OAF_MODEL Environment Variable**: Must be set to your desired LLM model configuration
 - **OAF_LC_MODEL Environment Variable** (optional): Low-cost model for cost optimization
+- **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
 - **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the main model (default: false). Required for Gemini models due to API restrictions
@@ -18,6 +19,8 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-api-key')"
 # Optional: Set a low-cost model for routine operations
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
+# Optional: Set a dedicated validation model for deep research scoring
+export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: 'your-api-key')"
 # Optional: Set console history size
 export OAF_MINI_A_CON_HIST_SIZE=1000
 # Optional: Set libraries to load automatically
@@ -902,6 +905,8 @@ agent.start({
 
 Enable `deepresearch=true` to run iterative research cycles where Mini-A refines its research through multiple attempts, each validated against specific quality criteria. This mode is ideal for comprehensive research tasks that benefit from progressive refinement.
 
+You can set `OAF_VAL_MODEL` to route the validation step to a dedicated model; otherwise the main model is used.
+
 ### How It Works
 
 Deep research mode runs a loop of research-validate-learn cycles:
@@ -917,7 +922,7 @@ Deep research mode runs a loop of research-validate-learn cycles:
 |-----------|------|---------|-------------|
 | `deepresearch` | boolean | `false` | Enable deep research mode with iterative validation |
 | `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
-| `validationgoal` | string | - | Validation criteria for evaluating research quality (required) |
+| `validationgoal` | string | - | Validation criteria for evaluating research quality (string or file path; implies `deepresearch=true`, defaults `maxcycles=3`) |
 | `validationthreshold` | string | `"PASS"` | Required validation verdict (`"PASS"` or score-based like `"score>=0.7"`) |
 | `persistlearnings` | boolean | `true` | Whether to carry learnings from previous cycles forward |
 
@@ -953,6 +958,8 @@ The `validationgoal` parameter defines your quality criteria. It can be:
 - **Coverage-based**: "Ensure all major topics are covered with citations"
 - **Score-based**: "Rate 1-10 on: accuracy, depth, clarity"
 - **Specific requirements**: "Must include at least 5 real-world examples with dates"
+
+`validationgoal` accepts either inline text or a file path (single-line path); when a file path is provided, Mini-A loads the file contents.
 
 Examples:
 ```bash
