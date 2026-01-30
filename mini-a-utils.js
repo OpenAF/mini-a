@@ -113,6 +113,15 @@ MiniUtilsTool.prototype._ensureWritable = function(operation) {
   }
 }
 
+MiniUtilsTool.prototype._createGlobMatcher = function(pattern) {
+  try {
+    var fileSystem = java.nio.file.FileSystems.getDefault()
+    return fileSystem.getPathMatcher("glob:" + pattern)
+  } catch (e) {
+    return null
+  }
+}
+
 MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
   var self = this
   options = options || {}
@@ -369,6 +378,85 @@ MiniUtilsTool.prototype.listDirectory = function(params) {
   }
 }
 
+MiniUtilsTool.prototype.globFiles = function(params) {
+  params = params || {}
+  if (isUnDef(params.pattern)) return "[ERROR] pattern is required"
+  try {
+    this._ensureInitialized()
+    var basePath = this._resolve(isDef(params.path) ? params.path : ".")
+    var info = io.fileInfo(basePath)
+    if (isUnDef(info)) {
+      return "[ERROR] Path not found: " + (isDef(params.path) ? params.path : ".")
+    }
+
+    var matcher = this._createGlobMatcher(params.pattern)
+    if (!matcher) return "[ERROR] Invalid glob pattern: " + params.pattern
+
+    var includeHidden = params.includeHidden === true
+    var recursive = params.recursive !== false
+    var entries = []
+
+    if (info.isFile === true) {
+      var entryInfo = io.fileInfo(basePath)
+      if (isDef(entryInfo)) {
+        entryInfo.filename = isString(entryInfo.filename) ? entryInfo.filename : new java.io.File(basePath).getName()
+        entryInfo.relativePath = this._toRelative(entryInfo.canonicalPath || basePath)
+        entryInfo.isDirectory = entryInfo.isDirectory === true
+        entryInfo.isFile = entryInfo.isFile === true
+        entries.push(entryInfo)
+      }
+    } else if (info.isDirectory === true) {
+      entries = this._listEntries(basePath, {
+        recursive: recursive,
+        includeHidden: includeHidden
+      })
+    }
+
+    var baseRelative = this._toRelative(basePath)
+    if (baseRelative === ".") baseRelative = ""
+    var sep = this._separator
+    var filtered = entries.filter(function(entry) {
+      var relPath = entry.relativePath || entry.filename || ""
+      var matchPath = relPath
+      if (baseRelative.length > 0 && matchPath.indexOf(baseRelative + sep) === 0) {
+        matchPath = matchPath.substring(baseRelative.length + sep.length)
+      }
+      try {
+        var pathObj = java.nio.file.Paths.get(matchPath)
+        return matcher.matches(pathObj)
+      } catch (e) {
+        return false
+      }
+    })
+
+    if (params.compact === true) {
+      var fileCount = 0
+      var dirCount = 0
+      var compactEntries = filtered.map(function(entry) {
+        if (entry.isDirectory) dirCount++
+        if (entry.isFile) fileCount++
+        return {
+          name: entry.filename,
+          relativePath: entry.relativePath,
+          isDirectory: entry.isDirectory,
+          isFile: entry.isFile,
+          size: entry.size
+        }
+      })
+      return {
+        count: filtered.length,
+        files: fileCount,
+        directories: dirCount,
+        items: compactEntries
+      }
+    }
+
+    return filtered
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
 MiniUtilsTool.prototype._collectFiles = function(startPath, recursive) {
   var entries = this._listEntries(startPath, { recursive: recursive, includeHidden: true })
   var files = []
@@ -601,6 +689,81 @@ MiniUtilsTool.prototype.writeFile = function(params) {
   }
 }
 
+MiniUtilsTool.prototype.editFile = function(params) {
+  params = params || {}
+  if (isUnDef(params.path)) return "[ERROR] path is required"
+  if (isUnDef(params.pattern)) return "[ERROR] pattern is required"
+  if (isUnDef(params.replacement)) return "[ERROR] replacement is required"
+  try {
+    this._ensureInitialized()
+    this._ensureWritable("edit operations")
+    var filePath = this._resolve(params.path)
+    if (!io.fileExists(filePath)) {
+      return "[ERROR] File not found: " + params.path
+    }
+    var details = io.fileInfo(filePath)
+    if (isUnDef(details) || details.isFile !== true) {
+      return "[ERROR] Path is not a file: " + params.path
+    }
+
+    var encoding = params.encoding || "utf-8"
+    var content = io.readFileString(filePath, encoding)
+    var pattern = String(params.pattern)
+    if (pattern.length === 0) return "[ERROR] pattern cannot be empty"
+    var replacement = String(params.replacement)
+    var caseSensitive = params.caseSensitive === true
+    var maxReplacements = isDef(params.maxReplacements) ? Number(params.maxReplacements) : 0
+    if (maxReplacements < 0 || isNaN(maxReplacements)) maxReplacements = 0
+
+    var replacements = 0
+    var resultText
+    if (params.regex === true) {
+      var flags = caseSensitive ? "g" : "gi"
+      var regex = new RegExp(pattern, flags)
+      resultText = String(content).replace(regex, function(match) {
+        if (maxReplacements > 0 && replacements >= maxReplacements) return match
+        replacements++
+        return replacement
+      })
+    } else {
+      var source = String(content)
+      var needle = caseSensitive ? pattern : pattern.toLowerCase()
+      var haystack = caseSensitive ? source : source.toLowerCase()
+      var start = 0
+      var output = ""
+      while (true) {
+        if (maxReplacements > 0 && replacements >= maxReplacements) break
+        var idx = haystack.indexOf(needle, start)
+        if (idx === -1) break
+        output += source.substring(start, idx) + replacement
+        start = idx + pattern.length
+        replacements++
+      }
+      output += source.substring(start)
+      resultText = output
+    }
+
+    if (params.requireMatch === true && replacements === 0) {
+      return "[ERROR] No matches found for pattern: " + params.pattern
+    }
+
+    if (resultText !== content) {
+      io.writeFileString(filePath, resultText, encoding, false)
+    }
+
+    return {
+      path: filePath,
+      relativePath: this._toRelative(filePath),
+      encoding: encoding,
+      replacements: replacements,
+      changed: resultText !== content,
+      contentLength: resultText.length
+    }
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
 MiniUtilsTool.prototype._deleteRecursive = function(targetPath) {
   var self = this
   var entries = this._listEntries(targetPath, { recursive: true, includeHidden: true })
@@ -678,7 +841,7 @@ MiniUtilsTool.prototype.filesystemQuery = function(params) {
   var payload = isObject(params) ? params : {}
   var opValue = payload.operation
   if (isUnDef(opValue) || !isString(opValue) || opValue.trim().length === 0) {
-    return "[ERROR] operation parameter is required (use: read, list, search, or info)"
+    return "[ERROR] operation parameter is required (use: read, list, search, glob, or info)"
   }
   var normalized = opValue.trim().toLowerCase()
   var map = {
@@ -694,6 +857,7 @@ MiniUtilsTool.prototype.filesystemQuery = function(params) {
     searchcontent: "searchContent",
     grep       : "searchContent",
     find       : "searchContent",
+    glob       : "globFiles",
     info       : "getFileInfo",
     stat       : "getFileInfo",
     metadata   : "getFileInfo",
@@ -735,6 +899,8 @@ MiniUtilsTool.prototype.filesystemModify = function(params) {
     writefile : "writeFile",
     save      : "writeFile",
     append    : "writeFile",
+    edit      : "editFile",
+    replace   : "editFile",
     delete    : "deleteFile",
     remove    : "deleteFile",
     rm        : "deleteFile",
@@ -1110,6 +1276,104 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
         throw e
       }
 
+    } else if (op === "webfetch" || op === "fetch") {
+      var url = params.url
+      if (isUnDef(url)) return "[ERROR] url is required"
+
+      var method = String(params.method || "GET").toUpperCase()
+      var timeout = isDef(params.timeout) ? Number(params.timeout) : 30000
+      var maxBytes = isDef(params.maxBytes) ? Number(params.maxBytes) : 1048576
+      if (isNaN(maxBytes) || maxBytes < 0) maxBytes = 1048576
+      var encoding = params.encoding || "utf-8"
+
+      var connection = new java.net.URL(String(url)).openConnection()
+      if (timeout > 0) {
+        connection.setConnectTimeout(timeout)
+        connection.setReadTimeout(timeout)
+      }
+
+      if (connection instanceof java.net.HttpURLConnection) {
+        connection.setInstanceFollowRedirects(true)
+        connection.setRequestMethod(method)
+      }
+
+      if (isMap(params.headers)) {
+        Object.keys(params.headers).forEach(function(key) {
+          connection.setRequestProperty(String(key), String(params.headers[key]))
+        })
+      }
+
+      if (isDef(params.body)) {
+        connection.setDoOutput(true)
+        var out = connection.getOutputStream()
+        out.write(af.fromString2Bytes(String(params.body)))
+        out.close()
+      }
+
+      var status = null
+      var statusText = null
+      if (connection instanceof java.net.HttpURLConnection) {
+        status = Number(connection.getResponseCode())
+        statusText = String(connection.getResponseMessage())
+      }
+
+      var stream = null
+      if (connection instanceof java.net.HttpURLConnection && status !== null && status >= 400) {
+        stream = connection.getErrorStream()
+      } else {
+        stream = connection.getInputStream()
+      }
+      if (isUnDef(stream)) return "[ERROR] Unable to read response stream"
+
+      var buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
+      var output = new java.io.ByteArrayOutputStream()
+      var total = 0
+      var truncated = false
+
+      while (true) {
+        var read = stream.read(buffer)
+        if (read === -1) break
+        if (maxBytes > 0 && total + read > maxBytes) {
+          var remaining = maxBytes - total
+          if (remaining > 0) {
+            output.write(buffer, 0, remaining)
+            total += remaining
+          }
+          truncated = true
+          break
+        }
+        output.write(buffer, 0, read)
+        total += read
+      }
+      stream.close()
+
+      var resultBytes = output.toByteArray()
+      var body = String(new java.lang.String(resultBytes, encoding))
+      var headers = {}
+      try {
+        var headerFields = connection.getHeaderFields()
+        if (isDef(headerFields)) {
+          var iterator = headerFields.entrySet().iterator()
+          while (iterator.hasNext()) {
+            var entry = iterator.next()
+            var key = entry.getKey()
+            if (isUnDef(key)) continue
+            headers[String(key)] = String(entry.getValue())
+          }
+        }
+      } catch (e) {
+      }
+
+      return {
+        url: String(url),
+        status: status,
+        statusText: statusText,
+        headers: headers,
+        bytes: total,
+        truncated: truncated,
+        body: body
+      }
+
     } else if (op === "diff") {
       var text1 = params.text1
       var text2 = params.text2
@@ -1356,14 +1620,19 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
 
     for (var i = 0; i < operations.length; i++) {
       var op = operations[i]
-      if (!isMap(op) || !isString(op.type)) {
+      var rawType = isMap(op) ? (isString(op.type) ? op.type : op.operation) : null
+      if (!isMap(op) || !isString(rawType)) {
         results.push({ error: "Invalid operation at index " + i, success: false })
         if (stopOnError) break
         continue
       }
 
-      var opType = op.type.toLowerCase()
-      var opParams = op.params || {}
+      var opType = rawType.toLowerCase()
+      var opParams = isMap(op.params) ? op.params : {}
+      Object.keys(op).forEach(function(key) {
+        if (key === "type" || key === "operation" || key === "params") return
+        if (isUnDef(opParams[key])) opParams[key] = op[key]
+      })
       if (compact) opParams.compact = true
 
       var result
@@ -1374,6 +1643,8 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
           result = this.listDirectory(opParams)
         } else if (opType === "search" || opType === "searchcontent") {
           result = this.searchContent(opParams)
+        } else if (opType === "glob") {
+          result = this.globFiles(opParams)
         } else if (opType === "info" || opType === "getfileinfo") {
           result = this.getFileInfo(opParams)
         } else {
@@ -1598,6 +1869,9 @@ MiniUtilsTool.prototype.kvStore = function(params) {
   if (isUnDef(this._kvStore)) {
     this._kvStore = {}
   }
+  if (isUnDef(this._todoList)) {
+    this._todoList = []
+  }
 
   try {
     if (op === "set") {
@@ -1662,6 +1936,27 @@ MiniUtilsTool.prototype.kvStore = function(params) {
       var count = Object.keys(this._kvStore).length
       this._kvStore = {}
       return { cleared: count }
+    } else if (op === "todo-write") {
+      var items = params.items
+      var item = params.item
+      var append = params.append === true
+
+      if (isUnDef(items) && isUnDef(item)) return "[ERROR] items or item is required"
+      if (isDef(items) && !isArray(items)) return "[ERROR] items must be an array"
+
+      var nextList = append ? this._todoList.slice(0) : []
+      if (isArray(items)) {
+        items.forEach(function(entry) {
+          if (isDef(entry)) nextList.push(entry)
+        })
+      } else if (isDef(item)) {
+        nextList.push(item)
+      }
+      this._todoList = nextList
+      return { count: this._todoList.length, items: this._todoList.slice(0) }
+
+    } else if (op === "todo-read") {
+      return { count: this._todoList.length, items: this._todoList.slice(0) }
     }
 
     return "[ERROR] Unknown operation: " + op
@@ -1673,7 +1968,7 @@ MiniUtilsTool.prototype.kvStore = function(params) {
 MiniUtilsTool._metadataByFn = (function() {
   var queryReadOps = ["read", "readfile", "get", "view"]
   var queryListOps = ["list", "ls", "listdirectory", "dir"]
-  var querySearchOps = ["search", "searchcontent", "grep", "find"]
+  var querySearchOps = ["search", "searchcontent", "grep", "find", "glob"]
   var queryInfoOps = ["info", "stat", "metadata", "getfileinfo"]
   var queryReadInfoOps = queryReadOps.concat(queryInfoOps)
   var queryAllOps = queryReadOps
@@ -1682,8 +1977,9 @@ MiniUtilsTool._metadataByFn = (function() {
     .concat(queryInfoOps)
 
   var modifyWriteOps = ["write", "writefile", "save", "append"]
+  var modifyEditOps = ["edit", "replace"]
   var modifyDeleteOps = ["delete", "remove", "rm", "deletefile"]
-  var modifyAllOps = modifyWriteOps.concat(modifyDeleteOps)
+  var modifyAllOps = modifyWriteOps.concat(modifyEditOps).concat(modifyDeleteOps)
 
   var mathOperationTypes = ["calculate", "statistics", "convert-unit", "convert", "random"]
   var timeOperationTypes = ["current-time", "current", "timezone-convert", "sleep"]
@@ -1692,8 +1988,9 @@ MiniUtilsTool._metadataByFn = (function() {
   var textEncodeOps = ["encode", "decode"]
   var textHashOps = ["hash"]
   var textConvertOps = ["json-to-yaml", "json2yaml", "yaml-to-json", "yaml2json", "csv-to-json", "csv2json", "json-to-csv", "json2csv"]
+  var textFetchOps = ["webfetch", "fetch"]
   var textManipOps = ["diff", "template", "templify", "replace", "extract", "split", "join", "trim", "line-count", "word-count"]
-  var textAllOps = textEncodeOps.concat(textHashOps).concat(textConvertOps).concat(textManipOps)
+  var textAllOps = textEncodeOps.concat(textHashOps).concat(textConvertOps).concat(textFetchOps).concat(textManipOps)
 
   // Path utilities operation types
   var pathOps = ["join", "resolve", "parse", "dirname", "basename", "extname", "normalize", "relative", "is-absolute"]
@@ -1705,7 +2002,7 @@ MiniUtilsTool._metadataByFn = (function() {
   var systemInfoOps = ["environment", "env", "platform", "cwd", "user", "memory", "disk"]
 
   // KV store operation types
-  var kvStoreOps = ["set", "get", "delete", "list", "clear"]
+  var kvStoreOps = ["set", "get", "delete", "list", "clear", "todo-write", "todo-read"]
 
   return {
     init: {
@@ -1721,13 +2018,13 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     filesystemQuery: {
       name       : "filesystemQuery",
-      description: "Read files, list directories, search text, get file info. Use for: viewing code, finding files, searching content, checking if files exist. Supports compact mode to reduce response size.",
+      description: "Unified read-only filesystem tool: read files, list directories, search content, glob match paths, or get file info. Use this to explore codebases, locate files, or inspect metadata while keeping output compact.",
       inputSchema: {
         type      : "object",
         properties: {
           operation    : {
             type       : "string",
-            description: "Operation to execute (read, list, search, info). Defaults to \"read\".",
+            description: "Operation to execute (read, list, search, glob, info). Use read for file contents, list for directory contents, search for text matches, glob for path patterns, info for metadata.",
             enum       : queryAllOps,
             default    : "read"
           },
@@ -1735,8 +2032,8 @@ MiniUtilsTool._metadataByFn = (function() {
           encoding     : { type: "string", description: "Character encoding to use when reading files." },
           includeHidden: { type: "boolean", description: "Include hidden files in list operations when true." },
           recursive    : { type: "boolean", description: "Traverse directories recursively when supported." },
-          pattern      : { type: "string", description: "Pattern to search for when operation is set to search." },
-          regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation is search." },
+          pattern      : { type: "string", description: "Pattern to search for when operation is set to search or glob (glob uses filesystem-style patterns)." },
+          regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation is search (ignored for glob)." },
           caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation is search." },
           maxResults   : { type: "number", description: "Maximum number of search matches to return (0 means no limit)." },
           compact      : { type: "boolean", description: "Return compact results with minimal metadata to save context." }
@@ -1759,13 +2056,13 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     filesystemModify: {
       name       : "filesystemModify",
-      description: "Write, append, or delete files and directories. Use for: creating files, modifying content, cleaning up. Requires readwrite=true initialization.",
+      description: "Unified write filesystem tool: write/append files, edit in-place, or delete paths. Use for controlled file changes; requires readwrite=true.",
       inputSchema: {
         type      : "object",
         properties: {
           operation        : {
             type       : "string",
-            description: "Operation to execute (write, append, delete).",
+            description: "Operation to execute (write, append, edit, delete). Use edit for in-place replacements, delete for cleanup.",
             enum       : modifyAllOps
           },
           path             : { type: "string", description: "Target file or directory path for the operation." },
@@ -1773,6 +2070,12 @@ MiniUtilsTool._metadataByFn = (function() {
           encoding         : { type: "string", description: "Character encoding to use when writing content." },
           append           : { type: "boolean", description: "Append to the file instead of overwriting when supported." },
           createMissingDirs: { type: "boolean", description: "Create parent directories when writing files if they do not exist." },
+          pattern          : { type: "string", description: "Pattern to search for when operation is set to edit (literal unless regex=true)." },
+          replacement      : { type: "string", description: "Replacement text when operation is set to edit." },
+          regex            : { type: "boolean", description: "Treat pattern as a regular expression when operation is edit." },
+          caseSensitive    : { type: "boolean", description: "Case-sensitive matching when operation is edit." },
+          maxReplacements  : { type: "number", description: "Maximum number of replacements to perform when editing." },
+          requireMatch     : { type: "boolean", description: "Require at least one match when editing (error if none)." },
           confirm          : { type: "boolean", description: "Must be true to confirm deletion operations." },
           recursive        : { type: "boolean", description: "Delete directories and their contents recursively when true." }
         },
@@ -1781,6 +2084,10 @@ MiniUtilsTool._metadataByFn = (function() {
           {
             if  : { required: ["operation"], properties: { operation: { enum: modifyWriteOps } } },
             then: { required: ["content"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: modifyEditOps } } },
+            then: { required: ["pattern", "replacement"] }
           },
           {
             if  : { required: ["operation"], properties: { operation: { enum: modifyDeleteOps } } },
@@ -1848,18 +2155,25 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     textUtilities: {
       name       : "textUtilities",
-      description: "Transform text and data: encode/decode (base64, hex, url, html), hash (md5, sha256), convert formats (JSON/YAML/CSV), manipulate strings. Use for: encoding data, hashing, format conversion, text processing, template rendering.",
+      description: "Text/data helper: encode/decode, hash, convert JSON/YAML/CSV, fetch URLs, and manipulate strings. Use for quick transformations or lightweight web fetches.",
       inputSchema: {
         type      : "object",
         properties: {
           operation  : {
             type       : "string",
-            description: "Operation type: encode, decode, hash, json-to-yaml, yaml-to-json, csv-to-json, json-to-csv, diff, template, replace, extract, split, join, trim, line-count, word-count.",
+            description: "Operation type: encode, decode, hash, json-to-yaml, yaml-to-json, csv-to-json, json-to-csv, webfetch, diff, template, replace, extract, split, join, trim, line-count, word-count.",
             enum       : textAllOps
           },
           data       : { type: "string", description: "Data to process (text, JSON, YAML, CSV, etc.)." },
           format     : { type: "string", description: "Encoding format for encode/decode: base64, hex, url, html." },
           algorithm  : { type: "string", description: "Hash algorithm: md5, sha1, sha256, sha384, sha512." },
+          url        : { type: "string", description: "URL to fetch when operation is webfetch." },
+          method     : { type: "string", description: "HTTP method for webfetch (default GET)." },
+          headers    : { type: "object", description: "HTTP headers for webfetch." },
+          body       : { type: "string", description: "Request body for webfetch." },
+          timeout    : { type: "number", description: "Timeout in milliseconds for webfetch." },
+          maxBytes   : { type: "number", description: "Maximum bytes to read for webfetch (prevents huge responses)." },
+          encoding   : { type: "string", description: "Response encoding for webfetch." },
           text       : { type: "string", description: "Text input for text operations." },
           text1      : { type: "string", description: "First text for diff operation." },
           text2      : { type: "string", description: "Second text for diff operation." },
@@ -1909,7 +2223,7 @@ MiniUtilsTool._metadataByFn = (function() {
             items      : {
               type      : "object",
               properties: {
-                type  : { type: "string", description: "Operation type: read, list, search, info." },
+                type  : { type: "string", description: "Operation type: read, list, search, glob, info." },
                 params: { type: "object", description: "Parameters for the operation." }
               },
               required : ["type"]
@@ -1961,18 +2275,21 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     kvStore: {
       name       : "kvStore",
-      description: "Simple key-value store for temporary data during execution. Use for: caching results, maintaining state between operations, storing intermediate data.",
+      description: "Ephemeral state helper: key/value cache plus a lightweight todo list. Use for short-lived state between steps.",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
-            description: "Operation type: set, get, delete, list, clear.",
+            description: "Operation type: set, get, delete, list, clear, todo-write, todo-read.",
             enum       : kvStoreOps
           },
           key      : { type: "string", description: "Key for set/get/delete operations." },
           value    : { description: "Value to store (any type)." },
-          ttl      : { type: "number", description: "Time-to-live in milliseconds." }
+          ttl      : { type: "number", description: "Time-to-live in milliseconds." },
+          items    : { type: "array", description: "Todo items array for todo-write operation." },
+          item     : { type: "string", description: "Single todo item for todo-write operation." },
+          append   : { type: "boolean", description: "Append to existing todo list when true." }
         },
         required : ["operation"]
       }
