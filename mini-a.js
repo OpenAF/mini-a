@@ -8349,7 +8349,6 @@ MiniA.prototype.start = function(args) {
             this.fnI("deepresearch", `Validation goal: ${deepResearchState.validationGoal}`)
             
             var finalOutput = null
-            var finalVerdict = null
             
             for (var cycle = 1; cycle <= deepResearchState.maxCycles && this.state != "stop"; cycle++) {
                 deepResearchState.currentCycle = cycle
@@ -8359,7 +8358,6 @@ MiniA.prototype.start = function(args) {
                 
                 // Store the output
                 finalOutput = cycleResult.output
-                finalVerdict = cycleResult.validation.verdict
                 
                 // Check if validation passes
                 if (cycleResult.passes) {
@@ -10350,7 +10348,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
 /**
  * Extract learnings from validation result
  */
-MiniA.prototype._extractCycleLearnings = function(validationResult, previousLearnings) {
+MiniA.prototype._extractCycleLearnings = function(validationResult) {
   var learnings = []
 
   if (isObject(validationResult)) {
@@ -10438,36 +10436,33 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
     cycleKnowledge = this._buildCycleKnowledge(deepResearchState.cycleHistory, deepResearchState.accumulatedLearnings)
   }
 
+  // Create a copy of args for this cycle
+  var argsForCycle = Object.assign({}, args)
+  argsForCycle.deepresearch = false // Prevent recursive deep research
+  
   // Augment knowledge for this cycle
-  var originalKnowledge = isString(args.knowledge) ? args.knowledge : ""
   if (cycleKnowledge.length > 0) {
-    args.knowledge = originalKnowledge.length > 0 ? originalKnowledge + "\n\n" + cycleKnowledge : cycleKnowledge
+    var originalKnowledge = isString(args.knowledge) ? args.knowledge : ""
+    argsForCycle.knowledge = originalKnowledge.length > 0 ? originalKnowledge + "\n\n" + cycleKnowledge : cycleKnowledge
   }
 
   // Execute the research goal (this will return the final answer)
   var cycleStartTime = now()
   var researchOutput
+  var originalIsInitialized = this._isInitialized
   
   try {
-    // Call the original _startInternal but skip deep research loop
-    var argsForCycle = Object.assign({}, args)
-    argsForCycle.deepresearch = false // Prevent recursive deep research
-    
-    // Store the original state to restore after cycle
-    var originalIsInitialized = this._isInitialized
-    this._isInitialized = false // Force re-init for each cycle
+    // Force re-init for each cycle
+    this._isInitialized = false
     
     researchOutput = this._startInternal(argsForCycle, cycleStartTime)
-    
-    // Restore initialization state
-    this._isInitialized = originalIsInitialized
   } catch (cycleErr) {
     this.fnI("error", `Cycle ${cycleNum} failed: ${cycleErr}`)
     researchOutput = "(cycle failed: " + cycleErr + ")"
+  } finally {
+    // Always restore initialization state
+    this._isInitialized = originalIsInitialized
   }
-
-  // Restore original knowledge
-  args.knowledge = originalKnowledge
 
   var cycleTime = now() - cycleStartTime
 
@@ -10476,7 +10471,7 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   var validationResult = this._validateResearchOutcome(researchOutput, deepResearchState.validationGoal, args)
 
   // Extract learnings
-  var cycleLearnings = this._extractCycleLearnings(validationResult, deepResearchState.accumulatedLearnings)
+  var cycleLearnings = this._extractCycleLearnings(validationResult)
 
   // Record cycle in history
   var cycleRecord = {
@@ -10543,7 +10538,7 @@ MiniA.prototype._checkValidationThreshold = function(validationResult, threshold
   }
 
   // Score-based threshold (e.g., "score>=0.7" or ">=7")
-  var scoreMatch = threshold.match(/score\s*>=\s*([0-9.]+)|>=\s*([0-9.]+)/)
+  var scoreMatch = threshold.match(/score\s*>=\s*([0-9]+(?:\.[0-9]+)?)|>=\s*([0-9]+(?:\.[0-9]+)?)/)
   if (scoreMatch && isNumber(validationResult.score)) {
     var requiredScore = parseFloat(scoreMatch[1] || scoreMatch[2])
     // Normalize if threshold is > 1 (assume 0-10 scale)
@@ -10567,7 +10562,7 @@ MiniA.prototype._formatDeepResearchResult = function(deepResearchState, finalOut
   
   sections.push("# Deep Research Results")
   sections.push("")
-  sections.push(`**Cycles Completed:** ${deepResearchState.currentCycle - 1}/${deepResearchState.maxCycles}`)
+  sections.push(`**Cycles Completed:** ${deepResearchState.currentCycle}/${deepResearchState.maxCycles}`)
   
   if (deepResearchState.finalVerdict) {
     sections.push(`**Final Verdict:** ${deepResearchState.finalVerdict}`)
