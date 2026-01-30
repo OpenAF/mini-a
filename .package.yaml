@@ -125,14 +125,14 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: 1e15e4e45604dc22c39222e684853720ebcc0aae
+  CHEATSHEET.md: b78aedef86f2cbb0820281a37ed6ff904e415d61
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: f6f78259661da25718a82ca7679ba9c2955a0d7c
-  USAGE.md: b01c37929542d69076962a6ede363eba6e70a3ba
+  README.md: a9ac2ad8a58815c156b4b3618a42aadd4f89f745
+  USAGE.md: 4f575c2bc9d2384461c5013dc7c1540bebcee086
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
-  docs/LEARN.md: 11d23bb7be82208cad17b948fac68bfdd7602cf7
+  docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
   docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
@@ -168,14 +168,14 @@ filesHash:
   mcps/mcp-time.yaml: 617dc07ce4e9bfb603a77d17429dc4b57accb3a4
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 729f8823d0cb19cc74fffeba7dd392d676534526
+  mini-a-con.js: 1b4998092f38695170e33d231413f1b28a1fb14f
   mini-a-mcptest.js: 276675bf192fc9431f9096e6854714b635ee2c48
   mini-a-modelman.js: 0a370c6136052b77edd66fa0cfe44c2cbab62a68
   mini-a-modes.yaml: dc2afd2c85038214db9d5421f2f3a0b8c3adbdc6
   mini-a-utils.js: e4c894b57a0a1370f9ceea18b824faf155455e72
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: f2d0f1fddc4db0de6473a21d33c05b909dcaec12
-  mini-a.js: cb326f9d9f8ec8cc5b1925e8aabef976c291c07c
+  mini-a-web.yaml: d2aa10d1cdebaca7210f9d47ab47e55bb6c71860
+  mini-a.js: 216466ef214419385995f1fbd83bcabb83ffa750
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cc7d8800051d310d4de50ad3dbd319def8c9f4be
   public/index.md: 5464b2ce1ae8b4a76783e42c4e34b8d08d7794e0
