@@ -62,6 +62,7 @@ modes:
       useshell   : true
       readwrite  : true
       useutils   : true
+      usestream  : true
       mcpproxy   : true
       mcp        : 
       - type   : ojob
@@ -72,6 +73,7 @@ modes:
     description: "Chatbot mode"
     params     :
       chatbotmode: true
+      usestream  : true
 
   web    :
     description: "Web mode with tools"
@@ -88,6 +90,7 @@ modes:
       usetools   : true
       usehistory : true
       useattach  : true
+      usestream  : true
       historykeep: true
       useplanning: false 
       mcpproxy   : true
