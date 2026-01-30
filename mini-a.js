@@ -122,6 +122,12 @@ var MiniA = function() {
     mcp_circuit_breaker_resets: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
     mcp_lazy_init_failed: $atomic(0, "long"),
+    deep_research_sessions: $atomic(0, "long"),
+    deep_research_cycles: $atomic(0, "long"),
+    deep_research_validations_passed: $atomic(0, "long"),
+    deep_research_validations_failed: $atomic(0, "long"),
+    deep_research_early_success: $atomic(0, "long"),
+    deep_research_max_cycles_reached: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -8334,7 +8340,55 @@ MiniA.prototype.init = function(args) {
 MiniA.prototype.start = function(args) {
     var sessionStartTime = now()
     try {
-        return this._startInternal(args, sessionStartTime)
+        // Check if deep research mode is enabled
+        var deepResearchState = this._initDeepResearch(args)
+        
+        if (isObject(deepResearchState) && deepResearchState.enabled) {
+            // Deep research mode: run multiple cycles with validation
+            this.fnI("deepresearch", `[Deep Research] Starting with max ${deepResearchState.maxCycles} cycles`)
+            this.fnI("deepresearch", `Validation goal: ${deepResearchState.validationGoal}`)
+            
+            var finalOutput = null
+            var finalVerdict = null
+            
+            for (var cycle = 1; cycle <= deepResearchState.maxCycles && this.state != "stop"; cycle++) {
+                deepResearchState.currentCycle = cycle
+                
+                // Run research cycle
+                var cycleResult = this._runDeepResearchCycle(cycle, args, deepResearchState)
+                
+                // Store the output
+                finalOutput = cycleResult.output
+                finalVerdict = cycleResult.validation.verdict
+                
+                // Check if validation passes
+                if (cycleResult.passes) {
+                    this.fnI("deepresearch", `[Deep Research] Cycle ${cycle} passed validation. Stopping.`)
+                    deepResearchState.finalVerdict = "PASS"
+                    break
+                } else {
+                    this.fnI("deepresearch", `[Deep Research] Cycle ${cycle} did not pass validation. ${cycle < deepResearchState.maxCycles ? 'Continuing to next cycle...' : 'Max cycles reached.'}`)
+                }
+            }
+            
+            // Check if we reached max cycles without passing
+            if (deepResearchState.finalVerdict !== "PASS") {
+                deepResearchState.finalVerdict = "MAX_CYCLES_REACHED"
+                global.__mini_a_metrics.deep_research_max_cycles_reached.inc()
+                this.fnI("deepresearch", `[Deep Research] Reached max cycles (${deepResearchState.maxCycles}) without passing validation`)
+            }
+            
+            // Format the final result with cycle metadata
+            var formattedResult = this._formatDeepResearchResult(deepResearchState, finalOutput || "(no output)")
+            
+            var totalTime = now() - sessionStartTime
+            global.__mini_a_metrics.total_session_time.set(totalTime)
+            
+            return formattedResult
+        } else {
+            // Normal mode: run once
+            return this._startInternal(args, sessionStartTime)
+        }
     } catch (e) {
         global.__mini_a_metrics.goals_failed.inc()
         global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
@@ -10173,6 +10227,386 @@ MiniA.prototype._runChatbotMode = function(options) {
     this.state = "stop"
 
     return this._processFinalAnswer(finalAnswer, args)
+}
+
+/**
+ * Initialize deep research state from args
+ */
+MiniA.prototype._initDeepResearch = function(args) {
+  var enabled = toBoolean(args.deepresearch) === true
+  if (!enabled) return null
+
+  var maxCycles = isNumber(args.maxcycles) ? Math.max(1, args.maxcycles) : 3
+  var validationGoal = isString(args.validationgoal) && args.validationgoal.length > 0 ? args.validationgoal : null
+  var validationThreshold = isString(args.validationthreshold) && args.validationthreshold.length > 0 ? args.validationthreshold : "PASS"
+  var persistLearnings = isUnDef(args.persistlearnings) ? true : toBoolean(args.persistlearnings)
+
+  if (!validationGoal) {
+    this.fnI("warn", "Deep research mode enabled but no validationgoal provided. Disabling deep research.")
+    return null
+  }
+
+  global.__mini_a_metrics.deep_research_sessions.inc()
+
+  return {
+    enabled: true,
+    currentCycle: 1,
+    maxCycles: maxCycles,
+    validationGoal: validationGoal,
+    validationThreshold: validationThreshold,
+    persistLearnings: persistLearnings,
+    cycleHistory: [],
+    accumulatedLearnings: [],
+    finalVerdict: null
+  }
+}
+
+/**
+ * Validate research outcome using LLM
+ */
+MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGoal, args) {
+  if (!isString(researchOutput) || researchOutput.length === 0) {
+    return { verdict: "REVISE", feedback: "Research output is empty", score: 0 }
+  }
+
+  var validatorLLM = this.llm
+  if (!isObject(validatorLLM) || (typeof validatorLLM.promptWithStats !== "function" && typeof validatorLLM.promptJSONWithStats !== "function")) {
+    this.fnI("warn", "No LLM available for validation")
+    return { verdict: "PASS", feedback: "Validation skipped (no LLM)", score: 1 }
+  }
+
+  var validationPrompt = "You are validating research results against specific criteria.\n\n" +
+    "RESEARCH OUTPUT:\n" + researchOutput + "\n\n" +
+    "VALIDATION CRITERIA:\n" + validationGoal + "\n\n" +
+    "Evaluate the research output and respond with JSON ONLY in this structure:\n" +
+    "{\"verdict\":\"PASS|REVISE\",\"feedback\":string,\"score\":number(0-1),\"specificIssues\":[strings],\"suggestions\":[strings]}\n\n" +
+    "- Use verdict=PASS only if the research fully meets the validation criteria\n" +
+    "- Use verdict=REVISE if improvements are needed\n" +
+    "- score should be 0-1 (0=completely fails, 1=fully passes)\n" +
+    "- specificIssues: list concrete problems with the research\n" +
+    "- suggestions: actionable recommendations for improvement"
+
+  try {
+    var responseWithStats = this._withExponentialBackoff(() => {
+      if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
+        return validatorLLM.promptJSONWithStats(validationPrompt)
+      }
+      return validatorLLM.promptWithStats(validationPrompt)
+    }, {
+      maxAttempts : 3,
+      initialDelay: 400,
+      maxDelay    : 4000,
+      context     : { source: "llm", operation: "deep-research-validation" },
+      onRetry     : (err, attempt, wait) => {
+        this.fnI("retry", `Research validation attempt ${attempt} failed. Retrying in ${wait}ms...`)
+      }
+    })
+
+    var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+    var totalTokens = this._getTotalTokens(stats)
+    global.__mini_a_metrics.llm_actual_tokens.getAdd(totalTokens)
+    global.__mini_a_metrics.llm_normal_tokens.getAdd(totalTokens)
+    global.__mini_a_metrics.llm_normal_calls.inc()
+
+    var validationContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
+    if (isObject(validationContent) && isString(validationContent.response)) {
+      validationContent = validationContent.response
+    }
+    if (isString(validationContent)) {
+      validationContent = this._cleanCodeBlocks(validationContent)
+    }
+
+    var validation = isObject(validationContent) ? validationContent : jsonParse(String(validationContent || ""), __, __, true)
+    if (!isObject(validation)) {
+      var fallback = String(validationContent || "")
+      var jsonMatch = fallback.match(/\{[\s\S]*\}/)
+      if (jsonMatch) validation = jsonParse(jsonMatch[0], __, __, true)
+    }
+    if (!isObject(validation)) {
+      return { verdict: "REVISE", feedback: "Validation parsing failed", score: 0.5 }
+    }
+
+    var verdictRaw = isString(validation.verdict) ? validation.verdict.trim().toUpperCase() : "REVISE"
+    var verdict = verdictRaw === "PASS" ? "PASS" : "REVISE"
+    var feedback = isString(validation.feedback) ? validation.feedback.trim() : ""
+    var score = isNumber(validation.score) ? validation.score : 0
+    var specificIssues = isArray(validation.specificIssues) ? validation.specificIssues.filter(isString) : []
+    var suggestions = isArray(validation.suggestions) ? validation.suggestions.filter(isString) : []
+
+    return {
+      verdict: verdict,
+      feedback: feedback,
+      score: score,
+      specificIssues: specificIssues,
+      suggestions: suggestions,
+      raw: validation
+    }
+  } catch (validationErr) {
+    this.fnI("warn", `Research validation failed: ${validationErr}`)
+    return { verdict: "REVISE", feedback: "Validation error: " + validationErr, score: 0 }
+  }
+}
+
+/**
+ * Extract learnings from validation result
+ */
+MiniA.prototype._extractCycleLearnings = function(validationResult, previousLearnings) {
+  var learnings = []
+
+  if (isObject(validationResult)) {
+    if (isArray(validationResult.specificIssues)) {
+      validationResult.specificIssues.forEach(function(issue) {
+        if (isString(issue) && issue.length > 0) {
+          learnings.push("Issue: " + issue)
+        }
+      })
+    }
+
+    if (isArray(validationResult.suggestions)) {
+      validationResult.suggestions.forEach(function(suggestion) {
+        if (isString(suggestion) && suggestion.length > 0) {
+          learnings.push("Suggestion: " + suggestion)
+        }
+      })
+    }
+
+    if (isString(validationResult.feedback) && validationResult.feedback.length > 0) {
+      learnings.push("Feedback: " + validationResult.feedback)
+    }
+  }
+
+  return learnings
+}
+
+/**
+ * Build knowledge prompt from cycle history
+ */
+MiniA.prototype._buildCycleKnowledge = function(cycleHistory, accumulatedLearnings) {
+  if (!isArray(cycleHistory) || cycleHistory.length === 0) {
+    return ""
+  }
+
+  var sections = []
+  sections.push("## DEEP RESEARCH CYCLE HISTORY")
+  sections.push("")
+
+  cycleHistory.forEach(function(cycle, index) {
+    sections.push(`### Cycle ${cycle.cycle}`)
+    if (isObject(cycle.validationResult)) {
+      sections.push(`- Verdict: ${cycle.validationResult.verdict}`)
+      if (isNumber(cycle.validationResult.score)) {
+        sections.push(`- Score: ${cycle.validationResult.score}`)
+      }
+      if (isString(cycle.validationResult.feedback) && cycle.validationResult.feedback.length > 0) {
+        sections.push(`- Feedback: ${cycle.validationResult.feedback}`)
+      }
+    }
+    if (isArray(cycle.learnings) && cycle.learnings.length > 0) {
+      sections.push("- Key Learnings:")
+      cycle.learnings.forEach(function(learning) {
+        sections.push(`  - ${learning}`)
+      })
+    }
+    sections.push("")
+  })
+
+  if (isArray(accumulatedLearnings) && accumulatedLearnings.length > 0) {
+    sections.push("## ACCUMULATED LEARNINGS")
+    sections.push("")
+    accumulatedLearnings.forEach(function(learning) {
+      sections.push(`- ${learning}`)
+    })
+    sections.push("")
+  }
+
+  sections.push("Use these learnings to improve your research in this cycle.")
+  sections.push("")
+
+  return sections.join("\n")
+}
+
+/**
+ * Run a single deep research cycle
+ */
+MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchState) {
+  this.fnI("deepresearch", `[Deep Research] Starting cycle ${cycleNum}/${deepResearchState.maxCycles}`)
+  global.__mini_a_metrics.deep_research_cycles.inc()
+
+  // Build knowledge from previous cycles
+  var cycleKnowledge = ""
+  if (cycleNum > 1 && deepResearchState.persistLearnings) {
+    cycleKnowledge = this._buildCycleKnowledge(deepResearchState.cycleHistory, deepResearchState.accumulatedLearnings)
+  }
+
+  // Augment knowledge for this cycle
+  var originalKnowledge = isString(args.knowledge) ? args.knowledge : ""
+  if (cycleKnowledge.length > 0) {
+    args.knowledge = originalKnowledge.length > 0 ? originalKnowledge + "\n\n" + cycleKnowledge : cycleKnowledge
+  }
+
+  // Execute the research goal (this will return the final answer)
+  var cycleStartTime = now()
+  var researchOutput
+  
+  try {
+    // Call the original _startInternal but skip deep research loop
+    var argsForCycle = Object.assign({}, args)
+    argsForCycle.deepresearch = false // Prevent recursive deep research
+    
+    // Store the original state to restore after cycle
+    var originalIsInitialized = this._isInitialized
+    this._isInitialized = false // Force re-init for each cycle
+    
+    researchOutput = this._startInternal(argsForCycle, cycleStartTime)
+    
+    // Restore initialization state
+    this._isInitialized = originalIsInitialized
+  } catch (cycleErr) {
+    this.fnI("error", `Cycle ${cycleNum} failed: ${cycleErr}`)
+    researchOutput = "(cycle failed: " + cycleErr + ")"
+  }
+
+  // Restore original knowledge
+  args.knowledge = originalKnowledge
+
+  var cycleTime = now() - cycleStartTime
+
+  // Validate the research output
+  this.fnI("deepresearch", `[Deep Research] Validating cycle ${cycleNum} results...`)
+  var validationResult = this._validateResearchOutcome(researchOutput, deepResearchState.validationGoal, args)
+
+  // Extract learnings
+  var cycleLearnings = this._extractCycleLearnings(validationResult, deepResearchState.accumulatedLearnings)
+
+  // Record cycle in history
+  var cycleRecord = {
+    cycle: cycleNum,
+    researchOutput: researchOutput,
+    validationResult: validationResult,
+    learnings: cycleLearnings,
+    timestamp: new Date().toISOString(),
+    duration: cycleTime
+  }
+  deepResearchState.cycleHistory.push(cycleRecord)
+
+  // Update accumulated learnings
+  if (deepResearchState.persistLearnings) {
+    cycleLearnings.forEach(function(learning) {
+      deepResearchState.accumulatedLearnings.push(learning)
+    })
+  }
+
+  // Log validation result
+  var verdictMsg = `[Deep Research] Cycle ${cycleNum} validation: ${validationResult.verdict}`
+  if (isNumber(validationResult.score)) {
+    verdictMsg += ` (score: ${validationResult.score})`
+  }
+  this.fnI("deepresearch", verdictMsg)
+  
+  if (isString(validationResult.feedback) && validationResult.feedback.length > 0) {
+    this.fnI("deepresearch", `Feedback: ${validationResult.feedback}`)
+  }
+
+  // Check if validation passes
+  var passes = this._checkValidationThreshold(validationResult, deepResearchState.validationThreshold)
+  
+  if (passes) {
+    global.__mini_a_metrics.deep_research_validations_passed.inc()
+    if (cycleNum < deepResearchState.maxCycles) {
+      global.__mini_a_metrics.deep_research_early_success.inc()
+    }
+  } else {
+    global.__mini_a_metrics.deep_research_validations_failed.inc()
+  }
+
+  return {
+    output: researchOutput,
+    validation: validationResult,
+    passes: passes,
+    learnings: cycleLearnings
+  }
+}
+
+/**
+ * Check if validation result meets threshold
+ */
+MiniA.prototype._checkValidationThreshold = function(validationResult, threshold) {
+  if (!isString(threshold) || threshold.length === 0) {
+    threshold = "PASS"
+  }
+
+  threshold = threshold.trim()
+
+  // Simple PASS check
+  if (threshold === "PASS" || threshold.toUpperCase() === "PASS") {
+    return validationResult.verdict === "PASS"
+  }
+
+  // Score-based threshold (e.g., "score>=0.7" or ">=7")
+  var scoreMatch = threshold.match(/score\s*>=\s*([0-9.]+)|>=\s*([0-9.]+)/)
+  if (scoreMatch && isNumber(validationResult.score)) {
+    var requiredScore = parseFloat(scoreMatch[1] || scoreMatch[2])
+    // Normalize if threshold is > 1 (assume 0-10 scale)
+    if (requiredScore > 1) {
+      requiredScore = requiredScore / 10
+    }
+    return validationResult.score >= requiredScore
+  }
+
+  // Default to PASS verdict
+  return validationResult.verdict === "PASS"
+}
+
+/**
+ * Format deep research result
+ */
+MiniA.prototype._formatDeepResearchResult = function(deepResearchState, finalOutput) {
+  if (!isObject(deepResearchState)) return finalOutput
+
+  var sections = []
+  
+  sections.push("# Deep Research Results")
+  sections.push("")
+  sections.push(`**Cycles Completed:** ${deepResearchState.currentCycle - 1}/${deepResearchState.maxCycles}`)
+  
+  if (deepResearchState.finalVerdict) {
+    sections.push(`**Final Verdict:** ${deepResearchState.finalVerdict}`)
+  }
+  
+  sections.push("")
+  sections.push("## Research Output")
+  sections.push("")
+  sections.push(finalOutput)
+  sections.push("")
+  
+  if (isArray(deepResearchState.cycleHistory) && deepResearchState.cycleHistory.length > 0) {
+    sections.push("## Cycle History")
+    sections.push("")
+    deepResearchState.cycleHistory.forEach(function(cycle) {
+      sections.push(`### Cycle ${cycle.cycle}`)
+      if (isObject(cycle.validationResult)) {
+        sections.push(`- **Verdict:** ${cycle.validationResult.verdict}`)
+        if (isNumber(cycle.validationResult.score)) {
+          sections.push(`- **Score:** ${cycle.validationResult.score}`)
+        }
+        if (isString(cycle.validationResult.feedback) && cycle.validationResult.feedback.length > 0) {
+          sections.push(`- **Feedback:** ${cycle.validationResult.feedback}`)
+        }
+      }
+      sections.push("")
+    })
+  }
+  
+  if (isArray(deepResearchState.accumulatedLearnings) && deepResearchState.accumulatedLearnings.length > 0) {
+    sections.push("## Key Learnings")
+    sections.push("")
+    deepResearchState.accumulatedLearnings.forEach(function(learning) {
+      sections.push(`- ${learning}`)
+    })
+    sections.push("")
+  }
+  
+  return sections.join("\n")
 }
 
 MiniA.prototype.getOrigAnswer = function() {

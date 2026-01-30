@@ -349,7 +349,12 @@ try {
     format         : { type: "string", description: "Final answer format (md|json)" },
     model          : { type: "string", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
-    auditch        : { type: "string", description: "Audit channel definition" }
+    auditch        : { type: "string", description: "Audit channel definition" },
+    deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
+    maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
+    validationgoal : { type: "string", description: "Validation criteria for deep research outcomes" },
+    validationthreshold: { type: "string", default: "PASS", description: "Required validation verdict (e.g., 'PASS' or 'score>=0.7')" },
+    persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" }
   }
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath

@@ -306,6 +306,58 @@ mini-a goal="complex multi-phase project" \
 
 ---
 
+## Deep Research Mode
+
+### Deep Research Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `deepresearch` | boolean | `false` | Enable iterative research with validation cycles |
+| `maxcycles` | number | `3` | Maximum number of research cycles to attempt |
+| `validationgoal` | string | - | Quality criteria for validating research outcomes (required when `deepresearch=true`) |
+| `validationthreshold` | string | `PASS` | Validation threshold (`PASS` or score-based like `score>=0.7`) |
+| `persistlearnings` | boolean | `true` | Carry forward learnings between cycles |
+
+**Examples:**
+
+```bash
+# Basic deep research with quality validation
+mini-a goal="Research quantum computing applications in drug discovery" \
+  deepresearch=true \
+  maxcycles=5 \
+  validationgoal="Validate: covers at least 3 specific applications with real-world examples and citations"
+
+# Academic research with score threshold
+mini-a goal="Survey recent advances in transformer architectures for NLP" \
+  deepresearch=true \
+  maxcycles=4 \
+  validationgoal="Rate 1-10: coverage of papers (2023-2024), technical depth, citation quality" \
+  validationthreshold="score>=0.8"
+
+# Market analysis with comprehensive criteria
+mini-a goal="Competitive analysis of project management SaaS tools" \
+  deepresearch=true \
+  maxcycles=3 \
+  validationgoal="Validate: covers top 5 tools, includes pricing, features comparison, customer reviews" \
+  useplanning=true
+
+# Technical documentation with specific requirements
+mini-a goal="Document migration strategy from Python 2 to Python 3" \
+  deepresearch=true \
+  maxcycles=5 \
+  validationgoal="Ensure: step-by-step process, common pitfalls, testing strategy, rollback plan" \
+  useshell=true
+
+# With MCP tools for comprehensive data gathering
+mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
+  deepresearch=true \
+  maxcycles=3 \
+  validationgoal="Validate: includes statistical data, covers solar/wind/hydro, has trend projections" \
+  mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
+```
+
+---
+
 ## Visual & Output
 
 ### Visual Parameters

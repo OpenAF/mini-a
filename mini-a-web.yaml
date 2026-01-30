@@ -822,6 +822,11 @@ jobs:
       chatbotmode    : toBoolean().isBoolean().default(false)
       format         : isString().default(__)
       auditch        : isString().default(__)
+      deepresearch   : toBoolean().isBoolean().default(false)
+      maxcycles      : toNumber().isNumber().default(3)
+      validationgoal : isString().default(__)
+      validationthreshold: isString().default("PASS")
+      persistlearnings: toBoolean().isBoolean().default(true)
   exec : | #js
     global.__res = {}
     global.__usehistory = args.usehistory
