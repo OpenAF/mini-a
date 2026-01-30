@@ -64,9 +64,6 @@ files:
 - .github/version.svg
 - .github/workflows/github-action.yml
 - .odoc.db
-- .openaf_precompiled/.t8-20260129
-- .openaf_precompiled/mini-a-utils_js.class
-- .openaf_precompiled/mini-a_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -75,7 +72,6 @@ files:
 - LICENSE
 - README.md
 - USAGE.md
-- debug.json
 - docs/BACKEND-ENDPOINTS.md
 - docs/LEARN.md
 - docs/MCPPROXY-FEATURE.md
@@ -142,9 +138,6 @@ filesHash:
   .github/version.svg: a56acf6f53d226852989986fc2531d256f4322cd
   .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/.t8-20260129: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  .openaf_precompiled/mini-a-utils_js.class: 1ea69577af53adb25ac88f46c9538397a5964d19
-  .openaf_precompiled/mini-a_js.class: f163df6f0d82787044e6361005c6215665163b30
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
   CHEATSHEET.md: 1e15e4e45604dc22c39222e684853720ebcc0aae
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
@@ -152,7 +145,6 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: f6f78259661da25718a82ca7679ba9c2955a0d7c
   USAGE.md: b01c37929542d69076962a6ede363eba6e70a3ba
-  debug.json: 750585b04c79eaa67cdea89cda7b31305400371b
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/LEARN.md: 11d23bb7be82208cad17b948fac68bfdd7602cf7
   docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
