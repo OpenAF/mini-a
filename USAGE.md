@@ -260,6 +260,7 @@ Optional flags when starting the server:
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
 - `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
 - `useattach=true` to enable the file attachment button in the browser UI (disabled by default)
+- `usekatex=true` (or `usemath=true`) to render LaTeX math expressions in the browser UI using KaTeX
 
 Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
 

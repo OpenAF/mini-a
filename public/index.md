@@ -1528,7 +1528,7 @@
 
 <script>
     /* ========== CONSTANTS & INITIALIZATION ========== */
-    const converter = new showdown.Converter({
+    const MARKDOWN_CONVERTER_OPTIONS = {
         "customizedHeaderId"      : true,
         "parseImgDimensions"      : true,
         "simplifiedAutoLink"      : true,
@@ -1543,7 +1543,93 @@
         "simpleLineBreaks"        : true,
         "ghCompatibleHeaderId"    : true,
         "disableForced4SpacesIndentedSublists": true
-    });
+    };
+    const KATEX_CSS_HREF = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+    const KATEX_EXTENSION_SRC = 'https://cdn.jsdelivr.net/npm/showdown-katex@latest/dist/showdown-katex.min.js';
+    let converter = null;
+    let katexEnabled = false;
+    let katexAssetsReady = false;
+    let katexAssetsPromise = null;
+
+    function buildMarkdownConverter(useKatex) {
+        const options = Object.assign({}, MARKDOWN_CONVERTER_OPTIONS);
+        if (useKatex && typeof window.showdownKatex === 'function') {
+            try {
+                options.extensions = [window.showdownKatex({ throwOnError: false })];
+            } catch (error) {
+                console.warn('KaTeX extension failed to initialize:', error);
+            }
+        }
+        return new showdown.Converter(options);
+    }
+
+    function setMarkdownConverter(useKatex) {
+        converter = buildMarkdownConverter(useKatex);
+        katexEnabled = useKatex === true;
+    }
+
+    function ensureStylesheet(href, dataAttr) {
+        const selector = dataAttr ? `link[${dataAttr}]` : `link[href="${href}"]`;
+        const existing = document.querySelector(selector);
+        if (existing) return;
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.crossOrigin = 'anonymous';
+        if (dataAttr) link.setAttribute(dataAttr, 'true');
+        document.head.appendChild(link);
+    }
+
+    function loadScriptOnce(src, dataAttr) {
+        const selector = dataAttr ? `script[${dataAttr}]` : `script[src="${src}"]`;
+        const existing = document.querySelector(selector);
+        if (existing) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            if (dataAttr) script.setAttribute(dataAttr, 'true');
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load ' + src));
+            document.head.appendChild(script);
+        });
+    }
+
+    async function ensureKatexAssets() {
+        if (katexAssetsReady) return;
+        if (katexAssetsPromise) {
+            await katexAssetsPromise;
+            return;
+        }
+        katexAssetsPromise = Promise.resolve()
+            .then(() => {
+                ensureStylesheet(KATEX_CSS_HREF, 'data-katex-style');
+                return loadScriptOnce(KATEX_EXTENSION_SRC, 'data-katex-extension');
+            })
+            .then(() => {
+                katexAssetsReady = true;
+            });
+        await katexAssetsPromise;
+    }
+
+    async function configureKatexAvailability(enabled) {
+        if (!enabled) {
+            if (katexEnabled) setMarkdownConverter(false);
+            return;
+        }
+        try {
+            await ensureKatexAssets();
+            if (typeof window.showdownKatex !== 'function') {
+                throw new Error('showdown-katex extension not available');
+            }
+            setMarkdownConverter(true);
+        } catch (error) {
+            console.warn('KaTeX rendering disabled:', error);
+            setMarkdownConverter(false);
+        }
+    }
+
+    setMarkdownConverter(false);
 
     const PREVIEW_ID = 'anticipationPreview';
     const PING_INTERVAL_MS = 60 * 1000; // 60 seconds
@@ -3664,6 +3750,7 @@
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
         let shouldEnableStream = false;
+        let shouldEnableKatex = false;
 
         try {
             const response = await fetch('/info', {
@@ -3684,6 +3771,9 @@
             if (typeof data.usestream === 'boolean') {
                 shouldEnableStream = data.usestream;
             }
+            if (typeof data.usekatex === 'boolean') {
+                shouldEnableKatex = data.usekatex;
+            }
         } catch (error) {
             console.error('Unable to determine feature availability:', error);
         }
@@ -3691,6 +3781,7 @@
         applyHistoryAvailability(shouldEnableHistory);
         applyAttachmentAvailability(shouldEnableAttachments);
         streamEnabled = shouldEnableStream;
+        await configureKatexAvailability(shouldEnableKatex);
 
         if (historyEnabled) {
             refreshHistoryPanel();

@@ -84,6 +84,16 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usekatex
+    desc     : "Boolean to enable/disable KaTeX math rendering in the browser UI (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usemath
+    desc     : "Alias for usekatex (KaTeX math rendering in the browser UI)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historys3bucket
     desc     : "S3 bucket to store conversation history objects"
     example  : "mini-a-history"
@@ -168,7 +178,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, usekatex: global.__usekatex, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -808,6 +818,8 @@ jobs:
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
       useascii        : toBoolean().isBoolean().default(false)
+      usekatex        : toBoolean().isBoolean().default(false)
+      usemath         : toBoolean().isBoolean().default(__)
       historys3bucket : isString().default(__)
       historys3prefix : isString().default("")
       historys3url    : isString().default("https://s3.amazonaws.com")
@@ -823,6 +835,10 @@ jobs:
       format         : isString().default(__)
       auditch        : isString().default(__)
   exec : | #js
+    if (isDef(args.usemath)) {
+      if (isUnDef(args.usekatex)) args.usekatex = args.usemath
+      delete args.usemath
+    }
     global.__res = {}
     global.__usehistory = args.usehistory
     global.__historypath = args.historypath
@@ -833,6 +849,7 @@ jobs:
     global.__usestream = args.usestream
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
+    global.__usekatex = args.usekatex
     global.__planState = {}
     global.__sseQueues = {}
     if (isUnDef(global.__webMetrics)) {
@@ -881,6 +898,7 @@ jobs:
     }
     
     global.maArgs = merge(args, {})
+    if (isDef(global.maArgs.usekatex)) delete global.maArgs.usekatex
     if (!toBoolean(args.mcplazy)) {
       var _ma = new MiniA()
       _ma.init( merge( global.maArgs, { mcpdynamic: false } ) )
