@@ -56,13 +56,6 @@ version: '20260126'
 dependencies:
   openaf: '>=20250915'
 files:
-- .claude/settings.local.json
-- .github/ISSUE_TEMPLATE/bug_report.md
-- .github/ISSUE_TEMPLATE/feature_request.md
-- .github/mini-a-con-screenshot.png
-- .github/mini-a-web-screenshot1.jpg
-- .github/version.svg
-- .github/workflows/github-action.yml
 - .odoc.db
 - .package.yaml
 - AGENTS.md
@@ -130,13 +123,6 @@ files:
 - tests/miniAUtils.js
 - tests/miniAUtils.yaml
 filesHash:
-  .claude/settings.local.json: 87cbf9038d7e93b2b6597cf37791c5fda76f30d0
-  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
-  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
-  .github/mini-a-con-screenshot.png: cb5fdf4b3013f482abbe9e4b358e6f0137a741e0
-  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
-  .github/version.svg: a56acf6f53d226852989986fc2531d256f4322cd
-  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
   CHEATSHEET.md: 1e15e4e45604dc22c39222e684853720ebcc0aae
