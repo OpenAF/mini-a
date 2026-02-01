@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260130'
+version: '20260201'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -178,7 +178,7 @@ filesHash:
   mini-a.js: 5af08dd25c7d649abe4b12e2e2b31f399a302df9
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: e4b4647ae4b4bed0f4c69d08b1d8fbaf4f8a3771
-  public/index.md: 5464b2ce1ae8b4a76783e42c4e34b8d08d7794e0
+  public/index.md: c4a5686897f9c8f4b6612d3c6a94074ddd11b2c1
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 8e0fefd35f96a3dfa4513f8721c31a1f751f25d4
   tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
