@@ -329,6 +329,11 @@
         --preview-highlight: rgba(255,255,255,0.6);
     }
 
+    /* ========== BASE LAYOUT ========== */
+    html, body {
+        height: 100%;
+    }
+
     /* ========== LAYOUT COMPONENTS ========== */
     .chat-container {
         display: flex;
