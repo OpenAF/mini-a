@@ -65,6 +65,37 @@
     }
   }
 
+  exports.testReadFileRanges = function() {
+    var testDir = createTestDir()
+    try {
+      var testFile = testDir + java.io.File.separator + "lines.txt"
+      io.writeFileString(testFile, "line1\nline2\nline3")
+
+      var tool = new MiniUtilsTool(testDir)
+
+      // Count lines without reading full content
+      var countResult = tool.readFile({ path: "lines.txt", countLines: true })
+      ow.test.assert(countResult.linesTotal === 3, true, "Should report total line count")
+      ow.test.assert(countResult.content === "", true, "Should omit content when only counting lines")
+
+      // Read line window with total count
+      var windowResult = tool.readFile({ path: "lines.txt", lineStart: 2, maxLines: 1, countLines: true })
+      ow.test.assert(windowResult.content === "line2", true, "Should read line window")
+      ow.test.assert(windowResult.linesRead === 1, true, "Should report lines read")
+      ow.test.assert(windowResult.linesTotal === 3, true, "Should report total lines with window read")
+
+      // Read byte range
+      var byteFile = testDir + java.io.File.separator + "bytes.txt"
+      io.writeFileString(byteFile, "HelloWorld")
+      var byteResult = tool.readFile({ path: "bytes.txt", byteStart: 5, byteLength: 5 })
+      ow.test.assert(byteResult.content === "World", true, "Should read byte range")
+      ow.test.assert(byteResult.bytesRead === 5, true, "Should report bytes read")
+      ow.test.assert(byteResult.byteStart === 5, true, "Should report byteStart")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
   exports.testWriteFile = function() {
     var testDir = createTestDir()
     try {

@@ -689,6 +689,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
 - **`useutils`** (boolean, default: false): Auto-register the Mini File Tool utilities as a dummy MCP server for quick file operations
   - Exposes three streamlined actions: `init` (configure the working root and permissions), `filesystemQuery` (read/list/search/info via the `operation` field), and `filesystemModify` (write/append/delete with `operation` plus required `content` or `confirm` flags)
+  - `filesystemQuery` read supports byte ranges (`byteStart`, `byteEnd`, `byteLength`), line windows (`lineStart`, `lineEnd`, `maxLines`, `lineSeparator`), and `countLines=true` for total line count
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history

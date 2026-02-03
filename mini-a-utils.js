@@ -274,6 +274,14 @@ MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
  * The `params` object can have the following properties:
  * - `path` (string, required): The relative or absolute path to the file to be read.
  * - `encoding` (string, optional): The character encoding to use when reading the file. Defaults to `"utf-8"`.
+ * - `byteStart` (number, optional): Zero-based byte offset to start reading from.
+ * - `byteEnd` (number, optional): Zero-based byte offset to stop reading (inclusive).
+ * - `byteLength` (number, optional): Number of bytes to read from `byteStart`.
+ * - `lineStart` (number, optional): One-based line number to start reading from.
+ * - `lineEnd` (number, optional): One-based line number to stop reading (inclusive).
+ * - `maxLines` (number, optional): Maximum number of lines to read (useful with `lineStart`).
+ * - `lineSeparator` (string, optional): Line separator to use when joining output. Defaults to "\n".
+ * - `countLines` (boolean, optional): If true, returns the total line count without loading full contents.
  *  
  * Returns an object containing file details and content on success, or an error message string on failure.
  * The returned object includes:
@@ -298,21 +306,177 @@ MiniUtilsTool.prototype.readFile = function(params) {
       return "[ERROR] Path is not a file: " + params.path
     }
     var encoding = params.encoding || "utf-8"
-    var content = io.readFileString(filePath, encoding)
+    var hasByteRange = isDef(params.byteStart) || isDef(params.byteEnd) || isDef(params.byteLength)
+    var hasLineRange = isDef(params.lineStart) || isDef(params.lineEnd) || isDef(params.maxLines)
+    var shouldCountLines = params.countLines === true
+
+    if (hasByteRange && hasLineRange) {
+      return "[ERROR] byte range and line range options are mutually exclusive"
+    }
+    if (hasByteRange && shouldCountLines) {
+      return "[ERROR] countLines cannot be combined with byte range options"
+    }
+
+    var content = ""
+    var byteDetails = null
+    var lineDetails = null
+    var totalLines = null
+
+    if (hasByteRange) {
+      var byteStart = isDef(params.byteStart) ? Number(params.byteStart) : 0
+      var byteEnd = isDef(params.byteEnd) ? Number(params.byteEnd) : null
+      var byteLength = isDef(params.byteLength) ? Number(params.byteLength) : null
+
+      if (isNaN(byteStart) || byteStart < 0) return "[ERROR] byteStart must be >= 0"
+      if (isDef(byteEnd) && (isNaN(byteEnd) || byteEnd < 0)) return "[ERROR] byteEnd must be >= 0"
+      if (isDef(byteLength) && (isNaN(byteLength) || byteLength < 0)) return "[ERROR] byteLength must be >= 0"
+      if (isDef(byteEnd) && byteEnd < byteStart) return "[ERROR] byteEnd must be >= byteStart"
+
+      var raf = io.randomAccessFile(filePath, "r")
+      var fileSize = Number(raf.length())
+      if (byteStart > fileSize) byteStart = fileSize
+
+      var computedEnd = null
+      if (isDef(byteLength)) {
+        computedEnd = byteStart + byteLength - 1
+      } else if (isDef(byteEnd)) {
+        computedEnd = byteEnd
+      } else {
+        computedEnd = fileSize > 0 ? fileSize - 1 : 0
+      }
+      if (computedEnd >= fileSize) computedEnd = fileSize > 0 ? fileSize - 1 : 0
+
+      var readLength = (fileSize === 0 || computedEnd < byteStart) ? 0 : (computedEnd - byteStart + 1)
+      var bytesRead = 0
+      if (readLength > 0) {
+        raf.seek(byteStart)
+        var buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, readLength)
+        while (bytesRead < readLength) {
+          var read = raf.read(buffer, bytesRead, readLength - bytesRead)
+          if (read === -1) break
+          bytesRead += read
+        }
+        content = String(new java.lang.String(buffer, 0, bytesRead, encoding))
+      }
+      raf.close()
+
+      byteDetails = {
+        byteStart: byteStart,
+        byteEnd: bytesRead === 0 ? byteStart : (byteStart + bytesRead - 1),
+        bytesRead: bytesRead
+      }
+    } else if (hasLineRange) {
+      var lineStart = isDef(params.lineStart) ? Number(params.lineStart) : 1
+      var lineEnd = isDef(params.lineEnd) ? Number(params.lineEnd) : null
+      var maxLines = isDef(params.maxLines) ? Number(params.maxLines) : null
+      var lineSeparator = isDef(params.lineSeparator) ? String(params.lineSeparator) : "\n"
+
+      if (isNaN(lineStart) || lineStart < 1) return "[ERROR] lineStart must be >= 1"
+      if (isDef(lineEnd) && (isNaN(lineEnd) || lineEnd < 1)) return "[ERROR] lineEnd must be >= 1"
+      if (isDef(maxLines) && (isNaN(maxLines) || maxLines < 0)) return "[ERROR] maxLines must be >= 0"
+      if (isDef(lineEnd) && lineEnd < lineStart) return "[ERROR] lineEnd must be >= lineStart"
+
+      var lineNo = 0
+      var lines = []
+      var countAll = 0
+      var reader = new java.io.BufferedReader(
+        new java.io.InputStreamReader(new java.io.FileInputStream(filePath), encoding)
+      )
+      try {
+        while (true) {
+          var line = reader.readLine()
+          if (line === null) break
+          lineNo++
+          countAll++
+
+          var inRange = lineNo >= lineStart && (!isDef(lineEnd) || lineNo <= lineEnd)
+          if (inRange) {
+            if (!isDef(maxLines) || lines.length < maxLines) {
+              lines.push(String(line))
+            }
+          }
+
+          if (!shouldCountLines) {
+            if (isDef(lineEnd) && lineNo >= lineEnd) break
+            if (isDef(maxLines) && lines.length >= maxLines && lineNo >= lineStart) break
+          }
+        }
+      } finally {
+        try { reader.close() } catch (e) {}
+      }
+
+      content = lines.join(lineSeparator)
+      lineDetails = {
+        lineStart: lineStart,
+        lineEnd: lines.length === 0 ? lineStart - 1 : (lineStart + lines.length - 1),
+        linesRead: lines.length,
+        lineSeparator: lineSeparator
+      }
+
+      if (shouldCountLines) {
+        totalLines = countAll
+      }
+    } else {
+      if (shouldCountLines) {
+        var reader2 = new java.io.BufferedReader(
+          new java.io.InputStreamReader(new java.io.FileInputStream(filePath), encoding)
+        )
+        var count2 = 0
+        try {
+          while (reader2.readLine() !== null) {
+            count2++
+          }
+        } finally {
+          try { reader2.close() } catch (e) {}
+        }
+        totalLines = count2
+      } else {
+        content = io.readFileString(filePath, encoding)
+      }
+    }
 
     if (params.compact === true) {
-      return {
+      var compactResult = {
         relativePath: this._toRelative(details.canonicalPath || filePath),
         size: details.size,
         encoding: encoding,
         content: content
       }
+      if (totalLines !== null) {
+        compactResult.linesTotal = totalLines
+      }
+      if (byteDetails) {
+        compactResult.byteStart = byteDetails.byteStart
+        compactResult.byteEnd = byteDetails.byteEnd
+        compactResult.bytesRead = byteDetails.bytesRead
+      }
+      if (lineDetails) {
+        compactResult.lineStart = lineDetails.lineStart
+        compactResult.lineEnd = lineDetails.lineEnd
+        compactResult.linesRead = lineDetails.linesRead
+        compactResult.lineSeparator = lineDetails.lineSeparator
+      }
+      return compactResult
     }
 
     details.path = isString(details.canonicalPath) ? details.canonicalPath : filePath
     details.relativePath = this._toRelative(details.path)
     details.encoding = encoding
     details.content = content
+    if (totalLines !== null) {
+      details.linesTotal = totalLines
+    }
+    if (byteDetails) {
+      details.byteStart = byteDetails.byteStart
+      details.byteEnd = byteDetails.byteEnd
+      details.bytesRead = byteDetails.bytesRead
+    }
+    if (lineDetails) {
+      details.lineStart = lineDetails.lineStart
+      details.lineEnd = lineDetails.lineEnd
+      details.linesRead = lineDetails.linesRead
+      details.lineSeparator = lineDetails.lineSeparator
+    }
     return details
   } catch (e) {
     return "[ERROR] " + (e.message || String(e))
@@ -2030,6 +2194,14 @@ MiniUtilsTool._metadataByFn = (function() {
           },
           path         : { type: "string", description: "Target file or directory path for the operation." },
           encoding     : { type: "string", description: "Character encoding to use when reading files." },
+          byteStart    : { type: "number", description: "Zero-based byte offset to start reading from (read operation)." },
+          byteEnd      : { type: "number", description: "Zero-based byte offset to stop reading (inclusive, read operation)." },
+          byteLength   : { type: "number", description: "Number of bytes to read from byteStart (read operation)." },
+          lineStart    : { type: "number", description: "One-based line number to start reading from (read operation)." },
+          lineEnd      : { type: "number", description: "One-based line number to stop reading (inclusive, read operation)." },
+          maxLines     : { type: "number", description: "Maximum number of lines to read (read operation)." },
+          lineSeparator: { type: "string", description: "Line separator for line reads (read operation, default \\n)." },
+          countLines   : { type: "boolean", description: "Return total line count without loading full content (read operation)." },
           includeHidden: { type: "boolean", description: "Include hidden files in list operations when true." },
           recursive    : { type: "boolean", description: "Traverse directories recursively when supported." },
           pattern      : { type: "string", description: "Pattern to search for when operation is set to search or glob (glob uses filesystem-style patterns)." },

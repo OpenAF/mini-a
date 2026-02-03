@@ -176,7 +176,7 @@ mini-a goal="find large files" useshell=true shellallowpipes=true
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
-| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection |
+| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection (filesystemQuery read supports byte/line ranges and countLines) |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
 
 **Single MCP:**

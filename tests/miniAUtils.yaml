@@ -12,6 +12,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testReadFile
 
+- name: MiniA Utils Tests::ReadFileRanges
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadFileRanges
+
 - name: MiniA Utils Tests::WriteFile
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -132,6 +137,7 @@ ojob:
 todo:
 - MiniA Utils Tests::InitTool
 - MiniA Utils Tests::ReadFile
+- MiniA Utils Tests::ReadFileRanges
 - MiniA Utils Tests::WriteFile
 - MiniA Utils Tests::ListDirectory
 - MiniA Utils Tests::SearchContent
