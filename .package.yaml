@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260201'
+version: '20260203'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -125,12 +125,12 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: 9a40faae8c97a71ad1043543cd4dfaf46e6e71f4
-  CHEATSHEET.md: a6692b38ea538dfdc22d9ba7a38025fea3c261f5
+  CHEATSHEET.md: 016253bb36fa39e987d5abb5734f7149a779048d
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: a9ac2ad8a58815c156b4b3618a42aadd4f89f745
-  USAGE.md: e1843b4fcc1d6ac352cc6d1cd67283fb5dc8e0ba
+  USAGE.md: 6326698a74d6222c71e0420c9bd0c7dc9e36261e
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
   docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
@@ -172,9 +172,9 @@ filesHash:
   mini-a-mcptest.js: 276675bf192fc9431f9096e6854714b635ee2c48
   mini-a-modelman.js: 0a370c6136052b77edd66fa0cfe44c2cbab62a68
   mini-a-modes.yaml: 273e12c002fdb1ad06762fd1f76bc2712082412a
-  mini-a-utils.js: e4c894b57a0a1370f9ceea18b824faf155455e72
+  mini-a-utils.js: 503db213a15b512992f57e77dbbb51989cb72a53
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: cade7a8d3fee5fbc4b9eee66540aeed6000213a7
+  mini-a-web.yaml: d2aa10d1cdebaca7210f9d47ab47e55bb6c71860
   mini-a.js: 5af08dd25c7d649abe4b12e2e2b31f399a302df9
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: e4b4647ae4b4bed0f4c69d08b1d8fbaf4f8a3771
@@ -186,5 +186,5 @@ filesHash:
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
   tests/coreFunctionality.js: b10c42a85394f0ad6f72cebcef540497349080d8
   tests/coreFunctionality.yaml: 0a656733b02a5a4f77139766e42eabddfc4a39ca
-  tests/miniAUtils.js: 5b8fbd7eae0fb74836fbc4d8c2223a4e65c937b9
-  tests/miniAUtils.yaml: ef1340db9f6053bde3681ef7a7c7ed0f53a336d2
+  tests/miniAUtils.js: 05438203c8bc28a509f6898b8654edb355bc2a47
+  tests/miniAUtils.yaml: df6621be147760a138f4d15598a5545a09d41d5d
