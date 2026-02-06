@@ -5525,6 +5525,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     var toolOptions = {}
     if (args.readwrite === true) toolOptions.readwrite = true
+    if (isString(args.utilsroot) && args.utilsroot.trim().length > 0) {
+      toolOptions.root = args.utilsroot.trim()
+    }
     var fileTool = new MiniUtilsTool(toolOptions)
     if (fileTool._initialized !== true) {
       var initResult = fileTool.init(toolOptions)
@@ -7703,7 +7706,8 @@ MiniA.prototype.init = function(args) {
       { name: "updateinterval", type: "number", default: 3 },
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
-      { name: "nosetmcpwd", type: "boolean", default: false }
+      { name: "nosetmcpwd", type: "boolean", default: false },
+      { name: "utilsroot", type: "string", default: __ }
     ])
 
     // Convert and validate boolean arguments
@@ -7737,6 +7741,7 @@ MiniA.prototype.init = function(args) {
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
+    args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
 
     this._savePlanNotes = args.saveplannotes
 
@@ -8336,6 +8341,7 @@ MiniA.prototype.init = function(args) {
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
+ * - utilsroot (string, optional): Root directory for Mini Utils Tool file operations (only when useutils=true).
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
@@ -8489,7 +8495,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "updateinterval", type: "number", default: 3 },
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
-      { name: "nosetmcpwd", type: "boolean", default: false }
+      { name: "nosetmcpwd", type: "boolean", default: false },
+      { name: "utilsroot", type: "string", default: __ }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -8519,6 +8526,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
+    args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
 
     if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format

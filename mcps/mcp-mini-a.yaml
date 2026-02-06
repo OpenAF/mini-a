@@ -127,6 +127,7 @@ jobs:
       mcp            : isString.default(__)
       usetools       : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(false)
+      utilsroot      : isString.default(__)
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcplazy        : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)

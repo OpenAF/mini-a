@@ -148,6 +148,10 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : utilsroot
+    desc     : Root directory for Mini Utils Tool file operations (only when useutils=true)
+    example  : "/path/to/project"
+    mandatory: false
   - name     : usediagrams
     desc     : Encourage Mermaid diagrams by priming the agent with diagram guidance
     example  : "true"

@@ -324,8 +324,8 @@ MiniUtilsTool.prototype.readFile = function(params) {
 
     if (hasByteRange) {
       var byteStart = isDef(params.byteStart) ? Number(params.byteStart) : 0
-      var byteEnd = isDef(params.byteEnd) ? Number(params.byteEnd) : null
-      var byteLength = isDef(params.byteLength) ? Number(params.byteLength) : null
+      var byteEnd = isDef(params.byteEnd) ? Number(params.byteEnd) : __
+      var byteLength = isDef(params.byteLength) ? Number(params.byteLength) : __
 
       if (isNaN(byteStart) || byteStart < 0) return "[ERROR] byteStart must be >= 0"
       if (isDef(byteEnd) && (isNaN(byteEnd) || byteEnd < 0)) return "[ERROR] byteEnd must be >= 0"
@@ -367,7 +367,7 @@ MiniUtilsTool.prototype.readFile = function(params) {
       }
     } else if (hasLineRange) {
       var lineStart = isDef(params.lineStart) ? Number(params.lineStart) : 1
-      var lineEnd = isDef(params.lineEnd) ? Number(params.lineEnd) : null
+      var lineEnd = isDef(params.lineEnd) ? Number(params.lineEnd) : __
       var maxLines = isDef(params.maxLines) ? Number(params.maxLines) : null
       var lineSeparator = isDef(params.lineSeparator) ? String(params.lineSeparator) : "\n"
 
@@ -579,6 +579,10 @@ MiniUtilsTool.prototype.globFiles = function(params) {
     var baseRelative = this._toRelative(basePath)
     if (baseRelative === ".") baseRelative = ""
     var sep = this._separator
+    var altMatcher = null
+    if (isString(params.pattern) && params.pattern.indexOf("**/") === 0) {
+      altMatcher = this._createGlobMatcher(params.pattern.substring(3))
+    }
     var filtered = entries.filter(function(entry) {
       var relPath = entry.relativePath || entry.filename || ""
       var matchPath = relPath
@@ -587,7 +591,9 @@ MiniUtilsTool.prototype.globFiles = function(params) {
       }
       try {
         var pathObj = java.nio.file.Paths.get(matchPath)
-        return matcher.matches(pathObj)
+        if (matcher.matches(pathObj)) return true
+        if (altMatcher) return altMatcher.matches(pathObj)
+        return false
       } catch (e) {
         return false
       }
