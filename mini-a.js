@@ -118,6 +118,13 @@ var MiniA = function() {
     tool_selection_fallback_all: $atomic(0, "long"),
     tool_cache_hits: $atomic(0, "long"),
     tool_cache_misses: $atomic(0, "long"),
+    delegation_total: $atomic(0, "long"),
+    delegation_running: $atomic(0, "long"),
+    delegation_completed: $atomic(0, "long"),
+    delegation_failed: $atomic(0, "long"),
+    delegation_cancelled: $atomic(0, "long"),
+    delegation_timedout: $atomic(0, "long"),
+    delegation_retried: $atomic(0, "long"),
     mcp_circuit_breaker_trips: $atomic(0, "long"),
     mcp_circuit_breaker_resets: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
@@ -1022,7 +1029,16 @@ MiniA.prototype.getMetrics = function() {
                 }
             })
             return toolStats
-        })()
+        })(),
+        delegation: {
+            total: global.__mini_a_metrics.delegation_total.get(),
+            running: global.__mini_a_metrics.delegation_running.get(),
+            completed: global.__mini_a_metrics.delegation_completed.get(),
+            failed: global.__mini_a_metrics.delegation_failed.get(),
+            cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
+            timedout: global.__mini_a_metrics.delegation_timedout.get(),
+            retried: global.__mini_a_metrics.delegation_retried.get()
+        }
     }
 }
 
@@ -5711,6 +5727,170 @@ MiniA.prototype._createShellMcpConfig = function(args) {
   }
 }
 
+MiniA.prototype._createDelegationMcpConfig = function(args) {
+  try {
+    if (isUnDef(this._subtaskManager)) {
+      this.fnI("warn", "SubtaskManager not initialized; skipping delegation MCP registration.")
+      return __
+    }
+
+    var parent = this
+
+    var fns = {
+      "delegate-subtask": function(params) {
+        var p = isObject(params) ? params : {}
+        var goal = isString(p.goal) ? p.goal.trim() : ""
+        
+        if (goal.length === 0) {
+          var msg = "[ERROR] Missing required 'goal' parameter"
+          parent.fnI("warn", `Delegation failed: ${msg}`)
+          return { error: msg, content: [{ type: "text", text: msg }] }
+        }
+
+        try {
+          var childArgs = {}
+          if (isDef(p.maxsteps)) childArgs.maxsteps = toNumber(p.maxsteps)
+          if (isDef(p.useshell)) childArgs.useshell = toBoolean(p.useshell)
+          
+          var opts = {}
+          if (isDef(p.timeout)) opts.deadlineMs = toNumber(p.timeout) * 1000
+          
+          var waitForResult = isDef(p.waitForResult) ? toBoolean(p.waitForResult) : true
+          
+          var subtaskId = parent._subtaskManager.submitAndRun(goal, childArgs, opts)
+          
+          // Update metrics
+          global.__mini_a_metrics.delegation_total.inc()
+          global.__mini_a_metrics.delegation_running.inc()
+          
+          if (waitForResult) {
+            try {
+              var result = parent._subtaskManager.waitFor(subtaskId, opts.deadlineMs || 300000)
+              
+              // Update metrics based on result
+              if (isDef(result.error)) {
+                global.__mini_a_metrics.delegation_failed.inc()
+              } else {
+                global.__mini_a_metrics.delegation_completed.inc()
+              }
+              global.__mini_a_metrics.delegation_running.dec()
+              
+              var output = {
+                subtaskId: subtaskId,
+                status: "completed",
+                answer: result.answer,
+                error: result.error
+              }
+              return { content: [{ type: "text", text: stringify(output, __, "") }] }
+            } catch(waitErr) {
+              global.__mini_a_metrics.delegation_failed.inc()
+              global.__mini_a_metrics.delegation_running.dec()
+              
+              var msg = "[ERROR] Timeout or error waiting for subtask: " + (waitErr && waitErr.message ? waitErr.message : String(waitErr))
+              parent.fnI("warn", msg)
+              return { error: msg, content: [{ type: "text", text: msg }] }
+            }
+          } else {
+            var output = {
+              subtaskId: subtaskId,
+              status: "started",
+              message: "Subtask started asynchronously. Use subtask-status to check progress."
+            }
+            return { content: [{ type: "text", text: stringify(output, __, "") }] }
+          }
+        } catch(err) {
+          var msg = "[ERROR] " + (err && err.message ? err.message : String(err))
+          parent.fnI("warn", `Delegation failed: ${msg}`)
+          return { error: msg, content: [{ type: "text", text: msg }] }
+        }
+      },
+      
+      "subtask-status": function(params) {
+        var p = isObject(params) ? params : {}
+        var subtaskId = isString(p.subtaskId) ? p.subtaskId.trim() : ""
+        
+        if (subtaskId.length === 0) {
+          var msg = "[ERROR] Missing required 'subtaskId' parameter"
+          parent.fnI("warn", `Status check failed: ${msg}`)
+          return { error: msg, content: [{ type: "text", text: msg }] }
+        }
+
+        try {
+          var status = parent._subtaskManager.status(subtaskId)
+          
+          var output = {
+            subtaskId: status.id,
+            status: status.status,
+            goal: status.goal,
+            createdAt: status.createdAt,
+            startedAt: status.startedAt,
+            completedAt: status.completedAt,
+            attempt: status.attempt,
+            maxAttempts: status.maxAttempts
+          }
+          
+          if (status.status === "completed" || status.status === "failed" || status.status === "cancelled" || status.status === "timeout") {
+            try {
+              var result = parent._subtaskManager.result(subtaskId)
+              output.answer = result.answer
+              output.error = result.error
+            } catch(ignoreResult) {}
+          }
+          
+          return { content: [{ type: "text", text: stringify(output, __, "") }] }
+        } catch(err) {
+          var msg = "[ERROR] " + (err && err.message ? err.message : String(err))
+          parent.fnI("warn", `Status check failed: ${msg}`)
+          return { error: msg, content: [{ type: "text", text: msg }] }
+        }
+      }
+    }
+
+    var fnsMeta = {
+      "delegate-subtask": {
+        name       : "delegate-subtask",
+        description: "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            goal          : { type: "string", description: "The sub-goal for the child agent." },
+            maxsteps      : { type: "integer", description: "Maximum steps for the child (default 10)." },
+            useshell      : { type: "boolean", description: "Allow the child to use shell commands." },
+            timeout       : { type: "integer", description: "Deadline in seconds (default 300)." },
+            waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." }
+          },
+          required: ["goal"]
+        }
+      },
+      "subtask-status": {
+        name       : "subtask-status",
+        description: "Check status and retrieve result of a previously delegated subtask.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            subtaskId: { type: "string", description: "The ID returned by delegate-subtask." }
+          },
+          required: ["subtaskId"]
+        }
+      }
+    }
+
+    return {
+      id     : "mini-a-delegation",
+      type   : "dummy",
+      options: {
+        name   : "mini-a-delegation",
+        fns    : fns,
+        fnsMeta: fnsMeta
+      }
+    }
+  } catch (e) {
+    var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
+    this.fnI("warn", `Failed to prepare Mini-A delegation MCP: ${errMsg}`)
+    return __
+  }
+}
+
 MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
   try {
     if (!isArray(mcpConfigs) || mcpConfigs.length === 0) {
@@ -7707,7 +7887,12 @@ MiniA.prototype.init = function(args) {
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
-      { name: "utilsroot", type: "string", default: __ }
+      { name: "utilsroot", type: "string", default: __ },
+      { name: "usedelegation", type: "boolean", default: false },
+      { name: "maxconcurrent", type: "number", default: 4 },
+      { name: "delegationmaxdepth", type: "number", default: 3 },
+      { name: "delegationtimeout", type: "number", default: 300000 },
+      { name: "delegationmaxretries", type: "number", default: 2 }
     ])
 
     // Convert and validate boolean arguments
@@ -7735,6 +7920,7 @@ MiniA.prototype.init = function(args) {
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
+    args.usedelegation = _$(toBoolean(args.usedelegation), "args.usedelegation").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
@@ -7742,6 +7928,10 @@ MiniA.prototype.init = function(args) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").isNumber().default(4)
+    args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").isNumber().default(3)
+    args.delegationtimeout = _$(args.delegationtimeout, "args.delegationtimeout").isNumber().default(300000)
+    args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").isNumber().default(2)
 
     this._savePlanNotes = args.saveplannotes
 
@@ -8015,6 +8205,37 @@ MiniA.prototype.init = function(args) {
       if (args.useutils === true) {
         var utilsMcpConfig = this._createUtilsMcpConfig(args)
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
+      }
+
+      // Initialize delegation if enabled
+      if (args.usedelegation === true) {
+        try {
+          // Load SubtaskManager if not already loaded
+          if (isUnDef(global.SubtaskManager)) {
+            loadLib(getOPackPath("mini-a") + "/mini-a-subtask.js")
+          }
+          
+          // Create SubtaskManager instance
+          var currentDepth = args._delegationDepth || 0
+          this._subtaskManager = new SubtaskManager(args, {
+            maxConcurrent: args.maxconcurrent,
+            defaultDeadlineMs: args.delegationtimeout,
+            defaultMaxAttempts: args.delegationmaxretries,
+            maxDepth: args.delegationmaxdepth,
+            interactionFn: this.interactionFn.bind(this),
+            currentDepth: currentDepth
+          })
+          
+          this.fnI("info", "Delegation enabled (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
+          
+          // Register delegation MCP config if usetools is enabled
+          if (args.usetools === true) {
+            var delegationMcpConfig = this._createDelegationMcpConfig(args)
+            if (isMap(delegationMcpConfig)) aggregatedMcpConfigs.push(delegationMcpConfig)
+          }
+        } catch(e) {
+          this.fnI("error", "Failed to initialize delegation: " + e.message)
+        }
       }
 
       // Auto-register a dummy MCP for shell execution when both usetools and useshell are enabled
