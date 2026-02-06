@@ -34,17 +34,258 @@ help:
     example  : "3600"
     mandatory: false
 
+include:
+- oJobHTTPd.yaml
+
 todo:
-- Check Environment
 - Init
-- Start HTTP Server
-- Healthz
-- Metrics
-- Info
-- Submit Task
-- Status
-- Result
-- Cancel
+
+# --- HTTP server lifecycle ---
+- (httpdStart  ): "${onport:-8888}"
+- (httpdHealthz): "${onport:-8888}"
+- (httpdMetrics): "${onport:-8888}"
+#- (httpdStop ): "${onport:-8888}"
+
+# --- Public endpoints ---
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /healthz
+  ((execURI   )): | #js
+    var response = {
+      status: "ok",
+      uptime: java.lang.System.currentTimeMillis() - global.__worker_startTime
+    };
+    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+  ((error     )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /metrics
+  ((execURI   )): | #js
+    var tasks = Object.values(global.__worker_tasks || {});
+    var response = {
+      tasks: {
+        total: tasks.length,
+        queued: tasks.filter(function(t) { return t.status === "queued" }).length,
+        running: tasks.filter(function(t) { return t.status === "running" }).length,
+        completed: tasks.filter(function(t) { return t.status === "completed" }).length,
+        failed: tasks.filter(function(t) { return t.status === "failed" }).length,
+        cancelled: tasks.filter(function(t) { return t.status === "cancelled" }).length
+      }
+    };
+    if (isDef(global.__mini_a_metrics)) {
+      response.delegation = {
+        total: global.__mini_a_metrics.delegation_total.get(),
+        running: global.__mini_a_metrics.delegation_running.get(),
+        completed: global.__mini_a_metrics.delegation_completed.get(),
+        failed: global.__mini_a_metrics.delegation_failed.get(),
+        cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
+        timedout: global.__mini_a_metrics.delegation_timedout.get(),
+        retried: global.__mini_a_metrics.delegation_retried.get()
+      };
+    }
+    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /info
+  ((execURI   )): | #js
+    var wargs = global.__worker_args;
+    var response = {
+      status: "ok",
+      name: "mini-a-worker",
+      version: "1.0.0",
+      capabilities: ["run-goal", "delegation", "planning"],
+      limits: {
+        maxConcurrent: wargs.maxconcurrent,
+        defaultTimeoutMs: wargs.defaulttimeout,
+        maxTimeoutMs: wargs.maxtimeout,
+        maxSteps: wargs.maxsteps || 15,
+        useshell: toBoolean(wargs.useshell) || false
+      },
+      auth: isDef(wargs.apitoken) ? "bearer" : "none"
+    };
+    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+  ((error    )): true
+
+# --- Authenticated endpoints ---
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /task
+  ((execPre   )): &authCheck | #js
+    if (isDef(global.__worker_args.apitoken)) {
+      var authHeader = request.header.authorization || "";
+      if (authHeader !== "Bearer " + global.__worker_args.apitoken) {
+        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), ow.server.httpd.mimes.JSON, 401);
+      }
+    }
+    if (isArray(global.__worker_ipallow) && global.__worker_ipallow.length > 0) {
+      var remoteAddr = request.header["x-forwarded-for"] || request.remoteAddress;
+      var allowed = global.__worker_ipallow.some(function(pattern) { return remoteAddr.indexOf(pattern) === 0; });
+      if (!allowed) {
+        return ow.server.httpd.reply(stringify({ error: "Forbidden" }, __, ""), ow.server.httpd.mimes.JSON, 403);
+      }
+    }
+  ((execURI  )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var wargs = global.__worker_args;
+      if (!isString(postData.goal) || postData.goal.trim().length === 0) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+      }
+      if (postData.goal.length > 10000) {
+        return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+      }
+      var taskArgs = postData.args || {};
+      var allowedRemoteKeys = {
+        goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
+        updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
+        planmode: true, planformat: true, convertplan: true, maxsteps: true
+      };
+      var mergedArgs = merge({}, wargs);
+      Object.keys(taskArgs).forEach(function(key) {
+        if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key]; }
+      });
+      mergedArgs.goal = postData.goal.trim();
+      var timeout = isDef(postData.timeout) ? Number(postData.timeout) * 1000 : wargs.defaulttimeout;
+      if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout;
+      var taskId = genUUID();
+      var now = new Date().getTime();
+      if (isUnDef(global.__worker_taskManager)) {
+        global.__worker_taskManager = new SubtaskManager(mergedArgs, {
+          maxConcurrent: wargs.maxconcurrent,
+          defaultDeadlineMs: wargs.defaulttimeout,
+          defaultMaxAttempts: 2,
+          maxDepth: 3,
+          interactionFn: function(event, message) {
+            if (isDef(global.__worker_tasks[taskId])) {
+              if (isUnDef(global.__worker_tasks[taskId].events)) { global.__worker_tasks[taskId].events = []; }
+              global.__worker_tasks[taskId].events.push({ event: event, message: message, ts: new Date().getTime() });
+            }
+          },
+          currentDepth: 0
+        });
+      }
+      var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
+        deadlineMs: timeout,
+        metadata: postData.metadata || {}
+      });
+      global.__worker_tasks[taskId] = {
+        taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
+        args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
+        events: [], metadata: postData.metadata || {}
+      };
+      global.__worker_taskManager.start(subtaskId);
+      global.__worker_tasks[taskId].status = "running";
+      global.__worker_tasks[taskId].startedAt = new Date().getTime();
+      return ow.server.httpd.reply(stringify({ taskId: taskId, status: "queued", createdAt: now }, __, ""), ow.server.httpd.mimes.JSON, 202);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /status
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var taskId = postData.taskId;
+      if (!isString(taskId)) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) {
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404);
+      }
+      try {
+        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+        task.status = subtaskStatus.status;
+        if (isDef(subtaskStatus.completedAt)) { task.completedAt = subtaskStatus.completedAt; }
+      } catch(statusErr) {}
+      var response = {
+        taskId: taskId, status: task.status, startedAt: task.startedAt,
+        elapsed: task.startedAt ? (new Date().getTime() - task.startedAt) : 0,
+        events: task.events || []
+      };
+      if (task.status === "running" && isDef(task.args) && isDef(task.args.maxsteps)) {
+        response.progress = { maxSteps: task.args.maxsteps };
+      }
+      return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /result
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var taskId = postData.taskId;
+      if (!isString(taskId)) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) {
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404);
+      }
+      try {
+        var subtaskResult = global.__worker_taskManager.result(task.subtaskId);
+        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+        task.status = subtaskStatus.status;
+        if (isDef(subtaskStatus.completedAt)) { task.completedAt = subtaskStatus.completedAt; }
+        var response = {
+          taskId: taskId, status: task.status,
+          result: {
+            goal: task.goal, answer: subtaskResult.answer, format: task.args.format || "md",
+            metrics: subtaskResult.metrics || {}, state: subtaskResult.state || {},
+            error: subtaskResult.error
+          },
+          completedAt: task.completedAt,
+          duration: task.completedAt && task.startedAt ? (task.completedAt - task.startedAt) : 0
+        };
+        return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+      } catch(resultErr) {
+        var errMsg = isDef(resultErr) && isString(resultErr.message) ? resultErr.message : String(resultErr);
+        if (errMsg.indexOf("not in terminal state") >= 0) {
+          return ow.server.httpd.reply(stringify({ error: "Task is not yet complete" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+        }
+        throw resultErr;
+      }
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /cancel
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var taskId = postData.taskId;
+      if (!isString(taskId)) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) {
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404);
+      }
+      var reason = postData.reason || "Cancelled by user";
+      try {
+        global.__worker_taskManager.cancel(task.subtaskId, reason);
+        task.status = "cancelled";
+        task.completedAt = new Date().getTime();
+      } catch(cancelErr) {}
+      return ow.server.httpd.reply(stringify({ taskId: taskId, status: task.status }, __, ""), ow.server.httpd.mimes.JSON, __);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+    }
+  ((error    )): true
+
 - Cleanup Loop
 
 ojob:
@@ -64,25 +305,22 @@ ojob:
   - mini-a-subtask.js
 
 jobs:
-# ------------------------
-- name : Check Environment
+# ----------
+- name : Init
   exec : | #js
+    // Check environment
     if (isUnDef(getEnv("OAF_MODEL"))) {
       throw "OAF_MODEL environment variable not set. Export OAF_MODEL before starting the worker."
     }
 
-# ----------
-- name : Init
-  from : Check Environment
-  exec : | #js
     // Set defaults
-    args.onport = _$(args.onport, "args.onport").isNumber().default(8080)
+    args.onport = _$(args.onport, "args.onport").toNumber().isNumber().default(8080)
     args.apitoken = _$(args.apitoken, "args.apitoken").isString().default(__)
     args.apiallow = _$(args.apiallow, "args.apiallow").isString().default(__)
-    args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").isNumber().default(4)
-    args.defaulttimeout = _$(args.defaulttimeout, "args.defaulttimeout").isNumber().default(300000)
-    args.maxtimeout = _$(args.maxtimeout, "args.maxtimeout").isNumber().default(600000)
-    args.taskretention = _$(args.taskretention, "args.taskretention").isNumber().default(3600)
+    args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").toNumber().isNumber().default(4)
+    args.defaulttimeout = _$(args.defaulttimeout, "args.defaulttimeout").toNumber().isNumber().default(300000)
+    args.maxtimeout = _$(args.maxtimeout, "args.maxtimeout").toNumber().isNumber().default(600000)
+    args.taskretention = _$(args.taskretention, "args.taskretention").toNumber().isNumber().default(3600)
 
     // Validate
     if (isUnDef(args.apitoken)) {
@@ -100,421 +338,25 @@ jobs:
     global.__worker_args = args
     global.__worker_tasks = {}
     global.__worker_taskManager = __
+    global.__worker_startTime = java.lang.System.currentTimeMillis()
 
     log("Mini-A Worker API starting on port " + args.onport)
     log("Max concurrent tasks: " + args.maxconcurrent)
     log("Default timeout: " + args.defaulttimeout + "ms")
     log("Task retention: " + args.taskretention + "s")
 
-# -----------------------
-- name : Start HTTP Server
-  from : Init
-  exec : | #js
-    ow.loadServer()
-    var hs = ow.server.httpd.start(args.onport)
-
-# ----------
-- name : Healthz
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /healthz
-  exec : | #js
-    var response = {
-      status: "ok",
-      uptime: java.lang.System.currentTimeMillis() - global.__worker_startTime
-    }
-    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __)
-
-# ----------
-- name : Metrics
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /metrics
-  exec : | #js
-    var tasks = Object.values(global.__worker_tasks || {})
-    var response = {
-      tasks: {
-        total: tasks.length,
-        queued: tasks.filter(function(t) { return t.status === "queued" }).length,
-        running: tasks.filter(function(t) { return t.status === "running" }).length,
-        completed: tasks.filter(function(t) { return t.status === "completed" }).length,
-        failed: tasks.filter(function(t) { return t.status === "failed" }).length,
-        cancelled: tasks.filter(function(t) { return t.status === "cancelled" }).length
-      }
-    }
-    
-    if (isDef(global.__mini_a_metrics)) {
-      response.delegation = {
-        total: global.__mini_a_metrics.delegation_total.get(),
-        running: global.__mini_a_metrics.delegation_running.get(),
-        completed: global.__mini_a_metrics.delegation_completed.get(),
-        failed: global.__mini_a_metrics.delegation_failed.get(),
-        cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
-        timedout: global.__mini_a_metrics.delegation_timedout.get(),
-        retried: global.__mini_a_metrics.delegation_retried.get()
-      }
-    }
-    
-    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __)
-
-# -------
-- name : Info
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /info
-  exec : | #js
-    var response = {
-      status: "ok",
-      name: "mini-a-worker",
-      version: "1.0.0",
-      capabilities: ["run-goal", "delegation", "planning"],
-      limits: {
-        maxConcurrent: args.maxconcurrent,
-        defaultTimeoutMs: args.defaulttimeout,
-        maxTimeoutMs: args.maxtimeout,
-        maxSteps: args.maxsteps || 15,
-        useshell: toBoolean(args.useshell) || false
-      },
-      auth: isDef(args.apitoken) ? "bearer" : "none"
-    }
-    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __)
-
-# --------------
-- name : Submit Task
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /task
-    method: POST
-  exec : | #js
-    // Check authentication
-    if (isDef(args.apitoken)) {
-      var authHeader = request.header.authorization || ""
-      var expectedToken = "Bearer " + args.apitoken
-      if (authHeader !== expectedToken) {
-        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), ow.server.httpd.mimes.JSON, 401)
-      }
-    }
-
-    // Check IP allowlist
-    if (isArray(global.__worker_ipallow) && global.__worker_ipallow.length > 0) {
-      var remoteAddr = request.header["x-forwarded-for"] || request.remoteAddress
-      var allowed = global.__worker_ipallow.some(function(pattern) {
-        return remoteAddr.indexOf(pattern) === 0
-      })
-      if (!allowed) {
-        return ow.server.httpd.reply(stringify({ error: "Forbidden" }, __, ""), ow.server.httpd.mimes.JSON, 403)
-      }
-    }
-
-    try {
-      var postData = jsonParse(request.files.postData)
-      
-      // Validate required fields
-      if (!isString(postData.goal) || postData.goal.trim().length === 0) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), ow.server.httpd.mimes.JSON, 400)
-      }
-      
-      if (postData.goal.length > 10000) {
-        return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), ow.server.httpd.mimes.JSON, 400)
-      }
-
-      // Extract and validate args
-      var taskArgs = postData.args || {}
-      var allowedRemoteKeys = {
-        goal: true, format: true, raw: true, chatbotmode: true, useplanning: true, 
-        updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
-        planmode: true, planformat: true, convertplan: true, maxsteps: true
-      }
-      
-      var mergedArgs = merge({}, global.__worker_args)
-      Object.keys(taskArgs).forEach(function(key) {
-        if (allowedRemoteKeys[key] === true) {
-          mergedArgs[key] = taskArgs[key]
-        }
-      })
-      
-      // Set goal
-      mergedArgs.goal = postData.goal.trim()
-      
-      // Handle timeout
-      var timeout = isDef(postData.timeout) ? toNumber(postData.timeout) * 1000 : args.defaulttimeout
-      if (timeout > args.maxtimeout) timeout = args.maxtimeout
-      
-      // Create task
-      var taskId = genUUID()
-      var now = new Date().getTime()
-      
-      // Initialize task manager if needed
-      if (isUnDef(global.__worker_taskManager)) {
-        global.__worker_taskManager = new SubtaskManager(mergedArgs, {
-          maxConcurrent: args.maxconcurrent,
-          defaultDeadlineMs: args.defaulttimeout,
-          defaultMaxAttempts: 2,
-          maxDepth: 3,
-          interactionFn: function(event, message) {
-            // Store events for task
-            if (isDef(global.__worker_tasks[taskId])) {
-              if (isUnDef(global.__worker_tasks[taskId].events)) {
-                global.__worker_tasks[taskId].events = []
-              }
-              global.__worker_tasks[taskId].events.push({
-                event: event,
-                message: message,
-                ts: new Date().getTime()
-              })
-            }
-          },
-          currentDepth: 0
-        })
-      }
-      
-      // Submit task
-      var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
-        deadlineMs: timeout,
-        metadata: postData.metadata || {}
-      })
-      
-      // Store task reference
-      global.__worker_tasks[taskId] = {
-        taskId: taskId,
-        subtaskId: subtaskId,
-        status: "queued",
-        goal: mergedArgs.goal,
-        args: mergedArgs,
-        createdAt: now,
-        startedAt: __,
-        completedAt: __,
-        events: [],
-        metadata: postData.metadata || {}
-      }
-      
-      // Start the task
-      global.__worker_taskManager.start(subtaskId)
-      global.__worker_tasks[taskId].status = "running"
-      global.__worker_tasks[taskId].startedAt = new Date().getTime()
-      
-      var response = {
-        taskId: taskId,
-        status: "queued",
-        createdAt: now
-      }
-      
-      return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, 202)
-      
-    } catch(e) {
-      logErr(e)
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500)
-    }
-
-# ---------
-- name : Status
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /status
-    method: POST
-  exec : | #js
-    // Check authentication
-    if (isDef(args.apitoken)) {
-      var authHeader = request.header.authorization || ""
-      var expectedToken = "Bearer " + args.apitoken
-      if (authHeader !== expectedToken) {
-        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), ow.server.httpd.mimes.JSON, 401)
-      }
-    }
-
-    try {
-      var postData = jsonParse(request.files.postData)
-      var taskId = postData.taskId
-      
-      if (!isString(taskId)) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400)
-      }
-      
-      var task = global.__worker_tasks[taskId]
-      if (isUnDef(task)) {
-        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404)
-      }
-      
-      // Get subtask status
-      try {
-        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId)
-        task.status = subtaskStatus.status
-        if (isDef(subtaskStatus.completedAt)) {
-          task.completedAt = subtaskStatus.completedAt
-        }
-      } catch(statusErr) {
-        // Ignore - keep existing status
-      }
-      
-      var response = {
-        taskId: taskId,
-        status: task.status,
-        startedAt: task.startedAt,
-        elapsed: task.startedAt ? (new Date().getTime() - task.startedAt) : 0,
-        events: task.events || []
-      }
-      
-      // Add progress info if available
-      if (task.status === "running" && isDef(task.args) && isDef(task.args.maxsteps)) {
-        response.progress = {
-          maxSteps: task.args.maxsteps
-        }
-      }
-      
-      return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __)
-      
-    } catch(e) {
-      logErr(e)
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500)
-    }
-
-# ---------
-- name : Result
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /result
-    method: POST
-  exec : | #js
-    // Check authentication
-    if (isDef(args.apitoken)) {
-      var authHeader = request.header.authorization || ""
-      var expectedToken = "Bearer " + args.apitoken
-      if (authHeader !== expectedToken) {
-        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), ow.server.httpd.mimes.JSON, 401)
-      }
-    }
-
-    try {
-      var postData = jsonParse(request.files.postData)
-      var taskId = postData.taskId
-      
-      if (!isString(taskId)) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400)
-      }
-      
-      var task = global.__worker_tasks[taskId]
-      if (isUnDef(task)) {
-        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404)
-      }
-      
-      // Get result from subtask manager
-      try {
-        var subtaskResult = global.__worker_taskManager.result(task.subtaskId)
-        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId)
-        
-        task.status = subtaskStatus.status
-        if (isDef(subtaskStatus.completedAt)) {
-          task.completedAt = subtaskStatus.completedAt
-        }
-        
-        var response = {
-          taskId: taskId,
-          status: task.status,
-          result: {
-            goal: task.goal,
-            answer: subtaskResult.answer,
-            format: task.args.format || "md",
-            metrics: subtaskResult.metrics || {},
-            state: subtaskResult.state || {},
-            error: subtaskResult.error
-          },
-          completedAt: task.completedAt,
-          duration: task.completedAt && task.startedAt ? (task.completedAt - task.startedAt) : 0
-        }
-        
-        return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __)
-        
-      } catch(resultErr) {
-        var errMsg = isDef(resultErr) && isString(resultErr.message) ? resultErr.message : String(resultErr)
-        if (errMsg.indexOf("not in terminal state") >= 0) {
-          return ow.server.httpd.reply(stringify({ error: "Task is not yet complete" }, __, ""), ow.server.httpd.mimes.JSON, 400)
-        }
-        throw resultErr
-      }
-      
-    } catch(e) {
-      logErr(e)
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500)
-    }
-
-# ---------
-- name : Cancel
-  from : Start HTTP Server
-  to   : (httpdRoute   )
-  args :
-    port: "{{onport}}"
-    uri : /cancel
-    method: POST
-  exec : | #js
-    // Check authentication
-    if (isDef(args.apitoken)) {
-      var authHeader = request.header.authorization || ""
-      var expectedToken = "Bearer " + args.apitoken
-      if (authHeader !== expectedToken) {
-        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), ow.server.httpd.mimes.JSON, 401)
-      }
-    }
-
-    try {
-      var postData = jsonParse(request.files.postData)
-      var taskId = postData.taskId
-      
-      if (!isString(taskId)) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400)
-      }
-      
-      var task = global.__worker_tasks[taskId]
-      if (isUnDef(task)) {
-        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404)
-      }
-      
-      var reason = postData.reason || "Cancelled by user"
-      
-      try {
-        global.__worker_taskManager.cancel(task.subtaskId, reason)
-        task.status = "cancelled"
-        task.completedAt = new Date().getTime()
-      } catch(cancelErr) {
-        // Already terminal
-      }
-      
-      var response = {
-        taskId: taskId,
-        status: task.status
-      }
-      
-      return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __)
-      
-    } catch(e) {
-      logErr(e)
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500)
-    }
-
 # ---------------
 - name : Cleanup Loop
-  from : Start HTTP Server
+  deps : Init
   exec : | #js
-    global.__worker_startTime = java.lang.System.currentTimeMillis()
-    
+    var retention = global.__worker_args.taskretention * 1000
+
     // Cleanup old completed tasks periodically
     setInterval(function() {
       try {
         var now = new Date().getTime()
-        var retention = args.taskretention * 1000
         var taskIds = Object.keys(global.__worker_tasks)
-        
+
         taskIds.forEach(function(taskId) {
           var task = global.__worker_tasks[taskId]
           if (isDef(task.completedAt)) {

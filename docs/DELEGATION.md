@@ -166,7 +166,7 @@ delegate-subtask({ goal: "Summarize GCP features and pricing" })
 
 ```bash
 # Start worker with bearer token authentication
-./mini-a-worker.sh onport=8080 apitoken=your-secret-token
+mini-a workermode=true onport=8080 apitoken=your-secret-token
 
 # Or without shell wrapper
 ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
@@ -459,7 +459,7 @@ Each level can delegate to the next, up to `delegationmaxdepth`.
 
 ```bash
 # Terminal 1: Start worker
-./mini-a-worker.sh onport=8080 apitoken=my-secret maxconcurrent=8
+mini-a workermode=true onport=8080 apitoken=my-secret maxconcurrent=8
 
 # Terminal 2: Submit task
 curl -X POST http://localhost:8080/task \
@@ -501,7 +501,7 @@ curl -X POST http://localhost:8080/result \
 - Set `apiallow=` to restrict access by IP:
 
 ```bash
-./mini-a-worker.sh apitoken=secret apiallow="127.0.0.1,192.168.1.0/24"
+mini-a workermode=true apitoken=secret apiallow="127.0.0.1,192.168.1.0/24"
 ```
 
 ### Parameter Allowlist

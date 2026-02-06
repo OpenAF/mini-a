@@ -324,7 +324,7 @@ Mini-A ships with complementary components:
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-subtask.js`** - SubtaskManager for local delegation and concurrent child agents
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
-- **`mini-a-worker.sh` / `mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation
+- **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml`)
 - **`public/`** - Browser interface assets
 
@@ -349,6 +349,7 @@ Mini-A ships with complementary components:
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
+| `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |

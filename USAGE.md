@@ -989,7 +989,7 @@ Start a headless worker API for programmatic delegation:
 
 ```bash
 # Start worker with authentication
-./mini-a-worker.sh onport=8080 apitoken=your-secret-token
+mini-a workermode=true onport=8080 apitoken=your-secret-token
 
 # Submit a task via HTTP
 curl -X POST http://localhost:8080/task \

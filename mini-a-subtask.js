@@ -312,13 +312,15 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
     return false
   }
   
+  var wasRunning = subtask.status === "running"
+  
   // Mark as cancelled
   subtask.status = "cancelled"
   subtask.completedAt = new Date().getTime()
   subtask.error = reason || "Cancelled by user"
   
   // Update metrics
-  if (subtask.status === "running") {
+  if (wasRunning) {
     this.metrics.running--
     this.runningCount--
   }

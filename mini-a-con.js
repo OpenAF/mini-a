@@ -167,6 +167,10 @@ try {
       // Start MCP test mode
       load("mini-a-mcptest.js")
       exit(0)
+    } else if (toBoolean(args.workermode) === true) {
+      // Start worker mode
+      oJobRunFile(getOPackPath("mini-a") + "/mini-a-worker.yaml", args, genUUID(), __, false)
+      exit(0)
     } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
       // Start web mode
       oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
@@ -374,6 +378,7 @@ try {
     web: true,
     modelman: true,
     mcptest: true,
+    workermode: true,
     resume: true,
     conversation: true,
     "--help": true,
@@ -421,6 +426,7 @@ try {
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
+      { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },
       { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." }
@@ -446,7 +452,8 @@ try {
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
-      { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." }
+      { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
+      { cmd: "mini-a workermode=true onport=8080", desc: "# Launch worker API on port 8080." }
     ]
 
     var maxCmdLength = examples.reduce(function(max, ex) {
@@ -1698,6 +1705,36 @@ try {
     }
   }
 
+  function ensureDelegationAgent() {
+    if (toBoolean(sessionOptions.usedelegation) !== true) {
+      print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
+      return false
+    }
+
+    if (isObject(activeAgent) && isDef(activeAgent._subtaskManager)) return true
+
+    var initArgs = buildArgs("__delegation_bootstrap__")
+    if (!ensureModel(initArgs)) return false
+
+    try {
+      var agent = new MiniA()
+      activeAgent = agent
+      agent.setInteractionFn(function(event, message) {
+        agent.defaultInteractionFn(event, message, function(icon, text, id) {
+          printEvent(event, icon, text, id)
+        })
+      })
+      agent.init(initArgs)
+      if (isDef(agent._subtaskManager)) return true
+      print(colorifyText("Delegation could not be initialized with current settings.", errorColor))
+      return false
+    } catch (e) {
+      var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
+      printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Delegation initialization failed: " + errMsg, errorColor))
+      return false
+    }
+  }
+
   function finalizeSession(reason) {
     if (shutdownHandled) return
     shutdownHandled = true
@@ -2153,10 +2190,7 @@ try {
         continue
       }
       if (commandLower.indexOf("delegate ") === 0) {
-        if (!isObject(activeAgent) || isUnDef(activeAgent._subtaskManager)) {
-          print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
-          continue
-        }
+        if (!ensureDelegationAgent()) continue
         var goal = command.substring(9).trim()
         if (goal.length === 0) {
           print(colorifyText("Usage: /delegate <goal>", errorColor))
@@ -2172,10 +2206,7 @@ try {
         continue
       }
       if (commandLower === "subtasks") {
-        if (!isObject(activeAgent) || isUnDef(activeAgent._subtaskManager)) {
-          print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
-          continue
-        }
+        if (!ensureDelegationAgent()) continue
         try {
           var subtasks = activeAgent._subtaskManager.list()
           if (subtasks.length === 0) {
@@ -2194,10 +2225,7 @@ try {
         continue
       }
       if (commandLower.indexOf("subtask cancel ") === 0) {
-        if (!isObject(activeAgent) || isUnDef(activeAgent._subtaskManager)) {
-          print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
-          continue
-        }
+        if (!ensureDelegationAgent()) continue
         var subtaskId = command.substring(15).trim()
         if (subtaskId.length === 0) {
           print(colorifyText("Usage: /subtask cancel <id>", errorColor))
@@ -2216,10 +2244,7 @@ try {
         continue
       }
       if (commandLower.indexOf("subtask result ") === 0) {
-        if (!isObject(activeAgent) || isUnDef(activeAgent._subtaskManager)) {
-          print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
-          continue
-        }
+        if (!ensureDelegationAgent()) continue
         var subtaskId = command.substring(15).trim()
         if (subtaskId.length === 0) {
           print(colorifyText("Usage: /subtask result <id>", errorColor))
@@ -2241,10 +2266,7 @@ try {
         continue
       }
       if (commandLower.indexOf("subtask ") === 0) {
-        if (!isObject(activeAgent) || isUnDef(activeAgent._subtaskManager)) {
-          print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
-          continue
-        }
+        if (!ensureDelegationAgent()) continue
         var subtaskId = command.substring(8).trim()
         if (subtaskId.length === 0) {
           print(colorifyText("Usage: /subtask <id> | /subtask cancel <id> | /subtask result <id>", errorColor))

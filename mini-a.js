@@ -935,6 +935,8 @@ MiniA.prototype.fnI = function(event, message) {
  * </odoc>
  */
 MiniA.prototype.getMetrics = function() {
+    this._syncDelegationMetrics()
+
     return {
         llm_calls: {
             normal: global.__mini_a_metrics.llm_normal_calls.get(),
@@ -1038,8 +1040,34 @@ MiniA.prototype.getMetrics = function() {
             cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
             timedout: global.__mini_a_metrics.delegation_timedout.get(),
             retried: global.__mini_a_metrics.delegation_retried.get()
+        },
+        deep_research: {
+            sessions: global.__mini_a_metrics.deep_research_sessions.get(),
+            cycles: global.__mini_a_metrics.deep_research_cycles.get(),
+            validations_passed: global.__mini_a_metrics.deep_research_validations_passed.get(),
+            validations_failed: global.__mini_a_metrics.deep_research_validations_failed.get(),
+            early_success: global.__mini_a_metrics.deep_research_early_success.get(),
+            max_cycles_reached: global.__mini_a_metrics.deep_research_max_cycles_reached.get()
         }
     }
+}
+
+MiniA.prototype._syncDelegationMetrics = function() {
+  try {
+    if (!isObject(this._subtaskManager) || typeof this._subtaskManager.getMetrics !== "function") return
+    if (!isObject(global.__mini_a_metrics)) return
+
+    var delegationMetrics = this._subtaskManager.getMetrics()
+    if (!isObject(delegationMetrics)) return
+
+    if (isNumber(delegationMetrics.total)) global.__mini_a_metrics.delegation_total.set(Math.max(0, Math.round(delegationMetrics.total)))
+    if (isNumber(delegationMetrics.running)) global.__mini_a_metrics.delegation_running.set(Math.max(0, Math.round(delegationMetrics.running)))
+    if (isNumber(delegationMetrics.completed)) global.__mini_a_metrics.delegation_completed.set(Math.max(0, Math.round(delegationMetrics.completed)))
+    if (isNumber(delegationMetrics.failed)) global.__mini_a_metrics.delegation_failed.set(Math.max(0, Math.round(delegationMetrics.failed)))
+    if (isNumber(delegationMetrics.cancelled)) global.__mini_a_metrics.delegation_cancelled.set(Math.max(0, Math.round(delegationMetrics.cancelled)))
+    if (isNumber(delegationMetrics.timedout)) global.__mini_a_metrics.delegation_timedout.set(Math.max(0, Math.round(delegationMetrics.timedout)))
+    if (isNumber(delegationMetrics.retried)) global.__mini_a_metrics.delegation_retried.set(Math.max(0, Math.round(delegationMetrics.retried)))
+  } catch(ignoreSync) {}
 }
 
 
@@ -5749,11 +5777,11 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
 
         try {
           var childArgs = {}
-          if (isDef(p.maxsteps)) childArgs.maxsteps = toNumber(p.maxsteps)
+          if (isDef(p.maxsteps)) childArgs.maxsteps = Number(p.maxsteps)
           if (isDef(p.useshell)) childArgs.useshell = toBoolean(p.useshell)
           
           var opts = {}
-          if (isDef(p.timeout)) opts.deadlineMs = toNumber(p.timeout) * 1000
+          if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
           
           var waitForResult = isDef(p.waitForResult) ? toBoolean(p.waitForResult) : true
           
@@ -8222,7 +8250,7 @@ MiniA.prototype.init = function(args) {
             defaultDeadlineMs: args.delegationtimeout,
             defaultMaxAttempts: args.delegationmaxretries,
             maxDepth: args.delegationmaxdepth,
-            interactionFn: this.interactionFn.bind(this),
+            interactionFn: this.fnI.bind(this),
             currentDepth: currentDepth
           })
           
