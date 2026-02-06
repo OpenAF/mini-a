@@ -929,6 +929,102 @@ Deep research mode runs a loop of research-validate-learn cycles:
 | `validationthreshold` | string | `"PASS"` | Required validation verdict (`"PASS"` or score-based like `"score>=0.7"`) |
 | `persistlearnings` | boolean | `true` | Whether to carry learnings from previous cycles forward |
 
+## Sub-Goal Delegation
+
+Mini-A supports **delegation** — the ability to spawn child Mini-A agents to handle sub-goals. This enables hierarchical problem decomposition, parallel execution, and distributed workloads.
+
+### Delegation Modes
+
+1. **Local Delegation** — Parent spawns child agents in the same process (async threads)
+2. **Remote Delegation** — Headless HTTP API worker for distributed execution
+
+### Local Delegation Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usedelegation` | boolean | `false` | Enable local subtask delegation |
+| `maxconcurrent` | number | `4` | Maximum concurrent child agents |
+| `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
+| `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
+| `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+
+### Enabling Local Delegation
+
+```bash
+# Enable delegation with tool registration
+mini-a usedelegation=true usetools=true goal="Coordinate multiple research tasks"
+
+# Or in the interactive console
+mini-a
+/set usedelegation true
+/set usetools true
+```
+
+When enabled, two MCP tools become available:
+- **`delegate-subtask`** — Spawn a child agent for a sub-goal
+- **`subtask-status`** — Check status/result of a delegated subtask
+
+### Console Commands
+
+```bash
+# Manually delegate a sub-goal
+/delegate Summarize the README.md file
+
+# List all subtasks
+/subtasks
+
+# Show subtask details
+/subtask a1b2c3d4
+
+# Show subtask result  
+/subtask result a1b2c3d4
+
+# Cancel a running subtask
+/subtask cancel a1b2c3d4
+```
+
+### Remote Delegation (Worker API)
+
+Start a headless worker API for programmatic delegation:
+
+```bash
+# Start worker with authentication
+./mini-a-worker.sh onport=8080 apitoken=your-secret-token
+
+# Submit a task via HTTP
+curl -X POST http://localhost:8080/task \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "Analyze data and produce summary",
+    "args": { "maxsteps": 10, "format": "json" },
+    "timeout": 300
+  }'
+
+# Poll for status
+curl -X POST http://localhost:8080/status \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "..." }'
+
+# Get result
+curl -X POST http://localhost:8080/result \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "..." }'
+```
+
+**Worker API Endpoints:**
+- `GET /info` — Server capabilities
+- `POST /task` — Submit new task
+- `POST /status` — Poll task status
+- `POST /result` — Get final result
+- `POST /cancel` — Cancel running task
+- `GET /healthz` — Health check
+- `GET /metrics` — Task/delegation metrics
+
+For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELEGATION.md)**.
+
 ### Basic Usage
 
 ```bash

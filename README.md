@@ -279,6 +279,12 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Dynamic Replanning** - Automatic plan adjustments when obstacles occur
   - **Phase Verification** - Auto-generated verification tasks ensure phase completion
   - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets); set `OAF_MINI_A_MODE` to pick a default when `mode=` is omitted
+- **Sub-Goal Delegation** - Hierarchical task decomposition with concurrent child agents
+  - **Local Delegation** - Spawn child Mini-A agents in the same process for parallel subtask execution (`usedelegation=true`)
+  - **Worker API** - Headless HTTP API for distributed agent workloads across processes/containers/hosts (`mini-a-worker.yaml`)
+  - **Autonomous Delegation** - LLM decides when to delegate via `delegate-subtask` tool
+  - **Manual Delegation** - Console commands for interactive control (`/delegate`, `/subtasks`, `/subtask`)
+  - **Depth Tracking** - Configurable nesting limits with automatic retry and deadline enforcement
 - **Conversation Persistence** - Save and resume conversations across sessions
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
@@ -290,6 +296,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
 - **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
+- **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[MCP Proxy Guide](docs/MCPPROXY-FEATURE.md)** - How to consolidate multiple MCP connections behind one `proxy-dispatch` tool
 - **[Usage Guide](USAGE.md)** - Comprehensive guide covering all features
   - [Getting Started](USAGE.md#basic-usage)
@@ -315,7 +322,9 @@ Mini-A ships with complementary components:
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
+- **`mini-a-subtask.js`** - SubtaskManager for local delegation and concurrent child agents
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
+- **`mini-a-worker.sh` / `mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml`)
 - **`public/`** - Browser interface assets
 
