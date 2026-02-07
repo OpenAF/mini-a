@@ -1,0 +1,531 @@
+# Author: OpenAF Assistant
+help:
+  text   : A STDIO/HTTP MCP AWS ECR server for browsing repositories and images
+  expects:
+  - name     : accessKey
+    desc     : AWS access key ID
+    example  : AKIA...
+    mandatory: false
+  - name     : secret
+    desc     : AWS secret access key
+    example  : WJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    mandatory: false
+  - name     : token
+    desc     : AWS session token (when using temporary credentials)
+    example  : FwoGZXIvYXdzE...
+    mandatory: false
+  - name     : region
+    desc     : AWS region for ECR operations
+    example  : eu-west-1
+    mandatory: true
+  - name     : assumeRole
+    desc     : Optional AWS role ARN to assume before querying ECR
+    example  : arn:aws:iam::123456789012:role/Example
+    mandatory: false
+  - name     : registry
+    desc     : Optional registry prefix to use when building pull references
+    example  : 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+    mandatory: false
+  - name     : restrict
+    desc     : Optional regex or list of regex patterns to exclude matching repositories
+    example  : "^internal/"
+    mandatory: false
+  - name     : cache
+    desc     : Cache TTL in milliseconds for repository and image metadata
+    example  : "15000"
+    mandatory: false
+  - name     : includere
+    desc     : Optional regex (or list of regex) to include matching image tags/digests
+    example  : "latest|prod"
+    mandatory: false
+  - name     : excludere
+    desc     : Optional regex (or list of regex) to exclude matching image tags/digests
+    example  : "dev|rc"
+    mandatory: false
+  - name     : usePull
+    desc     : Include last recorded pull time in listings and reports
+    example  : "true"
+    mandatory: false
+  - name     : refLink
+    desc     : Optional template link for pull references (use {image} and {type})
+    example  : https://example/pull?image={image}&type={type}
+    mandatory: false
+  - name     : sortTab
+    desc     : Include the markdown table sort script in generated reports
+    example  : "true"
+    mandatory: false
+  - name     : s3url
+    desc     : Optional S3 URL for markdown description files
+    example  : https://s3.amazonaws.com
+    mandatory: false
+  - name     : s3accesskey
+    desc     : S3 access key ID for markdown descriptions
+    example  : AKIA...
+    mandatory: false
+  - name     : s3secret
+    desc     : S3 secret access key for markdown descriptions
+    example  : WJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    mandatory: false
+  - name     : s3region
+    desc     : S3 region for markdown descriptions
+    example  : eu-west-1
+    mandatory: false
+  - name     : s3bucket
+    desc     : S3 bucket that stores markdown description files
+    example  : ecr-descriptions
+    mandatory: false
+  - name     : s3prefix
+    desc     : S3 prefix that stores markdown description files
+    example  : descriptions/
+    mandatory: false
+  - name     : onport
+    desc     : If defined starts a MCP server on the provided port
+    example  : "8888"
+    mandatory: false
+
+todo:
+- Init ECR cache
+- (if    ): "isDef(args.onport)"
+  ((then)):
+  - (httpdStart   ): "${onport:-8080}"
+  - (httpdHealthz ): "${onport:-8080}"
+  - (httpdMetrics ): "${onport:-8080}"
+  - (httpdMCP     ): "${onport:-8080}"
+    ((description)): &MCPSERVER
+      serverInfo:
+        name   : mini-a-aws-ecr
+        title  : OpenAF mini-a MCP AWS ECR server
+        version: 1.0.0
+    ((fnsMeta)): &MCPFNSMETA
+      ecr-list-repositories:
+        name       : ecr-list-repositories
+        description: Lists ECR repositories with optional prefix filtering.
+        inputSchema:
+          type      : object
+          properties:
+            prefix:
+              type       : string
+              description: Optional repository prefix filter.
+            refresh:
+              type       : boolean
+              description: Force refresh of cached repositories.
+          required  : []
+        annotations:
+          title         : ecr-list-repositories
+          readOnlyHint  : true
+          idempotentHint: true
+
+      ecr-list-images:
+        name       : ecr-list-images
+        description: Lists image metadata for a repository.
+        inputSchema:
+          type      : object
+          properties:
+            repository:
+              type       : string
+              description: Repository name to inspect.
+            refresh:
+              type       : boolean
+              description: Force refresh of cached image metadata.
+          required  : [ repository ]
+        annotations:
+          title         : ecr-list-images
+          readOnlyHint  : true
+          idempotentHint: true
+
+      ecr-get-repository-report:
+        name       : ecr-get-repository-report
+        description: Builds a markdown report for a repository including tags, pull references, and manifest info.
+        inputSchema:
+          type      : object
+          properties:
+            repository:
+              type       : string
+              description: Repository name to report on.
+            registry:
+              type       : string
+              description: Registry prefix override.
+            usePull:
+              type       : boolean
+              description: Override configured usePull setting.
+            refLink:
+              type       : string
+              description: Override configured reference link template.
+            sortTab:
+              type       : boolean
+              description: Override configured markdown table sorting.
+          required  : [ repository ]
+        annotations:
+          title         : ecr-get-repository-report
+          readOnlyHint  : true
+          idempotentHint: true
+
+    ((fns    )): &MCPFNS
+      ecr-list-repositories   : ECR List Repositories
+      ecr-list-images         : ECR List Images
+      ecr-get-repository-report: ECR Repository Report
+  ((else)):
+  - (stdioMCP ): *MCPSERVER
+    ((fnsMeta)): *MCPFNSMETA
+    ((fns    )): *MCPFNS
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  - AWS
+  - S3
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mcp-aws-ecr.pid
+    killPrevious: true
+  loadLibs    :
+  - aws.js
+  - s3.js
+
+include:
+- oJobMCP.yaml
+
+jobs:
+# -------------------
+- name : Init ECR cache
+  check:
+    in:
+      accessKey : isString.default(__)
+      secret    : isString.default(__)
+      token     : isString.default(__)
+      region    : isString
+      assumeRole: isString.default(__)
+      registry  : isString.default(__)
+      restrict  : isString.default(__)
+      cache     : toNumber.isNumber.default(15000)
+      includere : isString.default(__)
+      excludere : isString.default(__)
+      usePull   : toBoolean.isBoolean.default(false)
+      refLink   : isString.default(__)
+      sortTab   : toBoolean.isBoolean.default(false)
+      s3url     : isString.default(__)
+      s3accesskey: isString.default(__)
+      s3secret  : isString.default(__)
+      s3region  : isString.default(__)
+      s3bucket  : isString.default(__)
+      s3prefix  : isString.default(__)
+  exec : | #js
+    global.__ecrConfig__ = {
+      accessKey : args.accessKey,
+      secret    : args.secret,
+      token     : args.token,
+      region    : args.region,
+      assumeRole: args.assumeRole,
+      registry  : args.registry,
+      restrict  : args.restrict,
+      cache     : args.cache,
+      includere : args.includere,
+      excludere : args.excludere,
+      usePull   : args.usePull,
+      refLink   : args.refLink,
+      sortTab   : args.sortTab,
+      s3url     : args.s3url,
+      s3accesskey: args.s3accesskey,
+      s3secret  : args.s3secret,
+      s3region  : args.s3region,
+      s3bucket  : args.s3bucket,
+      s3prefix  : args.s3prefix
+    }
+
+    $cache("ecr-desc")
+    .ttl(args.cache)
+    .fn(k => {
+      var _s3
+      try {
+        _s3 = new S3(args.s3url, args.s3accesskey, args.s3secret, args.s3region)
+        var s3key = args.s3prefix + k.uri + ".md"
+        log(`Cache ECR description from s3://${args.s3bucket}/${s3key}...`)
+        var jstream = _s3.getObjectStream(args.s3bucket, s3key)
+        return af.fromInputStream2String(jstream)
+      } catch(ee) {
+        if (String(ee.message).indexOf("The specified key does not exist.") >= 0) {
+          logWarn("No description file found for " + k.uri)
+          return __
+        }
+        logWarn("Error retrieving description for " + k.uri + ": " + ee.message)
+        return __
+      } finally {
+        if (isDef(_s3)) _s3.close()
+      }
+    })
+    .create()
+
+    $cache("ecr-imgs")
+    .ttl(args.cache)
+    .byDefault(true, __)
+    .fn(k => {
+      if (isDef(args.restrict)) {
+        if (isString(args.restrict)) args.restrict = [ args.restrict ]
+        if (args.restrict.reduce((aP, aC) => (aP || (new RegExp(aC)).test(k.image)), false)) {
+          logWarn("Skip image " + k.image + " because it matches a restrict filter")
+          return __
+        }
+      }
+      log(`Cache ECR image ${k.image}...`)
+      try {
+        var _aws = new AWS(args.accessKey, args.secret, args.token)
+        if (isDef(args.assumeRole)) {
+          log("Assuming role " + args.assumeRole + "...")
+          _aws = _aws.assumeRole(args.assumeRole)
+        }
+        var _r = _aws.ECR_DescribeImages(args.region, k.image)
+        if (isDef(_r) && isDef(_r.error)) {
+          sprintErr(_r)
+          throw new Error(af.fromSLON(_r.error))
+        }
+        return _r
+      } catch(ee) {
+        logWarn("Error retrieving image " + k.image + ": " + ee.message)
+        throw new Error(ee)
+      }
+    })
+    .create()
+
+    $cache("ecr-repo")
+    .ttl(args.cache)
+    .fn(() => {
+      var _aws = new AWS(args.accessKey, args.secret, args.token)
+      if (isDef(args.assumeRole)) {
+        log("Assuming role " + args.assumeRole + "...")
+        _aws = _aws.assumeRole(args.assumeRole)
+      }
+      var lst = _aws.ECR_DescribeRepositories(args.region)
+      var lstParent = []
+
+      if (isDef(args.restrict)) {
+        if (isString(args.restrict)) args.restrict = [ args.restrict ]
+        lst = lst.filter(f => args.restrict.reduce((aP, aC) => (aP && !(new RegExp(aC)).test(f.repositoryName)), true))
+      }
+
+      $from(lst)
+      .sort("repositoryName")
+      .select(r => {
+        if (isDef(r.repositoryName)) {
+          var parts = r.repositoryName.split("/")
+          for (var i = 0; i < parts.length; i++) {
+            var parent = parts.slice(0, i + 1).join("/")
+            if ($from(lstParent).equals("name", parent).equals("level", i + 1).none()) {
+              lstParent.push({ name: parent, isParent: parent != r.repositoryName, level: i + 1 })
+            }
+          }
+        }
+      })
+
+      return { lst: lst, lstParent: lstParent }
+    })
+    .create()
+
+# -----------------------
+- name : ECR List Repositories
+  check:
+    in:
+      prefix : isString.default("")
+      refresh: toBoolean.isBoolean.default(false)
+  exec : | #js
+    if (isUnDef(global.__ecrConfig__)) {
+      return "[ERROR] ECR configuration not initialised"
+    }
+    if (args.refresh) {
+      $cache("ecr-repo").clear()
+    }
+    var result = $cache("ecr-repo").get({})
+    if (isUnDef(result)) {
+      return "[ERROR] Unable to load repositories"
+    }
+    var prefix = args.prefix || ""
+    var repositories = result.lst
+    var parents = result.lstParent
+    if (prefix.length > 0) {
+      repositories = repositories.filter(r => isDef(r.repositoryName) && r.repositoryName.startsWith(prefix))
+      parents = parents.filter(p => isDef(p.name) && p.name.startsWith(prefix))
+    }
+    return {
+      prefix      : prefix,
+      repositories: repositories,
+      parents     : parents
+    }
+
+# ------------------
+- name : ECR List Images
+  check:
+    in:
+      repository: isString
+      refresh   : toBoolean.isBoolean.default(false)
+  exec : | #js
+    if (isUnDef(global.__ecrConfig__)) {
+      return "[ERROR] ECR configuration not initialised"
+    }
+    var cfg = global.__ecrConfig__
+    if (args.refresh) {
+      $cache("ecr-imgs").clear()
+    }
+    var images = $cache("ecr-imgs").get({ image: args.repository })
+    if (isUnDef(images)) {
+      return "[ERROR] Unable to load image metadata"
+    }
+    var includeRe = cfg.includere
+    var excludeRe = cfg.excludere
+    if (isDef(includeRe) || isDef(excludeRe)) {
+      if (isString(includeRe)) includeRe = includeRe.split("\n").filter(r => r.length > 0)
+      if (isString(excludeRe)) excludeRe = excludeRe.split("\n").filter(r => r.length > 0)
+      images = images.filter(i => {
+        var haystack = ""
+        if (isDef(i.imageTags)) {
+          haystack += i.imageTags.join(",") + " "
+        }
+        haystack += i.imageDigest
+        if (isDef(excludeRe) && excludeRe.reduce((aP, aC) => (aP || (new RegExp(aC)).test(haystack)), false)) {
+          return false
+        }
+        if (isDef(includeRe)) {
+          return includeRe.reduce((aP, aC) => (aP || (new RegExp(aC)).test(haystack)), false)
+        }
+        return true
+      })
+    }
+    return {
+      repository: args.repository,
+      images    : images
+    }
+
+# ---------------------------
+- name : ECR Get Repository Report
+  check:
+    in:
+      repository: isString
+      registry  : isString.default(__)
+      usePull   : toBoolean.isBoolean.default(__)
+      refLink   : isString.default(__)
+      sortTab   : toBoolean.isBoolean.default(__)
+  exec : | #js
+    if (isUnDef(global.__ecrConfig__)) {
+      return "[ERROR] ECR configuration not initialised"
+    }
+    var cfg = global.__ecrConfig__
+    var registry = isDef(args.registry) ? args.registry : cfg.registry
+    var usePull = isDef(args.usePull) ? args.usePull : cfg.usePull
+    var refLink = isDef(args.refLink) ? args.refLink : cfg.refLink
+    var sortTab = isDef(args.sortTab) ? args.sortTab : cfg.sortTab
+
+    var img, ini = now(), data = ""
+    do {
+      img = $cache("ecr-imgs").get({ image: args.repository })
+      sleep(100, true)
+    } while (isUnDef(img) && now() - ini < 15000)
+
+    if (isUnDef(img)) {
+      return "[ERROR] Problem retrieving image data"
+    }
+
+    var includeRe = cfg.includere
+    var excludeRe = cfg.excludere
+    if (isDef(includeRe) || isDef(excludeRe)) {
+      if (isString(includeRe)) includeRe = includeRe.split("\n").filter(r => r.length > 0)
+      if (isString(excludeRe)) excludeRe = excludeRe.split("\n").filter(r => r.length > 0)
+      img = img.filter(i => {
+        var haystack = ""
+        if (isDef(i.imageTags)) {
+          haystack += i.imageTags.join(",") + " "
+        }
+        haystack += i.imageDigest
+        if (isDef(excludeRe) && excludeRe.reduce((aP, aC) => (aP || (new RegExp(aC)).test(haystack)), false)) {
+          return false
+        }
+        if (isDef(includeRe)) {
+          return includeRe.reduce((aP, aC) => (aP || (new RegExp(aC)).test(haystack)), false)
+        }
+        return true
+      })
+    }
+
+    var reg = _$(registry).default("")
+    if (reg.length > 0) reg += "/"
+
+    var useMDDesc = isDef(cfg.s3bucket) && isDef(cfg.s3prefix)
+    var mddesc = __
+    if (useMDDesc) {
+      mddesc = $cache("ecr-desc").get({ uri: args.repository })
+      if (isUnDef(mddesc) || isUnDef(mddesc.result)) {
+        log("No cached description found for image " + args.repository)
+        useMDDesc = false
+      }
+    }
+
+    data = "\n"
+    data += "## Contents\n\n"
+    if (useMDDesc) {
+      data += "* [📰 Description](#📰-description)\n"
+    }
+    data += "* [🏷️ Details per tag](#🏷️-details-per-tag)\n"
+    data += "* [💾 How to retrieve each](#💾-how-to-retrieve-each)\n"
+    data += "* [🔎 Manifest and artifact types per tag](#🔎-manifest-and-artifact-types-per-tag)\n"
+    data += "\n---\n"
+
+    if (useMDDesc) {
+      data += "### 📰 Description\n\n"
+      data += mddesc.result
+      data += "\n---\n"
+    }
+
+    data += "### 🏷️ Details per tag\n\n"
+    data += usePull ? "| Tag | Digest | Pushed at | Last Pull | Size | Size in bytes | Reference |\n" : "| Tag | Digest | Pushed at | Size | Size in bytes |\n"
+    data += usePull ? "|:---:|:---:|:---|:---|----:|----:|---|\n" : "|:---:|:---:|:---|----:|----:|\n"
+    $from(img).sort("-imagePushedAt").select(i => {
+      var ref = isDef(i.imageTags) ? reg + args.repository + ":" + i.imageTags[0] : reg + args.repository + ":" + i.imageDigest.substr(i.imageDigest.indexOf(":") + 1)
+      if (usePull) {
+        data += `| ${isDef(i.imageTags) ? i.imageTags.join(", ") : ""} | ${i.imageDigest.substr(i.imageDigest.indexOf(":") + 1, 7) + "..."} | ${ow.format.fromDate(new Date(i.imagePushedAt * 1000), "yyyy-MM-dd HH:mm:ss")} | ${isDef(i.lastRecordedPullTime) ? ow.format.fromDate(new Date(i.lastRecordedPullTime * 1000), "yyyy-MM-dd HH:mm:ss") : ""} | ${ow.format.toBytesAbbreviation(i.imageSizeInBytes)} | ${i.imageSizeInBytes} | ${ref} |\n`
+      } else {
+        data += `| ${isDef(i.imageTags) ? i.imageTags.join(", ") : ""} | ${i.imageDigest.substr(i.imageDigest.indexOf(":") + 1, 7) + "..."} | ${ow.format.fromDate(new Date(i.imagePushedAt * 1000), "yyyy-MM-dd HH:mm:ss")} | ${ow.format.toBytesAbbreviation(i.imageSizeInBytes)} | ${i.imageSizeInBytes} |\n`
+      }
+    })
+
+    data += "\n---\n\n### 💾 How to retrieve each\n\n"
+    if (isDef(refLink)) {
+      data += "> **Note:** Click on the corresponding link, on the 'To retrieve' column, to get instructions on how to pull the image.\n\n"
+    }
+    data += "| Tag | Digest | To retrieve |\n"
+    data += "|:---:|---|---|\n"
+    $from(img).sort("-imagePushedAt").select(i => {
+      if (isDef(i.imageTags)) {
+        for (var j = 0; j < i.imageTags.length; j++) {
+          var ret = reg + args.repository + ":" + i.imageTags[j]
+          if (isDef(refLink)) {
+            ret = "[" + ret + "](<" + $t(refLink, { image: ret, type: i.artifactMediaType }) + ">)"
+          } else {
+            ret = "\`\`\`" + ret + "\`\`\`"
+          }
+          data += `| ${i.imageTags[j]} | \`\`\`${i.imageDigest}\`\`\` | ${ret} |\n`
+        }
+      } else {
+        var retDigest = reg + args.repository + "@" + i.imageDigest
+        if (isDef(refLink)) {
+          retDigest = "[" + retDigest + "](<" + $t(refLink, { image: retDigest, type: i.artifactMediaType }) + ">)"
+        } else {
+          retDigest = "\`\`\`" + retDigest + "\`\`\`"
+        }
+        data += `|  | \`\`\`${i.imageDigest}\`\`\` | ${retDigest} |\n`
+      }
+    })
+
+    data += "\n---\n\n### 🔎 Manifest and artifact types per tag\n\n"
+    data += "| Tag | Digest | Manifest Type | Artifact Type |\n"
+    data += "|:---:|:---|:---|:---|\n"
+    $from(img).sort("-imagePushedAt").select(i => {
+      data += `| ${isDef(i.imageTags) ? i.imageTags.join(", ") : ""} | \`${i.imageDigest}\` | ${i.imageManifestMediaType} | ${isDef(i.artifactMediaType) ? i.artifactMediaType : ""} |\n`
+    })
+
+    if (sortTab) data += "<script src=\"/js/mdtablesort.js\"></script>\n"
+
+    return {
+      repository: args.repository,
+      report    : data
+    }
