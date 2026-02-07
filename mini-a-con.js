@@ -365,7 +365,8 @@ try {
     maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
     delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
-    delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" }
+    delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
+    showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" }
   }
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
@@ -1335,6 +1336,7 @@ try {
   var internalParameters = { goalprefix: true }
   var activeAgent = __
   var shutdownHandled = false
+  var subtaskLogsByShortId = {}
 
   function promptLabel() {
     var prefix = colorifyText(basePrompt, accentColor)
@@ -1557,6 +1559,31 @@ try {
   }
 
   var _prevEventLength = __
+  function _parseDelegateSubtaskMessage(message) {
+    if (!isString(message)) return __
+    var match = message.match(/^\[subtask:([^\]]+)\]\s*(.*)$/)
+    if (!isArray(match) || match.length < 3) return __
+    return {
+      shortId: String(match[1] || "").trim(),
+      text: String(match[2] || "")
+    }
+  }
+
+  function recordDelegateSubtaskLog(message) {
+    var parsed = _parseDelegateSubtaskMessage(message)
+    if (!isMap(parsed) || !isString(parsed.shortId) || parsed.shortId.length === 0) return
+    if (!isArray(subtaskLogsByShortId[parsed.shortId])) subtaskLogsByShortId[parsed.shortId] = []
+    subtaskLogsByShortId[parsed.shortId].push(parsed.text.length > 0 ? parsed.text : String(message))
+  }
+
+  function getDelegateSubtaskLogs(subtaskId) {
+    if (!isString(subtaskId) || subtaskId.trim().length === 0) return []
+    var shortId = subtaskId.substring(0, 8)
+    var logs = subtaskLogsByShortId[shortId]
+    if (!isArray(logs)) return []
+    return logs.slice()
+  }
+
   function printEvent(type, icon, message, id) {
     // Handle streaming output with markdown formatting
     if (type == "stream") {
@@ -1568,6 +1595,11 @@ try {
     // Ignore user events
     if (type == "user") return
     var extra = "", inline = false
+
+    if (type == "delegate") {
+      recordDelegateSubtaskLog(message)
+      if (toBoolean(sessionOptions.showdelegate) !== true) return
+    }
 
     var iconText
     if (( (!sessionOptions.showexecs && icon != "⚙️" && icon != "🖥️") || sessionOptions.showexecs) && icon != "📚" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
@@ -1583,6 +1615,7 @@ try {
       }
       inline = true
     }
+    if (type == "delegate") inline = true
     //var prefix = colorifyText("[" + id + "]", hintColor)
     var _msg = colorifyText("│ ", promptColor) + extra + iconText + colorifyText(message.replace(/\n/g, "↵").trim(), hintColor + ",ITALIC")
     // Optimized: extract previous line erase logic
@@ -1938,8 +1971,8 @@ try {
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
       "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
-      "  " + colorifyText("/subtasks", "BOLD") + colorifyText("          List all subtasks and their status", hintColor),
-      "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>      Show details for a subtask", hintColor),
+      "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
+      "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>       Show details for a subtask", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
@@ -2282,6 +2315,15 @@ try {
           if (isDef(status.startedAt)) {
             var elapsed = status.completedAt ? (status.completedAt - status.startedAt) : (new Date().getTime() - status.startedAt)
             print("  Duration: " + colorifyText(Math.round(elapsed / 1000) + "s", numericColor))
+          }
+          var subtaskLogs = getDelegateSubtaskLogs(status.id)
+          if (subtaskLogs.length > 0) {
+            print("  Logs:")
+            subtaskLogs.forEach(function(line) {
+              print("    " + colorifyText(line, hintColor))
+            })
+          } else if (status.status === "running") {
+            print("  Logs: " + colorifyText("(no delegate events yet)", hintColor))
           }
         } catch (statusErr) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to get status: " + statusErr, errorColor))

@@ -943,7 +943,7 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
-| `workers` | string | (none) | JSON/SLON array of worker URLs; when provided, delegation runs remotely instead of local |
+| `workers` | string | (none) | JSON/SLON array of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |

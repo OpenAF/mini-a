@@ -23,6 +23,8 @@ var SubtaskManager = function(parentArgs, opts) {
   this.remoteDelegation = this.workers.length > 0
   this.remotePollIntervalMs = _$(opts.remotePollIntervalMs, "opts.remotePollIntervalMs").isNumber().default(1000)
   this._workerCursor = 0
+  this._workerGroupCursor = {}
+  this._workerProfiles = {}
   
   this.subtasks = {}
   this.runningCount = 0
@@ -39,6 +41,10 @@ var SubtaskManager = function(parentArgs, opts) {
     retried: 0,
     totalDurationMs: 0,
     maxDepthUsed: 0
+  }
+
+  if (this.remoteDelegation) {
+    this._refreshWorkerProfiles()
   }
   
   // Start watchdog for deadlines
@@ -97,6 +103,164 @@ SubtaskManager.prototype._nextWorker = function() {
   var idx = this._workerCursor % this.workers.length
   this._workerCursor++
   return this.workers[idx]
+}
+
+SubtaskManager.prototype._refreshWorkerProfiles = function() {
+  var parent = this
+
+  this.workers.forEach(function(workerUrl) {
+    parent._workerProfiles[workerUrl] = parent._fetchWorkerProfile(workerUrl)
+  })
+}
+
+SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
+  var headers = {}
+  if (isString(this.parentArgs.apitoken) && this.parentArgs.apitoken.length > 0) {
+    headers.Authorization = "Bearer " + this.parentArgs.apitoken
+  }
+
+  try {
+    var response = $rest({ requestHeaders: headers }).get(workerUrl + "/info")
+    if (!isMap(response)) {
+      return { status: "unknown", signature: "unknown", capabilities: [], limits: {} }
+    }
+
+    var capabilities = []
+    if (isArray(response.capabilities)) {
+      capabilities = response.capabilities
+        .filter(function(cap) { return isString(cap) && cap.trim().length > 0 })
+        .map(function(cap) { return cap.trim().toLowerCase() })
+        .sort()
+    }
+
+    var limits = isMap(response.limits) ? response.limits : {}
+    var normalizedLimits = {
+      maxConcurrent: isDef(limits.maxConcurrent) ? Number(limits.maxConcurrent) : __,
+      defaultTimeoutMs: isDef(limits.defaultTimeoutMs) ? Number(limits.defaultTimeoutMs) : __,
+      maxTimeoutMs: isDef(limits.maxTimeoutMs) ? Number(limits.maxTimeoutMs) : __,
+      maxSteps: isDef(limits.maxSteps) ? Number(limits.maxSteps) : __,
+      useshell: isDef(limits.useshell) ? toBoolean(limits.useshell) : __
+    }
+
+    var signatureObj = {
+      capabilities: capabilities,
+      limits: normalizedLimits
+    }
+
+    return {
+      status: "ok",
+      capabilities: capabilities,
+      limits: normalizedLimits,
+      signature: stringify(signatureObj, __, "")
+    }
+  } catch(ignoreInfoErr) {
+    return { status: "unknown", signature: "unknown", capabilities: [], limits: {} }
+  }
+}
+
+SubtaskManager.prototype._buildWorkerRequirements = function(subtask, mergedArgs) {
+  var args = isMap(mergedArgs) ? mergedArgs : {}
+  return {
+    requiresRunGoal: true,
+    requiresPlanning: toBoolean(args.useplanning) === true,
+    requiresShell: toBoolean(args.useshell) === true,
+    requestedMaxSteps: isDef(args.maxsteps) ? Number(args.maxsteps) : __,
+    requestedTimeoutMs: isDef(subtask) && isDef(subtask.deadlineMs) ? Number(subtask.deadlineMs) : __
+  }
+}
+
+SubtaskManager.prototype._isWorkerProfileCompatible = function(profile, requirements) {
+  var req = isMap(requirements) ? requirements : {}
+  var p = isMap(profile) ? profile : {}
+  var caps = isArray(p.capabilities) ? p.capabilities : []
+  var limits = isMap(p.limits) ? p.limits : {}
+
+  if (p.status === "ok") {
+    if (req.requiresRunGoal === true && caps.indexOf("run-goal") < 0) return false
+    if (req.requiresPlanning === true && caps.indexOf("planning") < 0) return false
+    if (req.requiresShell === true && limits.useshell === false) return false
+
+    if (isNumber(req.requestedMaxSteps) && req.requestedMaxSteps > 0 && isNumber(limits.maxSteps) && limits.maxSteps > 0 && limits.maxSteps < req.requestedMaxSteps) {
+      return false
+    }
+    if (isNumber(req.requestedTimeoutMs) && req.requestedTimeoutMs > 0 && isNumber(limits.maxTimeoutMs) && limits.maxTimeoutMs > 0 && limits.maxTimeoutMs < req.requestedTimeoutMs) {
+      return false
+    }
+  }
+
+  return true
+}
+
+SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
+  var req = isMap(requirements) ? requirements : {}
+  var p = isMap(profile) ? profile : {}
+  var caps = isArray(p.capabilities) ? p.capabilities : []
+  var limits = isMap(p.limits) ? p.limits : {}
+
+  var score = 0
+  if (p.status === "ok") score += 1000
+  if (caps.indexOf("run-goal") >= 0) score += 200
+  if (req.requiresPlanning === true && caps.indexOf("planning") >= 0) score += 120
+  if (req.requiresShell === true && limits.useshell === true) score += 120
+
+  if (isNumber(req.requestedMaxSteps) && req.requestedMaxSteps > 0 && isNumber(limits.maxSteps) && limits.maxSteps > 0) {
+    score += Math.max(0, Math.min(100, limits.maxSteps - req.requestedMaxSteps))
+  }
+  if (isNumber(req.requestedTimeoutMs) && req.requestedTimeoutMs > 0 && isNumber(limits.maxTimeoutMs) && limits.maxTimeoutMs > 0) {
+    score += Math.max(0, Math.min(100, Math.floor((limits.maxTimeoutMs - req.requestedTimeoutMs) / 1000)))
+  }
+  if (isNumber(limits.maxConcurrent) && limits.maxConcurrent > 0) {
+    score += Math.min(50, limits.maxConcurrent)
+  }
+
+  return score
+}
+
+SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
+  if (!isArray(this.workers) || this.workers.length === 0) return __
+
+  var req = this._buildWorkerRequirements(subtask, mergedArgs)
+  var parent = this
+  var compatible = this.workers.filter(function(workerUrl) {
+    return parent._isWorkerProfileCompatible(parent._workerProfiles[workerUrl], req)
+  })
+
+  if (compatible.length === 0) {
+    return this._nextWorker()
+  }
+
+  var grouped = {}
+  compatible.forEach(function(workerUrl) {
+    var profile = parent._workerProfiles[workerUrl]
+    var signature = isMap(profile) && isString(profile.signature) ? profile.signature : "unknown"
+    if (!isArray(grouped[signature])) grouped[signature] = []
+    grouped[signature].push(workerUrl)
+  })
+
+  var signatures = Object.keys(grouped)
+  if (signatures.length === 0) {
+    return this._nextWorker()
+  }
+
+  signatures.sort(function(a, b) {
+    var profileA = parent._workerProfiles[grouped[a][0]] || {}
+    var profileB = parent._workerProfiles[grouped[b][0]] || {}
+    var scoreA = parent._scoreWorkerProfile(profileA, req)
+    var scoreB = parent._scoreWorkerProfile(profileB, req)
+    if (scoreA === scoreB) return a.localeCompare(b)
+    return scoreB - scoreA
+  })
+
+  var bestSignature = signatures[0]
+  var bestWorkers = grouped[bestSignature]
+  if (!isArray(bestWorkers) || bestWorkers.length === 0) {
+    return this._nextWorker()
+  }
+
+  var groupCursor = _$(this._workerGroupCursor[bestSignature], "this._workerGroupCursor[bestSignature]").isNumber().default(0)
+  var idx = groupCursor % bestWorkers.length
+  this._workerGroupCursor[bestSignature] = groupCursor + 1
+  return bestWorkers[idx]
 }
 
 SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload) {
@@ -204,7 +368,8 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
 
   $doV(function() {
     try {
-      var workerUrl = parent._nextWorker()
+      var mergedArgs = parent._buildChildArgs(subtask)
+      var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
       if (!isString(workerUrl) || workerUrl.length === 0) {
         throw new Error("No remote workers configured")
       }
@@ -212,7 +377,6 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
       subtask.workerUrl = workerUrl
       subtask.remoteEventIndex = 0
 
-      var mergedArgs = parent._buildChildArgs(subtask)
       var timeoutSec = Math.max(1, Math.ceil(subtask.deadlineMs / 1000))
       var metadata = merge({}, subtask.metadata || {})
       metadata.parentSubtaskId = subtask.parentId

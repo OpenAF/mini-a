@@ -46,7 +46,7 @@ mini-a
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 
-When `workers` is set, delegated subtasks are dispatched round-robin to the listed worker URLs via `/task`, `/status`, `/result`, and `/cancel`.
+When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If worker profiles are unavailable, it falls back to simple round-robin across all workers.
 
 ### How It Works
 

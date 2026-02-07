@@ -117,10 +117,11 @@ todo:
           defaultMaxAttempts: 2,
           maxDepth: 3,
           interactionFn: function(event, message) {
-            if (isDef(global.__worker_tasks[taskId])) {
-              if (isUnDef(global.__worker_tasks[taskId].events)) { global.__worker_tasks[taskId].events = []; }
-              global.__worker_tasks[taskId].events.push({ event: event, message: message, ts: new Date().getTime() });
+            var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message);
+            if (isString(resolvedTaskId) && resolvedTaskId.length > 0) {
+              global.__worker_appendTaskEvent(resolvedTaskId, event, message);
             }
+            global.__worker_logTaskEvent(resolvedTaskId, event, message);
           },
           currentDepth: 0
         });
@@ -134,6 +135,9 @@ todo:
         args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
         events: [], metadata: postData.metadata || {}
       };
+      global.__worker_subtaskToTaskId[subtaskId] = taskId;
+      global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId;
+      global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker");
       global.__worker_taskManager.start(subtaskId);
       global.__worker_tasks[taskId].status = "running";
       global.__worker_tasks[taskId].startedAt = new Date().getTime();
@@ -301,6 +305,39 @@ jobs:
     global.__worker_tasks = {}
     global.__worker_taskManager = __
     global.__worker_startTime = java.lang.System.currentTimeMillis()
+    global.__worker_subtaskToTaskId = {}
+    global.__worker_subtaskShortToTaskId = {}
+
+    global.__worker_appendTaskEvent = function(taskId, event, message) {
+      if (!isString(taskId) || isUnDef(global.__worker_tasks[taskId])) return
+      if (isUnDef(global.__worker_tasks[taskId].events)) global.__worker_tasks[taskId].events = []
+      global.__worker_tasks[taskId].events.push({
+        event: isString(event) ? event : "info",
+        message: isString(message) ? message : String(message),
+        ts: new Date().getTime()
+      })
+    }
+
+    global.__worker_logTaskEvent = function(taskId, event, message) {
+      var eventName = isString(event) && event.length > 0 ? event : "info"
+      var msgText = isString(message) ? message : String(message)
+      var normalized = msgText.replace(/\n/g, "↵")
+      var prefix = "[mini-a-worker]"
+      if (isString(taskId) && taskId.length > 0) {
+        prefix += "[task:" + taskId.substring(0, 8) + "]"
+      }
+      log(prefix + "[" + eventName + "] " + normalized)
+    }
+
+    global.__worker_resolveTaskIdFromMessage = function(message) {
+      if (!isString(message)) return __
+      var match = message.match(/^\[subtask:([^\]]+)\]/)
+      if (!isArray(match) || match.length < 2) return __
+      var shortId = String(match[1] || "").trim()
+      if (shortId.length === 0) return __
+      if (isString(global.__worker_subtaskShortToTaskId[shortId])) return global.__worker_subtaskShortToTaskId[shortId]
+      return __
+    }
 
     log("Mini-A Worker API starting on port " + args.onport)
     log("Max concurrent tasks: " + args.maxconcurrent)
@@ -327,6 +364,10 @@ jobs:
               try {
                 global.__worker_taskManager.cleanup(task.subtaskId)
               } catch(ignoreCleanup) {}
+              if (isString(task.subtaskId) && task.subtaskId.length > 0) {
+                delete global.__worker_subtaskToTaskId[task.subtaskId]
+                delete global.__worker_subtaskShortToTaskId[task.subtaskId.substring(0, 8)]
+              }
               delete global.__worker_tasks[taskId]
               log("Cleaned up task " + taskId + " (age: " + Math.round(age / 1000) + "s)")
             }
