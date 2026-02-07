@@ -938,11 +938,12 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 1. **Local Delegation** — Parent spawns child agents in the same process (async threads)
 2. **Remote Delegation** — Headless HTTP API worker for distributed execution
 
-### Local Delegation Parameters
+### Delegation Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `usedelegation` | boolean | `false` | Enable local subtask delegation |
+| `usedelegation` | boolean | `false` | Enable subtask delegation |
+| `workers` | string | (none) | JSON/SLON array of worker URLs; when provided, delegation runs remotely instead of local |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
@@ -990,6 +991,9 @@ Start a headless worker API for programmatic delegation:
 ```bash
 # Start worker with authentication
 mini-a workermode=true onport=8080 apitoken=your-secret-token
+
+# Parent agent using remote workers for delegation
+mini-a usedelegation=true workers="['http://localhost:8080']" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
 
 # Submit a task via HTTP
 curl -X POST http://localhost:8080/task \

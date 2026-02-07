@@ -19,6 +19,10 @@ var SubtaskManager = function(parentArgs, opts) {
   this.maxDepth = _$(opts.maxDepth, "opts.maxDepth").isNumber().default(3)
   this.interactionFn = opts.interactionFn || function() {}
   this.currentDepth = _$(opts.currentDepth, "opts.currentDepth").isNumber().default(0)
+  this.workers = this._normalizeWorkers(isDef(opts.workers) ? opts.workers : this.parentArgs.workers)
+  this.remoteDelegation = this.workers.length > 0
+  this.remotePollIntervalMs = _$(opts.remotePollIntervalMs, "opts.remotePollIntervalMs").isNumber().default(1000)
+  this._workerCursor = 0
   
   this.subtasks = {}
   this.runningCount = 0
@@ -39,6 +43,273 @@ var SubtaskManager = function(parentArgs, opts) {
   
   // Start watchdog for deadlines
   this._startWatchdog()
+}
+
+SubtaskManager.prototype._normalizeWorkers = function(workers) {
+  var list = []
+  var parsed = workers
+
+  if (isString(workers) && workers.trim().length > 0) {
+    try {
+      parsed = af.fromJSSLON(workers)
+    } catch(ignoreParseErr) {
+      parsed = []
+    }
+  }
+
+  if (isString(parsed)) parsed = [parsed]
+  if (!isArray(parsed)) parsed = []
+
+  parsed.forEach(function(entry) {
+    var url = __
+    if (isString(entry)) {
+      url = entry.trim()
+    } else if (isMap(entry) && isString(entry.url)) {
+      url = entry.url.trim()
+    }
+
+    if (!isString(url) || url.length === 0) return
+    url = url.replace(/\/+$/, "")
+    if (url.match(/^https?:\/\//i) === null) return
+    list.push(url)
+  })
+
+  return list
+}
+
+SubtaskManager.prototype._buildChildArgs = function(subtask) {
+  var mergedArgs = merge({}, this.parentArgs)
+
+  if (isMap(subtask.args)) {
+    Object.keys(subtask.args).forEach(function(key) {
+      mergedArgs[key] = subtask.args[key]
+    })
+  }
+
+  mergedArgs.goal = subtask.goal
+  mergedArgs._delegationDepth = subtask.depth
+  mergedArgs._parentSubtaskId = subtask.parentId
+  return mergedArgs
+}
+
+SubtaskManager.prototype._nextWorker = function() {
+  if (!isArray(this.workers) || this.workers.length === 0) return __
+  var idx = this._workerCursor % this.workers.length
+  this._workerCursor++
+  return this.workers[idx]
+}
+
+SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload) {
+  var headers = { "Content-Type": "application/json" }
+  if (isString(this.parentArgs.apitoken) && this.parentArgs.apitoken.length > 0) {
+    headers.Authorization = "Bearer " + this.parentArgs.apitoken
+  }
+
+  var response
+  try {
+    response = $rest({ requestHeaders: headers }).post(workerUrl + path, payload || {})
+  } catch (e) {
+    var errMsg = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
+    throw new Error("Remote worker request failed (" + workerUrl + path + "): " + errMsg)
+  }
+
+  if (!isMap(response)) {
+    throw new Error("Remote worker response is not a map for endpoint " + path)
+  }
+
+  if (isString(response.error) && response.error.length > 0) {
+    throw new Error("Remote worker error: " + response.error)
+  }
+
+  return response
+}
+
+SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
+  subtask.result = {
+    answer: answer,
+    metrics: metrics,
+    state: state
+  }
+  subtask.status = "completed"
+  subtask.completedAt = new Date().getTime()
+  subtask.error = __
+
+  var duration = subtask.completedAt - subtask.startedAt
+  this.metrics.totalDurationMs += duration
+  this.metrics.completed++
+  this.metrics.running--
+  this.runningCount--
+
+  this.interactionFn("delegate", prefix + " ✅ Completed in " + Math.round(duration / 1000) + "s")
+}
+
+SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) {
+  subtask.error = error
+
+  if (subtask.attempt < subtask.maxAttempts) {
+    subtask.status = "pending"
+    subtask.metadata.previousError = error
+    this.pendingQueue.push(subtask.id)
+    this.metrics.retried++
+    this.metrics.running--
+    this.runningCount--
+    this.interactionFn("delegate", prefix + " ⚠️ Failed (attempt " + subtask.attempt + "/" + subtask.maxAttempts + "), will retry: " + error)
+    return "retry"
+  }
+
+  subtask.status = "failed"
+  subtask.completedAt = new Date().getTime()
+  this.metrics.failed++
+  this.metrics.running--
+  this.runningCount--
+  this.interactionFn("delegate", prefix + " ❌ Failed after " + subtask.maxAttempts + " attempts: " + error)
+  return "failed"
+}
+
+SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
+  var parent = this
+
+  $doV(function() {
+    try {
+      var childAgent = new MiniA()
+      var mergedArgs = parent._buildChildArgs(subtask)
+
+      childAgent.setInteractionFn(function(event, message) {
+        parent.interactionFn(event, prefix + " " + message)
+      })
+
+      childAgent.init(mergedArgs)
+      var answer = childAgent.start(mergedArgs)
+      var childMetrics = childAgent.getMetrics()
+      var childState = jsonParse(stringify(childAgent._agentState || {}, __, ""), __, __, true)
+
+      if (subtask.status === "running") {
+        parent._completeSubtask(subtask, prefix, answer, childMetrics, childState)
+      }
+    } catch (e) {
+      if (subtask.status === "running") {
+        var error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
+        parent._failOrRetrySubtask(subtask, prefix, error)
+      }
+    }
+
+    try {
+      parent._processQueue()
+    } catch(ignoreQueue) {}
+  })
+}
+
+SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
+  var parent = this
+
+  $doV(function() {
+    try {
+      var workerUrl = parent._nextWorker()
+      if (!isString(workerUrl) || workerUrl.length === 0) {
+        throw new Error("No remote workers configured")
+      }
+
+      subtask.workerUrl = workerUrl
+      subtask.remoteEventIndex = 0
+
+      var mergedArgs = parent._buildChildArgs(subtask)
+      var timeoutSec = Math.max(1, Math.ceil(subtask.deadlineMs / 1000))
+      var metadata = merge({}, subtask.metadata || {})
+      metadata.parentSubtaskId = subtask.parentId
+      metadata.delegationDepth = subtask.depth
+
+      var taskResponse = parent._remoteRequest(workerUrl, "/task", {
+        goal: subtask.goal,
+        args: mergedArgs,
+        timeout: timeoutSec,
+        metadata: metadata
+      })
+
+      if (!isString(taskResponse.taskId) || taskResponse.taskId.length === 0) {
+        throw new Error("Remote worker did not return taskId")
+      }
+
+      subtask.remoteTaskId = taskResponse.taskId
+      parent.interactionFn("delegate", prefix + " Routed to worker: " + workerUrl)
+
+      while (subtask.status === "running") {
+        sleep(parent.remotePollIntervalMs, true)
+        if (subtask.status !== "running") break
+
+        var status = parent._remoteRequest(workerUrl, "/status", { taskId: subtask.remoteTaskId })
+        var remoteStatus = isString(status.status) ? status.status.toLowerCase() : "running"
+
+        if (isArray(status.events)) {
+          var seenEvents = _$(subtask.remoteEventIndex, "subtask.remoteEventIndex").isNumber().default(0)
+          for (var i = seenEvents; i < status.events.length; i++) {
+            var evt = status.events[i]
+            if (isMap(evt) && isString(evt.message) && evt.message.length > 0) {
+              parent.interactionFn("delegate", prefix + " " + evt.message)
+            }
+          }
+          subtask.remoteEventIndex = status.events.length
+        }
+
+        if (remoteStatus === "queued" || remoteStatus === "running") continue
+
+        if (remoteStatus === "completed") {
+          var resultPayload = __
+          var resultErrMsg = __
+
+          // /status can flip to completed slightly before /result is available.
+          for (var attempt = 0; attempt < 5; attempt++) {
+            try {
+              resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId })
+              if (isMap(resultPayload) && isMap(resultPayload.result)) break
+            } catch (resultErr) {
+              resultErrMsg = isDef(resultErr) && isString(resultErr.message) ? resultErr.message : stringify(resultErr, __, "")
+            }
+            sleep(250, true)
+          }
+
+          if (!(isMap(resultPayload) && isMap(resultPayload.result))) {
+            throw new Error("Remote task completed but result is not available yet" + (isString(resultErrMsg) ? ": " + resultErrMsg : ""))
+          }
+
+          var remoteResult = isMap(resultPayload) && isMap(resultPayload.result) ? resultPayload.result : {}
+          var remoteError = isDef(remoteResult.error) ? String(remoteResult.error) : __
+
+          if (isString(remoteError) && remoteError.length > 0) {
+            throw new Error(remoteError)
+          }
+
+          parent._completeSubtask(
+            subtask,
+            prefix,
+            remoteResult.answer,
+            isMap(remoteResult.metrics) ? remoteResult.metrics : {},
+            isMap(remoteResult.state) ? remoteResult.state : {}
+          )
+          return
+        }
+
+        var resultPayload = __
+        try {
+          resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId })
+        } catch(ignoreResultErr) {}
+
+        var failedMsg = "Remote subtask ended with status: " + remoteStatus
+        if (isMap(resultPayload) && isMap(resultPayload.result) && isDef(resultPayload.result.error)) {
+          failedMsg = String(resultPayload.result.error)
+        }
+        throw new Error(failedMsg)
+      }
+    } catch (e) {
+      if (subtask.status === "running") {
+        var error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
+        parent._failOrRetrySubtask(subtask, prefix, error)
+      }
+    }
+
+    try {
+      parent._processQueue()
+    } catch(ignoreQueue) {}
+  })
 }
 
 /**
@@ -123,7 +394,6 @@ SubtaskManager.prototype.start = function(subtaskId) {
     return
   }
   
-  var parent = this
   subtask.status = "running"
   subtask.startedAt = new Date().getTime()
   subtask.attempt++
@@ -139,105 +409,12 @@ SubtaskManager.prototype.start = function(subtaskId) {
   // Emit delegation start event
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
   this.interactionFn("delegate", prefix + " Starting sub-goal: " + subtask.goal)
-  
-  // Spawn child agent in async thread
-  $doV(function() {
-    var childAgent
-    var answer
-    var error
-    var childMetrics
-    var childState
-    
-    try {
-      // Create child agent with inherited config
-      childAgent = new MiniA()
-      
-      // Build child args by merging parent config with child overrides
-      var mergedArgs = merge({}, parent.parentArgs)
-      
-      // Apply child-specific overrides
-      if (isMap(subtask.args)) {
-        Object.keys(subtask.args).forEach(function(key) {
-          mergedArgs[key] = subtask.args[key]
-        })
-      }
-      
-      // Set the goal
-      mergedArgs.goal = subtask.goal
-      
-      // Increase depth for child
-      mergedArgs._delegationDepth = subtask.depth
-      mergedArgs._parentSubtaskId = subtask.parentId
-      
-      // Forward interaction events to parent with prefix
-      var originalInteractionFn = parent.interactionFn
-      childAgent.setInteractionFn(function(event, message) {
-        originalInteractionFn(event, prefix + " " + message)
-      })
-      
-      // Initialize and start child agent
-      childAgent.init(mergedArgs)
-      answer = childAgent.start(mergedArgs)
-      
-      // Collect results
-      childMetrics = childAgent.getMetrics()
-      childState = jsonParse(stringify(childAgent._agentState || {}, __, ""), __, __, true)
-      
-      // Update subtask with success
-      subtask.result = {
-        answer: answer,
-        metrics: childMetrics,
-        state: childState
-      }
-      subtask.status = "completed"
-      subtask.completedAt = new Date().getTime()
-      
-      var duration = subtask.completedAt - subtask.startedAt
-      parent.metrics.totalDurationMs += duration
-      parent.metrics.completed++
-      parent.metrics.running--
-      parent.runningCount--
-      
-      // Emit completion event
-      originalInteractionFn("delegate", prefix + " ✅ Completed in " + Math.round(duration / 1000) + "s")
-      
-    } catch(e) {
-      // Handle failure
-      error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
-      subtask.error = error
-      
-      // Check if we should retry
-      if (subtask.attempt < subtask.maxAttempts) {
-        subtask.status = "pending"
-        subtask.metadata.previousError = error
-        parent.pendingQueue.push(subtaskId)
-        parent.metrics.retried++
-        parent.metrics.running--
-        parent.runningCount--
-        
-        parent.interactionFn("delegate", prefix + " ⚠️ Failed (attempt " + subtask.attempt + "/" + subtask.maxAttempts + "), will retry: " + error)
-        
-        // Try to start it again (respecting concurrency)
-        try {
-          parent._processQueue()
-        } catch(ignoreQueue) {}
-        
-      } else {
-        subtask.status = "failed"
-        subtask.completedAt = new Date().getTime()
-        parent.metrics.failed++
-        parent.metrics.running--
-        parent.runningCount--
-        
-        parent.interactionFn("delegate", prefix + " ❌ Failed after " + subtask.maxAttempts + " attempts: " + error)
-      }
-    }
-    
-    // Process pending queue to start next task
-    try {
-      parent._processQueue()
-    } catch(ignoreQueue) {}
-  })
+
+  if (this.remoteDelegation) {
+    this._startRemoteSubtask(subtask, prefix)
+  } else {
+    this._startLocalSubtask(subtask, prefix)
+  }
 }
 
 /**
@@ -313,6 +490,15 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   }
   
   var wasRunning = subtask.status === "running"
+
+  if (wasRunning && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
+    try {
+      this._remoteRequest(subtask.workerUrl, "/cancel", {
+        taskId: subtask.remoteTaskId,
+        reason: reason || "Cancelled by user"
+      })
+    } catch(ignoreRemoteCancel) {}
+  }
   
   // Mark as cancelled
   subtask.status = "cancelled"
@@ -512,6 +698,15 @@ SubtaskManager.prototype._startWatchdog = function() {
           if (subtask.status === "running" && isDef(subtask.startedAt)) {
             var elapsed = now - subtask.startedAt
             if (elapsed >= subtask.deadlineMs) {
+              if (parent.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
+                try {
+                  parent._remoteRequest(subtask.workerUrl, "/cancel", {
+                    taskId: subtask.remoteTaskId,
+                    reason: "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+                  })
+                } catch(ignoreRemoteCancel) {}
+              }
+
               // Mark as timeout
               subtask.status = "timeout"
               subtask.completedAt = now

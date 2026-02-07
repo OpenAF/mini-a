@@ -7917,6 +7917,7 @@ MiniA.prototype.init = function(args) {
       { name: "nosetmcpwd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
       { name: "usedelegation", type: "boolean", default: false },
+      { name: "workers", type: "string", default: __ },
       { name: "maxconcurrent", type: "number", default: 4 },
       { name: "delegationmaxdepth", type: "number", default: 3 },
       { name: "delegationtimeout", type: "number", default: 300000 },
@@ -7960,6 +7961,35 @@ MiniA.prototype.init = function(args) {
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").isNumber().default(3)
     args.delegationtimeout = _$(args.delegationtimeout, "args.delegationtimeout").isNumber().default(300000)
     args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").isNumber().default(2)
+
+    var workersRaw = args.workers
+    var parsedWorkers = []
+    if (isArray(workersRaw)) parsedWorkers = workersRaw
+    else if (isString(workersRaw) && workersRaw.trim().length > 0) {
+      try {
+        var workersValue = af.fromJSSLON(workersRaw)
+        if (isString(workersValue)) parsedWorkers = [workersValue]
+        else if (isArray(workersValue)) parsedWorkers = workersValue
+        else this.fnI("warn", "workers must be a JSON/SLON array of URLs; ignoring value.")
+      } catch (workersErr) {
+        this.fnI("warn", "Invalid workers value. Provide JSON/SLON array, e.g. workers=\"['http://worker1:8080','http://worker2:8080']\".")
+      }
+    }
+
+    args.workers = parsedWorkers
+      .map(function(entry) {
+        if (isString(entry)) return entry.trim()
+        if (isMap(entry) && isString(entry.url)) return entry.url.trim()
+        return __
+      })
+      .filter(function(url) {
+        return isString(url) && url.length > 0 && url.match(/^https?:\/\//i) !== null
+      })
+      .map(function(url) {
+        return url.replace(/\/+$/, "")
+      })
+
+    if (args.workers.length > 0) args.usedelegation = true
 
     this._savePlanNotes = args.saveplannotes
 
@@ -8251,10 +8281,15 @@ MiniA.prototype.init = function(args) {
             defaultMaxAttempts: args.delegationmaxretries,
             maxDepth: args.delegationmaxdepth,
             interactionFn: this.fnI.bind(this),
-            currentDepth: currentDepth
+            currentDepth: currentDepth,
+            workers: args.workers
           })
-          
-          this.fnI("info", "Delegation enabled (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
+
+          if (isArray(args.workers) && args.workers.length > 0) {
+            this.fnI("info", "Delegation enabled in remote mode with " + args.workers.length + " worker(s) (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
+          } else {
+            this.fnI("info", "Delegation enabled (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
+          }
           
           // Register delegation MCP config if usetools is enabled
           if (args.usetools === true) {

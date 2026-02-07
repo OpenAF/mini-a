@@ -39,11 +39,14 @@ mini-a
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `usedelegation` | boolean | `false` | Enable local subtask delegation |
+| `usedelegation` | boolean | `false` | Enable subtask delegation |
+| `workers` | string | (none) | JSON/SLON array of worker URLs. If provided, delegation routes to remote workers instead of local child agents |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+
+When `workers` is set, delegated subtasks are dispatched round-robin to the listed worker URLs via `/task`, `/status`, `/result`, and `/cancel`.
 
 ### How It Works
 

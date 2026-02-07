@@ -48,44 +48,6 @@ todo:
 
 # --- Public endpoints ---
 - (httpdService): "${onport:-8888}"
-  ((uri       )): /healthz
-  ((execURI   )): | #js
-    var response = {
-      status: "ok",
-      uptime: java.lang.System.currentTimeMillis() - global.__worker_startTime
-    };
-    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
-  ((error     )): true
-
-- (httpdService): "${onport:-8888}"
-  ((uri       )): /metrics
-  ((execURI   )): | #js
-    var tasks = Object.values(global.__worker_tasks || {});
-    var response = {
-      tasks: {
-        total: tasks.length,
-        queued: tasks.filter(function(t) { return t.status === "queued" }).length,
-        running: tasks.filter(function(t) { return t.status === "running" }).length,
-        completed: tasks.filter(function(t) { return t.status === "completed" }).length,
-        failed: tasks.filter(function(t) { return t.status === "failed" }).length,
-        cancelled: tasks.filter(function(t) { return t.status === "cancelled" }).length
-      }
-    };
-    if (isDef(global.__mini_a_metrics)) {
-      response.delegation = {
-        total: global.__mini_a_metrics.delegation_total.get(),
-        running: global.__mini_a_metrics.delegation_running.get(),
-        completed: global.__mini_a_metrics.delegation_completed.get(),
-        failed: global.__mini_a_metrics.delegation_failed.get(),
-        cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
-        timedout: global.__mini_a_metrics.delegation_timedout.get(),
-        retried: global.__mini_a_metrics.delegation_retried.get()
-      };
-    }
-    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
-  ((error    )): true
-
-- (httpdService): "${onport:-8888}"
   ((uri       )): /info
   ((execURI   )): | #js
     var wargs = global.__worker_args;
@@ -103,7 +65,7 @@ todo:
       },
       auth: isDef(wargs.apitoken) ? "bearer" : "none"
     };
-    return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+    return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
   ((error    )): true
 
 # --- Authenticated endpoints ---
@@ -113,14 +75,14 @@ todo:
     if (isDef(global.__worker_args.apitoken)) {
       var authHeader = request.header.authorization || "";
       if (authHeader !== "Bearer " + global.__worker_args.apitoken) {
-        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), ow.server.httpd.mimes.JSON, 401);
+        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), 401, ow.server.httpd.mimes.JSON);
       }
     }
     if (isArray(global.__worker_ipallow) && global.__worker_ipallow.length > 0) {
       var remoteAddr = request.header["x-forwarded-for"] || request.remoteAddress;
       var allowed = global.__worker_ipallow.some(function(pattern) { return remoteAddr.indexOf(pattern) === 0; });
       if (!allowed) {
-        return ow.server.httpd.reply(stringify({ error: "Forbidden" }, __, ""), ow.server.httpd.mimes.JSON, 403);
+        return ow.server.httpd.reply(stringify({ error: "Forbidden" }, __, ""), 403, ow.server.httpd.mimes.JSON);
       }
     }
   ((execURI  )): | #js
@@ -128,10 +90,10 @@ todo:
       var postData = jsonParse(request.files.postData);
       var wargs = global.__worker_args;
       if (!isString(postData.goal) || postData.goal.trim().length === 0) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
       if (postData.goal.length > 10000) {
-        return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+        return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
       var taskArgs = postData.args || {};
       var allowedRemoteKeys = {
@@ -175,10 +137,10 @@ todo:
       global.__worker_taskManager.start(subtaskId);
       global.__worker_tasks[taskId].status = "running";
       global.__worker_tasks[taskId].startedAt = new Date().getTime();
-      return ow.server.httpd.reply(stringify({ taskId: taskId, status: "queued", createdAt: now }, __, ""), ow.server.httpd.mimes.JSON, 202);
+      return ow.server.httpd.reply(stringify({ taskId: taskId, status: "queued", createdAt: now }, __, ""), 202, ow.server.httpd.mimes.JSON);
     } catch(e) {
       logErr(e);
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
     }
   ((error    )): true
 
@@ -190,11 +152,11 @@ todo:
       var postData = jsonParse(request.files.postData);
       var taskId = postData.taskId;
       if (!isString(taskId)) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
       var task = global.__worker_tasks[taskId];
       if (isUnDef(task)) {
-        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404);
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
       }
       try {
         var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
@@ -209,10 +171,10 @@ todo:
       if (task.status === "running" && isDef(task.args) && isDef(task.args.maxsteps)) {
         response.progress = { maxSteps: task.args.maxsteps };
       }
-      return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+      return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
     } catch(e) {
       logErr(e);
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
     }
   ((error    )): true
 
@@ -224,11 +186,11 @@ todo:
       var postData = jsonParse(request.files.postData);
       var taskId = postData.taskId;
       if (!isString(taskId)) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
       var task = global.__worker_tasks[taskId];
       if (isUnDef(task)) {
-        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404);
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
       }
       try {
         var subtaskResult = global.__worker_taskManager.result(task.subtaskId);
@@ -245,17 +207,17 @@ todo:
           completedAt: task.completedAt,
           duration: task.completedAt && task.startedAt ? (task.completedAt - task.startedAt) : 0
         };
-        return ow.server.httpd.reply(stringify(response, __, ""), ow.server.httpd.mimes.JSON, __);
+        return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
       } catch(resultErr) {
         var errMsg = isDef(resultErr) && isString(resultErr.message) ? resultErr.message : String(resultErr);
         if (errMsg.indexOf("not in terminal state") >= 0) {
-          return ow.server.httpd.reply(stringify({ error: "Task is not yet complete" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+          return ow.server.httpd.reply(stringify({ error: "Task is not yet complete" }, __, ""), 400, ow.server.httpd.mimes.JSON);
         }
         throw resultErr;
       }
     } catch(e) {
       logErr(e);
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
     }
   ((error    )): true
 
@@ -267,11 +229,11 @@ todo:
       var postData = jsonParse(request.files.postData);
       var taskId = postData.taskId;
       if (!isString(taskId)) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), ow.server.httpd.mimes.JSON, 400);
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
       var task = global.__worker_tasks[taskId];
       if (isUnDef(task)) {
-        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), ow.server.httpd.mimes.JSON, 404);
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
       }
       var reason = postData.reason || "Cancelled by user";
       try {
@@ -279,10 +241,10 @@ todo:
         task.status = "cancelled";
         task.completedAt = new Date().getTime();
       } catch(cancelErr) {}
-      return ow.server.httpd.reply(stringify({ taskId: taskId, status: task.status }, __, ""), ow.server.httpd.mimes.JSON, __);
+      return ow.server.httpd.reply(stringify({ taskId: taskId, status: task.status }, __, ""), __, ow.server.httpd.mimes.JSON);
     } catch(e) {
       logErr(e);
-      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), ow.server.httpd.mimes.JSON, 500);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
     }
   ((error    )): true
 

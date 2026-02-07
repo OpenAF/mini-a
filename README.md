@@ -281,6 +281,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets); set `OAF_MINI_A_MODE` to pick a default when `mode=` is omitted
 - **Sub-Goal Delegation** - Hierarchical task decomposition with concurrent child agents
   - **Local Delegation** - Spawn child Mini-A agents in the same process for parallel subtask execution (`usedelegation=true`)
+  - **Remote Worker Routing** - Route delegated subtasks to worker URLs by setting `workers=[...]`
   - **Worker API** - Headless HTTP API for distributed agent workloads across processes/containers/hosts (`mini-a-worker.yaml`)
   - **Autonomous Delegation** - LLM decides when to delegate via `delegate-subtask` tool
   - **Manual Delegation** - Console commands for interactive control (`/delegate`, `/subtasks`, `/subtask`)
@@ -322,7 +323,7 @@ Mini-A ships with complementary components:
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
-- **`mini-a-subtask.js`** - SubtaskManager for local delegation and concurrent child agents
+- **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml`)
@@ -350,6 +351,7 @@ Mini-A ships with complementary components:
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
+| `workers` | JSON/SLON array of worker URLs for remote delegation (`workers=['http://host1:8080','http://host2:8080']`) | - |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
