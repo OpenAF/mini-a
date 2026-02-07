@@ -1,0 +1,379 @@
+# Author: Nuno Aguiar
+# License: Apache 2.0
+# Description: Mini-A headless worker API for programmatic agent delegation
+
+help:
+  text   : Mini-A headless worker API for programmatic agent delegation between processes/containers/hosts
+  expects:
+  - name     : onport
+    desc     : API server port
+    example  : "8080"
+    mandatory: false
+  - name     : apitoken
+    desc     : Required bearer token for authentication
+    example  : "your-secret-token"
+    mandatory: false
+  - name     : apiallow
+    desc     : Comma-separated IP allowlist
+    example  : "127.0.0.1,192.168.1.0/24"
+    mandatory: false
+  - name     : maxconcurrent
+    desc     : Maximum concurrent tasks
+    example  : "4"
+    mandatory: false
+  - name     : defaulttimeout
+    desc     : Default task deadline in milliseconds
+    example  : "300000"
+    mandatory: false
+  - name     : maxtimeout
+    desc     : Maximum allowed task deadline in milliseconds
+    example  : "600000"
+    mandatory: false
+  - name     : taskretention
+    desc     : Seconds to keep completed task results
+    example  : "3600"
+    mandatory: false
+
+include:
+- oJobHTTPd.yaml
+
+todo:
+- Init
+
+# --- HTTP server lifecycle ---
+- (httpdStart  ): "${onport:-8888}"
+- (httpdHealthz): "${onport:-8888}"
+- (httpdMetrics): "${onport:-8888}"
+#- (httpdStop ): "${onport:-8888}"
+
+# --- Public endpoints ---
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /info
+  ((execURI   )): | #js
+    var wargs = global.__worker_args;
+    var response = {
+      status: "ok",
+      name: "mini-a-worker",
+      version: "1.0.0",
+      capabilities: ["run-goal", "delegation", "planning"],
+      limits: {
+        maxConcurrent: wargs.maxconcurrent,
+        defaultTimeoutMs: wargs.defaulttimeout,
+        maxTimeoutMs: wargs.maxtimeout,
+        maxSteps: wargs.maxsteps || 15,
+        useshell: toBoolean(wargs.useshell) || false
+      },
+      auth: isDef(wargs.apitoken) ? "bearer" : "none"
+    };
+    return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
+  ((error    )): true
+
+# --- Authenticated endpoints ---
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /task
+  ((execPre   )): &authCheck | #js
+    if (isDef(global.__worker_args.apitoken)) {
+      var authHeader = request.header.authorization || "";
+      if (authHeader !== "Bearer " + global.__worker_args.apitoken) {
+        return ow.server.httpd.reply(stringify({ error: "Unauthorized" }, __, ""), 401, ow.server.httpd.mimes.JSON);
+      }
+    }
+    if (isArray(global.__worker_ipallow) && global.__worker_ipallow.length > 0) {
+      var remoteAddr = request.header["x-forwarded-for"] || request.remoteAddress;
+      var allowed = global.__worker_ipallow.some(function(pattern) { return remoteAddr.indexOf(pattern) === 0; });
+      if (!allowed) {
+        return ow.server.httpd.reply(stringify({ error: "Forbidden" }, __, ""), 403, ow.server.httpd.mimes.JSON);
+      }
+    }
+  ((execURI  )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var wargs = global.__worker_args;
+      if (!isString(postData.goal) || postData.goal.trim().length === 0) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      if (postData.goal.length > 10000) {
+        return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      var taskArgs = postData.args || {};
+      var allowedRemoteKeys = {
+        goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
+        updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
+        planmode: true, planformat: true, convertplan: true, maxsteps: true
+      };
+      var mergedArgs = merge({}, wargs);
+      Object.keys(taskArgs).forEach(function(key) {
+        if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key]; }
+      });
+      mergedArgs.goal = postData.goal.trim();
+      var timeout = isDef(postData.timeout) ? Number(postData.timeout) * 1000 : wargs.defaulttimeout;
+      if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout;
+      var taskId = genUUID();
+      var now = new Date().getTime();
+      if (isUnDef(global.__worker_taskManager)) {
+        global.__worker_taskManager = new SubtaskManager(mergedArgs, {
+          maxConcurrent: wargs.maxconcurrent,
+          defaultDeadlineMs: wargs.defaulttimeout,
+          defaultMaxAttempts: 2,
+          maxDepth: 3,
+          interactionFn: function(event, message) {
+            var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message);
+            if (isString(resolvedTaskId) && resolvedTaskId.length > 0) {
+              global.__worker_appendTaskEvent(resolvedTaskId, event, message);
+            }
+            global.__worker_logTaskEvent(resolvedTaskId, event, message);
+          },
+          currentDepth: 0
+        });
+      }
+      var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
+        deadlineMs: timeout,
+        metadata: postData.metadata || {}
+      });
+      global.__worker_tasks[taskId] = {
+        taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
+        args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
+        events: [], metadata: postData.metadata || {}
+      };
+      global.__worker_subtaskToTaskId[subtaskId] = taskId;
+      global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId;
+      global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker");
+      global.__worker_taskManager.start(subtaskId);
+      global.__worker_tasks[taskId].status = "running";
+      global.__worker_tasks[taskId].startedAt = new Date().getTime();
+      return ow.server.httpd.reply(stringify({ taskId: taskId, status: "queued", createdAt: now }, __, ""), 202, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /status
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var taskId = postData.taskId;
+      if (!isString(taskId)) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) {
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
+      }
+      try {
+        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+        task.status = subtaskStatus.status;
+        if (isDef(subtaskStatus.completedAt)) { task.completedAt = subtaskStatus.completedAt; }
+      } catch(statusErr) {}
+      var response = {
+        taskId: taskId, status: task.status, startedAt: task.startedAt,
+        elapsed: task.startedAt ? (new Date().getTime() - task.startedAt) : 0,
+        events: task.events || []
+      };
+      if (task.status === "running" && isDef(task.args) && isDef(task.args.maxsteps)) {
+        response.progress = { maxSteps: task.args.maxsteps };
+      }
+      return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /result
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var taskId = postData.taskId;
+      if (!isString(taskId)) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) {
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
+      }
+      try {
+        var subtaskResult = global.__worker_taskManager.result(task.subtaskId);
+        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+        task.status = subtaskStatus.status;
+        if (isDef(subtaskStatus.completedAt)) { task.completedAt = subtaskStatus.completedAt; }
+        var response = {
+          taskId: taskId, status: task.status,
+          result: {
+            goal: task.goal, answer: subtaskResult.answer, format: task.args.format || "md",
+            metrics: subtaskResult.metrics || {}, state: subtaskResult.state || {},
+            error: subtaskResult.error
+          },
+          completedAt: task.completedAt,
+          duration: task.completedAt && task.startedAt ? (task.completedAt - task.startedAt) : 0
+        };
+        return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
+      } catch(resultErr) {
+        var errMsg = isDef(resultErr) && isString(resultErr.message) ? resultErr.message : String(resultErr);
+        if (errMsg.indexOf("not in terminal state") >= 0) {
+          return ow.server.httpd.reply(stringify({ error: "Task is not yet complete" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+        }
+        throw resultErr;
+      }
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /cancel
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData = jsonParse(request.files.postData);
+      var taskId = postData.taskId;
+      if (!isString(taskId)) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) {
+        return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
+      }
+      var reason = postData.reason || "Cancelled by user";
+      try {
+        global.__worker_taskManager.cancel(task.subtaskId, reason);
+        task.status = "cancelled";
+        task.completedAt = new Date().getTime();
+      } catch(cancelErr) {}
+      return ow.server.httpd.reply(stringify({ taskId: taskId, status: task.status }, __, ""), __, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- Cleanup Loop
+
+ojob:
+  opacks      :
+  - openaf     : 20250915
+  - oJob-common: 20250914
+  - mini-a
+  catch       : logErr(exception); $err(exception, __, __, job.exec)
+  logToConsole: false
+  argsFromEnvs: true
+  daemon      : true
+  unique      :
+    pidFile     : .mini-a-worker.pid
+    killPrevious: true
+  loadLibs    :
+  - mini-a.js
+  - mini-a-subtask.js
+
+jobs:
+# ----------
+- name : Init
+  exec : | #js
+    // Check environment
+    if (isUnDef(getEnv("OAF_MODEL"))) {
+      throw "OAF_MODEL environment variable not set. Export OAF_MODEL before starting the worker."
+    }
+
+    // Set defaults
+    args.onport = _$(args.onport, "args.onport").toNumber().isNumber().default(8080)
+    args.apitoken = _$(args.apitoken, "args.apitoken").isString().default(__)
+    args.apiallow = _$(args.apiallow, "args.apiallow").isString().default(__)
+    args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").toNumber().isNumber().default(4)
+    args.defaulttimeout = _$(args.defaulttimeout, "args.defaulttimeout").toNumber().isNumber().default(300000)
+    args.maxtimeout = _$(args.maxtimeout, "args.maxtimeout").toNumber().isNumber().default(600000)
+    args.taskretention = _$(args.taskretention, "args.taskretention").toNumber().isNumber().default(3600)
+
+    // Validate
+    if (isUnDef(args.apitoken)) {
+      logWarn("No API token configured. Authentication is DISABLED. Set apitoken= parameter for production use.")
+    }
+
+    // Parse IP allowlist
+    global.__worker_ipallow = []
+    if (isString(args.apiallow) && args.apiallow.length > 0) {
+      global.__worker_ipallow = args.apiallow.split(",").map(function(ip) { return ip.trim() }).filter(function(ip) { return ip.length > 0 })
+      log("IP allowlist configured: " + global.__worker_ipallow.join(", "))
+    }
+
+    // Initialize global state
+    global.__worker_args = args
+    global.__worker_tasks = {}
+    global.__worker_taskManager = __
+    global.__worker_startTime = java.lang.System.currentTimeMillis()
+    global.__worker_subtaskToTaskId = {}
+    global.__worker_subtaskShortToTaskId = {}
+
+    global.__worker_appendTaskEvent = function(taskId, event, message) {
+      if (!isString(taskId) || isUnDef(global.__worker_tasks[taskId])) return
+      if (isUnDef(global.__worker_tasks[taskId].events)) global.__worker_tasks[taskId].events = []
+      global.__worker_tasks[taskId].events.push({
+        event: isString(event) ? event : "info",
+        message: isString(message) ? message : String(message),
+        ts: new Date().getTime()
+      })
+    }
+
+    global.__worker_logTaskEvent = function(taskId, event, message) {
+      var eventName = isString(event) && event.length > 0 ? event : "info"
+      var msgText = isString(message) ? message : String(message)
+      var normalized = msgText.replace(/\n/g, "↵")
+      var prefix = "[mini-a-worker]"
+      if (isString(taskId) && taskId.length > 0) {
+        prefix += "[task:" + taskId.substring(0, 8) + "]"
+      }
+      log(prefix + "[" + eventName + "] " + normalized)
+    }
+
+    global.__worker_resolveTaskIdFromMessage = function(message) {
+      if (!isString(message)) return __
+      var match = message.match(/^\[subtask:([^\]]+)\]/)
+      if (!isArray(match) || match.length < 2) return __
+      var shortId = String(match[1] || "").trim()
+      if (shortId.length === 0) return __
+      if (isString(global.__worker_subtaskShortToTaskId[shortId])) return global.__worker_subtaskShortToTaskId[shortId]
+      return __
+    }
+
+    log("Mini-A Worker API starting on port " + args.onport)
+    log("Max concurrent tasks: " + args.maxconcurrent)
+    log("Default timeout: " + args.defaulttimeout + "ms")
+    log("Task retention: " + args.taskretention + "s")
+
+# ---------------
+- name : Cleanup Loop
+  deps : Init
+  exec : | #js
+    var retention = global.__worker_args.taskretention * 1000
+
+    // Cleanup old completed tasks periodically
+    setInterval(function() {
+      try {
+        var now = new Date().getTime()
+        var taskIds = Object.keys(global.__worker_tasks)
+
+        taskIds.forEach(function(taskId) {
+          var task = global.__worker_tasks[taskId]
+          if (isDef(task.completedAt)) {
+            var age = now - task.completedAt
+            if (age > retention) {
+              try {
+                global.__worker_taskManager.cleanup(task.subtaskId)
+              } catch(ignoreCleanup) {}
+              if (isString(task.subtaskId) && task.subtaskId.length > 0) {
+                delete global.__worker_subtaskToTaskId[task.subtaskId]
+                delete global.__worker_subtaskShortToTaskId[task.subtaskId.substring(0, 8)]
+              }
+              delete global.__worker_tasks[taskId]
+              log("Cleaned up task " + taskId + " (age: " + Math.round(age / 1000) + "s)")
+            }
+          }
+        })
+      } catch(cleanupErr) {
+        logErr(cleanupErr)
+      }
+    }, 60000) // Run every minute

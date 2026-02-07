@@ -929,6 +929,106 @@ Deep research mode runs a loop of research-validate-learn cycles:
 | `validationthreshold` | string | `"PASS"` | Required validation verdict (`"PASS"` or score-based like `"score>=0.7"`) |
 | `persistlearnings` | boolean | `true` | Whether to carry learnings from previous cycles forward |
 
+## Sub-Goal Delegation
+
+Mini-A supports **delegation** — the ability to spawn child Mini-A agents to handle sub-goals. This enables hierarchical problem decomposition, parallel execution, and distributed workloads.
+
+### Delegation Modes
+
+1. **Local Delegation** — Parent spawns child agents in the same process (async threads)
+2. **Remote Delegation** — Headless HTTP API worker for distributed execution
+
+### Delegation Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usedelegation` | boolean | `false` | Enable subtask delegation |
+| `workers` | string | (none) | JSON/SLON array of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
+| `maxconcurrent` | number | `4` | Maximum concurrent child agents |
+| `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
+| `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
+| `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+
+### Enabling Local Delegation
+
+```bash
+# Enable delegation with tool registration
+mini-a usedelegation=true usetools=true goal="Coordinate multiple research tasks"
+
+# Or in the interactive console
+mini-a
+/set usedelegation true
+/set usetools true
+```
+
+When enabled, two MCP tools become available:
+- **`delegate-subtask`** — Spawn a child agent for a sub-goal
+- **`subtask-status`** — Check status/result of a delegated subtask
+
+### Console Commands
+
+```bash
+# Manually delegate a sub-goal
+/delegate Summarize the README.md file
+
+# List all subtasks
+/subtasks
+
+# Show subtask details
+/subtask a1b2c3d4
+
+# Show subtask result  
+/subtask result a1b2c3d4
+
+# Cancel a running subtask
+/subtask cancel a1b2c3d4
+```
+
+### Remote Delegation (Worker API)
+
+Start a headless worker API for programmatic delegation:
+
+```bash
+# Start worker with authentication
+mini-a workermode=true onport=8080 apitoken=your-secret-token
+
+# Parent agent using remote workers for delegation
+mini-a usedelegation=true workers="['http://localhost:8080']" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
+
+# Submit a task via HTTP
+curl -X POST http://localhost:8080/task \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "Analyze data and produce summary",
+    "args": { "maxsteps": 10, "format": "json" },
+    "timeout": 300
+  }'
+
+# Poll for status
+curl -X POST http://localhost:8080/status \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "..." }'
+
+# Get result
+curl -X POST http://localhost:8080/result \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "..." }'
+```
+
+**Worker API Endpoints:**
+- `GET /info` — Server capabilities
+- `POST /task` — Submit new task
+- `POST /status` — Poll task status
+- `POST /result` — Get final result
+- `POST /cancel` — Cancel running task
+- `GET /healthz` — Health check
+- `GET /metrics` — Task/delegation metrics
+
+For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELEGATION.md)**.
+
 ### Basic Usage
 
 ```bash
@@ -2010,6 +2110,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Dynamic tool selection metrics tracking how tools are selected when `mcpdynamic=true`. Shows usage of keyword matching, LLM-based selection (low-cost and main models), connection-level chooser fallbacks, and full catalog fallback. Includes stemming, synonym matching, n-grams, and fuzzy matching capabilities. |
 | `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
 | `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
+| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `avgDurationMs`, `maxDepthUsed` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle, retry activity, average duration, and deepest nesting level reached. |
 
 These counters mirror what is exported via `ow.metrics.add('mini-a', ...)`, so the same structure appears in Prometheus/Grafana when scraped through OpenAF.
 
@@ -2027,6 +2128,7 @@ To poll the OpenAF registry directly, use `ow.metrics.get("mini-a")` from anothe
 
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
 - **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
+- **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[MCP Documentation](mcps/README.md)** - Built-in MCP servers catalog
 - **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations

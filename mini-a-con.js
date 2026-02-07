@@ -167,6 +167,10 @@ try {
       // Start MCP test mode
       load("mini-a-mcptest.js")
       exit(0)
+    } else if (toBoolean(args.workermode) === true) {
+      // Start worker mode
+      oJobRunFile(getOPackPath("mini-a") + "/mini-a-worker.yaml", args, genUUID(), __, false)
+      exit(0)
     } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
       // Start web mode
       oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
@@ -238,7 +242,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "delegate", "subtasks", "subtask", "exit", "quit"]
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -355,7 +359,14 @@ try {
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
     valgoal        : { type: "string", description: "Alias for validationgoal (string or file path)" },
     validationthreshold: { type: "string", default: "PASS", description: "Required validation verdict (e.g., 'PASS' or 'score>=0.7')" },
-    persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" }
+    persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" },
+    usedelegation  : { type: "boolean", default: false, description: "Enable sub-goal delegation to child Mini-A agents" },
+    workers        : { type: "string", description: "JSON/SLON array of worker URLs to enable remote delegation" },
+    maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
+    delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
+    delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
+    delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
+    showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" }
   }
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
@@ -369,6 +380,7 @@ try {
     web: true,
     modelman: true,
     mcptest: true,
+    workermode: true,
     resume: true,
     conversation: true,
     "--help": true,
@@ -416,6 +428,7 @@ try {
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
+      { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },
       { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." }
@@ -441,7 +454,8 @@ try {
       { cmd: "mini-a mode=research goal=\"Summarize the project plan.\"", desc: "# Load research mode and run a goal." },
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
-      { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." }
+      { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
+      { cmd: "mini-a workermode=true onport=8080", desc: "# Launch worker API on port 8080." }
     ]
 
     var maxCmdLength = examples.reduce(function(max, ex) {
@@ -1322,6 +1336,7 @@ try {
   var internalParameters = { goalprefix: true }
   var activeAgent = __
   var shutdownHandled = false
+  var subtaskLogsByShortId = {}
 
   function promptLabel() {
     var prefix = colorifyText(basePrompt, accentColor)
@@ -1544,6 +1559,31 @@ try {
   }
 
   var _prevEventLength = __
+  function _parseDelegateSubtaskMessage(message) {
+    if (!isString(message)) return __
+    var match = message.match(/^\[subtask:([^\]]+)\]\s*(.*)$/)
+    if (!isArray(match) || match.length < 3) return __
+    return {
+      shortId: String(match[1] || "").trim(),
+      text: String(match[2] || "")
+    }
+  }
+
+  function recordDelegateSubtaskLog(message) {
+    var parsed = _parseDelegateSubtaskMessage(message)
+    if (!isMap(parsed) || !isString(parsed.shortId) || parsed.shortId.length === 0) return
+    if (!isArray(subtaskLogsByShortId[parsed.shortId])) subtaskLogsByShortId[parsed.shortId] = []
+    subtaskLogsByShortId[parsed.shortId].push(parsed.text.length > 0 ? parsed.text : String(message))
+  }
+
+  function getDelegateSubtaskLogs(subtaskId) {
+    if (!isString(subtaskId) || subtaskId.trim().length === 0) return []
+    var shortId = subtaskId.substring(0, 8)
+    var logs = subtaskLogsByShortId[shortId]
+    if (!isArray(logs)) return []
+    return logs.slice()
+  }
+
   function printEvent(type, icon, message, id) {
     // Handle streaming output with markdown formatting
     if (type == "stream") {
@@ -1555,6 +1595,11 @@ try {
     // Ignore user events
     if (type == "user") return
     var extra = "", inline = false
+
+    if (type == "delegate") {
+      recordDelegateSubtaskLog(message)
+      if (toBoolean(sessionOptions.showdelegate) !== true) return
+    }
 
     var iconText
     if (( (!sessionOptions.showexecs && icon != "⚙️" && icon != "🖥️") || sessionOptions.showexecs) && icon != "📚" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
@@ -1570,6 +1615,7 @@ try {
       }
       inline = true
     }
+    if (type == "delegate") inline = true
     //var prefix = colorifyText("[" + id + "]", hintColor)
     var _msg = colorifyText("│ ", promptColor) + extra + iconText + colorifyText(message.replace(/\n/g, "↵").trim(), hintColor + ",ITALIC")
     // Optimized: extract previous line erase logic
@@ -1690,6 +1736,36 @@ try {
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
       printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
+    }
+  }
+
+  function ensureDelegationAgent() {
+    if (toBoolean(sessionOptions.usedelegation) !== true) {
+      print(colorifyText("Delegation is not enabled. Set usedelegation=true to enable.", errorColor))
+      return false
+    }
+
+    if (isObject(activeAgent) && isDef(activeAgent._subtaskManager)) return true
+
+    var initArgs = buildArgs("__delegation_bootstrap__")
+    if (!ensureModel(initArgs)) return false
+
+    try {
+      var agent = new MiniA()
+      activeAgent = agent
+      agent.setInteractionFn(function(event, message) {
+        agent.defaultInteractionFn(event, message, function(icon, text, id) {
+          printEvent(event, icon, text, id)
+        })
+      })
+      agent.init(initArgs)
+      if (isDef(agent._subtaskManager)) return true
+      print(colorifyText("Delegation could not be initialized with current settings.", errorColor))
+      return false
+    } catch (e) {
+      var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
+      printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Delegation initialization failed: " + errMsg, errorColor))
+      return false
     }
   }
 
@@ -1894,6 +1970,9 @@ try {
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
       "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
+      "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
+      "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
+      "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>       Show details for a subtask", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
@@ -2142,6 +2221,113 @@ try {
       if (commandLower.indexOf("stats ") === 0) {
         var statsArg = command.substring(6).trim()
         printStats(statsArg)
+        continue
+      }
+      if (commandLower.indexOf("delegate ") === 0) {
+        if (!ensureDelegationAgent()) continue
+        var goal = command.substring(9).trim()
+        if (goal.length === 0) {
+          print(colorifyText("Usage: /delegate <goal>", errorColor))
+          continue
+        }
+        try {
+          var subtaskId = activeAgent._subtaskManager.submitAndRun(goal, {}, {})
+          print(colorifyText("Subtask submitted: " + subtaskId, successColor))
+          print(colorifyText("Use /subtask " + subtaskId + " to check status", hintColor))
+        } catch (delegateErr) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Delegation failed: " + delegateErr, errorColor))
+        }
+        continue
+      }
+      if (commandLower === "subtasks") {
+        if (!ensureDelegationAgent()) continue
+        try {
+          var subtasks = activeAgent._subtaskManager.list()
+          if (subtasks.length === 0) {
+            print(colorifyText("No subtasks.", hintColor))
+          } else {
+            print(colorifyText("Subtasks (" + subtasks.length + "):", accentColor))
+            subtasks.forEach(function(st) {
+              var idShort = st.id.substring(0, 8)
+              var statusColor = st.status === "completed" ? successColor : (st.status === "failed" ? errorColor : hintColor)
+              print("  " + colorifyText(idShort, statusColor) + " " + colorifyText(st.status.padEnd(10), statusColor) + " " + colorifyText(st.goal.substring(0, 60), hintColor))
+            })
+          }
+        } catch (listErr) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to list subtasks: " + listErr, errorColor))
+        }
+        continue
+      }
+      if (commandLower.indexOf("subtask cancel ") === 0) {
+        if (!ensureDelegationAgent()) continue
+        var subtaskId = command.substring(15).trim()
+        if (subtaskId.length === 0) {
+          print(colorifyText("Usage: /subtask cancel <id>", errorColor))
+          continue
+        }
+        try {
+          var cancelled = activeAgent._subtaskManager.cancel(subtaskId)
+          if (cancelled) {
+            print(colorifyText("Subtask " + subtaskId.substring(0, 8) + " cancelled.", successColor))
+          } else {
+            print(colorifyText("Subtask " + subtaskId.substring(0, 8) + " is already in terminal state.", hintColor))
+          }
+        } catch (cancelErr) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to cancel subtask: " + cancelErr, errorColor))
+        }
+        continue
+      }
+      if (commandLower.indexOf("subtask result ") === 0) {
+        if (!ensureDelegationAgent()) continue
+        var subtaskId = command.substring(15).trim()
+        if (subtaskId.length === 0) {
+          print(colorifyText("Usage: /subtask result <id>", errorColor))
+          continue
+        }
+        try {
+          var result = activeAgent._subtaskManager.result(subtaskId)
+          print(colorifyText("Result for subtask " + subtaskId.substring(0, 8) + ":", accentColor))
+          if (isDef(result.error)) {
+            print(colorifyText("Error: " + result.error, errorColor))
+          } else if (isDef(result.answer)) {
+            print(result.answer)
+          } else {
+            print(colorifyText("No result available.", hintColor))
+          }
+        } catch (resultErr) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to get result: " + resultErr, errorColor))
+        }
+        continue
+      }
+      if (commandLower.indexOf("subtask ") === 0) {
+        if (!ensureDelegationAgent()) continue
+        var subtaskId = command.substring(8).trim()
+        if (subtaskId.length === 0) {
+          print(colorifyText("Usage: /subtask <id> | /subtask cancel <id> | /subtask result <id>", errorColor))
+          continue
+        }
+        try {
+          var status = activeAgent._subtaskManager.status(subtaskId)
+          print(colorifyText("Subtask " + status.id.substring(0, 8) + ":", accentColor))
+          print("  Status: " + colorifyText(status.status, status.status === "completed" ? successColor : (status.status === "failed" ? errorColor : hintColor)))
+          print("  Goal: " + colorifyText(status.goal, hintColor))
+          print("  Attempt: " + colorifyText(status.attempt + "/" + status.maxAttempts, numericColor))
+          if (isDef(status.startedAt)) {
+            var elapsed = status.completedAt ? (status.completedAt - status.startedAt) : (new Date().getTime() - status.startedAt)
+            print("  Duration: " + colorifyText(Math.round(elapsed / 1000) + "s", numericColor))
+          }
+          var subtaskLogs = getDelegateSubtaskLogs(status.id)
+          if (subtaskLogs.length > 0) {
+            print("  Logs:")
+            subtaskLogs.forEach(function(line) {
+              print("    " + colorifyText(line, hintColor))
+            })
+          } else if (status.status === "running") {
+            print("  Logs: " + colorifyText("(no delegate events yet)", hintColor))
+          }
+        } catch (statusErr) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to get status: " + statusErr, errorColor))
+        }
         continue
       }
       if (commandLower.indexOf("toggle ") === 0) {

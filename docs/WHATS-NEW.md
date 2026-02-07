@@ -2,6 +2,84 @@
 
 ## Recent Updates
 
+### Sub-Goal Delegation (usedelegation parameter)
+
+**Change**: Introduced hierarchical task delegation enabling parent agents to spawn child Mini-A agents for parallel subtask execution, with support for both local (in-process) and remote (Worker API) delegation.
+
+**Why This Matters**:
+
+Complex goals often involve multiple independent sub-tasks (e.g., researching several topics, analyzing different datasets, coordinating distributed workloads). Previously, the agent handled everything sequentially within a single context. Delegation lets the LLM autonomously break goals into subtasks that run concurrently, each with its own context and step budget.
+
+**How It Works**:
+
+**Local Delegation:**
+```bash
+mini-a usedelegation=true usetools=true goal="Research and compare three cloud providers"
+```
+
+When enabled, Mini-A registers `delegate-subtask` and `subtask-status` MCP tools. The LLM can spawn child agents that run independently with their own conversation history:
+
+```json
+{
+  "action": "delegate-subtask",
+  "params": {
+    "goal": "Summarize AWS features and pricing",
+    "maxsteps": 10,
+    "waitForResult": true
+  }
+}
+```
+
+Children start with a clean slate, inherit model configuration, and run concurrently up to `maxconcurrent` (default 4).
+
+**Remote Delegation via Worker API:**
+```bash
+# Start a worker
+mini-a workermode=true onport=8080 apitoken=secret
+
+# Parent agent routing subtasks to workers
+mini-a usedelegation=true usetools=true \
+  workers="['http://worker1:8080','http://worker2:8080']" \
+  apitoken=secret goal="Distribute analysis"
+```
+
+Worker selection is capability-aware: Mini-A fetches each worker's `/info` profile and routes subtasks by matching required capabilities (planning, shell access) and limits (max steps, timeout). When multiple workers share the same profile, round-robin distributes the load.
+
+**Console Commands:**
+```bash
+/delegate Summarize the README.md file   # Manual delegation
+/subtasks                                 # List all subtasks
+/subtask a1b2c3d4                        # Show details
+/subtask result a1b2c3d4                 # Show result
+/subtask cancel a1b2c3d4                 # Cancel
+```
+
+**Key Features**:
+- Autonomous delegation via LLM tool calls or manual `/delegate` commands
+- Configurable concurrency, nesting depth, timeout, and retry limits
+- Capability-based worker routing with round-robin tie-breaks
+- Delegation metrics in `agent.getMetrics()` and worker `/metrics` endpoint
+- Event forwarding from child agents with `[subtask:id]` prefix
+
+**Configuration Parameters**:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `usedelegation` | `false` | Enable subtask delegation |
+| `workers` | - | Worker URLs for remote delegation |
+| `maxconcurrent` | `4` | Max concurrent child agents |
+| `delegationmaxdepth` | `3` | Max nesting depth |
+| `delegationtimeout` | `300000` | Subtask deadline (ms) |
+| `delegationmaxretries` | `2` | Retry count for failures |
+| `workermode` | `false` | Launch Worker API server |
+| `showdelegate` | `false` | Show delegate events in console |
+
+**Impact**: Enables complex multi-agent workflows with parallel execution, distributed workloads, and hierarchical problem decomposition.
+
+For full documentation, see **[docs/DELEGATION.md](DELEGATION.md)**.
+
+---
+
 ### Real-Time Token Streaming (usestream parameter)
 
 **Change**: Introduced real-time token streaming support via the `usestream` parameter, allowing LLM responses to be displayed incrementally as they are generated rather than waiting for complete responses.
@@ -579,6 +657,7 @@ mini-a goal="read ALL config files simultaneously and compare"
 ## Related Documentation
 
 - **[Quick Reference Cheatsheet](../CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
+- **[Delegation Guide](DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[Usage Guide](../USAGE.md)** - Comprehensive guide covering all features
 - **[MCP Documentation](../mcps/README.md)** - Built-in MCP servers catalog
 - **[External MCPs](../mcps/EXTERNAL-MCPS.md)** - Community MCP servers
