@@ -33,6 +33,14 @@ help:
     desc     : Seconds to keep completed task results
     example  : "3600"
     mandatory: false
+  - name     : workername
+    desc     : Worker name reported by /info
+    example  : "mini-a-worker"
+    mandatory: false
+  - name     : workerdesc
+    desc     : Worker description reported by /info
+    example  : "US-East research worker"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -53,7 +61,8 @@ todo:
     var wargs = global.__worker_args;
     var response = {
       status: "ok",
-      name: "mini-a-worker",
+      name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
+      description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
       version: "1.0.0",
       capabilities: ["run-goal", "delegation", "planning"],
       limits: {
@@ -287,6 +296,8 @@ jobs:
     args.defaulttimeout = _$(args.defaulttimeout, "args.defaulttimeout").toNumber().isNumber().default(300000)
     args.maxtimeout = _$(args.maxtimeout, "args.maxtimeout").toNumber().isNumber().default(600000)
     args.taskretention = _$(args.taskretention, "args.taskretention").toNumber().isNumber().default(3600)
+    args.workername = _$(args.workername, "args.workername").isString().default("mini-a-worker")
+    args.workerdesc = _$(args.workerdesc, "args.workerdesc").isString().default("Mini-A worker API")
 
     // Validate
     if (isUnDef(args.apitoken)) {

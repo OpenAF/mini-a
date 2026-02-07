@@ -46,7 +46,7 @@ mini-a
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 
-When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If worker profiles are unavailable, it falls back to simple round-robin across all workers.
+When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). Worker metadata (`name`, `description`) further influences routing to better align with sub-goal text. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If worker profiles are unavailable, it falls back to simple round-robin across all workers.
 
 ### How It Works
 
@@ -188,6 +188,8 @@ ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
 | `defaulttimeout` | number | `300000` | Default task deadline (ms) |
 | `maxtimeout` | number | `600000` | Maximum allowed deadline (ms) |
 | `taskretention` | number | `3600` | Seconds to keep completed results |
+| `workername` | string | `"mini-a-worker"` | Worker name reported by `/info` |
+| `workerdesc` | string | `"Mini-A worker API"` | Worker description reported by `/info` |
 
 Plus all standard Mini-A parameters: `model`, `mcp`, `rules`, `knowledge`, `useshell`, `readwrite`, `maxsteps`, etc.
 
@@ -207,6 +209,7 @@ curl http://localhost:8080/info
 {
   "status": "ok",
   "name": "mini-a-worker",
+  "description": "Mini-A worker API",
   "version": "1.0.0",
   "capabilities": ["run-goal", "delegation", "planning"],
   "limits": {

@@ -142,13 +142,19 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
       useshell: isDef(limits.useshell) ? toBoolean(limits.useshell) : __
     }
 
+    var workerName = isString(response.name) ? response.name.trim() : ""
+    var workerDesc = isString(response.description) ? response.description.trim() : ""
     var signatureObj = {
+      name: workerName,
+      description: workerDesc,
       capabilities: capabilities,
       limits: normalizedLimits
     }
 
     return {
       status: "ok",
+      name: workerName,
+      description: workerDesc,
       capabilities: capabilities,
       limits: normalizedLimits,
       signature: stringify(signatureObj, __, "")
@@ -161,6 +167,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
 SubtaskManager.prototype._buildWorkerRequirements = function(subtask, mergedArgs) {
   var args = isMap(mergedArgs) ? mergedArgs : {}
   return {
+    goalText: isDef(subtask) && isString(subtask.goal) ? subtask.goal.toLowerCase() : "",
     requiresRunGoal: true,
     requiresPlanning: toBoolean(args.useplanning) === true,
     requiresShell: toBoolean(args.useshell) === true,
@@ -196,6 +203,9 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
   var p = isMap(profile) ? profile : {}
   var caps = isArray(p.capabilities) ? p.capabilities : []
   var limits = isMap(p.limits) ? p.limits : {}
+  var goalText = isString(req.goalText) ? req.goalText : ""
+  var nameText = isString(p.name) ? p.name.toLowerCase() : ""
+  var descText = isString(p.description) ? p.description.toLowerCase() : ""
 
   var score = 0
   if (p.status === "ok") score += 1000
@@ -211,6 +221,17 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
   }
   if (isNumber(limits.maxConcurrent) && limits.maxConcurrent > 0) {
     score += Math.min(50, limits.maxConcurrent)
+  }
+  if (goalText.length > 0 && nameText.length > 0 && goalText.indexOf(nameText) >= 0) {
+    score += 80
+  }
+  if (goalText.length > 0 && descText.length > 0) {
+    var tokens = descText.split(/\s+/).filter(function(token) { return token.length > 4 })
+    var matched = 0
+    tokens.forEach(function(token) {
+      if (goalText.indexOf(token) >= 0) matched++
+    })
+    if (matched > 0) score += Math.min(60, matched * 10)
   }
 
   return score

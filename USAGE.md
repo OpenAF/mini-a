@@ -990,7 +990,7 @@ Start a headless worker API for programmatic delegation:
 
 ```bash
 # Start worker with authentication
-mini-a workermode=true onport=8080 apitoken=your-secret-token
+mini-a workermode=true onport=8080 apitoken=your-secret-token workername="research-east" workerdesc="US-East research worker"
 
 # Parent agent using remote workers for delegation
 mini-a usedelegation=true workers="['http://localhost:8080']" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
