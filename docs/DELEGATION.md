@@ -130,6 +130,8 @@ When delegation is enabled, you can manually delegate tasks from the interactive
 /subtask cancel a1b2c3d4
 ```
 
+Set `showdelegate=true` to display child agent events as separate console lines instead of inline output.
+
 ### Key Behaviors
 
 - **Clean Slate**: Children start with no parent conversation history or state
@@ -592,6 +594,7 @@ Check `maxconcurrent=` setting and ensure parent has available slots.
 - **No Docker isolation**: Future phase
 - **Result size limits**: Not enforced in v1 (may cause memory issues for very large results)
 - **No streaming**: Entire result returned when task completes
+- **In-memory task queue**: Task state does not survive worker restarts
 
 ---
 
@@ -614,7 +617,6 @@ Both can run simultaneously if needed.
 - Webhook/callback support for async notifications
 - Docker container isolation for child agents
 - Streaming results via SSE
-- Multi-worker load balancing
 - Persistent task queue (survives worker restart)
 - Result size limits and compression
 

@@ -521,6 +521,62 @@ mini-a mode=mypreset goal="your goal here"
 
 ---
 
+## Delegation
+
+### Delegation Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usedelegation` | boolean | `false` | Enable subtask delegation (requires `usetools=true`) |
+| `workers` | string | - | JSON/SLON array of worker URLs for remote delegation (e.g., `workers="['http://host:8080']"`) |
+| `maxconcurrent` | number | `4` | Maximum concurrent child agents |
+| `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
+| `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
+| `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+| `showdelegate` | boolean | `false` | Show delegate events as separate console lines |
+| `workermode` | boolean | `false` | Launch the Worker API server instead of the console |
+
+**Examples:**
+
+```bash
+# Local delegation (child agents in same process)
+mini-a usedelegation=true usetools=true goal="Coordinate multiple research tasks"
+
+# Remote delegation with worker URLs
+mini-a usedelegation=true usetools=true \
+  workers="['http://worker1:8080','http://worker2:8080']" \
+  apitoken=secret goal="Distribute analysis across workers"
+
+# Start a worker API server
+mini-a workermode=true onport=8080 apitoken=secret maxconcurrent=8
+```
+
+### Console Commands
+
+| Command | Description |
+|---------|-------------|
+| `/delegate <goal>` | Manually delegate a sub-goal to a child agent |
+| `/subtasks` | List all subtasks with status |
+| `/subtask <id>` | Show subtask details |
+| `/subtask result <id>` | Show subtask result |
+| `/subtask cancel <id>` | Cancel a running subtask |
+
+### Worker API Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/info` | GET | No | Server capabilities and limits |
+| `/task` | POST | Yes | Submit a new task |
+| `/status` | POST | Yes | Poll task status |
+| `/result` | POST | Yes | Get final result |
+| `/cancel` | POST | Yes | Cancel running task |
+| `/healthz` | GET | No | Health check |
+| `/metrics` | GET | No | Task/delegation metrics |
+
+See **[Delegation Guide](docs/DELEGATION.md)** for full documentation.
+
+---
+
 ## Advanced Features
 
 ### Chatbot Mode
