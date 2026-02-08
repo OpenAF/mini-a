@@ -25,6 +25,15 @@ var SubtaskManager = function(parentArgs, opts) {
   this._workerCursor = 0
   this._workerGroupCursor = {}
   this._workerProfiles = {}
+  this._deadWorkers = {}
+  this._deadWorkerInfo = {}
+  this._workerFailures = {}
+  this._lastWorkerSelectionError = __
+  this.workerProbeRetries = _$(opts.workerProbeRetries, "opts.workerProbeRetries").isNumber().default(3)
+  this.workerProbeRetryDelayMs = _$(opts.workerProbeRetryDelayMs, "opts.workerProbeRetryDelayMs").isNumber().default(250)
+  this.workerReviveCooldownMs = _$(opts.workerReviveCooldownMs, "opts.workerReviveCooldownMs").isNumber().default(15000)
+  this.workerReviveProbeIntervalMs = _$(opts.workerReviveProbeIntervalMs, "opts.workerReviveProbeIntervalMs").isNumber().default(5000)
+  this._lastReviveProbeAt = 0
   
   this.subtasks = {}
   this.runningCount = 0
@@ -56,11 +65,7 @@ SubtaskManager.prototype._normalizeWorkers = function(workers) {
   var parsed = workers
 
   if (isString(workers) && workers.trim().length > 0) {
-    try {
-      parsed = af.fromJSSLON(workers)
-    } catch(ignoreParseErr) {
-      parsed = []
-    }
+    parsed = workers.split(",")
   }
 
   if (isString(parsed)) parsed = [parsed]
@@ -70,6 +75,8 @@ SubtaskManager.prototype._normalizeWorkers = function(workers) {
     var url = __
     if (isString(entry)) {
       url = entry.trim()
+      url = url.replace(/^\[+/, "").replace(/\]+$/, "")
+      url = url.replace(/^['"]+/, "").replace(/['"]+$/, "")
     } else if (isMap(entry) && isString(entry.url)) {
       url = entry.url.trim()
     }
@@ -99,18 +106,48 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
 }
 
 SubtaskManager.prototype._nextWorker = function() {
-  if (!isArray(this.workers) || this.workers.length === 0) return __
-  var idx = this._workerCursor % this.workers.length
+  var healthyWorkers = this._getHealthyWorkers()
+  if (healthyWorkers.length === 0) return __
+  var idx = this._workerCursor % healthyWorkers.length
   this._workerCursor++
-  return this.workers[idx]
+  return healthyWorkers[idx]
 }
 
 SubtaskManager.prototype._refreshWorkerProfiles = function() {
   var parent = this
 
   this.workers.forEach(function(workerUrl) {
-    parent._workerProfiles[workerUrl] = parent._fetchWorkerProfile(workerUrl)
+    var probe = parent._probeWorkerProfile(workerUrl, parent.workerProbeRetries)
+    parent._workerProfiles[workerUrl] = probe.profile
+    if (probe.ok) {
+      parent._markWorkerAlive(workerUrl, "Worker /info probe succeeded during initialization")
+      return
+    }
+    parent._markWorkerDead(workerUrl, "Worker /info probe failed during initialization after " + probe.attempts + " attempt(s): " + probe.error)
   })
+}
+
+SubtaskManager.prototype._probeWorkerProfile = function(workerUrl, attempts) {
+  var maxAttempts = _$(attempts, "attempts").isNumber().default(1)
+  if (maxAttempts < 1) maxAttempts = 1
+  var lastProfile = { status: "unknown", signature: "unknown", capabilities: [], limits: {} }
+  var lastErr = "unknown probe failure"
+
+  for (var i = 0; i < maxAttempts; i++) {
+    var profile = this._fetchWorkerProfile(workerUrl)
+    lastProfile = profile
+    if (isMap(profile) && profile.status === "ok") {
+      return { ok: true, profile: profile, attempts: i + 1, error: __ }
+    }
+    if (isMap(profile) && isString(profile.error) && profile.error.length > 0) {
+      lastErr = profile.error
+    } else {
+      lastErr = "Worker /info did not return status=ok"
+    }
+    if (i < maxAttempts - 1) sleep(this.workerProbeRetryDelayMs, true)
+  }
+
+  return { ok: false, profile: lastProfile, attempts: maxAttempts, error: lastErr }
 }
 
 SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
@@ -122,7 +159,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
   try {
     var response = $rest({ requestHeaders: headers }).get(workerUrl + "/info")
     if (!isMap(response)) {
-      return { status: "unknown", signature: "unknown", capabilities: [], limits: {} }
+      return { status: "unknown", signature: "unknown", capabilities: [], limits: {}, error: "Worker /info response is not a map" }
     }
 
     var capabilities = []
@@ -142,25 +179,124 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
       useshell: isDef(limits.useshell) ? toBoolean(limits.useshell) : __
     }
 
+    var workerName = isString(response.name) ? response.name.trim() : ""
+    var workerDesc = isString(response.description) ? response.description.trim() : ""
     var signatureObj = {
+      name: workerName,
+      description: workerDesc,
       capabilities: capabilities,
       limits: normalizedLimits
     }
 
     return {
       status: "ok",
+      name: workerName,
+      description: workerDesc,
       capabilities: capabilities,
       limits: normalizedLimits,
       signature: stringify(signatureObj, __, "")
     }
   } catch(ignoreInfoErr) {
-    return { status: "unknown", signature: "unknown", capabilities: [], limits: {} }
+    var errMsg = isDef(ignoreInfoErr) && isString(ignoreInfoErr.message) ? ignoreInfoErr.message : stringify(ignoreInfoErr, __, "")
+    return { status: "unknown", signature: "unknown", capabilities: [], limits: {}, error: errMsg }
   }
+}
+
+SubtaskManager.prototype._getHealthyWorkers = function() {
+  if (!isArray(this.workers) || this.workers.length === 0) return []
+  this._tryReviveDeadWorkers(false)
+  var parent = this
+  var healthy = this.workers.filter(function(workerUrl) {
+    return parent._deadWorkers[workerUrl] !== true
+  })
+  if (healthy.length === 0 && Object.keys(this._deadWorkers).length > 0) {
+    this._tryReviveDeadWorkers(true)
+    healthy = this.workers.filter(function(workerUrl) {
+      return parent._deadWorkers[workerUrl] !== true
+    })
+  }
+  return healthy
+}
+
+SubtaskManager.prototype._tryReviveDeadWorkers = function(force) {
+  if (!this.remoteDelegation) return
+  var nowTs = new Date().getTime()
+  var forceProbe = toBoolean(force) === true
+  if (!forceProbe && (nowTs - this._lastReviveProbeAt) < this.workerReviveProbeIntervalMs) return
+  this._lastReviveProbeAt = nowTs
+  var parent = this
+
+  Object.keys(this._deadWorkers).forEach(function(workerUrl) {
+    if (parent._deadWorkers[workerUrl] !== true) return
+    var deadInfo = isMap(parent._deadWorkerInfo[workerUrl]) ? parent._deadWorkerInfo[workerUrl] : {}
+    var nextProbeAt = _$(deadInfo.nextProbeAt, "deadInfo.nextProbeAt").isNumber().default(0)
+    if (!forceProbe && nextProbeAt > nowTs) return
+
+    var probe = parent._probeWorkerProfile(workerUrl, parent.workerProbeRetries)
+    parent._workerProfiles[workerUrl] = probe.profile
+    if (probe.ok) {
+      parent._markWorkerAlive(workerUrl, "Worker recovered via /info probe")
+    } else {
+      parent._deadWorkerInfo[workerUrl] = {
+        deadAt: _$(deadInfo.deadAt, "deadInfo.deadAt").isNumber().default(nowTs),
+        reason: isString(probe.error) && probe.error.length > 0 ? probe.error : "Worker remains unavailable",
+        nextProbeAt: nowTs + parent.workerReviveCooldownMs
+      }
+    }
+  })
+}
+
+SubtaskManager.prototype._markWorkerAlive = function(workerUrl, reason) {
+  if (!isString(workerUrl) || workerUrl.length === 0) return
+  if (this._deadWorkers[workerUrl] !== true) {
+    this._workerFailures[workerUrl] = 0
+    return
+  }
+  delete this._deadWorkers[workerUrl]
+  delete this._deadWorkerInfo[workerUrl]
+  this._workerFailures[workerUrl] = 0
+  var aliveReason = isString(reason) && reason.length > 0 ? reason : "Worker recovered"
+  try {
+    this.interactionFn("delegate", "[worker] Worker marked healthy again: " + workerUrl + " (" + aliveReason + ")")
+  } catch(ignoreInteractionErr) {}
+}
+
+SubtaskManager.prototype._markWorkerDead = function(workerUrl, reason) {
+  if (!isString(workerUrl) || workerUrl.length === 0) return
+  if (this._deadWorkers[workerUrl] === true) return
+  this._deadWorkers[workerUrl] = true
+  var nowTs = new Date().getTime()
+  var deadReason = isString(reason) && reason.length > 0 ? reason : "Marked dead"
+  this._deadWorkerInfo[workerUrl] = {
+    deadAt: nowTs,
+    reason: deadReason,
+    nextProbeAt: nowTs + this.workerReviveCooldownMs
+  }
+  try {
+    this.interactionFn("delegate", "[worker] Marking worker as dead for this session: " + workerUrl + " (" + deadReason + ")")
+  } catch(ignoreInteractionErr) {}
+}
+
+SubtaskManager.prototype._recordWorkerFailure = function(workerUrl, error) {
+  if (!isString(workerUrl) || workerUrl.length === 0) return
+  var failures = _$(this._workerFailures[workerUrl], "this._workerFailures[workerUrl]").isNumber().default(0) + 1
+  this._workerFailures[workerUrl] = failures
+  if (failures >= this.defaultMaxAttempts) {
+    var reason = "Repeated transport/runtime failures"
+    if (isString(error) && error.length > 0) reason += ": " + error
+    this._markWorkerDead(workerUrl, reason)
+  }
+}
+
+SubtaskManager.prototype._recordWorkerSuccess = function(workerUrl) {
+  if (!isString(workerUrl) || workerUrl.length === 0) return
+  this._workerFailures[workerUrl] = 0
 }
 
 SubtaskManager.prototype._buildWorkerRequirements = function(subtask, mergedArgs) {
   var args = isMap(mergedArgs) ? mergedArgs : {}
   return {
+    goalText: isDef(subtask) && isString(subtask.goal) ? subtask.goal.toLowerCase() : "",
     requiresRunGoal: true,
     requiresPlanning: toBoolean(args.useplanning) === true,
     requiresShell: toBoolean(args.useshell) === true,
@@ -174,10 +310,13 @@ SubtaskManager.prototype._isWorkerProfileCompatible = function(profile, requirem
   var p = isMap(profile) ? profile : {}
   var caps = isArray(p.capabilities) ? p.capabilities : []
   var limits = isMap(p.limits) ? p.limits : {}
+  var hasCapsInfo = caps.length > 0
 
   if (p.status === "ok") {
-    if (req.requiresRunGoal === true && caps.indexOf("run-goal") < 0) return false
-    if (req.requiresPlanning === true && caps.indexOf("planning") < 0) return false
+    // Some providers/bridges can return incomplete capability metadata.
+    // Enforce capability flags only when capabilities are actually present.
+    if (req.requiresRunGoal === true && hasCapsInfo && caps.indexOf("run-goal") < 0) return false
+    if (req.requiresPlanning === true && hasCapsInfo && caps.indexOf("planning") < 0) return false
     if (req.requiresShell === true && limits.useshell === false) return false
 
     if (isNumber(req.requestedMaxSteps) && req.requestedMaxSteps > 0 && isNumber(limits.maxSteps) && limits.maxSteps > 0 && limits.maxSteps < req.requestedMaxSteps) {
@@ -196,6 +335,9 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
   var p = isMap(profile) ? profile : {}
   var caps = isArray(p.capabilities) ? p.capabilities : []
   var limits = isMap(p.limits) ? p.limits : {}
+  var goalText = isString(req.goalText) ? req.goalText : ""
+  var nameText = isString(p.name) ? p.name.toLowerCase() : ""
+  var descText = isString(p.description) ? p.description.toLowerCase() : ""
 
   var score = 0
   if (p.status === "ok") score += 1000
@@ -212,21 +354,78 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
   if (isNumber(limits.maxConcurrent) && limits.maxConcurrent > 0) {
     score += Math.min(50, limits.maxConcurrent)
   }
+  if (goalText.length > 0 && nameText.length > 0 && goalText.indexOf(nameText) >= 0) {
+    score += 80
+  }
+  if (goalText.length > 0 && descText.length > 0) {
+    var tokens = descText.split(/\s+/).filter(function(token) { return token.length > 4 })
+    var matched = 0
+    tokens.forEach(function(token) {
+      if (goalText.indexOf(token) >= 0) matched++
+    })
+    if (matched > 0) score += Math.min(60, matched * 10)
+  }
 
   return score
 }
 
 SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
-  if (!isArray(this.workers) || this.workers.length === 0) return __
+  this._lastWorkerSelectionError = __
+  var healthyWorkers = this._getHealthyWorkers()
+  if (healthyWorkers.length === 0) {
+    var deadReasons = []
+    var parent = this
+    this.workers.forEach(function(workerUrl) {
+      var deadInfo = parent._deadWorkerInfo[workerUrl]
+      if (isMap(deadInfo) && isString(deadInfo.reason) && deadInfo.reason.length > 0) {
+        deadReasons.push(workerUrl + ": " + deadInfo.reason)
+      }
+    })
+    this._lastWorkerSelectionError = deadReasons.length > 0
+      ? "No healthy remote workers available. Last probe reasons: " + deadReasons.join(" | ")
+      : "No healthy remote workers available"
+    return __
+  }
 
   var req = this._buildWorkerRequirements(subtask, mergedArgs)
   var parent = this
-  var compatible = this.workers.filter(function(workerUrl) {
+  var compatible = healthyWorkers.filter(function(workerUrl) {
     return parent._isWorkerProfileCompatible(parent._workerProfiles[workerUrl], req)
   })
 
   if (compatible.length === 0) {
-    return this._nextWorker()
+    // Re-probe once before declaring incompatibility (profiles can become stale).
+    this._refreshWorkerProfiles()
+    healthyWorkers = this._getHealthyWorkers()
+    compatible = healthyWorkers.filter(function(workerUrl) {
+      return parent._isWorkerProfileCompatible(parent._workerProfiles[workerUrl], req)
+    })
+  }
+
+  if (compatible.length === 0) {
+    if (req.requiresShell === true) {
+      var shellCapable = healthyWorkers.filter(function(workerUrl) {
+        var profile = parent._workerProfiles[workerUrl] || {}
+        var limits = isMap(profile.limits) ? profile.limits : {}
+        return limits.useshell !== false
+      })
+      if (shellCapable.length > 0) compatible = shellCapable
+    }
+  }
+
+  if (compatible.length === 0) {
+    var healthySummary = healthyWorkers.map(function(workerUrl) {
+      var profile = parent._workerProfiles[workerUrl] || {}
+      var limits = isMap(profile.limits) ? profile.limits : {}
+      var shellFlag = isDef(limits.useshell) ? String(toBoolean(limits.useshell)) : "unknown"
+      return workerUrl + "(useshell=" + shellFlag + ")"
+    }).join(", ")
+    if (req.requiresShell === true) {
+      this._lastWorkerSelectionError = "No compatible remote workers available. This subtask requires shell access (useshell=true). Healthy workers: " + (healthySummary.length > 0 ? healthySummary : "none")
+    } else {
+      this._lastWorkerSelectionError = "No compatible remote workers available for current requirements. Healthy workers: " + (healthySummary.length > 0 ? healthySummary : "none")
+    }
+    return __
   }
 
   var grouped = {}
@@ -239,7 +438,7 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
 
   var signatures = Object.keys(grouped)
   if (signatures.length === 0) {
-    return this._nextWorker()
+    return __
   }
 
   signatures.sort(function(a, b) {
@@ -254,7 +453,7 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
   var bestSignature = signatures[0]
   var bestWorkers = grouped[bestSignature]
   if (!isArray(bestWorkers) || bestWorkers.length === 0) {
-    return this._nextWorker()
+    return __
   }
 
   var groupCursor = _$(this._workerGroupCursor[bestSignature], "this._workerGroupCursor[bestSignature]").isNumber().default(0)
@@ -321,6 +520,10 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
     return "retry"
   }
 
+  if (this.remoteDelegation && isString(subtask.workerUrl) && subtask.workerUrl.length > 0) {
+    this._markWorkerDead(subtask.workerUrl, "Subtask exhausted max attempts (" + subtask.maxAttempts + ")")
+  }
+
   subtask.status = "failed"
   subtask.completedAt = new Date().getTime()
   this.metrics.failed++
@@ -371,7 +574,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
       var mergedArgs = parent._buildChildArgs(subtask)
       var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
       if (!isString(workerUrl) || workerUrl.length === 0) {
-        throw new Error("No remote workers configured")
+        throw new Error(isString(parent._lastWorkerSelectionError) && parent._lastWorkerSelectionError.length > 0 ? parent._lastWorkerSelectionError : "No healthy remote workers available")
       }
 
       subtask.workerUrl = workerUrl
@@ -449,6 +652,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
             isMap(remoteResult.metrics) ? remoteResult.metrics : {},
             isMap(remoteResult.state) ? remoteResult.state : {}
           )
+          parent._recordWorkerSuccess(workerUrl)
           return
         }
 
@@ -466,6 +670,9 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
     } catch (e) {
       if (subtask.status === "running") {
         var error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
+        if (isString(subtask.workerUrl) && subtask.workerUrl.length > 0) {
+          parent._recordWorkerFailure(subtask.workerUrl, error)
+        }
         parent._failOrRetrySubtask(subtask, prefix, error)
       }
     }

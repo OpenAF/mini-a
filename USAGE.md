@@ -943,7 +943,7 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
-| `workers` | string | (none) | JSON/SLON array of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
+| `workers` | string | (none) | Comma-separated list of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
@@ -990,10 +990,10 @@ Start a headless worker API for programmatic delegation:
 
 ```bash
 # Start worker with authentication
-mini-a workermode=true onport=8080 apitoken=your-secret-token
+mini-a workermode=true onport=8080 apitoken=your-secret-token workername="research-east" workerdesc="US-East research worker"
 
 # Parent agent using remote workers for delegation
-mini-a usedelegation=true workers="['http://localhost:8080']" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
+mini-a usedelegation=true workers="http://localhost:8080" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
 
 # Submit a task via HTTP
 curl -X POST http://localhost:8080/task \
