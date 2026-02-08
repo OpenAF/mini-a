@@ -65,6 +65,16 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 
 For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
 
+For browser UI with history + attachments enabled:
+```bash
+./mini-a-web.sh onport=8888 usehistory=true useattach=true historykeep=true
+```
+
+For browser UI with S3-backed history:
+```bash
+./mini-a-web.sh onport=8888 usehistory=true historys3bucket=mini-a-history historys3prefix=sessions/
+```
+
 > HTML Export Save Dialog: When using the Web UI's "Download conversation as HTML" feature, Chromium-based browsers (Chrome, Edge, Brave, etc.) will show a native save dialog leveraging the File System Access API so you can choose the exact filename and path. If the API is unavailable or you cancel the dialog, Mini-A falls back to a standard browser download. Safari does not yet support this API; to be prompted for a location there, enable "Ask where to save each file before downloading" in Safari preferences.
 
 ### Running in Docker
@@ -275,9 +285,10 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
 - **Web UI** - Lightweight embedded chat interface for interactive use with clipboard controls for Markdown and static HTML exports
 - **Planning Mode** - Generate and execute structured task plans for complex goals
+  - **Simple Plans by Default** - Flat sequential planning is now the default (`planstyle=simple`) for better model compliance
   - **Plan Validation** - LLM-based critique validates plans before execution
   - **Dynamic Replanning** - Automatic plan adjustments when obstacles occur
-  - **Phase Verification** - Auto-generated verification tasks ensure phase completion
+  - **Legacy Compatibility** - Keep phase-based behavior when needed (`planstyle=legacy`)
   - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets); set `OAF_MINI_A_MODE` to pick a default when `mode=` is omitted
 - **Sub-Goal Delegation** - Hierarchical task decomposition with concurrent child agents
   - **Local Delegation** - Spawn child Mini-A agents in the same process for parallel subtask execution (`usedelegation=true`)
@@ -290,7 +301,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Conversation Persistence** - Save and resume conversations across sessions
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
-- **Enhanced Visual Output** - UTF-8 box-drawing characters, ANSI color codes, and emoji for rich terminal displays (`useascii=true`)
+- **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
 
 ## Documentation
@@ -346,7 +357,8 @@ Mini-A ships with complementary components:
 | `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
-| `useascii` | Enable enhanced UTF-8/ANSI visual output with colors and emojis | `false` |
+| `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
+| `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
@@ -400,9 +412,9 @@ export OAF_MODEL="(type: ollama, model: 'gemma3', url: 'http://ollama.local', ti
 **Dual-model for cost optimization:**
 ```bash
 # High-capability model for complex reasoning
-export OAF_MODEL="(type: openai, model: gpt-4, key: '...')"
+export OAF_MODEL="(type: openai, model: gpt-5, key: '...')"
 # Low-cost model for routine operations
-export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
+export OAF_LC_MODEL="(type: openai, model: gpt-5-mini, key: '...')"
 # Optional validation model for deep research scoring
 export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: '...')"
 ```
