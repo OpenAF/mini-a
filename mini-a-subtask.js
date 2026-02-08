@@ -20,6 +20,7 @@ var SubtaskManager = function(parentArgs, opts) {
   this.interactionFn = opts.interactionFn || function() {}
   this.currentDepth = _$(opts.currentDepth, "opts.currentDepth").isNumber().default(0)
   this.workers = this._normalizeWorkers(isDef(opts.workers) ? opts.workers : this.parentArgs.workers)
+  this._staticWorkers = this.workers.slice()
   this.remoteDelegation = this.workers.length > 0
   this.remotePollIntervalMs = _$(opts.remotePollIntervalMs, "opts.remotePollIntervalMs").isNumber().default(1000)
   this._workerCursor = 0
@@ -28,11 +29,14 @@ var SubtaskManager = function(parentArgs, opts) {
   this._deadWorkers = {}
   this._deadWorkerInfo = {}
   this._workerFailures = {}
+  this._workerLastHeartbeat = {}
   this._lastWorkerSelectionError = __
   this.workerProbeRetries = _$(opts.workerProbeRetries, "opts.workerProbeRetries").isNumber().default(3)
   this.workerProbeRetryDelayMs = _$(opts.workerProbeRetryDelayMs, "opts.workerProbeRetryDelayMs").isNumber().default(250)
   this.workerReviveCooldownMs = _$(opts.workerReviveCooldownMs, "opts.workerReviveCooldownMs").isNumber().default(15000)
   this.workerReviveProbeIntervalMs = _$(opts.workerReviveProbeIntervalMs, "opts.workerReviveProbeIntervalMs").isNumber().default(5000)
+  this.workerEvictionTTLMs = _$(opts.workerEvictionTTLMs, "opts.workerEvictionTTLMs").isNumber().default(60000)
+  this.onWorkerEvicted = isFunction(opts.onWorkerEvicted) ? opts.onWorkerEvicted : function() {}
   this._lastReviveProbeAt = 0
   
   this.subtasks = {}
@@ -124,6 +128,87 @@ SubtaskManager.prototype._refreshWorkerProfiles = function() {
       return
     }
     parent._markWorkerDead(workerUrl, "Worker /info probe failed during initialization after " + probe.attempts + " attempt(s): " + probe.error)
+  })
+}
+
+SubtaskManager.prototype.addWorker = function(url) {
+  if (!isString(url) || url.length === 0) return false
+  url = url.replace(/\/+$/, "")
+  if (url.match(/^https?:\/\//i) === null) return false
+
+  var existingIdx = this.workers.indexOf(url)
+  var nowTs = new Date().getTime()
+
+  if (existingIdx >= 0) {
+    this._workerLastHeartbeat[url] = nowTs
+    var existingProbe = this._probeWorkerProfile(url, this.workerProbeRetries)
+    this._workerProfiles[url] = existingProbe.profile
+    if (existingProbe.ok) {
+      this._markWorkerAlive(url, "Heartbeat re-registration")
+    } else {
+      this._markWorkerDead(url, "Worker heartbeat received but /info probe failed: " + existingProbe.error)
+    }
+    return true
+  }
+
+  this.workers.push(url)
+  this._workerLastHeartbeat[url] = nowTs
+  this.remoteDelegation = true
+
+  var probe = this._probeWorkerProfile(url, this.workerProbeRetries)
+  this._workerProfiles[url] = probe.profile
+  if (probe.ok) {
+    this._markWorkerAlive(url, "Dynamic registration via /worker-register")
+  } else {
+    this._markWorkerDead(url, "Worker registered but /info probe failed: " + probe.error)
+  }
+
+  try {
+    this.interactionFn("delegate", "[worker] Dynamically registered worker: " + url)
+  } catch(ignoreInteractionErr) {}
+
+  return true
+}
+
+SubtaskManager.prototype.removeWorker = function(url) {
+  if (!isString(url) || url.length === 0) return false
+  url = url.replace(/\/+$/, "")
+
+  var idx = this.workers.indexOf(url)
+  if (idx < 0) return false
+
+  if (isArray(this._staticWorkers) && this._staticWorkers.indexOf(url) >= 0) {
+    return false
+  }
+
+  this.workers.splice(idx, 1)
+  delete this._workerProfiles[url]
+  delete this._deadWorkers[url]
+  delete this._deadWorkerInfo[url]
+  delete this._workerFailures[url]
+  delete this._workerLastHeartbeat[url]
+
+  if (this.workers.length === 0) {
+    this.remoteDelegation = false
+  }
+
+  try {
+    this.interactionFn("delegate", "[worker] Dynamically deregistered worker: " + url)
+  } catch(ignoreInteractionErr) {}
+
+  return true
+}
+
+SubtaskManager.prototype.getRegisteredWorkers = function() {
+  var parent = this
+  return this.workers.map(function(url) {
+    return {
+      url: url,
+      static: isArray(parent._staticWorkers) && parent._staticWorkers.indexOf(url) >= 0,
+      healthy: parent._deadWorkers[url] !== true,
+      lastHeartbeat: parent._workerLastHeartbeat[url] || null,
+      profile: parent._workerProfiles[url] || null
+    }
   })
 }
 
@@ -1008,6 +1093,12 @@ SubtaskManager.prototype.getMetrics = function() {
   var avgDurationMs = this.metrics.completed > 0 
     ? Math.round(this.metrics.totalDurationMs / this.metrics.completed) 
     : 0
+  var staticCount = isArray(this._staticWorkers) ? this._staticWorkers.length : 0
+  var dynamicCount = Math.max(0, this.workers.length - staticCount)
+  var parent = this
+  var healthyCount = this.workers.filter(function(workerUrl) {
+    return parent._deadWorkers[workerUrl] !== true
+  }).length
   
   return {
     total: this.metrics.total,
@@ -1018,7 +1109,14 @@ SubtaskManager.prototype.getMetrics = function() {
     timedout: this.metrics.timedout,
     retried: this.metrics.retried,
     avgDurationMs: avgDurationMs,
-    maxDepthUsed: this.metrics.maxDepthUsed
+    maxDepthUsed: this.metrics.maxDepthUsed,
+    workers: {
+      total: this.workers.length,
+      static: staticCount,
+      dynamic: dynamicCount,
+      healthy: healthyCount,
+      dead: Math.max(0, this.workers.length - healthyCount)
+    }
   }
 }
 
@@ -1096,6 +1194,24 @@ SubtaskManager.prototype._startWatchdog = function() {
             }
           }
         })
+
+        if (parent.workerEvictionTTLMs > 0) {
+          Object.keys(parent._workerLastHeartbeat).forEach(function(workerUrl) {
+            if (isArray(parent._staticWorkers) && parent._staticWorkers.indexOf(workerUrl) >= 0) return
+            var lastHb = parent._workerLastHeartbeat[workerUrl]
+            if (!isNumber(lastHb)) return
+            var ageMs = now - lastHb
+            if (ageMs <= parent.workerEvictionTTLMs) return
+            try {
+              parent.interactionFn("delegate", "[worker] Auto-evicting worker (no heartbeat for " + Math.round(ageMs / 1000) + "s): " + workerUrl)
+            } catch(ignoreInteractionErr) {}
+            if (parent.removeWorker(workerUrl)) {
+              try {
+                parent.onWorkerEvicted(workerUrl, ageMs)
+              } catch(ignoreEvictCbErr) {}
+            }
+          })
+        }
       } catch(e) {
         // Ignore watchdog errors
       }

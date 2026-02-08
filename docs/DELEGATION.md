@@ -41,6 +41,9 @@ mini-a
 |---|---|---|---|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
 | `workers` | string | (none) | Comma-separated list of worker URLs. If provided, delegation routes to remote workers instead of local child agents |
+| `workerreg` | number | (none) | Port to start worker registration HTTP server for dynamic worker discovery |
+| `workerregtoken` | string | (none) | Bearer token required by `/worker-register`, `/worker-deregister`, and `/worker-list` |
+| `workerevictionttl` | number | `60000` | Heartbeat TTL (ms) before dynamic workers are auto-evicted |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
@@ -190,6 +193,9 @@ ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
 | `taskretention` | number | `3600` | Seconds to keep completed results |
 | `workername` | string | `"mini-a-worker"` | Worker name reported by `/info` |
 | `workerdesc` | string | `"Mini-A worker API"` | Worker description reported by `/info` |
+| `workerregurl` | string | (none) | Comma-separated parent registration URL(s) to self-register with |
+| `workerregtoken` | string | (none) | Bearer token used for registration endpoint authentication |
+| `workerreginterval` | number | `30000` | Heartbeat interval (ms) used to refresh registration |
 
 Plus all standard Mini-A parameters: `model`, `mcp`, `rules`, `knowledge`, `useshell`, `readwrite`, `maxsteps`, etc.
 
@@ -405,6 +411,50 @@ curl http://localhost:8080/metrics
 
 ---
 
+## Part 3: Dynamic Worker Registration
+
+Dynamic registration allows worker pods to self-register to a parent Mini-A instance at startup and deregister on shutdown. Static `workers=` and dynamic workers coexist in the same pool.
+
+### Parent-Side Parameters
+
+- `workerreg=<port>` starts a dedicated registration HTTP server.
+- `workerregtoken=<token>` enables bearer authentication for registration endpoints.
+- `workerevictionttl=<ms>` evicts dynamic workers that miss heartbeats beyond TTL.
+
+### Worker-Side Parameters
+
+- `workerregurl="<url1,url2>"` enables self-registration against one or more parents.
+- `workerregtoken=<token>` sends `Authorization: Bearer <token>`.
+- `workerreginterval=<ms>` controls heartbeat frequency.
+
+### Registration Endpoints (Parent `workerreg` Port)
+
+- `POST /worker-register` registers or refreshes a worker.
+- `POST /worker-deregister` removes a dynamic worker.
+- `GET /worker-list` returns worker list plus registration metrics.
+- `GET /healthz` simple liveness response.
+
+### Auto-Eviction and Coexistence Rules
+
+- Dynamic workers get a heartbeat timestamp on registration.
+- The watchdog checks heartbeats and auto-evicts stale dynamic workers.
+- Static workers from `workers=` are never removed by deregistration or TTL eviction.
+
+### Example: Dynamic Registration with Kubernetes HPA
+
+```bash
+# Main
+mini-a usedelegation=true usetools=true \
+  workerreg=12345 workerregtoken=secret workerevictionttl=90000
+
+# Worker pod/container
+mini-a workermode=true onport=8080 apitoken=secret \
+  workerregurl="http://mini-a-main-reg:12345" \
+  workerregtoken=secret workerreginterval=30000
+```
+
+---
+
 ## Examples
 
 ### Example 1: Single Delegation
@@ -494,6 +544,19 @@ curl -X POST http://localhost:8080/result \
   -d '{ "taskId": "abc123..." }'
 ```
 
+### Example 5: Dynamic Worker Registration with Kubernetes HPA
+
+```bash
+# Parent instance with registration server
+mini-a usedelegation=true usetools=true \
+  workerreg=12345 workerregtoken=secret workerevictionttl=90000
+
+# Worker instances self-register and heartbeat
+mini-a workermode=true onport=8080 apitoken=secret \
+  workerregurl="http://mini-a-main-reg:12345" \
+  workerregtoken=secret workerreginterval=30000
+```
+
 ---
 
 ## Security Considerations
@@ -543,6 +606,10 @@ Delegation metrics are included in `agent.getMetrics()`:
     cancelled: 1,
     timedout: 0,
     retried: 2,
+    workers_total: 5,
+    workers_static: 1,
+    workers_dynamic: 4,
+    workers_healthy: 4,
     avgDurationMs: 12500,
     maxDepthUsed: 2
   }

@@ -2,6 +2,38 @@
 
 ## Recent Updates
 
+### Dynamic Worker Registration (workerreg / workerregurl)
+
+**Change**: Added dynamic worker self-registration so worker instances can register, heartbeat, and deregister with one or more parent Mini-A instances.
+
+**What’s New**:
+- Parent-side registration server via `workerreg=<port>`
+- Optional endpoint auth with `workerregtoken=<token>`
+- Worker self-registration via `workerregurl=<url1,url2>`
+- Heartbeat refresh via `workerreginterval=<ms>`
+- Automatic eviction of stale dynamic workers via `workerevictionttl=<ms>`
+- Registration endpoints: `POST /worker-register`, `POST /worker-deregister`, `GET /worker-list`, `GET /healthz`
+
+**Why This Matters**:
+- Works cleanly with autoscaled worker pools (for example Kubernetes HPA)
+- Reduces static worker list management overhead
+- Supports graceful scale-down (shutdown deregistration) and crash cleanup (TTL eviction)
+- Static `workers=` configuration still works and coexists with dynamic workers
+
+**Example**:
+```bash
+# Parent
+mini-a usedelegation=true usetools=true \
+  workerreg=12345 workerregtoken=secret workerevictionttl=90000
+
+# Worker
+mini-a workermode=true onport=8080 apitoken=secret \
+  workerregurl="http://mini-a-main-reg:12345" \
+  workerregtoken=secret workerreginterval=30000
+```
+
+---
+
 ### Sub-Goal Delegation (usedelegation parameter)
 
 **Change**: Introduced hierarchical task delegation enabling parent agents to spawn child Mini-A agents for parallel subtask execution, with support for both local (in-process) and remote (Worker API) delegation.

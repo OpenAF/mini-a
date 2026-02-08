@@ -564,6 +564,8 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
 
 MiniA._activeInstances = []
 MiniA._shutdownHookRegistered = false
+MiniA._registeredWorkers = []
+MiniA._registeredWorkerLastHeartbeat = {}
 
 MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
@@ -584,11 +586,22 @@ MiniA._destroyAllMcpConnections = function() {
   })
 }
 
+MiniA._stopAllRegistrationServers = function() {
+  if (!isArray(MiniA._activeInstances)) return
+  if (isUnDef(ow) || isUnDef(ow.server) || isUnDef(ow.server.httpd) || typeof ow.server.httpd.stop !== "function") return
+  MiniA._activeInstances.forEach(function(agent) {
+    if (!isObject(agent) || isUnDef(agent._regHttpServer)) return
+    try { ow.server.httpd.stop(agent._regHttpServer) } catch(ignoreStopErr) {}
+    agent._regHttpServer = __
+  })
+}
+
 MiniA._registerShutdownHook = function() {
   if (MiniA._shutdownHookRegistered === true) return
   if (typeof addOnOpenAFShutdown !== "function") return
 
   addOnOpenAFShutdown(function() {
+    try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
     try {
       if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
@@ -1039,7 +1052,19 @@ MiniA.prototype.getMetrics = function() {
             failed: global.__mini_a_metrics.delegation_failed.get(),
             cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
             timedout: global.__mini_a_metrics.delegation_timedout.get(),
-            retried: global.__mini_a_metrics.delegation_retried.get()
+            retried: global.__mini_a_metrics.delegation_retried.get(),
+            workers_total: (function(parent) {
+              try { return parent._subtaskManager.getMetrics().workers.total } catch(ignore) { return 0 }
+            })(this),
+            workers_static: (function(parent) {
+              try { return parent._subtaskManager.getMetrics().workers.static } catch(ignore) { return 0 }
+            })(this),
+            workers_dynamic: (function(parent) {
+              try { return parent._subtaskManager.getMetrics().workers.dynamic } catch(ignore) { return 0 }
+            })(this),
+            workers_healthy: (function(parent) {
+              try { return parent._subtaskManager.getMetrics().workers.healthy } catch(ignore) { return 0 }
+            })(this)
         },
         deep_research: {
             sessions: global.__mini_a_metrics.deep_research_sessions.get(),
@@ -1068,6 +1093,151 @@ MiniA.prototype._syncDelegationMetrics = function() {
     if (isNumber(delegationMetrics.timedout)) global.__mini_a_metrics.delegation_timedout.set(Math.max(0, Math.round(delegationMetrics.timedout)))
     if (isNumber(delegationMetrics.retried)) global.__mini_a_metrics.delegation_retried.set(Math.max(0, Math.round(delegationMetrics.retried)))
   } catch(ignoreSync) {}
+}
+
+MiniA.prototype._startWorkerRegistrationServer = function(args) {
+  if (isDef(this._regHttpServer)) return
+  if (!isNumber(args.workerreg)) return
+  if (!isObject(this._subtaskManager)) return
+
+  ow.loadServer()
+
+  var parent = this
+  var subtaskMgr = this._subtaskManager
+  var regHs = ow.server.httpd.start(args.workerreg)
+  var regToken = isString(args.workerregtoken) ? args.workerregtoken.trim() : ""
+
+  if (!isArray(MiniA._registeredWorkers)) MiniA._registeredWorkers = []
+  if (!isObject(MiniA._registeredWorkerLastHeartbeat)) MiniA._registeredWorkerLastHeartbeat = {}
+
+  var _broadcastWorkerUpdate = function(action, url) {
+    if (!isArray(MiniA._activeInstances)) return
+    MiniA._activeInstances.forEach(function(agent) {
+      if (!isObject(agent) || !isObject(agent._subtaskManager)) return
+      if (agent === parent) return
+      try {
+        if (action === "register") agent._subtaskManager.addWorker(url)
+        else if (action === "deregister") agent._subtaskManager.removeWorker(url)
+        else if (action === "heartbeat") {
+          if (agent._subtaskManager.workers.indexOf(url) >= 0) agent._subtaskManager.addWorker(url)
+        }
+      } catch(ignoreUpdateErr) {}
+    })
+  }
+
+  var _registerWorkerGlobal = function(url, action) {
+    if (!isString(url) || url.length === 0) return
+    var normalizedUrl = url.replace(/\/+$/, "")
+    if (MiniA._registeredWorkers.indexOf(normalizedUrl) < 0) MiniA._registeredWorkers.push(normalizedUrl)
+    MiniA._registeredWorkerLastHeartbeat[normalizedUrl] = Date.now()
+    _broadcastWorkerUpdate(action || "register", normalizedUrl)
+  }
+
+  var _deregisterWorkerGlobal = function(url) {
+    if (!isString(url) || url.length === 0) return
+    var normalizedUrl = url.replace(/\/+$/, "")
+    var idx = MiniA._registeredWorkers.indexOf(normalizedUrl)
+    if (idx >= 0) MiniA._registeredWorkers.splice(idx, 1)
+    delete MiniA._registeredWorkerLastHeartbeat[normalizedUrl]
+    _broadcastWorkerUpdate("deregister", normalizedUrl)
+  }
+
+  this._workerRegMetrics = {
+    registrations: 0,
+    deregistrations: 0,
+    heartbeats: 0,
+    evictions: 0,
+    authFailures: 0
+  }
+
+  subtaskMgr.onWorkerEvicted = function() {
+    parent._workerRegMetrics.evictions++
+  }
+
+  var _replyJSON = function(code, payload) {
+    return ow.server.httpd.reply(stringify(payload, __, ""), code, ow.server.httpd.mimes.JSON)
+  }
+
+  var _authCheck = function(req) {
+    if (regToken.length <= 0) return true
+    var authHeader = isMap(req.header) && isString(req.header.authorization) ? req.header.authorization : ""
+    if (authHeader !== "Bearer " + regToken) {
+      parent._workerRegMetrics.authFailures++
+      return false
+    }
+    return true
+  }
+
+  ow.server.httpd.route(regHs, {
+    "/worker-register": function(req) {
+      if (req.method !== "POST") return _replyJSON(405, { error: "Method not allowed" })
+      if (!_authCheck(req)) return _replyJSON(401, { error: "Unauthorized" })
+      try {
+        var body = {}
+        try {
+          body = jsonParse(req.files.postData)
+        } catch(parseErr) {
+          return _replyJSON(400, { error: "Invalid JSON in request body" })
+        }
+        var workerUrl = isString(body.workerUrl) ? body.workerUrl.trim() : ""
+        if (workerUrl.length === 0) return _replyJSON(400, { error: "Missing required field: workerUrl" })
+        var normalizedUrl = workerUrl.replace(/\/+$/, "")
+        var knownBefore = subtaskMgr.workers.indexOf(normalizedUrl) >= 0
+        var added = subtaskMgr.addWorker(workerUrl)
+        if (added) {
+          if (knownBefore) parent._workerRegMetrics.heartbeats++
+          else parent._workerRegMetrics.registrations++
+        }
+        if (added) _registerWorkerGlobal(normalizedUrl, knownBefore ? "heartbeat" : "register")
+        return _replyJSON(200, { status: "ok", workerUrl: workerUrl, added: added })
+      } catch(e) {
+        return _replyJSON(500, { error: String(e) })
+      }
+    },
+    "/worker-deregister": function(req) {
+      if (req.method !== "POST") return _replyJSON(405, { error: "Method not allowed" })
+      if (!_authCheck(req)) return _replyJSON(401, { error: "Unauthorized" })
+      try {
+        var body = {}
+        try {
+          body = jsonParse(req.files.postData)
+        } catch(parseErr) {
+          return _replyJSON(400, { error: "Invalid JSON in request body" })
+        }
+        var workerUrl = isString(body.workerUrl) ? body.workerUrl.trim() : ""
+        if (workerUrl.length === 0) return _replyJSON(400, { error: "Missing required field: workerUrl" })
+        var removed = subtaskMgr.removeWorker(workerUrl)
+        if (removed) parent._workerRegMetrics.deregistrations++
+        if (removed) _deregisterWorkerGlobal(workerUrl)
+        return _replyJSON(200, { status: "ok", workerUrl: workerUrl, removed: removed })
+      } catch(e) {
+        return _replyJSON(500, { error: String(e) })
+      }
+    },
+    "/worker-list": function(req) {
+      if (req.method !== "GET") return _replyJSON(405, { error: "Method not allowed" })
+      if (!_authCheck(req)) return _replyJSON(401, { error: "Unauthorized" })
+      try {
+        return _replyJSON(200, { workers: subtaskMgr.getRegisteredWorkers(), metrics: parent._workerRegMetrics })
+      } catch(e) {
+        return _replyJSON(500, { error: String(e) })
+      }
+    },
+    "/healthz": function() {
+      return _replyJSON(200, { status: "ok" })
+    }
+  }, function() {
+    return _replyJSON(404, { error: "Not found" })
+  })
+
+  this._regHttpServer = regHs
+  this.fnI("info", "Worker registration server started on port " + args.workerreg)
+
+  if (isArray(subtaskMgr.workers) && subtaskMgr.workers.length > 0) {
+    subtaskMgr.workers.forEach(function(url) {
+      _registerWorkerGlobal(url, "heartbeat")
+    })
+  }
 }
 
 
@@ -7972,6 +8142,9 @@ MiniA.prototype.init = function(args) {
       { name: "utilsroot", type: "string", default: __ },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
+      { name: "workerreg", type: "number", default: __ },
+      { name: "workerregtoken", type: "string", default: __ },
+      { name: "workerevictionttl", type: "number", default: 60000 },
       { name: "maxconcurrent", type: "number", default: 4 },
       { name: "delegationmaxdepth", type: "number", default: 3 },
       { name: "delegationtimeout", type: "number", default: 300000 },
@@ -8015,6 +8188,9 @@ MiniA.prototype.init = function(args) {
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").isNumber().default(3)
     args.delegationtimeout = _$(args.delegationtimeout, "args.delegationtimeout").isNumber().default(300000)
     args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").isNumber().default(2)
+    args.workerreg = _$(args.workerreg, "args.workerreg").isNumber().default(__)
+    args.workerregtoken = _$(args.workerregtoken, "args.workerregtoken").isString().default(__)
+    args.workerevictionttl = _$(args.workerevictionttl, "args.workerevictionttl").isNumber().default(60000)
 
     var workersRaw = args.workers
     var parsedWorkers = []
@@ -8041,13 +8217,57 @@ MiniA.prototype.init = function(args) {
         return url.replace(/\/+$/, "")
       })
 
+    if (isArray(MiniA._registeredWorkers) && MiniA._registeredWorkers.length > 0) {
+      var mergedWorkers = args.workers.concat(MiniA._registeredWorkers)
+      var seenWorkers = {}
+      args.workers = mergedWorkers.filter(function(url) {
+        if (!isString(url) || url.length === 0) return false
+        if (seenWorkers[url]) return false
+        seenWorkers[url] = true
+        return true
+      })
+    }
+
     if (args.workers.length > 0) {
       this.fnI("info", "Configured remote workers: " + args.workers.join(", "))
     }
 
-    if (args.workers.length > 0) args.usedelegation = true
+    if (args.workers.length > 0 || isNumber(args.workerreg)) args.usedelegation = true
 
     this._savePlanNotes = args.saveplannotes
+
+    // Initialize delegation and registration server as early as possible
+    if (args.usedelegation === true && isUnDef(this._subtaskManager)) {
+      try {
+        if (isUnDef(global.SubtaskManager)) {
+          loadLib(getOPackPath("mini-a") + "/mini-a-subtask.js")
+        }
+
+        var currentDepth = args._delegationDepth || 0
+        this._subtaskManager = new SubtaskManager(args, {
+          maxConcurrent: args.maxconcurrent,
+          defaultDeadlineMs: args.delegationtimeout,
+          defaultMaxAttempts: args.delegationmaxretries,
+          maxDepth: args.delegationmaxdepth,
+          interactionFn: this.fnI.bind(this),
+          currentDepth: currentDepth,
+          workers: args.workers,
+          workerEvictionTTLMs: args.workerevictionttl
+        })
+
+        if (isArray(args.workers) && args.workers.length > 0) {
+          this.fnI("info", "Delegation enabled in remote mode with " + args.workers.length + " worker(s) (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
+        } else {
+          this.fnI("info", "Delegation enabled (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
+        }
+      } catch(e) {
+        this.fnI("error", "Failed to initialize delegation: " + e.message)
+      }
+    }
+
+    if (args.usedelegation === true && isNumber(args.workerreg)) {
+      this._startWorkerRegistrationServer(args)
+    }
 
     // Set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location by default
     if (!args.nosetmcpwd) {
@@ -8321,40 +8541,10 @@ MiniA.prototype.init = function(args) {
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
       }
 
-      // Initialize delegation if enabled
-      if (args.usedelegation === true) {
-        try {
-          // Load SubtaskManager if not already loaded
-          if (isUnDef(global.SubtaskManager)) {
-            loadLib(getOPackPath("mini-a") + "/mini-a-subtask.js")
-          }
-          
-          // Create SubtaskManager instance
-          var currentDepth = args._delegationDepth || 0
-          this._subtaskManager = new SubtaskManager(args, {
-            maxConcurrent: args.maxconcurrent,
-            defaultDeadlineMs: args.delegationtimeout,
-            defaultMaxAttempts: args.delegationmaxretries,
-            maxDepth: args.delegationmaxdepth,
-            interactionFn: this.fnI.bind(this),
-            currentDepth: currentDepth,
-            workers: args.workers
-          })
-
-          if (isArray(args.workers) && args.workers.length > 0) {
-            this.fnI("info", "Delegation enabled in remote mode with " + args.workers.length + " worker(s) (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
-          } else {
-            this.fnI("info", "Delegation enabled (depth " + currentDepth + "/" + args.delegationmaxdepth + ", max concurrent: " + args.maxconcurrent + ")")
-          }
-          
-          // Register delegation MCP config if usetools is enabled
-          if (args.usetools === true) {
-            var delegationMcpConfig = this._createDelegationMcpConfig(args)
-            if (isMap(delegationMcpConfig)) aggregatedMcpConfigs.push(delegationMcpConfig)
-          }
-        } catch(e) {
-          this.fnI("error", "Failed to initialize delegation: " + e.message)
-        }
+      // Register delegation MCP config if usetools is enabled
+      if (args.usedelegation === true && args.usetools === true) {
+        var delegationMcpConfig = this._createDelegationMcpConfig(args)
+        if (isMap(delegationMcpConfig)) aggregatedMcpConfigs.push(delegationMcpConfig)
       }
 
       // Auto-register a dummy MCP for shell execution when both usetools and useshell are enabled

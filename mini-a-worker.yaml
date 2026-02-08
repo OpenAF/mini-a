@@ -41,6 +41,18 @@ help:
     desc     : Worker description reported by /info
     example  : "US-East research worker"
     mandatory: false
+  - name     : workerregurl
+    desc     : Comma-separated list of main instance registration URLs
+    example  : "http://main1:12345,http://main2:12345"
+    mandatory: false
+  - name     : workerregtoken
+    desc     : Bearer token for authenticating with registration endpoints
+    example  : "your-reg-token"
+    mandatory: false
+  - name     : workerreginterval
+    desc     : Heartbeat interval in milliseconds
+    example  : "30000"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -281,6 +293,7 @@ todo:
   ((error    )): true
 
 - Cleanup Loop
+- Register With Parents
 
 ojob:
   opacks      :
@@ -319,6 +332,9 @@ jobs:
     args.workerdesc = _$(args.workerdesc, "args.workerdesc").isString().default("Mini-A worker API")
     args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").toNumber().isNumber().default(2)
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").toNumber().isNumber().default(3)
+    args.workerregurl = _$(args.workerregurl, "args.workerregurl").isString().default(__)
+    args.workerregtoken = _$(args.workerregtoken, "args.workerregtoken").isString().default(__)
+    args.workerreginterval = _$(args.workerreginterval, "args.workerreginterval").toNumber().isNumber().default(30000)
 
     // Validate
     if (isUnDef(args.apitoken)) {
@@ -339,6 +355,9 @@ jobs:
     global.__worker_startTime = java.lang.System.currentTimeMillis()
     global.__worker_subtaskToTaskId = {}
     global.__worker_subtaskShortToTaskId = {}
+    global.__worker_regTargets = []
+    global.__worker_selfUrl = __
+    global.__worker_regInterval = __
 
     global.__worker_appendTaskEvent = function(taskId, event, message) {
       if (!isString(taskId) || isUnDef(global.__worker_tasks[taskId])) return
@@ -409,3 +428,83 @@ jobs:
         logErr(cleanupErr)
       }
     }, 60000) // Run every minute
+
+# ---------------
+- name : Register With Parents
+  deps : Init
+  exec : | #js
+    var regUrls = args.workerregurl
+    if (!isString(regUrls) || regUrls.trim().length === 0) return
+
+    var targets = regUrls.split(",").map(function(u) { return String(u || "").trim() }).filter(function(u) { return u.length > 0 })
+    if (targets.length === 0) return
+
+    ow.loadNet()
+    var myHost = ow.net.getHostAddress()
+    if (!isString(myHost) || myHost.trim().length === 0) myHost = ow.net.getHostName()
+    var myUrl = "http://" + myHost + ":" + args.onport
+
+    global.__worker_selfUrl = myUrl
+    global.__worker_regTargets = targets
+
+    var headers = {}
+    if (isString(args.workerregtoken) && args.workerregtoken.length > 0) {
+      headers.Authorization = "Bearer " + args.workerregtoken
+    }
+
+    var _register = function(targetUrl) {
+      var baseUrl = String(targetUrl || "").replace(/\/+$/, "")
+      try {
+        var resp = $rest({ requestHeaders: headers }).post(baseUrl + "/worker-register", { workerUrl: myUrl })
+        if (isMap(resp) && resp.status === "ok") {
+          log("[worker-reg] Registered with " + baseUrl + " as " + myUrl)
+          return true
+        }
+        logWarn("[worker-reg] Registration response from " + baseUrl + ": " + stringify(resp, __, ""))
+        return false
+      } catch(e) {
+        logWarn("[worker-reg] Failed to register with " + baseUrl + ": " + e)
+        return false
+      }
+    }
+
+    targets.forEach(_register)
+
+    if (isUnDef(args.workerreginterval) || args.workerreginterval <= 0) args.workerreginterval = 30000
+    global.__worker_regInterval = setInterval(function() {
+      targets.forEach(_register)
+    }, args.workerreginterval)
+
+    log("[worker-reg] Heartbeat interval: " + args.workerreginterval + "ms to " + targets.length + " target(s)")
+
+# ---------------
+- name : Deregister From Parents
+  type : shutdown
+  exec : | #js
+    if (isDef(global.__worker_regInterval)) {
+      clearInterval(global.__worker_regInterval)
+      global.__worker_regInterval = __
+    }
+
+    var targets = global.__worker_regTargets
+    var myUrl = global.__worker_selfUrl
+    if (!isArray(targets) || targets.length === 0 || !isString(myUrl) || myUrl.length === 0) return
+
+    var headers = {}
+    if (isDef(global.__worker_args) && isString(global.__worker_args.workerregtoken) && global.__worker_args.workerregtoken.length > 0) {
+      headers.Authorization = "Bearer " + global.__worker_args.workerregtoken
+    }
+
+    targets.forEach(function(targetUrl) {
+      var baseUrl = String(targetUrl || "").replace(/\/+$/, "")
+      try {
+        var resp = $rest({ requestHeaders: headers }).post(baseUrl + "/worker-deregister", { workerUrl: myUrl })
+        if (isMap(resp) && resp.status === "ok") {
+          log("[worker-reg] Deregistered from " + baseUrl)
+        } else {
+          logWarn("[worker-reg] Deregister response from " + baseUrl + ": " + stringify(resp, __, ""))
+        }
+      } catch(e) {
+        logWarn("[worker-reg] Failed to deregister from " + baseUrl + ": " + e)
+      }
+    })

@@ -529,6 +529,11 @@ mini-a mode=mypreset goal="your goal here"
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation (requires `usetools=true`) |
 | `workers` | string | - | Comma-separated list of worker URLs for remote delegation (e.g., `workers="http://host:8080"`) |
+| `workerreg` | number | - | Port for worker registration HTTP server |
+| `workerregtoken` | string | - | Bearer token for registration endpoints |
+| `workerevictionttl` | number | `60000` | TTL (ms) before evicting unresponsive dynamic workers |
+| `workerregurl` | string | - | Registration URL(s) for worker self-registration (comma-separated) |
+| `workerreginterval` | number | `30000` | Heartbeat interval (ms) for re-registration |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
@@ -549,6 +554,13 @@ mini-a usedelegation=true usetools=true \
 
 # Start a worker API server
 mini-a workermode=true onport=8080 apitoken=secret maxconcurrent=8
+
+# Start main with registration server
+mini-a usedelegation=true usetools=true workerreg=12345 workerregtoken=secret
+
+# Start worker that self-registers
+mini-a workermode=true onport=8080 apitoken=secret \
+  workerregurl="http://main-host:12345" workerregtoken=secret
 ```
 
 ### Console Commands
@@ -570,6 +582,9 @@ mini-a workermode=true onport=8080 apitoken=secret maxconcurrent=8
 | `/status` | POST | Yes | Poll task status |
 | `/result` | POST | Yes | Get final result |
 | `/cancel` | POST | Yes | Cancel running task |
+| `/worker-register` | POST | Yes | Register a worker dynamically (on registration port) |
+| `/worker-deregister` | POST | Yes | Deregister a worker (on registration port) |
+| `/worker-list` | GET | Yes | List all workers with status (on registration port) |
 | `/healthz` | GET | No | Health check |
 | `/metrics` | GET | No | Task/delegation metrics |
 

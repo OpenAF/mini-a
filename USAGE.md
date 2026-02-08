@@ -944,6 +944,11 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
 | `workers` | string | (none) | Comma-separated list of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
+| `workerreg` | number | (none) | Port for dynamic worker registration server on the parent |
+| `workerregtoken` | string | (none) | Bearer token for registration endpoints |
+| `workerevictionttl` | number | `60000` | Heartbeat TTL (ms) before dynamic worker eviction |
+| `workerregurl` | string | (none) | Comma-separated parent registration URLs for worker self-registration |
+| `workerreginterval` | number | `30000` | Worker heartbeat interval (ms) |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
@@ -1028,6 +1033,33 @@ curl -X POST http://localhost:8080/result \
 - `GET /metrics` — Task/delegation metrics
 
 For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELEGATION.md)**.
+
+### Dynamic Worker Registration
+
+Dynamic worker registration lets workers announce themselves at startup and refresh registration with heartbeats, instead of relying only on a static `workers=` list.
+
+```bash
+# Parent instance: start registration server
+mini-a usedelegation=true usetools=true \
+  workerreg=12345 workerregtoken=secret workerevictionttl=90000
+
+# Worker: self-register and heartbeat
+mini-a workermode=true onport=8080 apitoken=secret \
+  workerregurl="http://main-host:12345" \
+  workerregtoken=secret workerreginterval=30000
+```
+
+Registration endpoints on the parent `workerreg` port:
+- `POST /worker-register`
+- `POST /worker-deregister`
+- `GET /worker-list`
+- `GET /healthz`
+
+Kubernetes HPA flow:
+- Scale up: new worker pod starts and registers itself.
+- Runtime: worker sends heartbeats at `workerreginterval`.
+- Scale down (graceful): worker sends deregistration on shutdown.
+- Crash/OOM: parent auto-evicts stale dynamic workers after `workerevictionttl`.
 
 ### Basic Usage
 
@@ -2110,7 +2142,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Dynamic tool selection metrics tracking how tools are selected when `mcpdynamic=true`. Shows usage of keyword matching, LLM-based selection (low-cost and main models), connection-level chooser fallbacks, and full catalog fallback. Includes stemming, synonym matching, n-grams, and fuzzy matching capabilities. |
 | `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
 | `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
-| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `avgDurationMs`, `maxDepthUsed` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle, retry activity, average duration, and deepest nesting level reached. |
+| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy`, `avgDurationMs`, `maxDepthUsed` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle, retries, worker pool composition/health, average duration, and deepest nesting level reached. |
 
 These counters mirror what is exported via `ow.metrics.add('mini-a', ...)`, so the same structure appears in Prometheus/Grafana when scraped through OpenAF.
 

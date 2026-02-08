@@ -362,6 +362,11 @@ try {
     persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" },
     usedelegation  : { type: "boolean", default: false, description: "Enable sub-goal delegation to child Mini-A agents" },
     workers        : { type: "string", description: "Comma-separated list of worker URLs to enable remote delegation" },
+    workerreg      : { type: "number", description: "Port for worker dynamic registration server (main instance)" },
+    workerregtoken : { type: "string", description: "Bearer token for worker registration endpoints" },
+    workerevictionttl: { type: "number", default: 60000, description: "Heartbeat TTL in ms before dynamic worker eviction" },
+    workerregurl   : { type: "string", description: "Comma-separated registration URL(s) used by workers in workermode" },
+    workerreginterval: { type: "number", default: 30000, description: "Worker heartbeat interval in ms for self-registration" },
     maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
     delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
@@ -482,7 +487,7 @@ try {
       return parsedBool
     }
     if (def.type === "number") {
-      var parsedNum = parseNumber(rawValue)
+      var parsedNum = Number(rawValue)
       if (isUnDef(parsedNum)) {
         print(colorifyText("Ignored CLI override for " + key + ": expected number.", errorColor))
         return undefined
@@ -1337,6 +1342,7 @@ try {
   var activeAgent = __
   var shutdownHandled = false
   var subtaskLogsByShortId = {}
+  var workerRegBootstrapped = false
 
   function promptLabel() {
     var prefix = colorifyText(basePrompt, accentColor)
@@ -1360,11 +1366,6 @@ try {
     return lines.join("\n")
   }
 
-  function parseNumber(value) {
-    var num = Number(value)
-    return isNaN(num) ? undefined : num
-  }
-
   function setOption(name, rawValue) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
@@ -1385,7 +1386,7 @@ try {
       }
       value = parsedBool
     } else if (def.type === "number") {
-      var parsedNum = parseNumber(value)
+      var parsedNum = Number(value)
       if (isUnDef(parsedNum)) {
         printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse numeric value for " + key + ".", errorColor))
         return
@@ -1769,6 +1770,31 @@ try {
     }
   }
 
+  function bootstrapWorkerRegistration() {
+    if (workerRegBootstrapped) return
+    workerRegBootstrapped = true
+    if (!isNumber(sessionOptions.workerreg)) return
+
+    var initArgs = buildArgs("__delegation_bootstrap__")
+    initArgs.usedelegation = true
+
+    if (!ensureModel(initArgs)) return
+
+    try {
+      var agent = new MiniA()
+      activeAgent = agent
+      agent.setInteractionFn(function(event, message) {
+        agent.defaultInteractionFn(event, message, function(icon, text, id) {
+          printEvent(event, icon, text, id)
+        })
+      })
+      agent.init(initArgs)
+    } catch (e) {
+      var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
+      printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Worker registration bootstrap failed: " + errMsg, errorColor))
+    }
+  }
+
   function finalizeSession(reason) {
     if (shutdownHandled) return
     shutdownHandled = true
@@ -1997,6 +2023,8 @@ try {
   	__con.getTerminal().settings.set("icanon echo")
   	return true
   })
+
+  bootstrapWorkerRegistration()
   
   while(true) {
     _miniaConReset()
