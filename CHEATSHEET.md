@@ -528,7 +528,7 @@ mini-a mode=mypreset goal="your goal here"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation (requires `usetools=true`) |
-| `workers` | string | - | JSON/SLON array of worker URLs for remote delegation (e.g., `workers="['http://host:8080']"`) |
+| `workers` | string | - | Comma-separated list of worker URLs for remote delegation (e.g., `workers="http://host:8080"`) |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
@@ -544,7 +544,7 @@ mini-a usedelegation=true usetools=true goal="Coordinate multiple research tasks
 
 # Remote delegation with worker URLs
 mini-a usedelegation=true usetools=true \
-  workers="['http://worker1:8080','http://worker2:8080']" \
+  workers="http://worker1:8080,http://worker2:8080" \
   apitoken=secret goal="Distribute analysis across workers"
 
 # Start a worker API server

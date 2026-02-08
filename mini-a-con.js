@@ -361,7 +361,7 @@ try {
     validationthreshold: { type: "string", default: "PASS", description: "Required validation verdict (e.g., 'PASS' or 'score>=0.7')" },
     persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" },
     usedelegation  : { type: "boolean", default: false, description: "Enable sub-goal delegation to child Mini-A agents" },
-    workers        : { type: "string", description: "JSON/SLON array of worker URLs to enable remote delegation" },
+    workers        : { type: "string", description: "Comma-separated list of worker URLs to enable remote delegation" },
     maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
     delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },

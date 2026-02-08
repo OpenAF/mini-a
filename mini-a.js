@@ -4704,6 +4704,60 @@ MiniA.prototype._extractPrimaryResponseText = function(rawResponse) {
     return rawResponse
 }
 
+MiniA.prototype._parseJsonCandidate = function(rawText) {
+    if (!isString(rawText)) return __
+    var text = rawText.trim()
+    if (text.length === 0) return __
+
+    var parsed = jsonParse(text, __, __, true)
+    if (isMap(parsed) || isArray(parsed)) return parsed
+
+    var firstObj = text.indexOf("{")
+    var lastObj = text.lastIndexOf("}")
+    if (firstObj >= 0 && lastObj > firstObj) {
+        var objCandidate = text.substring(firstObj, lastObj + 1)
+        parsed = jsonParse(objCandidate, __, __, true)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+    }
+
+    var firstArr = text.indexOf("[")
+    var lastArr = text.lastIndexOf("]")
+    if (firstArr >= 0 && lastArr > firstArr) {
+        var arrCandidate = text.substring(firstArr, lastArr + 1)
+        parsed = jsonParse(arrCandidate, __, __, true)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+    }
+
+    return __
+}
+
+MiniA.prototype._recoverMessageFromProviderError = function(rawPayload) {
+    var payload = isMap(rawPayload) ? rawPayload : {}
+    var errorPayload = __
+
+    if (isMap(payload.error)) errorPayload = payload.error
+    if (isUnDef(errorPayload) && isMap(payload.response) && isMap(payload.response.error)) {
+        errorPayload = payload.response.error
+    }
+    if (!isMap(errorPayload)) return __
+
+    var errorCode = isString(errorPayload.code) ? errorPayload.code : ""
+    var failedGeneration = isString(errorPayload.failed_generation) ? errorPayload.failed_generation : ""
+    if (errorCode !== "tool_use_failed" || failedGeneration.length === 0) return __
+
+    var parsedFailure = this._parseJsonCandidate(failedGeneration)
+    if (!isMap(parsedFailure) && !isArray(parsedFailure)) return __
+
+    if (isMap(parsedFailure) && isString(parsedFailure.name) && parsedFailure.name.toLowerCase() === "json" && isMap(parsedFailure.arguments)) {
+        return parsedFailure.arguments
+    }
+    if (isMap(parsedFailure) && isDef(parsedFailure.action)) {
+        return parsedFailure
+    }
+
+    return __
+}
+
 MiniA.prototype._extractThinkingBlocksFromResponse = function(rawResponse) {
     var candidates = this._extractResponseTextCandidates(rawResponse)
     if (!isArray(candidates) || candidates.length === 0) return []
@@ -7966,19 +8020,17 @@ MiniA.prototype.init = function(args) {
     var parsedWorkers = []
     if (isArray(workersRaw)) parsedWorkers = workersRaw
     else if (isString(workersRaw) && workersRaw.trim().length > 0) {
-      try {
-        var workersValue = af.fromJSSLON(workersRaw)
-        if (isString(workersValue)) parsedWorkers = [workersValue]
-        else if (isArray(workersValue)) parsedWorkers = workersValue
-        else this.fnI("warn", "workers must be a JSON/SLON array of URLs; ignoring value.")
-      } catch (workersErr) {
-        this.fnI("warn", "Invalid workers value. Provide JSON/SLON array, e.g. workers=\"['http://worker1:8080','http://worker2:8080']\".")
-      }
+      parsedWorkers = workersRaw.split(",")
     }
 
     args.workers = parsedWorkers
       .map(function(entry) {
-        if (isString(entry)) return entry.trim()
+        if (isString(entry)) {
+          var normalized = entry.trim()
+          normalized = normalized.replace(/^\[+/, "").replace(/\]+$/, "")
+          normalized = normalized.replace(/^['"]+/, "").replace(/['"]+$/, "")
+          return normalized
+        }
         if (isMap(entry) && isString(entry.url)) return entry.url.trim()
         return __
       })
@@ -7988,6 +8040,10 @@ MiniA.prototype.init = function(args) {
       .map(function(url) {
         return url.replace(/\/+$/, "")
       })
+
+    if (args.workers.length > 0) {
+      this.fnI("info", "Configured remote workers: " + args.workers.join(", "))
+    }
 
     if (args.workers.length > 0) args.usedelegation = true
 
@@ -9583,8 +9639,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         continue
       }
 
+      var recoveredMsgFromEnvelope = __
+      if (isObject(responseWithStats) && isMap(responseWithStats.response)) {
+        recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats.response)
+      }
+
       if (args.debug) {
-        print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        var responseToPrint = responseWithStats
+        if (isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope)) {
+          responseToPrint = jsonParse(stringify(responseWithStats, __, ""), __, __, true)
+          if (!isObject(responseToPrint)) responseToPrint = {}
+          responseToPrint.response = recoveredMsgFromEnvelope
+          responseToPrint.recoveredFromProviderToolUseFailed = true
+        }
+        print( ow.format.withSideLine("<--\n" + stringify(responseToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
       }
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var responseTokenTotal = this._getTotalTokens(stats)
@@ -9626,6 +9694,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
       
       var msg
+      var recoveredFromEnvelopeApplied = false
       if (isString(rmsg)) {
         rmsg = rmsg.replace(/.+\n(\{.+)/m, "$1")
         msg = jsonParse(rmsg, __, __, true)
@@ -9677,8 +9746,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             continue
           }
+          var fallbackRecoveredMsgFromEnvelope = __
+          if (isObject(fallbackResponseWithStats) && isMap(fallbackResponseWithStats.response)) {
+            fallbackRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(fallbackResponseWithStats.response)
+          }
+
           if (args.debug) {
-            print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+            var fallbackToPrint = fallbackResponseWithStats
+            if (isMap(fallbackRecoveredMsgFromEnvelope) || isArray(fallbackRecoveredMsgFromEnvelope)) {
+              fallbackToPrint = jsonParse(stringify(fallbackResponseWithStats, __, ""), __, __, true)
+              if (!isObject(fallbackToPrint)) fallbackToPrint = {}
+              fallbackToPrint.response = fallbackRecoveredMsgFromEnvelope
+              fallbackToPrint.recoveredFromProviderToolUseFailed = true
+            }
+            print( ow.format.withSideLine("<--\n" + stringify(fallbackToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
           }
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
@@ -9713,6 +9794,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           } else {
             msg = rmsg
           }
+          if (isMap(fallbackRecoveredMsgFromEnvelope) || isArray(fallbackRecoveredMsgFromEnvelope)) {
+            msg = fallbackRecoveredMsgFromEnvelope
+          }
         }
 
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
@@ -9733,8 +9817,24 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         msg = rmsg
       }
 
+      if (isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope)) {
+        msg = recoveredMsgFromEnvelope
+        recoveredFromEnvelopeApplied = true
+      }
+
       if (args.debug) {
         print( ow.format.withSideLine("<<<\n" + colorify(msg, { bgcolor: "BG(230),BLACK"}) + "\n<<<", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+      }
+
+      if (!recoveredFromEnvelopeApplied && isMap(msg)) {
+        var recoveredMsg = this._recoverMessageFromProviderError(msg)
+        if (isMap(recoveredMsg) || isArray(recoveredMsg)) {
+          msg = recoveredMsg
+          runtime.context.push(`[OBS ${step + 1}] (recover) Parsed model action from provider tool_use_failed payload.`)
+          if (args.debug || args.verbose) {
+            this.fnI("recover", `Recovered step ${step + 1} message from provider tool_use_failed envelope.`)
+          }
+        }
       }
 
       // Normalize model response into a sequence of action requests

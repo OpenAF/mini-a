@@ -39,7 +39,7 @@ mini-a workermode=true onport=8080 apitoken=secret
 
 # Parent agent routing subtasks to workers
 mini-a usedelegation=true usetools=true \
-  workers="['http://worker1:8080','http://worker2:8080']" \
+  workers="http://worker1:8080,http://worker2:8080" \
   apitoken=secret goal="Distribute analysis"
 ```
 
@@ -66,7 +66,7 @@ Worker selection is capability-aware: Mini-A fetches each worker's `/info` profi
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `usedelegation` | `false` | Enable subtask delegation |
-| `workers` | - | Worker URLs for remote delegation |
+| `workers` | - | Comma-separated worker URLs for remote delegation |
 | `maxconcurrent` | `4` | Max concurrent child agents |
 | `delegationmaxdepth` | `3` | Max nesting depth |
 | `delegationtimeout` | `300000` | Subtask deadline (ms) |
