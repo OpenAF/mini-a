@@ -130,7 +130,7 @@ SubtaskManager.prototype._refreshWorkerProfiles = function() {
 SubtaskManager.prototype._probeWorkerProfile = function(workerUrl, attempts) {
   var maxAttempts = _$(attempts, "attempts").isNumber().default(1)
   if (maxAttempts < 1) maxAttempts = 1
-  var lastProfile = { status: "unknown", signature: "unknown", capabilities: [], limits: {} }
+  var lastProfile = { status: "unknown", name: "", description: "", signature: "unknown", capabilities: [], limits: {} }
   var lastErr = "unknown probe failure"
 
   for (var i = 0; i < maxAttempts; i++) {
@@ -159,7 +159,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
   try {
     var response = $rest({ requestHeaders: headers }).get(workerUrl + "/info")
     if (!isMap(response)) {
-      return { status: "unknown", signature: "unknown", capabilities: [], limits: {}, error: "Worker /info response is not a map" }
+      return { status: "unknown", name: "", description: "", signature: "unknown", capabilities: [], limits: {}, error: "Worker /info response is not a map" }
     }
 
     var capabilities = []
@@ -198,7 +198,7 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
     }
   } catch(ignoreInfoErr) {
     var errMsg = isDef(ignoreInfoErr) && isString(ignoreInfoErr.message) ? ignoreInfoErr.message : stringify(ignoreInfoErr, __, "")
-    return { status: "unknown", signature: "unknown", capabilities: [], limits: {}, error: errMsg }
+    return { status: "unknown", name: "", description: "", signature: "unknown", capabilities: [], limits: {}, error: errMsg }
   }
 }
 

@@ -96,12 +96,16 @@ todo:
     }
   ((execURI  )): | #js
     try {
-      var postData = jsonParse(request.files.postData);
+      var postData;
+      try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+        return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
       var wargs = global.__worker_args;
-      if (!isString(postData.goal) || postData.goal.trim().length === 0) {
+      var goalTrimmed = isString(postData.goal) ? postData.goal.trim() : "";
+      if (goalTrimmed.length === 0) {
         return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
-      if (postData.goal.length > 10000) {
+      if (goalTrimmed.length > 10000) {
         return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
       var taskArgs = postData.args || {};
@@ -114,8 +118,14 @@ todo:
       Object.keys(taskArgs).forEach(function(key) {
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key]; }
       });
-      mergedArgs.goal = postData.goal.trim();
-      var timeout = isDef(postData.timeout) ? Number(postData.timeout) * 1000 : wargs.defaulttimeout;
+      mergedArgs.goal = goalTrimmed;
+      var timeout = wargs.defaulttimeout;
+      if (isDef(postData.timeout)) {
+        var parsedTimeout = Number(postData.timeout);
+        if (!isNaN(parsedTimeout) && parsedTimeout > 0) {
+          timeout = parsedTimeout * 1000;
+        }
+      }
       if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout;
       var taskId = genUUID();
       var now = new Date().getTime();
@@ -123,8 +133,8 @@ todo:
         global.__worker_taskManager = new SubtaskManager(mergedArgs, {
           maxConcurrent: wargs.maxconcurrent,
           defaultDeadlineMs: wargs.defaulttimeout,
-          defaultMaxAttempts: 2,
-          maxDepth: 3,
+          defaultMaxAttempts: wargs.delegationmaxretries,
+          maxDepth: wargs.delegationmaxdepth,
           interactionFn: function(event, message) {
             var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message);
             if (isString(resolvedTaskId) && resolvedTaskId.length > 0) {
@@ -162,7 +172,10 @@ todo:
   ((execPre   )): *authCheck
   ((execURI   )): | #js
     try {
-      var postData = jsonParse(request.files.postData);
+      var postData;
+      try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+        return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
       var taskId = postData.taskId;
       if (!isString(taskId)) {
         return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
@@ -196,7 +209,10 @@ todo:
   ((execPre   )): *authCheck
   ((execURI   )): | #js
     try {
-      var postData = jsonParse(request.files.postData);
+      var postData;
+      try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+        return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
       var taskId = postData.taskId;
       if (!isString(taskId)) {
         return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
@@ -239,7 +255,10 @@ todo:
   ((execPre   )): *authCheck
   ((execURI   )): | #js
     try {
-      var postData = jsonParse(request.files.postData);
+      var postData;
+      try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+        return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
       var taskId = postData.taskId;
       if (!isString(taskId)) {
         return ow.server.httpd.reply(stringify({ error: "Missing required field: taskId" }, __, ""), 400, ow.server.httpd.mimes.JSON);
@@ -298,6 +317,8 @@ jobs:
     args.taskretention = _$(args.taskretention, "args.taskretention").toNumber().isNumber().default(3600)
     args.workername = _$(args.workername, "args.workername").isString().default("mini-a-worker")
     args.workerdesc = _$(args.workerdesc, "args.workerdesc").isString().default("Mini-A worker API")
+    args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").toNumber().isNumber().default(2)
+    args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").toNumber().isNumber().default(3)
 
     // Validate
     if (isUnDef(args.apitoken)) {
