@@ -78,7 +78,7 @@ todo:
               example     : "Europe/Lisbon"
             datetime:
               type        : string
-              description : Date/time reference for `convert`/`difference`. Accepts ISO date/time or Unix epoch (seconds/milliseconds). Defaults to now.
+              description : Date/time reference for `convert`/`difference`. Supports ISO 8601, LocalDateTime strings, or Unix epoch (10-digit seconds, 13-digit milliseconds, negative for pre-1970). Defaults to now.
               example     : "2024-06-01T10:15:00"
             inputFormat:
               type        : string
@@ -327,8 +327,25 @@ jobs:
           return ZonedDateTime.now(sourceZone)
         }
 
-        var epochParsed = parseEpochToZoned(value, sourceZone)
-        if (isDef(epochParsed)) return epochParsed
+        // Detect numeric epoch input (Unix timestamps)
+        // Supports both seconds (10 digits) and milliseconds (13 digits)
+        // Also supports negative epoch values for historical dates before 1970
+        if (/^-?\d+$/.test(value)) {
+          var Instant = java.time.Instant
+          // Extract digit count (excluding the optional minus sign)
+          var digitCount = value.startsWith('-') ? value.length - 1 : value.length
+          
+          // 10-digit value indicates seconds since epoch
+          if (digitCount === 10) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochSecond(Number(value)), sourceZone)
+          }
+          // 13-digit value indicates milliseconds since epoch
+          else if (digitCount === 13) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochMilli(Number(value)), sourceZone)
+          }
+          // Invalid epoch format - must be 10 or 13 digits
+          throw new Error("Epoch value must be 10 or 13 digits (seconds or milliseconds).")
+        }
 
         if (isDef(args.inputFormat)) {
           var fmt = DateTimeFormatter.ofPattern(args.inputFormat).withLocale(locale)
