@@ -78,7 +78,7 @@ todo:
               example     : "Europe/Lisbon"
             datetime:
               type        : string
-              description : Date/time reference for `convert`/`difference`. Defaults to now.
+              description : Date/time reference for `convert`/`difference`. Accepts ISO date/time or Unix epoch (seconds/milliseconds). Defaults to now.
               example     : "2024-06-01T10:15:00"
             inputFormat:
               type        : string
@@ -294,8 +294,24 @@ jobs:
     var ZonedDateTime = java.time.ZonedDateTime
     var LocalDateTime = java.time.LocalDateTime
     var DateTimeFormatter = java.time.format.DateTimeFormatter
+    var Instant = java.time.Instant
     var Locale = java.util.Locale
     var locale = isDef(args.locale) ? Locale.forLanguageTag(args.locale) : Locale.getDefault()
+
+    function parseEpochToZoned(value, zone) {
+      if (isUnDef(value) || value === null) return __
+
+      var raw = String(value).trim()
+      if (raw.length === 0) return __
+      if (!/^-?\d+$/.test(raw)) return __
+
+      var epoch = Number(raw)
+      if (!isFinite(epoch)) return __
+
+      // 13+ digits usually represent milliseconds; smaller magnitudes are treated as seconds.
+      var instant = Math.abs(epoch) >= 1000000000000 ? Instant.ofEpochMilli(Math.trunc(epoch)) : Instant.ofEpochSecond(Math.trunc(epoch))
+      return ZonedDateTime.ofInstant(instant, zone)
+    }
 
     if (op === "convert") {
       if (isUnDef(args.targetTimezone)) {
@@ -310,6 +326,9 @@ jobs:
         if (isUnDef(value) || value === null || value === "") {
           return ZonedDateTime.now(sourceZone)
         }
+
+        var epochParsed = parseEpochToZoned(value, sourceZone)
+        if (isDef(epochParsed)) return epochParsed
 
         if (isDef(args.inputFormat)) {
           var fmt = DateTimeFormatter.ofPattern(args.inputFormat).withLocale(locale)
@@ -355,6 +374,9 @@ jobs:
         if (isUnDef(value) || value === null || value === "") {
           return ZonedDateTime.now(firstZone)
         }
+
+        var epochParsed = parseEpochToZoned(value, firstZone)
+        if (isDef(epochParsed)) return epochParsed
 
         if (isDef(args.inputFormat)) {
           var fmt = DateTimeFormatter.ofPattern(args.inputFormat).withLocale(locale)
