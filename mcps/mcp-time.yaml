@@ -78,7 +78,7 @@ todo:
               example     : "Europe/Lisbon"
             datetime:
               type        : string
-              description : Date/time reference for `convert`/`difference`. Supports ISO 8601 strings, LocalDateTime strings, or Unix epoch values (10 digits for seconds, 13 digits for milliseconds). Defaults to now.
+              description : Date/time reference for `convert`/`difference`. Supports ISO 8601 strings, LocalDateTime strings, or Unix epoch values (10 digits for seconds, 13 digits for milliseconds; negative values supported for pre-1970 dates). Defaults to now.
               example     : "2024-06-01T10:15:00"
             inputFormat:
               type        : string
@@ -313,17 +313,19 @@ jobs:
 
         // Detect numeric epoch input (Unix timestamps)
         // Supports both seconds (10 digits) and milliseconds (13 digits)
+        // Also supports negative epoch values for historical dates before 1970
         if (/^-?\d+$/.test(value)) {
           var Instant = java.time.Instant
-          var longVal = Number(value)
+          // Extract digit count (excluding the optional minus sign)
+          var digitCount = value.charAt(0) === '-' ? value.length - 1 : value.length
           
           // 10-digit value indicates seconds since epoch
-          if (value.length === 10 || (value.charAt(0) === '-' && value.length === 11)) {
-            return ZonedDateTime.ofInstant(Instant.ofEpochSecond(longVal), sourceZone)
+          if (digitCount === 10) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochSecond(Number(value)), sourceZone)
           }
           // 13-digit value indicates milliseconds since epoch
-          else if (value.length === 13 || (value.charAt(0) === '-' && value.length === 14)) {
-            return ZonedDateTime.ofInstant(Instant.ofEpochMilli(longVal), sourceZone)
+          else if (digitCount === 13) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochMilli(Number(value)), sourceZone)
           }
           // Invalid epoch format - must be 10 or 13 digits
           throw new Error("Epoch value must be 10 or 13 digits (seconds or milliseconds).")
