@@ -78,7 +78,7 @@ todo:
               example     : "Europe/Lisbon"
             datetime:
               type        : string
-              description : Date/time reference for `convert`/`difference`. Supports ISO 8601 strings, LocalDateTime strings, or Unix epoch values (10 digits for seconds, 13 digits for milliseconds; negative values supported for pre-1970 dates). Defaults to now.
+              description : Date/time reference for `convert`/`difference`. Supports ISO 8601, LocalDateTime strings, or Unix epoch (10-digit seconds, 13-digit milliseconds, negative for pre-1970). Defaults to now.
               example     : "2024-06-01T10:15:00"
             inputFormat:
               type        : string
@@ -317,7 +317,7 @@ jobs:
         if (/^-?\d+$/.test(value)) {
           var Instant = java.time.Instant
           // Extract digit count (excluding the optional minus sign)
-          var digitCount = value.charAt(0) === '-' ? value.length - 1 : value.length
+          var digitCount = value.startsWith('-') ? value.length - 1 : value.length
           
           // 10-digit value indicates seconds since epoch
           if (digitCount === 10) {
