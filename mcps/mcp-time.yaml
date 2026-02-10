@@ -311,6 +311,24 @@ jobs:
           return ZonedDateTime.now(sourceZone)
         }
 
+        // Detect numeric epoch input (Unix timestamps)
+        // Supports both seconds (10 digits) and milliseconds (13 digits)
+        if (/^-?\d+$/.test(value)) {
+          var Instant = java.time.Instant
+          var longVal = Number(value)
+          
+          // 10-digit value indicates seconds since epoch
+          if (value.length === 10 || (value.charAt(0) === '-' && value.length === 11)) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochSecond(longVal), sourceZone)
+          }
+          // 13-digit value indicates milliseconds since epoch
+          else if (value.length === 13 || (value.charAt(0) === '-' && value.length === 14)) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochMilli(longVal), sourceZone)
+          }
+          // Invalid epoch format - must be 10 or 13 digits
+          throw new Error("Epoch value must be 10 or 13 digits (seconds or milliseconds).")
+        }
+
         if (isDef(args.inputFormat)) {
           var fmt = DateTimeFormatter.ofPattern(args.inputFormat).withLocale(locale)
           var local = LocalDateTime.parse(value, fmt)
