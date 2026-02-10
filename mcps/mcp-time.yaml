@@ -78,7 +78,7 @@ todo:
               example     : "Europe/Lisbon"
             datetime:
               type        : string
-              description : Date/time reference for `convert`/`difference`. Defaults to now.
+              description : Date/time reference for `convert`/`difference`. Supports ISO 8601 strings, LocalDateTime strings, or Unix epoch values (10 digits for seconds, 13 digits for milliseconds). Defaults to now.
               example     : "2024-06-01T10:15:00"
             inputFormat:
               type        : string
