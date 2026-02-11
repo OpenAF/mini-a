@@ -1,6 +1,6 @@
 # Author: OpenAI Assistant
 help:
-  text   : Provides precise time retrieval (system or atomic clock), timezone intelligence, and delay controls over STDIO/HTTP MCP.
+  text   : Provides timezone conversions (including Unix epoch to/from formatted dates), precise time retrieval from system or atomic clocks, and delay controls over STDIO/HTTP MCP.
   expects:
   - name     : onport
     desc     : Optional HTTP port. When omitted the MCP server runs over STDIO.
@@ -22,7 +22,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       current-time:
         name       : current-time
-        description: Returns detailed current time data from the system clock or an atomic clock, with formatting and timezone controls.
+        description: Retrieves precise current time with support for custom timezones, formats, and atomic clock sources (NTP). Useful for absolute time references.
         inputSchema:
           type      : object
           properties:
@@ -54,13 +54,13 @@ todo:
               example     : 4000
           required: []
         annotations:
-          title         : precise-current-time
+          title         : Precise Current Time Retrieval
           readOnlyHint  : true
           idempotentHint: true
 
       timezone-tools:
         name       : timezone-tools
-        description: Converts timestamps, compares offsets, or lists zones depending on the requested operation.
+        description: Converts timestamps between timezones or Unix epochs (seconds/milliseconds), compares timezone offsets, or lists available zones. Supports ISO 8601 and custom formats.
         inputSchema:
           type      : object
           properties:
@@ -78,7 +78,7 @@ todo:
               example     : "Europe/Lisbon"
             datetime:
               type        : string
-              description : Date/time reference for `convert`/`difference`. Defaults to now.
+              description : Date/time reference for `convert`/`difference`. Supports ISO 8601, LocalDateTime strings, or Unix epoch (10-digit seconds, 13-digit milliseconds, negative for pre-1970). Defaults to now.
               example     : "2024-06-01T10:15:00"
             inputFormat:
               type        : string
@@ -106,12 +106,12 @@ todo:
               example     : "America"
           required: [ operation ]
         annotations:
-          title         : timezone-operations
+          title         : Timezone & Unix Epoch Conversions
           readOnlyHint  : true
           idempotentHint: true
       sleep:
         name       : sleep
-        description: Pauses execution for controlled delays (useful for pacing prompts or demos).
+        description: Blocks execution for a specified duration in milliseconds. Essential for rate limiting, pacing sequences, or introducing controlled delays in workflows.
         inputSchema:
           type      : object
           properties:
@@ -122,7 +122,7 @@ todo:
               example     : 1000
           required: [ milliseconds ]
         annotations:
-          title         : delay
+          title         : Controlled Sleep/Delay
           readOnlyHint  : false
           idempotentHint: false
     ((fns    )): &MCPFNS
@@ -294,8 +294,24 @@ jobs:
     var ZonedDateTime = java.time.ZonedDateTime
     var LocalDateTime = java.time.LocalDateTime
     var DateTimeFormatter = java.time.format.DateTimeFormatter
+    var Instant = java.time.Instant
     var Locale = java.util.Locale
     var locale = isDef(args.locale) ? Locale.forLanguageTag(args.locale) : Locale.getDefault()
+
+    function parseEpochToZoned(value, zone) {
+      if (isUnDef(value) || value === null) return __
+
+      var raw = String(value).trim()
+      if (raw.length === 0) return __
+      if (!/^-?\d+$/.test(raw)) return __
+
+      var epoch = Number(raw)
+      if (!isFinite(epoch)) return __
+
+      // 13+ digits usually represent milliseconds; smaller magnitudes are treated as seconds.
+      var instant = Math.abs(epoch) >= 1000000000000 ? Instant.ofEpochMilli(Math.trunc(epoch)) : Instant.ofEpochSecond(Math.trunc(epoch))
+      return ZonedDateTime.ofInstant(instant, zone)
+    }
 
     if (op === "convert") {
       if (isUnDef(args.targetTimezone)) {
@@ -309,6 +325,26 @@ jobs:
       function parseDateTime(value) {
         if (isUnDef(value) || value === null || value === "") {
           return ZonedDateTime.now(sourceZone)
+        }
+
+        // Detect numeric epoch input (Unix timestamps)
+        // Supports both seconds (10 digits) and milliseconds (13 digits)
+        // Also supports negative epoch values for historical dates before 1970
+        if (/^-?\d+$/.test(value)) {
+          var Instant = java.time.Instant
+          // Extract digit count (excluding the optional minus sign)
+          var digitCount = value.startsWith('-') ? value.length - 1 : value.length
+          
+          // 10-digit value indicates seconds since epoch
+          if (digitCount === 10) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochSecond(Number(value)), sourceZone)
+          }
+          // 13-digit value indicates milliseconds since epoch
+          else if (digitCount === 13) {
+            return ZonedDateTime.ofInstant(Instant.ofEpochMilli(Number(value)), sourceZone)
+          }
+          // Invalid epoch format - must be 10 or 13 digits
+          throw new Error("Epoch value must be 10 or 13 digits (seconds or milliseconds).")
         }
 
         if (isDef(args.inputFormat)) {
@@ -355,6 +391,9 @@ jobs:
         if (isUnDef(value) || value === null || value === "") {
           return ZonedDateTime.now(firstZone)
         }
+
+        var epochParsed = parseEpochToZoned(value, firstZone)
+        if (isDef(epochParsed)) return epochParsed
 
         if (isDef(args.inputFormat)) {
           var fmt = DateTimeFormatter.ofPattern(args.inputFormat).withLocale(locale)
