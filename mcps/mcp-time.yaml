@@ -1,6 +1,6 @@
 # Author: OpenAI Assistant
 help:
-  text   : Provides precise time retrieval (system or atomic clock), timezone intelligence, and delay controls over STDIO/HTTP MCP.
+  text   : Provides timezone conversions (including Unix epoch to/from formatted dates), precise time retrieval from system or atomic clocks, and delay controls over STDIO/HTTP MCP.
   expects:
   - name     : onport
     desc     : Optional HTTP port. When omitted the MCP server runs over STDIO.
@@ -22,7 +22,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       current-time:
         name       : current-time
-        description: Returns detailed current time data from the system clock or an atomic clock, with formatting and timezone controls.
+        description: Retrieves precise current time with support for custom timezones, formats, and atomic clock sources (NTP). Useful for absolute time references.
         inputSchema:
           type      : object
           properties:
@@ -54,13 +54,13 @@ todo:
               example     : 4000
           required: []
         annotations:
-          title         : precise-current-time
+          title         : Precise Current Time Retrieval
           readOnlyHint  : true
           idempotentHint: true
 
       timezone-tools:
         name       : timezone-tools
-        description: Converts timestamps, compares offsets, or lists zones depending on the requested operation.
+        description: Converts timestamps between timezones or Unix epochs (seconds/milliseconds), compares timezone offsets, or lists available zones. Supports ISO 8601 and custom formats.
         inputSchema:
           type      : object
           properties:
@@ -106,12 +106,12 @@ todo:
               example     : "America"
           required: [ operation ]
         annotations:
-          title         : timezone-operations
+          title         : Timezone & Unix Epoch Conversions
           readOnlyHint  : true
           idempotentHint: true
       sleep:
         name       : sleep
-        description: Pauses execution for controlled delays (useful for pacing prompts or demos).
+        description: Blocks execution for a specified duration in milliseconds. Essential for rate limiting, pacing sequences, or introducing controlled delays in workflows.
         inputSchema:
           type      : object
           properties:
@@ -122,7 +122,7 @@ todo:
               example     : 1000
           required: [ milliseconds ]
         annotations:
-          title         : delay
+          title         : Controlled Sleep/Delay
           readOnlyHint  : false
           idempotentHint: false
     ((fns    )): &MCPFNS
