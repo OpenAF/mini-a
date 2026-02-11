@@ -133,9 +133,9 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 2b49e266decad0a706f22eee3a6df7d7ff911bb5
-  USAGE.md: 0c1058998baa3d5f9e64d2d941690866284ee82c
+  USAGE.md: 0f6ab8f14389794436051947af7626cf40cfcec7
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
-  docs/DELEGATION.md: ef526365dc61aa3e404a1ba06158af237fe97589
+  docs/DELEGATION.md: bc441039e175e996d5d9ca4fa316b1059cda2ac5
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
   docs/MCPPROXY-FEATURE.md: a168f177ef3b631cedb78daf5e8138c3261dc3a4
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
@@ -180,7 +180,7 @@ filesHash:
   mini-a-utils.js: 9ce30b49dd8360d1fa221831a535459af1576862
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 16b1dfaa38c627d1d828745019d9d1bdcd6a92c1
-  mini-a-worker.yaml: e69cdcfd766c5943d0a71a53f9e5f1b8b362e180
+  mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
   mini-a.js: 159afc4c37e0d6f59463f06c0e9ef4a82e16a148
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 7104bc6fc6d854ab54e752b4b6af467fa0d8a975
