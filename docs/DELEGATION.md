@@ -217,7 +217,7 @@ curl http://localhost:8080/info
   "name": "mini-a-worker",
   "description": "Mini-A worker API",
   "version": "1.0.0",
-  "capabilities": ["run-goal", "delegation", "planning"],
+  "capabilities": ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
   "limits": {
     "maxConcurrent": 4,
     "defaultTimeoutMs": 300000,
@@ -359,6 +359,38 @@ curl -X POST http://localhost:8080/cancel \
   "status": "cancelled"
 }
 ```
+
+
+### A2A HTTP+JSON/REST Endpoints (additional compatibility)
+
+The worker also exposes A2A-style HTTP+JSON endpoints aligned with section 11 of the A2A protocol specification:
+
+- `POST /message:send` — submits a task from `message.parts[].text`
+- `GET /tasks` — lists known tasks
+- `GET /tasks?id=<taskId>` — returns one task record (query parameter based lookup)
+- `POST /tasks:cancel` — cancels a task using `{ "id": "..." }` or `{ "taskId": "..." }`
+- `GET /.well-known/agent.json` — public Agent Card
+- `GET /extendedAgentCard` — authenticated extended Agent Card
+
+Example:
+
+```bash
+curl -X POST http://localhost:8080/message:send \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contextId": "ctx-1",
+    "message": {
+      "messageId": "msg-1",
+      "role": "ROLE_USER",
+      "parts": [{ "text": "Summarize the release blockers" }]
+    }
+  }'
+
+curl -H "Authorization: Bearer your-secret-token" \
+  "http://localhost:8080/tasks?id=<taskId>"
+```
+
 
 #### `GET /healthz`
 
