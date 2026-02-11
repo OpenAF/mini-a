@@ -76,7 +76,7 @@ todo:
       name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
       description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
       version: "1.0.0",
-      capabilities: ["run-goal", "delegation", "planning"],
+      capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
       limits: {
         maxConcurrent: wargs.maxconcurrent,
         defaultTimeoutMs: wargs.defaulttimeout,
@@ -87,6 +87,37 @@ todo:
       auth: isDef(wargs.apitoken) ? "bearer" : "none"
     };
     return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
+  ((error    )): true
+
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /.well-known/agent.json
+  ((execURI   )): | #js
+    var wargs = global.__worker_args;
+    var baseUrl = "http://" + ow.net.getHostAddress() + ":" + wargs.onport;
+    var card = {
+      protocolVersion: "0.3.0",
+      name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
+      description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
+      url: baseUrl,
+      preferredTransport: "HTTP+JSON",
+      additionalInterfaces: ["mini-a-worker-v1"],
+      capabilities: {
+        streaming: false,
+        pushNotifications: false,
+        stateTransitionHistory: true
+      },
+      skills: [
+        {
+          id: "run-goal",
+          name: "Run goal",
+          description: "Executes Mini-A goals asynchronously and returns task results",
+          tags: ["planning", "delegation", "research"],
+          examples: ["Summarize this document", "Create a release checklist"]
+        }
+      ]
+    };
+    return ow.server.httpd.reply(stringify(card, __, ""), __, ow.server.httpd.mimes.JSON);
   ((error    )): true
 
 # --- Authenticated endpoints ---
@@ -177,6 +208,229 @@ todo:
       logErr(e);
       return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
     }
+  ((error    )): true
+
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /message:send
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData;
+      try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+        return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      var message = isMap(postData.message) ? postData.message : {};
+      var goal = "";
+      if (isArray(message.parts)) {
+        goal = message.parts.map(function(part) {
+          if (isMap(part) && isString(part.text)) return part.text;
+          return "";
+        }).filter(function(part) { return part.length > 0; }).join("\n");
+      }
+      if ((!isString(goal) || goal.trim().length === 0) && isString(postData.goal)) goal = postData.goal;
+      if (!isString(goal) || goal.trim().length === 0) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required message text" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+
+      var taskPayload = {
+        goal: goal,
+        args: isMap(postData.metadata) ? postData.metadata.args : {},
+        timeout: isMap(postData.configuration) ? postData.configuration.timeoutSeconds : __,
+        metadata: {
+          a2aMessageId: isString(message.messageId) ? message.messageId : __,
+          a2aContextId: isString(postData.contextId) ? postData.contextId : __
+        }
+      };
+
+      var requestBody = { files: { postData: stringify(taskPayload, __, "") } };
+      var _request = request;
+      request = requestBody;
+      var submission = __;
+      try {
+        submission = (function() {
+          var postData;
+          postData = jsonParse(request.files.postData);
+          var wargs = global.__worker_args;
+          var goalTrimmed = isString(postData.goal) ? postData.goal.trim() : "";
+          var taskArgs = postData.args || {};
+          var allowedRemoteKeys = {
+            goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
+            updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
+            planmode: true, planformat: true, convertplan: true, maxsteps: true
+          };
+          var mergedArgs = merge({}, wargs);
+          Object.keys(taskArgs).forEach(function(key) {
+            if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key]; }
+          });
+          mergedArgs.goal = goalTrimmed;
+          var timeout = wargs.defaulttimeout;
+          if (isDef(postData.timeout)) {
+            var parsedTimeout = Number(postData.timeout);
+            if (!isNaN(parsedTimeout) && parsedTimeout > 0) timeout = parsedTimeout * 1000;
+          }
+          if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout;
+          var taskId = genUUID();
+          var now = new Date().getTime();
+          if (isUnDef(global.__worker_taskManager)) {
+            global.__worker_taskManager = new SubtaskManager(mergedArgs, {
+              maxConcurrent: wargs.maxconcurrent,
+              defaultDeadlineMs: wargs.defaulttimeout,
+              defaultMaxAttempts: wargs.delegationmaxretries,
+              maxDepth: wargs.delegationmaxdepth,
+              interactionFn: function(event, message) {
+                var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message);
+                if (isString(resolvedTaskId) && resolvedTaskId.length > 0) global.__worker_appendTaskEvent(resolvedTaskId, event, message);
+                global.__worker_logTaskEvent(resolvedTaskId, event, message);
+              },
+              currentDepth: 0
+            });
+          }
+          var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
+            deadlineMs: timeout,
+            metadata: postData.metadata || {}
+          });
+          global.__worker_tasks[taskId] = {
+            taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
+            args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
+            events: [], metadata: postData.metadata || {}
+          };
+          global.__worker_subtaskToTaskId[subtaskId] = taskId;
+          global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId;
+          global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker");
+          global.__worker_taskManager.start(subtaskId);
+          global.__worker_tasks[taskId].status = "running";
+          global.__worker_tasks[taskId].startedAt = new Date().getTime();
+          return { taskId: taskId, createdAt: now };
+        })();
+      } finally {
+        request = _request;
+      }
+
+      var task = global.__worker_tasks[submission.taskId];
+      var response = {
+        task: {
+          id: submission.taskId,
+          contextId: isString(postData.contextId) ? postData.contextId : submission.taskId,
+          status: {
+            state: "TASK_STATE_WORKING",
+            timestamp: new Date(task.startedAt || task.createdAt).toISOString()
+          }
+        }
+      };
+      return ow.server.httpd.reply(stringify(response, __, ""), 202, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /tasks
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var toState = function(status) {
+        if (status === "completed") return "TASK_STATE_COMPLETED";
+        if (status === "failed") return "TASK_STATE_FAILED";
+        if (status === "cancelled") return "TASK_STATE_CANCELED";
+        return "TASK_STATE_WORKING";
+      };
+      var asTask = function(task) {
+        return {
+          id: task.taskId,
+          contextId: isMap(task.metadata) && isString(task.metadata.a2aContextId) ? task.metadata.a2aContextId : task.taskId,
+          status: {
+            state: toState(task.status),
+            timestamp: new Date((task.completedAt || task.startedAt || task.createdAt)).toISOString()
+          }
+        };
+      };
+
+      var taskId = __;
+      if (isMap(request.params)) {
+        if (isString(request.params.id)) taskId = request.params.id;
+        if (isString(request.params.taskId)) taskId = request.params.taskId;
+      }
+      if (isString(taskId) && taskId.length > 0) {
+        var task = global.__worker_tasks[taskId];
+        if (isUnDef(task)) return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
+        try {
+          var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+          task.status = subtaskStatus.status;
+          if (isDef(subtaskStatus.completedAt)) task.completedAt = subtaskStatus.completedAt;
+        } catch(ignoreStatusErr) {}
+        return ow.server.httpd.reply(stringify({ task: asTask(task) }, __, ""), __, ow.server.httpd.mimes.JSON);
+      }
+
+      var tasks = Object.keys(global.__worker_tasks).map(function(id) {
+        var task = global.__worker_tasks[id];
+        try {
+          var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+          task.status = subtaskStatus.status;
+          if (isDef(subtaskStatus.completedAt)) task.completedAt = subtaskStatus.completedAt;
+        } catch(ignoreStatusErr) {}
+        return asTask(task);
+      });
+      return ow.server.httpd.reply(stringify({ tasks: tasks }, __, ""), __, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /tasks:cancel
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    try {
+      var postData;
+      try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
+        postData = isMap(request.params) ? request.params : {};
+      }
+      var taskId = isString(postData.id) ? postData.id : postData.taskId;
+      if (!isString(taskId) || taskId.length === 0) {
+        return ow.server.httpd.reply(stringify({ error: "Missing required field: id" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      }
+      var task = global.__worker_tasks[taskId];
+      if (isUnDef(task)) return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
+      var reason = postData.reason || "Cancelled via A2A REST";
+      try {
+        global.__worker_taskManager.cancel(task.subtaskId, reason);
+        task.status = "cancelled";
+        task.completedAt = new Date().getTime();
+      } catch(ignoreCancelErr) {}
+      return ow.server.httpd.reply(stringify({ task: { id: taskId, status: { state: "TASK_STATE_CANCELED", timestamp: new Date(task.completedAt).toISOString() } } }, __, ""), __, ow.server.httpd.mimes.JSON);
+    } catch(e) {
+      logErr(e);
+      return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
+    }
+  ((error    )): true
+
+- (httpdService): "${onport:-8888}"
+  ((uri       )): /extendedAgentCard
+  ((execPre   )): *authCheck
+  ((execURI   )): | #js
+    var wargs = global.__worker_args;
+    var card = {
+      protocolVersion: "0.3.0",
+      name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
+      description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
+      version: "1.0.0",
+      capabilities: {
+        streaming: false,
+        pushNotifications: false,
+        stateTransitionHistory: true
+      },
+      interfaces: {
+        a2aHttpJsonRest: {
+          messageSend: "/message:send",
+          tasks: "/tasks",
+          cancel: "/tasks:cancel"
+        }
+      }
+    };
+    return ow.server.httpd.reply(stringify(card, __, ""), __, ow.server.httpd.mimes.JSON);
   ((error    )): true
 
 - (httpdService): "${onport:-8888}"

@@ -1025,12 +1025,39 @@ curl -X POST http://localhost:8080/result \
 
 **Worker API Endpoints:**
 - `GET /info` — Server capabilities
-- `POST /task` — Submit new task
-- `POST /status` — Poll task status
-- `POST /result` — Get final result
-- `POST /cancel` — Cancel running task
+- `POST /task` — Submit new task (Mini-A native API)
+- `POST /status` — Poll task status (Mini-A native API)
+- `POST /result` — Get final result (Mini-A native API)
+- `POST /cancel` — Cancel running task (Mini-A native API)
+- `POST /message:send` — A2A HTTP+JSON/REST send message endpoint
+- `GET /tasks` — A2A HTTP+JSON/REST list tasks (`?id=<taskId>` to fetch one task)
+- `POST /tasks:cancel` — A2A HTTP+JSON/REST cancel task (`{ "id": "..." }`)
+- `GET /.well-known/agent.json` — Public A2A agent card
+- `GET /extendedAgentCard` — Authenticated extended A2A agent card
 - `GET /healthz` — Health check
 - `GET /metrics` — Task/delegation metrics
+
+
+A2A HTTP+JSON/REST quick example:
+
+```bash
+# Send A2A message
+curl -X POST http://localhost:8080/message:send \
+  -H "Authorization: Bearer your-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": {
+      "messageId": "msg-1",
+      "role": "ROLE_USER",
+      "parts": [{ "text": "Summarize deployment risks for this week" }]
+    },
+    "contextId": "ctx-1"
+  }'
+
+# List A2A tasks (or query one with ?id=<taskId>)
+curl -H "Authorization: Bearer your-secret-token" \
+  http://localhost:8080/tasks
+```
 
 For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELEGATION.md)**.
 
