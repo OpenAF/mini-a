@@ -41,6 +41,7 @@ mini-a
 |---|---|---|---|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
 | `workers` | string | (none) | Comma-separated list of worker URLs. If provided, delegation routes to remote workers instead of local child agents |
+| `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST binding (`/message:send`, `/tasks`, `/tasks:cancel`) for remote worker transport |
 | `workerreg` | number | (none) | Port to start worker registration HTTP server for dynamic worker discovery |
 | `workerregtoken` | string | (none) | Bearer token required by `/worker-register`, `/worker-deregister`, and `/worker-list` |
 | `workerevictionttl` | number | `60000` | Heartbeat TTL (ms) before dynamic workers are auto-evicted |
@@ -50,6 +51,8 @@ mini-a
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 
 When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). Worker metadata (`name`, `description`) further influences routing to better align with sub-goal text. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If worker profiles are unavailable, it falls back to simple round-robin across all workers.
+
+Set `usea2a=true` to switch the parent-to-worker transport from the legacy `/task` + `/status` + `/result` endpoints to the A2A HTTP+JSON/REST flow (`POST /message:send`, `GET /tasks?id=...`, `POST /tasks:cancel`).
 
 ### How It Works
 
