@@ -22,6 +22,7 @@ var SubtaskManager = function(parentArgs, opts) {
   this.workers = this._normalizeWorkers(isDef(opts.workers) ? opts.workers : this.parentArgs.workers)
   this._staticWorkers = this.workers.slice()
   this.remoteDelegation = this.workers.length > 0
+  this.useA2A = toBoolean(isDef(opts.useA2A) ? opts.useA2A : this.parentArgs.usea2a) === true
   this.remotePollIntervalMs = _$(opts.remotePollIntervalMs, "opts.remotePollIntervalMs").isNumber().default(1000)
   this._workerCursor = 0
   this._workerGroupCursor = {}
@@ -572,6 +573,43 @@ SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload) {
   return response
 }
 
+SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
+  var headers = { "Content-Type": "application/json" }
+  if (isString(this.parentArgs.apitoken) && this.parentArgs.apitoken.length > 0) {
+    headers.Authorization = "Bearer " + this.parentArgs.apitoken
+  }
+
+  var url = workerUrl + path
+  if (isMap(query)) {
+    var queryParts = []
+    Object.keys(query).forEach(function(key) {
+      if (isUnDef(query[key])) return
+      queryParts.push(encodeURIComponent(String(key)) + "=" + encodeURIComponent(String(query[key])))
+    })
+    if (queryParts.length > 0) {
+      url += "?" + queryParts.join("&")
+    }
+  }
+
+  var response
+  try {
+    response = $rest({ requestHeaders: headers }).get(url)
+  } catch (e) {
+    var errMsg = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
+    throw new Error("Remote worker request failed (" + url + "): " + errMsg)
+  }
+
+  if (!isMap(response)) {
+    throw new Error("Remote worker response is not a map for endpoint " + path)
+  }
+
+  if (isString(response.error) && response.error.length > 0) {
+    throw new Error("Remote worker error: " + response.error)
+  }
+
+  return response
+}
+
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
   subtask.result = {
     answer: answer,
@@ -670,36 +708,76 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
       metadata.parentSubtaskId = subtask.parentId
       metadata.delegationDepth = subtask.depth
 
-      var taskResponse = parent._remoteRequest(workerUrl, "/task", {
-        goal: subtask.goal,
-        args: mergedArgs,
-        timeout: timeoutSec,
-        metadata: metadata
-      })
-
-      if (!isString(taskResponse.taskId) || taskResponse.taskId.length === 0) {
-        throw new Error("Remote worker did not return taskId")
+      var taskResponse
+      if (parent.useA2A) {
+        taskResponse = parent._remoteRequest(workerUrl, "/message:send", {
+          message: {
+            messageId: "mini-a-" + subtask.id,
+            role: "user",
+            parts: [
+              {
+                kind: "text",
+                text: subtask.goal
+              }
+            ]
+          },
+          contextId: isString(subtask.parentId) ? subtask.parentId : subtask.id,
+          metadata: {
+            args: mergedArgs
+          },
+          configuration: {
+            timeoutSeconds: timeoutSec
+          }
+        })
+      } else {
+        taskResponse = parent._remoteRequest(workerUrl, "/task", {
+          goal: subtask.goal,
+          args: mergedArgs,
+          timeout: timeoutSec,
+          metadata: metadata
+        })
       }
 
-      subtask.remoteTaskId = taskResponse.taskId
+      if (parent.useA2A) {
+        if (!isMap(taskResponse.task) || !isString(taskResponse.task.id) || taskResponse.task.id.length === 0) {
+          throw new Error("Remote worker did not return task.id")
+        }
+        subtask.remoteTaskId = taskResponse.task.id
+      } else {
+        if (!isString(taskResponse.taskId) || taskResponse.taskId.length === 0) {
+          throw new Error("Remote worker did not return taskId")
+        }
+        subtask.remoteTaskId = taskResponse.taskId
+      }
       parent.interactionFn("delegate", prefix + " Routed to worker: " + workerUrl)
 
       while (subtask.status === "running") {
         sleep(parent.remotePollIntervalMs, true)
         if (subtask.status !== "running") break
 
-        var status = parent._remoteRequest(workerUrl, "/status", { taskId: subtask.remoteTaskId })
-        var remoteStatus = isString(status.status) ? status.status.toLowerCase() : "running"
+        var status
+        var remoteStatus = "running"
 
-        if (isArray(status.events)) {
-          var seenEvents = _$(subtask.remoteEventIndex, "subtask.remoteEventIndex").isNumber().default(0)
-          for (var i = seenEvents; i < status.events.length; i++) {
-            var evt = status.events[i]
-            if (isMap(evt) && isString(evt.message) && evt.message.length > 0) {
-              parent.interactionFn("delegate", prefix + " " + evt.message)
+        if (parent.useA2A) {
+          status = parent._remoteGet(workerUrl, "/tasks", { id: subtask.remoteTaskId })
+          var remoteState = isMap(status.task) && isMap(status.task.status) && isString(status.task.status.state) ? status.task.status.state.toUpperCase() : "TASK_STATE_WORKING"
+          if (remoteState === "TASK_STATE_COMPLETED") remoteStatus = "completed"
+          if (remoteState === "TASK_STATE_FAILED") remoteStatus = "failed"
+          if (remoteState === "TASK_STATE_CANCELED" || remoteState === "TASK_STATE_CANCELLED") remoteStatus = "cancelled"
+        } else {
+          status = parent._remoteRequest(workerUrl, "/status", { taskId: subtask.remoteTaskId })
+          remoteStatus = isString(status.status) ? status.status.toLowerCase() : "running"
+
+          if (isArray(status.events)) {
+            var seenEvents = _$(subtask.remoteEventIndex, "subtask.remoteEventIndex").isNumber().default(0)
+            for (var i = seenEvents; i < status.events.length; i++) {
+              var evt = status.events[i]
+              if (isMap(evt) && isString(evt.message) && evt.message.length > 0) {
+                parent.interactionFn("delegate", prefix + " " + evt.message)
+              }
             }
+            subtask.remoteEventIndex = status.events.length
           }
-          subtask.remoteEventIndex = status.events.length
         }
 
         if (remoteStatus === "queued" || remoteStatus === "running") continue
@@ -949,10 +1027,17 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
 
   if (wasRunning && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
     try {
-      this._remoteRequest(subtask.workerUrl, "/cancel", {
-        taskId: subtask.remoteTaskId,
-        reason: reason || "Cancelled by user"
-      })
+      if (this.useA2A) {
+        this._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
+          id: subtask.remoteTaskId,
+          reason: reason || "Cancelled by user"
+        })
+      } else {
+        this._remoteRequest(subtask.workerUrl, "/cancel", {
+          taskId: subtask.remoteTaskId,
+          reason: reason || "Cancelled by user"
+        })
+      }
     } catch(ignoreRemoteCancel) {}
   }
   
@@ -1169,10 +1254,17 @@ SubtaskManager.prototype._startWatchdog = function() {
             if (elapsed >= subtask.deadlineMs) {
               if (parent.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
                 try {
-                  parent._remoteRequest(subtask.workerUrl, "/cancel", {
-                    taskId: subtask.remoteTaskId,
-                    reason: "Deadline exceeded (" + subtask.deadlineMs + "ms)"
-                  })
+                  if (parent.useA2A) {
+                    parent._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
+                      id: subtask.remoteTaskId,
+                      reason: "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+                    })
+                  } else {
+                    parent._remoteRequest(subtask.workerUrl, "/cancel", {
+                      taskId: subtask.remoteTaskId,
+                      reason: "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+                    })
+                  }
                 } catch(ignoreRemoteCancel) {}
               }
 
