@@ -182,7 +182,7 @@ Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mo
 - **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities (`useutils=true usetools=true`).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
 - **`web`** – Browser UI with tool registration (`usetools=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, and ASCII sketches enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, and ASCII sketches enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset, or `useplotly=true` for Plotly charts.
 
 ### Creating Custom Presets
 
@@ -257,7 +257,7 @@ Optional flags when starting the server:
 
 - `showexecs=true` to show executed commands in the interaction stream
 - `logpromptheaders=origin,referer` to log selected incoming headers for debugging
-- `usediagrams=false` / `usecharts=false` / `useascii=false` / `usemaps=false` to disable Mermaid, Chart.js, ASCII sketch, or Leaflet map guidance when running headless
+- `usediagrams=false` / `usecharts=false` / `useplotly=false` / `useascii=false` / `usemaps=false` to disable Mermaid, Chart.js, Plotly, ASCII sketch, or Leaflet map guidance when running headless
 - `usestream=true` to enable real-time token streaming via Server-Sent Events (SSE) for live response display
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
@@ -670,6 +670,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Visual Guidance
 - **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
 - **`usecharts`** (boolean, default: false): Hint the model to provide Chart.js snippets for data visualization tasks
+- **`useplotly`** (boolean, default: false): Prompt the model to emit Plotly.js JSON code blocks using `plotly` fenced blocks for interactive charting
 - **`useascii`** (boolean, default: false): Encourage enhanced UTF-8/ANSI visual output for rich terminal displays. When enabled, Mini-A guides the model to use:
   - **Full UTF-8 characters**: Box-drawing (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬), arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇)
   - **Strategic emoji**: Status indicators (✅❌⚠️🔴🟢🟡), workflow symbols (🔄🔁⏸️▶️⏹️), category icons (📁📂📄🔧⚙️🔑🔒), and semantic markers (💡🎯🚀⭐🏆)
@@ -703,7 +704,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`) exposing `init`, `filesystemQuery`, and `filesystemModify` actions.
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
   - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
-  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
+  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset, or `useplotly=true` for Plotly charts.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 
