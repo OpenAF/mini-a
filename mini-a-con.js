@@ -383,6 +383,7 @@ try {
     persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" },
     usedelegation  : { type: "boolean", default: false, description: "Enable sub-goal delegation to child Mini-A agents" },
     workers        : { type: "string", description: "Comma-separated list of worker URLs to enable remote delegation" },
+    usea2a        : { type: "boolean", default: false, description: "Use A2A HTTP+JSON/REST endpoints for remote worker delegation" },
     workerreg      : { type: "number", description: "Port for worker dynamic registration server (main instance)" },
     workerregtoken : { type: "string", description: "Bearer token for worker registration endpoints" },
     workerevictionttl: { type: "number", default: 60000, description: "Heartbeat TTL in ms before dynamic worker eviction" },

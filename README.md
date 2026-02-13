@@ -295,6 +295,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Sub-Goal Delegation** - Hierarchical task decomposition with concurrent child agents
   - **Local Delegation** - Spawn child Mini-A agents in the same process for parallel subtask execution (`usedelegation=true`)
   - **Remote Worker Routing** - Route delegated subtasks by worker `/info` capabilities/limits plus name/description hints, with round-robin tie-breaks (set `workers=http://worker1:8080,http://worker2:8080`)
+  - **Optional A2A Transport** - Use A2A HTTP+JSON/REST worker endpoints instead of the legacy `/task` protocol (`usea2a=true`)
   - **Dynamic Worker Registration** - Workers can self-register/heartbeat/deregister through a dedicated parent registration server (`workerreg`, `workerregurl`, `workerevictionttl`)
   - **Worker API** - Headless HTTP API for distributed agent workloads across processes/containers/hosts (`mini-a-worker.yaml`)
   - **Autonomous Delegation** - LLM decides when to delegate via `delegate-subtask` tool
@@ -368,6 +369,7 @@ Mini-A ships with complementary components:
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
 | `workers` | Comma-separated list of worker URLs for remote delegation (`workers=http://host1:8080,http://host2:8080`) | - |
+| `usea2a` | Use A2A HTTP+JSON/REST binding (`/message:send`, `/tasks`, `/tasks:cancel`) for remote delegation | `false` |
 | `workerreg` | Start dynamic worker registration server on the parent instance (port number) | - |
 | `workerregtoken` | Bearer token for dynamic worker registration endpoints | - |
 | `workerevictionttl` | Heartbeat TTL in milliseconds before dynamic worker eviction | `60000` |

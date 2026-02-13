@@ -974,6 +974,7 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
 | `workers` | string | (none) | Comma-separated list of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
+| `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST transport (`/message:send`, `/tasks`, `/tasks:cancel`) when delegating to remote workers |
 | `workerreg` | number | (none) | Port for dynamic worker registration server on the parent |
 | `workerregtoken` | string | (none) | Bearer token for registration endpoints |
 | `workerevictionttl` | number | `60000` | Heartbeat TTL (ms) before dynamic worker eviction |
@@ -1029,6 +1030,9 @@ mini-a workermode=true onport=8080 apitoken=your-secret-token workername="resear
 
 # Parent agent using remote workers for delegation
 mini-a usedelegation=true workers="http://localhost:8080" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
+
+# Parent agent using A2A HTTP+JSON/REST transport to remote workers
+mini-a usedelegation=true usea2a=true workers="http://localhost:8080" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
 
 # Submit a task via HTTP
 curl -X POST http://localhost:8080/task \
