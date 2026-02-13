@@ -2340,9 +2340,11 @@ try {
         printEvent(event, icon, text, id)
       })
     })
-    agent.setHookFn(function(event, contextVars) {
-      return runHooks(event, contextVars)
-    })
+    if (isFunction(agent.setHookFn)) {
+      agent.setHookFn(function(event, contextVars) {
+        return runHooks(event, contextVars)
+      })
+    }
     var agentResult = __, agentOrigResult = __
     var stopRequested = false
     try {
