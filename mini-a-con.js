@@ -907,7 +907,9 @@ try {
 
       if (isString(filePath) && filePath.length > 0 && !isAbsoluteOrExternalPath(filePath)) {
         var resolved = canonicalizePath(templateDir + "/" + filePath)
-        replacement = "@" + resolved
+        try {
+          if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) replacement = "@" + resolved
+        } catch(ignoreResolvedSkillRefError) { }
       }
 
       chunks.push(text.substring(cursor, atPos))
