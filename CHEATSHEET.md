@@ -176,8 +176,8 @@ mini-a goal="find large files" useshell=true shellallowpipes=true
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
-| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection (filesystemQuery read supports byte/line ranges and countLines) |
-| `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot` so docs can be inspected with `useutils` |
+| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`; filesystemQuery read supports byte/line ranges and countLines) |
+| `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
 
 **Single MCP:**

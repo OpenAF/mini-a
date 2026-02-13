@@ -6005,6 +6005,21 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       }
     })
 
+    // When mini-a-docs=true, enrich the markdownFiles description with the actual docs root path
+    // so the LLM knows exactly where to look and how to navigate the documentation.
+    if (args["mini-a-docs"] === true && isMap(fnsMeta.markdownFiles)) {
+      var docsRoot = isString(fileTool._root) ? fileTool._root : getOPackPath("mini-a")
+      fnsMeta.markdownFiles = {
+        name       : fnsMeta.markdownFiles.name,
+        description: "Read-only markdown helper for Mini-A documentation. Root directory: '" + docsRoot + "'. " +
+          "Start with operation='list' (no path needed) to discover all available documentation files. " +
+          "Then use operation='read' with a relative path (e.g. 'README.md', 'USAGE.md', 'CHEATSHEET.md', " +
+          "'docs/LEARN.md', 'docs/WHATS-NEW.md', 'mcps/README.md') to read them. " +
+          "Use operation='search' with a pattern to find content across all documentation files.",
+        inputSchema: fnsMeta.markdownFiles.inputSchema
+      }
+    }
+
     return {
       id     : "mini-a-utils",
       type   : "dummy",

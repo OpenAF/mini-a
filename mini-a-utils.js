@@ -2623,17 +2623,20 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     markdownFiles: {
       name       : "markdownFiles",
-      description: "Read-only markdown helper limited to *.md files inside the configured root. Use for listing markdown docs, searching their content, reading full files or selected line ranges, and reading Mini-A documentation.",
+      description: "Read-only markdown helper limited to *.md files inside the configured root. " +
+        "Call with operation='list' (no path) to discover all available documentation files and their relative paths. " +
+        "Use operation='read' with a relative path returned by 'list' to read a specific file. " +
+        "Use operation='search' with a pattern to find content across all markdown files.",
       inputSchema: {
         type      : "object",
         properties: {
           operation    : {
             type       : "string",
-            description: "Operation type: list markdown files, search markdown content, or read a markdown file.",
+            description: "Operation type: 'list' to enumerate markdown files, 'search' to find content, or 'read' to read a specific file.",
             enum       : markdownOps,
             default    : "list"
           },
-          path         : { type: "string", description: "Directory path for list/search or markdown file path for read." },
+          path         : { type: "string", description: "Relative path within the root: a directory for list/search, or a markdown file path (from a previous 'list' result) for read." },
           recursive    : { type: "boolean", description: "Traverse subdirectories for list/search operations." },
           includeHidden: { type: "boolean", description: "Include hidden files/directories in list/search operations." },
           pattern      : { type: "string", description: "Pattern to find when operation=search." },

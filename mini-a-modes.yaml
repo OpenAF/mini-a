@@ -14,17 +14,20 @@ modes:
       shellallowpipes: true
       shellbatch     : true
       showexecs      : true
+      mini-a-docs    : true
 
   utils:
     description: "Utilities mode"
     params     :
-      useutils : true
-      usetools : true
+      useutils   : true
+      mini-a-docs: true
+      usetools   : true
 
   internet:
     description: "Internet access mode"
     params     :
       usetools   : true
+      mini-a-docs: true
       mcp        :
       - type   : ojob
         options:
@@ -64,6 +67,7 @@ modes:
       useutils   : true
       usestream  : true
       mcpproxy   : true
+      mini-a-docs: true
       mcp        : 
       - type   : ojob
         options:
