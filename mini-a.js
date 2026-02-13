@@ -5866,6 +5866,119 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     var fns = {}
     var fnsMeta = {}
+    var _normalizeOp = function(v) {
+      return isString(v) ? v.toLowerCase().trim() : ""
+    }
+    var _quoted = function(v) {
+      if (!isString(v)) return ""
+      var t = v.replace(/\s+/g, " ").trim()
+      if (t.length > 80) t = t.substring(0, 77) + "..."
+      return "'" + t + "'"
+    }
+    var _formatPathPart = function(payload) {
+      if (isMap(payload) && isString(payload.path) && payload.path.trim().length > 0) {
+        return " in " + _quoted(payload.path.trim())
+      }
+      return ""
+    }
+    var _buildUtilsIntentMessage = function(name, payload) {
+      if (!isMap(payload)) return "Running tool '" + name + "'."
+
+      var op = _normalizeOp(payload.operation)
+      var pathPart = _formatPathPart(payload)
+
+      if (name === "filesystemQuery") {
+        if (["search", "searchcontent", "grep", "find"].indexOf(op) >= 0) {
+          if (isString(payload.pattern) && payload.pattern.trim().length > 0) {
+            return "Searching for text " + _quoted(payload.pattern) + pathPart + "."
+          }
+          return "Searching text" + pathPart + "."
+        }
+        if (op === "glob") {
+          if (isString(payload.pattern) && payload.pattern.trim().length > 0) {
+            return "Finding files matching " + _quoted(payload.pattern) + pathPart + "."
+          }
+          return "Finding files" + pathPart + "."
+        }
+        if (["list", "ls", "listdirectory", "dir"].indexOf(op) >= 0) {
+          return "Listing directory" + pathPart + "."
+        }
+        if (["info", "stat", "metadata", "getfileinfo"].indexOf(op) >= 0) {
+          return "Getting file info" + pathPart + "."
+        }
+        if (op === "" || ["read", "cat", "readfile"].indexOf(op) >= 0) {
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd) && payload.lineStart === payload.lineEnd) {
+            return "Getting line " + Math.floor(payload.lineStart) + pathPart + "."
+          }
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd)) {
+            return "Getting lines " + Math.floor(payload.lineStart) + "-" + Math.floor(payload.lineEnd) + pathPart + "."
+          }
+          if (isNumber(payload.lineStart)) {
+            return "Getting line " + Math.floor(payload.lineStart) + pathPart + "."
+          }
+          if (payload.countLines === true) {
+            return "Counting lines" + pathPart + "."
+          }
+          return "Reading file" + pathPart + "."
+        }
+      }
+
+      if (name === "filesystemModify") {
+        if (["write", "writefile", "save"].indexOf(op) >= 0) return "Writing file" + pathPart + "."
+        if (op === "append") return "Appending to file" + pathPart + "."
+        if (["edit", "replace"].indexOf(op) >= 0) return "Editing file" + pathPart + "."
+        if (["delete", "remove", "rm", "deletefile"].indexOf(op) >= 0) return "Deleting path" + pathPart + "."
+      }
+
+      if (name === "timeUtilities") {
+        if (op === "" || op === "current-time" || op === "current") {
+          if (isString(payload.timezone) && payload.timezone.trim().length > 0) {
+            return "Getting current time for " + _quoted(payload.timezone.trim()) + "."
+          }
+          return "Getting current time."
+        }
+        if (op === "convert" || op === "timezone-convert") {
+          if (isString(payload.targetTimezone) && payload.targetTimezone.trim().length > 0) {
+            return "Converting time to timezone " + _quoted(payload.targetTimezone.trim()) + "."
+          }
+          return "Converting time between timezones."
+        }
+        if (op === "sleep") {
+          var ms = Number(payload.milliseconds)
+          if (!isNaN(ms)) return "Sleeping for " + ms + "ms."
+          return "Sleeping."
+        }
+      }
+
+      if (name === "markdownFiles") {
+        if (op === "" || op === "list") {
+          return "Listing markdown files" + pathPart + "."
+        }
+        if (op === "search") {
+          if (isString(payload.pattern) && payload.pattern.trim().length > 0) {
+            return "Searching markdown files for " + _quoted(payload.pattern) + pathPart + "."
+          }
+          return "Searching markdown files" + pathPart + "."
+        }
+        if (["read", "get", "view", "cat"].indexOf(op) >= 0) {
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd) && payload.lineStart === payload.lineEnd) {
+            return "Getting line " + Math.floor(payload.lineStart) + " from markdown file" + pathPart + "."
+          }
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd)) {
+            return "Getting lines " + Math.floor(payload.lineStart) + "-" + Math.floor(payload.lineEnd) + " from markdown file" + pathPart + "."
+          }
+          if (isNumber(payload.lineStart)) {
+            return "Getting markdown file lines starting at " + Math.floor(payload.lineStart) + pathPart + "."
+          }
+          return "Reading markdown file" + pathPart + "."
+        }
+      }
+
+      if (isString(op) && op.length > 0) {
+        return "Running tool '" + name + "' with operation '" + op + "'."
+      }
+      return "Running tool '" + name + "'."
+    }
 
     methodNames.forEach(function(name) {
       var meta = metadataByFn[name] || {
@@ -5878,6 +5991,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         var payload = params
         if (isUnDef(payload)) payload = {}
         try {
+          parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           var result = fileTool[name](payload)
           return formatResponse(result)
         } catch (err) {
@@ -8140,6 +8254,7 @@ MiniA.prototype.init = function(args) {
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
+      { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
       { name: "workerreg", type: "number", default: __ },
@@ -8176,6 +8291,7 @@ MiniA.prototype.init = function(args) {
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
+    args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usedelegation = _$(toBoolean(args.usedelegation), "args.usedelegation").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -8184,6 +8300,10 @@ MiniA.prototype.init = function(args) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
+      args.utilsroot = getOPackPath("mini-a")
+      this.fnI("info", "mini-a-docs=true: using Mini-A opack path as utilsroot for documentation access.")
+    }
     args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").isNumber().default(4)
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").isNumber().default(3)
     args.delegationtimeout = _$(args.delegationtimeout, "args.delegationtimeout").isNumber().default(300000)
@@ -8872,6 +8992,7 @@ MiniA.prototype.init = function(args) {
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
  * - utilsroot (string, optional): Root directory for Mini Utils Tool file operations (only when useutils=true).
+ * - mini-a-docs (boolean, default=false): When true and utilsroot is not set, auto-set utilsroot to getOPackPath("mini-a") so the LLM can inspect Mini-A documentation with useutils tools.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
@@ -9026,7 +9147,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
-      { name: "utilsroot", type: "string", default: __ }
+      { name: "utilsroot", type: "string", default: __ },
+      { name: "mini-a-docs", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -9042,6 +9164,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
@@ -9057,6 +9180,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
+      args.utilsroot = getOPackPath("mini-a")
+      this.fnI("info", "mini-a-docs=true: using Mini-A opack path as utilsroot for documentation access.")
+    }
 
     if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format

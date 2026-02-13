@@ -21,7 +21,23 @@ try {
     return found
   }
 
+  function hasCheatsheetFlag(map) {
+    if (!isObject(map)) return false
+    var cheatsheetKeys = ["--cheatsheet", "cheatsheet"]
+    var found = false
+    Object.keys(map).some(function(key) {
+      var normalized = String(key || "").toLowerCase()
+      if (cheatsheetKeys.indexOf(normalized) >= 0) {
+        found = true
+        return true
+      }
+      return false
+    })
+    return found
+  }
+
   var helpRequested = hasHelpFlag(args)
+  var cheatsheetRequested = hasCheatsheetFlag(args)
 
   // Init
   if (!(isString(args.libs) && args.libs.trim().length > 0)) {
@@ -38,7 +54,7 @@ try {
     if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
   }
 
-  if (!helpRequested) {
+  if (!helpRequested && !cheatsheetRequested) {
     (function(args) {
       if (args.__modeApplied === true) return
       if (!isString(args.mode)) return
@@ -239,10 +255,14 @@ try {
   var historyFilePath       = resolveCanonicalPath(historyHome, historyFileName)
   var conversationFileName  = ".openaf-mini-a_session.json"
   var conversationFilePath  = resolveCanonicalPath(historyHome, conversationFileName)
+  var customCommandsDirPath = canonicalizePath(historyHome + "/.openaf-mini-a/commands")
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
   var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var builtInSlashCommands  = {}
+  slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
+  var customSlashCommands   = {}
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -307,6 +327,7 @@ try {
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     usetools       : { type: "boolean", default: false, description: "Register MCP tools directly on the model" },
     useutils       : { type: "boolean", default: false, description: "Enable bundled Mini Utils Tool utilities" },
+    "mini-a-docs"  : { type: "boolean", default: false, description: "When true (with useutils=true), point utilsroot to the Mini-A opack path so the LLM can inspect Mini-A documentation files." },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
     usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },
@@ -389,7 +410,8 @@ try {
     resume: true,
     conversation: true,
     "--help": true,
-    "-h": true
+    "-h": true,
+    "--cheatsheet": true
   }
 
   function formatDefaultValue(value) {
@@ -436,7 +458,8 @@ try {
       { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },
       { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
-      { option: "--help | -h", description: "Show this help text." }
+      { option: "--help | -h", description: "Show this help text." },
+      { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." }
     ]
 
     var maxOptionLength = options.reduce(function(max, opt) {
@@ -474,6 +497,29 @@ try {
   if (helpRequested) {
     printCliHelp()
     exit(0)
+  }
+
+  function printCheatSheet() {
+    var cheatsheetPath = getOPackPath("mini-a") + "/CHEATSHEET.md"
+    if (!io.fileExists(cheatsheetPath)) cheatsheetPath = resolveCanonicalPath(".", "CHEATSHEET.md")
+    if (!io.fileExists(cheatsheetPath)) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to locate CHEATSHEET.md.", errorColor))
+      return false
+    }
+
+    try {
+      var cheatsheet = io.readFileString(cheatsheetPath)
+      print(format.withMD(cheatsheet))
+      return true
+    } catch (cheatsheetError) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to render CHEATSHEET.md: " + cheatsheetError, errorColor))
+      return false
+    }
+  }
+
+  if (cheatsheetRequested) {
+    if (printCheatSheet()) exit(0)
+    exit(1)
   }
 
   function coerceDefaultValue(def, rawValue, key) {
@@ -554,6 +600,168 @@ try {
     return completions
   }
 
+  function loadCustomSlashCommands() {
+    var loaded = {}
+    try {
+      if (!io.fileExists(customCommandsDirPath)) return loaded
+      var info = io.fileInfo(customCommandsDirPath)
+      if (!isObject(info) || info.isDirectory !== true) return loaded
+      var listing = io.listFiles(customCommandsDirPath)
+      if (!isObject(listing) || !isArray(listing.files)) return loaded
+
+      listing.files.forEach(function(file) {
+        if (!isObject(file) || file.isDirectory === true) return
+        if (!isString(file.filename) || file.filename.length === 0) return
+        if (!/\.md$/i.test(file.filename)) return
+
+        var commandName = file.filename.replace(/\.md$/i, "").toLowerCase()
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(commandName)) {
+          logWarn("Ignoring custom slash command file with invalid name: " + file.filename)
+          return
+        }
+        if (Object.prototype.hasOwnProperty.call(builtInSlashCommands, commandName)) {
+          logWarn("Ignoring custom slash command '/" + commandName + "' because it conflicts with a built-in command.")
+          return
+        }
+
+        var fullPath = canonicalizePath(customCommandsDirPath + "/" + file.filename)
+        loaded[commandName] = {
+          name: commandName,
+          file: fullPath
+        }
+      })
+    } catch (customCommandLoadError) {
+      logWarn("Failed to load custom slash commands: " + customCommandLoadError)
+    }
+    return loaded
+  }
+
+  function getCustomSlashCommandNames() {
+    return Object.keys(customSlashCommands).sort()
+  }
+
+  function getAllSlashCommandNames() {
+    return slashCommands.concat(getCustomSlashCommandNames())
+  }
+
+  function parseSlashCommandInput(commandText) {
+    var raw = isString(commandText) ? commandText.trim() : ""
+    if (raw.length === 0) {
+      return { name: "", argsRaw: "" }
+    }
+    var firstSpace = raw.indexOf(" ")
+    if (firstSpace === -1) {
+      return { name: raw.toLowerCase(), argsRaw: "" }
+    }
+    return {
+      name: raw.substring(0, firstSpace).trim().toLowerCase(),
+      argsRaw: raw.substring(firstSpace + 1).trim()
+    }
+  }
+
+  function parseSlashArgs(rawArgs) {
+    var raw = isString(rawArgs) ? rawArgs.trim() : ""
+    if (raw.length === 0) return { ok: true, raw: "", argv: [], argc: 0 }
+
+    var argv = []
+    var current = ""
+    var quote = ""
+    var escaping = false
+
+    for (var i = 0; i < raw.length; i++) {
+      var ch = raw.charAt(i)
+
+      if (escaping) {
+        current += ch
+        escaping = false
+        continue
+      }
+
+      if (ch === "\\") {
+        escaping = true
+        continue
+      }
+
+      if (quote.length > 0) {
+        if (ch === quote) {
+          quote = ""
+        } else {
+          current += ch
+        }
+        continue
+      }
+
+      if (ch === "'" || ch === "\"") {
+        quote = ch
+        continue
+      }
+
+      if (/\s/.test(ch)) {
+        if (current.length > 0) {
+          argv.push(current)
+          current = ""
+        }
+        continue
+      }
+
+      current += ch
+    }
+
+    if (escaping || quote.length > 0) {
+      return { ok: false, error: "Unbalanced quotes or trailing escape in arguments." }
+    }
+    if (current.length > 0) argv.push(current)
+
+    return {
+      ok: true,
+      raw: raw,
+      argv: argv,
+      argc: argv.length
+    }
+  }
+
+  function renderCustomSlashTemplate(template, parsedArgs) {
+    var rendered = isString(template) ? template : String(template || "")
+    var replacedAny = false
+    var args = isObject(parsedArgs) ? parsedArgs : { raw: "", argv: [], argc: 0 }
+
+    function replaceAll(placeholder, value) {
+      if (rendered.indexOf(placeholder) >= 0) {
+        replacedAny = true
+        rendered = rendered.split(placeholder).join(value)
+      }
+    }
+
+    var argvString = "[]"
+    try {
+      argvString = stringify(args.argv || [], __, "")
+    } catch(ignoreArgvStringError) {
+      argvString = "[]"
+    }
+
+    replaceAll("{{args}}", args.raw || "")
+    replaceAll("{{argv}}", argvString)
+    replaceAll("{{argc}}", String(isNumber(args.argc) ? args.argc : 0))
+
+    rendered = rendered.replace(/\{\{arg([1-9][0-9]*)\}\}/g, function(_, indexStr) {
+      replacedAny = true
+      var idx = Number(indexStr) - 1
+      if (!isNaN(idx) && idx >= 0 && isArray(args.argv) && idx < args.argv.length) return args.argv[idx]
+      return ""
+    })
+
+    if ((args.argc || 0) > 0 && replacedAny !== true) {
+      rendered += "\n\nArguments (auto-appended):\n"
+      rendered += "- raw: " + (args.raw || "") + "\n"
+      rendered += "- argv: " + argvString + "\n"
+      rendered += "- argc: " + (args.argc || 0) + "\n"
+    }
+
+    return rendered
+  }
+
+  customSlashCommands = loadCustomSlashCommands()
+
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
@@ -586,7 +794,7 @@ try {
           var firstSpace = uptoCursor.indexOf(" ")
           if (firstSpace === -1) {
             var partialCommand = uptoCursor.toLowerCase()
-            slashCommands.forEach(function(cmd) {
+            getAllSlashCommandNames().forEach(function(cmd) {
               var candidateCommand = "/" + cmd
               if (candidateCommand.toLowerCase().indexOf(partialCommand) === 0) candidates.add(candidateCommand)
             })
@@ -2001,6 +2209,14 @@ try {
       "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>       Show details for a subtask", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
+    var customCommandNames = getCustomSlashCommandNames()
+    if (customCommandNames.length > 0) {
+      lines.push("")
+      lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
+      customCommandNames.forEach(function(name) {
+        lines.push("  " + colorifyText("/" + name, "BOLD") + colorifyText(" [args]       Execute instructions from " + customSlashCommands[name].file, hintColor))
+      })
+    }
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
 
@@ -2040,6 +2256,7 @@ try {
     if (trimmed.charAt(0) === '/') {
       var command = trimmed.substring(1).trim()
       var commandLower = command.toLowerCase()
+      var parsedSlashCommand = parseSlashCommandInput(command)
       if (command.length === 0) {
         printHelp()
         continue
@@ -2375,6 +2592,27 @@ try {
           var key = match[1]
           var value = match[2]
           setOption(key, value)
+        }
+        continue
+      }
+      if (Object.prototype.hasOwnProperty.call(customSlashCommands, parsedSlashCommand.name)) {
+        var customDef = customSlashCommands[parsedSlashCommand.name]
+        try {
+          if (!io.fileExists(customDef.file) || io.fileInfo(customDef.file).isFile !== true) {
+            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Custom slash command template is missing: " + customDef.file, errorColor))
+            continue
+          }
+          var parsedArgs = parseSlashArgs(parsedSlashCommand.argsRaw)
+          if (parsedArgs.ok !== true) {
+            print(colorifyText("Usage: /" + parsedSlashCommand.name + " [args...]", errorColor))
+            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedArgs.error, errorColor))
+            continue
+          }
+          var template = io.readFileString(customDef.file)
+          var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
+          runGoal(goalFromTemplate)
+        } catch (customCommandError) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute custom slash command '/" + parsedSlashCommand.name + "': " + customCommandError, errorColor))
         }
         continue
       }

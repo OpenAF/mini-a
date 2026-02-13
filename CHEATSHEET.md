@@ -177,6 +177,7 @@ mini-a goal="find large files" useshell=true shellallowpipes=true
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection (filesystemQuery read supports byte/line ranges and countLines) |
+| `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot` so docs can be inspected with `useutils` |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
 
 **Single MCP:**
@@ -214,6 +215,12 @@ mini-a goal="query database" \
 mini-a goal="analyze local files" \
   mcp="[(cmd: 'ojob mcps/mcp-db.yaml...'), (cmd: 'ojob mcps/mcp-net.yaml...')]" \
   mcplazy=true usetools=true
+```
+
+**Read Mini-A documentation with utils tools:**
+```bash
+mini-a goal="list markdown docs in the Mini-A package and summarize CHEATSHEET.md" \
+  useutils=true mini-a-docs=true
 ```
 
 **Proxy Aggregation (single tool exposed):**
@@ -923,12 +930,35 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
 | `/save <path>` | Save the last final answer to the provided file path |
+| `/<custom> [args...]` | Execute custom command templates from `~/.openaf-mini-a/commands/<custom>.md` |
 | `/help` | Show help information |
 | `/quit` or `/exit` | Exit console |
 
+**Custom Slash Commands (`~/.openaf-mini-a/commands/*.md`):**
+
+- Command file: `~/.openaf-mini-a/commands/my-command.md` is invoked as `/my-command ...args...`
+- Placeholders: `{{args}}`, `{{argv}}`, `{{argc}}`, `{{arg1}}`, `{{arg2}}`, ...
+- Built-in commands always take precedence (`/help`, `/show`, etc. cannot be overridden)
+- Missing or unreadable command templates fail with an explicit hard error
+
+Example template:
+
+```markdown
+Follow these instructions:
+Target: {{arg1}}
+All args: {{args}}
+Parsed args: {{argv}}
+```
+
+Run it:
+
+```bash
+mini-a ➤ /my-command repo-a --fast "include docs"
+```
+
 **File Attachments in Console:**
 
-> **Tip:** Slash commands that accept file paths (like `/save`) now include filesystem tab-completion, so you can press <kbd>Tab</kbd> to auto-complete directories and filenames.
+> **Tip:** Slash commands that accept file paths (like `/save`) include filesystem tab-completion, and discovered custom slash commands also appear in command completion via <kbd>Tab</kbd>.
 
 ```bash
 # Single file

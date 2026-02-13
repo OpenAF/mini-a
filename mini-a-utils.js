@@ -645,6 +645,54 @@ MiniUtilsTool.prototype._collectFiles = function(startPath, recursive) {
   return files
 }
 
+MiniUtilsTool.prototype._isMarkdownPath = function(pathValue) {
+  if (!isString(pathValue)) return false
+  return pathValue.toLowerCase().endsWith(".md")
+}
+
+MiniUtilsTool.prototype._collectMarkdownFiles = function(startPath, recursive, includeHidden) {
+  var files = []
+  var seen = {}
+  var self = this
+  var pushFile = function(filePath) {
+    if (!isString(filePath)) return
+    if (seen[filePath]) return
+    var info = io.fileInfo(filePath)
+    if (isUnDef(info) || info.isFile !== true) return
+    var relativePath = self._toRelative(info.canonicalPath || filePath)
+    if (!self._isMarkdownPath(relativePath)) return
+    seen[filePath] = true
+    files.push({
+      filepath: filePath,
+      relativePath: relativePath,
+      size: info.size,
+      lastModified: isDef(info.lastModified) ? new Date(info.lastModified) : __
+    })
+  }
+
+  var info = io.fileInfo(startPath)
+  if (isUnDef(info)) return files
+  if (info.isFile === true) {
+    pushFile(startPath)
+    return files
+  }
+  if (info.isDirectory !== true) return files
+
+  var entries = this._listEntries(startPath, {
+    recursive: recursive === true,
+    includeHidden: includeHidden === true
+  })
+  entries.forEach(function(entry) {
+    if (entry.isFile !== true) return
+    if (!self._isMarkdownPath(entry.relativePath)) return
+    try {
+      pushFile(self._resolve(entry.relativePath))
+    } catch (ignoreResolveError) {
+    }
+  })
+  return files
+}
+
 /**
  * <odoc>
  * <key>MiniUtilsTool.searchContent(params) : Array</key>
@@ -752,6 +800,106 @@ MiniUtilsTool.prototype.searchContent = function(params) {
     }
 
     return filtered
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.markdownFiles(params) : Object|Array</key>
+ * Provides markdown-focused filesystem operations limited to `*.md` files.
+ * The `params` object supports:
+ * - `operation` (string, optional): `list` (default), `search`, or `read`.
+ * - `path` (string, optional): Base directory or markdown file path. Defaults to `"."`.
+ * - `recursive` (boolean, optional): Recursively scan directories for `list`/`search`. Defaults to `true`.
+ * - `includeHidden` (boolean, optional): Include hidden files/directories during scans. Defaults to `false`.
+ * - `pattern` (string, required for `search`): Text/regex pattern to find in markdown files.
+ * - `regex` (boolean, optional): Treat search pattern as regular expression. Defaults to `false`.
+ * - `caseSensitive` (boolean, optional): Case-sensitive search. Defaults to `false`.
+ * - `maxResults` (number, optional): Maximum number of matches for `search`. Defaults to `0` (no limit).
+ * - Read options for `read`: `encoding`, `lineStart`, `lineEnd`, `maxLines`, `lineSeparator`, `countLines`, `compact`.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.markdownFiles = function(params) {
+  params = params || {}
+  try {
+    this._ensureInitialized()
+    var operation = isString(params.operation) ? params.operation.toLowerCase().trim() : "list"
+    var startPath = this._resolve(isDef(params.path) ? params.path : ".")
+    var recursive = params.recursive !== false
+    var includeHidden = params.includeHidden === true
+
+    if (operation === "list") {
+      var markdowns = this._collectMarkdownFiles(startPath, recursive, includeHidden)
+      markdowns.sort(function(a, b) { return String(a.relativePath).localeCompare(String(b.relativePath)) })
+
+      if (params.compact === true) {
+        return {
+          count: markdowns.length,
+          files: markdowns.map(function(entry) { return entry.relativePath })
+        }
+      }
+      return markdowns
+    }
+
+    if (operation === "search") {
+      if (!isString(params.pattern) || params.pattern.length === 0) return "[ERROR] pattern is required for markdown search"
+      var files = this._collectMarkdownFiles(startPath, recursive, includeHidden)
+      var regexMode = params.regex === true
+      var caseSensitive = params.caseSensitive === true
+      var maxResults = Number(params.maxResults || 0)
+      var matcher = regexMode ? new RegExp(params.pattern, caseSensitive ? "g" : "gi") : null
+      var needle = caseSensitive ? params.pattern : String(params.pattern).toLowerCase()
+      var results = []
+      var totalMatches = 0
+
+      files.some(function(entry) {
+        if (maxResults > 0 && totalMatches >= maxResults) return true
+        try {
+          var content = io.readFileString(entry.filepath)
+          var lines = String(content).split(/\r?\n/)
+          for (var i = 0; i < lines.length; i++) {
+            if (maxResults > 0 && totalMatches >= maxResults) break
+            var line = lines[i]
+            var matched = false
+            if (regexMode) {
+              matcher.lastIndex = 0
+              matched = matcher.test(line)
+            } else {
+              var haystack = caseSensitive ? line : line.toLowerCase()
+              matched = haystack.indexOf(needle) >= 0
+            }
+            if (matched) {
+              totalMatches++
+              results.push({
+                relativePath: entry.relativePath,
+                line: i + 1,
+                preview: line
+              })
+            }
+          }
+        } catch (ignoreReadError) {
+        }
+        return maxResults > 0 && totalMatches >= maxResults
+      })
+
+      if (params.compact === true) {
+        return { count: results.length, matches: results }
+      }
+      return results
+    }
+
+    if (operation === "read" || operation === "get" || operation === "view" || operation === "cat") {
+      if (isUnDef(params.path)) return "[ERROR] path is required for markdown read"
+      var targetRelative = this._toRelative(startPath)
+      if (!this._isMarkdownPath(targetRelative)) {
+        return "[ERROR] markdown read only supports *.md files"
+      }
+      return this.readFile(params)
+    }
+
+    return "[ERROR] Unknown markdown operation: " + operation
   } catch (e) {
     return "[ERROR] " + (e.message || String(e))
   }
@@ -2173,6 +2321,7 @@ MiniUtilsTool._metadataByFn = (function() {
 
   // KV store operation types
   var kvStoreOps = ["set", "get", "delete", "list", "clear", "todo-write", "todo-read"]
+  var markdownOps = ["list", "search", "read", "get", "view", "cat"]
 
   return {
     init: {
@@ -2470,6 +2619,45 @@ MiniUtilsTool._metadataByFn = (function() {
           append   : { type: "boolean", description: "Append to existing todo list when true." }
         },
         required : ["operation"]
+      }
+    },
+    markdownFiles: {
+      name       : "markdownFiles",
+      description: "Read-only markdown helper limited to *.md files inside the configured root. Use for listing markdown docs, searching their content, reading full files or selected line ranges, and reading Mini-A documentation.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation    : {
+            type       : "string",
+            description: "Operation type: list markdown files, search markdown content, or read a markdown file.",
+            enum       : markdownOps,
+            default    : "list"
+          },
+          path         : { type: "string", description: "Directory path for list/search or markdown file path for read." },
+          recursive    : { type: "boolean", description: "Traverse subdirectories for list/search operations." },
+          includeHidden: { type: "boolean", description: "Include hidden files/directories in list/search operations." },
+          pattern      : { type: "string", description: "Pattern to find when operation=search." },
+          regex        : { type: "boolean", description: "Treat search pattern as regular expression." },
+          caseSensitive: { type: "boolean", description: "Case-sensitive matching for search." },
+          maxResults   : { type: "number", description: "Maximum number of matches for search (0 means unlimited)." },
+          encoding     : { type: "string", description: "Character encoding for read operation." },
+          lineStart    : { type: "number", description: "One-based start line for read operation." },
+          lineEnd      : { type: "number", description: "One-based end line for read operation." },
+          maxLines     : { type: "number", description: "Maximum lines to read for read operation." },
+          lineSeparator: { type: "string", description: "Line separator used when joining lines for read operation." },
+          countLines   : { type: "boolean", description: "Return total line count for read operation." },
+          compact      : { type: "boolean", description: "Return compact responses to reduce token usage." }
+        },
+        allOf: [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["search"] } } },
+            then: { required: ["pattern"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["read", "get", "view", "cat"] } } },
+            then: { required: ["path"] }
+          }
+        ]
       }
     }
   }

@@ -47,6 +47,35 @@ Need a quick reference of every option? Run `mini-a -h` (or `mini-a --help`) to 
 
 Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
 
+Custom slash commands are supported through markdown templates in `~/.openaf-mini-a/commands/`. Typing `/<name> ...args...` looks for `~/.openaf-mini-a/commands/<name>.md`, renders placeholders, and submits the result as the goal text.
+
+Supported placeholders inside each template:
+- `{{args}}` → raw argument string
+- `{{argv}}` → parsed argument array as JSON
+- `{{argc}}` → argument count
+- `{{arg1}}`, `{{arg2}}`, ... → positional arguments
+
+Example template file `~/.openaf-mini-a/commands/my-command.md`:
+
+```markdown
+Follow these instructions exactly.
+
+Primary target: {{arg1}}
+Extra flags: {{args}}
+Parsed list: {{argv}}
+```
+
+Then run:
+
+```bash
+mini-a ➤ /my-command repo-a --fast "include docs"
+```
+
+Notes:
+- Built-in commands take precedence, so custom files cannot override `/help`, `/show`, etc.
+- If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
+- Discovered custom commands appear in `/help` and Tab completion.
+
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
 - `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. Use this when you want to reclaim tokens but keep the high-level context available to the agent.
@@ -691,6 +720,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - Exposes three streamlined actions: `init` (configure the working root and permissions), `filesystemQuery` (read/list/search/info via the `operation` field), and `filesystemModify` (write/append/delete with `operation` plus required `content` or `confirm` flags)
   - `filesystemQuery` read supports byte ranges (`byteStart`, `byteEnd`, `byteLength`), line windows (`lineStart`, `lineEnd`, `maxLines`, `lineSeparator`), and `countLines=true` for total line count
 - **`utilsroot`** (string, default: `.`): Root directory for Mini Utils Tool file operations (only when `useutils=true`)
+- **`mini-a-docs`** (boolean, default: false): When true (and `utilsroot` is not provided), automatically sets `utilsroot` to `getOPackPath("mini-a")` so the LLM can inspect Mini-A documentation files through `useutils` tools
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history

@@ -56,7 +56,17 @@ version: '20260211'
 dependencies:
   openaf: '>=20250915'
 files:
+- .claude/settings.local.json
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+- .github/mini-a-con-screenshot.png
+- .github/mini-a-web-screenshot1.jpg
+- .github/version.svg
+- .github/workflows/github-action.yml
 - .odoc.db
+- .openaf_precompiled/.t8-20260212
+- .openaf_precompiled/mini-a-utils_js.class
+- .openaf_precompiled/mini-a_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -65,6 +75,7 @@ files:
 - LICENSE
 - README.md
 - USAGE.md
+- c.md
 - docs/BACKEND-ENDPOINTS.md
 - docs/DELEGATION.md
 - docs/LEARN.md
@@ -126,14 +137,25 @@ files:
 - tests/miniAUtils.js
 - tests/miniAUtils.yaml
 filesHash:
+  .claude/settings.local.json: 87cbf9038d7e93b2b6597cf37791c5fda76f30d0
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  .github/mini-a-con-screenshot.png: cb5fdf4b3013f482abbe9e4b358e6f0137a741e0
+  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
+  .github/version.svg: d4f04ae96be54e7bd7d7006d942983245ab1c482
+  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20260212: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a-utils_js.class: 5340aecdaf1038d52c7d44f23b28a6d728b935c5
+  .openaf_precompiled/mini-a_js.class: e64cfcdb69e219c9d6ab0d1540ff7df7e266d7dd
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 3ed8876697804973e2e73e9922fc198d2c4872b9
+  CHEATSHEET.md: b36b7cfa6fd2537cdff67e5e06d5947819baabf2
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 2b49e266decad0a706f22eee3a6df7d7ff911bb5
-  USAGE.md: 0f6ab8f14389794436051947af7626cf40cfcec7
+  README.md: 954405f14bb6a847e4364bb886d1cdfc42bc68df
+  USAGE.md: ee4619baa8adef2c0433f18dbebf655ce981a236
+  c.md: a8a533a032b6db497763f3fa1dcf9afa2b852524
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: bc441039e175e996d5d9ca4fa316b1059cda2ac5
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
@@ -172,16 +194,16 @@ filesHash:
   mcps/mcp-time.yaml: fd4e494a2d73d5579912ce8c66fcbb3204046917
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: a3c9cd4f02b7874f8faa2a097d445e2f2ca451b9
-  mini-a-con.js: 83a56565a654cbafb821a2e11ce6682aff88096d
+  mini-a-con.js: 4759f55a1134646624e7e7c8ee5d3a92de0d34ce
   mini-a-mcptest.js: 276675bf192fc9431f9096e6854714b635ee2c48
   mini-a-modelman.js: 0a370c6136052b77edd66fa0cfe44c2cbab62a68
   mini-a-modes.yaml: 273e12c002fdb1ad06762fd1f76bc2712082412a
   mini-a-subtask.js: 196d3bcd89375974ca8f57d80c7765376890cbb6
-  mini-a-utils.js: 9ce30b49dd8360d1fa221831a535459af1576862
+  mini-a-utils.js: 335ff8d7a23c66f333f7f5549de25099a087458f
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 16b1dfaa38c627d1d828745019d9d1bdcd6a92c1
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: 159afc4c37e0d6f59463f06c0e9ef4a82e16a148
+  mini-a.js: 0e61a9812e60d31dbc907af1a56f9ff6f046755c
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 7104bc6fc6d854ab54e752b4b6af467fa0d8a975
   public/index.md: c4a5686897f9c8f4b6612d3c6a94074ddd11b2c1
@@ -192,5 +214,5 @@ filesHash:
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
   tests/coreFunctionality.js: b10c42a85394f0ad6f72cebcef540497349080d8
   tests/coreFunctionality.yaml: 0a656733b02a5a4f77139766e42eabddfc4a39ca
-  tests/miniAUtils.js: 5de4dc1b4ad922d61709ca107b6c3a0b732ef3df
-  tests/miniAUtils.yaml: df6621be147760a138f4d15598a5545a09d41d5d
+  tests/miniAUtils.js: f21d75618dfe2247beeaa94ba5ea1755890b98a7
+  tests/miniAUtils.yaml: a77837609829e1418bafcc3038b5b1c477521bea

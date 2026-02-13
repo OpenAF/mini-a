@@ -420,12 +420,46 @@
     }
   }
 
+  exports.testMarkdownFiles = function() {
+    var testDir = createTestDir()
+    try {
+      io.writeFileString(testDir + java.io.File.separator + "README.md", "# Intro\nLine 2")
+      io.writeFileString(testDir + java.io.File.separator + "notes.txt", "not markdown")
+      io.mkdir(testDir + java.io.File.separator + "docs")
+      io.writeFileString(testDir + java.io.File.separator + "docs" + java.io.File.separator + "guide.md", "Guide title\nSearch Me")
+
+      var tool = new MiniUtilsTool(testDir)
+
+      var listResult = tool.markdownFiles({ operation: "list" })
+      ow.test.assert(isArray(listResult), true, "Markdown list should return array")
+      ow.test.assert(listResult.length === 2, true, "Markdown list should include only *.md files")
+
+      var searchResult = tool.markdownFiles({ operation: "search", pattern: "search me" })
+      ow.test.assert(isArray(searchResult), true, "Markdown search should return array")
+      ow.test.assert(searchResult.length === 1, true, "Markdown search should find content in markdown files")
+      ow.test.assert(searchResult[0].relativePath === "docs" + java.io.File.separator + "guide.md", true, "Markdown search should point to markdown file")
+
+      var readLineResult = tool.markdownFiles({ operation: "read", path: "README.md", lineStart: 2, maxLines: 1 })
+      ow.test.assert(isMap(readLineResult), true, "Markdown read should return file map")
+      ow.test.assert(String(readLineResult.content).trim() === "Line 2", true, "Markdown read should support line window")
+
+      var readFullResult = tool.markdownFiles({ operation: "read", path: "README.md" })
+      ow.test.assert(readFullResult.content.indexOf("# Intro") >= 0, true, "Markdown read should support full file")
+
+      var readNonMarkdown = tool.markdownFiles({ operation: "read", path: "notes.txt" })
+      ow.test.assert(isString(readNonMarkdown) && readNonMarkdown.indexOf("[ERROR]") === 0, true, "Markdown read should reject non-md files")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
   exports.testMetadata = function() {
     var metadata = MiniUtilsTool.getMetadataByFn()
     ow.test.assert(isMap(metadata), true, "Should return metadata map")
     ow.test.assert(isDef(metadata.init), true, "Should include init metadata")
     ow.test.assert(isDef(metadata.filesystemQuery), true, "Should include filesystemQuery metadata")
     ow.test.assert(isDef(metadata.filesystemModify), true, "Should include filesystemModify metadata")
+    ow.test.assert(isDef(metadata.markdownFiles), true, "Should include markdownFiles metadata")
     ow.test.assert(isDef(metadata.mathematics), true, "Should include mathematics metadata")
     ow.test.assert(isDef(metadata.timeUtilities), true, "Should include timeUtilities metadata")
 
@@ -434,6 +468,7 @@
     ow.test.assert(methods.indexOf("init") >= 0, true, "Should include init method")
     ow.test.assert(methods.indexOf("filesystemQuery") >= 0, true, "Should include filesystemQuery method")
     ow.test.assert(methods.indexOf("filesystemModify") >= 0, true, "Should include filesystemModify method")
+    ow.test.assert(methods.indexOf("markdownFiles") >= 0, true, "Should include markdownFiles method")
     ow.test.assert(methods.indexOf("mathematics") >= 0, true, "Should include mathematics method")
     ow.test.assert(methods.indexOf("timeUtilities") >= 0, true, "Should include timeUtilities method")
 
@@ -445,6 +480,8 @@
     ow.test.assert(textOps.indexOf("webfetch") >= 0, true, "Should include webfetch operation in textUtilities")
     var kvOps = metadata.kvStore.inputSchema.properties.operation.enum || []
     ow.test.assert(kvOps.indexOf("todo-write") >= 0, true, "Should include todo-write operation in kvStore")
+    var markdownOps = metadata.markdownFiles.inputSchema.properties.operation.enum || []
+    ow.test.assert(markdownOps.indexOf("search") >= 0, true, "Should include search operation in markdownFiles")
   }
 
   exports.testMathOpsCalculate = function() {

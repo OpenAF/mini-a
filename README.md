@@ -57,7 +57,9 @@ Two steps to use:
    For a colorized overview of every console, web, and planning flag (including shared Mini-A arguments), run `mini-a -h` or `mini-a --help`; the console prints the CLI-specific switches followed by the auto-generated table of core agent parameters.
    Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
 
-   **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, so you can press <kbd>Tab</kbd> to expand directories and filenames instead of typing the whole path.
+   Custom slash commands are loaded from `~/.openaf-mini-a/commands/*.md`. For example, `/my-command first "second arg"` loads `~/.openaf-mini-a/commands/my-command.md`, injects arguments, and runs the rendered text as the goal. Supported placeholders are `{{args}}`, `{{argv}}`, `{{argc}}`, and positional `{{arg1}}`, `{{arg2}}`, ... . Built-ins always win (`/help`, `/show`, etc. cannot be overridden), and missing template files are treated as hard errors.
+
+   **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, and discovered custom slash commands also appear in command completion, so you can press <kbd>Tab</kbd> to expand options quickly.
 
    **Tip**: Include file contents in your goals using `@path/to/file` syntax (e.g., `Follow these instructions @docs/guide.md`).
 
@@ -354,6 +356,7 @@ Mini-A ships with complementary components:
 | `usetools` | Register MCP tools with the model | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
+| `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")` so Mini-A docs can be explored via utils tools | `false` |
 | `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |

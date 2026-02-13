@@ -77,6 +77,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testPathSecurity
 
+- name: MiniA Utils Tests::MarkdownFiles
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMarkdownFiles
+
 - name: MiniA Utils Tests::Metadata
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -150,6 +155,7 @@ todo:
 - MiniA Utils Tests::WebFetch
 - MiniA Utils Tests::TodoOps
 - MiniA Utils Tests::PathSecurity
+- MiniA Utils Tests::MarkdownFiles
 - MiniA Utils Tests::Metadata
 - MiniA Utils Tests::MathOpsCalculate
 - MiniA Utils Tests::MathOpsStatistics
