@@ -148,6 +148,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useskills
+    desc     : Expose the Mini Utils Tool `skills` operation (only when useutils=true)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : utilsroot
     desc     : Root directory for Mini Utils Tool file operations (only when useutils=true)
     example  : "/path/to/project"
@@ -370,6 +375,7 @@ jobs:
         valgoal        : valgoal
         usetools       : usetools
         useutils       : useutils
+        useskills      : useskills
         usediagrams    : usediagrams
         usemermaid     : usemermaid
         usecharts      : usecharts
@@ -431,6 +437,7 @@ jobs:
       valgoal        : isString.default(__)
       usetools       : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(false)
+      useskills      : toBoolean.isBoolean.default(false)
       usediagrams    : toBoolean.isBoolean.default(false)
       usemermaid     : toBoolean.isBoolean.default(false)
       usecharts      : toBoolean.isBoolean.default(false)

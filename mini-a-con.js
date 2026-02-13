@@ -5,6 +5,12 @@
 try {
   plugin("Console")
   var args = processExpr(" ")
+  function hasRunnableExecValue(value) {
+    if (isUnDef(value) || value === null) return false
+    if (isString(value)) return value.trim().length > 0
+    return String(value).trim().length > 0
+  }
+  var hasRunnableExecArg = hasRunnableExecValue(args.exec)
 
   function hasHelpFlag(map) {
     if (!isObject(map)) return false
@@ -191,7 +197,7 @@ try {
       // Start web mode
       oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
       exit(0)
-    } else if (isDef(args.goal)) {
+    } else if (isDef(args.goal) && hasRunnableExecArg !== true) {
       // Start cli mode
       oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
       exit(0)
@@ -256,13 +262,17 @@ try {
   var conversationFileName  = ".openaf-mini-a_session.json"
   var conversationFilePath  = resolveCanonicalPath(historyHome, conversationFileName)
   var customCommandsDirPath = canonicalizePath(historyHome + "/.openaf-mini-a/commands")
+  var customSkillsDirPath   = canonicalizePath(historyHome + "/.openaf-mini-a/skills")
+  var hooksDirPath          = canonicalizePath(historyHome + "/.openaf-mini-a/hooks")
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
-  var customSlashCommands   = {}
+  var customSlashCommands      = {}
+  var customSkillSlashCommands = {}
+  var loadedHooks              = {}
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
   var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
@@ -403,6 +413,7 @@ try {
     mode: true,
     libs: true,
     goal: true,
+    exec: true,
     onport: true,
     web: true,
     modelman: true,
@@ -453,6 +464,7 @@ try {
       { option: "mode=<name>", description: "Apply one of the presets defined in mini-a-modes." },
       { option: "libs=<list>", description: "Comma-separated libs to load before launching." },
       { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
+      { option: "exec=\"/<cmd> ...args\"", description: "Execute one custom command/skill template and exit (use /cmd or $skill)." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
@@ -601,48 +613,339 @@ try {
     return completions
   }
 
-  function loadCustomSlashCommands() {
-    var loaded = {}
+  function resolveSkillTemplateFromFolder(folderPath) {
+    if (!isString(folderPath) || folderPath.trim().length === 0) return __
+    var candidates = ["SKILL.md", "skill.md"]
+    for (var i = 0; i < candidates.length; i++) {
+      var candidatePath = canonicalizePath(folderPath + "/" + candidates[i])
+      if (io.fileExists(candidatePath) && io.fileInfo(candidatePath).isFile === true) return candidatePath
+    }
+    return __
+  }
+
+  function readSkillDescriptionFromTemplate(templatePath) {
+    if (!isString(templatePath) || templatePath.trim().length === 0) return __
     try {
-      if (!io.fileExists(customCommandsDirPath)) return loaded
-      var info = io.fileInfo(customCommandsDirPath)
+      if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
+      var content = io.readFileString(templatePath)
+      if (!isString(content) || content.length === 0) return __
+      var normalized = String(content).replace(/\r\n/g, "\n")
+      var frontMatterMatch = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)
+      if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
+      var meta = af.fromYAML(frontMatterMatch[1])
+      if (!isObject(meta) || !isString(meta.description)) return __
+      var description = meta.description.replace(/\s+/g, " ").trim()
+      return description.length > 0 ? description : __
+    } catch(readSkillDescriptionError) {
+      return __
+    }
+  }
+
+  function loadSlashCommandsFromDir(dirPath, existingNames, options) {
+    var loaded = {}
+    var opts = isObject(options) ? options : {}
+    var enableSkillFolders = opts.enableSkillFolders === true
+    var sourceLabel = isString(opts.sourceLabel) ? opts.sourceLabel : "slash commands"
+    var sourceCategory = isString(opts.sourceCategory) ? opts.sourceCategory : "command"
+    try {
+      if (!io.fileExists(dirPath)) return loaded
+      var info = io.fileInfo(dirPath)
       if (!isObject(info) || info.isDirectory !== true) return loaded
-      var listing = io.listFiles(customCommandsDirPath)
+      var listing = io.listFiles(dirPath)
       if (!isObject(listing) || !isArray(listing.files)) return loaded
 
       listing.files.forEach(function(file) {
-        if (!isObject(file) || file.isDirectory === true) return
+        if (!isObject(file)) return
         if (!isString(file.filename) || file.filename.length === 0) return
-        if (!/\.md$/i.test(file.filename)) return
+        if (file.filename.indexOf(".") === 0) return
 
-        var commandName = file.filename.replace(/\.md$/i, "").toLowerCase()
-        if (!/^[a-z0-9][a-z0-9-]*$/.test(commandName)) {
-          logWarn("Ignoring custom slash command file with invalid name: " + file.filename)
+        var commandName
+        var fullPath
+        var sourceType = "file"
+
+        if (file.isDirectory === true) {
+          if (enableSkillFolders !== true) return
+          commandName = file.filename.toLowerCase()
+          fullPath = resolveSkillTemplateFromFolder(canonicalizePath(dirPath + "/" + file.filename))
+          if (isUnDef(fullPath)) {
+            logWarn("Ignoring skill folder without SKILL.md/skill.md: " + file.filename)
+            return
+          }
+          sourceType = "folder"
+        } else {
+          if (!/\.md$/i.test(file.filename)) return
+          commandName = file.filename.replace(/\.md$/i, "").toLowerCase()
+          fullPath = canonicalizePath(dirPath + "/" + file.filename)
+        }
+
+        if (!/^[a-z0-9][a-z0-9_-]*$/.test(commandName)) {
+          logWarn("Ignoring " + sourceLabel + " entry with invalid name: " + file.filename)
           return
         }
         if (Object.prototype.hasOwnProperty.call(builtInSlashCommands, commandName)) {
-          logWarn("Ignoring custom slash command '/" + commandName + "' because it conflicts with a built-in command.")
+          logWarn("Ignoring '/" + commandName + "' because it conflicts with a built-in command.")
+          return
+        }
+        if (isObject(existingNames) && Object.prototype.hasOwnProperty.call(existingNames, commandName)) {
+          logWarn("Ignoring '/" + commandName + "' in '" + dirPath + "' because it conflicts with an existing command.")
+          return
+        }
+        if (Object.prototype.hasOwnProperty.call(loaded, commandName)) {
+          logWarn("Ignoring duplicate '/" + commandName + "' in '" + dirPath + "'.")
           return
         }
 
-        var fullPath = canonicalizePath(customCommandsDirPath + "/" + file.filename)
         loaded[commandName] = {
           name: commandName,
-          file: fullPath
+          file: fullPath,
+          sourceType: sourceType,
+          sourceCategory: sourceCategory,
+          description: (sourceType === "folder") ? readSkillDescriptionFromTemplate(fullPath) : __
         }
       })
-    } catch (customCommandLoadError) {
-      logWarn("Failed to load custom slash commands: " + customCommandLoadError)
+    } catch (loadError) {
+      logWarn("Failed to load " + sourceLabel + " from '" + dirPath + "': " + loadError)
     }
     return loaded
   }
 
+  function loadHooks() {
+    var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
+    var hooks = {}
+    validEvents.forEach(function(ev) { hooks[ev] = [] })
+    try {
+      if (!io.fileExists(hooksDirPath)) return hooks
+      var info = io.fileInfo(hooksDirPath)
+      if (!isObject(info) || info.isDirectory !== true) return hooks
+      var listing = io.listFiles(hooksDirPath)
+      if (!isObject(listing) || !isArray(listing.files)) return hooks
+
+      listing.files.forEach(function(file) {
+        if (!isObject(file) || file.isDirectory === true) return
+        if (!isString(file.filename) || file.filename.length === 0) return
+        if (!/\.(yaml|yml|json)$/i.test(file.filename)) return
+
+        var fullPath = canonicalizePath(hooksDirPath + "/" + file.filename)
+        try {
+          var hookDef
+          if (/\.json$/i.test(file.filename)) {
+            hookDef = io.readFileJSON(fullPath)
+          } else {
+            hookDef = io.readFileYAML(fullPath)
+          }
+          if (!isObject(hookDef)) return
+          var event = isString(hookDef.event) ? hookDef.event.trim().toLowerCase() : ""
+          if (validEvents.indexOf(event) < 0) {
+            logWarn("Hook '" + file.filename + "' has invalid or missing event type: '" + event + "'")
+            return
+          }
+          var cmd = isString(hookDef.command) ? hookDef.command.trim() : ""
+          if (cmd.length === 0) {
+            logWarn("Hook '" + file.filename + "' has no command defined.")
+            return
+          }
+          var toolFilter = []
+          if (isString(hookDef.toolFilter) && hookDef.toolFilter.trim().length > 0) {
+            toolFilter = hookDef.toolFilter.split(",").map(function(s) { return s.trim().toLowerCase() }).filter(function(s) { return s.length > 0 })
+          }
+          hooks[event].push({
+            name        : file.filename.replace(/\.(yaml|yml|json)$/i, ""),
+            file        : fullPath,
+            event       : event,
+            command     : cmd,
+            toolFilter  : toolFilter,
+            injectOutput: parseBoolean(hookDef.injectOutput) === true,
+            timeout     : (isNumber(hookDef.timeout) && hookDef.timeout > 0) ? hookDef.timeout : 5000,
+            failBlocks  : parseBoolean(hookDef.failBlocks) === true,
+            env         : isObject(hookDef.env) ? hookDef.env : {}
+          })
+        } catch (hookParseError) {
+          logWarn("Failed to parse hook file '" + file.filename + "': " + hookParseError)
+        }
+      })
+    } catch (hookLoadError) {
+      logWarn("Failed to load hooks: " + hookLoadError)
+    }
+    return hooks
+  }
+
+  function runHooks(event, contextVars) {
+    var hooksForEvent = isArray(loadedHooks[event]) ? loadedHooks[event] : []
+    if (hooksForEvent.length === 0) return { outputs: [], blocked: false }
+
+    var outputs = []
+    var blocked = false
+    var vars = isObject(contextVars) ? contextVars : {}
+
+    hooksForEvent.forEach(function(hook) {
+      if (hook.toolFilter.length > 0 && isString(vars.MINI_A_TOOL)) {
+        var toolLower = vars.MINI_A_TOOL.toLowerCase()
+        if (hook.toolFilter.indexOf(toolLower) < 0) return
+      }
+      try {
+        var env = {}
+        Object.keys(hook.env).forEach(function(k) { env[k] = String(hook.env[k]) })
+        Object.keys(vars).forEach(function(k) { env[k] = String(vars[k]) })
+        env.MINI_A_HOOK_NAME  = hook.name
+        env.MINI_A_HOOK_EVENT = event
+
+        var result = $sh(hook.command).timeout(hook.timeout).envs(env).get(0)
+        var stdout   = isString(result.stdout)   ? result.stdout.trim()   : ""
+        var stderr   = isString(result.stderr)   ? result.stderr.trim()   : ""
+        var exitCode = isNumber(result.exitcode) ? result.exitcode        : -1
+
+        if (exitCode !== 0) {
+          logWarn("Hook '" + hook.name + "' (" + event + ") exited with code " + exitCode + (stderr.length > 0 ? ": " + stderr.substring(0, 200) : ""))
+          if (hook.failBlocks) blocked = true
+        }
+        if (hook.injectOutput && stdout.length > 0) {
+          outputs.push({ hookName: hook.name, output: stdout.substring(0, 4096) })
+        }
+      } catch (hookExecError) {
+        logWarn("Hook '" + hook.name + "' (" + event + ") failed: " + hookExecError)
+        if (hook.failBlocks) blocked = true
+      }
+    })
+
+    return { outputs: outputs, blocked: blocked }
+  }
+
   function getCustomSlashCommandNames() {
-    return Object.keys(customSlashCommands).sort()
+    var unique = {}
+    Object.keys(customSlashCommands).forEach(function(name) { unique[name] = true })
+    Object.keys(customSkillSlashCommands).forEach(function(name) { unique[name] = true })
+    return Object.keys(unique).sort()
   }
 
   function getAllSlashCommandNames() {
     return slashCommands.concat(getCustomSlashCommandNames())
+  }
+
+  function findCustomTemplateDefinition(commandName, options) {
+    var name = isString(commandName) ? commandName.trim().toLowerCase() : ""
+    if (name.length === 0) return __
+    var opts = isObject(options) ? options : {}
+    var includeCommands = opts.includeCommands !== false
+    var includeSkills = opts.includeSkills !== false
+
+    if (includeSkills && Object.prototype.hasOwnProperty.call(customSkillSlashCommands, name)) return customSkillSlashCommands[name]
+    if (includeCommands && Object.prototype.hasOwnProperty.call(customSlashCommands, name)) return customSlashCommands[name]
+    return __
+  }
+
+  function normalizeSkillReferencePath(rawPath) {
+    if (!isString(rawPath)) return __
+    var normalized = rawPath.trim()
+    if (normalized.length === 0) return __
+    if (normalized.charAt(0) === "<" && normalized.charAt(normalized.length - 1) === ">") {
+      normalized = normalized.substring(1, normalized.length - 1).trim()
+    }
+    if (normalized.length === 0) return __
+    return normalized
+  }
+
+  function isAbsoluteOrExternalPath(pathValue) {
+    if (!isString(pathValue) || pathValue.length === 0) return false
+    if (pathValue.charAt(0) === "/" || pathValue.charAt(0) === "~") return true
+    if (/^[A-Za-z]:[\\/]/.test(pathValue)) return true
+    if (/^[a-z][a-z0-9+.-]*:/i.test(pathValue)) return true
+    if (pathValue.indexOf("//") === 0) return true
+    return false
+  }
+
+  function splitAttachmentToken(rawToken) {
+    var token = isString(rawToken) ? rawToken : ""
+    var suffix = ""
+    while (token.length > 0) {
+      var lastChar = token.charAt(token.length - 1)
+      if (/[,.;:!?)\]}'"]/.test(lastChar)) {
+        suffix = lastChar + suffix
+        token = token.substring(0, token.length - 1)
+        continue
+      }
+      break
+    }
+    return { filePath: token, suffix: suffix }
+  }
+
+  function preprocessSkillTemplateReferences(templateText, templateDef) {
+    if (!isString(templateText) || templateText.length === 0) return templateText
+    if (!isObject(templateDef) || templateDef.sourceCategory !== "skill") return templateText
+    if (!isString(templateDef.file) || templateDef.file.trim().length === 0) return templateText
+
+    var templatePath = canonicalizePath(templateDef.file)
+    var templateDir = templatePath.replace(/[\\\/][^\\\/]+$/, "")
+    if (!isString(templateDir) || templateDir.length === 0) return templateText
+
+    var text = String(templateText)
+
+    // Resolve relative @file tokens against the skill folder so @reference.md works naturally.
+    var chunks = []
+    var cursor = 0
+    var wsPattern = /\s/
+    while (cursor < text.length) {
+      var atPos = text.indexOf("@", cursor)
+      if (atPos < 0) {
+        chunks.push(text.substring(cursor))
+        break
+      }
+
+      var backslashes = 0
+      for (var b = atPos - 1; b >= 0 && text.charAt(b) === "\\"; b--) backslashes++
+      if (backslashes > 0) {
+        chunks.push(text.substring(cursor, atPos + 1))
+        cursor = atPos + 1
+        continue
+      }
+
+      var endPos = atPos + 1
+      while (endPos < text.length && !wsPattern.test(text.charAt(endPos))) endPos++
+      var rawToken = text.substring(atPos + 1, endPos)
+      var tokenParts = splitAttachmentToken(rawToken)
+      var filePath = normalizeSkillReferencePath(tokenParts.filePath)
+      var replacement = "@" + tokenParts.filePath
+
+      if (isString(filePath) && filePath.length > 0 && !isAbsoluteOrExternalPath(filePath)) {
+        var resolved = canonicalizePath(templateDir + "/" + filePath)
+        replacement = "@" + resolved
+      }
+
+      chunks.push(text.substring(cursor, atPos))
+      chunks.push(replacement)
+      if (tokenParts.suffix.length > 0) chunks.push(tokenParts.suffix)
+      cursor = endPos
+    }
+    text = chunks.join("")
+
+    // Auto-include relative markdown links from the skill folder.
+    var includedPaths = {}
+    var includeBlocks = []
+    text.replace(/\[[^\]]*\]\(([^)\n]+)\)/g, function(_, targetSpec) {
+      var spec = isString(targetSpec) ? targetSpec.trim() : ""
+      if (spec.length === 0) return _
+      var firstToken = spec.split(/\s+/)[0]
+      var normalizedTarget = normalizeSkillReferencePath(firstToken)
+      if (!isString(normalizedTarget) || normalizedTarget.length === 0) return _
+      if (normalizedTarget.charAt(0) === "#") return _
+      if (isAbsoluteOrExternalPath(normalizedTarget)) return _
+
+      var cleanTarget = normalizedTarget.split("#")[0].split("?")[0]
+      if (!/\.md$/i.test(cleanTarget)) return _
+
+      var resolvedPath = canonicalizePath(templateDir + "/" + cleanTarget)
+      if (Object.prototype.hasOwnProperty.call(includedPaths, resolvedPath)) return _
+      includedPaths[resolvedPath] = true
+
+      try {
+        if (!io.fileExists(resolvedPath) || io.fileInfo(resolvedPath).isFile !== true) return _
+        var refContent = io.readFileString(resolvedPath)
+        includeBlocks.push("\n\n--- Skill reference from " + cleanTarget + " ---\n" + refContent + "\n--- End of " + cleanTarget + " ---\n")
+      } catch(ignoreSkillRefError) { }
+      return _
+    })
+
+    if (includeBlocks.length > 0) text += includeBlocks.join("")
+    return text
   }
 
   function parseSlashCommandInput(commandText) {
@@ -761,7 +1064,61 @@ try {
     return rendered
   }
 
-  customSlashCommands = loadCustomSlashCommands()
+  function tryExpandInlineSkillInvocation(text) {
+    if (!isString(text) || text.length === 0) return { changed: false, text: text }
+
+    var goalText = String(text)
+    var skillRegex = /\$([a-z0-9][a-z0-9_-]*)/ig
+    var match
+
+    while ((match = skillRegex.exec(goalText)) !== null) {
+      var fullToken = match[0]
+      var skillName = String(match[1] || "").toLowerCase()
+      var tokenStart = match.index
+      var tokenEnd = tokenStart + fullToken.length
+
+      // Allow escaping \$skill to keep it literal.
+      var backslashes = 0
+      for (var i = tokenStart - 1; i >= 0 && goalText.charAt(i) === "\\"; i--) backslashes++
+      if (backslashes > 0) continue
+
+      var matchedSkillDef = findCustomTemplateDefinition(skillName, { includeCommands: false, includeSkills: true })
+      if (isUnDef(matchedSkillDef)) continue
+
+      try {
+        if (!io.fileExists(matchedSkillDef.file) || io.fileInfo(matchedSkillDef.file).isFile !== true) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Template file is missing: " + matchedSkillDef.file, errorColor))
+          return { changed: false, text: goalText }
+        }
+
+        var argsRaw = goalText.substring(tokenEnd).trim()
+        var parsedSkillArgs = parseSlashArgs(argsRaw)
+        if (parsedSkillArgs.ok !== true) {
+          print(colorifyText("Usage: $" + skillName + " [args...]", errorColor))
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedSkillArgs.error, errorColor))
+          return { changed: false, text: goalText }
+        }
+
+        var skillTemplate = io.readFileString(matchedSkillDef.file)
+        var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
+        goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, matchedSkillDef)
+        var prefix = goalText.substring(0, tokenStart)
+        var separator = ""
+        if (prefix.length > 0 && !/\s$/.test(prefix)) separator = "\n\n"
+        var combined = prefix + separator + goalFromSkillTemplate
+        return { changed: true, text: combined }
+      } catch (inlineSkillError) {
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '$" + skillName + "': " + inlineSkillError, errorColor))
+        return { changed: false, text: goalText }
+      }
+    }
+
+    return { changed: false, text: goalText }
+  }
+
+  customSlashCommands      = loadSlashCommandsFromDir(customCommandsDirPath, {}, { sourceLabel: "slash commands", sourceCategory: "command" })
+  customSkillSlashCommands = loadSlashCommandsFromDir(customSkillsDirPath, {}, { sourceLabel: "skills", enableSkillFolders: true, sourceCategory: "skill" })
+  loadedHooks              = loadHooks()
 
   if (consoleReader) {
     try {
@@ -786,6 +1143,29 @@ try {
                 candidates.add(path)
               })
               return candidates.isEmpty() ? -1 : (lastAtPos + 1)
+            }
+          }
+
+          // Handle $skill completions (anywhere in the line)
+          var lastDollarPos = uptoCursor.lastIndexOf("$")
+          if (lastDollarPos !== -1) {
+            var afterDollar = uptoCursor.substring(lastDollarPos + 1)
+            // Only complete if there's no space after $
+            if (afterDollar.indexOf(" ") === -1) {
+              // Respect escaped \$skill usage.
+              var escapedDollar = false
+              for (var j = lastDollarPos - 1; j >= 0 && uptoCursor.charAt(j) === "\\"; j--) {
+                escapedDollar = true
+              }
+              if (!escapedDollar) {
+                var partialSkill = afterDollar.toLowerCase()
+                if (/^[a-z0-9_-]*$/.test(partialSkill)) {
+                  Object.keys(customSkillSlashCommands).sort().forEach(function(name) {
+                    if (name.toLowerCase().indexOf(partialSkill) === 0) candidates.add("$" + name)
+                  })
+                  return candidates.isEmpty() ? -1 : lastDollarPos
+                }
+              }
             }
           }
 
@@ -1682,35 +2062,107 @@ try {
   function processFileAttachments(text) {
     if (!isString(text) || text.trim().length === 0) return text
 
-    // Match @path patterns - matches @ followed by path characters until whitespace
-    var pattern = /@([^\s]+)/g
-    var match
-    var result = text
-    var processed = []
+    var chunks = []
+    var cursor = 0
+    var cache = {}
+    var wsPattern = /\s/
+    var winDrivePattern = /^[A-Za-z]:/
 
-    while ((match = pattern.exec(text)) !== null) {
-      var fullMatch = match[0]  // e.g., "@some/file.md"
-      var filePath = match[1]   // e.g., "some/file.md"
-
-      // Skip if already processed (same file referenced multiple times)
-      if (processed.indexOf(fullMatch) !== -1) continue
-      processed.push(fullMatch)
-
-      try {
-        // Try to read the file
-        var fileContent = io.readFileString(filePath)
-        if (isDef(fileContent)) {
-          // Replace all occurrences of this pattern with the file content
-          var replacement = "\n\n--- Content from " + filePath + " ---\n" + fileContent + "\n--- End of " + filePath + " ---\n\n"
-          result = result.split(fullMatch).join(replacement)
-          print(colorifyText("📎 Attached: " + filePath + " (" + fileContent.length + " bytes)", successColor))
+    function splitAttachmentToken(rawToken) {
+      var token = isString(rawToken) ? rawToken : ""
+      var suffix = ""
+      while (token.length > 0) {
+        var lastChar = token.charAt(token.length - 1)
+        if (/[,.;:!?)\]}'"]/.test(lastChar)) {
+          suffix = lastChar + suffix
+          token = token.substring(0, token.length - 1)
+          continue
         }
-      } catch (fileError) {
-        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to read file " + filePath + ": " + fileError, errorColor))
+        break
+      }
+      return { filePath: token, suffix: suffix }
+    }
+
+    function shouldTreatAsAttachment(filePath) {
+      if (!isString(filePath) || filePath.length === 0) return false
+      var pathLike = (
+        filePath.indexOf("/") >= 0 ||
+        filePath.indexOf("\\") >= 0 ||
+        filePath.indexOf(".") >= 0 ||
+        filePath.charAt(0) === "~" ||
+        winDrivePattern.test(filePath)
+      )
+      if (pathLike) return true
+      try {
+        if (!io.fileExists(filePath)) return false
+        var info = io.fileInfo(filePath)
+        return isObject(info) && info.isFile === true
+      } catch(ignoreFileInfoError) {
+        return false
       }
     }
 
-    return result
+    while (cursor < text.length) {
+      var atPos = text.indexOf("@", cursor)
+      if (atPos < 0) {
+        chunks.push(text.substring(cursor))
+        break
+      }
+
+      // Count contiguous backslashes immediately before '@' to detect escaping.
+      var backslashes = 0
+      for (var b = atPos - 1; b >= 0 && text.charAt(b) === "\\"; b--) backslashes++
+      if (backslashes > 0) {
+        // Any backslash directly before @ disables attachment parsing.
+        // Keep it literal and remove one escaping backslash.
+        chunks.push(text.substring(cursor, atPos - 1))
+        chunks.push("@")
+        cursor = atPos + 1
+        continue
+      }
+
+      var endPos = atPos + 1
+      while (endPos < text.length && !wsPattern.test(text.charAt(endPos))) endPos++
+      var rawToken = text.substring(atPos + 1, endPos)
+      var tokenParts = splitAttachmentToken(rawToken)
+      var filePath = tokenParts.filePath
+      var trailingSuffix = tokenParts.suffix
+      var fullMatch = "@" + filePath
+
+      // Ignore lone '@' characters.
+      if (filePath.length === 0) {
+        chunks.push(text.substring(cursor, endPos))
+        cursor = endPos
+        continue
+      }
+
+      chunks.push(text.substring(cursor, atPos))
+
+      if (!Object.prototype.hasOwnProperty.call(cache, fullMatch)) {
+        if (!shouldTreatAsAttachment(filePath)) {
+          cache[fullMatch] = fullMatch
+        } else {
+          try {
+            var fileContent = io.readFileString(filePath)
+            if (isDef(fileContent)) {
+              cache[fullMatch] = "\n\n--- Content from " + filePath + " ---\n" + fileContent + "\n--- End of " + filePath + " ---\n\n"
+              print(colorifyText("📎 Attached: " + filePath + " (" + fileContent.length + " bytes)", successColor))
+            } else {
+              cache[fullMatch] = fullMatch
+            }
+          } catch (fileError) {
+            cache[fullMatch] = fullMatch
+            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to read file " + filePath + ": " + fileError, errorColor))
+          }
+        }
+      }
+
+      chunks.push(cache[fullMatch])
+      if (trailingSuffix.length > 0) chunks.push(trailingSuffix)
+      cursor = endPos
+    }
+
+    return chunks.join("")
   }
 
   function buildArgs(goalText) {
@@ -1868,14 +2320,28 @@ try {
   }
 
   function runGoal(goalText) {
-    var _args = buildArgs(goalText)
-    if (!ensureModel(_args)) return
+    var beforeGoalResult = runHooks("before_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "" })
+    if (beforeGoalResult.blocked) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Goal blocked by a before_goal hook.", errorColor))
+      return false
+    }
+    var effectiveGoal = goalText
+    if (isArray(beforeGoalResult.outputs) && beforeGoalResult.outputs.length > 0) {
+      var hookPrefix = beforeGoalResult.outputs.map(function(o) { return "[Hook " + o.hookName + "] " + o.output }).join("\n")
+      effectiveGoal = hookPrefix + "\n\n" + (isString(goalText) ? goalText : "")
+    }
+
+    var _args = buildArgs(effectiveGoal)
+    if (!ensureModel(_args)) return false
     var agent = new MiniA()
     activeAgent = agent
     agent.setInteractionFn(function(event, message) {
       agent.defaultInteractionFn(event, message, function(icon, text, id) {
         printEvent(event, icon, text, id)
       })
+    })
+    agent.setHookFn(function(event, contextVars) {
+      return runHooks(event, contextVars)
     })
     var agentResult = __, agentOrigResult = __
     var stopRequested = false
@@ -1915,8 +2381,10 @@ try {
       refreshConversationStats(agent)
       if (stopRequested) {
         print(colorifyText("Mini-A stopped by user (Esc).", hintColor))
-        return
+        return false
       }
+      var resultPreview = isString(agentResult) ? agentResult.substring(0, 2000) : (isDef(agentResult) ? stringify(agentResult, __, "").substring(0, 2000) : "")
+      runHooks("after_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "", MINI_A_RESULT: resultPreview })
       lastResult = agentResult
       lastOrigResult = agentOrigResult
       if (isUnDef(_args.outfile)) {
@@ -1943,9 +2411,69 @@ try {
       } else {
         print(colorifyText("Final answer written to " + _args.outfile, successColor))
       }
+      return true
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
       printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
+      return false
+    }
+  }
+
+  function executeCustomSlashTemplate(rawSlashInput) {
+    var commandText = isString(rawSlashInput) ? rawSlashInput.trim() : ""
+    if (commandText.length === 0) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" exec= requires a template name (example: exec=\"/my-command arg1\" or exec=\"$my-skill arg1\").", errorColor))
+      return false
+    }
+    var inputPrefix = commandText.charAt(0)
+    if (inputPrefix === "/" || inputPrefix === "$") commandText = commandText.substring(1).trim()
+    if (commandText.length === 0) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" exec= requires a template name (example: exec=\"/my-command arg1\" or exec=\"$my-skill arg1\").", errorColor))
+      return false
+    }
+
+    var parsedSlashCommand = parseSlashCommandInput(commandText)
+    if (!isString(parsedSlashCommand.name) || parsedSlashCommand.name.length === 0) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Invalid exec= slash command syntax.", errorColor))
+      return false
+    }
+    if (inputPrefix !== "$" && Object.prototype.hasOwnProperty.call(builtInSlashCommands, parsedSlashCommand.name)) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" exec= only supports custom commands/skills. Built-in '/" + parsedSlashCommand.name + "' is interactive-only.", errorColor))
+      return false
+    }
+
+    var matchedDef = findCustomTemplateDefinition(parsedSlashCommand.name, {
+      includeCommands: inputPrefix !== "$",
+      includeSkills: true
+    })
+
+    if (isUnDef(matchedDef)) {
+      var unknownPrefix = inputPrefix === "$" ? "$" : "/"
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown custom slash command/skill: " + unknownPrefix + parsedSlashCommand.name, errorColor))
+      return false
+    }
+    if (!io.fileExists(matchedDef.file) || io.fileInfo(matchedDef.file).isFile !== true) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Template file is missing: " + matchedDef.file, errorColor))
+      return false
+    }
+
+    var parsedArgs = parseSlashArgs(parsedSlashCommand.argsRaw)
+    if (parsedArgs.ok !== true) {
+      var usagePrefix = inputPrefix === "$" ? "$" : "/"
+      print(colorifyText("Usage: " + usagePrefix + parsedSlashCommand.name + " [args...]", errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedArgs.error, errorColor))
+      return false
+    }
+
+    try {
+      var template = io.readFileString(matchedDef.file)
+      var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
+      goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
+      return runGoal(goalFromTemplate) === true
+    } catch (templateExecError) {
+      var failurePrefix = inputPrefix === "$" ? "$" : "/"
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '" + failurePrefix + parsedSlashCommand.name + "': " + templateExecError, errorColor))
+      return false
     }
   }
 
@@ -2186,6 +2714,8 @@ try {
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
       "• Include file contents in your goal using " + colorifyText("@path/to/file", accentColor) + colorifyText(" syntax.", hintColor),
       "  Example: " + colorifyText("\"Follow these instructions @docs/guide.md and apply @config/settings.json\"", hintColor),
+      "• Use " + colorifyText("\\$name", accentColor) + colorifyText(" when you need a literal $ token at the beginning of a goal line.", hintColor),
+      "• Notes: skills can also be executed with " + colorifyText("$skill [args]", accentColor) + colorifyText(".", hintColor),
       "• Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
       "",
@@ -2205,27 +2735,89 @@ try {
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
       "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
+      "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]   List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
       "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
       "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>       Show details for a subtask", hintColor),
       "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
     ]
-    var customCommandNames = getCustomSlashCommandNames()
-    if (customCommandNames.length > 0) {
+    var commandNames = Object.keys(customSlashCommands).sort()
+    if (commandNames.length > 0) {
       lines.push("")
       lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
-      customCommandNames.forEach(function(name) {
+      commandNames.forEach(function(name) {
         lines.push("  " + colorifyText("/" + name, "BOLD") + colorifyText(" [args]       Execute instructions from " + customSlashCommands[name].file, hintColor))
       })
     }
+    var skillNames = Object.keys(customSkillSlashCommands).sort()
+    if (skillNames.length > 0) {
+      lines.push("")
+      lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + ":")
+      skillNames.forEach(function(name) {
+        var skillEntry = customSkillSlashCommands[name]
+        var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
+        var fallbackHelp = "Execute " + sourceHint + " from " + customSkillSlashCommands[name].file
+        var skillHelpText = fallbackHelp
+        if (isObject(skillEntry) && skillEntry.sourceType === "folder" && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
+          var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+          var maxDescriptionLength = Math.max(32, termWidth - (name.length + 20))
+          skillHelpText = truncateText(skillEntry.description.replace(/\s+/g, " ").trim(), maxDescriptionLength)
+        }
+        lines.push("  " + colorifyText("/" + name, "BOLD") + colorifyText(" [args]   " + skillHelpText, hintColor))
+      })
+    }
+    var totalHooks = 0
+    Object.keys(loadedHooks).forEach(function(ev) { totalHooks += loadedHooks[ev].length })
+    if (totalHooks > 0) {
+      lines.push("")
+      lines.push("Hooks: " + colorifyText(String(totalHooks) + " hook(s) loaded", hintColor) + " from " + colorifyText(hooksDirPath, accentColor))
+    }
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
+  }
+
+  function printSkills(prefix) {
+    var normalizedPrefix = isString(prefix) ? prefix.trim().toLowerCase() : ""
+    var skillNames = Object.keys(customSkillSlashCommands).sort().filter(function(name) {
+      if (normalizedPrefix.length === 0) return true
+      return name.indexOf(normalizedPrefix) === 0
+    })
+
+    if (skillNames.length === 0) {
+      if (normalizedPrefix.length > 0) {
+        print(colorifyText("No skills match prefix '" + normalizedPrefix + "'.", hintColor))
+      } else {
+        print(colorifyText("No skills discovered in " + customSkillsDirPath + ".", hintColor))
+      }
+      return
+    }
+
+    var rows = skillNames.map(function(name) {
+      var entry = customSkillSlashCommands[name]
+      var source = (isObject(entry) && entry.sourceType === "folder") ? "folder" : "file"
+      var description = ""
+      if (isObject(entry) && isString(entry.description) && entry.description.trim().length > 0) {
+        description = entry.description.replace(/\s+/g, " ").trim()
+      }
+      if (description.length === 0) description = "No description"
+      return {
+        skill: name,
+        type: source,
+        description: description,
+        file: isObject(entry) && isString(entry.file) ? entry.file : ""
+      }
+    })
+
+    print(colorifyText("Skills (" + rows.length + ") from " + customSkillsDirPath + ":", accentColor))
+    print()
+    print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+    print(colorifyText("Run a skill with /<name> ...args... or $<name> ...args...", hintColor))
   }
 
   const miniaLogo = ` ._ _ ${colorifyText("o", promptColor)}._ ${colorifyText("o", promptColor)}   _ 
  | | ||| ||~~(_|`
   print(colorifyText(miniaLogo, "BOLD") + colorifyText(" console", accentColor))
   print()
-  print(colorifyText("Type /help for available commands.", hintColor))
+  print(colorifyText("Type /help for available commands (skills also support $<name>).", hintColor))
 
   const _miniaConReset = function() {
   	if (String(java.lang.System.getProperty("os.name")).match(/Windows/)) return true
@@ -2241,6 +2833,15 @@ try {
   	return true
   })
 
+  var execArgValue = args.exec
+  if (hasRunnableExecValue(execArgValue)) {
+    bootstrapWorkerRegistration()
+    var execSuccess = executeCustomSlashTemplate(String(execArgValue))
+    finalizeSession(execSuccess ? "exec" : "exec-error")
+    if (isDef(ow.oJob)) ow.oJob.stop()
+    exit(execSuccess ? 0 : 1)
+  }
+
   bootstrapWorkerRegistration()
   
   while(true) {
@@ -2249,10 +2850,45 @@ try {
     if (isUnDef(input)) break
     var trimmed = String(input)
     if (trimmed.trim().length === 0) continue
+    if (trimmed.indexOf("\\$") === 0) {
+      var escapedGoalText = "$" + trimmed.substring(2)
+      runGoal(escapedGoalText)
+      continue
+    }
     if (trimmed === '"""') {
       var composed = collectMultiline("")
       if (isDef(composed) && composed.trim().length > 0) runGoal(composed)
       continue
+    }
+    if (trimmed.charAt(0) === '$') {
+      var skillCommand = trimmed.substring(1).trim()
+      if (skillCommand.length === 0) {
+        print(colorifyText("Usage: $<skill> [args...]", errorColor))
+        continue
+      }
+      var parsedSkillCommand = parseSlashCommandInput(skillCommand)
+      var _matchedSkillDef = findCustomTemplateDefinition(parsedSkillCommand.name, { includeCommands: false, includeSkills: true })
+      if (isDef(_matchedSkillDef)) {
+        try {
+          if (!io.fileExists(_matchedSkillDef.file) || io.fileInfo(_matchedSkillDef.file).isFile !== true) {
+            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Template file is missing: " + _matchedSkillDef.file, errorColor))
+            continue
+          }
+          var parsedSkillArgs = parseSlashArgs(parsedSkillCommand.argsRaw)
+          if (parsedSkillArgs.ok !== true) {
+            print(colorifyText("Usage: $" + parsedSkillCommand.name + " [args...]", errorColor))
+            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedSkillArgs.error, errorColor))
+            continue
+          }
+          var skillTemplate = io.readFileString(_matchedSkillDef.file)
+          var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
+          goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, _matchedSkillDef)
+          runGoal(goalFromSkillTemplate)
+        } catch (skillTemplateExecError) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '$" + parsedSkillCommand.name + "': " + skillTemplateExecError, errorColor))
+        }
+        continue
+      }
     }
     if (trimmed.charAt(0) === '/') {
       var command = trimmed.substring(1).trim()
@@ -2469,6 +3105,14 @@ try {
         printStats(statsArg)
         continue
       }
+      if (commandLower === "skills") {
+        printSkills()
+        continue
+      }
+      if (commandLower.indexOf("skills ") === 0) {
+        printSkills(command.substring(7))
+        continue
+      }
       if (commandLower.indexOf("delegate ") === 0) {
         if (!ensureDelegationAgent()) continue
         var goal = command.substring(9).trim()
@@ -2596,11 +3240,11 @@ try {
         }
         continue
       }
-      if (Object.prototype.hasOwnProperty.call(customSlashCommands, parsedSlashCommand.name)) {
-        var customDef = customSlashCommands[parsedSlashCommand.name]
+      var _matchedDef = findCustomTemplateDefinition(parsedSlashCommand.name)
+      if (isDef(_matchedDef)) {
         try {
-          if (!io.fileExists(customDef.file) || io.fileInfo(customDef.file).isFile !== true) {
-            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Custom slash command template is missing: " + customDef.file, errorColor))
+          if (!io.fileExists(_matchedDef.file) || io.fileInfo(_matchedDef.file).isFile !== true) {
+            printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Template file is missing: " + _matchedDef.file, errorColor))
             continue
           }
           var parsedArgs = parseSlashArgs(parsedSlashCommand.argsRaw)
@@ -2609,11 +3253,12 @@ try {
             printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedArgs.error, errorColor))
             continue
           }
-          var template = io.readFileString(customDef.file)
+          var template = io.readFileString(_matchedDef.file)
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
+          goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
           runGoal(goalFromTemplate)
-        } catch (customCommandError) {
-          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute custom slash command '/" + parsedSlashCommand.name + "': " + customCommandError, errorColor))
+        } catch (templateExecError) {
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '/" + parsedSlashCommand.name + "': " + templateExecError, errorColor))
         }
         continue
       }
@@ -2625,6 +3270,10 @@ try {
       goalText = goalText.substring(0, goalText.length - 1)
       var more = collectMultiline("")
       if (more !== __) goalText = goalText + "\n" + more
+    }
+    var inlineSkillExpansion = tryExpandInlineSkillInvocation(goalText)
+    if (isObject(inlineSkillExpansion) && inlineSkillExpansion.changed === true && isString(inlineSkillExpansion.text)) {
+      goalText = inlineSkillExpansion.text
     }
     runGoal(goalText)
   }

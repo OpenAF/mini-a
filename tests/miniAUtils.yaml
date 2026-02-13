@@ -82,6 +82,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMarkdownFiles
 
+- name: MiniA Utils Tests::Skills
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSkills
+
+- name: MiniA Utils Tests::SkillsDefaultRoots
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSkillsDefaultRoots
+
 - name: MiniA Utils Tests::Metadata
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -156,6 +166,8 @@ todo:
 - MiniA Utils Tests::TodoOps
 - MiniA Utils Tests::PathSecurity
 - MiniA Utils Tests::MarkdownFiles
+- MiniA Utils Tests::Skills
+- MiniA Utils Tests::SkillsDefaultRoots
 - MiniA Utils Tests::Metadata
 - MiniA Utils Tests::MathOpsCalculate
 - MiniA Utils Tests::MathOpsStatistics

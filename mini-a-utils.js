@@ -15,6 +15,8 @@ var MiniUtilsTool = function(options) {
   this._readWrite = false
   this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
+  this._skillTemplateCandidates = ["SKILL.md", "skill.md"]
+  this._skillsRoots = []
   //if (isDef(options)) {
     this.init(options)
   //}
@@ -55,6 +57,7 @@ MiniUtilsTool.prototype.init = function(options) {
 
     this._root = canonicalRoot
     this._readWrite = options.readwrite === true
+    this._skillsRoots = this._resolveSkillsRoots(options)
     var sep = String(java.io.File.separator)
     this._separator = sep
     if (canonicalRoot.indexOf(sep, canonicalRoot.length - sep.length) === -1) {
@@ -120,6 +123,333 @@ MiniUtilsTool.prototype._createGlobMatcher = function(pattern) {
   } catch (e) {
     return null
   }
+}
+
+MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
+  options = isMap(options) ? options : {}
+  var roots = []
+  var seen = {}
+  var self = this
+  var addRoot = function(pathValue) {
+    if (!(isString(pathValue) || pathValue instanceof java.lang.String)) return
+    var trimmed = String(pathValue).trim()
+    if (trimmed.length === 0) return
+    var expanded = self._expandHomePath(trimmed)
+    var canonical
+    try {
+      canonical = String(new java.io.File(expanded).getCanonicalPath())
+    } catch (e) {
+      return
+    }
+    if (seen[canonical]) return
+    if (!io.fileExists(canonical)) return
+    var info = io.fileInfo(canonical)
+    if (isUnDef(info) || info.isDirectory !== true) return
+    seen[canonical] = true
+    roots.push(canonical)
+  }
+
+  if (isString(options.skillsroot) || options.skillsroot instanceof java.lang.String) addRoot(options.skillsroot)
+  if (isArray(options.skillsroots)) {
+    options.skillsroots.forEach(function(entry) {
+      addRoot(entry)
+    })
+  }
+
+  if (roots.length === 0) {
+    var userHome = java.lang.System.getProperty("user.home")
+    if (isString(userHome) || userHome instanceof java.lang.String) {
+      userHome = String(userHome)
+      if (userHome.length > 0) {
+        addRoot(userHome + java.io.File.separator + ".openaf-mini-a" + java.io.File.separator + "skills")
+      }
+    }
+
+    if (typeof __gHDir === "function") {
+      try {
+        var gHome = __gHDir()
+        if (isString(gHome) || gHome instanceof java.lang.String) {
+          gHome = String(gHome)
+          if (gHome.length > 0) {
+            addRoot(gHome + java.io.File.separator + ".openaf-mini-a" + java.io.File.separator + "skills")
+          }
+        }
+      } catch (ignoreGHDirError) {
+      }
+    }
+  }
+  return roots
+}
+
+MiniUtilsTool.prototype._expandHomePath = function(pathValue) {
+  if (!(isString(pathValue) || pathValue instanceof java.lang.String)) return pathValue
+  pathValue = String(pathValue)
+  if (pathValue === "~") return java.lang.System.getProperty("user.home")
+  if (pathValue.indexOf("~/") === 0 || pathValue.indexOf("~\\") === 0) {
+    var home = java.lang.System.getProperty("user.home")
+    if (isString(home) && home.length > 0) {
+      return home + pathValue.substring(1)
+    }
+  }
+  return pathValue
+}
+
+MiniUtilsTool.prototype._getSkillRelativeToRoot = function(rootPath, targetPath) {
+  if (!(isString(rootPath) || rootPath instanceof java.lang.String)) return targetPath
+  if (!(isString(targetPath) || targetPath instanceof java.lang.String)) return targetPath
+  rootPath = String(rootPath)
+  targetPath = String(targetPath)
+  if (targetPath === rootPath) return "."
+  var sep = String(java.io.File.separator)
+  var rootWithSep = rootPath
+  if (rootPath.indexOf(sep, rootPath.length - sep.length) === -1) {
+    rootWithSep = rootPath + sep
+  }
+  if (targetPath.indexOf(rootWithSep) === 0) {
+    return targetPath.substring(rootWithSep.length)
+  }
+  return targetPath
+}
+
+MiniUtilsTool.prototype._resolveSkillTemplateFromFolder = function(folderPath) {
+  if (!(isString(folderPath) || folderPath instanceof java.lang.String)) return __
+  folderPath = String(folderPath)
+  if (folderPath.trim().length === 0) return __
+  var candidates = this._skillTemplateCandidates || ["SKILL.md", "skill.md"]
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      var candidatePath = String(new java.io.File(folderPath, candidates[i]).getCanonicalPath())
+      if (!io.fileExists(candidatePath)) continue
+      var info = io.fileInfo(candidatePath)
+      if (isDef(info) && info.isFile === true) return candidatePath
+    } catch (e) {
+    }
+  }
+  return __
+}
+
+MiniUtilsTool.prototype._readSkillDescriptionFromTemplate = function(templatePath) {
+  if (!(isString(templatePath) || templatePath instanceof java.lang.String)) return __
+  templatePath = String(templatePath)
+  if (templatePath.trim().length === 0) return __
+  try {
+    if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
+    var content = io.readFileString(templatePath)
+    if (!isString(content) || content.length === 0) return __
+    var normalized = String(content).replace(/\r\n/g, "\n")
+    var frontMatterMatch = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)
+    if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
+    var meta = af.fromYAML(frontMatterMatch[1])
+    if (!isObject(meta) || !isString(meta.description)) return __
+    var description = meta.description.replace(/\s+/g, " ").trim()
+    return description.length > 0 ? description : __
+  } catch (e) {
+    return __
+  }
+}
+
+MiniUtilsTool.prototype._listSkills = function(params) {
+  var payload = isMap(params) ? params : {}
+  var includeHidden = payload.includeHidden === true
+  var query = isString(payload.query) ? payload.query.toLowerCase().trim() : ""
+  var seenByName = {}
+  var results = []
+  var self = this
+  var validName = /^[a-z0-9][a-z0-9_-]*$/
+
+  this._skillsRoots.forEach(function(rootPath) {
+    var listing
+    try {
+      listing = io.listFiles(rootPath)
+    } catch (e) {
+      listing = __
+    }
+    if (!isMap(listing) || !isArray(listing.files)) return
+
+    listing.files.forEach(function(entry) {
+      var entryName = __
+      var isDirectory = false
+
+      if (isMap(entry) && (isString(entry.filename) || entry.filename instanceof java.lang.String)) {
+        entryName = String(entry.filename)
+        isDirectory = entry.isDirectory === true
+      } else if (isString(entry) || entry instanceof java.lang.String) {
+        entryName = String(entry)
+        try {
+          var fromString = new java.io.File(rootPath, entryName)
+          isDirectory = fromString.isDirectory()
+        } catch (entryErr) {
+          isDirectory = false
+        }
+      } else {
+        return
+      }
+
+      if (!isString(entryName) || entryName.length === 0) return
+      if (!includeHidden && entryName.indexOf(".") === 0) return
+
+      var name = __
+      var sourceType = "file"
+      var templatePath = __
+
+      if (isDirectory === true) {
+        name = entryName.toLowerCase()
+        try {
+          var folderPath = String(new java.io.File(rootPath, entryName).getCanonicalPath())
+          templatePath = self._resolveSkillTemplateFromFolder(folderPath)
+        } catch (folderErr) {
+          templatePath = __
+        }
+        if (isUnDef(templatePath)) return
+        sourceType = "folder"
+      } else {
+        if (!/\.md$/i.test(entryName)) return
+        name = entryName.replace(/\.md$/i, "").toLowerCase()
+        try {
+          templatePath = String(new java.io.File(rootPath, entryName).getCanonicalPath())
+        } catch (fileErr) {
+          templatePath = __
+        }
+      }
+
+      if (!isString(name) || !validName.test(name)) return
+      if (!isString(templatePath) || !io.fileExists(templatePath)) return
+      if (seenByName[name]) return
+
+      var description = sourceType === "folder"
+        ? self._readSkillDescriptionFromTemplate(templatePath)
+        : __
+      var relativePath = self._getSkillRelativeToRoot(rootPath, templatePath)
+      var queryText = [
+        name,
+        isString(relativePath) ? relativePath : "",
+        isString(description) ? description : ""
+      ].join(" ").toLowerCase()
+      if (query.length > 0 && queryText.indexOf(query) < 0) return
+
+      seenByName[name] = true
+      results.push({
+        name        : name,
+        sourceType  : sourceType,
+        description : description,
+        templatePath: templatePath,
+        relativePath: relativePath,
+        rootPath    : rootPath
+      })
+    })
+  })
+
+  results.sort(function(a, b) {
+    return String(a.name).localeCompare(String(b.name))
+  })
+  return results
+}
+
+MiniUtilsTool.prototype._parseSkillArgs = function(rawValue) {
+  var raw = isString(rawValue) ? rawValue.trim() : ""
+  if (raw.length === 0) return { ok: true, raw: "", argv: [], argc: 0 }
+
+  var argv = []
+  var current = ""
+  var quote = ""
+  var escaping = false
+  for (var i = 0; i < raw.length; i++) {
+    var ch = raw.charAt(i)
+
+    if (escaping) {
+      current += ch
+      escaping = false
+      continue
+    }
+
+    if (ch === "\\") {
+      escaping = true
+      continue
+    }
+
+    if (quote.length > 0) {
+      if (ch === quote) quote = ""
+      else current += ch
+      continue
+    }
+
+    if (ch === "'" || ch === "\"") {
+      quote = ch
+      continue
+    }
+
+    if (/\s/.test(ch)) {
+      if (current.length > 0) {
+        argv.push(current)
+        current = ""
+      }
+      continue
+    }
+    current += ch
+  }
+
+  if (escaping || quote.length > 0) {
+    return { ok: false, error: "Unbalanced quotes or trailing escape in arguments." }
+  }
+  if (current.length > 0) argv.push(current)
+  return {
+    ok  : true,
+    raw : raw,
+    argv: argv,
+    argc: argv.length
+  }
+}
+
+MiniUtilsTool.prototype._renderSkillTemplate = function(template, parsedArgs) {
+  var rendered = isString(template) ? template : String(template || "")
+  var replacedAny = false
+  var args = isObject(parsedArgs) ? parsedArgs : { raw: "", argv: [], argc: 0 }
+
+  var replaceAll = function(placeholder, value) {
+    if (rendered.indexOf(placeholder) >= 0) {
+      replacedAny = true
+      rendered = rendered.split(placeholder).join(value)
+    }
+  }
+
+  var argvString = "[]"
+  try {
+    argvString = stringify(args.argv || [], __, "")
+  } catch (e) {
+    argvString = "[]"
+  }
+
+  replaceAll("{{args}}", args.raw || "")
+  replaceAll("{{argv}}", argvString)
+  replaceAll("{{argc}}", String(isNumber(args.argc) ? args.argc : 0))
+
+  rendered = rendered.replace(/\{\{arg([1-9][0-9]*)\}\}/g, function(_, indexStr) {
+    replacedAny = true
+    var idx = Number(indexStr) - 1
+    if (!isNaN(idx) && idx >= 0 && isArray(args.argv) && idx < args.argv.length) return args.argv[idx]
+    return ""
+  })
+
+  if ((args.argc || 0) > 0 && replacedAny !== true) {
+    rendered += "\n\nArguments (auto-appended):\n"
+    rendered += "- raw: " + (args.raw || "") + "\n"
+    rendered += "- argv: " + argvString + "\n"
+    rendered += "- argc: " + (args.argc || 0) + "\n"
+  }
+
+  return rendered
+}
+
+MiniUtilsTool.prototype._serializeSkillArgv = function(argv) {
+  if (!isArray(argv) || argv.length === 0) return ""
+  return argv.map(function(value) {
+    var token = String(value)
+    if (token.length === 0) return "\"\""
+    if (/[\\\s"]/.test(token)) {
+      return "\"" + token.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\""
+    }
+    return token
+  }).join(" ")
 }
 
 MiniUtilsTool.prototype._listEntries = function(baseDir, options) {
@@ -900,6 +1230,149 @@ MiniUtilsTool.prototype.markdownFiles = function(params) {
     }
 
     return "[ERROR] Unknown markdown operation: " + operation
+  } catch (e) {
+    return "[ERROR] " + (e.message || String(e))
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.skills(params) : Object|Array</key>
+ * Discovers and uses installed skills from configured skill roots.
+ * The `params` object supports:
+ * - `operation` (string, optional): `list` (default), `search`, `read`, `render`, or `invoke`.
+ * - `name` (string, required for `read`/`render`/`invoke`): Skill name.
+ * - `query` (string, required for `search`): Query string to match skill metadata.
+ * - `args` (string, optional): Raw arguments used by `render`.
+ * - `argv` (array, optional): Explicit argument list for `render` (overrides parsed `args`).
+ * - `includeHidden` (boolean, optional): Include hidden entries for discovery.
+ * - `compact` (boolean, optional): Return compact payload.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.skills = function(params) {
+  params = params || {}
+  try {
+    this._ensureInitialized()
+    var op = isString(params.operation) ? params.operation.toLowerCase().trim() : "list"
+    if (op === "get") op = "read"
+    if (op === "view") op = "read"
+    if (op === "cat") op = "read"
+    if (op === "use") op = "render"
+    if (op === "expand") op = "render"
+    if (op === "apply") op = "render"
+    if (op === "run") op = "invoke"
+
+    var listParams = {
+      includeHidden: params.includeHidden === true
+    }
+    if (op === "search") {
+      if (!isString(params.query) || params.query.trim().length === 0) return "[ERROR] query is required for search"
+      listParams.query = params.query
+    }
+
+    if (op === "list" || op === "search") {
+      var skills = this._listSkills(listParams)
+      if (params.compact === true) {
+        return {
+          count : skills.length,
+          skills: skills.map(function(entry) { return entry.name })
+        }
+      }
+      return {
+        count : skills.length,
+        skills: skills.map(function(entry) {
+          return {
+            name       : entry.name,
+            sourceType : entry.sourceType,
+            description: entry.description,
+            relativePath: entry.relativePath
+          }
+        })
+      }
+    }
+
+    if (op === "read" || op === "render" || op === "invoke") {
+      if (!isString(params.name) || params.name.trim().length === 0) return "[ERROR] name is required"
+      var requestedName = params.name.trim().toLowerCase()
+      var discovered = this._listSkills({ includeHidden: params.includeHidden === true })
+      var selected = __
+      for (var i = 0; i < discovered.length; i++) {
+        if (discovered[i].name === requestedName) {
+          selected = discovered[i]
+          break
+        }
+      }
+      if (isUnDef(selected)) return "[ERROR] Skill not found: " + params.name
+
+      var content = io.readFileString(selected.templatePath)
+      if (op === "read") {
+        if (params.compact === true) {
+          return {
+            name  : selected.name,
+            content: content
+          }
+        }
+        return {
+          name        : selected.name,
+          sourceType  : selected.sourceType,
+          description : selected.description,
+          relativePath: selected.relativePath,
+          contentLength: isString(content) ? content.length : 0,
+          content     : content
+        }
+      }
+
+      var parsedArgs
+      if (isArray(params.argv)) {
+        var argv = params.argv.map(function(value) { return String(value) })
+        var rawFromArgv = this._serializeSkillArgv(argv)
+        parsedArgs = {
+          ok  : true,
+          raw : isString(params.args) ? params.args : rawFromArgv,
+          argv: argv,
+          argc: argv.length
+        }
+      } else {
+        parsedArgs = this._parseSkillArgs(isString(params.args) ? params.args : "")
+      }
+      if (!isMap(parsedArgs) || parsedArgs.ok !== true) {
+        return "[ERROR] " + (isMap(parsedArgs) && isString(parsedArgs.error) ? parsedArgs.error : "Invalid skill arguments")
+      }
+
+      var rendered = this._renderSkillTemplate(content, parsedArgs)
+      var invocationSuffix = isString(parsedArgs.raw) && parsedArgs.raw.length > 0 ? " " + parsedArgs.raw : ""
+      var skillInvocation = "$" + selected.name + invocationSuffix
+      var slashInvocation = "/" + selected.name + invocationSuffix
+      if (params.compact === true) {
+        if (op === "invoke") {
+          return {
+            name      : selected.name,
+            invocation: skillInvocation,
+            rendered  : rendered
+          }
+        }
+        return {
+          name    : selected.name,
+          rendered: rendered
+        }
+      }
+      return {
+        name        : selected.name,
+        sourceType  : selected.sourceType,
+        description : selected.description,
+        relativePath: selected.relativePath,
+        args        : {
+          raw : parsedArgs.raw,
+          argv: parsedArgs.argv,
+          argc: parsedArgs.argc
+        },
+        rendered     : rendered,
+        invocation   : skillInvocation,
+        slashCommand : slashInvocation
+      }
+    }
+
+    return "[ERROR] Unknown skills operation: " + op
   } catch (e) {
     return "[ERROR] " + (e.message || String(e))
   }
@@ -2322,6 +2795,7 @@ MiniUtilsTool._metadataByFn = (function() {
   // KV store operation types
   var kvStoreOps = ["set", "get", "delete", "list", "clear", "todo-write", "todo-read"]
   var markdownOps = ["list", "search", "read", "get", "view", "cat"]
+  var skillOps = ["list", "search", "read", "get", "view", "cat", "render", "use", "expand", "apply", "invoke", "run"]
 
   return {
     init: {
@@ -2331,7 +2805,9 @@ MiniUtilsTool._metadataByFn = (function() {
         type      : "object",
         properties: {
           root     : { type: "string", description: "Root directory for subsequent file operations. Defaults to current directory." },
-          readwrite: { type: "boolean", description: "Enable write and delete operations when set to true." }
+          readwrite: { type: "boolean", description: "Enable write and delete operations when set to true." },
+          skillsroot: { type: "string", description: "Optional additional skill root directory for skill discovery." },
+          skillsroots: { type: "array", items: { type: "string" }, description: "Optional ordered skill root directories for skill discovery." }
         }
       }
     },
@@ -2659,6 +3135,37 @@ MiniUtilsTool._metadataByFn = (function() {
           {
             if  : { required: ["operation"], properties: { operation: { enum: ["read", "get", "view", "cat"] } } },
             then: { required: ["path"] }
+          }
+        ]
+      }
+    },
+    skills: {
+      name       : "skills",
+      description: "Discover and use existing skills from configured skill directories. Start with operation='list', use operation='read' to inspect a skill template, and operation='invoke' to render a skill with arguments and get a canonical invocation string.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation    : {
+            type       : "string",
+            description: "Operation type: list/search/read/render/invoke (aliases: get/view/cat, use/expand/apply, run).",
+            enum       : skillOps,
+            default    : "list"
+          },
+          name         : { type: "string", description: "Skill name for read/render/invoke operations." },
+          query        : { type: "string", description: "Search query for operation=search." },
+          args         : { type: "string", description: "Raw argument string for render/invoke operations." },
+          argv         : { type: "array", items: { type: "string" }, description: "Explicit argument array for render/invoke operations (overrides parsed args parsing)." },
+          includeHidden: { type: "boolean", description: "Include hidden files/folders during skill discovery." },
+          compact      : { type: "boolean", description: "Return compact responses to reduce token usage." }
+        },
+        allOf: [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["search"] } } },
+            then: { required: ["query"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["read", "get", "view", "cat", "render", "use", "expand", "apply", "invoke", "run"] } } },
+            then: { required: ["name"] }
           }
         ]
       }

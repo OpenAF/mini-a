@@ -48,6 +48,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-key')"
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `goal` | Objective for the agent to achieve | `goal="analyze code and suggest improvements"` |
+| `exec` | Execute one custom slash command/skill template non-interactively (different from `goal`) | `exec="/my-command arg1 arg2"` |
 
 ### Essential Options
 
@@ -497,10 +498,11 @@ Quick configuration bundles for common use cases.
 |------|-------------|----------------------|
 | `shell` | Read-only shell access | `useshell=true` |
 | `shellrw` | Shell with write access | `useshell=true readwrite=true` |
-| `shellutils` | Shell + Mini Utils Tool | `useshell=true useutils=true usetools=true` |
+| `shellutils` | Shell + Mini Utils Tool | `useshell=true useutils=true mini-a-docs=true usetools=true` |
 | `chatbot` | Conversational mode | `chatbotmode=true` |
-| `web` | Browser UI optimized | `usetools=true` |
-| `webfull` | Full-featured web UI | `usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true` |
+| `internet` | Internet-focused MCP mode | `usetools=true mini-a-docs=true mcp=...` |
+| `web` | Browser UI optimized | `usetools=true mini-a-docs=true` |
+| `webfull` | Full-featured web UI | `usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true` |
 
 **Examples:**
 
@@ -930,7 +932,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
 | `/save <path>` | Save the last final answer to the provided file path |
-| `/<custom> [args...]` | Execute custom command templates from `~/.openaf-mini-a/commands/<custom>.md` |
+| `/<name> [args...]` | Execute slash template from `~/.openaf-mini-a/commands/<name>.md`, `~/.openaf-mini-a/skills/<name>.md`, or `~/.openaf-mini-a/skills/<name>/SKILL.md` |
 | `/help` | Show help information |
 | `/quit` or `/exit` | Exit console |
 
@@ -940,6 +942,23 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 - Placeholders: `{{args}}`, `{{argv}}`, `{{argc}}`, `{{arg1}}`, `{{arg2}}`, ...
 - Built-in commands always take precedence (`/help`, `/show`, etc. cannot be overridden)
 - Missing or unreadable command templates fail with an explicit hard error
+
+**Skill Slash Templates (`~/.openaf-mini-a/skills/`):**
+
+- Same placeholder support as command templates (`{{args}}`, `{{argv}}`, `{{argc}}`, `{{argN}}`)
+- Invoked with the same `/<name> ...args...` syntax
+- Supported layouts:
+  - `~/.openaf-mini-a/skills/<name>/SKILL.md` (Claude Code-style folder skill)
+  - `~/.openaf-mini-a/skills/<name>.md` (legacy file skill)
+- If both folders define the same name, `commands` takes precedence and the `skills` entry is ignored
+- Skills downloaded from sites like `skillsmp.com` can be copied as folders under `~/.openaf-mini-a/skills/` when each folder includes `SKILL.md` (or `skill.md`)
+
+**Console Hooks (`~/.openaf-mini-a/hooks/*.{yaml,yml,json}`):**
+
+- Supported events: `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell`
+- Key fields: `event`, `command`, optional `toolFilter`, `injectOutput`, `timeout`, `failBlocks`, `env`
+- Hook runtime env vars include `MINI_A_GOAL`, `MINI_A_RESULT`, `MINI_A_TOOL`, `MINI_A_TOOL_PARAMS`, `MINI_A_TOOL_RESULT`, `MINI_A_SHELL_COMMAND`, `MINI_A_SHELL_OUTPUT`
+- `failBlocks=true` can stop the associated goal/tool/shell action when a hook fails
 
 Example template:
 
@@ -958,7 +977,7 @@ mini-a ➤ /my-command repo-a --fast "include docs"
 
 **File Attachments in Console:**
 
-> **Tip:** Slash commands that accept file paths (like `/save`) include filesystem tab-completion, and discovered custom slash commands also appear in command completion via <kbd>Tab</kbd>.
+> **Tip:** Slash commands that accept file paths (like `/save`) include filesystem tab-completion, and discovered command/skill slash templates also appear in command completion via <kbd>Tab</kbd>.
 
 ```bash
 # Single file

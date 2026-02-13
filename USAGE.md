@@ -37,6 +37,7 @@ Mini-A now ships with an interactive console so you can start the agent directly
 
 - `opack exec mini-a` — launches the console; append arguments such as `goal="summarize the logs" useshell=true`, or type the goal at the prompt.
 - `mini-a goal="summarize the logs" useshell=true` — same console when you add the optional alias printed after installation.
+- `mini-a exec="/my-command repo-a --fast"` — executes one custom slash command/skill template non-interactively and exits (different from `goal=...`).
 - `./mini-a.sh goal="summarize the logs" useshell=true` — wrapper script when running from a cloned repository.
 - `ojob mini-a.yaml goal="summarize the logs" useshell=true` — direct invocation of the oJob definition.
 - `ojob mini-a-web.yaml onport=8888` — launches the HTTP server that powers the browser UI found in `public/`.
@@ -45,9 +46,25 @@ All command-line flags documented below work with the console (`opack exec mini-
 
 Need a quick reference of every option? Run `mini-a -h` (or `mini-a --help`) to print the colorized console help followed by a table of shared Mini-A arguments sourced directly from `mini-a.js`. That listing mirrors the parameter catalog below, so it is always up to date with the agent’s runtime defaults.
 
-Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`.
+Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`. Use `/skills [prefix]` to list discovered skills and optionally filter by skill name prefix.
 
 Custom slash commands are supported through markdown templates in `~/.openaf-mini-a/commands/`. Typing `/<name> ...args...` looks for `~/.openaf-mini-a/commands/<name>.md`, renders placeholders, and submits the result as the goal text.
+
+Skill slash templates support both formats in `~/.openaf-mini-a/skills/`:
+- Claude Code-style folder skills: `~/.openaf-mini-a/skills/<name>/SKILL.md`
+- Legacy single-file skills: `~/.openaf-mini-a/skills/<name>.md`
+
+Both are invoked with `/<name> ...args...`, and skills also support `$<name> ...args...`. If both directories define the same slash name, the skill template in `~/.openaf-mini-a/skills/` takes precedence over `~/.openaf-mini-a/commands/`.
+
+To invoke one template directly from the command line (without entering the console), use `exec=`:
+
+```bash
+mini-a exec="/my-command repo-a --fast \"include docs\""
+```
+
+`exec=` is not the same as `goal=`:
+- `goal=` sends your text directly as the user goal.
+- `exec=` resolves and renders a slash command/skill template first, then runs the rendered goal with normal hook integration.
 
 Supported placeholders inside each template:
 - `{{args}}` → raw argument string
@@ -74,7 +91,45 @@ mini-a ➤ /my-command repo-a --fast "include docs"
 Notes:
 - Built-in commands take precedence, so custom files cannot override `/help`, `/show`, etc.
 - If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
-- Discovered custom commands appear in `/help` and Tab completion.
+- Discovered command and skill templates appear in `/help` and Tab completion.
+- Skill packs downloaded from catalogs such as `skillsmp.com` can be copied directly as folders under `~/.openaf-mini-a/skills/` as long as each skill folder contains `SKILL.md` (or `skill.md`).
+- Skill templates resolve relative `@file.md` attachment paths against the skill folder, and relative markdown links to `.md` files are auto-inlined as additional reference content.
+
+### Console Hooks (`~/.openaf-mini-a/hooks`)
+
+The console can run local hooks before/after goals, tool calls, and shell commands. Hook definitions are loaded from `~/.openaf-mini-a/hooks/*.yaml`, `*.yml`, or `*.json`.
+
+Supported `event` values:
+- `before_goal`
+- `after_goal`
+- `before_tool`
+- `after_tool`
+- `before_shell`
+- `after_shell`
+
+Hook fields:
+- `event` (required): Hook event name.
+- `command` (required): Local shell command to execute.
+- `toolFilter` (optional): Comma-separated tool names (applies only to tool events).
+- `injectOutput` (optional, default `false`): Include hook `stdout` in agent context (currently consumed by `before_goal` and `before_tool`).
+- `timeout` (optional, default `5000`): Hook command timeout in milliseconds.
+- `failBlocks` (optional, default `false`): Block the associated action when the hook exits non-zero or fails.
+- `env` (optional): Static environment variables merged with runtime hook variables.
+
+Runtime variables exposed to hooks include:
+- `MINI_A_HOOK_NAME`, `MINI_A_HOOK_EVENT`
+- `MINI_A_GOAL`, `MINI_A_RESULT`
+- `MINI_A_TOOL`, `MINI_A_TOOL_PARAMS`, `MINI_A_TOOL_RESULT`
+- `MINI_A_SHELL_COMMAND`, `MINI_A_SHELL_OUTPUT`
+
+Example `~/.openaf-mini-a/hooks/block-dangerous-shell.yaml`:
+
+```yaml
+event: before_shell
+command: "echo \"$MINI_A_SHELL_COMMAND\" | grep -E '(rm -rf|mkfs|dd if=)' >/dev/null && exit 1 || exit 0"
+timeout: 1500
+failBlocks: true
+```
 
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
@@ -88,6 +143,8 @@ To view conversation token usage:
 
 Need to revisit or store the most recent response? `/last [md]` reprints the previous final answer so you can copy it (add `md` to emit the raw Markdown instead of the formatted view), and `/save <path>` writes that answer straight to a file. When providing a path, press <kbd>Tab</kbd> to leverage the console's new filesystem auto-completion for slash commands.
 
+Need to inspect available skills quickly? `/skills` prints all discovered skills (name, type, description, and source file), and `/skills <prefix>` filters the list.
+
 ### Attaching Files in the Console
 
 The console supports inline file attachments using the `@path/to/file` syntax. When you include file references in your goal, Mini-A automatically reads and includes the file contents as part of the submitted goal.
@@ -97,6 +154,8 @@ The console supports inline file attachments using the `@path/to/file` syntax. W
 - Embed file references within sentences: `Follow these instructions @docs/guide.md and also check @config/settings.json`
 - Files are wrapped with clear delimiters showing the file path
 - Non-existent or unreadable files produce error messages without blocking the goal
+- Escape literal mentions with `\@token` when you do not want Mini-A to treat them as attachments
+- Escape leading skill-like tokens with `\$token` when you want literal text instead of `$skill` invocation
 
 **Examples:**
 
@@ -208,10 +267,11 @@ Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mo
 
 - **`shell`** – Read-only shell access (`useshell=true`).
 - **`shellrw`** – Shell with write access enabled (`useshell=true readwrite=true`).
-- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities (`useutils=true usetools=true`).
+- **`shellutils`** – Shell plus the Mini Utils Tool MCP utilities with docs-aware defaults (`useutils=true mini-a-docs=true usetools=true`).
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
-- **`web`** – Browser UI with tool registration (`usetools=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, and ASCII sketches enabled (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
+- **`internet`** – Tool mode with web-access MCP presets plus docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
+- **`web`** – Browser UI with tool registration and docs-aware utils (`usetools=true mini-a-docs=true`).
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and docs-aware utils enabled (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
 
 ### Creating Custom Presets
 
@@ -731,10 +791,11 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 - **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access.
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
-  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true usetools=true`) exposing `init`, `filesystemQuery`, and `filesystemModify` actions.
+  - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`) exposing `init`, `filesystemQuery`, `filesystemModify`, and `markdownFiles` actions.
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
-  - `web` – Optimizes for the browser UI with MCP tools registered (`usetools=true`).
-  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, and planning for the web UI (`usetools=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
+  - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
+  - `web` – Optimizes for the browser UI with MCP tools registered and docs-aware utils (`usetools=true mini-a-docs=true`).
+  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 
