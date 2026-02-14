@@ -32,6 +32,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testNormalizeToolResultVariants
 
+- name: MiniA Core Tests::UtilsMcpSkillsToggle
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUtilsMcpSkillsToggle
+
 include:
 - oJobTest.yaml
 
@@ -46,3 +51,4 @@ todo:
 - MiniA Core Tests::CategorizeError
 - MiniA Core Tests::ErrorHistory
 - MiniA Core Tests::NormalizeToolResult
+- MiniA Core Tests::UtilsMcpSkillsToggle

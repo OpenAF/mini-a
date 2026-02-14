@@ -80,4 +80,18 @@
     ow.test.assert(emptyResult.display === "(no output)", true, "Display should indicate missing output")
     ow.test.assert(emptyResult.hasError === false, true, "Missing error field should not flag hasError")
   }
+
+  exports.testUtilsMcpSkillsToggle = function() {
+    var agent = createAgent()
+
+    var disabled = agent._createUtilsMcpConfig({ useskills: false })
+    ow.test.assert(isMap(disabled) && isMap(disabled.options), true, "Should build utils MCP config with useskills=false")
+    ow.test.assert(isUnDef(disabled.options.fns.skills), true, "Should hide skills tool when useskills=false")
+    ow.test.assert(isUnDef(disabled.options.fnsMeta.skills), true, "Should hide skills metadata when useskills=false")
+
+    var enabled = agent._createUtilsMcpConfig({ useskills: true })
+    ow.test.assert(isMap(enabled) && isMap(enabled.options), true, "Should build utils MCP config with useskills=true")
+    ow.test.assert(isDef(enabled.options.fns.skills), true, "Should expose skills tool when useskills=true")
+    ow.test.assert(isDef(enabled.options.fnsMeta.skills), true, "Should expose skills metadata when useskills=true")
+  }
 })()

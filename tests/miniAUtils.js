@@ -420,12 +420,119 @@
     }
   }
 
+  exports.testMarkdownFiles = function() {
+    var testDir = createTestDir()
+    try {
+      io.writeFileString(testDir + java.io.File.separator + "README.md", "# Intro\nLine 2")
+      io.writeFileString(testDir + java.io.File.separator + "notes.txt", "not markdown")
+      io.mkdir(testDir + java.io.File.separator + "docs")
+      io.writeFileString(testDir + java.io.File.separator + "docs" + java.io.File.separator + "guide.md", "Guide title\nSearch Me")
+
+      var tool = new MiniUtilsTool(testDir)
+
+      var listResult = tool.markdownFiles({ operation: "list" })
+      ow.test.assert(isArray(listResult), true, "Markdown list should return array")
+      ow.test.assert(listResult.length === 2, true, "Markdown list should include only *.md files")
+
+      var searchResult = tool.markdownFiles({ operation: "search", pattern: "search me" })
+      ow.test.assert(isArray(searchResult), true, "Markdown search should return array")
+      ow.test.assert(searchResult.length === 1, true, "Markdown search should find content in markdown files")
+      ow.test.assert(searchResult[0].relativePath === "docs" + java.io.File.separator + "guide.md", true, "Markdown search should point to markdown file")
+
+      var readLineResult = tool.markdownFiles({ operation: "read", path: "README.md", lineStart: 2, maxLines: 1 })
+      ow.test.assert(isMap(readLineResult), true, "Markdown read should return file map")
+      ow.test.assert(String(readLineResult.content).trim() === "Line 2", true, "Markdown read should support line window")
+
+      var readFullResult = tool.markdownFiles({ operation: "read", path: "README.md" })
+      ow.test.assert(readFullResult.content.indexOf("# Intro") >= 0, true, "Markdown read should support full file")
+
+      var readNonMarkdown = tool.markdownFiles({ operation: "read", path: "notes.txt" })
+      ow.test.assert(isString(readNonMarkdown) && readNonMarkdown.indexOf("[ERROR]") === 0, true, "Markdown read should reject non-md files")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
+  exports.testSkills = function() {
+    var testDir = createTestDir()
+    var skillsDir = createTestDir()
+    try {
+      io.writeFileString(skillsDir + java.io.File.separator + "summarize.md", "Summarize {{arg1}} with {{args}}")
+      io.mkdir(skillsDir + java.io.File.separator + "planner")
+      io.writeFileString(
+        skillsDir + java.io.File.separator + "planner" + java.io.File.separator + "SKILL.md",
+        "---\ndescription: Build a practical plan\n---\nPlan for {{arg1}}"
+      )
+
+      var tool = new MiniUtilsTool({ root: testDir, skillsroots: [skillsDir] })
+
+      var listResult = tool.skills({ operation: "list" })
+      ow.test.assert(isMap(listResult), true, "Skills list should return object")
+      var listedNames = isArray(listResult.skills) ? listResult.skills.map(function(entry) { return entry.name }) : []
+      ow.test.assert(listedNames.indexOf("planner") >= 0, true, "Skills list should include folder skills")
+      ow.test.assert(listedNames.indexOf("summarize") >= 0, true, "Skills list should include file skills")
+
+      var searchResult = tool.skills({ operation: "search", query: "plan" })
+      ow.test.assert(searchResult.count === 1, true, "Skills search should filter skills")
+      ow.test.assert(searchResult.skills[0].name === "planner", true, "Skills search should find planner")
+
+      var readResult = tool.skills({ operation: "read", name: "planner" })
+      ow.test.assert(isMap(readResult), true, "Skills read should return object")
+      ow.test.assert(isString(readResult.content) && readResult.content.indexOf("Plan for") >= 0, true, "Skills read should include template content")
+
+      var renderResult = tool.skills({ operation: "render", name: "summarize", args: "\"release notes\" quickly" })
+      ow.test.assert(isMap(renderResult), true, "Skills render should return object")
+      ow.test.assert(renderResult.rendered.indexOf("release notes") >= 0, true, "Skills render should replace arg placeholders")
+      ow.test.assert(renderResult.rendered.indexOf("quickly") >= 0, true, "Skills render should preserve full args")
+
+      var useAliasResult = tool.skills({ operation: "use", name: "planner", argv: ["Q1 roadmap"] })
+      ow.test.assert(useAliasResult.rendered.indexOf("Q1 roadmap") >= 0, true, "Skills use alias should render with argv")
+
+      var invokeResult = tool.skills({ operation: "invoke", name: "planner", argv: ["Q1 roadmap", "FY26"] })
+      ow.test.assert(isMap(invokeResult), true, "Skills invoke should return object")
+      ow.test.assert(invokeResult.invocation === "$planner \"Q1 roadmap\" FY26", true, "Skills invoke should return canonical skill invocation")
+      ow.test.assert(invokeResult.slashCommand === "/planner \"Q1 roadmap\" FY26", true, "Skills invoke should return canonical slash invocation")
+      ow.test.assert(invokeResult.rendered.indexOf("Q1 roadmap") >= 0, true, "Skills invoke should render with argv")
+    } finally {
+      cleanupTestDir(testDir)
+      cleanupTestDir(skillsDir)
+    }
+  }
+
+  exports.testSkillsDefaultRoots = function() {
+    var testDir = createTestDir()
+    var fakeHome = createTestDir()
+    var sep = java.io.File.separator
+    var originalHome = java.lang.System.getProperty("user.home")
+    try {
+      var defaultSkillsDir = fakeHome + sep + ".openaf-mini-a" + sep + "skills"
+      io.mkdir(defaultSkillsDir)
+      io.mkdir(defaultSkillsDir + sep + "humanizer")
+      io.writeFileString(
+        defaultSkillsDir + sep + "humanizer" + sep + "SKILL.md",
+        "---\ndescription: make text sound natural\n---\nHumanize {{arg1}}"
+      )
+
+      java.lang.System.setProperty("user.home", fakeHome)
+      var tool = new MiniUtilsTool({ root: testDir })
+      var listResult = tool.skills({ operation: "list" })
+      var listedNames = isArray(listResult.skills) ? listResult.skills.map(function(entry) { return entry.name }) : []
+      ow.test.assert(listedNames.indexOf("humanizer") >= 0, true, "Skills list should discover default ~/.openaf-mini-a/skills root")
+    } finally {
+      if (isDef(originalHome)) java.lang.System.setProperty("user.home", String(originalHome))
+      cleanupTestDir(testDir)
+      cleanupTestDir(fakeHome)
+    }
+  }
+
   exports.testMetadata = function() {
     var metadata = MiniUtilsTool.getMetadataByFn()
     ow.test.assert(isMap(metadata), true, "Should return metadata map")
     ow.test.assert(isDef(metadata.init), true, "Should include init metadata")
     ow.test.assert(isDef(metadata.filesystemQuery), true, "Should include filesystemQuery metadata")
     ow.test.assert(isDef(metadata.filesystemModify), true, "Should include filesystemModify metadata")
+    ow.test.assert(isDef(metadata.markdownFiles), true, "Should include markdownFiles metadata")
+    ow.test.assert(isDef(metadata.skills), true, "Should include skills metadata")
     ow.test.assert(isDef(metadata.mathematics), true, "Should include mathematics metadata")
     ow.test.assert(isDef(metadata.timeUtilities), true, "Should include timeUtilities metadata")
 
@@ -434,6 +541,8 @@
     ow.test.assert(methods.indexOf("init") >= 0, true, "Should include init method")
     ow.test.assert(methods.indexOf("filesystemQuery") >= 0, true, "Should include filesystemQuery method")
     ow.test.assert(methods.indexOf("filesystemModify") >= 0, true, "Should include filesystemModify method")
+    ow.test.assert(methods.indexOf("markdownFiles") >= 0, true, "Should include markdownFiles method")
+    ow.test.assert(methods.indexOf("skills") >= 0, true, "Should include skills method")
     ow.test.assert(methods.indexOf("mathematics") >= 0, true, "Should include mathematics method")
     ow.test.assert(methods.indexOf("timeUtilities") >= 0, true, "Should include timeUtilities method")
 
@@ -445,6 +554,11 @@
     ow.test.assert(textOps.indexOf("webfetch") >= 0, true, "Should include webfetch operation in textUtilities")
     var kvOps = metadata.kvStore.inputSchema.properties.operation.enum || []
     ow.test.assert(kvOps.indexOf("todo-write") >= 0, true, "Should include todo-write operation in kvStore")
+    var markdownOps = metadata.markdownFiles.inputSchema.properties.operation.enum || []
+    ow.test.assert(markdownOps.indexOf("search") >= 0, true, "Should include search operation in markdownFiles")
+    var skillOps = metadata.skills.inputSchema.properties.operation.enum || []
+    ow.test.assert(skillOps.indexOf("render") >= 0, true, "Should include render operation in skills")
+    ow.test.assert(skillOps.indexOf("invoke") >= 0, true, "Should include invoke operation in skills")
   }
 
   exports.testMathOpsCalculate = function() {

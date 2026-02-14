@@ -53,13 +53,28 @@ Two steps to use:
    ```bash
    opack exec mini-a goal="your goal"
    ```
+   To run one custom slash command/skill template without entering interactive mode, use:
+   ```bash
+   opack exec mini-a exec="/my-command first second"
+   ```
+   `exec=` is different from `goal=`: it resolves a slash template from `~/.openaf-mini-a/commands/` or `~/.openaf-mini-a/skills/`, renders placeholders with the provided arguments, runs the resulting goal through Mini-A (including hooks), and exits.
    If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
    For a colorized overview of every console, web, and planning flag (including shared Mini-A arguments), run `mini-a -h` or `mini-a --help`; the console prints the CLI-specific switches followed by the auto-generated table of core agent parameters.
-   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
+   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Use `/skills [prefix]` to list discovered skills (optionally filtered by name prefix). Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
 
-   **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, so you can press <kbd>Tab</kbd> to expand directories and filenames instead of typing the whole path.
+   Custom slash commands are loaded from `~/.openaf-mini-a/commands/*.md`. For example, `/my-command first "second arg"` loads `~/.openaf-mini-a/commands/my-command.md`, injects arguments, and runs the rendered text as the goal. Supported placeholders are `{{args}}`, `{{argv}}`, `{{argc}}`, and positional `{{arg1}}`, `{{arg2}}`, ... . Built-ins always win (`/help`, `/show`, etc. cannot be overridden), and missing template files are treated as hard errors.
 
-   **Tip**: Include file contents in your goals using `@path/to/file` syntax (e.g., `Follow these instructions @docs/guide.md`).
+   Skills are loaded from `~/.openaf-mini-a/skills/` and can be invoked as slash commands (`/<name> ...args...`) or skill aliases (`$<name> ...args...`). Mini-A supports both:
+   - folder skills (Claude Code-style): `~/.openaf-mini-a/skills/<name>/SKILL.md`
+   - legacy file skills: `~/.openaf-mini-a/skills/<name>.md`
+   
+   This keeps compatibility with skill packs downloaded from catalogs such as `skillsmp.com` (drop each skill folder under `~/.openaf-mini-a/skills/`). If a name exists in both folders, `skills` now take precedence over `commands`.
+
+   Console hook files can be loaded from `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` to run local commands around agent lifecycle events. Supported events are `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, and `after_shell`.
+
+   **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, and discovered custom command/skill templates (including `$<skill>`) also appear in completion, so you can press <kbd>Tab</kbd> to expand options quickly.
+
+   **Tip**: Include file contents in your goals using `@path/to/file` syntax (e.g., `Follow these instructions @docs/guide.md`). Skill templates also resolve relative `@file.md` paths from the skill folder automatically, and relative markdown links to `.md` files are auto-inlined as references. Use `\@token` when you need a literal `@token` (for example inside skill markdown) without triggering file attachment parsing. Use `\$token` when you need a literal leading `$token` instead of skill invocation.
 
 Shell access is disabled by default for safety; add `useshell=true` when you explicitly want the agent to run commands.
 
@@ -353,8 +368,9 @@ Mini-A ships with complementary components:
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
-| `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection | `false` |
+| `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`) | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
+| `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate Mini-A documentation directly | `false` |
 | `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |

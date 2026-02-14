@@ -916,6 +916,20 @@ MiniA.prototype.setInteractionFn = function(afn) {
   this._fnI = afn
 }
 
+MiniA.prototype.setHookFn = function(fn) {
+  this._hookFn = isFunction(fn) ? fn : null
+}
+
+MiniA.prototype._runHook = function(event, contextVars) {
+  if (!isFunction(this._hookFn)) return { outputs: [], blocked: false }
+  try {
+    return this._hookFn(event, contextVars)
+  } catch (hookErr) {
+    this.fnI("warn", "Hook failed for '" + event + "': " + hookErr)
+    return { outputs: [], blocked: false }
+  }
+}
+
 /**
  * <odoc>
  * <key>MinA.fnI(event, message) : Function</key>
@@ -5826,9 +5840,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       })
     }
 
+    var includeSkillsTool = toBoolean(args.useskills) === true
     methodNames = methodNames.filter(function(name) {
       return isFunction(fileTool[name])
     })
+    if (includeSkillsTool !== true) {
+      methodNames = methodNames.filter(function(name) { return name !== "skills" })
+    }
 
     if (methodNames.length === 0) return __
 
@@ -5866,6 +5884,143 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     var fns = {}
     var fnsMeta = {}
+    var _normalizeOp = function(v) {
+      return isString(v) ? v.toLowerCase().trim() : ""
+    }
+    var _quoted = function(v) {
+      if (!isString(v)) return ""
+      var t = v.replace(/\s+/g, " ").trim()
+      if (t.length > 80) t = t.substring(0, 77) + "..."
+      return "'" + t + "'"
+    }
+    var _formatPathPart = function(payload) {
+      if (isMap(payload) && isString(payload.path) && payload.path.trim().length > 0) {
+        return " in " + _quoted(payload.path.trim())
+      }
+      return ""
+    }
+    var _buildUtilsIntentMessage = function(name, payload) {
+      if (!isMap(payload)) return "Running tool '" + name + "'."
+
+      var op = _normalizeOp(payload.operation)
+      var pathPart = _formatPathPart(payload)
+
+      if (name === "filesystemQuery") {
+        if (["search", "searchcontent", "grep", "find"].indexOf(op) >= 0) {
+          if (isString(payload.pattern) && payload.pattern.trim().length > 0) {
+            return "Searching for text " + _quoted(payload.pattern) + pathPart + "."
+          }
+          return "Searching text" + pathPart + "."
+        }
+        if (op === "glob") {
+          if (isString(payload.pattern) && payload.pattern.trim().length > 0) {
+            return "Finding files matching " + _quoted(payload.pattern) + pathPart + "."
+          }
+          return "Finding files" + pathPart + "."
+        }
+        if (["list", "ls", "listdirectory", "dir"].indexOf(op) >= 0) {
+          return "Listing directory" + pathPart + "."
+        }
+        if (["info", "stat", "metadata", "getfileinfo"].indexOf(op) >= 0) {
+          return "Getting file info" + pathPart + "."
+        }
+        if (op === "" || ["read", "cat", "readfile"].indexOf(op) >= 0) {
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd) && payload.lineStart === payload.lineEnd) {
+            return "Getting line " + Math.floor(payload.lineStart) + pathPart + "."
+          }
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd)) {
+            return "Getting lines " + Math.floor(payload.lineStart) + "-" + Math.floor(payload.lineEnd) + pathPart + "."
+          }
+          if (isNumber(payload.lineStart)) {
+            return "Getting line " + Math.floor(payload.lineStart) + pathPart + "."
+          }
+          if (payload.countLines === true) {
+            return "Counting lines" + pathPart + "."
+          }
+          return "Reading file" + pathPart + "."
+        }
+      }
+
+      if (name === "filesystemModify") {
+        if (["write", "writefile", "save"].indexOf(op) >= 0) return "Writing file" + pathPart + "."
+        if (op === "append") return "Appending to file" + pathPart + "."
+        if (["edit", "replace"].indexOf(op) >= 0) return "Editing file" + pathPart + "."
+        if (["delete", "remove", "rm", "deletefile"].indexOf(op) >= 0) return "Deleting path" + pathPart + "."
+      }
+
+      if (name === "timeUtilities") {
+        if (op === "" || op === "current-time" || op === "current") {
+          if (isString(payload.timezone) && payload.timezone.trim().length > 0) {
+            return "Getting current time for " + _quoted(payload.timezone.trim()) + "."
+          }
+          return "Getting current time."
+        }
+        if (op === "convert" || op === "timezone-convert") {
+          if (isString(payload.targetTimezone) && payload.targetTimezone.trim().length > 0) {
+            return "Converting time to timezone " + _quoted(payload.targetTimezone.trim()) + "."
+          }
+          return "Converting time between timezones."
+        }
+        if (op === "sleep") {
+          var ms = Number(payload.milliseconds)
+          if (!isNaN(ms)) return "Sleeping for " + ms + "ms."
+          return "Sleeping."
+        }
+      }
+
+      if (name === "markdownFiles") {
+        if (op === "" || op === "list") {
+          return "Listing markdown files" + pathPart + "."
+        }
+        if (op === "search") {
+          if (isString(payload.pattern) && payload.pattern.trim().length > 0) {
+            return "Searching markdown files for " + _quoted(payload.pattern) + pathPart + "."
+          }
+          return "Searching markdown files" + pathPart + "."
+        }
+        if (["read", "get", "view", "cat"].indexOf(op) >= 0) {
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd) && payload.lineStart === payload.lineEnd) {
+            return "Getting line " + Math.floor(payload.lineStart) + " from markdown file" + pathPart + "."
+          }
+          if (isNumber(payload.lineStart) && isNumber(payload.lineEnd)) {
+            return "Getting lines " + Math.floor(payload.lineStart) + "-" + Math.floor(payload.lineEnd) + " from markdown file" + pathPart + "."
+          }
+          if (isNumber(payload.lineStart)) {
+            return "Getting markdown file lines starting at " + Math.floor(payload.lineStart) + pathPart + "."
+          }
+          return "Reading markdown file" + pathPart + "."
+        }
+      }
+
+      if (name === "skills") {
+        if (op === "" || op === "list") {
+          return "Listing available skills."
+        }
+        if (op === "search") {
+          if (isString(payload.query) && payload.query.trim().length > 0) {
+            return "Searching skills for " + _quoted(payload.query) + "."
+          }
+          return "Searching skills."
+        }
+        if (["read", "get", "view", "cat"].indexOf(op) >= 0) {
+          if (isString(payload.name) && payload.name.trim().length > 0) {
+            return "Reading skill " + _quoted(payload.name.trim()) + "."
+          }
+          return "Reading skill."
+        }
+        if (["render", "use", "expand", "apply"].indexOf(op) >= 0) {
+          if (isString(payload.name) && payload.name.trim().length > 0) {
+            return "Rendering skill " + _quoted(payload.name.trim()) + "."
+          }
+          return "Rendering skill."
+        }
+      }
+
+      if (isString(op) && op.length > 0) {
+        return "Running tool '" + name + "' with operation '" + op + "'."
+      }
+      return "Running tool '" + name + "'."
+    }
 
     methodNames.forEach(function(name) {
       var meta = metadataByFn[name] || {
@@ -5878,6 +6033,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         var payload = params
         if (isUnDef(payload)) payload = {}
         try {
+          parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           var result = fileTool[name](payload)
           return formatResponse(result)
         } catch (err) {
@@ -5890,6 +6046,21 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         }
       }
     })
+
+    // When mini-a-docs=true, enrich the markdownFiles description with the actual docs root path
+    // so the LLM knows exactly where to look and how to navigate the documentation.
+    if (args["mini-a-docs"] === true && isMap(fnsMeta.markdownFiles)) {
+      var docsRoot = isString(fileTool._root) ? fileTool._root : getOPackPath("mini-a")
+      fnsMeta.markdownFiles = {
+        name       : fnsMeta.markdownFiles.name,
+        description: "Read-only markdown helper for Mini-A documentation. Root directory: '" + docsRoot + "'. " +
+          "Start with operation='list' (no path needed) to discover all available documentation files. " +
+          "Then use operation='read' with a relative path (e.g. 'README.md', 'USAGE.md', 'CHEATSHEET.md', " +
+          "'docs/LEARN.md', 'docs/WHATS-NEW.md', 'mcps/README.md') to read them. " +
+          "Use operation='search' with a pattern to find content across all documentation files.",
+        inputSchema: fnsMeta.markdownFiles.inputSchema
+      }
+    }
 
     return {
       id     : "mini-a-utils",
@@ -6917,6 +7088,30 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
       return { toolName: toolName, result: { error: unknownMsg }, error: true }
     }
 
+    var beforeToolResult = parent._runHook("before_tool", {
+      MINI_A_TOOL       : toolName,
+      MINI_A_TOOL_PARAMS: stringify(params, __, "")
+    })
+    if (beforeToolResult.blocked) {
+      var blockedMsg = "Tool '" + toolName + "' blocked by before_tool hook."
+      parent.fnI("warn", blockedMsg)
+      parent._finalizeToolExecution({
+        toolName     : toolName,
+        params       : params,
+        observation  : blockedMsg,
+        stepLabel    : stepLabel,
+        error        : true,
+        context      : context,
+        contextId    : context.contextId
+      })
+      return { toolName: toolName, result: { error: blockedMsg }, error: true }
+    }
+    if (isArray(beforeToolResult.outputs) && beforeToolResult.outputs.length > 0 && isObject(parent._runtime)) {
+      beforeToolResult.outputs.forEach(function(o) {
+        parent._runtime.context.push("[Hook " + o.hookName + " before " + toolName + "] " + o.output)
+      })
+    }
+
     var rawToolResult
     var toolCallError = false
     try {
@@ -6941,6 +7136,11 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
       error        : toolCallError || normalized.hasError,
       context      : context,
       contextId    : context.contextId
+    })
+
+    parent._runHook("after_tool", {
+      MINI_A_TOOL        : toolName,
+      MINI_A_TOOL_RESULT : resultDisplay.substring(0, 2000)
     })
 
     return {
@@ -7204,14 +7404,35 @@ MiniA.prototype._runCommand = function(args) {
         commandParts.push(originalCommand)
         shInput = commandParts
       }
-      this.fnI("shell", shellPrefix.length > 0
-        ? `Executing '${finalCommand}' (original: '${originalCommand}').`
-        : `Executing '${finalCommand}'...`
-      )
-      var _r = $sh(shInput).get(0)
-      args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
-      args.executedCommand = finalCommand
-      global.__mini_a_metrics.shell_commands_executed.inc()
+      var beforeShellResult = this._runHook("before_shell", { MINI_A_SHELL_COMMAND: finalCommand })
+      if (isArray(beforeShellResult.outputs) && beforeShellResult.outputs.length > 0 && isObject(this._runtime)) {
+        beforeShellResult.outputs.forEach(function(o) {
+          this._runtime.context.push("[Hook " + o.hookName + " before shell] " + o.output)
+        }.bind(this))
+      }
+      if (beforeShellResult.blocked) {
+        args.output = "[blocked by hook] " + finalCommand
+        args.executedCommand = finalCommand
+        global.__mini_a_metrics.shell_commands_blocked.inc()
+      } else {
+        this.fnI("shell", shellPrefix.length > 0
+          ? `Executing '${finalCommand}' (original: '${originalCommand}').`
+          : `Executing '${finalCommand}'...`
+        )
+        var _r = $sh(shInput).get(0)
+        args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
+        args.executedCommand = finalCommand
+        global.__mini_a_metrics.shell_commands_executed.inc()
+        var afterShellResult = this._runHook("after_shell", {
+          MINI_A_SHELL_COMMAND: finalCommand,
+          MINI_A_SHELL_OUTPUT : (args.output || "").substring(0, 2000)
+        })
+        if (isArray(afterShellResult.outputs) && afterShellResult.outputs.length > 0 && isObject(this._runtime)) {
+          afterShellResult.outputs.forEach(function(o) {
+            this._runtime.context.push("[Hook " + o.hookName + " after shell] " + o.output)
+          }.bind(this))
+        }
+      }
     }
 
     var activityStatus = exec ? "SUCCESS" : "FAILED"
@@ -8140,6 +8361,8 @@ MiniA.prototype.init = function(args) {
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
+      { name: "useskills", type: "boolean", default: false },
+      { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
       { name: "workerreg", type: "number", default: __ },
@@ -8162,6 +8385,7 @@ MiniA.prototype.init = function(args) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
@@ -8176,6 +8400,7 @@ MiniA.prototype.init = function(args) {
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
+    args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usedelegation = _$(toBoolean(args.usedelegation), "args.usedelegation").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -8184,6 +8409,10 @@ MiniA.prototype.init = function(args) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
+      args.utilsroot = getOPackPath("mini-a")
+      this.fnI("info", "mini-a-docs=true: using Mini-A opack path as utilsroot for documentation access.")
+    }
     args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").isNumber().default(4)
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").isNumber().default(3)
     args.delegationtimeout = _$(args.delegationtimeout, "args.delegationtimeout").isNumber().default(300000)
@@ -8871,7 +9100,9 @@ MiniA.prototype.init = function(args) {
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
+ * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP (only when useutils=true).
  * - utilsroot (string, optional): Root directory for Mini Utils Tool file operations (only when useutils=true).
+ * - mini-a-docs (boolean, default=false): When true and utilsroot is not set, auto-set utilsroot to getOPackPath("mini-a") so the LLM can inspect Mini-A documentation with useutils tools.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
  * - libs (string, optional): Comma-separated list of additional libraries to load.
@@ -9026,7 +9257,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
-      { name: "utilsroot", type: "string", default: __ }
+      { name: "utilsroot", type: "string", default: __ },
+      { name: "useskills", type: "boolean", default: false },
+      { name: "mini-a-docs", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -9042,6 +9275,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
+    args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
@@ -9057,6 +9292,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
+      args.utilsroot = getOPackPath("mini-a")
+      this.fnI("info", "mini-a-docs=true: using Mini-A opack path as utilsroot for documentation access.")
+    }
 
     if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
