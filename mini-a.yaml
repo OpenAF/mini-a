@@ -465,13 +465,123 @@ jobs:
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
+    function parseHookBoolean(value) {
+      if (isUnDef(value) || value === null) return false
+      var lowered = ("" + value).trim().toLowerCase()
+      return lowered === "true" || lowered === "1" || lowered === "yes" || lowered === "y" || lowered === "on"
+    }
+    function canonicalizeHookPath(path) {
+      if (!isString(path) || path.trim().length === 0) return path
+      try {
+        return io.fileInfo(path).canonicalPath
+      } catch (e) {
+        return path
+      }
+    }
+    function loadHooks() {
+      var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
+      var hooks = {}
+      validEvents.forEach(function(ev) { hooks[ev] = [] })
+      try {
+        var historyHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+        var hooksDirPath = canonicalizeHookPath(historyHome + "/.openaf-mini-a/hooks")
+        if (!io.fileExists(hooksDirPath)) return hooks
+        var info = io.fileInfo(hooksDirPath)
+        if (!isObject(info) || info.isDirectory !== true) return hooks
+        var listing = io.listFiles(hooksDirPath)
+        if (!isObject(listing) || !isArray(listing.files)) return hooks
+        listing.files.forEach(function(file) {
+          if (!isObject(file) || file.isDirectory === true) return
+          if (!isString(file.filename) || file.filename.length === 0) return
+          if (!/\.(yaml|yml|json)$/i.test(file.filename)) return
+          var fullPath = canonicalizeHookPath(hooksDirPath + "/" + file.filename)
+          try {
+            var hookDef = /\.json$/i.test(file.filename) ? io.readFileJSON(fullPath) : io.readFileYAML(fullPath)
+            if (!isObject(hookDef)) return
+            var event = isString(hookDef.event) ? hookDef.event.trim().toLowerCase() : ""
+            if (validEvents.indexOf(event) < 0) return
+            var cmd = isString(hookDef.command) ? hookDef.command.trim() : ""
+            if (cmd.length === 0) return
+            var toolFilter = []
+            if (isString(hookDef.toolFilter) && hookDef.toolFilter.trim().length > 0) {
+              toolFilter = hookDef.toolFilter.split(",").map(function(s) { return s.trim().toLowerCase() }).filter(function(s) { return s.length > 0 })
+            }
+            hooks[event].push({
+              name        : file.filename.replace(/\.(yaml|yml|json)$/i, ""),
+              command     : cmd,
+              toolFilter  : toolFilter,
+              injectOutput: parseHookBoolean(hookDef.injectOutput) === true,
+              timeout     : (isNumber(hookDef.timeout) && hookDef.timeout > 0) ? hookDef.timeout : 5000,
+              failBlocks  : parseHookBoolean(hookDef.failBlocks) === true,
+              env         : isObject(hookDef.env) ? hookDef.env : {}
+            })
+          } catch (hookParseError) {
+            logWarn("Failed to parse hook file '" + file.filename + "': " + hookParseError)
+          }
+        })
+      } catch (hookLoadError) {
+        logWarn("Failed to load hooks: " + hookLoadError)
+      }
+      return hooks
+    }
+    var loadedHooks = loadHooks()
+    function runHooks(event, contextVars) {
+      var hooksForEvent = isArray(loadedHooks[event]) ? loadedHooks[event] : []
+      if (hooksForEvent.length === 0) return { outputs: [], blocked: false }
+      var outputs = []
+      var blocked = false
+      var vars = isObject(contextVars) ? contextVars : {}
+      hooksForEvent.forEach(function(hook) {
+        if (hook.toolFilter.length > 0 && isString(vars.MINI_A_TOOL)) {
+          var toolLower = vars.MINI_A_TOOL.toLowerCase()
+          if (hook.toolFilter.indexOf(toolLower) < 0) return
+        }
+        try {
+          var env = {}
+          Object.keys(hook.env).forEach(function(k) { env[k] = String(hook.env[k]) })
+          Object.keys(vars).forEach(function(k) { env[k] = String(vars[k]) })
+          env.MINI_A_HOOK_NAME = hook.name
+          env.MINI_A_HOOK_EVENT = event
+          var result = $sh(hook.command).timeout(hook.timeout).envs(env).get(0)
+          var stdout = isString(result.stdout) ? result.stdout.trim() : ""
+          var stderr = isString(result.stderr) ? result.stderr.trim() : ""
+          var exitCode = isNumber(result.exitcode) ? result.exitcode : -1
+          if (exitCode !== 0) {
+            logWarn("Hook '" + hook.name + "' (" + event + ") exited with code " + exitCode + (stderr.length > 0 ? ": " + stderr.substring(0, 200) : ""))
+            if (hook.failBlocks) blocked = true
+          }
+          if (hook.injectOutput && stdout.length > 0) outputs.push({ hookName: hook.name, output: stdout.substring(0, 4096) })
+        } catch (hookExecError) {
+          logWarn("Hook '" + hook.name + "' (" + event + ") failed: " + hookExecError)
+          if (hook.failBlocks) blocked = true
+        }
+      })
+      return { outputs: outputs, blocked: blocked }
+    }
     if (isDef(args.usemermaid) && isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
     if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
     if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
     if (isUnDef(args.format)) args.format = "md"
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
+    var originalGoalText = isString(args.goal) ? args.goal : ""
+    var beforeGoalResult = runHooks("before_goal", { MINI_A_GOAL: originalGoalText })
+    if (beforeGoalResult.blocked) {
+      logWarn("Goal blocked by a before_goal hook.")
+      return
+    }
+    if (isArray(beforeGoalResult.outputs) && beforeGoalResult.outputs.length > 0) {
+      var hookPrefix = beforeGoalResult.outputs.map(function(o) { return "[Hook " + o.hookName + "] " + o.output }).join("\n")
+      args.goal = hookPrefix + "\n\n" + originalGoalText
+    }
+    if (isFunction(_ma.setHookFn)) {
+      _ma.setHookFn(function(event, contextVars) {
+        return runHooks(event, contextVars)
+      })
+    }
     _ma.init(args)
     var _r = _ma.start(args)
+    var resultPreview = isString(_r) ? _r.substring(0, 2000) : (isDef(_r) ? stringify(_r, __, "").substring(0, 2000) : "")
+    runHooks("after_goal", { MINI_A_GOAL: originalGoalText, MINI_A_RESULT: resultPreview })
     if (isUnDef(args.outfile)) {
       if (isObject(_r)) 
         ow.oJob.output(_r, args)

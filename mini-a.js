@@ -7405,6 +7405,11 @@ MiniA.prototype._runCommand = function(args) {
         shInput = commandParts
       }
       var beforeShellResult = this._runHook("before_shell", { MINI_A_SHELL_COMMAND: finalCommand })
+      if (isArray(beforeShellResult.outputs) && beforeShellResult.outputs.length > 0 && isObject(this._runtime)) {
+        beforeShellResult.outputs.forEach(function(o) {
+          this._runtime.context.push("[Hook " + o.hookName + " before shell] " + o.output)
+        }.bind(this))
+      }
       if (beforeShellResult.blocked) {
         args.output = "[blocked by hook] " + finalCommand
         args.executedCommand = finalCommand
@@ -7418,10 +7423,15 @@ MiniA.prototype._runCommand = function(args) {
         args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
         args.executedCommand = finalCommand
         global.__mini_a_metrics.shell_commands_executed.inc()
-        this._runHook("after_shell", {
+        var afterShellResult = this._runHook("after_shell", {
           MINI_A_SHELL_COMMAND: finalCommand,
           MINI_A_SHELL_OUTPUT : (args.output || "").substring(0, 2000)
         })
+        if (isArray(afterShellResult.outputs) && afterShellResult.outputs.length > 0 && isObject(this._runtime)) {
+          afterShellResult.outputs.forEach(function(o) {
+            this._runtime.context.push("[Hook " + o.hookName + " after shell] " + o.output)
+          }.bind(this))
+        }
       }
     }
 

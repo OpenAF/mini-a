@@ -2739,7 +2739,7 @@ try {
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
       "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
-      "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]   List discovered skills (optionally filtered by prefix)", hintColor),
+      "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
       "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
       "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>       Show details for a subtask", hintColor),
