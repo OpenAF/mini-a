@@ -2756,7 +2756,7 @@ try {
     var skillNames = Object.keys(customSkillSlashCommands).sort()
     if (skillNames.length > 0) {
       lines.push("")
-      lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + ":")
+      lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + " (skills also support $<name>):")
       skillNames.forEach(function(name) {
         var skillEntry = customSkillSlashCommands[name]
         var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
@@ -2821,7 +2821,7 @@ try {
  | | ||| ||~~(_|`
   print(colorifyText(miniaLogo, "BOLD") + colorifyText(" console", accentColor))
   print()
-  print(colorifyText("Type /help for available commands (skills also support $<name>).", hintColor))
+  print(colorifyText("Type /help for available commands.", hintColor))
 
   const _miniaConReset = function() {
   	if (String(java.lang.System.getProperty("os.name")).match(/Windows/)) return true
