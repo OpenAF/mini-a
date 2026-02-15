@@ -10152,6 +10152,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // Create streaming delta handler if streaming is enabled
       var onDelta = args.usestream ? this._createStreamDeltaHandler(args) : null
       var canStream = args.usestream && isFunction(currentLLM.promptStreamWithStats)
+      var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
 
       var responseWithStats
       try {
@@ -10163,11 +10164,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // Streaming not compatible with showthinking - use regular prompts
             if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) {
               return currentLLM.promptJSONWithStatsRaw(prompt)
-            } else if (isDef(currentLLM.rawPromptWithStats)) {
+            }
+            if (isDef(currentLLM.rawPromptWithStats)) {
               return currentLLM.rawPromptWithStats(prompt, __, __, jsonFlag)
             }
+            if (jsonFlag && isDef(currentLLM.promptJSONWithStats)) {
+              return currentLLM.promptJSONWithStats(prompt)
+            }
+            return currentLLM.promptWithStats(prompt)
           }
-          if (canStream && !noJsonPromptFlag) {
+          if (canStreamJson && !noJsonPromptFlag) {
             return currentLLM.promptStreamJSONWithStats(prompt, __, __, __, __, onDelta)
           } else if (canStream) {
             return currentLLM.promptStreamWithStats(prompt, __, __, __, __, __, onDelta)
@@ -10950,6 +10956,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Create streaming delta handler if streaming is enabled
       var onDelta = args.usestream ? this._createStreamDeltaHandler(args) : null
       var canStream = args.usestream && isFunction(this.llm.promptStreamWithStats)
+      var canStreamJson = canStream && isFunction(this.llm.promptStreamJSONWithStats)
 
       // Use new promptJSONWithStatsRaw if available for showthinking
       if (args.showthinking) {
@@ -10962,7 +10969,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
-      } else if (canStream && !this._noJsonPrompt && args.format == "json") {
+      } else if (canStreamJson && !this._noJsonPrompt && args.format == "json") {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
       } else if (canStream) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
