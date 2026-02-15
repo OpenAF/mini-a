@@ -51,6 +51,7 @@ var MiniA = function() {
   this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
   this._planLogFile = __
   this._planResumeInfo = null
+  this._toollogon = false
   this._defaultAgentPersonaLine = "You are a decisive, action-oriented agent that executes efficiently."
   this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
@@ -952,6 +953,31 @@ MiniA.prototype.fnI = function(event, message) {
     })
   }
   return this._fnI(event, message)
+}
+
+MiniA.prototype._logToolUsage = function(toolName, params, answer, meta) {
+  if (!this._toollogon) return
+  var _t = nowUTC()
+  var _m = isObject(meta) ? meta : {}
+  try {
+    $ch("_mini_a_toollog_channel").set({
+      ts  : _t,
+      id  : this._id,
+      tool: toolName,
+      key : genUUID()
+    }, {
+      ts        : _t,
+      id        : this._id,
+      tool      : toolName,
+      params    : params,
+      answer    : answer,
+      connection: _m.connectionId,
+      fromCache : _m.fromCache === true,
+      error     : _m.error === true
+    })
+  } catch (e) {
+    this.fnI("warn", "Failed to record tool usage log: " + e.message)
+  }
 }
 
 /**
@@ -7021,6 +7047,11 @@ MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
 MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params, callContext) {
   var client = isObject(this._mcpConnections) ? this._mcpConnections[connectionId] : __
   if (isUnDef(client) || !isFunction(client.callTool)) {
+    this._logToolUsage(toolName, params, { error: `MCP client for tool '${toolName}' not available.` }, {
+      connectionId: connectionId,
+      error       : true,
+      fromCache   : false
+    })
     throw new Error(`MCP client for tool '${toolName}' not available.`)
   }
 
@@ -7035,6 +7066,11 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
         global.__mini_a_metrics.tool_cache_hits.inc()
       }
       if (isObject(callContext)) callContext.fromCache = true
+      this._logToolUsage(toolName, params, cached.value, {
+        connectionId: connectionId,
+        fromCache   : true,
+        error       : isMap(cached.value) && isDef(cached.value.error)
+      })
       return cached.value
     } else {
       if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.tool_cache_misses)) {
@@ -7046,30 +7082,45 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   if (this._isCircuitOpen(connectionId)) {
     var circuitError = new Error(`Circuit open for connection '${connectionId}'. Skipping MCP call.`)
     circuitError.transient = true
+    this._logToolUsage(toolName, params, { error: circuitError.message }, {
+      connectionId: connectionId,
+      error       : true,
+      fromCache   : false
+    })
     throw circuitError
   }
 
   var parent = this
-  var result = this._withExponentialBackoff(function() {
-    parent._ensureConnectionInitialized(connectionId)
-    return client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, params) : client.callTool(toolName, params)
-  }, {
-    maxAttempts : 3,
-    initialDelay: 250,
-    maxDelay    : 4000,
-    context     : { source: "mcp", connectionId: connectionId, toolName: toolName },
-    onRetry     : function(err, attempt, wait, category) {
-      parent.fnI("retry", `MCP '${toolName}' attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-        global.__mini_a_metrics.retries.inc()
+  var result
+  try {
+    result = this._withExponentialBackoff(function() {
+      parent._ensureConnectionInitialized(connectionId)
+      return client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, params) : client.callTool(toolName, params)
+    }, {
+      maxAttempts : 3,
+      initialDelay: 250,
+      maxDelay    : 4000,
+      context     : { source: "mcp", connectionId: connectionId, toolName: toolName },
+      onRetry     : function(err, attempt, wait, category) {
+        parent.fnI("retry", `MCP '${toolName}' attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+          global.__mini_a_metrics.retries.inc()
+        }
+      },
+      onFailure   : function(err, attempts, category) {
+        if (isObject(category) && category.type === "transient") {
+          parent._recordCircuitFailure(connectionId, { tool: toolName, message: err && err.message })
+        }
       }
-    },
-    onFailure   : function(err, attempts, category) {
-      if (isObject(category) && category.type === "transient") {
-        parent._recordCircuitFailure(connectionId, { tool: toolName, message: err && err.message })
-      }
-    }
-  })
+    })
+  } catch (e) {
+    this._logToolUsage(toolName, params, { error: e.message }, {
+      connectionId: connectionId,
+      fromCache   : false,
+      error       : true
+    })
+    throw e
+  }
 
   parent._recordCircuitSuccess(connectionId)
 
@@ -7078,6 +7129,11 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   }
 
   if (isObject(callContext)) callContext.fromCache = false
+  this._logToolUsage(toolName, params, result, {
+    connectionId: connectionId,
+    fromCache   : false,
+    error       : isMap(result) && isDef(result.error)
+  })
   return result
 }
 
@@ -8477,6 +8533,7 @@ MiniA.prototype.init = function(args) {
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
+      { name: "toollog", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
       { name: "planfile", type: "string", default: __ },
@@ -8702,6 +8759,19 @@ MiniA.prototype.init = function(args) {
           this._auditon = true
         } catch (e) {
           this.fnI("error", `Failed to create audit channel: ${e.message}`)
+        }
+      }
+    }
+
+    // Check the need to init toollog
+    if (isDef(args.toollog) && args.toollog.length > 0) {
+      var _toollogm = af.fromJSSLON(args.toollog)
+      if (isMap(_toollogm)) {
+        try {
+          $ch("_mini_a_toollog_channel").create(isDef(_toollogm.type) ? _toollogm.type : "simple", isMap(_toollogm.options) ? _toollogm.options : {})
+          this._toollogon = true
+        } catch (e) {
+          this.fnI("error", `Failed to create tool log channel: ${e.message}`)
         }
       }
     }

@@ -145,6 +145,10 @@ help:
     desc     : "SLON/JSON definition of an audit channel for Mini-A interaction logs"
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
+  - name     : toollog
+    desc     : "SLON/JSON definition of a channel that records tool calls, arguments and responses"
+    example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -822,6 +826,7 @@ jobs:
       chatbotmode    : toBoolean().isBoolean().default(false)
       format         : isString().default(__)
       auditch        : isString().default(__)
+      toollog        : isString().default(__)
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)
