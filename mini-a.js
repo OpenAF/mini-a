@@ -58,7 +58,9 @@ var MiniA = function() {
 
   // Check OAF_MINI_A_NOJSONPROMPT environment variable to disable promptJSONWithStats
   // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
-  this._noJsonPrompt = toBoolean(getEnv("OAF_MINI_A_NOJSONPROMPT"))
+  this._noJsonPromptEnvValue = getEnv("OAF_MINI_A_NOJSONPROMPT")
+  this._noJsonPrompt = toBoolean(this._noJsonPromptEnvValue)
+  this._noJsonPromptEnvDefined = isDef(this._noJsonPromptEnvValue)
 
   // Check OAF_MINI_A_LCNOJSONPROMPT environment variable to disable promptJSONWithStats for low-cost model
   // This allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
@@ -1288,11 +1290,14 @@ MiniA.prototype._formatTokenStats = function(stats) {
  */
 MiniA.prototype._createStreamDeltaHandler = function(args) {
     var self = this
+    var decodeUnicodeEscapes = toBoolean(isObject(args) ? args.useascii : false) === true
     var jsonBuffer = ""         // Buffer for finding "answer" field
     var contentBuffer = ""      // Buffer for decoded content
     var streamingAnswer = false
     var answerDetected = false
     var escapeNext = false
+    var unicodeEscapeActive = false
+    var unicodeEscapeBuffer = ""
     var inCodeBlock = false     // Track if inside ``` code block
     var inTable = false         // Track if inside a table
     var codeBlockBuffer = ""    // Buffer code blocks until complete
@@ -1304,14 +1309,59 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     // Requires: starting |, one or more columns with dashes (optional alignment colons), ending |
     var TABLE_SEPARATOR_REGEX = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
 
-    // Decode a character considering escape sequences
+    function isHexDigit(ch) {
+        return /^[0-9a-fA-F]$/.test(ch)
+    }
+
+    function flushPendingEscapes() {
+        if (unicodeEscapeActive) {
+            // Preserve incomplete unicode escapes instead of dropping them.
+            processContent("\\u" + unicodeEscapeBuffer)
+            unicodeEscapeActive = false
+            unicodeEscapeBuffer = ""
+        }
+        if (escapeNext) {
+            // Preserve trailing backslash if stream ended mid-escape.
+            processContent("\\")
+            escapeNext = false
+        }
+    }
+
+    // Decode a character considering JSON escape sequences
     function decodeChar(ch) {
+        if (decodeUnicodeEscapes && unicodeEscapeActive) {
+            if (isHexDigit(ch)) {
+                unicodeEscapeBuffer += ch
+                if (unicodeEscapeBuffer.length === 4) {
+                    var code = parseInt(unicodeEscapeBuffer, 16)
+                    unicodeEscapeActive = false
+                    unicodeEscapeBuffer = ""
+                    return String.fromCharCode(code)
+                }
+                return null
+            }
+            // Malformed unicode escape: keep literal content and continue.
+            var fallback = "\\u" + unicodeEscapeBuffer + ch
+            unicodeEscapeActive = false
+            unicodeEscapeBuffer = ""
+            return fallback
+        }
+
         if (escapeNext) {
             escapeNext = false
             if (ch == 'n') return "\n"
             else if (ch == 't') return "\t"
+            else if (ch == 'r') return "\r"
+            else if (ch == 'b') return "\b"
+            else if (ch == 'f') return "\f"
+            else if (ch == '/') return "/"
             else if (ch == '"') return "\""
             else if (ch == '\\') return "\\"
+            else if (ch == 'u' && decodeUnicodeEscapes) {
+                unicodeEscapeActive = true
+                unicodeEscapeBuffer = ""
+                return null
+            }
             else return ch
         } else if (ch == '\\') {
             escapeNext = true
@@ -1434,6 +1484,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
 
     // Flush remaining buffers at end of answer
     function flushRemaining() {
+        flushPendingEscapes()
         if (codeBlockBuffer.length > 0) flushContent(codeBlockBuffer)
         if (tableBuffer.length > 0) flushContent(tableBuffer)
         if (contentBuffer.length > 0) flushContent(contentBuffer)
@@ -1460,7 +1511,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
                         for (var j = 0; j < content.length; j++) {
                             var ch = content[j]
                             // Check for unescaped closing quote before decoding
-                            if (ch == '"' && !escapeNext) {
+                            if (ch == '"' && !escapeNext && !unicodeEscapeActive) {
                                 streamingAnswer = false
                                 flushRemaining()
                                 return
@@ -1474,7 +1525,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
                 }
             } else {
                 // Streaming answer content - check for unescaped closing quote first
-                if (c == '"' && !escapeNext) {
+                if (c == '"' && !escapeNext && !unicodeEscapeActive) {
                     // End of answer string
                     streamingAnswer = false
                     flushRemaining()
@@ -4798,6 +4849,52 @@ MiniA.prototype._cleanCodeBlocks = function(text) {
         return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
     }
     return text
+}
+
+/**
+ * Parse JSON payloads returned by models, including fenced or embedded JSON.
+ */
+MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
+    if (isMap(rawResponse) || isArray(rawResponse)) return rawResponse
+    if (!isString(rawResponse)) return __
+
+    var candidates = []
+    var seen = {}
+    var addCandidate = value => {
+        if (!isString(value)) return
+        var candidate = String(value).trim()
+        if (candidate.length === 0) return
+        if (seen[candidate]) return
+        seen[candidate] = true
+        candidates.push(candidate)
+    }
+
+    var parseCandidate = candidate => {
+        if (!isString(candidate)) return __
+        if (!candidate.startsWith("{") && !candidate.startsWith("[")) return __
+        return jsonParse(candidate, __, __, true)
+    }
+
+    addCandidate(rawResponse)
+    addCandidate(this._cleanCodeBlocks(rawResponse))
+
+    candidates.forEach(candidate => {
+        if (candidate.indexOf("\n{") >= 0) {
+            var objectMatches = candidate.match(/\{[\s\S]*\}/g)
+            if (isArray(objectMatches) && objectMatches.length > 0) addCandidate(objectMatches[objectMatches.length - 1])
+        }
+        if (candidate.indexOf("\n[") >= 0) {
+            var arrayMatches = candidate.match(/\[[\s\S]*\]/g)
+            if (isArray(arrayMatches) && arrayMatches.length > 0) addCandidate(arrayMatches[arrayMatches.length - 1])
+        }
+    })
+
+    for (var i = 0; i < candidates.length; i++) {
+        var parsed = parseCandidate(candidates[i])
+        if (isMap(parsed) || isArray(parsed)) return parsed
+    }
+
+    return __
 }
 
 /**
@@ -8688,6 +8785,12 @@ MiniA.prototype.init = function(args) {
       if (isDef(envLcModel)) this._oaf_lc_model = envLcModel
     }
 
+    // Auto-enable no-json prompt mode for Gemini when OAF_MINI_A_NOJSONPROMPT is not defined.
+    if (isMap(this._oaf_model) && this._oaf_model.type === "gemini" && !this._noJsonPrompt && !this._noJsonPromptEnvDefined) {
+      this._noJsonPrompt = true
+      this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
+    }
+
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
       this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
@@ -10160,8 +10263,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var msg
       var recoveredFromEnvelopeApplied = false
       if (isString(rmsg)) {
-        rmsg = rmsg.replace(/.+\n(\{.+)/m, "$1")
-        msg = jsonParse(rmsg, __, __, true)
+        msg = this._parseModelJsonResponse(rmsg)
         
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
@@ -10256,8 +10358,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this.fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
           
           if (isString(rmsg)) {
-            rmsg = rmsg.replace(/.+\n(\{.+)/m, "$1")
-            msg = jsonParse(rmsg, __, __, true)
+            msg = this._parseModelJsonResponse(rmsg)
           } else {
             msg = rmsg
           }
@@ -10779,7 +10880,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var extractedFinalText = this._extractPrimaryResponseText(finalResponseWithStats.response)
       if (isString(extractedFinalText)) finalResponseText = extractedFinalText
     }
-    var res = jsonParse(finalResponseText, __, __, true)
+    var res = this._parseModelJsonResponse(finalResponseText)
+    if (!isMap(res)) res = { answer: this._cleanCodeBlocks(isString(finalResponseText) ? finalResponseText : stringify(finalResponseText, __, "")) }
     var finalTokenStatsMsg = this._formatTokenStats(finalStats)
     this.fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 

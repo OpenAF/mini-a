@@ -12,7 +12,7 @@ Mini-A (Mini Agent) is a goal-oriented autonomous agent that uses Large Language
 - **OAF_VAL_MODEL Environment Variable** (optional): Dedicated model for deep research validation
 - **OAF_MINI_A_CON_HIST_SIZE Environment Variable** (optional): Set the maximum console history size (default is JLine's default)
 - **OAF_MINI_A_LIBS Environment Variable** (optional): Comma-separated list of libraries to load automatically
-- **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the main model (default: false). Required for Gemini models due to API restrictions
+- **OAF_MINI_A_NOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the main model (default: false). For Gemini main models, Mini-A now auto-enables this behavior when the variable is unset.
 - **OAF_MINI_A_LCNOJSONPROMPT Environment Variable** (optional): Disable promptJSONWithStats and force promptWithStats for the low-cost model (default: false). Required for Gemini low-cost models. Allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
 
 ```bash
@@ -25,7 +25,7 @@ export OAF_VAL_MODEL="(type: openai, model: gpt-4o-mini, key: 'your-api-key')"
 export OAF_MINI_A_CON_HIST_SIZE=1000
 # Optional: Set libraries to load automatically
 export OAF_MINI_A_LIBS="@AWS/aws.js,custom.js"
-# Optional: Disable JSON prompt methods (required for Gemini main model)
+# Optional: Disable JSON prompt methods (Gemini main models auto-enable this when unset)
 export OAF_MINI_A_NOJSONPROMPT=true
 # Optional: Disable JSON prompt methods for low-cost model (required for Gemini low-cost model)
 export OAF_MINI_A_LCNOJSONPROMPT=true
@@ -151,8 +151,8 @@ failBlocks: true
 
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
-- `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. Use this when you want to reclaim tokens but keep the high-level context available to the agent.
-- `/summarize [n]` — Requires an active agent session. It asks the model for a detailed recap of the earlier conversation, replaces that portion of the history with the generated summary, prints confirmation in the console, and then keeps the most recent `n` messages appended to the summary (also defaults to 6). Choose this when you want a human-readable digest before moving on.
+- `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving up to the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. When enough history exists, Mini-A always leaves at least one older entry eligible for summarization. Use this when you want to reclaim tokens but keep the high-level context available to the agent.
+- `/summarize [n]` — Requires an active agent session. It asks the model for a detailed recap of the earlier conversation, replaces that portion of the history with the generated summary, prints confirmation in the console, and then keeps up to the most recent `n` messages appended to the summary (also defaults to 6). When enough history exists, Mini-A always leaves at least one older entry eligible for summarization. Choose this when you want a human-readable digest before moving on.
 
 To view conversation token usage:
 
@@ -1407,7 +1407,7 @@ The browser receives tokens via Server-Sent Events (SSE) and renders them progre
 **Technical details:**
 - Uses `promptStreamWithStats` and `promptStreamJSONWithStats` methods
 - Implements markdown-aware buffering for code blocks (``` delimiters) and tables (lines starting with |)
-- Detects and properly handles escape sequences (\n, \t, \", \\) in streamed JSON
+- Detects and properly handles escape sequences (\n, \t, \r, \b, \f, \/, \", \\) in streamed JSON, plus optional `\uXXXX` unicode decoding when `useascii=true`
 - Adds initial newline before first output for clean formatting
 - Flushes remaining buffers when streaming completes
 
@@ -1901,12 +1901,13 @@ export OAF_LC_MODEL="(type: ollama, model: 'llama3', url: 'http://localhost:1143
 ```bash
 export OAF_MODEL="(type: gemini, model: gemini-2.5-pro, key: 'your-gemini-key')"
 export OAF_LC_MODEL="(type: gemini, model: gemini-2.5-flash, key: 'your-gemini-key')"
-# Required for Gemini models due to API restrictions:
+# Main model auto-enables no-JSON prompt behavior when this is unset.
+# Low-cost Gemini still requires explicit opt-in:
 export OAF_MINI_A_NOJSONPROMPT=true
 export OAF_MINI_A_LCNOJSONPROMPT=true
 ```
 
-> **Note**: When using Gemini models, Mini-A will display a warning at startup if the appropriate `OAF_MINI_A_NOJSONPROMPT` or `OAF_MINI_A_LCNOJSONPROMPT` environment variables are not set. These flags disable the JSON prompt methods that are not compatible with Gemini's API restrictions.
+> **Note**: For Gemini main models, Mini-A automatically enables no-JSON prompt mode when `OAF_MINI_A_NOJSONPROMPT` is not defined. For Gemini low-cost models, set `OAF_MINI_A_LCNOJSONPROMPT=true` to avoid compatibility issues; Mini-A warns if that low-cost flag is missing.
 
 **Log Output Examples:**
 

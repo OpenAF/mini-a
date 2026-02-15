@@ -1743,13 +1743,17 @@ try {
       return ctx.substring(0, 400)
     }
 
+    var originalState = activeAgent.state
     try {
+      if (originalState === "stop") activeAgent.state = "idle"
       var summaryResponse = activeAgent.summarizeText(ctx, { verbose: false })
       if (isString(summaryResponse) && summaryResponse.trim().length > 0) {
         return summaryResponse.trim()
       }
     } catch (summarizeError) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Summarization failed: " + summarizeError, errorColor))
+    } finally {
+      if (isDef(originalState)) activeAgent.state = originalState
     }
     return ctx.substring(0, 400)
   }
@@ -1763,7 +1767,8 @@ try {
 
     var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
     var entries = stats.entries.slice()
-    var keepSize = Math.min(keepCount, entries.length)
+    // Always leave at least one older entry eligible for summarization when possible.
+    var keepSize = Math.min(keepCount, Math.max(0, entries.length - 1))
     var keepTail = entries.slice(entries.length - keepSize)
     var summarizeUntil = entries.length - keepTail.length
 
@@ -1857,7 +1862,8 @@ try {
 
     var keepCount = isNumber(preserveCount) ? Math.max(1, Math.floor(preserveCount)) : 6
     var entries = stats.entries.slice()
-    var keepSize = Math.min(keepCount, entries.length)
+    // Always leave at least one older entry eligible for summarization when possible.
+    var keepSize = Math.min(keepCount, Math.max(0, entries.length - 1))
     var keepTail = entries.slice(entries.length - keepSize)
     var summarizeUntil = entries.length - keepTail.length
 
@@ -1892,14 +1898,17 @@ try {
       return
     }
 
+    var originalState = activeAgent.state
     try {
       print(colorifyText("Generating conversation summary...", hintColor))
       var instructionText = "You are summarizing a conversation between a user and an AI assistant. Provide a clear, concise summary that:\n1) Identifies the main topics discussed\n2) Highlights key decisions or outcomes\n3) Notes any unresolved questions or next steps\n\nFormat the summary in a readable way with bullet points where appropriate."
 
+      if (originalState === "stop") activeAgent.state = "idle"
       var fullSummary = activeAgent.summarizeText(conversationPayload, {
         verbose: false,
         instructionText: instructionText
       })
+      if (isDef(originalState)) activeAgent.state = originalState
 
       if (isString(fullSummary) && fullSummary.trim().length > 0) {
         // Replace the conversation with the summary
@@ -1946,6 +1955,7 @@ try {
         print(colorifyText("Conversation payload length: " + conversationPayload.length + " characters", hintColor))
       }
     } catch (summaryError) {
+      if (isDef(originalState)) activeAgent.state = originalState
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to generate conversation summary: " + summaryError, errorColor))
       if (isDef(summaryError.stack)) {
         print(colorifyText("Stack trace: " + summaryError.stack, errorColor))

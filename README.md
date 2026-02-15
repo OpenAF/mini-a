@@ -60,7 +60,7 @@ Two steps to use:
    `exec=` is different from `goal=`: it resolves a slash template from `~/.openaf-mini-a/commands/` or `~/.openaf-mini-a/skills/`, renders placeholders with the provided arguments, runs the resulting goal through Mini-A (including hooks), and exits.
    If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
    For a colorized overview of every console, web, and planning flag (including shared Mini-A arguments), run `mini-a -h` or `mini-a --help`; the console prints the CLI-specific switches followed by the auto-generated table of core agent parameters.
-   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Use `/skills [prefix]` to list discovered skills (optionally filtered by name prefix). Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping the most recent `n` exchanges, and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving the latest messages so the session can continue with a condensed context window. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
+   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Use `/skills [prefix]` to list discovered skills (optionally filtered by name prefix). Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping up to the most recent `n` exchanges (default 6), and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving up to the latest `n` messages (default 6) so the session can continue with a condensed context window. When enough history exists, Mini-A always leaves at least one older entry eligible for summarization. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
 
    Custom slash commands are loaded from `~/.openaf-mini-a/commands/*.md`. For example, `/my-command first "second arg"` loads `~/.openaf-mini-a/commands/my-command.md`, injects arguments, and runs the rendered text as the goal. Supported placeholders are `{{args}}`, `{{argv}}`, `{{argc}}`, and positional `{{arg1}}`, `{{arg2}}`, ... . Built-ins always win (`/help`, `/show`, etc. cannot be overridden), and missing template files are treated as hard errors. Use `extracommands=<path1>,<path2>` to load commands from additional comma-separated directories (default directory wins on conflicts).
 
@@ -408,7 +408,7 @@ export OAF_MODEL="(type: openai, model: gpt-5-mini, key: ..., timeout: 900000, t
 **Google Gemini:**
 ```bash
 export OAF_MODEL="(type: gemini, model: gemini-2.5-flash-lite, key: ..., timeout: 900000, temperature: 0)"
-# Required for Gemini models:
+# Optional override: Mini-A auto-enables this behavior for Gemini main models when unset.
 export OAF_MINI_A_NOJSONPROMPT=true
 ```
 
