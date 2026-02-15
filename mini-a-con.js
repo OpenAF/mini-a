@@ -403,7 +403,10 @@ try {
     delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
-    showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" }
+    showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
+    extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
+    extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
+    extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" }
   }
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
@@ -641,6 +644,14 @@ try {
     }
   }
 
+  function parseExtraDirPaths(commaSeparated) {
+    if (!isString(commaSeparated) || commaSeparated.trim().length === 0) return []
+    return commaSeparated.split(",")
+      .map(function(s) { return s.trim() })
+      .filter(function(s) { return s.length > 0 })
+      .map(function(s) { return canonicalizePath(s) })
+  }
+
   function loadSlashCommandsFromDir(dirPath, existingNames, options) {
     var loaded = {}
     var opts = isObject(options) ? options : {}
@@ -709,23 +720,21 @@ try {
     return loaded
   }
 
-  function loadHooks() {
+  function loadHooksFromDir(dirPath, hooks) {
     var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
-    var hooks = {}
-    validEvents.forEach(function(ev) { hooks[ev] = [] })
     try {
-      if (!io.fileExists(hooksDirPath)) return hooks
-      var info = io.fileInfo(hooksDirPath)
-      if (!isObject(info) || info.isDirectory !== true) return hooks
-      var listing = io.listFiles(hooksDirPath)
-      if (!isObject(listing) || !isArray(listing.files)) return hooks
+      if (!io.fileExists(dirPath)) return
+      var info = io.fileInfo(dirPath)
+      if (!isObject(info) || info.isDirectory !== true) return
+      var listing = io.listFiles(dirPath)
+      if (!isObject(listing) || !isArray(listing.files)) return
 
       listing.files.forEach(function(file) {
         if (!isObject(file) || file.isDirectory === true) return
         if (!isString(file.filename) || file.filename.length === 0) return
         if (!/\.(yaml|yml|json)$/i.test(file.filename)) return
 
-        var fullPath = canonicalizePath(hooksDirPath + "/" + file.filename)
+        var fullPath = canonicalizePath(dirPath + "/" + file.filename)
         try {
           var hookDef
           if (/\.json$/i.test(file.filename)) {
@@ -764,8 +773,15 @@ try {
         }
       })
     } catch (hookLoadError) {
-      logWarn("Failed to load hooks: " + hookLoadError)
+      logWarn("Failed to load hooks from '" + dirPath + "': " + hookLoadError)
     }
+  }
+
+  function loadHooks() {
+    var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
+    var hooks = {}
+    validEvents.forEach(function(ev) { hooks[ev] = [] })
+    loadHooksFromDir(hooksDirPath, hooks)
     return hooks
   }
 
@@ -1121,6 +1137,27 @@ try {
   customSlashCommands      = loadSlashCommandsFromDir(customCommandsDirPath, {}, { sourceLabel: "slash commands", sourceCategory: "command" })
   customSkillSlashCommands = loadSlashCommandsFromDir(customSkillsDirPath, {}, { sourceLabel: "skills", enableSkillFolders: true, sourceCategory: "skill" })
   loadedHooks              = loadHooks()
+
+  var extraCommandsDirs = parseExtraDirPaths(findArgumentValue(args, "extracommands"))
+  extraCommandsDirs.forEach(function(dir) {
+    var extra = loadSlashCommandsFromDir(dir, customSlashCommands, { sourceLabel: "extra slash commands", sourceCategory: "command" })
+    Object.keys(extra).forEach(function(k) {
+      if (!Object.prototype.hasOwnProperty.call(customSlashCommands, k)) customSlashCommands[k] = extra[k]
+    })
+  })
+
+  var extraSkillsDirs = parseExtraDirPaths(findArgumentValue(args, "extraskills"))
+  extraSkillsDirs.forEach(function(dir) {
+    var extra = loadSlashCommandsFromDir(dir, customSkillSlashCommands, { sourceLabel: "extra skills", enableSkillFolders: true, sourceCategory: "skill" })
+    Object.keys(extra).forEach(function(k) {
+      if (!Object.prototype.hasOwnProperty.call(customSkillSlashCommands, k)) customSkillSlashCommands[k] = extra[k]
+    })
+  })
+
+  var extraHooksDirs = parseExtraDirPaths(findArgumentValue(args, "extrahooks"))
+  extraHooksDirs.forEach(function(dir) {
+    loadHooksFromDir(dir, loadedHooks)
+  })
 
   if (consoleReader) {
     try {
@@ -2223,6 +2260,10 @@ try {
   }
 
   var _prevEventLength = __
+  var _streamOutputStats = {
+    totalChars: 0,
+    contentChars: 0
+  }
   function _parseDelegateSubtaskMessage(message) {
     if (!isString(message)) return __
     var match = message.match(/^\[subtask:([^\]]+)\]\s*(.*)$/)
@@ -2251,6 +2292,9 @@ try {
   function printEvent(type, icon, message, id) {
     // Handle streaming output with markdown formatting
     if (type == "stream") {
+      var streamText = isString(message) ? message : String(message || "")
+      _streamOutputStats.totalChars += streamText.length
+      _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
       // Apply markdown formatting to the streamed content
       var formatted = ow.format.withMD(message)
       printnl(formatted)
@@ -2322,6 +2366,8 @@ try {
   }
 
   function runGoal(goalText) {
+    _streamOutputStats.totalChars = 0
+    _streamOutputStats.contentChars = 0
     var beforeGoalResult = runHooks("before_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "" })
     if (beforeGoalResult.blocked) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Goal blocked by a before_goal hook.", errorColor))
@@ -2356,6 +2402,7 @@ try {
         agentOrigResult = agent.getOrigAnswer()
       }).stopWhen(function(done) {
         if (done === true) return true
+        if (stopRequested) return true
         var rawCode = con.readCharNB()
         var code = isDef(rawCode) ? Number(rawCode) : NaN
         if (!isNaN(code) && code > 0) {
@@ -2375,9 +2422,11 @@ try {
                 try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
               }
               printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
+              return true
             }
           }
         }
+        if (stopRequested) return true
         sleep(75)
         return false
       }).exec()
@@ -2404,6 +2453,17 @@ try {
             print(stringify(lastResult, __, ""))
           }
         } else {
+          // If streaming was enabled but no visible content was streamed, fallback to final result output.
+          if (_streamOutputStats.contentChars === 0 && isDef(lastResult)) {
+            print()
+            if (isObject(lastResult) || isArray(lastResult)) {
+              print(stringify(lastResult, __, "  "))
+            } else if (isString(lastResult)) {
+              print(lastResult)
+            } else {
+              print(stringify(lastResult, __, ""))
+            }
+          }
           // Add newline after streaming output before prompt
           // Also ensure newline if there was an inline event pending
           if (isDef(_prevEventLength)) {

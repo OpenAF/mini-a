@@ -478,23 +478,19 @@ jobs:
         return path
       }
     }
-    function loadHooks() {
+    function loadHooksFromDir(dirPath, hooks) {
       var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
-      var hooks = {}
-      validEvents.forEach(function(ev) { hooks[ev] = [] })
       try {
-        var historyHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-        var hooksDirPath = canonicalizeHookPath(historyHome + "/.openaf-mini-a/hooks")
-        if (!io.fileExists(hooksDirPath)) return hooks
-        var info = io.fileInfo(hooksDirPath)
-        if (!isObject(info) || info.isDirectory !== true) return hooks
-        var listing = io.listFiles(hooksDirPath)
-        if (!isObject(listing) || !isArray(listing.files)) return hooks
+        if (!io.fileExists(dirPath)) return
+        var info = io.fileInfo(dirPath)
+        if (!isObject(info) || info.isDirectory !== true) return
+        var listing = io.listFiles(dirPath)
+        if (!isObject(listing) || !isArray(listing.files)) return
         listing.files.forEach(function(file) {
           if (!isObject(file) || file.isDirectory === true) return
           if (!isString(file.filename) || file.filename.length === 0) return
           if (!/\.(yaml|yml|json)$/i.test(file.filename)) return
-          var fullPath = canonicalizeHookPath(hooksDirPath + "/" + file.filename)
+          var fullPath = canonicalizeHookPath(dirPath + "/" + file.filename)
           try {
             var hookDef = /\.json$/i.test(file.filename) ? io.readFileJSON(fullPath) : io.readFileYAML(fullPath)
             if (!isObject(hookDef)) return
@@ -520,7 +516,20 @@ jobs:
           }
         })
       } catch (hookLoadError) {
-        logWarn("Failed to load hooks: " + hookLoadError)
+        logWarn("Failed to load hooks from '" + dirPath + "': " + hookLoadError)
+      }
+    }
+    function loadHooks() {
+      var validEvents = ["before_goal", "after_goal", "before_tool", "after_tool", "before_shell", "after_shell"]
+      var hooks = {}
+      validEvents.forEach(function(ev) { hooks[ev] = [] })
+      var historyHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+      var hooksDirPath = canonicalizeHookPath(historyHome + "/.openaf-mini-a/hooks")
+      loadHooksFromDir(hooksDirPath, hooks)
+      if (isString(args.extrahooks) && args.extrahooks.trim().length > 0) {
+        args.extrahooks.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 }).forEach(function(dir) {
+          loadHooksFromDir(canonicalizeHookPath(dir), hooks)
+        })
       }
       return hooks
     }

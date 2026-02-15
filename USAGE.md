@@ -50,11 +50,23 @@ Inside the console, use slash commands for quick configuration checks. `/show` p
 
 Custom slash commands are supported through markdown templates in `~/.openaf-mini-a/commands/`. Typing `/<name> ...args...` looks for `~/.openaf-mini-a/commands/<name>.md`, renders placeholders, and submits the result as the goal text.
 
+To load commands from additional directories, pass `extracommands=<path1>,<path2>`. Commands in the default directory always win on name conflicts; among extra directories, earlier entries take precedence:
+
+```bash
+mini-a extracommands=/path/to/team-commands,/path/to/project-commands
+```
+
 Skill slash templates support both formats in `~/.openaf-mini-a/skills/`:
 - Claude Code-style folder skills: `~/.openaf-mini-a/skills/<name>/SKILL.md`
 - Legacy single-file skills: `~/.openaf-mini-a/skills/<name>.md`
 
 Both are invoked with `/<name> ...args...`, and skills also support `$<name> ...args...`. If both directories define the same slash name, the skill template in `~/.openaf-mini-a/skills/` takes precedence over `~/.openaf-mini-a/commands/`.
+
+To load skills from additional directories, pass `extraskills=<path1>,<path2>`. The default skills directory wins on name conflicts. When `useutils=true useskills=true`, the extra paths are also forwarded to the MiniUtilsTool skills operation:
+
+```bash
+mini-a extraskills=/path/to/shared-skills,/path/to/project-skills
+```
 
 To invoke one template directly from the command line (without entering the console), use `exec=`:
 
@@ -98,6 +110,12 @@ Notes:
 ### Console Hooks (`~/.openaf-mini-a/hooks`)
 
 The console can run local hooks before/after goals, tool calls, and shell commands. Hook definitions are loaded from `~/.openaf-mini-a/hooks/*.yaml`, `*.yml`, or `*.json`.
+
+To load hooks from additional directories, pass `extrahooks=<path1>,<path2>`. Hooks from all directories are merged additively — every matching hook fires regardless of which directory it came from:
+
+```bash
+mini-a extrahooks=/path/to/team-hooks,/path/to/project-hooks
+```
 
 Supported `event` values:
 - `before_goal`

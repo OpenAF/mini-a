@@ -5538,8 +5538,20 @@ MiniA.prototype._withExponentialBackoff = function(operation, options) {
   var attempts = 0
   var lastError
   var lastCategory
+  var shouldAbort = () => this.state == "stop" || (isFunction(opts.shouldAbort) && opts.shouldAbort() === true)
+  var buildAbortError = () => {
+    var err = new Error("Operation cancelled due to stop request.")
+    err.permanent = true
+    err.miniAStop = true
+    return err
+  }
 
   while (attempts < maxAttempts) {
+    if (shouldAbort()) {
+      lastError = buildAbortError()
+      lastCategory = { type: "permanent", reason: lastError.message }
+      break
+    }
     attempts++
     try {
       if (isFunction(opts.beforeAttempt)) opts.beforeAttempt(attempts)
@@ -5548,6 +5560,10 @@ MiniA.prototype._withExponentialBackoff = function(operation, options) {
       return result
     } catch (e) {
       lastError = e
+      if (isObject(e) && e.miniAStop === true) {
+        lastCategory = { type: "permanent", reason: e.message || "stop requested" }
+        break
+      }
       lastCategory = this._categorizeError(e, opts.context)
       if (isFunction(opts.onError)) opts.onError(e, attempts, lastCategory)
       if (lastCategory.type !== "transient" || attempts >= maxAttempts) break
@@ -5558,6 +5574,11 @@ MiniA.prototype._withExponentialBackoff = function(operation, options) {
         wait = Math.min(baseDelay * factor, maxDelay)
       }
       if (isFunction(opts.onRetry)) opts.onRetry(e, attempts, wait, lastCategory)
+      if (shouldAbort()) {
+        lastError = buildAbortError()
+        lastCategory = { type: "permanent", reason: lastError.message }
+        break
+      }
       sleep(wait, true)
     }
   }
@@ -5809,6 +5830,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (args.readwrite === true) toolOptions.readwrite = true
     if (isString(args.utilsroot) && args.utilsroot.trim().length > 0) {
       toolOptions.root = args.utilsroot.trim()
+    }
+    if (isString(args.extraskills) && args.extraskills.trim().length > 0) {
+      var extraSkillRoots = args.extraskills.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
+      if (extraSkillRoots.length > 0) toolOptions.skillsroots = extraSkillRoots
     }
     var fileTool = new MiniUtilsTool(toolOptions)
     if (fileTool._initialized !== true) {
@@ -7065,6 +7090,9 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
     var params = entry.params
     var stepLabel = entry.stepLabel
     var updateContext = entry.updateContext
+    if (parent.state == "stop") {
+      return { toolName: toolName, result: { stopped: true }, stopped: true, error: false }
+    }
     var context = parent._prepareToolExecution({
       action      : toolName,
       params      : params,
@@ -7124,7 +7152,11 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
     var normalized = parent._normalizeToolResult(rawToolResult)
     var resultDisplay = normalized.display || "(no output)"
     var cacheNote = context.fromCache === true ? " (cached)" : ""
-    parent.fnI("done", `Action '${toolName}' completed${cacheNote} (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
+    if (parent.state == "stop") {
+      parent.fnI("stop", `Action '${toolName}' interrupted by stop request.`)
+    } else {
+      parent.fnI("done", `Action '${toolName}' completed${cacheNote} (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
+    }
 
     parent._finalizeToolExecution({
       toolName     : toolName,
@@ -10059,6 +10091,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
         })
       } catch (e) {
+        if (this.state == "stop" || (isObject(e) && e.miniAStop === true)) {
+          break
+        }
         var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
         runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
         this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
@@ -10163,6 +10198,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               }
             })
           } catch (fallbackErr) {
+            if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
+              break
+            }
             var fallbackErrorInfo = this._categorizeError(fallbackErr, { source: "llm", llmType: "main", reason: "fallback" })
             runtime.context.push(`[OBS ${step + 1}] (error) main fallback model failed: ${fallbackErrorInfo.reason}`)
             this._registerRuntimeError(runtime, {
@@ -10366,6 +10404,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var pendingToolActions = []
       var flushToolActions = () => {
         if (pendingToolActions.length === 0) return
+        if (this.state == "stop") {
+          pendingToolActions = []
+          return
+        }
         var batchResults = this._executeParallelToolBatch(pendingToolActions)
         if (isArray(batchResults) && batchResults.some(r => isObject(r) && r.error === true)) {
           runtime.hadErrorThisStep = true
@@ -10374,6 +10416,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       for (var actionIndex = 0; actionIndex < actionMessages.length; actionIndex++) {
+        if (this.state == "stop") {
+          flushToolActions()
+          break
+        }
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
         var action = origActionRaw.toLowerCase()

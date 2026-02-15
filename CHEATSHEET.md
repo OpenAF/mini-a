@@ -549,6 +549,9 @@ mini-a mode=mypreset goal="your goal here"
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 | `showdelegate` | boolean | `false` | Show delegate events as separate console lines |
 | `workermode` | boolean | `false` | Launch the Worker API server instead of the console |
+| `extracommands` | string | | Comma-separated extra directories for custom slash commands |
+| `extraskills` | string | | Comma-separated extra directories for custom skills |
+| `extrahooks` | string | | Comma-separated extra directories for custom hooks |
 
 **Examples:**
 
@@ -942,6 +945,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 - Placeholders: `{{args}}`, `{{argv}}`, `{{argc}}`, `{{arg1}}`, `{{arg2}}`, ...
 - Built-in commands always take precedence (`/help`, `/show`, etc. cannot be overridden)
 - Missing or unreadable command templates fail with an explicit hard error
+- Use `extracommands=<path1>,<path2>` to load commands from additional directories (default dir wins on name conflicts)
 
 **Skill Slash Templates (`~/.openaf-mini-a/skills/`):**
 
@@ -952,6 +956,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
   - `~/.openaf-mini-a/skills/<name>.md` (legacy file skill)
 - If both folders define the same name, `commands` takes precedence and the `skills` entry is ignored
 - Skills downloaded from sites like `skillsmp.com` can be copied as folders under `~/.openaf-mini-a/skills/` when each folder includes `SKILL.md` (or `skill.md`)
+- Use `extraskills=<path1>,<path2>` to load skills from additional directories (default dir wins on name conflicts)
 
 **Console Hooks (`~/.openaf-mini-a/hooks/*.{yaml,yml,json}`):**
 
@@ -959,6 +964,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 - Key fields: `event`, `command`, optional `toolFilter`, `injectOutput`, `timeout`, `failBlocks`, `env`
 - Hook runtime env vars include `MINI_A_GOAL`, `MINI_A_RESULT`, `MINI_A_TOOL`, `MINI_A_TOOL_PARAMS`, `MINI_A_TOOL_RESULT`, `MINI_A_SHELL_COMMAND`, `MINI_A_SHELL_OUTPUT`
 - `failBlocks=true` can stop the associated goal/tool/shell action when a hook fails
+- Use `extrahooks=<path1>,<path2>` to load hooks from additional directories (additive — hooks from all dirs are merged)
 
 Example template:
 

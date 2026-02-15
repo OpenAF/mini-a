@@ -4416,13 +4416,15 @@
                 }
 
                 if (data.status === 'finished') {
+                    const finalStreamChunk = streamBuffer || '';
+                    const finalContent = mergeFinalContentWithStream(rawContent, finalStreamChunk);
                     conversationFinished = true;
-                    streamActive = false;
-                    streamBuffer = '';
                     stopStream();
-                    await renderRawContent(rawContent);
+                    lastRawContent = finalContent;
+                    await renderRawContent(finalContent);
                     if (currentSessionUuid && historyEnabled !== false) {
-                        const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, data);
+                        const historyData = Object.assign({}, data, { content: finalContent });
+                        const savedEntry = addConversationToHistory(currentSessionUuid, lastSubmittedPrompt, historyData);
                         if (savedEntry) {
                             activeHistoryId = savedEntry.id;
                         }
@@ -4446,6 +4448,30 @@
             forceRenderChartBlocks();
             stopProcessing();
         }
+    }
+
+    function hasVisibleStreamText(text) {
+        return (text || '').replace(/\s+/g, '').length > 0;
+    }
+
+    function appendWithOverlap(base, addition) {
+        if (!addition) return base;
+        if (!base) return addition;
+        const maxOverlap = Math.min(base.length, addition.length);
+        for (let i = maxOverlap; i > 0; i--) {
+            if (base.slice(-i) === addition.slice(0, i)) {
+                return base + addition.slice(i);
+            }
+        }
+        return base + addition;
+    }
+
+    function mergeFinalContentWithStream(rawContent, streamedChunk) {
+        const base = rawContent || '';
+        const stream = streamedChunk || '';
+        if (!hasVisibleStreamText(stream)) return base;
+        if (base.indexOf(stream) !== -1) return base;
+        return appendWithOverlap(base, stream);
     }
 
     function startPolling() {
