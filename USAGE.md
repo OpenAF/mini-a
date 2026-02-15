@@ -724,8 +724,8 @@ The `start()` method accepts various configuration options:
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
 - **`shell`** (string): Prefix applied to every shell command (use with `useshell=true`)
-- **`shellprefix`** (string): Override the shell prefix embedded inside stored plans or MCP executions so converted tasks run
-  against the right environment
+- **`shellprefix`** (string): Override the shell prefix embedded inside stored plans or MCP executions so converted tasks run against the right environment
+- **`shelltimeout`** (number): Maximum shell command runtime in milliseconds before timeout
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed

@@ -65,6 +65,10 @@ help:
     desc     : Prefix applied to every shell command (requires useshell=true)
     example  : "sandbox-exec -f /path/to/profile.sb"
     mandatory: false
+  - name     : shelltimeout
+    desc     : Maximum shell command execution time in milliseconds before timeout
+    example  : "30000"
+    mandatory: false
   - name     : shellallow
     desc     : Comma-separated list of banned commands to allow explicitly
     example  : "curl,wget"
@@ -370,6 +374,7 @@ jobs:
         shellallowpipes: shellallowpipes
         shellbatch     : shellbatch
         shellprefix    : shellprefix
+        shelltimeout   : shelltimeout
         toolcachettl   : toolcachettl
         validationgoal : validationgoal
         valgoal        : valgoal
@@ -432,6 +437,7 @@ jobs:
       shellallowpipes: toBoolean.isBoolean.default(false)
       shellbatch     : toBoolean.isBoolean.default(false)
       shellprefix    : isString.default(__)
+      shelltimeout   : toNumber.isNumber.default(__)
       toolcachettl   : toNumber.isNumber.default(__)
       validationgoal : isString.default(__)
       valgoal        : isString.default(__)

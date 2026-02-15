@@ -330,6 +330,7 @@ try {
     chatyouare     : { type: "string", description: "Override the opening chatbot persona sentence when chatbotmode=true" },
     useshell       : { type: "boolean", default: false, description: "Allow shell command execution" },
     shell          : { type: "string", description: "Prefix applied to every shell command" },
+    shelltimeout   : { type: "number", description: "Maximum shell command runtime in milliseconds" },
     readwrite      : { type: "boolean", default: false, description: "Allow write operations during shell commands" },
     checkall       : { type: "boolean", default: false, description: "Ask for confirmation before shell commands" },
     shellbatch     : { type: "boolean", default: false, description: "Automatically approve shell commands" },
