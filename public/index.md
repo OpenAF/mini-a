@@ -368,6 +368,92 @@
         height: auto !important;
     }
 
+    .mermaid-diagram {
+        position: relative;
+        text-align: center;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+        overflow: hidden;
+    }
+
+    .mermaid-panzoom-viewport {
+        width: 100%;
+        overflow: hidden;
+        touch-action: none;
+        cursor: grab;
+    }
+
+    .mermaid-panzoom-viewport.dragging {
+        cursor: grabbing;
+    }
+
+    .mermaid-panzoom-content {
+        display: inline-block;
+        transform-origin: 0 0;
+        will-change: transform;
+        transition: transform 0.08s ease-out;
+    }
+
+    .mermaid-panzoom-content svg {
+        max-width: none;
+        height: auto;
+    }
+
+    .mermaid-diagram-controls {
+        position: absolute;
+        top: 0.65rem;
+        right: 0.65rem;
+        display: flex;
+        gap: 0.45rem;
+        z-index: 2;
+    }
+
+    .mermaid-control-group {
+        display: flex;
+        border: 1px solid rgba(148, 156, 166, 0.45);
+        border-radius: 0.8rem;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+
+    body.markdown-body-dark .mermaid-control-group {
+        background: rgba(26, 29, 35, 0.94);
+        border-color: rgba(255,255,255,0.12);
+    }
+
+    .mermaid-control-btn {
+        border: none;
+        background: transparent;
+        color: inherit;
+        width: 2.2rem;
+        height: 2.2rem;
+        font-size: 1.45rem;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+
+    .mermaid-control-btn + .mermaid-control-btn {
+        border-left: 1px solid rgba(148, 156, 166, 0.45);
+    }
+
+    body.markdown-body-dark .mermaid-control-btn + .mermaid-control-btn {
+        border-left-color: rgba(255,255,255,0.12);
+    }
+
+    .mermaid-control-btn:hover {
+        background: rgba(51, 144, 255, 0.16);
+    }
+
+    .mermaid-reset-icon {
+        width: 1.1rem;
+        height: 1.1rem;
+    }
+
     /* ========== LEAFLET MAPS ========== */
     .leaflet-map {
         width: 100%;
@@ -2768,6 +2854,130 @@
         });
     }
 
+    function addMermaidPanZoomLayer(container) {
+        if (!container) return;
+
+        const svg = container.querySelector('svg');
+        if (!svg) return;
+
+        const viewport = document.createElement('div');
+        viewport.className = 'mermaid-panzoom-viewport';
+
+        const content = document.createElement('div');
+        content.className = 'mermaid-panzoom-content';
+        content.appendChild(svg);
+        viewport.appendChild(content);
+
+        const controls = document.createElement('div');
+        controls.className = 'mermaid-diagram-controls';
+        controls.innerHTML = [
+            '<div class="mermaid-control-group">',
+            '<button type="button" class="mermaid-control-btn" data-action="reset" aria-label="Reset mermaid view" title="Reset view">',
+            '<svg class="mermaid-reset-icon" viewBox="0 0 16 16" aria-hidden="true">',
+            '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+            '</svg>',
+            '</button>',
+            '</div>',
+            '<div class="mermaid-control-group">',
+            '<button type="button" class="mermaid-control-btn" data-action="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>',
+            '<button type="button" class="mermaid-control-btn" data-action="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>',
+            '</div>'
+        ].join('');
+
+        container.innerHTML = '';
+        container.appendChild(viewport);
+        container.appendChild(controls);
+
+        let state = { scale: 1, x: 0, y: 0 };
+        const minScale = 0.35;
+        const maxScale = 3;
+        let dragStart = null;
+
+        function applyTransform() {
+            content.style.transform = 'translate(' + state.x + 'px, ' + state.y + 'px) scale(' + state.scale + ')';
+        }
+
+        function clampScale(value) {
+            return Math.min(maxScale, Math.max(minScale, value));
+        }
+
+        function zoomAt(factor, centerX, centerY) {
+            const nextScale = clampScale(state.scale * factor);
+            if (nextScale === state.scale) return;
+            const ratio = nextScale / state.scale;
+            state.x = centerX - (centerX - state.x) * ratio;
+            state.y = centerY - (centerY - state.y) * ratio;
+            state.scale = nextScale;
+            applyTransform();
+        }
+
+        function resetView() {
+            state.scale = 1;
+            state.x = 0;
+            state.y = 0;
+            applyTransform();
+        }
+
+        controls.addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-action]');
+            if (!btn) return;
+
+            const rect = viewport.getBoundingClientRect();
+            const cx = rect.width / 2;
+            const cy = rect.height / 2;
+            const action = btn.getAttribute('data-action');
+
+            if (action === 'zoom-in') {
+                zoomAt(1.2, cx, cy);
+            } else if (action === 'zoom-out') {
+                zoomAt(1 / 1.2, cx, cy);
+            } else if (action === 'reset') {
+                resetView();
+            }
+        });
+
+        viewport.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            const rect = viewport.getBoundingClientRect();
+            const cx = event.clientX - rect.left;
+            const cy = event.clientY - rect.top;
+            const factor = event.deltaY < 0 ? 1.12 : (1 / 1.12);
+            zoomAt(factor, cx, cy);
+        }, { passive: false });
+
+        viewport.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            dragStart = {
+                x: event.clientX - state.x,
+                y: event.clientY - state.y
+            };
+            viewport.classList.add('dragging');
+            try { viewport.setPointerCapture(event.pointerId); } catch (_) {}
+        });
+
+        viewport.addEventListener('pointermove', (event) => {
+            if (!dragStart) return;
+            state.x = event.clientX - dragStart.x;
+            state.y = event.clientY - dragStart.y;
+            applyTransform();
+        });
+
+        function endDrag(event) {
+            if (!dragStart) return;
+            dragStart = null;
+            viewport.classList.remove('dragging');
+            if (event && typeof event.pointerId !== 'undefined') {
+                try { viewport.releasePointerCapture(event.pointerId); } catch (_) {}
+            }
+        }
+
+        viewport.addEventListener('pointerup', endDrag);
+        viewport.addEventListener('pointercancel', endDrag);
+        viewport.addEventListener('pointerleave', endDrag);
+
+        resetView();
+    }
+
     async function renderMermaidDiagrams() {
         if (typeof window.mermaid === 'undefined') return;
 
@@ -2818,6 +3028,7 @@
                     // Render the diagram
                     const { svg } = await window.mermaid.render('mermaid-' + Date.now() + '-' + i, code);
                     container.innerHTML = svg;
+                    addMermaidPanZoomLayer(container);
 
                     // Replace the pre/code block with the rendered diagram
                     pre.replaceWith(container);
@@ -2863,6 +3074,7 @@
                     // Re-render the diagram with new theme
                     const { svg } = await window.mermaid.render('mermaid-rerender-' + Date.now() + '-' + i, code);
                     container.innerHTML = svg;
+                    addMermaidPanZoomLayer(container);
                 } catch (error) {
                     console.error('Failed to re-render Mermaid diagram:', error);
                 }
