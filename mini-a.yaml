@@ -285,6 +285,10 @@ help:
     desc     : SLON/JSON definition of an audit channel to record agent activity
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
+  - name     : toollog
+    desc     : SLON/JSON definition of a channel that records every tool call, arguments and result
+    example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
+    mandatory: false
   - name     : debugch
     desc     : SLON/JSON definition of a debug channel for LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"
@@ -397,6 +401,7 @@ jobs:
         rules          : rules
         state          : state
         auditch        : auditch
+        toollog        : toollog
         debugch        : debugch
         debuglcch      : debuglcch
         nosetmcpwd     : nosetmcpwd
@@ -458,6 +463,7 @@ jobs:
       rules          : isString.default(__)
       state          : isString.default(__)
       auditch        : isString.default(__)
+      toollog        : isString.default(__)
       debugch        : isString.default(__)
       debuglcch      : isString.default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)

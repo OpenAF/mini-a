@@ -824,6 +824,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 
 #### Audit Logging
 - **`auditch`** (string): JSSLON definition for the OpenAF channel that stores Mini-A interaction events. When supplied, each call to `fnI` is persisted under the `_mini_a_audit_channel` key. Example for a file-backed log: `auditch="(type: 'file', options: (file: 'audit.json'))"`. Channel types and options follow the OpenAF channel conventions documented in `github.com/openaf/docs/openaf.md` and `github.com/openaf/docs/llm-guide.md`; keep the structure compatible with `$ch().create(type, options)`.
+- **`toollog`** (string): JSSLON definition for a dedicated tool-log channel. When supplied, every MCP tool usage is captured under `_mini_a_toollog_channel` including tool name, input arguments (`params`) and returned answer payload (`answer`) across both streaming and non-streaming runs.
 
 #### MCP Working Directory
 - **`nosetmcpwd`** (boolean, default: false): By default, Mini-A sets `__flags.JSONRPC.cmd.defaultDir` to the mini-a oPack installation location, providing a consistent working directory for MCP commands. Set `nosetmcpwd=true` to prevent this automatic configuration and use the system's default working directory instead.
