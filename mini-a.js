@@ -869,7 +869,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   switch(e) {
   case "user"     : _e = "👤"; break
   case "exec"     : _e = "⚙️"; break
-  case "shell"    : _e = "🖥️"; break
+  case "shell"    : _e = "🖥️ "; break
   case "think"    : _e = "💡"; break
   case "final"    : _e = "🏁"; break
   case "input"    : _e = "➡️"; break
@@ -885,7 +885,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "libs"     : _e = "📚"; break
   case "info"     : _e = "ℹ️"; break
   case "load"     : _e = "📂"; break
-  case "warn"     : _e = "⚠️"; break
+  case "warn"     : _e = "⚠️ "; break
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
   default         : _e = e
