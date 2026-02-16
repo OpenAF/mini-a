@@ -6250,7 +6250,8 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellallow     : isDef(p.shellallow) ? p.shellallow : args.shellallow,
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
             shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
-            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix
+            shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix,
+            shelltimeout   : isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout
           })
           var out = result && isString(result.output) ? result.output : stringify(result, __, "")
           if (!isString(out) || out.length === 0) out = "(no output)"
@@ -6276,7 +6277,8 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellallow     : { type: "string", description: "Comma-separated allowlist to override bans." },
             shellbanextra  : { type: "string", description: "Comma-separated extra banned commands." },
             shellallowpipes: { type: "boolean", description: "Allow pipes/redirection/control operators." },
-            shellprefix    : { type: "string", description: "Prefix to prepend to the command (e.g., 'docker exec -it <cid> sh -lc')." }
+            shellprefix    : { type: "string", description: "Prefix to prepend to the command (e.g., 'docker exec -it <cid> sh -lc')." },
+            shelltimeout   : { type: "number", description: "Maximum command execution time in milliseconds." }
           },
           required: ["command"]
         }
@@ -7505,8 +7507,11 @@ MiniA.prototype._runCommand = function(args) {
     var allowValue = isDef(args.shellallow) ? args.shellallow : this._shellAllowlist
     var extraBanValue = isDef(args.shellbanextra) ? args.shellbanextra : this._shellExtraBanned
     var allowPipesValue = isDef(args.shellallowpipes) ? args.shellallowpipes : this._shellAllowPipes
+    var shellTimeoutValue = isDef(args.shelltimeout) ? args.shelltimeout : this._shellTimeout
 
     args.shellallowpipes = _$(toBoolean(allowPipesValue), "args.shellallowpipes").isBoolean().default(false)
+    args.shelltimeout = _$(shellTimeoutValue, "args.shelltimeout").isNumber().default(__)
+    if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
 
     const baseBanned = [
         "rm","sudo","chmod","chown","mv","scp","ssh","docker","podman","kubectl",
@@ -7605,7 +7610,9 @@ MiniA.prototype._runCommand = function(args) {
           ? `Executing '${finalCommand}' (original: '${originalCommand}').`
           : `Executing '${finalCommand}'...`
         )
-        var _r = $sh(shInput).get(0)
+        var shellExec = $sh(shInput)
+        if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
+        var _r = shellExec.get(0)
         args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
         args.executedCommand = finalCommand
         global.__mini_a_metrics.shell_commands_executed.inc()
@@ -8531,6 +8538,7 @@ MiniA.prototype.init = function(args) {
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" },
+      { name: "shelltimeout", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
@@ -8594,6 +8602,8 @@ MiniA.prototype.init = function(args) {
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
+    args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
+    if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
@@ -8716,6 +8726,7 @@ MiniA.prototype.init = function(args) {
       this._toolCacheDefaultTtl = args.toolcachettl
     }
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
+    this._shellTimeout = args.shelltimeout
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
@@ -9305,6 +9316,7 @@ MiniA.prototype.init = function(args) {
  * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
+ * - shelltimeout (number, optional): Maximum shell command runtime in milliseconds before timing out.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
  * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP (only when useutils=true).
@@ -9456,6 +9468,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "shell", type: "string", default: "" },
       { name: "shellallow", type: "string", default: __ },
       { name: "shellbanextra", type: "string", default: __ },
+      { name: "shelltimeout", type: "number", default: __ },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
       { name: "outputfile", type: "string", default: __ },
@@ -9497,6 +9510,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
+    args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
+    if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
@@ -9532,6 +9547,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
+    this._shellTimeout = args.shelltimeout
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
@@ -10742,7 +10758,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 shellallow     : args.shellallow,
                 shellbanextra  : args.shellbanextra,
                 shellallowpipes: args.shellallowpipes,
-                shellprefix    : args.shellprefix
+                shellprefix    : args.shellprefix,
+                shelltimeout   : args.shelltimeout
               },
               stepLabel    : stepLabel,
               updateContext: !this._useTools
@@ -10757,7 +10774,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             checkall       : args.checkall,
             shellallow     : args.shellallow,
             shellbanextra  : args.shellbanextra,
-            shellallowpipes: args.shellallowpipes
+            shellallowpipes: args.shellallowpipes,
+            shelltimeout   : args.shelltimeout
           }).output
           runtime.context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
           runtime.context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
@@ -11217,7 +11235,8 @@ MiniA.prototype._runChatbotMode = function(options) {
               shellbatch     : args.shellbatch,
               shellallow     : args.shellallow,
               shellbanextra  : args.shellbanextra,
-              shellallowpipes: args.shellallowpipes
+              shellallowpipes: args.shellallowpipes,
+              shelltimeout   : args.shelltimeout
             })
             var shellOutput = isDef(shellResult) && isString(shellResult.output) ? shellResult.output : ""
             if (!isString(shellOutput) || shellOutput.length === 0) shellOutput = "(no output)"
