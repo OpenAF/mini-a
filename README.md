@@ -53,44 +53,52 @@ Two steps to use:
    ```bash
    opack exec mini-a goal="your goal"
    ```
-   To run one custom slash command/skill template without entering interactive mode, use:
-   ```bash
-   opack exec mini-a exec="/my-command first second"
-   ```
-   `exec=` is different from `goal=`: it resolves a slash template from `~/.openaf-mini-a/commands/` or `~/.openaf-mini-a/skills/`, renders placeholders with the provided arguments, runs the resulting goal through Mini-A (including hooks), and exits.
-   If you enabled the optional alias displayed after installation, simply run `mini-a ...`.
-   For a colorized overview of every console, web, and planning flag (including shared Mini-A arguments), run `mini-a -h` or `mini-a --help`; the console prints the CLI-specific switches followed by the auto-generated table of core agent parameters.
-   Inside the console you can inspect active parameters with slash commands; `/show` lists them all and `/show use` filters to parameters beginning with `use`. Use `/skills [prefix]` to list discovered skills (optionally filtered by name prefix). Conversation cleanup commands are also available: `/compact [n]` condenses older user/assistant turns into a single summary message while keeping up to the most recent `n` exchanges (default 6), and `/summarize [n]` generates a full narrative summary entry that replaces the earlier history while preserving up to the latest `n` messages (default 6) so the session can continue with a condensed context window. When enough history exists, Mini-A always leaves at least one older entry eligible for summarization. When you need to revisit prior output, `/last [md]` reprints the previous final answer (add `md` to emit the raw Markdown), and `/save <path>` writes that answer directly to disk.
-
-   Custom slash commands are loaded from `~/.openaf-mini-a/commands/*.md`. For example, `/my-command first "second arg"` loads `~/.openaf-mini-a/commands/my-command.md`, injects arguments, and runs the rendered text as the goal. Supported placeholders are `{{args}}`, `{{argv}}`, `{{argc}}`, and positional `{{arg1}}`, `{{arg2}}`, ... . Built-ins always win (`/help`, `/show`, etc. cannot be overridden), and missing template files are treated as hard errors. Use `extracommands=<path1>,<path2>` to load commands from additional comma-separated directories (default directory wins on conflicts).
-
-   Skills are loaded from `~/.openaf-mini-a/skills/` and can be invoked as slash commands (`/<name> ...args...`) or skill aliases (`$<name> ...args...`). Mini-A supports both:
-   - folder skills (Claude Code-style): `~/.openaf-mini-a/skills/<name>/SKILL.md`
-   - legacy file skills: `~/.openaf-mini-a/skills/<name>.md`
-
-   This keeps compatibility with skill packs downloaded from catalogs such as `skillsmp.com` (drop each skill folder under `~/.openaf-mini-a/skills/`). If a name exists in both folders, `skills` now take precedence over `commands`. Use `extraskills=<path1>,<path2>` to load skills from additional directories (default directory wins on conflicts; extra paths are also forwarded to the MiniUtilsTool skills operation when `useutils=true useskills=true`).
-
-   Console hook files can be loaded from `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` to run local commands around agent lifecycle events. Supported events are `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, and `after_shell`. Use `extrahooks=<path1>,<path2>` to load hooks from additional directories (additive — hooks from all directories are merged).
-
-   **Tab-complete tips**: Slash commands that accept file paths (such as `/save`) now support inline filesystem completion, and discovered custom command/skill templates (including `$<skill>`) also appear in completion, so you can press <kbd>Tab</kbd> to expand options quickly.
-
-   **Tip**: Include file contents in your goals using `@path/to/file` syntax (e.g., `Follow these instructions @docs/guide.md`). Skill templates also resolve relative `@file.md` paths from the skill folder automatically, and relative markdown links to `.md` files are auto-inlined as references. Use `\@token` when you need a literal `@token` (for example inside skill markdown) without triggering file attachment parsing. Use `\$token` when you need a literal leading `$token` instead of skill invocation.
+   If you enabled the optional alias displayed after installation, you can use `mini-a ...` instead.
 
 Shell access is disabled by default for safety; add `useshell=true` when you explicitly want the agent to run commands.
 
-For browser UI, start `./mini-a-web.sh onport=8888` after exporting the model settings and open `http://localhost:8888`.
+## Next Steps
 
-For browser UI with history + attachments enabled:
+### Helpful first commands
+
+- Show all console/web/planning flags and defaults:
+  ```bash
+  mini-a -h
+  ```
+- Run one custom slash command/skill template without entering interactive mode:
+   ```bash
+   opack exec mini-a exec="/my-command first second"
+   ```
+
+`exec=` resolves a slash template from `~/.openaf-mini-a/commands/` or `~/.openaf-mini-a/skills/`, renders placeholders, runs the resulting goal (including hooks), and exits.
+
+### Console templates and hooks
+
+- Custom commands: `~/.openaf-mini-a/commands/*.md` (`extracommands=<path1>,<path2>`)
+- Skills: `~/.openaf-mini-a/skills/<name>/SKILL.md` or `~/.openaf-mini-a/skills/<name>.md` (`extraskills=<path1>,<path2>`)
+- Hooks: `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` with events `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell` (`extrahooks=<path1>,<path2>`)
+
+See [USAGE.md](USAGE.md) for full template placeholders, precedence rules, and examples.
+
+### Console productivity tips
+
+- `/show` lists active parameters (`/show use` filters by prefix)
+- `/skills [prefix]` lists discovered skills
+- `/compact [n]` and `/summarize [n]` condense history
+- `/last [md]` reprints the previous final answer
+- `/save <path>` writes the previous final answer to disk
+- `@path/to/file` inlines file content into goals; use `\@token` for a literal `@token` and `\$token` for a literal `$token`
+
+### Web UI quick start
+
+Start the browser UI:
 ```bash
-./mini-a-web.sh onport=8888 usehistory=true useattach=true historykeep=true
+./mini-a-web.sh onport=8888
 ```
 
-For browser UI with S3-backed history:
-```bash
-./mini-a-web.sh onport=8888 usehistory=true historys3bucket=mini-a-history historys3prefix=sessions/
-```
+Then open `http://localhost:8888`.
 
-> HTML Export Save Dialog: When using the Web UI's "Download conversation as HTML" feature, Chromium-based browsers (Chrome, Edge, Brave, etc.) will show a native save dialog leveraging the File System Access API so you can choose the exact filename and path. If the API is unavailable or you cancel the dialog, Mini-A falls back to a standard browser download. Safari does not yet support this API; to be prompted for a location there, enable "Ask where to save each file before downloading" in Safari preferences.
+For history/attachments and S3-backed history examples, see [USAGE.md](USAGE.md#web-ui-quick-start).
 
 ### Running in Docker
 
@@ -394,6 +402,7 @@ Mini-A ships with complementary components:
 | `rpm` | Rate limit (requests per minute) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
 | `shelltimeout` | Maximum shell command runtime in milliseconds before timeout | - |
+| `toollog` | JSSLON definition for a dedicated tool-log channel capturing MCP tool inputs/outputs | - |
 | `showthinking` | Surface XML-tagged thinking blocks from model responses as thought logs | `false` |
 | `verbose` / `debug` | Enable detailed logging | `false` |
 
