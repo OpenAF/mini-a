@@ -382,6 +382,9 @@
         overflow: hidden;
         touch-action: none;
         cursor: grab;
+        display: flex;
+        justify-content: center;
+        align-items: center;
     }
 
     .mermaid-panzoom-viewport.dragging {
@@ -389,20 +392,18 @@
     }
 
     .mermaid-panzoom-content {
-        display: inline-block;
-        transform-origin: 0 0;
-        will-change: transform;
-        transition: transform 0.08s ease-out;
+        display: contents;
     }
 
     .mermaid-panzoom-content svg {
-        max-width: none;
+        display: block;
+        max-width: 100%;
         height: auto;
     }
 
     .mermaid-diagram-controls {
         position: absolute;
-        top: 0.65rem;
+        bottom: 0.65rem;
         right: 0.65rem;
         display: flex;
         gap: 0.45rem;
@@ -427,9 +428,9 @@
         border: none;
         background: transparent;
         color: inherit;
-        width: 2.2rem;
-        height: 2.2rem;
-        font-size: 1.45rem;
+        width: 1.65rem;
+        height: 1.65rem;
+        font-size: 1.1rem;
         line-height: 1;
         display: inline-flex;
         align-items: center;
@@ -450,8 +451,8 @@
     }
 
     .mermaid-reset-icon {
-        width: 1.1rem;
-        height: 1.1rem;
+        width: 0.85rem;
+        height: 0.85rem;
     }
 
     /* ========== LEAFLET MAPS ========== */
@@ -2888,13 +2889,51 @@
         container.appendChild(viewport);
         container.appendChild(controls);
 
-        let state = { scale: 1, x: 0, y: 0 };
         const minScale = 0.35;
         const maxScale = 3;
         let dragStart = null;
+        const originalViewBoxAttr = svg.getAttribute('viewBox');
+        const originalPreserveAspectRatio = svg.getAttribute('preserveAspectRatio');
+        let viewBox = null;
 
-        function applyTransform() {
-            content.style.transform = 'translate(' + state.x + 'px, ' + state.y + 'px) scale(' + state.scale + ')';
+        function parseViewBox(value) {
+            if (!value) return null;
+            const parts = value.trim().split(/\s+/).map(Number);
+            if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return null;
+            return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+        }
+
+        function getViewBoxFromSvg() {
+            const parsed = parseViewBox(svg.getAttribute('viewBox'));
+            if (parsed && parsed.width > 0 && parsed.height > 0) return parsed;
+
+            try {
+                const bbox = svg.getBBox();
+                if (bbox.width > 0 && bbox.height > 0) {
+                    return { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
+                }
+            } catch (error) {
+                // getBBox can throw when SVG is not in the document yet.
+            }
+
+            const rect = svg.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                return { x: 0, y: 0, width: rect.width, height: rect.height };
+            }
+
+            return { x: 0, y: 0, width: 1000, height: 1000 };
+        }
+
+        function ensureViewBox() {
+            if (viewBox) return;
+            viewBox = getViewBoxFromSvg();
+            svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+            applyViewBox();
+        }
+
+        function applyViewBox() {
+            if (!viewBox) return;
+            svg.setAttribute('viewBox', viewBox.x + ' ' + viewBox.y + ' ' + viewBox.width + ' ' + viewBox.height);
         }
 
         function clampScale(value) {
@@ -2902,20 +2941,40 @@
         }
 
         function zoomAt(factor, centerX, centerY) {
-            const nextScale = clampScale(state.scale * factor);
-            if (nextScale === state.scale) return;
-            const ratio = nextScale / state.scale;
-            state.x = centerX - (centerX - state.x) * ratio;
-            state.y = centerY - (centerY - state.y) * ratio;
-            state.scale = nextScale;
-            applyTransform();
+            ensureViewBox();
+            if (!viewBox) return;
+            const baseViewBox = parseViewBox(originalViewBoxAttr) || viewBox;
+            const currentScale = baseViewBox.width / viewBox.width;
+            const nextScale = clampScale(currentScale * factor);
+            if (nextScale === currentScale) return;
+
+            const rect = viewport.getBoundingClientRect();
+            const cxRatio = rect.width ? centerX / rect.width : 0.5;
+            const cyRatio = rect.height ? centerY / rect.height : 0.5;
+            const newWidth = baseViewBox.width / nextScale;
+            const newHeight = baseViewBox.height / nextScale;
+
+            viewBox.x = viewBox.x + (viewBox.width - newWidth) * cxRatio;
+            viewBox.y = viewBox.y + (viewBox.height - newHeight) * cyRatio;
+            viewBox.width = newWidth;
+            viewBox.height = newHeight;
+            applyViewBox();
         }
 
         function resetView() {
-            state.scale = 1;
-            state.x = 0;
-            state.y = 0;
-            applyTransform();
+            if (originalViewBoxAttr) {
+                viewBox = parseViewBox(originalViewBoxAttr);
+                applyViewBox();
+            } else {
+                viewBox = null;
+                svg.removeAttribute('viewBox');
+            }
+
+            if (originalPreserveAspectRatio) {
+                svg.setAttribute('preserveAspectRatio', originalPreserveAspectRatio);
+            } else {
+                svg.removeAttribute('preserveAspectRatio');
+            }
         }
 
         controls.addEventListener('click', (event) => {
@@ -2947,9 +3006,13 @@
 
         viewport.addEventListener('pointerdown', (event) => {
             if (event.button !== 0) return;
+            ensureViewBox();
+            if (!viewBox) return;
             dragStart = {
-                x: event.clientX - state.x,
-                y: event.clientY - state.y
+                x: event.clientX,
+                y: event.clientY,
+                viewX: viewBox.x,
+                viewY: viewBox.y
             };
             viewport.classList.add('dragging');
             try { viewport.setPointerCapture(event.pointerId); } catch (_) {}
@@ -2957,9 +3020,14 @@
 
         viewport.addEventListener('pointermove', (event) => {
             if (!dragStart) return;
-            state.x = event.clientX - dragStart.x;
-            state.y = event.clientY - dragStart.y;
-            applyTransform();
+            const rect = viewport.getBoundingClientRect();
+            const dx = event.clientX - dragStart.x;
+            const dy = event.clientY - dragStart.y;
+            const scaleX = rect.width ? viewBox.width / rect.width : 0;
+            const scaleY = rect.height ? viewBox.height / rect.height : 0;
+            viewBox.x = dragStart.viewX - dx * scaleX;
+            viewBox.y = dragStart.viewY - dy * scaleY;
+            applyViewBox();
         });
 
         function endDrag(event) {
