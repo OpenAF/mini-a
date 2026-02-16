@@ -1838,6 +1838,18 @@
         return '';
     }
 
+    function extractFirstUserPromptFromEvents(events) {
+        if (!Array.isArray(events)) return '';
+        for (let i = 0; i < events.length; i++) {
+            const ev = events[i];
+            const key = ev && typeof ev.event === 'string' ? ev.event : '';
+            if (key === '👤' || key === 'user') {
+                return typeof ev.message === 'string' ? ev.message : '';
+            }
+        }
+        return '';
+    }
+
     function removeLastAssistantFromEvents(events) {
         const sanitized = sanitizeHistoryEvents(events);
         const isUserEvent = (name) => name === '👤' || name === 'user';
@@ -3580,7 +3592,8 @@
         const rendered = entries.map(entry => {
             const isActive = entry.id === activeHistoryId;
             const entryId = escapeHtml(entry.id || '');
-            const titleSource = entry.title || formatHistoryTitle(entry.prompt);
+            const firstPrompt = extractFirstUserPromptFromEvents(entry && entry.events);
+            const titleSource = formatHistoryTitle(firstPrompt || entry.prompt || entry.title || 'Conversation');
             const title = escapeHtml(titleSource);
             const timestamp = escapeHtml(formatHistoryTime(entry.timestamp));
             return `
@@ -3813,8 +3826,9 @@
             })
             .filter(Boolean);
 
-        const promptValue = prompt || existing.prompt || '';
-        const titleSource = prompt || existing.title || existing.prompt || '';
+        const firstPromptFromEvents = extractFirstUserPromptFromEvents(sanitizedEvents);
+        const promptValue = firstPromptFromEvents || existing.prompt || prompt || '';
+        const titleSource = firstPromptFromEvents || existing.prompt || prompt || existing.title || '';
         const contentValue = (data && typeof data.content === 'string') ? data.content : (existing.content || '');
         const statusValue = (data && typeof data.status !== 'undefined') ? data.status : (existing.status || 'finished');
 
