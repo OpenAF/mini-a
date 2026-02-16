@@ -186,6 +186,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usemath
+    desc     : Encourage LaTeX math formulas in markdown output for KaTeX rendering
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usestream
     desc     : Enable streaming output - display LLM tokens as they arrive in real-time
     example  : "true"
@@ -390,6 +395,7 @@ jobs:
         usecharts      : usecharts
         useascii       : useascii
         usemaps        : usemaps
+        usemath        : usemath
         usestream      : usestream
         mcpdynamic     : mcpdynamic
         mcplazy        : mcplazy
@@ -453,6 +459,8 @@ jobs:
       usemermaid     : toBoolean.isBoolean.default(false)
       usecharts      : toBoolean.isBoolean.default(false)
       useascii       : toBoolean.isBoolean.default(false)
+      usemaps        : toBoolean.isBoolean.default(false)
+      usemath        : toBoolean.isBoolean.default(false)
       usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcplazy        : toBoolean.isBoolean.default(false)

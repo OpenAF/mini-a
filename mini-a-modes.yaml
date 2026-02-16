@@ -91,6 +91,7 @@ modes:
       usecharts  : true
       usemaps    : true
       useascii   : false
+      usemath    : true
       usetools   : true
       usehistory : true
       useattach  : true
