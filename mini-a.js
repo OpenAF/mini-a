@@ -621,8 +621,9 @@ MiniA.buildVisualKnowledge = function(options) {
   var useCharts = _$(toBoolean(options.useCharts), "options.useCharts").isBoolean().default(false)
   var useAscii = _$(toBoolean(options.useAscii), "options.useAscii").isBoolean().default(false)
   var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
+  var useMath = _$(toBoolean(options.useMath), "options.useMath").isBoolean().default(false)
 
-  if (!useDiagrams && !useCharts && !useAscii && !useMaps) return ""
+  if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
   // Check if visual guidance already exists AND matches current flags
@@ -631,8 +632,9 @@ MiniA.buildVisualKnowledge = function(options) {
     var hasCharts = existingKnowledge.indexOf("Charts (strict format):") >= 0
     var hasAscii = existingKnowledge.indexOf("ASCII/UTF-8 visuals") >= 0
     var hasMaps = existingKnowledge.indexOf("Interactive Maps:") >= 0
+    var hasMath = existingKnowledge.indexOf("Math formulas:") >= 0
     // Only return early if existing guidance matches current flags
-    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps) {
+    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps && useMath === hasMath) {
       return ""
     }
   }
@@ -771,6 +773,16 @@ MiniA.buildVisualKnowledge = function(options) {
     )
   }
 
+  if (useMath) {
+    visualParts.push(
+      "Math formulas:\n" +
+      "  - Use LaTeX notation that can be rendered in markdown output.\n" +
+      "  - Use inline math as `$...$` and standalone equations as `$$...$$`.\n" +
+      "  - Keep syntax valid (balanced braces, escaped backslashes) and avoid wrapping formulas inside regular code fences.\n" +
+      "  - Add one short sentence after each displayed equation to explain what it represents."
+    )
+  }
+
   var checklist = "\n\nVisual selection checklist:"
   var nextIndex = 1
   if (useDiagrams) {
@@ -799,6 +811,10 @@ MiniA.buildVisualKnowledge = function(options) {
     checklist += "\n" + nextIndex + ". Geographic data or locations -> interactive map with markers and layers."
     nextIndex++
     checklist += "\n" + nextIndex + ". Spatial relationships or coverage areas -> map with circles, polygons, or polylines."
+    nextIndex++
+  }
+  if (useMath) {
+    checklist += "\n" + nextIndex + ". Any mathematical expression, equation, or derivation -> use LaTeX math fences ($...$ or $$...$$)."
     nextIndex++
   }
   checklist += "\n\nIf no visual type above applies to the user's request (e.g., purely narrative or conversational queries), you may provide text-only output without explanation."
@@ -8519,6 +8535,7 @@ MiniA.prototype.init = function(args) {
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
+    args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -8640,6 +8657,7 @@ MiniA.prototype.init = function(args) {
       useCharts: args.usecharts,
       useAscii: args.useascii,
       useMaps: args.usemaps,
+      useMath: args.usemath,
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {
@@ -9248,6 +9266,7 @@ MiniA.prototype.init = function(args) {
  * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
  * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
  * - format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
+ * - usemath (boolean, default=false): Encourage LaTeX math output (`$...$` and `$$...$$`) for KaTeX rendering in the web UI.
  * 
  * Returns:
  * - The final answer as a string or parsed JSON object if format is "json" and the answer is valid JSON.
@@ -9394,7 +9413,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "nosetmcpwd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
-      { name: "mini-a-docs", type: "boolean", default: false }
+      { name: "mini-a-docs", type: "boolean", default: false },
+      { name: "usemath", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -9412,6 +9432,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
+    args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)

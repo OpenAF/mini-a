@@ -289,7 +289,7 @@ Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mo
 - **`chatbot`** – Lightweight conversational mode (`chatbotmode=true`).
 - **`internet`** – Tool mode with web-access MCP presets plus docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
 - **`web`** – Browser UI with tool registration and docs-aware utils (`usetools=true mini-a-docs=true`).
-- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and docs-aware utils enabled (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
+- **`webfull`** – Web UI with history, attachments, diagrams, charts, ASCII sketches, and docs-aware utils enabled (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` if you also want interactive map guidance in this preset.
 
 ### Creating Custom Presets
 
@@ -364,7 +364,7 @@ Optional flags when starting the server:
 
 - `showexecs=true` to show executed commands in the interaction stream
 - `logpromptheaders=origin,referer` to log selected incoming headers for debugging
-- `usediagrams=false` / `usecharts=false` / `useascii=false` / `usemaps=false` to disable Mermaid, Chart.js, ASCII sketch, or Leaflet map guidance when running headless
+- `usediagrams=false` / `usecharts=false` / `useascii=false` / `usemaps=false` / `usemath=false` to disable Mermaid, Chart.js, ASCII sketch, Leaflet map, or math-rendering guidance when running headless
 - `usestream=true` to enable real-time token streaming via Server-Sent Events (SSE) for live response display
 - `usehistory=true` to expose the history side panel and persist conversations on disk
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
@@ -784,6 +784,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **Markdown tables**: Preferred format for tabular data with colored cell content for enhanced readability
   - **Progress indicators**: Block characters (█▓▒░), fractions (▏▎▍▌▋▊▉), spinners (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏), and percentage displays with color gradients
 - **`usemaps`** (boolean, default: false): Prime the model to emit ```leaflet``` blocks that describe interactive maps (center coordinates, zoom, markers, layers). The console transcript preserves the fenced JSON, and the web UI auto-renders the configuration with Leaflet tiles, themed popups, and transparent markers.
+- **`usemath`** (boolean, default: false): Prime the model to emit LaTeX formulas using inline `$...$` or display `$$...$$` syntax. When enabled in the web server, the UI loads KaTeX + showdown-katex so math expressions render as formatted equations.
 - **`usestream`** (boolean, default: false): Enable real-time token streaming where LLM responses are displayed incrementally as they arrive. When enabled:
   - **Console mode**: Tokens are formatted with markdown and displayed immediately with smooth rendering
   - **Web UI mode**: Uses Server-Sent Events (SSE) to push tokens to the browser for real-time display
@@ -813,7 +814,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
   - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
   - `web` – Optimizes for the browser UI with MCP tools registered and docs-aware utils (`usetools=true mini-a-docs=true`).
-  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
+  - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 

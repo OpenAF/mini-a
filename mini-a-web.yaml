@@ -84,6 +84,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usemath
+    desc     : "Boolean to enable/disable math formula rendering guidance (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : historys3bucket
     desc     : "S3 bucket to store conversation history objects"
     example  : "mini-a-history"
@@ -168,7 +173,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, usemath: global.__usemath }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -808,6 +813,7 @@ jobs:
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
       useascii        : toBoolean().isBoolean().default(false)
+      usemath         : toBoolean().isBoolean().default(false)
       historys3bucket : isString().default(__)
       historys3prefix : isString().default("")
       historys3url    : isString().default("https://s3.amazonaws.com")
@@ -838,6 +844,7 @@ jobs:
     global.__usestream = args.usestream
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
+    global.__usemath = args.usemath
     global.__planState = {}
     global.__sseQueues = {}
     if (isUnDef(global.__webMetrics)) {

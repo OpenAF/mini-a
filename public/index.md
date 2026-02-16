@@ -1533,22 +1533,96 @@
 
 <script>
     /* ========== CONSTANTS & INITIALIZATION ========== */
-    const converter = new showdown.Converter({
-        "customizedHeaderId"      : true,
-        "parseImgDimensions"      : true,
-        "simplifiedAutoLink"      : true,
-        "strikethrough"           : true,
-        "tables"                  : true,
-        "tablesHeaderId"          : true,
-        "tasklists"               : true,
-        "backslashEscapesHTMLTags": true,
-        "emoji"                   : true,
-        "underline"               : true,
-        "splitAdjacentBlockquotes": true,
-        "simpleLineBreaks"        : true,
-        "ghCompatibleHeaderId"    : true,
-        "disableForced4SpacesIndentedSublists": true
-    });
+    let converter;
+    let mathRenderingEnabled = false;
+    let mathSupportPromise = null;
+
+    function createMarkdownConverter(enableMath) {
+        const converterOptions = {
+            "customizedHeaderId"      : true,
+            "parseImgDimensions"      : true,
+            "simplifiedAutoLink"      : true,
+            "strikethrough"           : true,
+            "tables"                  : true,
+            "tablesHeaderId"          : true,
+            "tasklists"               : true,
+            "backslashEscapesHTMLTags": true,
+            "emoji"                   : true,
+            "underline"               : true,
+            "splitAdjacentBlockquotes": true,
+            "simpleLineBreaks"        : true,
+            "ghCompatibleHeaderId"    : true,
+            "disableForced4SpacesIndentedSublists": true
+        };
+
+        if (enableMath && typeof window.showdownKatex === 'function') {
+            try {
+                converterOptions.extensions = [window.showdownKatex({ throwOnError: false })];
+            } catch (error) {
+                console.warn('Failed to initialize showdown-katex extension:', error);
+            }
+        }
+
+        return new showdown.Converter(converterOptions);
+    }
+
+    function ensureMathCssLoaded() {
+        const cssId = 'mini-a-katex-css';
+        if (document.getElementById(cssId)) return;
+        const link = document.createElement('link');
+        link.id = cssId;
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';
+        document.head.appendChild(link);
+    }
+
+    function loadScriptWithFallback(urls) {
+        return new Promise((resolve, reject) => {
+            const candidates = Array.isArray(urls) ? urls.slice() : [urls];
+            const tryNext = () => {
+                if (candidates.length === 0) {
+                    reject(new Error('No script sources available'));
+                    return;
+                }
+
+                const src = candidates.shift();
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = true;
+                script.onload = () => resolve(src);
+                script.onerror = () => {
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                    tryNext();
+                };
+                document.head.appendChild(script);
+            };
+
+            tryNext();
+        });
+    }
+
+    async function ensureMathRenderingSupport() {
+        if (mathSupportPromise) return mathSupportPromise;
+
+        mathSupportPromise = (async () => {
+            ensureMathCssLoaded();
+            await loadScriptWithFallback([
+                'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js'
+            ]);
+            await loadScriptWithFallback([
+                'https://cdn.jsdelivr.net/npm/showdown-katex/dist/showdown-katex.min.js'
+            ]);
+            if (typeof window.showdownKatex !== 'function') {
+                throw new Error('showdown-katex extension is unavailable after script loading');
+            }
+            mathRenderingEnabled = true;
+            converter = createMarkdownConverter(true);
+        })();
+
+        return mathSupportPromise;
+    }
+
+    converter = createMarkdownConverter(false);
 
     const PREVIEW_ID = 'anticipationPreview';
     const PING_INTERVAL_MS = 60 * 1000; // 60 seconds
@@ -3669,6 +3743,7 @@
         let shouldEnableHistory = true;
         let shouldEnableAttachments = false;
         let shouldEnableStream = false;
+        let shouldEnableMath = false;
 
         try {
             const response = await fetch('/info', {
@@ -3689,6 +3764,9 @@
             if (typeof data.usestream === 'boolean') {
                 shouldEnableStream = data.usestream;
             }
+            if (typeof data.usemath === 'boolean') {
+                shouldEnableMath = data.usemath;
+            }
         } catch (error) {
             console.error('Unable to determine feature availability:', error);
         }
@@ -3696,6 +3774,16 @@
         applyHistoryAvailability(shouldEnableHistory);
         applyAttachmentAvailability(shouldEnableAttachments);
         streamEnabled = shouldEnableStream;
+
+        if (shouldEnableMath && !mathRenderingEnabled) {
+            try {
+                await ensureMathRenderingSupport();
+            } catch (error) {
+                console.warn('Math rendering support could not be enabled:', error);
+                mathRenderingEnabled = false;
+                converter = createMarkdownConverter(false);
+            }
+        }
 
         if (historyEnabled) {
             refreshHistoryPanel();
@@ -4663,7 +4751,7 @@
     }
 
     /* ========== INITIALIZATION ========== */
-    function initializeUI() {
+    async function initializeUI() {
         promptInput.disabled = false;
         // If uuid exists in URL or session, set it and refresh current view
         const uuid = getOrCreateSessionUuid();
@@ -4792,7 +4880,7 @@
             console.error('Failed to start ping on load:', e);
         }
 
-        configureFeatureAvailability();
+        await configureFeatureAvailability();
         refreshHistoryPanel();
         updateCopyActionsVisibility();
     }

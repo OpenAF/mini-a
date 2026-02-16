@@ -319,6 +319,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
+- **Math Formula Rendering** - Encourage LaTeX formulas rendered with KaTeX in the web UI (`usemath=true`)
 
 ## Documentation
 
@@ -377,6 +378,7 @@ Mini-A ships with complementary components:
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
+| `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
