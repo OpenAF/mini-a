@@ -7453,7 +7453,7 @@ MiniA.prototype._runCommand = function(args) {
     var shellTimeoutValue = isDef(args.shelltimeout) ? args.shelltimeout : this._shellTimeout
 
     args.shellallowpipes = _$(toBoolean(allowPipesValue), "args.shellallowpipes").isBoolean().default(false)
-    args.shelltimeout = _$(toNumber(shellTimeoutValue), "args.shelltimeout").isNumber().default(__)
+    args.shelltimeout = _$(shellTimeoutValue, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
 
     const baseBanned = [
@@ -8544,7 +8544,7 @@ MiniA.prototype.init = function(args) {
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
-    args.shelltimeout = _$(toNumber(args.shelltimeout), "args.shelltimeout").isNumber().default(__)
+    args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
@@ -9438,7 +9438,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
-    args.shelltimeout = _$(toNumber(args.shelltimeout), "args.shelltimeout").isNumber().default(__)
+    args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
