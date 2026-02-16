@@ -542,6 +542,7 @@ CURRENT STATE:
 PROGRESS: {{{context}}}
 
 Maximum steps reached. Provide your best final answer now.
+Do not call tools/functions. Respond directly with action "final".
 Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete answer"}
     `
 
@@ -9104,6 +9105,7 @@ MiniA.prototype.init = function(args) {
 
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
+      baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Use {\"action\":\"list\"} to discover tools, then {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one.")
     }
 
     var proxyToolsList = ""
@@ -10368,6 +10370,24 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
+          var isGeminiEmptyText = isString(rmsg) && rmsg.trim().length === 0 && (
+            (useLowCost && isMap(this._oaf_lc_model) && this._oaf_lc_model.type === "gemini") ||
+            (!useLowCost && isMap(this._oaf_model) && this._oaf_model.type === "gemini")
+          )
+          if (isGeminiEmptyText) {
+            runtime.context.push(`[OBS ${step + 1}] (warn) empty text response from Gemini; treating as transient and continuing.`)
+            this._registerRuntimeError(runtime, {
+              category: "transient",
+              message : "empty text response from gemini",
+              context : { step: step + 1, llmType: llmType }
+            })
+            if (args.debug || args.verbose) {
+              this.fnI("warn", `Step ${step + 1}: Gemini returned empty text response. Skipping permanent JSON failure for this turn.`)
+              this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+            }
+            continue
+          }
+
           var truncatedResponse = isString(rmsg) && rmsg.length > 500 ? rmsg.substring(0, 500) + "..." : rmsg
           runtime.context.push(`[OBS ${step + 1}] (error) invalid JSON from model. The model's response was not valid JSON or was not an object/array. Response received: ${stringify(truncatedResponse, __, "")}`)
           this._registerRuntimeError(runtime, {
@@ -10821,22 +10841,40 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this.fnI("warn", `Reached max steps without successful actions. Asking for final answer...`)
     }
     // Get final answer from model
+    // Use an isolated no-tools LLM instance for this fallback call to avoid
+    // tool-calling loops (e.g., repeated invalid shell/proxy invocations).
+    var finalLLM = this.llm
+    if (this._useToolsActual === true) {
+      try {
+        finalLLM = $llm(this._oaf_model)
+        if (isFunction(finalLLM.withInstructions) && isString(this._systemInst) && this._systemInst.length > 0) {
+          var updatedFinalLLM = finalLLM.withInstructions(this._systemInst)
+          if (isDef(updatedFinalLLM)) finalLLM = updatedFinalLLM
+        }
+        this.fnI("info", "Final answer fallback call will run with tools disabled.")
+      } catch (finalLlmErr) {
+        var finalLlmErrMsg = isObject(finalLlmErr) && isString(finalLlmErr.message) ? finalLlmErr.message : String(finalLlmErr)
+        this.fnI("warn", `Failed to create tool-free final-answer LLM; reusing current session model: ${finalLlmErrMsg}`)
+        finalLLM = this.llm
+      }
+    }
+
     var finalResponseWithStats
     try {
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
         var jsonFlag = !this._noJsonPrompt
         if (args.showthinking) {
-          if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
-            return this.llm.promptJSONWithStatsRaw(finalPrompt)
-          } else if (isDef(this.llm.rawPromptWithStats)) {
-            return this.llm.rawPromptWithStats(finalPrompt, __, __, jsonFlag)
+          if (jsonFlag && isDef(finalLLM.promptJSONWithStatsRaw)) {
+            return finalLLM.promptJSONWithStatsRaw(finalPrompt)
+          } else if (isDef(finalLLM.rawPromptWithStats)) {
+            return finalLLM.rawPromptWithStats(finalPrompt, __, __, jsonFlag)
           }
         }
-        if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
-          return this.llm.promptJSONWithStats(finalPrompt)
+        if (!this._noJsonPrompt && isDef(finalLLM.promptJSONWithStats)) {
+          return finalLLM.promptJSONWithStats(finalPrompt)
         }
-        return this.llm.promptWithStats(finalPrompt)
+        return finalLLM.promptWithStats(finalPrompt)
       }, {
         maxAttempts : 3,
         initialDelay: 250,
