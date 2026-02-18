@@ -40,6 +40,7 @@ flowchart LR
 2. **Simplified Tool Management**: The LLM can discover and use tools through a unified interface
 3. **Better Scalability**: Add more MCP connections without overwhelming the model's context window
 4. **Flexible Tool Discovery**: The `proxy-dispatch` tool supports listing, searching, and calling tools across all downstream connections
+5. **Large Payload Handoff**: For large tool inputs/outputs, `proxy-dispatch` can use temporary JSON files (`argumentsFile`, `resultToFile`) to avoid inflating LLM context
 
 ## Usage
 
@@ -108,6 +109,35 @@ Calls a specific tool on a downstream MCP connection.
   }
 }
 ```
+
+### 4. Large Input/Output with Temporary JSON Files
+
+Use these options when payloads are large:
+
+- `argumentsFile` (string): load the downstream tool arguments from a JSON file path
+- `resultToFile` (boolean): write downstream result JSON into a temporary file and return `resultFile` path instead of embedding the full payload in model context
+
+```javascript
+{
+  "action": "call",
+  "tool": "filesystemModify",
+  "argumentsFile": "/tmp/mini-a-proxy-args-123.json",
+  "resultToFile": true
+}
+```
+
+Response shape (abridged):
+
+```javascript
+{
+  "action": "call",
+  "tool": "filesystemModify",
+  "resultFile": "/tmp/mini-a-proxy-result-xyz.json",
+  "content": [{"type":"text","text":"Result written to temporary JSON file: ..."}]
+}
+```
+
+Temporary files are marked for auto-delete on process shutdown and cleaned by Mini-A shutdown hooks.
 
 ## Implementation Details
 
@@ -182,6 +212,35 @@ Tools registered with LLM:
 - proxy-dispatch
 Total: 1 tool + its schema = Minimal context
 ```
+
+## Context Savings Guidance
+
+Using temporary JSON handoff can materially reduce context usage when tool payloads are large. A rough estimate is **~4 characters per token** for JSON-heavy content.
+
+- 20 KB JSON inline payload ≈ 5,000 tokens
+- 100 KB JSON inline payload ≈ 25,000 tokens
+- 500 KB JSON inline payload ≈ 125,000 tokens
+
+When `resultToFile=true`, the model receives only a short status string + file path (typically a few dozen tokens) instead of the full JSON blob.
+
+### When this is most helpful
+
+- Large `filesystemQuery`/`filesystemModify` results (especially with many files or rich metadata)
+- SQL/API MCP tools that return large arrays
+- Multi-step pipelines where one tool output becomes another tool input
+- Summarization/extraction flows where only a small subset of fields is needed
+
+### Recommended usage incentives
+
+Prefer this pattern when all of the following are true:
+
+1. Payload is expected to be large (hundreds of lines / tens of KB+)
+2. You have a safe way to inspect/extract from files: 
+   - `useutils=true` (recommended), or
+   - `useshell=true readwrite=true`
+3. The next step only needs selected fields rather than the full raw payload in context
+
+For small payloads, inline `arguments` and inline `result` are simpler and usually better.
 
 ## Technical Notes
 

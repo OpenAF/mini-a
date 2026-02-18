@@ -215,7 +215,7 @@ mini-a goal="compare release dates across APIs" \
   mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-fin.yaml')]" \
   useutils=true
 ```
-This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even when multiple MCP servers and the Mini Utils Tool are active. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for a deep dive.
+This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even when multiple MCP servers and the Mini Utils Tool are active. For large tool payloads, `proxy-dispatch` can also load arguments from `argumentsFile` and save results to a temporary JSON `resultFile` (`resultToFile=true`) to avoid context bloat. Prefer this pattern when `useutils=true` (recommended) or `useshell=true readwrite=true` and payloads are expected to be large. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for a deep dive.
 
 **Chatbot mode:**
 ```bash
@@ -380,7 +380,7 @@ Mini-A ships with complementary components:
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`) | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate Mini-A documentation directly | `false` |
-| `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context | `false` |
+| `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context; supports `argumentsFile` + `resultToFile` for large payload handoff | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |

@@ -570,6 +570,7 @@ MiniA._activeInstances = []
 MiniA._shutdownHookRegistered = false
 MiniA._registeredWorkers = []
 MiniA._registeredWorkerLastHeartbeat = {}
+MiniA._proxyTempFiles = []
 
 MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
@@ -607,6 +608,7 @@ MiniA._registerShutdownHook = function() {
   addOnOpenAFShutdown(function() {
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
+    try { MiniA._cleanupProxyTempFiles() } catch(ignoreTempCleanupError) {}
     try {
       if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
         $mcp.destroy()
@@ -615,6 +617,23 @@ MiniA._registerShutdownHook = function() {
   })
 
   MiniA._shutdownHookRegistered = true
+}
+
+MiniA._registerProxyTempFile = function(filePath) {
+  if (!isString(filePath) || filePath.length === 0) return
+  if (!isArray(MiniA._proxyTempFiles)) MiniA._proxyTempFiles = []
+  if (MiniA._proxyTempFiles.indexOf(filePath) < 0) MiniA._proxyTempFiles.push(filePath)
+}
+
+MiniA._cleanupProxyTempFiles = function() {
+  if (!isArray(MiniA._proxyTempFiles) || MiniA._proxyTempFiles.length === 0) return
+  MiniA._proxyTempFiles.forEach(function(filePath) {
+    if (!isString(filePath) || filePath.length === 0) return
+    try {
+      if (io.fileExists(filePath)) io.rm(filePath)
+    } catch(ignoreTempDeleteError) {}
+  })
+  MiniA._proxyTempFiles = []
 }
 
 MiniA.buildVisualKnowledge = function(options) {
@@ -6717,6 +6736,58 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         var includeSchema = params.includeInputSchema === true
         var includeAnnotations = params.includeAnnotations !== false
 
+        var createProxyTempFile = function(prefix, payload) {
+          var resolvedPrefix = isString(prefix) && prefix.trim().length > 0 ? prefix.trim() : "mini-a-proxy"
+          var tempPath
+          try {
+            var tempFile = java.nio.file.Files.createTempFile(resolvedPrefix + "-", ".json")
+            tempPath = String(tempFile.toAbsolutePath())
+          } catch(tempCreateError) {
+            throw new Error("Failed to create temporary file: " + (tempCreateError.message || String(tempCreateError)))
+          }
+
+          try {
+            io.writeFileString(tempPath, stringify(payload, __, ""))
+          } catch(tempWriteError) {
+            try {
+              if (isString(tempPath) && tempPath.length > 0 && io.fileExists(tempPath)) io.rm(tempPath)
+            } catch(ignoreRmError) {}
+            throw new Error("Failed to write temporary file: " + (tempWriteError.message || String(tempWriteError)))
+          }
+
+          try {
+            if (isDef(java.io.File)) {
+              new java.io.File(tempPath).deleteOnExit()
+            }
+          } catch(ignoreDeleteOnExitError) {}
+
+          if (typeof MiniA !== "undefined" && isFunction(MiniA._registerProxyTempFile)) {
+            MiniA._registerProxyTempFile(tempPath)
+          }
+
+          return tempPath
+        }
+
+        var readProxyJsonFile = function(filePath, label) {
+          var path = isString(filePath) ? filePath.trim() : ""
+          if (path.length === 0) {
+            throw new Error("Missing path for " + label + ".")
+          }
+          if (!io.fileExists(path)) {
+            throw new Error("File for " + label + " does not exist: " + path)
+          }
+          var fileInfo = io.fileInfo(path)
+          if (!isMap(fileInfo) || fileInfo.isFile !== true) {
+            throw new Error("Path for " + label + " is not a file: " + path)
+          }
+          var raw = io.readFileString(path)
+          try {
+            return af.fromJson(raw)
+          } catch(parseError) {
+            throw new Error("Invalid JSON in " + label + " file: " + (parseError.message || String(parseError)))
+          }
+        }
+
         var resolveConnectionId = function(identifier) {
           if (typeof helpers.resolveConnectionId === "function") {
             return helpers.resolveConnectionId(identifier)
@@ -6892,12 +6963,26 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
 
           var inputArgs = isMap(params.arguments) ? params.arguments : {}
+          if (isString(params.argumentsFile) && params.argumentsFile.trim().length > 0) {
+            var fileArgs = readProxyJsonFile(params.argumentsFile, "arguments")
+            if (!isMap(fileArgs)) {
+              return { error: "The arguments file must contain a JSON object." }
+            }
+            inputArgs = fileArgs
+          }
           var meta = isMap(params.meta) ? params.meta : __
+          var useResultFile = toBoolean(params.resultToFile) === true
 
           try {
             var result = isDef(meta)
               ? target.client.callTool(toolName, inputArgs, meta)
               : target.client.callTool(toolName, inputArgs)
+
+            var resultFile
+            if (useResultFile) {
+              resultFile = createProxyTempFile("mini-a-proxy-result", result)
+            }
+
             return {
               action    : "call",
               connection: {
@@ -6907,8 +6992,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               },
               tool      : toolName,
               arguments : inputArgs,
-              result    : result,
-              content: [{ type: "text", text: stringify(result, __, "") }]
+              result    : useResultFile ? __ : result,
+              resultFile: resultFile,
+              content: [{ type: "text", text: useResultFile
+                ? "Result written to temporary JSON file: " + resultFile + " (auto-deleted at shutdown)."
+                : stringify(result, __, "") }]
             }
           } catch(e) {
             return {
@@ -6953,9 +7041,17 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               type       : "object",
               description: "Input arguments forwarded to the downstream MCP tool when action is 'call'."
             },
+            argumentsFile: {
+              type       : "string",
+              description: "Optional path to a JSON file containing tool arguments. When provided, it overrides 'arguments'."
+            },
             meta: {
               type       : "object",
               description: "Optional metadata object forwarded to the downstream MCP call."
+            },
+            resultToFile: {
+              type       : "boolean",
+              description: "When true for action='call', writes the tool result to a temporary JSON file and returns 'resultFile' instead of embedding full content."
             },
             limit: {
               type       : "integer",
@@ -9205,6 +9301,8 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Use {\"action\":\"list\"} to discover tools, then {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one.")
+      baseRules.push("For large MCP payloads, proxy-dispatch supports temporary JSON handoff: use 'argumentsFile' to load arguments from disk and 'resultToFile=true' to save results into a temporary file path (returned as 'resultFile') instead of injecting large JSON into context.")
+      baseRules.push("Prefer temporary JSON handoff only when payloads are large and you can inspect files safely via useutils=true tools (recommended) or useshell=true with readwrite=true. Keep normal inline arguments/results for small payloads.")
     }
 
     var proxyToolsList = ""
