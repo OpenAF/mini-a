@@ -907,7 +907,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   var _e = ""
   switch(e) {
   case "user"     : _e = "👤"; break
-  case "exec"     : _e = "⚙️"; break
+  case "exec"     : _e = "⚙️ "; break
   case "shell"    : _e = "🖥️ "; break
   case "think"    : _e = "💡"; break
   case "final"    : _e = "🏁"; break
@@ -924,7 +924,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "libs"     : _e = "📚"; break
   case "info"     : _e = "ℹ️"; break
   case "load"     : _e = "📂"; break
-  case "warn"     : _e = "⚠️ "; break
+  case "warn"     : _e = "⚠️  "; break
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
   default         : _e = e
@@ -6720,6 +6720,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     helpers.rebuildIndexes()
     state.lastUpdated = now()
 
+    // Capture auto-spill threshold (0 = disabled) from args at config creation time
+    var globalSpillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
+      ? Math.floor(args.mcpproxythreshold) : 0
+
     // Define the proxy-dispatch function
     var fns = {
       "proxy-dispatch": function(params) {
@@ -6973,17 +6977,66 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           var meta = isMap(params.meta) ? params.meta : __
           var useResultFile = toBoolean(params.resultToFile) === true
 
+          // Per-call threshold (overrides global); 0 = use global
+          var callSpillThreshold = isNumber(params.resultSizeThreshold) && params.resultSizeThreshold > 0
+            ? Math.floor(params.resultSizeThreshold)
+            : globalSpillThreshold
+
+          // Track if argumentsFile was used to suppress echoing large args
+          var usedArgumentsFile = isString(params.argumentsFile) && params.argumentsFile.trim().length > 0
+
           try {
             var result = isDef(meta)
               ? target.client.callTool(toolName, inputArgs, meta)
               : target.client.callTool(toolName, inputArgs)
+
+            // Serialize once for size check, preview, and inline content
+            var resultJson = stringify(result, __, "")
+            var resultByteSize = isString(resultJson) ? resultJson.length : 0
+
+            // Auto-spill when result exceeds threshold and file mode not already requested
+            var autoSpilled = false
+            if (!useResultFile && callSpillThreshold > 0 && resultByteSize > callSpillThreshold) {
+              useResultFile = true
+              autoSpilled = true
+            }
 
             var resultFile
             if (useResultFile) {
               resultFile = createProxyTempFile("mini-a-proxy-result", result)
             }
 
-            return {
+            // Build rich content text for file-mode results
+            var contentText
+            if (useResultFile) {
+              var estTokens = Math.ceil(resultByteSize / 4)
+              var spillReason = autoSpilled
+                ? "Result auto-spilled to temporary JSON file (exceeded " + callSpillThreshold + " bytes): "
+                : "Result written to temporary JSON file: "
+              var previewLines = [
+                spillReason + resultFile + " (auto-deleted at shutdown).",
+                "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens)."
+              ]
+              if (isMap(result)) {
+                previewLines.push("Top-level keys: [" + Object.keys(result).join(", ") + "]")
+              } else if (isArray(result)) {
+                previewLines.push("Result is an array with " + result.length + " element(s).")
+              }
+              var previewChars = resultJson.length > 300 ? resultJson.substring(0, 300) + "..." : resultJson
+              if (isString(resultJson) && resultJson.length > 0) {
+                previewLines.push("Preview: " + previewChars)
+              }
+              contentText = previewLines.join("\n")
+            } else {
+              contentText = resultJson
+            }
+
+            // Suppress echoing large parsed args when argumentsFile was used
+            var argumentsField = usedArgumentsFile
+              ? { _fromFile: params.argumentsFile.trim() }
+              : inputArgs
+
+            var responseObj = {
               action    : "call",
               connection: {
                 id    : target.id,
@@ -6991,13 +7044,16 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 serverInfo: isDef(target.serverInfo) ? (helpers.deepClone ? helpers.deepClone(target.serverInfo) : target.serverInfo) : __
               },
               tool      : toolName,
-              arguments : inputArgs,
-              result    : useResultFile ? __ : result,
+              arguments : argumentsField,
               resultFile: resultFile,
-              content: [{ type: "text", text: useResultFile
-                ? "Result written to temporary JSON file: " + resultFile + " (auto-deleted at shutdown)."
-                : stringify(result, __, "") }]
+              content: [{ type: "text", text: contentText }]
             }
+
+            if (autoSpilled) responseObj.autoSpilled = true
+            if (!useResultFile && resultByteSize > 0) responseObj.estimatedTokens = Math.ceil(resultByteSize / 4)
+
+            return responseObj
+
           } catch(e) {
             return {
               action    : "call",
@@ -7009,7 +7065,134 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
         }
 
-        return { error: "Unsupported action '" + params.action + "'. Use list, search, or call." }
+        // Read back a previously spilled result file — bypasses auto-spill threshold
+        if (action === "readresult") {
+          var resultFilePath = isString(params.resultFile) ? params.resultFile.trim() : ""
+          if (resultFilePath.length === 0) {
+            return { error: "readresult requires 'resultFile' parameter with the path returned by a prior call." }
+          }
+          // Default op is 'stat' — safe first look before committing to full content
+          var rop = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
+          // maxBytes limits content returned by op='read'; 0 = unlimited
+          var ropMaxBytes = isNumber(params.maxBytes) && params.maxBytes >= 0 ? Math.floor(params.maxBytes) : 0
+          try {
+            var spilledRaw = io.readFileString(resultFilePath)
+            var spilledByteSize = isString(spilledRaw) ? spilledRaw.length : 0
+
+            // stat: size/line-count only, no content
+            if (rop === "stat") {
+              var statLineCount = spilledRaw.split("\n").length
+              var statText = "File: " + resultFilePath + "\nSize: " + spilledByteSize + " bytes (~" + Math.ceil(spilledByteSize / 4) + " tokens)\nLines: " + statLineCount
+              return {
+                action: "readresult", op: "stat", resultFile: resultFilePath,
+                byteSize: spilledByteSize, lineCount: statLineCount,
+                estimatedTokens: Math.ceil(spilledByteSize / 4),
+                content: [{ type: "text", text: statText }]
+              }
+            }
+
+            var ropLines = spilledRaw.split("\n")
+            var ropTotalLines = ropLines.length
+
+            // slice: lines fromLine..toLine (1-based, inclusive)
+            if (rop === "slice") {
+              var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine) : 1
+              var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)   : ropTotalLines
+              if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
+              var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
+              return {
+                action: "readresult", op: "slice", resultFile: resultFilePath,
+                fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
+                content: [{ type: "text", text: sliceText }],
+                estimatedTokens: Math.ceil(sliceText.length / 4)
+              }
+            }
+
+            // head: first N lines
+            if (rop === "head") {
+              var headN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
+              var headText = ropLines.slice(0, headN).join("\n")
+              return {
+                action: "readresult", op: "head", resultFile: resultFilePath,
+                lines: headN, totalLines: ropTotalLines,
+                content: [{ type: "text", text: headText }],
+                estimatedTokens: Math.ceil(headText.length / 4)
+              }
+            }
+
+            // tail: last N lines
+            if (rop === "tail") {
+              var tailN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
+              var tailText = ropLines.slice(Math.max(0, ropTotalLines - tailN)).join("\n")
+              return {
+                action: "readresult", op: "tail", resultFile: resultFilePath,
+                lines: tailN, totalLines: ropTotalLines,
+                content: [{ type: "text", text: tailText }],
+                estimatedTokens: Math.ceil(tailText.length / 4)
+              }
+            }
+
+            // grep: search for pattern, return matching lines with optional context
+            if (rop === "grep") {
+              var grepPat = isString(params.pattern) ? params.pattern : ""
+              if (grepPat.length === 0) return { error: "readresult op='grep' requires a 'pattern' parameter." }
+              var grepCtx = isNumber(params.context) && params.context >= 0 ? Math.floor(params.context) : 0
+              var grepRx
+              try {
+                grepRx = new RegExp(grepPat, "i")
+              } catch(rxErr) {
+                grepRx = new RegExp(grepPat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+              }
+              var grepInclude = {}
+              var grepMatchCount = 0
+              for (var gi = 0; gi < ropLines.length; gi++) {
+                if (grepRx.test(ropLines[gi])) {
+                  grepMatchCount++
+                  for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
+                    grepInclude[gc] = true
+                  }
+                }
+              }
+              var grepParts = []
+              var grepLast = -1
+              for (var gi2 = 0; gi2 < ropLines.length; gi2++) {
+                if (grepInclude[gi2]) {
+                  if (grepLast >= 0 && gi2 > grepLast + 1) grepParts.push("---")
+                  grepParts.push((gi2 + 1) + ": " + ropLines[gi2])
+                  grepLast = gi2
+                }
+              }
+              var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
+              return {
+                action: "readresult", op: "grep", resultFile: resultFilePath,
+                pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
+                content: [{ type: "text", text: grepText }],
+                estimatedTokens: Math.ceil(grepText.length / 4)
+              }
+            }
+
+            // read: full content inline (or truncated when maxBytes set and exceeded)
+            var readContent = spilledRaw
+            var readTruncated = false
+            if (ropMaxBytes > 0 && spilledByteSize > ropMaxBytes) {
+              readContent = spilledRaw.substring(0, ropMaxBytes)
+              readTruncated = true
+            }
+            var readResponse = {
+              action: "readresult", op: "read", resultFile: resultFilePath,
+              totalLines: ropTotalLines, byteSize: spilledByteSize,
+              content: [{ type: "text", text: readContent + (readTruncated ? "\n[TRUNCATED at " + ropMaxBytes + " bytes. " + (spilledByteSize - ropMaxBytes) + " bytes remaining. Use op='slice' with fromLine/toLine or op='grep' with pattern to access remaining content.]" : "") }],
+              estimatedTokens: Math.ceil(readContent.length / 4)
+            }
+            if (readTruncated) readResponse.truncated = true
+            return readResponse
+
+          } catch(readErr) {
+            return { error: "Failed to read result file '" + resultFilePath + "': " + (readErr.message || String(readErr)) }
+          }
+        }
+
+        return { error: "Unsupported action '" + params.action + "'. Use list, search, call, or readresult." }
       }
     }
 
@@ -7022,8 +7205,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           properties: {
             action: {
               type       : "string",
-              description: "Operation to perform: list, search, or call.",
-              enum       : [ "list", "search", "call" ]
+              description: "Operation to perform: list, search, call, or readresult. Use 'readresult' to retrieve the content of a previously spilled result file (from resultFile) without triggering further auto-spill.",
+              enum       : [ "list", "search", "call", "readresult" ]
             },
             connection: {
               type       : "string",
@@ -7052,6 +7235,49 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             resultToFile: {
               type       : "boolean",
               description: "When true for action='call', writes the tool result to a temporary JSON file and returns 'resultFile' instead of embedding full content."
+            },
+            resultSizeThreshold: {
+              type       : "integer",
+              description: "Per-call byte size threshold. When the serialized result exceeds this value, result is written to a temporary file automatically (as if resultToFile=true). Overrides the global mcpproxythreshold. 0 = disabled.",
+              minimum    : 0
+            },
+            resultFile: {
+              type       : "string",
+              description: "For action='readresult': path to a previously spilled result file (as returned in 'resultFile' from a prior call). The file content is returned inline without triggering auto-spill."
+            },
+            op: {
+              type       : "string",
+              description: "Sub-operation for action='readresult'. 'stat' (DEFAULT — always use first): byte size and line count only. 'read': full content inline (use only when stat confirms size is manageable). 'head': first N lines. 'tail': last N lines. 'slice': lines fromLine..toLine. 'grep': lines matching pattern with optional context.",
+              enum       : [ "stat", "read", "head", "tail", "slice", "grep" ]
+            },
+            fromLine: {
+              type       : "integer",
+              description: "For op='slice': 1-based start line (inclusive).",
+              minimum    : 1
+            },
+            toLine: {
+              type       : "integer",
+              description: "For op='slice': 1-based end line (inclusive).",
+              minimum    : 1
+            },
+            lines: {
+              type       : "integer",
+              description: "For op='head' or op='tail': number of lines to return (default 50).",
+              minimum    : 1
+            },
+            pattern: {
+              type       : "string",
+              description: "For op='grep': regular expression (case-insensitive) to search for. Falls back to literal match if invalid regex."
+            },
+            context: {
+              type       : "integer",
+              description: "For op='grep': number of lines of context to include before and after each match (default 0).",
+              minimum    : 0
+            },
+            maxBytes: {
+              type       : "integer",
+              description: "For op='read': maximum bytes to return inline. Content beyond this limit is truncated with a notice. 0 = no limit (default). Recommended: set to a safe token budget e.g. 50000.",
+              minimum    : 0
             },
             limit: {
               type       : "integer",
@@ -8653,6 +8879,7 @@ MiniA.prototype.init = function(args) {
       { name: "shelltimeout", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
+      { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "auditch", type: "string", default: __ },
       { name: "toollog", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
@@ -9301,8 +9528,30 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Use {\"action\":\"list\"} to discover tools, then {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one.")
-      baseRules.push("For large MCP payloads, proxy-dispatch supports temporary JSON handoff: use 'argumentsFile' to load arguments from disk and 'resultToFile=true' to save results into a temporary file path (returned as 'resultFile') instead of injecting large JSON into context.")
-      baseRules.push("Prefer temporary JSON handoff only when payloads are large and you can inspect files safely via useutils=true tools (recommended) or useshell=true with readwrite=true. Keep normal inline arguments/results for small payloads.")
+      var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
+        ? args.mcpproxythreshold : 0
+      var spillNote = spillThreshold > 0
+        ? "Results exceeding " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tokens) are auto-spilled to a temporary file automatically."
+        : "Set mcpproxythreshold=<bytes> to enable auto-spill; or use resultToFile=true manually."
+      baseRules.push(
+        "For large MCP payloads, proxy-dispatch supports temporary JSON handoff: " +
+        "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
+        "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
+        spillNote + " " +
+        "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
+        "To inspect or retrieve a spilled result file, use action='readresult' with the 'resultFile' path — this bypasses auto-spill entirely. " +
+        "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
+        "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
+        "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
+        "Do NOT use a downstream tool (e.g. filesystemQuery) to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
+        "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
+        "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
+      )
+      baseRules.push(
+        "Prefer file handoff when payloads are large and files are accessible via useutils=true (recommended) or useshell=true readwrite=true. " +
+        "For small payloads (<10KB), inline is simpler. " +
+        "The 'estimatedTokens' field in inline results shows approximate token cost — use it to decide proactively whether to use 'resultToFile=true' next time."
+      )
     }
 
     var proxyToolsList = ""
@@ -9597,7 +9846,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "utilsroot", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
-      { name: "usemath", type: "boolean", default: false }
+      { name: "usemath", type: "boolean", default: false },
+      { name: "mcpproxythreshold", type: "number", default: 0 }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -9631,6 +9881,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
+    args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
+    if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {

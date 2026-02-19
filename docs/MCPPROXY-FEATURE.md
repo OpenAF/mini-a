@@ -64,6 +64,14 @@ When `mcpproxy=true` is set:
 4. A single `proxy-dispatch` tool is registered with the LLM
 5. The LLM can interact with all downstream tools through this proxy
 
+## CLI Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mcpproxy` | boolean | `false` | Enable MCP proxy mode — aggregates all downstream MCP connections under a single `proxy-dispatch` tool |
+| `mcplazy` | boolean | `false` | Defer MCP connection setup until first tool use |
+| `mcpproxythreshold` | number (bytes) | `0` | Global auto-spill threshold. When > 0, any `call` result whose serialized size exceeds this value is automatically written to a temporary file instead of being returned inline. `0` = disabled |
+
 ## The proxy-dispatch Tool
 
 The `proxy-dispatch` tool provides three actions:
@@ -114,8 +122,9 @@ Calls a specific tool on a downstream MCP connection.
 
 Use these options when payloads are large:
 
-- `argumentsFile` (string): load the downstream tool arguments from a JSON file path
+- `argumentsFile` (string): load the downstream tool arguments from a JSON file path; when used, the `arguments` field in the response is replaced with `{ _fromFile: "<path>" }` to avoid echoing large args back
 - `resultToFile` (boolean): write downstream result JSON into a temporary file and return `resultFile` path instead of embedding the full payload in model context
+- `resultSizeThreshold` (integer, bytes): per-call auto-spill threshold — if the serialized result exceeds this size, it is automatically written to a temp file (overrides global `mcpproxythreshold`; 0 = disabled)
 
 ```javascript
 {
@@ -126,18 +135,88 @@ Use these options when payloads are large:
 }
 ```
 
-Response shape (abridged):
+File-mode response (abridged):
 
 ```javascript
 {
   "action": "call",
   "tool": "filesystemModify",
+  "arguments": { "_fromFile": "/tmp/mini-a-proxy-args-123.json" },
   "resultFile": "/tmp/mini-a-proxy-result-xyz.json",
-  "content": [{"type":"text","text":"Result written to temporary JSON file: ..."}]
+  "autoSpilled": true,
+  "content": [{
+    "type": "text",
+    "text": "Result auto-spilled to temporary JSON file (exceeded 51200 bytes): /tmp/mini-a-proxy-result-xyz.json (auto-deleted at shutdown).\nSize: 83421 bytes (~20855 tokens).\nTop-level keys: [files, metadata, summary]\nPreview: {\"files\":[{\"name\":\"foo.txt\",\"size\":123}..."
+  }]
+}
+```
+
+Inline result response includes `estimatedTokens` for calibration. The result data is carried exclusively in `content[0].text` (no separate `result` field — avoids double-counting in context metrics):
+
+```javascript
+{
+  "action": "call",
+  "tool": "get_current_time",
+  "estimatedTokens": 12,
+  "content": [{"type":"text","text":"{\"time\":\"2026-02-18T10:00:00Z\"}"}]
 }
 ```
 
 Temporary files are marked for auto-delete on process shutdown and cleaned by Mini-A shutdown hooks.
+
+### 5. Reading Back a Spilled Result
+
+Use `action='readresult'` with the `resultFile` path to inspect or retrieve a spilled result. This action **bypasses auto-spill entirely** — all sub-operations always return inline.
+
+**Important:** do NOT use a downstream tool (e.g. `filesystemQuery operation:read`) to read spilled proxy result files. That call's result will itself exceed the threshold and trigger another auto-spill, creating an infinite regress. Always use `action='readresult'` for this purpose.
+
+| `op` | Description | Key params |
+|------|-------------|------------|
+| `stat` **(default)** | Returns byte size, line count, and estimated tokens — no content; always start here | — |
+| `head` | First N lines | `lines` (default 50) |
+| `tail` | Last N lines | `lines` (default 50) |
+| `slice` | Lines fromLine..toLine (1-based, inclusive) | `fromLine`, `toLine` |
+| `grep` | Case-insensitive regex search, matching lines with optional context | `pattern`, `context` |
+| `read` | Full content inline — only use after `stat` confirms size is manageable | `maxBytes` (0 = unlimited; set e.g. 50000 to truncate safely) |
+
+```javascript
+// Step 1: check size before committing to a full read
+{"action":"readresult","resultFile":"/tmp/mini-a-proxy-result-abc.json","op":"stat"}
+// → { byteSize: 83421, lineCount: 1204, estimatedTokens: 20855 }
+
+// Step 2a: grep for specific content
+{"action":"readresult","resultFile":"/tmp/mini-a-proxy-result-abc.json","op":"grep","pattern":"foo\\.txt","context":2}
+
+// Step 2b: or read a known range
+{"action":"readresult","resultFile":"/tmp/mini-a-proxy-result-abc.json","op":"slice","fromLine":1,"toLine":100}
+
+// Step 2c: or full read when size is manageable
+{"action":"readresult","resultFile":"/tmp/mini-a-proxy-result-abc.json","op":"read"}
+```
+
+### 6. Chain Pattern: resultFile → argumentsFile
+
+Pass the `resultFile` path from one call directly as `argumentsFile` to the next:
+
+```javascript
+// Step 1: get large dataset, spill to file
+{"action":"call","tool":"filesystemQuery","arguments":{"path":"/data"},"resultToFile":true}
+// → resultFile: "/tmp/mini-a-proxy-result-abc.json"
+
+// Step 2: pass that file as arguments to next tool
+{"action":"call","tool":"dataTransform","argumentsFile":"/tmp/mini-a-proxy-result-abc.json"}
+```
+
+### Global Auto-Spill
+
+Set `mcpproxythreshold=<bytes>` at startup to automatically spill any result exceeding that size:
+
+```shell
+mini-a goal="..." usetools=true mcpproxy=true mcpproxythreshold=51200 \
+  mcp="[...]" useutils=true
+```
+
+When auto-spill fires, the response includes `"autoSpilled": true` and the same preview metadata as explicit `resultToFile=true`.
 
 ## Implementation Details
 
