@@ -321,6 +321,14 @@ try {
     return ansiColor(color, text)
   }
 
+  function unwrapSingleMarkdownCodeBlock(text) {
+    if (!isString(text)) return text
+    var normalized = text.replace(/\r\n/g, "\n")
+    var fencedMatch = normalized.match(/^\s*```[^\n]*\n([\s\S]*?)\n```[ \t]*\s*$/)
+    if (!isArray(fencedMatch) || fencedMatch.length < 2) return text
+    return fencedMatch[1]
+  }
+
   var parameterDefinitions = {
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
@@ -2460,7 +2468,7 @@ try {
           if (isObject(lastResult) || isArray(lastResult)) {
             print(stringify(lastResult, __, "  "))
           } else if (isString(lastResult)) {
-            print(lastResult)
+            print(unwrapSingleMarkdownCodeBlock(lastResult))
           } else if (isDef(lastResult)) {
             print(stringify(lastResult, __, ""))
           }
@@ -2471,7 +2479,7 @@ try {
             if (isObject(lastResult) || isArray(lastResult)) {
               print(stringify(lastResult, __, "  "))
             } else if (isString(lastResult)) {
-              print(lastResult)
+              print(unwrapSingleMarkdownCodeBlock(lastResult))
             } else {
               print(stringify(lastResult, __, ""))
             }
@@ -3023,7 +3031,7 @@ try {
           if (isObject(lastResult) || isArray(lastResult)) {
             print(stringify(lastResult, __, "  "))
           } else {
-            print(lastResult)
+            print(unwrapSingleMarkdownCodeBlock(String(lastResult)))
           }
         }
         continue

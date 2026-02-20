@@ -10662,13 +10662,30 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         if (this.state == "stop" || (isObject(e) && e.miniAStop === true)) {
           break
         }
-        var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
-        runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
-        this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
-        if (args.debug || args.verbose) {
-          this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+
+        var recoveredFromThrownError = this._recoverMessageFromProviderError(e)
+        if (!(isMap(recoveredFromThrownError) || isArray(recoveredFromThrownError)) && isObject(e) && isDef(e.response)) {
+          recoveredFromThrownError = this._recoverMessageFromProviderError(e.response)
         }
-        continue
+
+        if (isMap(recoveredFromThrownError) || isArray(recoveredFromThrownError)) {
+          responseWithStats = {
+            response: recoveredFromThrownError,
+            stats   : {}
+          }
+          runtime.context.push(`[OBS ${step + 1}] (recover) Parsed model action from thrown provider tool_use_failed payload.`)
+          if (args.debug || args.verbose) {
+            this.fnI("recover", `Recovered step ${step + 1} message from thrown provider tool_use_failed error.`)
+          }
+        } else {
+          var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
+          runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
+          this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
+          if (args.debug || args.verbose) {
+            this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+          }
+          continue
+        }
       }
 
       var recoveredMsgFromEnvelope = __
@@ -10768,17 +10785,34 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
               break
             }
-            var fallbackErrorInfo = this._categorizeError(fallbackErr, { source: "llm", llmType: "main", reason: "fallback" })
-            runtime.context.push(`[OBS ${step + 1}] (error) main fallback model failed: ${fallbackErrorInfo.reason}`)
-            this._registerRuntimeError(runtime, {
-              category: fallbackErrorInfo.type,
-              message : fallbackErrorInfo.reason,
-              context : { step: step + 1, llmType: "main" }
-            })
-            if (args.debug || args.verbose) {
-              this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+
+            var recoveredFallbackFromThrownError = this._recoverMessageFromProviderError(fallbackErr)
+            if (!(isMap(recoveredFallbackFromThrownError) || isArray(recoveredFallbackFromThrownError)) && isObject(fallbackErr) && isDef(fallbackErr.response)) {
+              recoveredFallbackFromThrownError = this._recoverMessageFromProviderError(fallbackErr.response)
             }
-            continue
+
+            if (isMap(recoveredFallbackFromThrownError) || isArray(recoveredFallbackFromThrownError)) {
+              fallbackResponseWithStats = {
+                response: recoveredFallbackFromThrownError,
+                stats   : {}
+              }
+              runtime.context.push(`[OBS ${step + 1}] (recover) Parsed fallback model action from thrown provider tool_use_failed payload.`)
+              if (args.debug || args.verbose) {
+                this.fnI("recover", `Recovered step ${step + 1} fallback message from thrown provider tool_use_failed error.`)
+              }
+            } else {
+              var fallbackErrorInfo = this._categorizeError(fallbackErr, { source: "llm", llmType: "main", reason: "fallback" })
+              runtime.context.push(`[OBS ${step + 1}] (error) main fallback model failed: ${fallbackErrorInfo.reason}`)
+              this._registerRuntimeError(runtime, {
+                category: fallbackErrorInfo.type,
+                message : fallbackErrorInfo.reason,
+                context : { step: step + 1, llmType: "main" }
+              })
+              if (args.debug || args.verbose) {
+                this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+              }
+              continue
+            }
           }
           var fallbackRecoveredMsgFromEnvelope = __
           if (isObject(fallbackResponseWithStats) && isMap(fallbackResponseWithStats.response)) {
