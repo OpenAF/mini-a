@@ -167,6 +167,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
+{{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
 
 ## MULTI-ACTION SUPPORT:
@@ -187,6 +188,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
+{{#if shellViaActionPreferred}}• This function-calling rule applies to non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
@@ -221,6 +223,7 @@ Arguments: {
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • Call the proxy-dispatch tool through the JSON "action" field
+{{#if shellViaActionPreferred}}• This proxy-dispatch path is for non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "proxy-dispatch" | "final"
 
 ### How to call MCP tools:
@@ -253,6 +256,7 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 ## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
 • {{toolCount}} MCP tools are available via direct function calling
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
+{{#if shellViaActionPreferred}}• This function-calling rule applies to non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Each tool has its own function signature - call tools directly by their name
 • Tool schemas are provided via the tool interface, so keep prompts concise.
@@ -270,6 +274,7 @@ Arguments: {
 ## MCP TOOL ACCESS (ACTION-BASED):
 • {{toolCount}} MCP tools are available as action types
 • Call MCP tools through the JSON "action" field, just like shell or custom actions
+{{#if shellViaActionPreferred}}• For shell commands, use "action":"shell" with top-level "command"; reserve MCP action names for non-shell tools.{{/if}}
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | [MCP tool name] | "final"
 
 ### How to call MCP tools:
@@ -490,11 +495,12 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 ### TOOL CALLING STEPS
 • If you truly need a tool, reply with a single JSON object following this schema: {"thought":"why the tool is needed","action":"<tool name>","params":{...}}.
 • The "action" must match one of the available tool names exactly; "params" must be a JSON object with the required fields.
+{{#if shellViaActionPreferred}}• Exception: for shell commands use {"thought":"...","action":"shell","command":"..."} (top-level "command", not params.command).{{/if}}
 • After you receive the tool result, continue answering in natural language (use JSON again only if you need another tool).
 {{/if}}
 {{#if useshell}}
 ### SHELL ACCESS
-• You may request shell commands by setting "action":"shell" and providing the POSIX command via "command" (or params.command).
+• You may request shell commands by setting "action":"shell" and providing the POSIX command via top-level "command".
 • Keep commands minimal, avoid destructive operations, and remember pipes/redirection may be blocked unless explicitly allowed.
 {{/if}}
 
@@ -9553,7 +9559,11 @@ MiniA.prototype.init = function(args) {
         "The 'estimatedTokens' field in inline results shows approximate token cost — use it to decide proactively whether to use 'resultToFile=true' next time."
       )
     }
+    if (args.useshell === true && args.usetools === true) {
+      baseRules.push("When shell and tools are both enabled, always execute shell with action=\"shell\" and top-level command. Do not invoke shell as an MCP tool/function.")
+    }
 
+    var shellViaActionPreferred = args.useshell === true && this._useTools === true
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
     if (this._useMcpProxy === true && isObject(global.__mcpProxyState__)) {
@@ -9567,20 +9577,24 @@ MiniA.prototype.init = function(args) {
           .filter(name => isString(name) && name.length > 0)
       }
       proxyNames = proxyNames.filter(name => name !== "proxy-dispatch")
+      if (shellViaActionPreferred) proxyNames = proxyNames.filter(name => name !== "shell")
       proxyNames.sort()
       if (proxyNames.length > 0) {
         proxyToolCount = proxyNames.length
         proxyToolsList = proxyNames.join(", ")
+      } else {
+        proxyToolCount = 0
       }
     }
 
     if (args.chatbotmode) {
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
-      var chatToolsList = this.mcpToolNames.join(", ")
+      var chatbotVisibleToolNames = this.mcpToolNames.filter(name => !(shellViaActionPreferred && name === "shell"))
+      var chatToolsList = chatbotVisibleToolNames.join(", ")
       var chatbotToolDetails = []
       if (this.mcpTools.length > 0 && !this._useTools) {
-        chatbotToolDetails = this.mcpTools.map(tool => {
+        chatbotToolDetails = this.mcpTools.filter(tool => !(shellViaActionPreferred && tool.name === "shell")).map(tool => {
           var summary = this._getToolSchemaSummary(tool)
           return {
             name       : summary.name,
@@ -9591,21 +9605,26 @@ MiniA.prototype.init = function(args) {
         })
       }
 
-      this._actionsList = chatActions.concat(this.mcpToolNames).join(" | ")
+      var chatActionSet = {}
+      chatActions.concat(chatbotVisibleToolNames).forEach(name => {
+        if (isString(name) && name.length > 0) chatActionSet[name] = true
+      })
+      this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
         knowledge     : trimmedKnowledge,
         hasKnowledge  : trimmedKnowledge.length > 0,
         hasRules      : baseRules.length > 0,
         rules         : baseRules,
-        hasTools      : this.mcpTools.length > 0,
-        toolCount     : this.mcpTools.length,
-        toolsPlural   : this.mcpTools.length !== 1,
+        hasTools      : chatbotVisibleToolNames.length > 0,
+        toolCount     : chatbotVisibleToolNames.length,
+        toolsPlural   : chatbotVisibleToolNames.length !== 1,
         toolsList     : chatToolsList,
         hasToolDetails: chatbotToolDetails.length > 0,
         toolDetails   : chatbotToolDetails,
         markdown      : args.format == "md",
-        useshell      : args.useshell
+        useshell      : args.useshell,
+        shellViaActionPreferred: shellViaActionPreferred
       }
       this._systemInst = this._getCachedSystemPrompt("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT)
     } else {
@@ -9638,6 +9657,7 @@ MiniA.prototype.init = function(args) {
         usetools         : this._useTools,
         usetoolsActual   : this._useToolsActual,
         useMcpProxy      : this._useMcpProxy,
+        shellViaActionPreferred: shellViaActionPreferred,
         toolCount        : this.mcpTools.length,
         proxyToolCount   : proxyToolCount,
         proxyToolsList   : proxyToolsList,
@@ -11453,7 +11473,7 @@ MiniA.prototype._runChatbotMode = function(options) {
     var maxSteps = Math.max(1, args.maxsteps || 10)
     var pendingPrompt = isString(args.goal) ? args.goal : stringify(args.goal, __, "")
     var finalAnswer
-    var toolNames = this.mcpToolNames.slice()
+    var toolNames = this.mcpToolNames.filter(name => !(args.useshell === true && this._useTools === true && name === "shell"))
 
     // Initialize runtime object for chatbot mode
     var runtime = this._runtime = {
