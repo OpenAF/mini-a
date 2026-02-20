@@ -2284,6 +2284,69 @@ try {
     totalChars: 0,
     contentChars: 0
   }
+  var _streamMdState = {
+    pending: "",
+    inTable: false,
+    tableBuffer: ""
+  }
+  var _streamTableSeparatorRegex = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
+
+  function _printStreamMarkdown(text) {
+    if (!isString(text) || text.length === 0) return
+    printnl(ow.format.withMD(text))
+  }
+
+  function _flushStreamTableBuffer() {
+    if (_streamMdState.tableBuffer.length === 0) return
+    _printStreamMarkdown(_streamMdState.tableBuffer)
+    _streamMdState.tableBuffer = ""
+    _streamMdState.inTable = false
+  }
+
+  function _renderStreamChunk(streamText) {
+    if (!isString(streamText) || streamText.length === 0) return
+    _streamMdState.pending += streamText
+
+    while (true) {
+      var newlineIdx = _streamMdState.pending.indexOf("\n")
+      if (newlineIdx < 0) break
+
+      var line = _streamMdState.pending.substring(0, newlineIdx)
+      _streamMdState.pending = _streamMdState.pending.substring(newlineIdx + 1)
+      var lineWithNl = line + "\n"
+      var trimmedLine = line.trim()
+      var isTableLine = trimmedLine.indexOf("|") === 0
+
+      if (_streamMdState.inTable) {
+        if (isTableLine) {
+          _streamMdState.tableBuffer += lineWithNl
+        } else {
+          _flushStreamTableBuffer()
+          _printStreamMarkdown(lineWithNl)
+        }
+        continue
+      }
+
+      if (isTableLine) {
+        _streamMdState.inTable = true
+        _streamMdState.tableBuffer = lineWithNl
+        continue
+      }
+
+      _printStreamMarkdown(lineWithNl)
+    }
+
+    // Keep partial lines pending. If we're in a table and receive a separator
+    // line without trailing newline, hold it until the next chunk completes it.
+    if (!_streamMdState.inTable && _streamMdState.pending.length > 0) {
+      var pendingTrimmed = _streamMdState.pending.trim()
+      var looksLikeTablePiece = pendingTrimmed.indexOf("|") === 0 || _streamTableSeparatorRegex.test(pendingTrimmed)
+      if (!looksLikeTablePiece) {
+        _printStreamMarkdown(_streamMdState.pending)
+        _streamMdState.pending = ""
+      }
+    }
+  }
   function _parseDelegateSubtaskMessage(message) {
     if (!isString(message)) return __
     var match = message.match(/^\[subtask:([^\]]+)\]\s*(.*)$/)
@@ -2310,14 +2373,12 @@ try {
   }
 
   function printEvent(type, icon, message, id) {
-    // Handle streaming output with markdown formatting
+    // Handle streaming output
     if (type == "stream") {
       var streamText = isString(message) ? message : String(message || "")
       _streamOutputStats.totalChars += streamText.length
       _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
-      // Apply markdown formatting to the streamed content
-      var formatted = ow.format.withMD(message)
-      printnl(formatted)
+      _renderStreamChunk(streamText)
       return
     }
     // Ignore user events
