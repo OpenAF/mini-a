@@ -683,12 +683,12 @@ todo:
     } catch(e) {
       // Mark queue as closed on error (e.g., client disconnect)
       if (isDef(uuid)) {
-        var _qErr = $ch("sseQueues").get({uuid: uuid})
-        if (isDef(_qErr)) {
+        $ch("sseQueues").getSet({uuid: uuid}, function(_qErr) {
+          if (!isDef(_qErr)) return _qErr
           _qErr.closed = true
           _qErr.updated = Date.now()
-          $ch("sseQueues").set({uuid: uuid}, _qErr)
-        }
+          return _qErr
+        })
       }
       try {
         writer.write("error", { message: String(e) })
@@ -909,10 +909,13 @@ jobs:
       $ch("results").set({uuid: uuid}, { events: [], updated: Date.now() })
     }
     global._ch_res_push = function(uuid, entry) {
-      var r = $ch("results").get({uuid: uuid}) || { events: [] }
-      r.events.push(entry)
-      r.updated = Date.now()
-      $ch("results").set({uuid: uuid}, r)
+      $ch("results").getSet({uuid: uuid}, function(r) {
+        r = r || { events: [] }
+        if (!isArray(r.events)) r.events = []
+        r.events.push(entry)
+        r.updated = Date.now()
+        return r
+      })
     }
     global._ch_res_unset = function(uuid) {
       $ch("results").unset({uuid: uuid})
@@ -1036,21 +1039,25 @@ jobs:
     global._mini_a_web_ssePush = (uuid, event, data) => {
       if (!global.__usestream) return
       if (isUnDef(uuid) || isUnDef(event)) return
-      var q = $ch("sseQueues").get({uuid: uuid}) || { events: [], closed: false }
-      q.events.push({ event: event, data: data })
-      q.updated = Date.now()
-      $ch("sseQueues").set({uuid: uuid}, q)
+      $ch("sseQueues").getSet({uuid: uuid}, function(q) {
+        q = q || { events: [], closed: false }
+        q.events.push({ event: event, data: data })
+        q.updated = Date.now()
+        return q
+      })
     }
 
     global._mini_a_web_sseClose = (uuid, status) => {
       if (!global.__usestream) return
       if (isUnDef(uuid)) return
-      var q = $ch("sseQueues").get({uuid: uuid}) || { events: [], closed: false }
-      if (q.closed === true) return
-      q.events.push({ event: "done", data: { status: status || "finished" } })
-      q.closed = true
-      q.updated = Date.now()
-      $ch("sseQueues").set({uuid: uuid}, q)
+      $ch("sseQueues").getSet({uuid: uuid}, function(q) {
+        q = q || { events: [], closed: false }
+        if (q.closed === true) return q
+        q.events.push({ event: "done", data: { status: status || "finished" } })
+        q.closed = true
+        q.updated = Date.now()
+        return q
+      })
     }
 
     global._mini_a_web_buildHistoryPayload = (uuid) => {
