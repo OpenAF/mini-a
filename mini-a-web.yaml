@@ -257,6 +257,15 @@ todo:
         global._ch_la_set(_res.uuid)
       } else {
         global._ch_la_set(_res.uuid)
+        // Guard against a race condition: if the previous conversation's last event is
+        // "final" (completed), the first pollOnce() after this prompt is submitted may
+        // run before $doV pushes any new events and incorrectly see status="finished",
+        // causing the browser to stop polling before the response arrives.
+        // Push a sentinel so the channel is never in a "finished" state during the gap.
+        var _lastEvts = global._ch_res_events(_res.uuid)
+        if (_lastEvts.length > 0 && _lastEvts[_lastEvts.length - 1].event === "final") {
+          global._ch_res_push(_res.uuid, { event: "__pending__", message: "" })
+        }
       }
       
       // Prompt header logging
@@ -751,7 +760,7 @@ todo:
       var sanitized = []
       for (var i = 0; i < postData.history.length; i++) {
         var item = postData.history[i]
-        if (isUnDef(item) || isUnDef(item.event)) continue
+        if (isUnDef(item) || isUnDef(item.event) || item.event === "__pending__") continue
         var entry = { event: item.event }
         if (isDef(item.message)) entry.message = item.message
         sanitized.push(entry)
