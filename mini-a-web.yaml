@@ -597,7 +597,7 @@ todo:
         var _history = []
         for (var i = 0; i < _resultEvents.length; i++) {
           var r = _resultEvents[i]
-          if (isDef(r.event)) {
+          if (isDef(r.event) && r.event !== "__pending__") {
             var _h = { event: r.event }
             if (isDef(r.message)) _h.message = r.message
             _history.push(_h)
