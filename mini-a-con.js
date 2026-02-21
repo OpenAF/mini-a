@@ -2284,6 +2284,7 @@ try {
     totalChars: 0,
     contentChars: 0
   }
+  var _streamHasRendered = false
   var _streamMdState = {
     pending: "",
     inTable: false,
@@ -2293,6 +2294,7 @@ try {
 
   function _printStreamMarkdown(text) {
     if (!isString(text) || text.length === 0) return
+    _streamHasRendered = true
     printnl(ow.format.withMD(text))
   }
 
@@ -2301,6 +2303,21 @@ try {
     _printStreamMarkdown(_streamMdState.tableBuffer)
     _streamMdState.tableBuffer = ""
     _streamMdState.inTable = false
+  }
+
+  function _resetStreamRenderState() {
+    _streamHasRendered = false
+    _streamMdState.pending = ""
+    _streamMdState.inTable = false
+    _streamMdState.tableBuffer = ""
+  }
+
+  function _flushStreamRemainder() {
+    _flushStreamTableBuffer()
+    if (_streamMdState.pending.length > 0) {
+      _printStreamMarkdown(_streamMdState.pending)
+      _streamMdState.pending = ""
+    }
   }
 
   function _renderStreamChunk(streamText) {
@@ -2375,6 +2392,12 @@ try {
   function printEvent(type, icon, message, id) {
     // Handle streaming output
     if (type == "stream") {
+      // Clear inline-event erase state before rendering stream chunks so
+      // future event logs don't wipe already streamed answer text.
+      if (isDef(_prevEventLength)) {
+        print()
+        _prevEventLength = __
+      }
       var streamText = isString(message) ? message : String(message || "")
       _streamOutputStats.totalChars += streamText.length
       _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
@@ -2449,6 +2472,7 @@ try {
   function runGoal(goalText) {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
+    _resetStreamRenderState()
     var beforeGoalResult = runHooks("before_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "" })
     if (beforeGoalResult.blocked) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Goal blocked by a before_goal hook.", errorColor))
@@ -2534,8 +2558,9 @@ try {
             print(stringify(lastResult, __, ""))
           }
         } else {
+          _flushStreamRemainder()
           // If streaming was enabled but no visible content was streamed, fallback to final result output.
-          if (_streamOutputStats.contentChars === 0 && isDef(lastResult)) {
+          if (!_streamHasRendered && _streamOutputStats.contentChars === 0 && isDef(lastResult)) {
             print()
             if (isObject(lastResult) || isArray(lastResult)) {
               print(stringify(lastResult, __, "  "))
