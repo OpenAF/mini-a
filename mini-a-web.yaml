@@ -154,6 +154,14 @@ help:
     desc     : "SLON/JSON definition of a channel that records tool calls, arguments and responses"
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
+  - name     : chtype
+    desc     : "OpenAF channel type for external session state storage (e.g. 'redis'). Defaults to 'simple' (in-memory). Requires the corresponding oPack (e.g. 'opack install Redis')."
+    example  : "redis"
+    mandatory: false
+  - name     : choptions
+    desc     : "OpenAF channel options as JSON/SLON for the configured chtype (e.g. '(host: redis-host, port: 6379)')"
+    example  : "(host: redis-host, port: 6379)"
+    mandatory: false
 
 include:
 - oJobHTTPd.yaml
@@ -194,18 +202,19 @@ todo:
       // __useHistory - if no history is being used, always clear
       if (!global.__usehistory || postData.force) {
         log("Clearing session " + postData.uuid)
-        if (isDef(global.__res[ postData.uuid ])) {
-          delete global.__res[ postData.uuid ]
+        if (global._ch_res_isDef(postData.uuid)) {
+          global._ch_res_unset(postData.uuid)
         }
         if (isDef(global.__conversations[ postData.uuid ])) {
           delete global.__conversations[ postData.uuid ]
         }
-        if (isDef(global.__lastActivity[ postData.uuid ])) {
-          delete global.__lastActivity[ postData.uuid ]
+        if (global._ch_la_isDef(postData.uuid)) {
+          global._ch_la_unset(postData.uuid)
         }
-        if (isDef(global.__planState) && isDef(global.__planState[ postData.uuid ])) {
-          delete global.__planState[ postData.uuid ]
+        if (global._ch_ps_isDef(postData.uuid)) {
+          global._ch_ps_unset(postData.uuid)
         }
+        $ch("sseQueues").unset({uuid: postData.uuid})
         if (global.__usehistory && !global.__historykeep) {
           log("Deleting history file for session " + postData.uuid)
           if (isFunction(global._mini_a_web_deleteHistory)) {
@@ -242,12 +251,12 @@ todo:
       }
       
       // Initialize response storage
-      if (isUnDef(global.__res[_res.uuid])) {
-        global.__res[ _res.uuid ] = [ ]
+      if (!global._ch_res_isDef(_res.uuid)) {
+        global._ch_res_init(_res.uuid)
         global.__conversations[ _res.uuid ] = __
-        global.__lastActivity[ _res.uuid ] = Date.now()
+        global._ch_la_set(_res.uuid)
       } else {
-        global.__lastActivity[ _res.uuid ] = Date.now()
+        global._ch_la_set(_res.uuid)
       }
       
       // Prompt header logging
@@ -264,8 +273,8 @@ todo:
         if (global.__usestream && isFunction(global._mini_a_web_initSSE)) {
           global._mini_a_web_initSSE(uuid)
         }
-        if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
-          delete global.__planState[ uuid ]
+        if (global._ch_ps_isDef(uuid)) {
+          global._ch_ps_unset(uuid)
         }
 
         // If history is enabled, set the history file
@@ -274,12 +283,13 @@ todo:
         // If conversation does not exist, create it
         if (isUnDef(global.__conversations[ uuid ])) {
           isNewConversation = true
-          // If history does not exist but we have history in memory, rebuild it
-          if (global.__usehistory && !global._mini_a_web_historyExists(uuid) && isDef(global.__res[ uuid ]) && global.__res[ uuid ].length > 0) {
+          // If history does not exist but we have events in the channel, rebuild it
+          var _rebuildEvts = global._ch_res_events(uuid)
+          if (global.__usehistory && !global._mini_a_web_historyExists(uuid) && _rebuildEvts.length > 0) {
             // Try rebuilding
             var _data = []
-            for (var i = 0; i < global.__res[ uuid ].length; i++) {
-              var r = global.__res[ uuid ][i]
+            for (var i = 0; i < _rebuildEvts.length; i++) {
+              var r = _rebuildEvts[i]
               if (r.event == "👤") {
                 _data.push( { role: "user", content: r.message } )
               } else if (r.event == "🤖" || r.event == "⬅️") {
@@ -403,7 +413,7 @@ todo:
                         if (isNumber(checkpoints.total)) checkpointInfo.total = checkpoints.total
                       }
 
-                      global.__planState[uuid] = {
+                      var _planData = {
                         items      : normalized,
                         total      : normalized.length,
                         completed  : completedCount,
@@ -412,11 +422,12 @@ todo:
                         active     : normalized.length > 0,
                         updated    : Date.now()
                       }
+                      global._ch_ps_set(uuid, _planData)
                       if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
-                        global._mini_a_web_ssePush(uuid, "plan", { plan: global.__planState[uuid] })
+                        global._mini_a_web_ssePush(uuid, "plan", { plan: _planData })
                       }
                     } else {
-                      if (isDef(global.__planState[uuid])) delete global.__planState[uuid]
+                      if (global._ch_ps_isDef(uuid)) global._ch_ps_unset(uuid)
                     }
                   }
                 } catch(planErr) {
@@ -424,15 +435,15 @@ todo:
                 }
               //} else if (_e == "🏁" || _e == "✅" || _e == "❌") {
               } else if (_e == "🏁" || _e == "🛑") {
-                if (isDef(global.__planState[uuid])) {
+                if (global._ch_ps_isDef(uuid)) {
                   log(`[${uuid}] ${_e} Plan closed`)
-                  delete global.__planState[uuid]
+                  global._ch_ps_unset(uuid)
                 }
                 if (_e == "🛑" && global.__usestream && isFunction(global._mini_a_web_sseClose)) {
                   global._mini_a_web_sseClose(uuid, "stopped")
                 }
               }
-              global.__res[uuid].push({ event: _e, message: m })
+              global._ch_res_push(uuid, { event: _e, message: m })
               // Only sync to S3 after user prompts (not on every event)
               if (_e == "👤" && isFunction(global._mini_a_web_storeHistory)) {
                 try {
@@ -445,7 +456,7 @@ todo:
             } catch(eee) {
               $err(eee)
               logWarn(`[${uuid}] Plan closed`)
-              delete global.__planState[uuid]
+              if (global._ch_ps_isDef(uuid)) global._ch_ps_unset(uuid)
             }
           })
           global.__conversations[ uuid ] = lma
@@ -472,7 +483,7 @@ todo:
             _rma.answer = trimmedAnswer.replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
           }
         }
-        global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        global._ch_res_push(uuid, { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) })
         if (global.__usestream && isFunction(global._mini_a_web_sseClose)) {
           global._mini_a_web_sseClose(uuid, "finished")
         }
@@ -566,25 +577,26 @@ todo:
 
         return html
       }
-      if (isDef(global.__res[ postData.uuid ])) {
+      var _resultEvents = global._ch_res_events(postData.uuid)
+      if (global._ch_res_isDef(postData.uuid)) {
         // Update last activity
-        global.__lastActivity[ postData.uuid ] = Date.now()
-        var planState = isDef(global.__planState) ? global.__planState[ postData.uuid ] : __
+        global._ch_la_set(postData.uuid)
+        var planState = global._ch_ps_get(postData.uuid)
         var hasActivePlan = isDef(planState) && isArray(planState.items) && planState.items.length > 0
 
         // Append all messages to content
         var _history = []
-        for (var i = 0; i < global.__res[ postData.uuid ].length; i++) {
-          var r = global.__res[ postData.uuid ][i]
+        for (var i = 0; i < _resultEvents.length; i++) {
+          var r = _resultEvents[i]
           if (isDef(r.event)) {
             var _h = { event: r.event }
             if (isDef(r.message)) _h.message = r.message
             _history.push(_h)
           }
           if (r.event == "final") {
-            if (i == global.__res[ postData.uuid ].length - 1) _res.status = "finished"
+            if (i == _resultEvents.length - 1) _res.status = "finished"
             _res.content += "\n" + r.message + "\n"
-            //delete global.__res[ postData.uuid ]
+            //global._ch_res_unset(postData.uuid)
             //break
           } else {
             // Exclude planning (🗺️) messages from the content log; plan panel remains driven by __planState
@@ -637,14 +649,14 @@ todo:
         writer.write("error", { message: "uuid is required" })
         return
       }
-      if (isUnDef(global.__sseQueues[uuid])) {
-        global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
+      if (isUnDef($ch("sseQueues").get({uuid: uuid}))) {
+        $ch("sseQueues").set({uuid: uuid}, { events: [], closed: false, updated: Date.now() })
       }
       var idx = 0
       var lastPing = Date.now()
       writer.write("ready", { status: "ok", uuid: uuid })
       while (true) {
-        var queue = global.__sseQueues[uuid]
+        var queue = $ch("sseQueues").get({uuid: uuid})
         if (isUnDef(queue)) break
         while (idx < queue.events.length) {
           var entry = queue.events[idx]
@@ -661,24 +673,29 @@ todo:
       }
     } catch(e) {
       // Mark queue as closed on error (e.g., client disconnect)
-      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
-        global.__sseQueues[uuid].closed = true
-        global.__sseQueues[uuid].updated = Date.now()
+      if (isDef(uuid)) {
+        var _qErr = $ch("sseQueues").get({uuid: uuid})
+        if (isDef(_qErr)) {
+          _qErr.closed = true
+          _qErr.updated = Date.now()
+          $ch("sseQueues").set({uuid: uuid}, _qErr)
+        }
       }
-      try { 
-        writer.write("error", { message: String(e) }) 
+      try {
+        writer.write("error", { message: String(e) })
       } catch(writeErr) {
         // Log both the original error and the write failure for complete context
         log("SSE error" + (isDef(uuid) ? " for " + uuid : "") + ": " + e + " | Failed to write error response: " + writeErr)
       }
     } finally {
       // Clean up on exit (normal or error); periodic job handles edge cases
-      if (isDef(uuid) && isDef(global.__sseQueues[uuid])) {
+      if (isDef(uuid)) {
         // Queue.closed is true in two cases:
         // 1. Normal completion: _mini_a_web_sseClose() sets closed=true, loop exits
         // 2. Error/disconnect: catch block sets closed=true
-        if (global.__sseQueues[uuid].closed) {
-          delete global.__sseQueues[uuid]
+        var _qFin = $ch("sseQueues").get({uuid: uuid})
+        if (isDef(_qFin) && _qFin.closed) {
+          $ch("sseQueues").unset({uuid: uuid})
         }
       }
     }
@@ -723,9 +740,10 @@ todo:
       }
 
       // If already stored no need to load again
-      if (isDef(global.__res[ postData.uuid ])) {
+      if (global._ch_res_isDef(postData.uuid)) {
+        var _existing = global._ch_res_events(postData.uuid)
         logWarn("History for " + postData.uuid + " already loaded")
-        return ow.server.httpd.reply({ status: "loaded", uuid: postData.uuid, entries: global.__res[ postData.uuid ].length })
+        return ow.server.httpd.reply({ status: "loaded", uuid: postData.uuid, entries: _existing.length })
       } else {
         logWarn("History for " + postData.uuid + " not found. Rebuilding from provided history with " + postData.history.length + " entries")
       }
@@ -739,9 +757,9 @@ todo:
         sanitized.push(entry)
       }
 
-      global.__res[ postData.uuid ] = sanitized
+      $ch("results").set({uuid: postData.uuid}, { events: sanitized, updated: Date.now() })
       delete global.__conversations[ postData.uuid ]
-      global.__lastActivity[ postData.uuid ] = Date.now()
+      global._ch_la_set(postData.uuid)
       if (isFunction(global._mini_a_web_storeHistory)) {
         try {
           global._mini_a_web_storeHistory(postData.uuid)
@@ -769,11 +787,6 @@ ojob:
   loadLibs    :
   - mini-a.js
   - s3.js
-  channels    :
-    create:
-    - name: conversations
-    - name: lastActivity
-    - name: results
 
 jobs:
 # ---------------------
@@ -833,25 +846,97 @@ jobs:
       format         : isString().default(__)
       auditch        : isString().default(__)
       toollog        : isString().default(__)
+      chtype         : isString().default("simple")
+      choptions      : isString().default("")
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)
       validationthreshold: isString().default("PASS")
       persistlearnings: toBoolean().isBoolean().default(true)
   exec : | #js
-    global.__res = {}
     global.__usehistory = args.usehistory
     global.__historypath = args.historypath
     global.__historykeep = args.historykeep
     global.__conversations = {}
-    global.__lastActivity = { }
     global.__showexecs = args.showexecs
     global.__usestream = args.usestream
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
     global.__usemath = args.usemath
-    global.__planState = {}
-    global.__sseQueues = {}
+
+    // --- OpenAF Channel setup for external session state ---
+    // chtype controls the backing store: "simple" (default, in-memory) or any oPack type e.g. "redis"
+    // choptions is a JSON/SLON string with connection options for the chosen type
+    var _chType = (isString(args.chtype) && args.chtype.trim().length > 0) ? args.chtype.trim() : "simple"
+    var _chOptions = {}
+    if (isString(args.choptions) && args.choptions.trim().length > 0) {
+      try {
+        _chOptions = af.fromSLON(args.choptions)
+      } catch(e1) {
+        try { _chOptions = jsonParse(args.choptions) } catch(e2) {
+          logWarn("Failed to parse choptions: " + args.choptions)
+        }
+      }
+    }
+    ;["results", "lastActivity", "planState", "sseQueues"].forEach(function(chName) {
+      try { $ch(chName).destroy() } catch(ignore) {}
+      if (_chType === "simple") {
+        $ch(chName).create()
+      } else {
+        log("Creating '" + chName + "' channel with type=" + _chType)
+        $ch(chName).create(false, _chType, _chOptions)
+      }
+    })
+
+    // Channel helpers — results (event log per uuid)
+    global._ch_res_isDef = function(uuid) {
+      return isDef($ch("results").get({uuid: uuid}))
+    }
+    global._ch_res_events = function(uuid) {
+      var r = $ch("results").get({uuid: uuid})
+      return (isDef(r) && isArray(r.events)) ? r.events : []
+    }
+    global._ch_res_init = function(uuid) {
+      $ch("results").set({uuid: uuid}, { events: [], updated: Date.now() })
+    }
+    global._ch_res_push = function(uuid, entry) {
+      var r = $ch("results").get({uuid: uuid}) || { events: [] }
+      r.events.push(entry)
+      r.updated = Date.now()
+      $ch("results").set({uuid: uuid}, r)
+    }
+    global._ch_res_unset = function(uuid) {
+      $ch("results").unset({uuid: uuid})
+    }
+
+    // Channel helpers — lastActivity (session touch timestamps)
+    global._ch_la_isDef = function(uuid) {
+      return isDef($ch("lastActivity").get({uuid: uuid}))
+    }
+    global._ch_la_get = function(uuid) {
+      var r = $ch("lastActivity").get({uuid: uuid})
+      return isDef(r) ? r.ts : __
+    }
+    global._ch_la_set = function(uuid) {
+      $ch("lastActivity").set({uuid: uuid}, { ts: Date.now() })
+    }
+    global._ch_la_unset = function(uuid) {
+      $ch("lastActivity").unset({uuid: uuid})
+    }
+
+    // Channel helpers — planState (live plan progress per uuid)
+    global._ch_ps_get = function(uuid) {
+      return $ch("planState").get({uuid: uuid})
+    }
+    global._ch_ps_isDef = function(uuid) {
+      return isDef($ch("planState").get({uuid: uuid}))
+    }
+    global._ch_ps_set = function(uuid, state) {
+      $ch("planState").set({uuid: uuid}, state)
+    }
+    global._ch_ps_unset = function(uuid) {
+      $ch("planState").unset({uuid: uuid})
+    }
     if (isUnDef(global.__webMetrics)) {
       global.__webMetrics = { html_exports: $atomic(0, "long") }
       try {
@@ -936,29 +1021,27 @@ jobs:
 
     global._mini_a_web_initSSE = (uuid) => {
       if (isUnDef(uuid)) return
-      global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
+      $ch("sseQueues").set({uuid: uuid}, { events: [], closed: false, updated: Date.now() })
     }
 
     global._mini_a_web_ssePush = (uuid, event, data) => {
       if (!global.__usestream) return
       if (isUnDef(uuid) || isUnDef(event)) return
-      if (isUnDef(global.__sseQueues[uuid])) {
-        global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
-      }
-      global.__sseQueues[uuid].events.push({ event: event, data: data })
-      global.__sseQueues[uuid].updated = Date.now()
+      var q = $ch("sseQueues").get({uuid: uuid}) || { events: [], closed: false }
+      q.events.push({ event: event, data: data })
+      q.updated = Date.now()
+      $ch("sseQueues").set({uuid: uuid}, q)
     }
 
     global._mini_a_web_sseClose = (uuid, status) => {
       if (!global.__usestream) return
       if (isUnDef(uuid)) return
-      if (isUnDef(global.__sseQueues[uuid])) {
-        global.__sseQueues[uuid] = { events: [], closed: false, updated: Date.now() }
-      }
-      if (global.__sseQueues[uuid].closed === true) return
-      global.__sseQueues[uuid].events.push({ event: "done", data: { status: status || "finished" } })
-      global.__sseQueues[uuid].closed = true
-      global.__sseQueues[uuid].updated = Date.now()
+      var q = $ch("sseQueues").get({uuid: uuid}) || { events: [], closed: false }
+      if (q.closed === true) return
+      q.events.push({ event: "done", data: { status: status || "finished" } })
+      q.closed = true
+      q.updated = Date.now()
+      $ch("sseQueues").set({uuid: uuid}, q)
     }
 
     global._mini_a_web_buildHistoryPayload = (uuid) => {
@@ -998,11 +1081,12 @@ jobs:
         }
       }
 
-      // Build from in-memory events
-      if (isDef(global.__res[uuid]) && isArray(global.__res[uuid]) && global.__res[uuid].length > 0) {
+      // Build from channel-stored events
+      var _chEvts = global._ch_res_events(uuid)
+      if (_chEvts.length > 0) {
         var data = []
-        for (var i = 0; i < global.__res[uuid].length; i++) {
-          var entry = global.__res[uuid][i]
+        for (var i = 0; i < _chEvts.length; i++) {
+          var entry = _chEvts[i]
           if (isUnDef(entry) || isUnDef(entry.event)) continue
           var msg = isDef(entry.message) ? entry.message : ""
           switch(entry.event) {
@@ -1165,18 +1249,19 @@ jobs:
     ssequeuetimeout: toNumber().isNumber().default(120)   # SSE queue timeout in seconds (2 minutes)
   exec : | #js
     var toDelete = []
-    for (var uuid in global.__lastActivity) {
-      // If no activity for more than 5 minutes, delete session
-      if (now() - global.__lastActivity[ uuid ] > args.historyretention * 1000) {
-        toDelete.push(uuid)
+    $ch("lastActivity").forEach(function(key, value) {
+      // If no activity for more than historyretention seconds, mark for deletion
+      if (isDef(value) && isDef(value.ts) && (now() - value.ts > args.historyretention * 1000)) {
+        toDelete.push(key.uuid)
       }
-    }
+    })
     for (var i = 0; i < toDelete.length; i++) {
       var uuid = toDelete[i]
-      delete global.__lastActivity[ uuid ]
-      delete global.__res[ uuid ]
+      global._ch_la_unset(uuid)
+      global._ch_res_unset(uuid)
       delete global.__conversations[ uuid ]
-      if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
+      if (global._ch_ps_isDef(uuid)) global._ch_ps_unset(uuid)
+      $ch("sseQueues").unset({uuid: uuid})
       if (global.__usehistory && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
         try {
           global._mini_a_web_deleteHistory(uuid)
@@ -1191,18 +1276,15 @@ jobs:
     var sseTimeoutMs = args.ssequeuetimeout * 1000
     var sseNow = Date.now()
     var sseToDelete = []
-    for (var uuid in global.__sseQueues) {
-      var queue = global.__sseQueues[uuid]
+    $ch("sseQueues").forEach(function(key, value) {
       // Remove queues that are closed or haven't been updated within the timeout period
-      // Also remove queues with no timestamp (defensive - shouldn't happen in normal flow)
-      if (isDef(queue) && (queue.closed || isUnDef(queue.updated) || (sseNow - queue.updated > sseTimeoutMs))) {
-        sseToDelete.push(uuid)
+      if (isDef(value) && (value.closed || isUnDef(value.updated) || (sseNow - value.updated > sseTimeoutMs))) {
+        sseToDelete.push(key.uuid)
       }
-    }
+    })
     for (var i = 0; i < sseToDelete.length; i++) {
-      var uuid = sseToDelete[i]
-      delete global.__sseQueues[uuid]
-      log("Cleaned up SSE queue " + uuid)
+      $ch("sseQueues").unset({uuid: sseToDelete[i]})
+      log("Cleaned up SSE queue " + sseToDelete[i])
     }
 
 # ---------------------------------------
