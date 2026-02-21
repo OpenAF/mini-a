@@ -1097,6 +1097,7 @@ jobs:
         for (var i = 0; i < _chEvts.length; i++) {
           var entry = _chEvts[i]
           if (isUnDef(entry) || isUnDef(entry.event)) continue
+          if (entry.event === "__pending__") continue
           var msg = isDef(entry.message) ? entry.message : ""
           switch(entry.event) {
           case "👤":
