@@ -9840,9 +9840,10 @@ MiniA.prototype.init = function(args) {
     }
 
     var shellViaActionPreferred = args.useshell === true && this._useTools === true
+    var promptUseMcpProxy = this._useMcpProxy === true || toBoolean(args.mcpproxy) === true
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
-    if (this._useMcpProxy === true && isObject(global.__mcpProxyState__)) {
+    if (promptUseMcpProxy === true && isObject(global.__mcpProxyState__)) {
       var proxyState = global.__mcpProxyState__
       var proxyNames = []
       if (isMap(proxyState.toolToConnections)) {
@@ -9932,7 +9933,7 @@ MiniA.prototype.init = function(args) {
         isMachine        : (isDef(args.format) && args.format != "md"),
         usetools         : this._useTools,
         usetoolsActual   : this._useToolsActual,
-        useMcpProxy      : this._useMcpProxy,
+        useMcpProxy      : promptUseMcpProxy,
         shellViaActionPreferred: shellViaActionPreferred,
         toolCount        : this.mcpTools.length,
         proxyToolCount   : proxyToolCount,
@@ -10517,13 +10518,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
     })
 
-    // Set proxy mode flag early
-    this._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
+    // When mcpproxy=true, build the prompt in proxy mode even before connections exist.
+    // The proxy connection is created during init(), so gating on existing connections
+    // can produce stale/non-proxy instructions in the first model turn.
+    var promptProxyMode = usingMcpProxy
 
-    if (usingMcpProxy && hasMcpProxyConnection) {
+    // Set proxy mode flag early
+    this._useMcpProxy = promptProxyMode
+
+    if (promptProxyMode) {
       // MCP proxy mode: useToolsActual depends on whether usetools=true
       this._useToolsActual = this._useTools === true
-      this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()")
+      var proxyPresetSuffix = hasMcpProxyConnection ? " (connection already present)" : " (connection will be initialized)"
+      this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()" + proxyPresetSuffix)
     } else if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
       // Check if LLM supports function calling (non-proxy mode)
       this._useToolsActual = isDef(this.llm) && typeof this.llm.withMcpTools === "function"
