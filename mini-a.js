@@ -54,7 +54,8 @@ var MiniA = function() {
   this._planResumeInfo = null
   this._toollogon = false
   this._defaultAgentPersonaLine = "You are a decisive, action-oriented agent that executes efficiently."
-  this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
+  this._agentDirectiveCoreLine = "Work step-by-step toward your goal."
+  this._agentDirectiveNoInteractionRemark = "No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
 
@@ -9939,9 +9940,14 @@ MiniA.prototype.init = function(args) {
       var simplePlanStyle = this._isSimplePlanStyle()
       var stepContext = simplePlanStyle ? this._buildStepContext(this._agentState ? this._agentState.plan : null) : null
 
+      var agentDirectiveLine = this._agentDirectiveCoreLine
+      if (this._shouldIncludeNoUserInteractionRemark(args)) {
+        agentDirectiveLine += " " + this._agentDirectiveNoInteractionRemark
+      }
+
       var agentPayload = {
         agentPersonaLine: agentPersonaLine,
-        agentDirectiveLine: this._agentDirectiveLine,
+        agentDirectiveLine: agentDirectiveLine,
         actionsWordNumber: actionsWordNumber,
         actionsList      : promptActionsList,
         useshell         : args.useshell,
@@ -9976,6 +9982,13 @@ MiniA.prototype.init = function(args) {
   } catch(ee) {
     this._isInitialized = false
   }
+}
+
+MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
+  if (!isMap(args)) return false
+  if (!isString(args.__interaction_source)) return false
+  var source = args.__interaction_source.trim().toLowerCase()
+  return source === "mini-a-con" || source === "mini-a-web"
 }
 
 /**

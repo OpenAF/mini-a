@@ -2221,6 +2221,7 @@ try {
       cleanGoal = sessionOptions.goalprefix + cleanGoal
     }
     args.goal = cleanGoal
+    args.__interaction_source = "mini-a-con"
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
     return args
   }

@@ -710,7 +710,7 @@ The `start()` method accepts various configuration options:
 #### Basic Configuration
 - **`maxsteps`** (number, default: 15): Maximum consecutive steps without a successful action before the agent forces a final answer
 - **`earlystopthreshold`** (number, default: 3, auto-adjusts to 5 with low-cost models): Number of identical consecutive errors before the early stop guard activates. The system automatically increases this threshold when using low-cost models before escalation to give them more recovery opportunities. Set explicitly to override automatic behavior.
-- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." / "No user interaction..." directives afterward so autonomy constraints remain intact
+- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." directive, and adds the "No user interaction..." remark when running through `mini-a-con` or `mini-a-web`
 - **`chatyouare`** (string): Override the opening chatbot persona sentence when `chatbotmode=true` (inline text or an `@file` path) without touching the rest of the conversational instructions
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
