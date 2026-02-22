@@ -6561,7 +6561,26 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
           type      : "object",
           properties: {
             thought: { type: "string", description: "Reasoning/thought string for the step." },
-            action : { type: "string", description: "Action name such as think, shell, or final." },
+            action : {
+              oneOf: [
+                { type: "string" },
+                {
+                  type : "array",
+                  items: {
+                    type      : "object",
+                    properties: {
+                      action : { type: "string" },
+                      command: { type: "string" },
+                      answer : { type: "string" },
+                      state  : { type: "object" },
+                      params : { type: "object" }
+                    },
+                    required: ["action"]
+                  }
+                }
+              ],
+              description: "Action name (string) or action batch (array) for compatibility payloads."
+            },
             command: { type: "string", description: "Shell command when action is shell." },
             answer : { type: "string", description: "Final answer text when action is final." },
             state  : { type: "object", description: "Optional state object to persist." },
@@ -11589,11 +11608,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
 
+          var shouldUpdateToolContext = !this._useTools || runtime.providerToolUseFailedDetected === true
           pendingToolActions.push({
             toolName     : origActionRaw,
             params       : paramsValue,
             stepLabel    : stepLabel,
-            updateContext: !this._useTools
+            updateContext: shouldUpdateToolContext
           })
           continue
         }
