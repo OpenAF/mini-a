@@ -203,6 +203,13 @@ mini-a goal="list all JavaScript files in this directory" useshell=true
 mini-a goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
+`mcp-web` also includes `http-request` for direct HTTP verbs (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`); use `readwrite=true` when you need mutating verbs.
+
+```bash
+mini-a goal="inspect rust-lang.org response headers" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml', timeout: 5000)"
+```
+
 **Testing MCP servers interactively:**
 ```bash
 mini-a mcptest=true mcp="(cmd: 'ojob mcps/mcp-time.yaml')"

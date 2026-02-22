@@ -3,6 +3,7 @@
 // Description: Mini Agent (Mini-A) to achieve goals using an LLM and shell commands.
 
 ow.loadMetrics()
+loadLib("mini-a-common.js")
 
 /**
  * <odoc>
@@ -1672,18 +1673,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
                     gptInstance.setConversation(savedConversation)
                 }
             }
-        }, {
-            maxAttempts : 3,
-            initialDelay: 250,
-            maxDelay    : 4000,
-            context     : { source: "llm", operation: "summarize" },
-            onRetry     : function(err, attempt, wait, category) {
-                self.fnI("retry", "Summarization attempt " + attempt + " failed (" + category.type + "). Retrying in " + wait + "ms...")
-                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-                    global.__mini_a_metrics.retries.inc()
-                }
-            }
-        })
+        }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
     } catch (e) {
         var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
         this.fnI("warn", "Summarization failed: " + (summaryError.reason || e))
@@ -3692,12 +3682,7 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
         if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
         if (isFunction(analyzerLLM.promptWithStats)) return analyzerLLM.promptWithStats(analysisPrompt)
         return analyzerLLM.prompt(analysisPrompt)
-      }, {
-        maxAttempts : 2,
-        initialDelay: 250,
-        maxDelay    : 2000,
-        context     : { source: "llm", operation: "plan-analysis" }
-      })
+      }, this._llmRetryOptions("Plan analysis", { operation: "plan-analysis" }, { maxAttempts: 2, maxDelay: 2000 }))
 
       if (isObject(analysisResponse)) {
         if (isFunction(controls && controls.afterCall)) {
@@ -3752,15 +3737,7 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
         return validatorLLM.promptJSONWithStats(critiquePrompt)
       }
       return validatorLLM.promptWithStats(critiquePrompt)
-    }, {
-      maxAttempts : 3,
-      initialDelay: 400,
-      maxDelay    : 4000,
-      context     : { source: "llm", operation: "plan-critique" },
-      onRetry     : (err, attempt, wait) => {
-        this.fnI("retry", `Plan critique attempt ${attempt} failed (${err}). Retrying in ${wait}ms...`)
-      }
-    })
+    }, this._llmRetryOptions("Plan critique", { operation: "plan-critique" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
     var totalTokens = this._getTotalTokens(stats)
@@ -4081,15 +4058,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
     if (isFunction(plannerLLM.promptWithStats)) return plannerLLM.promptWithStats(prompt)
     var result = plannerLLM.prompt(prompt)
     return { response: result, stats: {} }
-  }, {
-    maxAttempts : 3,
-    initialDelay: 500,
-    maxDelay    : 4000,
-    context     : { source: "llm", operation: "plan-generate" },
-    onRetry     : (err, attempt, wait) => {
-      this.fnI("retry", `Plan generation attempt ${attempt} failed (${err}). Retrying in ${wait}ms...`)
-    }
-  })
+  }, this._llmRetryOptions("Plan generation", { operation: "plan-generate" }, { initialDelay: 500 }))
 
   var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
   var totalTokens = this._getTotalTokens(stats)
@@ -5951,6 +5920,30 @@ MiniA.prototype._withExponentialBackoff = function(operation, options) {
   throw lastError
 }
 
+/**
+ * Returns a standard options object for _withExponentialBackoff LLM calls.
+ * Provides consistent retry behaviour with metric tracking across all LLM call sites.
+ *
+ * @param {string} label       - Human-readable label used in retry log messages.
+ * @param {object} [ctx]       - Extra fields merged into the context object (e.g. { operation: "summarize" }).
+ * @param {object} [overrides] - Any options that should override the defaults (maxAttempts, maxDelay, onRetry, …).
+ */
+MiniA.prototype._llmRetryOptions = function(label, ctx, overrides) {
+  var self = this
+  return merge({
+    maxAttempts : 3,
+    initialDelay: 250,
+    maxDelay    : 4000,
+    context     : merge({ source: "llm" }, ctx || {}),
+    onRetry     : function(err, attempt, wait, category) {
+      self.fnI("retry", label + " attempt " + attempt + " failed (" + (isObject(category) ? category.type : String(err)) + "). Retrying in " + wait + "ms...")
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+        global.__mini_a_metrics.retries.inc()
+      }
+    }
+  }, overrides || {})
+}
+
 MiniA.prototype._updateErrorHistory = function(runtime, entry) {
   var target = isObject(runtime) ? runtime : {}
   if (!isArray(target.errorHistory)) target.errorHistory = []
@@ -7093,29 +7086,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
         }
 
-        var resolveConnectionId = function(identifier) {
-          if (typeof helpers.resolveConnectionId === "function") {
-            return helpers.resolveConnectionId(identifier)
-          }
-          if (!isString(identifier) || identifier.length === 0) return __
-          var normalized = identifier.trim()
-          var lowered = normalized.toLowerCase()
-          if (isObject(state.connections) && isObject(state.connections[normalized])) return normalized
-          if (isObject(state.aliasToId) && isString(state.aliasToId[normalized])) return state.aliasToId[normalized]
-          if (lowered === "default" || lowered === "primary") {
-            if (isString(state.defaultConnectionId) && isObject(state.connections) && isObject(state.connections[state.defaultConnectionId])) {
-              return state.defaultConnectionId
-            }
-            var availableIds = Object.keys(state.connections || {})
-            if (availableIds.length > 0) return availableIds[0]
-          }
-          return __
-        }
-
         var refreshTargets = []
         if (params.refresh === true) {
           if (isString(connectionRef) && connectionRef.length > 0) {
-            var resolvedId = resolveConnectionId(connectionRef)
+            var resolvedId = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(resolvedId)) {
               return { error: "Unknown connection identifier '" + connectionRef + "' supplied for refresh." }
             }
@@ -7160,7 +7134,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (action === "list") {
           var targetIds = []
           if (isString(connectionRef) && connectionRef.length > 0) {
-            var resolved = resolveConnectionId(connectionRef)
+            var resolved = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(resolved)) {
               return { error: "Unknown connection identifier '" + connectionRef + "'." }
             }
@@ -7190,7 +7164,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
           var searchableIds = []
           if (isString(connectionRef) && connectionRef.length > 0) {
-            var resolvedSearchId = resolveConnectionId(connectionRef)
+            var resolvedSearchId = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(resolvedSearchId)) {
               return { error: "Unknown connection identifier '" + connectionRef + "'." }
             }
@@ -7255,7 +7229,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
           var connectionId
           if (isString(connectionRef) && connectionRef.length > 0) {
-            connectionId = resolveConnectionId(connectionRef)
+            connectionId = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(connectionId)) {
               return { error: "Unknown connection identifier '" + connectionRef + "'." }
             }
@@ -7369,8 +7343,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               action    : "call",
               connection: { id: target.id, alias: target.alias },
               tool      : toolName,
-              error     : e.message || String(e),
-              content: [{ type: "text", text: "Error: " + (e.message || String(e)) }]
+              error     : __miniAErrMsg(e),
+              content: [{ type: "text", text: "Error: " + __miniAErrMsg(e) }]
             }
           }
         }
@@ -8657,7 +8631,7 @@ Selected tools (JSON array only):`
     var validToolNames = allTools.map(t => t.name)
     return selectedTools.filter(name => validToolNames.indexOf(name) >= 0)
   } catch (e) {
-    this.fnI("warn", `LLM tool selection failed: ${e.message || e}`)
+    this.fnI("warn", `LLM tool selection failed: ${__miniAErrMsg(e)}`)
     return []
   }
 }
@@ -8834,7 +8808,7 @@ MiniA.prototype._selectConnectionAndToolsByLLM = function(goal, allTools, llmIns
   try {
     parsed = JSON.parse(response)
   } catch (e) {
-    this.fnI("warn", `Connection-level LLM selection returned invalid JSON: ${e.message || e}`)
+    this.fnI("warn", `Connection-level LLM selection returned invalid JSON: ${__miniAErrMsg(e)}`)
     return []
   }
 
@@ -8939,7 +8913,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return lcSelected
       }
     } catch (e) {
-      this.fnI("warn", `Low-cost LLM tool selection failed: ${e.message || e}`)
+      this.fnI("warn", `Low-cost LLM tool selection failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8955,7 +8929,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return llmSelected
       }
     } catch (e) {
-      this.fnI("warn", `Main LLM tool selection failed: ${e.message || e}`)
+      this.fnI("warn", `Main LLM tool selection failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8975,7 +8949,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return connectionFallbackSelection
       }
     } catch (e) {
-      this.fnI("warn", `Low-cost LLM connection chooser failed: ${e.message || e}`)
+      this.fnI("warn", `Low-cost LLM connection chooser failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8991,7 +8965,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return connectionFallbackSelection
       }
     } catch (e) {
-      this.fnI("warn", `Primary LLM connection chooser failed: ${e.message || e}`)
+      this.fnI("warn", `Primary LLM connection chooser failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -9391,29 +9365,11 @@ MiniA.prototype.init = function(args) {
 
     // Load additional libraries if specified
     if (isDef(args.libs) && args.libs.length > 0) {
-      args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-        this.fnI("libs", `Loading library: ${lib}...`)
-        try {
-          if (lib.startsWith("@")) {
-            if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
-              var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
-              var _path = getOPackPath(_ar[1])
-              var _file = _path + "/" + _ar[2] + ".js"
-              if (io.fileExists(_file)) {
-                loadLib(_file)
-              } else {
-                this.fnI("error", `Library '${lib}' not found.`)
-              }
-            } else {
-              this.fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
-            }
-          } else {
-            loadLib(lib)
-          }
-        } catch(e) {
-          this.fnI("error", `Failed to load library ${lib}: ${e.message}`)
-        }
-      })
+      var _self = this
+      __miniALoadLibraries(args.libs,
+        function(msg) { _self.fnI("libs",  msg) },
+        function(msg) { _self.fnI("error", msg) }
+      )
     }
 
     // Check the need to init auditch
@@ -10410,18 +10366,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var summarizer = summarizeLLM.withInstructions(instructionText)
           if (!self._noJsonPrompt && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(ctx)
           return summarizer.promptWithStats(ctx)
-        }, {
-          maxAttempts : 3,
-          initialDelay: 250,
-          maxDelay    : 4000,
-          context     : { source: "llm", operation: "summarize" },
-          onRetry     : (err, attempt, wait, category) => {
-            this.fnI("retry", `Summarization attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-              global.__mini_a_metrics.retries.inc()
-            }
-          }
-        })
+        }, this._llmRetryOptions("Summarization", { operation: "summarize" }))
       } catch (e) {
         var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
         this.fnI("warn", `Summarization failed: ${summaryError.reason || e}`)
@@ -11025,23 +10970,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             return currentLLM.promptJSONWithStats(prompt)
           }
           return currentLLM.promptWithStats(prompt)
-        }, {
-          maxAttempts : 3,
-          initialDelay: 250,
-          maxDelay    : 6000,
-          context     : { source: "llm", llmType: llmType, step: step + 1 },
-          onRetry     : (err, attempt, wait, category) => {
-            this.fnI("retry", `${llmType} model attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-              global.__mini_a_metrics.retries.inc()
-            }
-          },
-          onFailure   : (err, attempts, category) => {
+        }, this._llmRetryOptions(llmType + " model", { llmType: llmType, step: step + 1 }, {
+          maxDelay  : 6000,
+          onFailure : (err, attempts, category) => {
             if (isObject(category) && category.type === "transient") {
               this.fnI("warn", `${llmType} model failed after ${attempts} attempts due to transient error: ${err && err.message}`)
             }
           }
-        })
+        }))
       } catch (e) {
         if (this.state == "stop" || (isObject(e) && e.miniAStop === true)) {
           break
@@ -11169,18 +11105,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 return this.llm.promptJSONWithStats(prompt)
               }
               return this.llm.promptWithStats(prompt)
-            }, {
-              maxAttempts : 3,
-              initialDelay: 250,
-              maxDelay    : 6000,
-              context     : { source: "llm", llmType: "main", reason: "fallback" },
-              onRetry     : (err, attempt, wait, category) => {
-                this.fnI("retry", `Main fallback model attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-                  global.__mini_a_metrics.retries.inc()
-                }
-              }
-            })
+            }, this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
           } catch (fallbackErr) {
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
               break
@@ -11813,18 +11738,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           return finalLLM.promptJSONWithStats(finalPrompt)
         }
         return finalLLM.promptWithStats(finalPrompt)
-      }, {
-        maxAttempts : 3,
-        initialDelay: 250,
-        maxDelay    : 6000,
-        context     : { source: "llm", operation: "final" },
-        onRetry     : (err, attempt, wait, category) => {
-          this.fnI("retry", `Final answer attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-            global.__mini_a_metrics.retries.inc()
-          }
-        }
-      })
+      }, this._llmRetryOptions("Final answer", { operation: "final" }, { maxDelay: 6000 }))
     } catch (finalErr) {
       var finalErrorInfo = this._categorizeError(finalErr, { source: "llm", operation: "final" })
       runtime.context.push(`[OBS FINAL] (error) final answer request failed: ${finalErrorInfo.reason}`)
@@ -12268,15 +12182,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
         return validatorLLM.promptJSONWithStats(validationPrompt)
       }
       return validatorLLM.promptWithStats(validationPrompt)
-    }, {
-      maxAttempts : 3,
-      initialDelay: 400,
-      maxDelay    : 4000,
-      context     : { source: "llm", operation: "deep-research-validation" },
-      onRetry     : (err, attempt, wait) => {
-        this.fnI("retry", `Research validation attempt ${attempt} failed. Retrying in ${wait}ms...`)
-      }
-    })
+    }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
     var totalTokens = this._getTotalTokens(stats)

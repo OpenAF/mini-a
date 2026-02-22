@@ -2,6 +2,9 @@
 // License: Apache 2.0
 // Description: SubtaskManager for Mini-A delegation - enables parent agents to spawn child agents for sub-goals
 
+var __SUBTASK_TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "timeout"])
+function __isTerminalSubtaskState(status) { return __SUBTASK_TERMINAL_STATES.has(status) }
+
 /**
  * <odoc>
  * <key>SubtaskManager</key>
@@ -548,52 +551,27 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
   return bestWorkers[idx]
 }
 
-SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload) {
-  var headers = { "Content-Type": "application/json" }
-  if (isString(this.parentArgs.apitoken) && this.parentArgs.apitoken.length > 0) {
-    headers.Authorization = "Bearer " + this.parentArgs.apitoken
-  }
-
-  var response
-  try {
-    response = $rest({ requestHeaders: headers }).post(workerUrl + path, payload || {})
-  } catch (e) {
-    var errMsg = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
-    throw new Error("Remote worker request failed (" + workerUrl + path + "): " + errMsg)
-  }
-
-  if (!isMap(response)) {
-    throw new Error("Remote worker response is not a map for endpoint " + path)
-  }
-
-  if (isString(response.error) && response.error.length > 0) {
-    throw new Error("Remote worker error: " + response.error)
-  }
-
-  return response
-}
-
-SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
+SubtaskManager.prototype._remoteCall = function(method, workerUrl, path, data) {
   var headers = { "Content-Type": "application/json" }
   if (isString(this.parentArgs.apitoken) && this.parentArgs.apitoken.length > 0) {
     headers.Authorization = "Bearer " + this.parentArgs.apitoken
   }
 
   var url = workerUrl + path
-  if (isMap(query)) {
+  if (method === "GET" && isMap(data)) {
     var queryParts = []
-    Object.keys(query).forEach(function(key) {
-      if (isUnDef(query[key])) return
-      queryParts.push(encodeURIComponent(String(key)) + "=" + encodeURIComponent(String(query[key])))
+    Object.keys(data).forEach(function(key) {
+      if (isUnDef(data[key])) return
+      queryParts.push(encodeURIComponent(String(key)) + "=" + encodeURIComponent(String(data[key])))
     })
-    if (queryParts.length > 0) {
-      url += "?" + queryParts.join("&")
-    }
+    if (queryParts.length > 0) url += "?" + queryParts.join("&")
   }
 
   var response
   try {
-    response = $rest({ requestHeaders: headers }).get(url)
+    response = method === "GET"
+      ? $rest({ requestHeaders: headers }).get(url)
+      : $rest({ requestHeaders: headers }).post(url, data || {})
   } catch (e) {
     var errMsg = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
     throw new Error("Remote worker request failed (" + url + "): " + errMsg)
@@ -608,6 +586,14 @@ SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
   }
 
   return response
+}
+
+SubtaskManager.prototype._remoteRequest = function(workerUrl, path, payload) {
+  return this._remoteCall("POST", workerUrl, path, payload)
+}
+
+SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
+  return this._remoteCall("GET", workerUrl, path, query)
 }
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
@@ -993,7 +979,7 @@ SubtaskManager.prototype.result = function(subtaskId) {
     throw new Error("Subtask " + subtaskId + " not found")
   }
   
-  if (subtask.status !== "completed" && subtask.status !== "failed" && subtask.status !== "cancelled" && subtask.status !== "timeout") {
+  if (!__isTerminalSubtaskState(subtask.status)) {
     throw new Error("Subtask " + subtaskId + " is not in terminal state (current: " + subtask.status + ")")
   }
   
@@ -1019,7 +1005,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   }
   
   // Check if already terminal
-  if (subtask.status === "completed" || subtask.status === "failed" || subtask.status === "cancelled" || subtask.status === "timeout") {
+  if (__isTerminalSubtaskState(subtask.status)) {
     return false
   }
   
@@ -1088,7 +1074,7 @@ SubtaskManager.prototype.waitFor = function(subtaskId, timeoutMs) {
   var pollInterval = 500
   
   while (true) {
-    if (subtask.status === "completed" || subtask.status === "failed" || subtask.status === "cancelled" || subtask.status === "timeout") {
+    if (__isTerminalSubtaskState(subtask.status)) {
       return this.result(subtaskId)
     }
     
@@ -1161,7 +1147,7 @@ SubtaskManager.prototype.cleanup = function(subtaskId) {
   }
   
   // Only allow cleanup of terminal states
-  if (subtask.status !== "completed" && subtask.status !== "failed" && subtask.status !== "cancelled" && subtask.status !== "timeout") {
+  if (!__isTerminalSubtaskState(subtask.status)) {
     throw new Error("Cannot cleanup subtask " + subtaskId + " in non-terminal state: " + subtask.status)
   }
   

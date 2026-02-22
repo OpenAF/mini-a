@@ -585,6 +585,21 @@ docker run --rm \
   outfile=/work/report.md usetools=true mcpproxy=true
 ```
 
+`mcp-web` now exposes both `get-url` (jsoup processing) and `http-request` (direct HTTP verbs).  
+`http-request` supports `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`; mutating verbs require starting `mcp-web` with `readwrite=true`.
+
+Example (`HEAD`, read-only):
+```bash
+mini-a goal="check response headers for rust-lang.org" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml', timeout: 5000)"
+```
+
+Example (`PATCH`, read-write enabled):
+```bash
+mini-a goal="call http-request PATCH on my API endpoint" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml readwrite=true', timeout: 5000)"
+```
+
 ### Web UI via Docker (Provider-Specific Examples)
 
 Run the Mini‑A browser UI inside a container by passing the proper `OAF_MODEL` configuration for your LLM provider and exposing port `12345`. The following examples mount a `history/` directory from the host so conversation transcripts persist across runs.

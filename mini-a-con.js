@@ -242,6 +242,7 @@ try {
   }
 
   __initializeCon()
+  loadLib("mini-a-common.js")
   loadLib("mini-a.js")
 
   ow.loadFormat()
@@ -627,31 +628,11 @@ try {
   }
 
   function resolveSkillTemplateFromFolder(folderPath) {
-    if (!isString(folderPath) || folderPath.trim().length === 0) return __
-    var candidates = ["SKILL.md", "skill.md"]
-    for (var i = 0; i < candidates.length; i++) {
-      var candidatePath = canonicalizePath(folderPath + "/" + candidates[i])
-      if (io.fileExists(candidatePath) && io.fileInfo(candidatePath).isFile === true) return candidatePath
-    }
-    return __
+    return __miniAResolveSkillTemplateFromFolder(folderPath)
   }
 
   function readSkillDescriptionFromTemplate(templatePath) {
-    if (!isString(templatePath) || templatePath.trim().length === 0) return __
-    try {
-      if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
-      var content = io.readFileString(templatePath)
-      if (!isString(content) || content.length === 0) return __
-      var normalized = String(content).replace(/\r\n/g, "\n")
-      var frontMatterMatch = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)
-      if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
-      var meta = af.fromYAML(frontMatterMatch[1])
-      if (!isObject(meta) || !isString(meta.description)) return __
-      var description = meta.description.replace(/\s+/g, " ").trim()
-      return description.length > 0 ? description : __
-    } catch(readSkillDescriptionError) {
-      return __
-    }
+    return __miniAReadSkillDescriptionFromTemplate(templatePath)
   }
 
   function parseExtraDirPaths(commaSeparated) {
@@ -1053,43 +1034,7 @@ try {
   }
 
   function renderCustomSlashTemplate(template, parsedArgs) {
-    var rendered = isString(template) ? template : String(template || "")
-    var replacedAny = false
-    var args = isObject(parsedArgs) ? parsedArgs : { raw: "", argv: [], argc: 0 }
-
-    function replaceAll(placeholder, value) {
-      if (rendered.indexOf(placeholder) >= 0) {
-        replacedAny = true
-        rendered = rendered.split(placeholder).join(value)
-      }
-    }
-
-    var argvString = "[]"
-    try {
-      argvString = stringify(args.argv || [], __, "")
-    } catch(ignoreArgvStringError) {
-      argvString = "[]"
-    }
-
-    replaceAll("{{args}}", args.raw || "")
-    replaceAll("{{argv}}", argvString)
-    replaceAll("{{argc}}", String(isNumber(args.argc) ? args.argc : 0))
-
-    rendered = rendered.replace(/\{\{arg([1-9][0-9]*)\}\}/g, function(_, indexStr) {
-      replacedAny = true
-      var idx = Number(indexStr) - 1
-      if (!isNaN(idx) && idx >= 0 && isArray(args.argv) && idx < args.argv.length) return args.argv[idx]
-      return ""
-    })
-
-    if ((args.argc || 0) > 0 && replacedAny !== true) {
-      rendered += "\n\nArguments (auto-appended):\n"
-      rendered += "- raw: " + (args.raw || "") + "\n"
-      rendered += "- argv: " + argvString + "\n"
-      rendered += "- argc: " + (args.argc || 0) + "\n"
-    }
-
-    return rendered
+    return __miniARenderSkillTemplate(template, parsedArgs)
   }
 
   function tryExpandInlineSkillInvocation(text) {

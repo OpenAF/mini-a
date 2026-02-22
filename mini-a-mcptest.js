@@ -8,32 +8,11 @@ var args = isDef(global._args) ? global._args : processExpr(" ")
 
 // Initialize OAF module
 __initializeCon()
+loadLib("mini-a-common.js")
 
 // Load additional libraries if specified
 if (isDef(args.libs) && args.libs.length > 0) {
-    args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-        log(`Loading library: ${lib}...`)
-        try {
-            if (lib.startsWith("@")) {
-                if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
-                    var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
-                    var _path = getOPackPath(_ar[1])
-                    var _file = _path + "/" + _ar[2] + ".js"
-                    if (io.fileExists(_file)) {
-                        loadLib(_file)
-                    } else {
-                        logErr(`Library '${lib}' not found.`)
-                    }
-                } else {
-                    logErr(`Library '${lib}' does not have the correct format (@oPack/library.js).`)
-                }
-            } else {
-                loadLib(lib)
-            }
-        } catch(e) {
-            logErr(`Failed to load library ${lib}: ${e.message}`)
-        }
-    })
+    __miniALoadLibraries(args.libs, log, logErr)
 }
 
 // Create MCP connection configuration

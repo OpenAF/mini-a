@@ -38,6 +38,9 @@ modes:
       - type   : ojob
         options:
           job: mcps/mcp-weather.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-net.yaml
       mcpproxy : true
 
   news:

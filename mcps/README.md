@@ -476,11 +476,12 @@ mini-a goal="summarize the most recent Azure announcements" \
 
 #### mcp-web
 
-`mcp-web` provides a simple web search and URL retrieval toolkit. It performs searches via DuckDuckGo and fetches web pages using jsoup, returning cleaned HTML, raw HTML, plain text, or a structured map.
+`mcp-web` provides web search, URL retrieval, and generic HTTP request capabilities. It performs searches via DuckDuckGo, fetches web pages using jsoup, and can execute direct HTTP requests with `$rest`.
 
 Arguments:
 
 - `onport` (optional): start an HTTP MCP server on the specified port.
+- `readwrite` (optional, default: `false`): allows mutating `http-request` methods (`POST`, `PUT`, `PATCH`, `DELETE`). Without it, only `GET` and `HEAD` are allowed.
 
 Tools:
 
@@ -488,6 +489,9 @@ Tools:
   - Input: `query` (string, required), `limit` (number, default 12), `searchEngine` (string, default `duckduckgo`/`ddg`).
 - `get-url`: Fetch and process a single URL.
   - Input: `url` (string, required), `style` (enum `html` | `basic` | `text` | `map`, default `basic`).
+- `http-request`: Execute a direct HTTP request and return the raw `$rest` response map.
+  - Input: `url` (string, required), `method` (enum `GET` | `HEAD` | `POST` | `PUT` | `PATCH` | `DELETE`, default `GET`), `data` (object, optional for `POST`/`PUT`/`PATCH`), `headers` (object, optional), `throwExceptions` (boolean, default `false`).
+  - `POST`/`PUT`/`PATCH`/`DELETE` require starting the MCP with `readwrite=true`.
 
 Example — search the web (STDIO MCP):
 
@@ -500,6 +504,18 @@ Example — fetch a URL as text:
 
 ```bash
 oafp in=mcp data="(cmd: 'ojob mcps/mcp-web.yaml', tool: get-url, params: (url: 'https://www.rust-lang.org/', style: 'text'))"
+```
+
+Example — HTTP HEAD request:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-web.yaml', tool: http-request, params: (url: 'https://www.rust-lang.org/', method: 'HEAD'))"
+```
+
+Example — HTTP PATCH request (requires `readwrite=true`):
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-web.yaml readwrite=true', tool: http-request, params: (url: 'https://example.com/api/item/1', method: 'PATCH', data: (status: 'done')))"
 ```
 
 Example — run as HTTP MCP server and call remotely:

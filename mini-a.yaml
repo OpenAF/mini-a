@@ -82,6 +82,10 @@ help:
     desc     : Additional comma-separated commands to ban
     example  : "lsblk,ifconfig"
     mandatory: false
+  - name     : extrahooks
+    desc     : Comma-separated list of additional hook directories to load
+    example  : "/path/to/hooks1,/path/to/hooks2"
+    mandatory: false
   - name     : outfile
     desc     : Output file path to save the final answer (if not provided, prints to console)
     example  : "/path/to/output.txt"
@@ -122,6 +126,24 @@ help:
     desc     : Alias for validationgoal
     example  : "Validate: includes sources, covers tradeoffs, provides a recommendation"
     mandatory: false
+  - name     : deepresearch
+    desc     : Enable deep research iterative cycles
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : maxcycles
+    desc     : "Maximum number of deep research cycles (default: 3)"
+    example  : "3"
+    mandatory: false
+  - name     : validationthreshold
+    desc     : Validation verdict label expected to pass deep research validation
+    example  : "PASS"
+    mandatory: false
+  - name     : persistlearnings
+    desc     : Persist deep research learnings between cycles
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : raw
     desc     : Whether to return raw output without formatting
     example  : "false"
@@ -210,6 +232,15 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : mcpproxy
+    desc     : Route MCP access through the proxy-dispatch tool
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcpproxythreshold
+    desc     : Byte threshold to auto-spill large proxy tool results to files (0 disables)
+    example  : "0"
+    mandatory: false
   - name     : forceplanning
     desc     : Force planning even when heuristics would normally skip it
     example  : "true"
@@ -225,6 +256,10 @@ help:
     example  : "simple"
     mandatory: false
     options  : ["simple", "legacy"]
+  - name     : earlystopthreshold
+    desc     : Number of consecutive think/error-like steps before forcing stronger recovery logic
+    example  : "3"
+    mandatory: false
   - name     : planmode
     desc     : Run Mini-A in plan-only mode (produce or convert plans without executing)
     example  : "false"
@@ -258,6 +293,43 @@ help:
     desc     : Initial state data to provide to the agent as structured JSON/SLON
     example  : '{"current_task": "analysis", "progress": 0}'
     mandatory: false
+  - name     : usedelegation
+    desc     : Enable subtask delegation to local/remote workers
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : workers
+    desc     : Comma-separated list of worker URLs (http/https) for delegation
+    example  : "http://127.0.0.1:17777,http://127.0.0.1:17778"
+    mandatory: false
+  - name     : workerreg
+    desc     : Start worker registration HTTP server on the provided port
+    example  : "18888"
+    mandatory: false
+  - name     : workerregtoken
+    desc     : Optional token required by the worker registration endpoint
+    example  : "my-shared-token"
+    mandatory: false
+  - name     : workerevictionttl
+    desc     : Worker eviction TTL in milliseconds for stale worker entries
+    example  : "60000"
+    mandatory: false
+  - name     : maxconcurrent
+    desc     : Maximum concurrent delegated subtasks
+    example  : "4"
+    mandatory: false
+  - name     : delegationmaxdepth
+    desc     : Maximum recursive delegation depth
+    example  : "3"
+    mandatory: false
+  - name     : delegationtimeout
+    desc     : Default delegated subtask timeout in milliseconds
+    example  : "300000"
+    mandatory: false
+  - name     : delegationmaxretries
+    desc     : Maximum retries per delegated subtask
+    example  : "2"
+    mandatory: false
   - name     : planfile
     desc     : Plan file path to load or save before execution
     example  : "/path/to/plan.md"
@@ -290,6 +362,19 @@ help:
   - name     : outputfile
     desc     : Alternative key for outfile, used mainly during plan conversions
     example  : "/tmp/output.json"
+    mandatory: false
+  - name     : miniadocs
+    desc     : Enable Mini-A docs shortcuts (alias for mini-a-docs)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : extraskills
+    desc     : Comma-separated list of additional skills roots for Mini Utils Tool
+    example  : "/path/skillsA,/path/skillsB"
+    mandatory: false
+  - name     : secpass
+    desc     : Password used to open OpenAF sBucket model secrets
+    example  : "my-secret-passphrase"
     mandatory: false
   - name     : shellprefix
     desc     : Override shell prefix when converting plans or running commands from stored plans
@@ -355,6 +440,7 @@ jobs:
       throw "OAF_MODEL environment variable not set. Please export OAF_MODEL or provide model= with your model configuration before running Mini-A."
     }
 
+# ----------------
 - name : MiniAgent
   from :
   - MiniAgent CheckEnv
@@ -373,9 +459,11 @@ jobs:
         maxcontext     : maxcontext
         maxcontent     : maxcontent
         readwrite      : readwrite
+        checkall       : checkall
         debug          : debug
         useshell       : useshell
         shell          : shell
+        extrahooks     : extrahooks
         knowledge      : knowledge
         youare         : youare
         chatyouare    : chatyouare
@@ -397,6 +485,10 @@ jobs:
         toolcachettl   : toolcachettl
         validationgoal : validationgoal
         valgoal        : valgoal
+        deepresearch   : deepresearch
+        maxcycles      : maxcycles
+        validationthreshold: validationthreshold
+        persistlearnings: persistlearnings
         usetools       : usetools
         usejsontool    : usejsontool
         useutils       : useutils
@@ -409,9 +501,13 @@ jobs:
         usemath        : usemath
         usestream      : usestream
         mcpdynamic     : mcpdynamic
+        mcpproxy       : mcpproxy
+        mcpproxythreshold: mcpproxythreshold
         mcplazy        : mcplazy
         useplanning    : useplanning
         forceplanning  : forceplanning
+        planstyle      : planstyle
+        earlystopthreshold: earlystopthreshold
         planmode       : planmode
         validateplan   : validateplan
         convertplan    : convertplan
@@ -420,18 +516,35 @@ jobs:
         planfile       : planfile
         planformat     : planformat
         plancontent    : plancontent
+        updatefreq     : updatefreq
+        updateinterval : updateinterval
+        forceupdates   : forceupdates
+        planlog        : planlog
         rules          : rules
         state          : state
+        usedelegation  : usedelegation
+        workers        : workers
+        workerreg      : workerreg
+        workerregtoken : workerregtoken
+        workerevictionttl: workerevictionttl
+        maxconcurrent  : maxconcurrent
+        delegationmaxdepth: delegationmaxdepth
+        delegationtimeout: delegationtimeout
+        delegationmaxretries: delegationmaxretries
         auditch        : auditch
         toollog        : toollog
         debugch        : debugch
         debuglcch      : debuglcch
         nosetmcpwd     : nosetmcpwd
+        miniadocs      : miniadocs
+        extraskills    : extraskills
+        secpass        : secpass
+        utilsroot      : utilsroot
         saveplannotes  : saveplannotes
   check:
     in:
       goal           : isString
-      mcp            : isString.default(__)
+      mcp            : default(__)
       verbose        : toBoolean.isBoolean.default(false)
       rpm            : toNumber.isNumber.default(__)
       rtm            : toNumber.isNumber.default(__)
@@ -440,17 +553,19 @@ jobs:
       maxcontext     : toNumber.isNumber.default(0)
       maxcontent     : toNumber.isNumber.default(__)
       readwrite      : toBoolean.isBoolean.default(false)
+      checkall       : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)
       shell          : isString.default(__)
+      extrahooks     : isString.default(__)
       knowledge      : isString.default(__)
       youare         : isString.default(__)
       chatyouare     : isString.default(__)
       outfile        : isString.default(__)
       outputfile     : isString.default(__)
       libs           : isString.default(__)
-      model          : isString.default(__)
-      modellc        : isString.default(__)
+      model          : default(__)
+      modellc        : default(__)
       conversation   : isString.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
@@ -464,6 +579,10 @@ jobs:
       toolcachettl   : toNumber.isNumber.default(__)
       validationgoal : isString.default(__)
       valgoal        : isString.default(__)
+      deepresearch   : toBoolean.isBoolean.default(false)
+      maxcycles      : toNumber.isNumber.default(__)
+      validationthreshold: isString.default(__)
+      persistlearnings: toBoolean.isBoolean.default(__)
       usetools       : toBoolean.isBoolean.default(false)
       usejsontool    : toBoolean.isBoolean.default(__)
       useutils       : toBoolean.isBoolean.default(false)
@@ -476,9 +595,13 @@ jobs:
       usemath        : toBoolean.isBoolean.default(false)
       usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
+      mcpproxy       : toBoolean.isBoolean.default(false)
+      mcpproxythreshold: toNumber.isNumber.default(__)
       mcplazy        : toBoolean.isBoolean.default(false)
       useplanning    : toBoolean.isBoolean.default(false)
       forceplanning  : toBoolean.isBoolean.default(false)
+      planstyle      : isString.default(__)
+      earlystopthreshold: toNumber.isNumber.default(__)
       planmode       : toBoolean.isBoolean.default(false)
       validateplan   : toBoolean.isBoolean.default(false)
       convertplan    : toBoolean.isBoolean.default(false)
@@ -487,13 +610,30 @@ jobs:
       planfile       : isString.default(__)
       planformat     : isString.default(__)
       plancontent    : isString.default(__)
-      rules          : isString.default(__)
-      state          : isString.default(__)
-      auditch        : isString.default(__)
-      toollog        : isString.default(__)
-      debugch        : isString.default(__)
-      debuglcch      : isString.default(__)
+      updatefreq     : isString.default(__)
+      updateinterval : toNumber.isNumber.default(__)
+      forceupdates   : toBoolean.isBoolean.default(false)
+      planlog        : isString.default(__)
+      rules          : default(__)
+      state          : default(__)
+      usedelegation  : toBoolean.isBoolean.default(false)
+      workers        : isString.default(__)
+      workerreg      : toNumber.isNumber.default(__)
+      workerregtoken : isString.default(__)
+      workerevictionttl: toNumber.isNumber.default(__)
+      maxconcurrent  : toNumber.isNumber.default(__)
+      delegationmaxdepth: toNumber.isNumber.default(__)
+      delegationtimeout: toNumber.isNumber.default(__)
+      delegationmaxretries: toNumber.isNumber.default(__)
+      auditch        : default(__)
+      toollog        : default(__)
+      debugch        : default(__)
+      debuglcch      : default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)
+      miniadocs      : toBoolean.isBoolean.default(false)
+      extraskills    : isString.default(__)
+      secpass        : isString.default(__)
+      utilsroot      : isString.default(__)
       saveplannotes  : toBoolean.isBoolean.default(false)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
