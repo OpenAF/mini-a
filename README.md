@@ -217,6 +217,14 @@ mini-a goal="compare release dates across APIs" \
 ```
 This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even when multiple MCP servers and the Mini Utils Tool are active. For large tool payloads, `proxy-dispatch` can also load arguments from `argumentsFile` and save results to a temporary JSON `resultFile` (`resultToFile=true`) to avoid context bloat. Prefer this pattern when `useutils=true` (recommended) or `useshell=true readwrite=true` and payloads are expected to be large. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for a deep dive.
 
+For some tool-calling runs with `gpt-oss-120b`, enabling `usejsontool=true` can improve reliability:
+
+```bash
+mini-a goal="what is the current time?" usetools=true mcpproxy=true usejsontool=true
+```
+
+This adds a compatibility shim for accidental `json` tool calls and feeds the payload back into Mini-A's normal action flow.
+
 **Chatbot mode:**
 ```bash
 mini-a goal="help me plan a vacation in Lisbon" chatbotmode=true
@@ -377,6 +385,7 @@ Mini-A ships with complementary components:
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
+| `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`) | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate Mini-A documentation directly | `false` |

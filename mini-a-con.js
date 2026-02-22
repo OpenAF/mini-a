@@ -1172,7 +1172,7 @@ try {
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
-      var statsCompletions = ["detailed", "tools"]
+      var statsCompletions = ["detailed", "tools", "out=", "file=", "save=", "json="]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc"]
       var contextCompletions = ["llm", "analyze"]
@@ -1252,11 +1252,26 @@ try {
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
+            var lastSpace = trimmedRemainder.lastIndexOf(" ")
+            var token = lastSpace >= 0 ? trimmedRemainder.substring(lastSpace + 1) : trimmedRemainder
+            var tokenInsertionPoint = insertionPoint + (lastSpace >= 0 ? (lastSpace + 1) : 0)
+            var tokenLower = token.toLowerCase()
+            var fileMatch = token.match(/^(out|file|save|json)=(.*)$/i)
+
+            if (fileMatch) {
+              var keyPrefix = fileMatch[1] + "="
+              var pathPrefix = fileMatch[2]
+              var fileCompletions = getFileCompletions(pathPrefix)
+              fileCompletions.forEach(function(path) {
+                candidates.add(keyPrefix + path)
+              })
+              return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
+            }
 
             statsCompletions.forEach(function(mode) {
-              if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
+              if (mode.indexOf(tokenLower) === 0) candidates.add(mode)
             })
-            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
           }
 
           // Handle /last command completions
@@ -2288,13 +2303,80 @@ try {
   var _streamMdState = {
     pending: "",
     inTable: false,
-    tableBuffer: ""
+    tableBuffer: "",
+    tableHeaderCandidate: ""
   }
-  var _streamTableSeparatorRegex = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
+  var _streamTableSeparatorRegex = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+  function _isStreamTableSeparator(lineText) {
+    if (!isString(lineText)) return false
+    return _streamTableSeparatorRegex.test(lineText.trim())
+  }
+
+  function _isStreamTableRow(lineText) {
+    if (!isString(lineText)) return false
+    var trimmed = lineText.trim()
+    if (trimmed.length === 0) return false
+    if (_isStreamTableSeparator(trimmed)) return false
+    return trimmed.indexOf("|") >= 0
+  }
+
+  function _streamTableCellCount(lineText) {
+    if (!isString(lineText)) return 0
+    var normalized = lineText.trim()
+    if (normalized.length === 0) return 0
+    if (normalized.indexOf("|") === 0) normalized = normalized.substring(1)
+    if (normalized.lastIndexOf("|") === normalized.length - 1) normalized = normalized.substring(0, normalized.length - 1)
+    if (normalized.length === 0) return 0
+    return normalized.split("|").length
+  }
+
+  function _containsStreamTableSyntax(text) {
+    if (!isString(text) || text.length === 0) return false
+    var lines = text.split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      if (_isStreamTableSeparator(lines[i]) || _isStreamTableRow(lines[i])) return true
+    }
+    return false
+  }
+
+  function _isStreamValidMarkdownTableText(text) {
+    if (!isString(text) || text.length === 0) return false
+    var lines = text.split("\n").filter(function(line) { return line.trim().length > 0 })
+    if (lines.length < 2) return false
+
+    var separatorIdx = -1
+    for (var i = 0; i < lines.length; i++) {
+      if (_isStreamTableSeparator(lines[i])) {
+        separatorIdx = i
+        break
+      }
+    }
+    if (separatorIdx <= 0) return false
+    if (separatorIdx > 1) return false
+
+    var headerLine = lines[separatorIdx - 1]
+    var separatorLine = lines[separatorIdx]
+    if (!_isStreamTableRow(headerLine)) return false
+
+    var headerCols = _streamTableCellCount(headerLine)
+    var separatorCols = _streamTableCellCount(separatorLine)
+    if (headerCols < 2 || separatorCols < 2 || headerCols !== separatorCols) return false
+
+    for (var j = separatorIdx + 1; j < lines.length; j++) {
+      if (!_isStreamTableRow(lines[j])) return false
+      if (_streamTableCellCount(lines[j]) !== headerCols) return false
+    }
+    return true
+  }
 
   function _printStreamMarkdown(text) {
     if (!isString(text) || text.length === 0) return
     _streamHasRendered = true
+    if (_containsStreamTableSyntax(text) && !_isStreamValidMarkdownTableText(text)) {
+      print(text)
+      return
+    }
     printnl(ow.format.withMD(text))
   }
 
@@ -2305,15 +2387,34 @@ try {
     _streamMdState.inTable = false
   }
 
+  function _flushStreamTableHeaderCandidate() {
+    if (_streamMdState.tableHeaderCandidate.length === 0) return
+    _printStreamMarkdown(_streamMdState.tableHeaderCandidate)
+    _streamMdState.tableHeaderCandidate = ""
+  }
+
   function _resetStreamRenderState() {
     _streamHasRendered = false
     _streamMdState.pending = ""
     _streamMdState.inTable = false
     _streamMdState.tableBuffer = ""
+    _streamMdState.tableHeaderCandidate = ""
   }
 
   function _flushStreamRemainder() {
+    if (_streamMdState.pending.length > 0) {
+      if (_streamMdState.inTable && (_isStreamTableRow(_streamMdState.pending) || _isStreamTableSeparator(_streamMdState.pending))) {
+        _streamMdState.tableBuffer += _streamMdState.pending
+        _streamMdState.pending = ""
+      } else if (!_streamMdState.inTable && _streamMdState.tableHeaderCandidate.length > 0 && _isStreamTableSeparator(_streamMdState.pending)) {
+        _streamMdState.inTable = true
+        _streamMdState.tableBuffer = _streamMdState.tableHeaderCandidate + _streamMdState.pending
+        _streamMdState.tableHeaderCandidate = ""
+        _streamMdState.pending = ""
+      }
+    }
     _flushStreamTableBuffer()
+    _flushStreamTableHeaderCandidate()
     if (_streamMdState.pending.length > 0) {
       _printStreamMarkdown(_streamMdState.pending)
       _streamMdState.pending = ""
@@ -2331,11 +2432,11 @@ try {
       var line = _streamMdState.pending.substring(0, newlineIdx)
       _streamMdState.pending = _streamMdState.pending.substring(newlineIdx + 1)
       var lineWithNl = line + "\n"
-      var trimmedLine = line.trim()
-      var isTableLine = trimmedLine.indexOf("|") === 0
+      var isTableLine = _isStreamTableRow(line)
+      var isTableSeparatorLine = _isStreamTableSeparator(line)
 
       if (_streamMdState.inTable) {
-        if (isTableLine) {
+        if (isTableLine || isTableSeparatorLine) {
           _streamMdState.tableBuffer += lineWithNl
         } else {
           _flushStreamTableBuffer()
@@ -2344,20 +2445,34 @@ try {
         continue
       }
 
-      if (isTableLine) {
-        _streamMdState.inTable = true
-        _streamMdState.tableBuffer = lineWithNl
+      if (_streamMdState.tableHeaderCandidate.length > 0) {
+        if (isTableSeparatorLine) {
+          _streamMdState.inTable = true
+          _streamMdState.tableBuffer = _streamMdState.tableHeaderCandidate + lineWithNl
+          _streamMdState.tableHeaderCandidate = ""
+        } else {
+          _flushStreamTableHeaderCandidate()
+          if (isTableLine) {
+            _streamMdState.tableHeaderCandidate = lineWithNl
+          } else {
+            _printStreamMarkdown(lineWithNl)
+          }
+        }
         continue
       }
 
-      _printStreamMarkdown(lineWithNl)
+      if (isTableLine) {
+        _streamMdState.tableHeaderCandidate = lineWithNl
+      } else {
+        _printStreamMarkdown(lineWithNl)
+      }
     }
 
     // Keep partial lines pending. If we're in a table and receive a separator
     // line without trailing newline, hold it until the next chunk completes it.
     if (!_streamMdState.inTable && _streamMdState.pending.length > 0) {
       var pendingTrimmed = _streamMdState.pending.trim()
-      var looksLikeTablePiece = pendingTrimmed.indexOf("|") === 0 || _streamTableSeparatorRegex.test(pendingTrimmed)
+      var looksLikeTablePiece = _isStreamTableRow(pendingTrimmed) || _isStreamTableSeparator(pendingTrimmed)
       if (!looksLikeTablePiece) {
         _printStreamMarkdown(_streamMdState.pending)
         _streamMdState.pending = ""
@@ -2728,7 +2843,81 @@ try {
     }
   }
 
+  function parseStatsOptions(args) {
+    var parsedArgs
+    if (isObject(args) && isArray(args.argv)) {
+      parsedArgs = {
+        ok: true,
+        raw: isString(args.raw) ? args.raw : "",
+        argv: args.argv,
+        argc: isNumber(args.argc) ? args.argc : args.argv.length
+      }
+    } else {
+      parsedArgs = parseSlashArgs(isString(args) ? args : "")
+    }
+    if (parsedArgs.ok !== true) return parsedArgs
+
+    var options = {
+      showDetailed: false,
+      showTools: false,
+      outputPath: __
+    }
+
+    for (var i = 0; i < parsedArgs.argv.length; i++) {
+      var token = parsedArgs.argv[i]
+      var tokenLower = token.toLowerCase()
+
+      if (tokenLower === "detailed" || tokenLower === "detail" || tokenLower === "full") {
+        options.showDetailed = true
+        continue
+      }
+      if (tokenLower === "tools" || tokenLower === "tool") {
+        options.showTools = true
+        continue
+      }
+
+      var valueFromNext = false
+      var outputKey = ""
+      var outputValue = ""
+      var splitPos = token.indexOf("=")
+
+      if (splitPos > 0) {
+        outputKey = token.substring(0, splitPos).toLowerCase()
+        outputValue = token.substring(splitPos + 1)
+      } else if (tokenLower === "out" || tokenLower === "output" || tokenLower === "file" || tokenLower === "save" || tokenLower === "json") {
+        valueFromNext = true
+        outputKey = tokenLower
+      }
+
+      if (outputKey === "out" || outputKey === "output" || outputKey === "file" || outputKey === "save" || outputKey === "json") {
+        if (valueFromNext) {
+          if (i + 1 >= parsedArgs.argv.length) {
+            return { ok: false, error: "Missing output file path after '" + token + "'." }
+          }
+          outputValue = parsedArgs.argv[++i]
+        }
+        if (!isString(outputValue) || outputValue.trim().length === 0) {
+          return { ok: false, error: "Output file path cannot be empty." }
+        }
+        options.outputPath = outputValue.trim()
+        continue
+      }
+
+      return { ok: false, error: "Unknown /stats argument '" + token + "'." }
+    }
+
+    options.ok = true
+    return options
+  }
+
   function printStats(args) {
+    var statsOptions = parseStatsOptions(args)
+    if (statsOptions.ok !== true) {
+      print(colorifyText("Usage: /stats [detailed] [tools] [out=<file.json>]", errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + statsOptions.error, errorColor))
+      return
+    }
+
     if (!isObject(activeAgent) || typeof activeAgent.getMetrics !== "function") {
       print(colorifyText("No active agent available. Run a goal first to collect metrics.", hintColor))
       return
@@ -2740,16 +2929,10 @@ try {
       return
     }
 
-    var showDetailed = false
-    var showTools = false
-    if (isString(args)) {
-      var argLower = args.toLowerCase().trim()
-      if (argLower === "detailed" || argLower === "detail" || argLower === "full") {
-        showDetailed = true
-      } else if (argLower === "tools" || argLower === "tool") {
-        showTools = true
-      }
-    }
+    var showDetailed = statsOptions.showDetailed === true
+    var showTools = statsOptions.showTools === true
+    var summaryExport = __
+    var exportPayload = __
 
     print(colorifyText("Mini-A Session Statistics", accentColor))
     print()
@@ -2757,9 +2940,20 @@ try {
     // Show general stats by default
     if (!showDetailed && !showTools) {
       var summaryRows = []
+      summaryExport = {
+        goals: {},
+        llm_calls: {},
+        actions: {},
+        performance: {}
+      }
 
       // Goals
       if (isObject(metrics.goals)) {
+        summaryExport.goals = {
+          achieved: metrics.goals.achieved || 0,
+          failed: metrics.goals.failed || 0,
+          stopped: metrics.goals.stopped || 0
+        }
         summaryRows.push({
           category: "Goals",
           metric: "Achieved",
@@ -2779,6 +2973,11 @@ try {
 
       // LLM Calls
       if (isObject(metrics.llm_calls)) {
+        summaryExport.llm_calls = {
+          total: metrics.llm_calls.total || 0,
+          normal: metrics.llm_calls.normal || 0,
+          low_cost: metrics.llm_calls.low_cost || 0
+        }
         summaryRows.push({
           category: "LLM Calls",
           metric: "Total",
@@ -2798,6 +2997,12 @@ try {
 
       // Actions
       if (isObject(metrics.actions)) {
+        summaryExport.actions = {
+          mcp_actions_executed: metrics.actions.mcp_actions_executed || 0,
+          mcp_actions_failed: metrics.actions.mcp_actions_failed || 0,
+          shell_commands_executed: metrics.actions.shell_commands_executed || 0,
+          thoughts_made: metrics.actions.thoughts_made || 0
+        }
         summaryRows.push({
           category: "Actions",
           metric: "MCP Executed",
@@ -2822,6 +3027,13 @@ try {
 
       // Performance
       if (isObject(metrics.performance)) {
+        summaryExport.performance = {
+          steps_taken: metrics.performance.steps_taken || 0
+        }
+        if (metrics.performance.total_session_time_ms > 0) {
+          summaryExport.performance.total_session_time_ms = metrics.performance.total_session_time_ms
+          summaryExport.performance.total_session_time_seconds = Number((metrics.performance.total_session_time_ms / 1000).toFixed(2))
+        }
         summaryRows.push({
           category: "Performance",
           metric: "Steps Taken",
@@ -2838,7 +3050,8 @@ try {
 
       print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       print()
-      print(colorifyText("Use '/stats detailed' for all metrics or '/stats tools' for per-tool statistics", hintColor))
+      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, or add out=<file.json> to save.", hintColor))
+      exportPayload = { mode: "summary", data: summaryExport }
     }
 
     // Show detailed stats
@@ -2846,6 +3059,7 @@ try {
       print(colorifyText("Detailed Statistics:", accentColor))
       print()
       print(printTree(metrics))
+      exportPayload = { mode: (showTools ? "detailed+tools" : "detailed"), data: metrics }
     }
 
     // Show per-tool stats
@@ -2872,6 +3086,24 @@ try {
         print(printTable(toolRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       } else {
         print(colorifyText("No per-tool statistics available yet.", hintColor))
+      }
+      if (!showDetailed) {
+        exportPayload = { mode: "tools", data: isObject(metrics.per_tool_usage) ? metrics.per_tool_usage : {} }
+      }
+    }
+
+    if (isString(statsOptions.outputPath) && statsOptions.outputPath.length > 0) {
+      var payload = {
+        generated_at: new Date(),
+        mode: isObject(exportPayload) && isString(exportPayload.mode) ? exportPayload.mode : "summary",
+        data: isObject(exportPayload) && isDef(exportPayload.data) ? exportPayload.data : {}
+      }
+      try {
+        io.writeFileJSON(statsOptions.outputPath, payload, "")
+        print()
+        print(colorifyText("Statistics written to " + statsOptions.outputPath, successColor))
+      } catch (statsSaveErr) {
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to write statistics file: " + statsSaveErr, errorColor))
       }
     }
   }
@@ -2904,7 +3136,7 @@ try {
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
-      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
+      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools)", hintColor),
       "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
       "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
@@ -3266,13 +3498,14 @@ try {
         }
         continue
       }
-      if (commandLower === "stats") {
-        printStats()
-        continue
-      }
-      if (commandLower.indexOf("stats ") === 0) {
-        var statsArg = command.substring(6).trim()
-        printStats(statsArg)
+      if (parsedSlashCommand.name === "stats") {
+        var parsedStatsArgs = parseSlashArgs(parsedSlashCommand.argsRaw)
+        if (parsedStatsArgs.ok !== true) {
+          print(colorifyText("Usage: /stats [detailed] [tools] [out=<file.json>]", errorColor))
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedStatsArgs.error, errorColor))
+          continue
+        }
+        printStats(parsedStatsArgs)
         continue
       }
       if (commandLower === "skills") {

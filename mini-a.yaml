@@ -107,8 +107,12 @@ help:
     example  : "lib1,lib2"
     mandatory: false
   - name     : maxcontext
-    desc     : Maximum context size in tokens (if exceeded, conversation will be summarized)
+    desc     : "Maximum context size in tokens (default: 0 = disable proactive summarization; recover automatically on provider context-window errors)"
     example  : "200000"
+    mandatory: false
+  - name     : maxcontent
+    desc     : Alias for maxcontext
+    example  : "0"
     mandatory: false
   - name     : validationgoal
     desc     : Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, defaults maxcycles=3)
@@ -144,6 +148,11 @@ help:
     mandatory: false
   - name     : usetools
     desc     : Register MCP tools directly on the model instead of expanding the prompt with schemas
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usejsontool
+    desc     : Register an optional compatibility json tool when usetools=true (for models that may emit json tool calls)
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
@@ -362,6 +371,7 @@ jobs:
         tpm            : tpm
         maxsteps       : maxsteps
         maxcontext     : maxcontext
+        maxcontent     : maxcontent
         readwrite      : readwrite
         debug          : debug
         useshell       : useshell
@@ -388,6 +398,7 @@ jobs:
         validationgoal : validationgoal
         valgoal        : valgoal
         usetools       : usetools
+        usejsontool    : usejsontool
         useutils       : useutils
         useskills      : useskills
         usediagrams    : usediagrams
@@ -427,6 +438,7 @@ jobs:
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
       maxcontext     : toNumber.isNumber.default(0)
+      maxcontent     : toNumber.isNumber.default(__)
       readwrite      : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)
@@ -453,6 +465,7 @@ jobs:
       validationgoal : isString.default(__)
       valgoal        : isString.default(__)
       usetools       : toBoolean.isBoolean.default(false)
+      usejsontool    : toBoolean.isBoolean.default(__)
       useutils       : toBoolean.isBoolean.default(false)
       useskills      : toBoolean.isBoolean.default(false)
       usediagrams    : toBoolean.isBoolean.default(false)
@@ -590,6 +603,7 @@ jobs:
     if (isDef(args.usemermaid) && isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
     if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
     if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
+    if (isDef(args.maxcontent) && isUnDef(args.maxcontext)) args.maxcontext = args.maxcontent
     if (isUnDef(args.format)) args.format = "md"
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     var originalGoalText = isString(args.goal) ? args.goal : ""

@@ -1895,16 +1895,21 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
       var ZoneId = java.time.ZoneId
       var ZonedDateTime = java.time.ZonedDateTime
       var DateTimeFormatter = java.time.format.DateTimeFormatter
+      var ChronoUnit = java.time.temporal.ChronoUnit
 
       var zone = isDef(params.timezone) ? ZoneId.of(params.timezone) : ZoneId.systemDefault()
       var now = ZonedDateTime.now(zone)
+      var truncatedNow = now.truncatedTo(ChronoUnit.SECONDS)
       var pattern = params.format || "yyyy-MM-dd'T'HH:mm:ssXXX"
       var formatter = DateTimeFormatter.ofPattern(pattern)
+      var timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
       return {
         timezone: String(zone.getId()),
         iso8601: String(now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)),
         formatted: String(now.format(formatter)),
+        date: String(now.toLocalDate()),
+        time: String(truncatedNow.toLocalTime().format(timeFormatter)),
         unixEpochSeconds: Number(now.toEpochSecond()),
         unixEpochMilliseconds: Number(now.toInstant().toEpochMilli())
       }

@@ -1370,12 +1370,24 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     var inTable = false         // Track if inside a table
     var codeBlockBuffer = ""    // Buffer code blocks until complete
     var tableBuffer = ""        // Buffer table rows until complete
-    var tableHeaderSeen = false // Track if table header separator was seen
+    var tableHeaderCandidate = "" // Buffer first row until separator confirms a table
     var firstOutput = true      // Track if first output (for initial newline)
     
-    // Regex to match valid markdown table separator lines (e.g., | --- | :---: | ---: |)
-    // Requires: starting |, one or more columns with dashes (optional alignment colons), ending |
-    var TABLE_SEPARATOR_REGEX = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
+    // Match markdown table separator rows with or without outer pipes.
+    var TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+    function isTableSeparatorLine(lineText) {
+        if (!isString(lineText)) return false
+        return TABLE_SEPARATOR_REGEX.test(lineText.trim())
+    }
+
+    function isTableRowLine(lineText) {
+        if (!isString(lineText)) return false
+        var trimmed = lineText.trim()
+        if (trimmed.length === 0) return false
+        if (isTableSeparatorLine(trimmed)) return false
+        return trimmed.indexOf("|") >= 0
+    }
 
     function isHexDigit(ch) {
         return /^[0-9a-fA-F]$/.test(ch)
@@ -1491,61 +1503,41 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
                 continue
             }
 
-            // Check for table row (starts with |)
-            if (trimmedLine.indexOf("|") === 0) {
-                // Check if this is a table header separator line
-                var isSeparator = TABLE_SEPARATOR_REGEX.test(trimmedLine)
-                
-                if (!inTable) {
-                    // Starting potential table
-                    if (isSeparator) {
-                        // This is a separator without a header - not a valid table
-                        // Output immediately as regular content
-                        flushContent(line + "\n")
-                        continue
-                    }
-                    // Buffer first line - might be table header
-                    inTable = true
-                    tableBuffer = line + "\n"
-                    tableHeaderSeen = false
+            var isTableLine = isTableRowLine(line)
+            var isSeparatorLine = isTableSeparatorLine(line)
+
+            if (inTable) {
+                if (isTableLine || isSeparatorLine) {
+                    tableBuffer += line + "\n"
                     continue
                 }
-                
-                // Already in table - check if this is the separator
-                if (!tableHeaderSeen) {
-                    if (isSeparator) {
-                        // Found the separator - now we know it's a valid table
-                        tableHeaderSeen = true
-                        tableBuffer += line + "\n"
-                        continue
-                    } else {
-                        // Second line is not a separator - not a valid table
-                        // Flush the buffered header as regular content
-                        flushContent(tableBuffer)
-                        // And flush current line
-                        flushContent(line + "\n")
-                        tableBuffer = ""
-                        inTable = false
-                        tableHeaderSeen = false
-                        continue
-                    }
-                }
-                
-                // tableHeaderSeen is true - valid table continues
-                tableBuffer += line + "\n"
-                continue
-            }
-
-            // If we were in a table and hit a non-table line
-            if (inTable) {
-                // Flush buffered content (valid table or non-table lines with |)
                 flushContent(tableBuffer)
                 tableBuffer = ""
                 inTable = false
-                tableHeaderSeen = false
             }
 
-            // Normal line - output immediately
+            if (tableHeaderCandidate.length > 0) {
+                if (isSeparatorLine) {
+                    inTable = true
+                    tableBuffer = tableHeaderCandidate + line + "\n"
+                    tableHeaderCandidate = ""
+                    continue
+                }
+                flushContent(tableHeaderCandidate)
+                tableHeaderCandidate = ""
+                if (isTableLine) {
+                    tableHeaderCandidate = line + "\n"
+                } else {
+                    flushContent(line + "\n")
+                }
+                continue
+            }
+
+            if (isTableLine) {
+                tableHeaderCandidate = line + "\n"
+                continue
+            }
+
             flushContent(line + "\n")
         }
     }
@@ -1554,7 +1546,19 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     function flushRemaining() {
         flushPendingEscapes()
         if (codeBlockBuffer.length > 0) flushContent(codeBlockBuffer)
+        if (contentBuffer.length > 0) {
+            if (inTable && (isTableRowLine(contentBuffer) || isTableSeparatorLine(contentBuffer))) {
+                tableBuffer += contentBuffer
+                contentBuffer = ""
+            } else if (!inTable && tableHeaderCandidate.length > 0 && isTableSeparatorLine(contentBuffer)) {
+                inTable = true
+                tableBuffer = tableHeaderCandidate + contentBuffer
+                tableHeaderCandidate = ""
+                contentBuffer = ""
+            }
+        }
         if (tableBuffer.length > 0) flushContent(tableBuffer)
+        if (tableHeaderCandidate.length > 0) flushContent(tableHeaderCandidate)
         if (contentBuffer.length > 0) flushContent(contentBuffer)
         flushContent("\n\n")
     }
@@ -4923,7 +4927,12 @@ MiniA.prototype._cleanCodeBlocks = function(text) {
  * Parse JSON payloads returned by models, including fenced or embedded JSON.
  */
 MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
-    if (isMap(rawResponse) || isArray(rawResponse)) return rawResponse
+    if (isMap(rawResponse)) {
+        var recoveredDirect = this._extractJsonActionFromPseudoToolCall(rawResponse)
+        if (isMap(recoveredDirect) || isArray(recoveredDirect)) return recoveredDirect
+        return rawResponse
+    }
+    if (isArray(rawResponse)) return rawResponse
     if (!isString(rawResponse)) return __
 
     var candidates = []
@@ -4940,7 +4949,11 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
     var parseCandidate = candidate => {
         if (!isString(candidate)) return __
         if (!candidate.startsWith("{") && !candidate.startsWith("[")) return __
-        return jsonParse(candidate, __, __, true)
+        var parsed = jsonParse(candidate, __, __, true)
+        if (!(isMap(parsed) || isArray(parsed))) return parsed
+        var recovered = this._extractJsonActionFromPseudoToolCall(parsed)
+        if (isMap(recovered) || isArray(recovered)) return recovered
+        return parsed
     }
 
     addCandidate(rawResponse)
@@ -4960,6 +4973,68 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
     for (var i = 0; i < candidates.length; i++) {
         var parsed = parseCandidate(candidates[i])
         if (isMap(parsed) || isArray(parsed)) return parsed
+    }
+
+    return __
+}
+
+MiniA.prototype._extractJsonActionFromPseudoToolCall = function(payload) {
+    var parseArguments = args => {
+        if (isMap(args) || isArray(args)) return args
+        if (!isString(args)) return __
+        var parsed = this._parseJsonCandidate(args)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+        return __
+    }
+
+    if (!isMap(payload)) return __
+    if (isDef(payload.action)) return payload
+
+    if (isMap(payload.arguments) && isDef(payload.arguments.action)) return payload.arguments
+    if (isString(payload.arguments)) {
+        var parsedPayloadArguments = parseArguments(payload.arguments)
+        if (isMap(parsedPayloadArguments) && isDef(parsedPayloadArguments.action)) return parsedPayloadArguments
+    }
+
+    var payloadName = isString(payload.name) ? payload.name.toLowerCase() : ""
+    if (payloadName === "json") {
+        var parsedNamedArguments = parseArguments(payload.arguments)
+        if (isMap(parsedNamedArguments) || isArray(parsedNamedArguments)) return parsedNamedArguments
+    }
+
+    if (isMap(payload.function)) {
+        var functionName = isString(payload.function.name) ? payload.function.name.toLowerCase() : ""
+        if (functionName === "json") {
+            var parsedFunctionArguments = parseArguments(payload.function.arguments)
+            if (isMap(parsedFunctionArguments) || isArray(parsedFunctionArguments)) return parsedFunctionArguments
+        }
+    }
+
+    if (isArray(payload.tool_calls)) {
+        for (var i = 0; i < payload.tool_calls.length; i++) {
+            var toolCall = payload.tool_calls[i]
+            if (!isMap(toolCall)) continue
+            var toolFunction = isMap(toolCall.function) ? toolCall.function : {}
+            var toolName = isString(toolCall.name)
+              ? toolCall.name.toLowerCase()
+              : (isString(toolFunction.name) ? toolFunction.name.toLowerCase() : "")
+            if (toolName !== "json") continue
+            var parsedToolArguments = parseArguments(isDef(toolCall.arguments) ? toolCall.arguments : toolFunction.arguments)
+            if (isMap(parsedToolArguments) || isArray(parsedToolArguments)) return parsedToolArguments
+        }
+    }
+
+    if (isArray(payload.choices)) {
+        for (var j = 0; j < payload.choices.length; j++) {
+            var choice = payload.choices[j]
+            if (!isMap(choice)) continue
+            var recoveredFromChoice = this._extractJsonActionFromPseudoToolCall(choice)
+            if (isMap(recoveredFromChoice) || isArray(recoveredFromChoice)) return recoveredFromChoice
+            if (isMap(choice.message)) {
+                var recoveredFromMessage = this._extractJsonActionFromPseudoToolCall(choice.message)
+                if (isMap(recoveredFromMessage) || isArray(recoveredFromMessage)) return recoveredFromMessage
+            }
+        }
     }
 
     return __
@@ -5080,26 +5155,71 @@ MiniA.prototype._parseJsonCandidate = function(rawText) {
     return __
 }
 
-MiniA.prototype._recoverMessageFromProviderError = function(rawPayload) {
-    var payload = isMap(rawPayload) ? rawPayload : {}
-    var errorPayload = __
+MiniA.prototype._extractProviderToolUseFailedGeneration = function(rawPayload) {
+    var queue = [ rawPayload ]
+    var seen = {}
+    var stringCandidates = []
 
-    if (isMap(payload.error)) errorPayload = payload.error
-    if (isUnDef(errorPayload) && isMap(payload.response) && isMap(payload.response.error)) {
-        errorPayload = payload.response.error
+    while (queue.length > 0) {
+        var current = queue.shift()
+        if (isUnDef(current) || current === null) continue
+
+        if (isString(current)) {
+            if (current.indexOf("failed_generation") >= 0) stringCandidates.push(current)
+            continue
+        }
+
+        if (isArray(current)) {
+            current.forEach(entry => queue.push(entry))
+            continue
+        }
+
+        if (!isMap(current)) continue
+
+        var currentId = md5(stringify(current, __, ""))
+        if (seen[currentId]) continue
+        seen[currentId] = true
+
+        var errorCode = isString(current.code) ? current.code.toLowerCase() : ""
+        var failedGeneration = isString(current.failed_generation) ? current.failed_generation : ""
+        if (errorCode === "tool_use_failed" && failedGeneration.length > 0) return failedGeneration
+
+        if (isString(current.message) && current.message.indexOf("failed_generation") >= 0) {
+            stringCandidates.push(current.message)
+        }
+
+        Object.keys(current).forEach(key => queue.push(current[key]))
     }
-    if (!isMap(errorPayload)) return __
 
-    var errorCode = isString(errorPayload.code) ? errorPayload.code : ""
-    var failedGeneration = isString(errorPayload.failed_generation) ? errorPayload.failed_generation : ""
-    if (errorCode !== "tool_use_failed" || failedGeneration.length === 0) return __
+    for (var i = 0; i < stringCandidates.length; i++) {
+        var text = stringCandidates[i]
+        if (!isString(text)) continue
+        var match = text.match(/"failed_generation"\s*:\s*"((?:\\.|[^"\\])*)"/)
+        if (!isArray(match) || match.length < 2) continue
+        var rawEscaped = match[1]
+        var decodedObj = jsonParse('{"x":"' + rawEscaped + '"}', __, __, true)
+        if (isMap(decodedObj) && isString(decodedObj.x) && decodedObj.x.length > 0) return decodedObj.x
+    }
+
+    return ""
+}
+
+MiniA.prototype._recoverMessageFromProviderError = function(rawPayload) {
+    var failedGeneration = this._extractProviderToolUseFailedGeneration(rawPayload)
+    if (!isString(failedGeneration) || failedGeneration.length === 0) return __
 
     var parsedFailure = this._parseJsonCandidate(failedGeneration)
+    if (!isMap(parsedFailure) && !isArray(parsedFailure)) {
+        var nestedString = jsonParse(failedGeneration, __, __, true)
+        if (isString(nestedString)) {
+            parsedFailure = this._parseJsonCandidate(nestedString)
+        }
+    }
     if (!isMap(parsedFailure) && !isArray(parsedFailure)) return __
 
-    if (isMap(parsedFailure) && isString(parsedFailure.name) && parsedFailure.name.toLowerCase() === "json" && isMap(parsedFailure.arguments)) {
-        return parsedFailure.arguments
-    }
+    var recovered = this._extractJsonActionFromPseudoToolCall(parsedFailure)
+    if (isMap(recovered) || isArray(recovered)) return recovered
+
     if (isMap(parsedFailure) && isDef(parsedFailure.action)) {
         return parsedFailure
     }
@@ -5666,9 +5786,18 @@ MiniA.prototype._categorizeError = function(error, context) {
   var normalized = isString(message) ? message.toLowerCase() : ""
   if (normalized.length === 0 && isString(err.code)) normalized = err.code.toLowerCase()
 
+  if (this._isContextOverflowError(err)) {
+    return {
+      type           : "permanent",
+      reason         : message && message.length > 0 ? message : "model context window exceeded",
+      contextOverflow: true
+    }
+  }
+
   var transientSignals = [
     "timeout", "temporar", "rate limit", "throttle", "econnreset", "econnrefused", "unreachable",
-    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open"
+    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open",
+    "tool call validation failed", "tool_use_failed", "attempted to call tool 'json'"
   ]
   var permanentSignals = ["invalid", "syntax", "parse", "unknown action", "not found", "missing", "denied"]
 
@@ -5693,6 +5822,76 @@ MiniA.prototype._categorizeError = function(error, context) {
   }
 
   return { type: category.type, reason: message }
+}
+
+MiniA.prototype._isContextOverflowError = function(error) {
+  var err = isObject(error) ? error : {}
+  if (isString(error)) err = { message: error }
+  if (!isObject(err)) return false
+
+  var samples = []
+  var add = value => {
+    if (!isString(value)) return
+    var text = value.trim()
+    if (text.length === 0) return
+    samples.push(text.toLowerCase())
+  }
+
+  add(err.message)
+  add(err.error)
+  add(err.code)
+  add(err.type)
+
+  if (isObject(err.response)) {
+    add(err.response.message)
+    add(err.response.error)
+    add(err.response.code)
+    add(err.response.type)
+    if (isObject(err.response.error)) {
+      add(err.response.error.message)
+      add(err.response.error.error)
+      add(err.response.error.code)
+      add(err.response.error.type)
+      add(err.response.error.status)
+    }
+  }
+
+  var normalized = samples.join(" | ")
+  if (normalized.length === 0) return false
+
+  var directSignals = [
+    "context_length_exceeded",
+    "model_context_window_exceeded",
+    "maximum context length",
+    "max context length",
+    "context window",
+    "prompt is too long",
+    "prompt too long",
+    "input token count",
+    "input too long",
+    "too many tokens",
+    "token limit exceeded",
+    "input length and max_tokens exceed context limit",
+    "input length and `max_tokens` exceed context limit",
+    "exceeds the maximum number of tokens"
+  ]
+
+  for (var i = 0; i < directSignals.length; i++) {
+    if (normalized.indexOf(directSignals[i]) >= 0) return true
+  }
+
+  var hasSizeTarget =
+    normalized.indexOf("context") >= 0 ||
+    normalized.indexOf("token") >= 0 ||
+    normalized.indexOf("prompt") >= 0 ||
+    normalized.indexOf("input") >= 0
+  var hasOverflowSignal =
+    normalized.indexOf("exceed") >= 0 ||
+    normalized.indexOf("too long") >= 0 ||
+    normalized.indexOf("limit") >= 0 ||
+    normalized.indexOf("maximum") >= 0
+
+  return hasSizeTarget && hasOverflowSignal
 }
 
 MiniA.prototype._withExponentialBackoff = function(operation, options) {
@@ -6342,6 +6541,86 @@ MiniA.prototype._createShellMcpConfig = function(args) {
   }
 }
 
+MiniA.prototype._createJsonToolMcpConfig = function(args) {
+  try {
+    if (toBoolean(args.usejsontool) !== true) return __
+
+    var parent = this
+    var fns = {
+      json: function(params) {
+        var payload = params
+        if (!(isMap(payload) || isArray(payload))) payload = {}
+        if (isObject(parent._runtime)) {
+          parent._runtime.pendingJsonToolPayload = payload
+        }
+        return {
+          content: [{ type: "text", text: "JSON payload accepted." }],
+          accepted: true
+        }
+      }
+    }
+
+    var fnsMeta = {
+      json: {
+        name       : "json",
+        description: "Compatibility shim: accept a JSON action payload and pass it back to Mini-A for normal processing.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            thought: { type: "string", description: "Reasoning/thought string for the step." },
+            action : { type: "string", description: "Action name such as think, shell, or final." },
+            command: { type: "string", description: "Shell command when action is shell." },
+            answer : { type: "string", description: "Final answer text when action is final." },
+            state  : { type: "object", description: "Optional state object to persist." },
+            params : { type: "object", description: "Optional action parameters." }
+          }
+        }
+      }
+    }
+
+    return {
+      id     : "mini-a-json-tool",
+      type   : "dummy",
+      options: {
+        name   : "mini-a-json-tool",
+        fns    : fns,
+        fnsMeta: fnsMeta
+      }
+    }
+  } catch (e) {
+    var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
+    this.fnI("warn", `Failed to prepare Mini-A json MCP: ${errMsg}`)
+    return __
+  }
+}
+
+MiniA.prototype._isOpenAIOssJsonToolModel = function(modelConfig) {
+  if (!isMap(modelConfig)) return false
+
+  var modelName = ""
+  if (isString(modelConfig.model) && modelConfig.model.trim().length > 0) {
+    modelName = modelConfig.model.trim()
+  } else if (isMap(modelConfig.options) && isString(modelConfig.options.model) && modelConfig.options.model.trim().length > 0) {
+    modelName = modelConfig.options.model.trim()
+  }
+
+  if (!isString(modelName) || modelName.length === 0) return false
+
+  var normalized = modelName.toLowerCase()
+  return normalized.indexOf("gpt-oss-120b") >= 0 || normalized.indexOf("gpt-oss-20b") >= 0
+}
+
+MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasDefined) {
+  if (!isMap(args)) return
+  if (toBoolean(useJsonToolWasDefined) === true) return
+  if (toBoolean(args.usejsontool) === true) return
+
+  if (this._isOpenAIOssJsonToolModel(this._oaf_model)) {
+    args.usejsontool = true
+    this.fnI("info", "Model is gpt-oss-120b/20b and usejsontool is not set: enabling usejsontool=true compatibility mode.")
+  }
+}
+
 MiniA.prototype._createDelegationMcpConfig = function(args) {
   try {
     if (isUnDef(this._subtaskManager)) {
@@ -6521,6 +6800,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         connections       : {},
         aliasToId         : {},
         idToAlias         : {},
+        defaultConnectionId: __,
         catalog           : [],
         toolToConnections : {},
         aliasCounter      : 0,
@@ -6594,8 +6874,20 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       var state = global.__mcpProxyState__
       if (!isObject(state) || isUnDef(identifier)) return __
       if (isString(identifier) && identifier.length > 0) {
-        if (isObject(state.connections) && isObject(state.connections[identifier])) return identifier
-        if (isObject(state.aliasToId) && isString(state.aliasToId[identifier])) return state.aliasToId[identifier]
+        var normalized = identifier.trim()
+        var lowered = normalized.toLowerCase()
+        if (isObject(state.connections) && isObject(state.connections[normalized])) return normalized
+        if (isObject(state.aliasToId) && isString(state.aliasToId[normalized])) return state.aliasToId[normalized]
+        if (lowered === "default" || lowered === "primary") {
+          if (isString(state.defaultConnectionId) && isObject(state.connections) && isObject(state.connections[state.defaultConnectionId])) {
+            return state.defaultConnectionId
+          }
+          var connectionIds = Object.keys(state.connections || {})
+          if (connectionIds.length > 0) {
+            state.defaultConnectionId = connectionIds[0]
+            return state.defaultConnectionId
+          }
+        }
       }
       return __
     }
@@ -6719,6 +7011,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         lastRefreshed      : now(),
         lastError          : __
       }
+      if (!isString(state.defaultConnectionId) || !isObject(state.connections[state.defaultConnectionId])) {
+        state.defaultConnectionId = connectionId
+      }
 
       parent.fnI("info", `[mcp-proxy] Connection #${index + 1} ready as '${alias}' with ${extracted.tools.length} tool(s).`)
     })
@@ -6803,8 +7098,17 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             return helpers.resolveConnectionId(identifier)
           }
           if (!isString(identifier) || identifier.length === 0) return __
-          if (isObject(state.connections) && isObject(state.connections[identifier])) return identifier
-          if (isObject(state.aliasToId) && isString(state.aliasToId[identifier])) return state.aliasToId[identifier]
+          var normalized = identifier.trim()
+          var lowered = normalized.toLowerCase()
+          if (isObject(state.connections) && isObject(state.connections[normalized])) return normalized
+          if (isObject(state.aliasToId) && isString(state.aliasToId[normalized])) return state.aliasToId[normalized]
+          if (lowered === "default" || lowered === "primary") {
+            if (isString(state.defaultConnectionId) && isObject(state.connections) && isObject(state.connections[state.defaultConnectionId])) {
+              return state.defaultConnectionId
+            }
+            var availableIds = Object.keys(state.connections || {})
+            if (availableIds.length > 0) return availableIds[0]
+          }
           return __
         }
 
@@ -7216,7 +7520,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             },
             connection: {
               type       : "string",
-              description: "Optional connection identifier or alias. When omitted, actions operate across all registered connections."
+              description: "Optional connection identifier or alias. Special aliases 'default' and 'primary' resolve to the proxy default connection. When omitted, actions operate across all registered connections."
             },
             query: {
               type       : "string",
@@ -8903,6 +9207,7 @@ MiniA.prototype.init = function(args) {
       { name: "utilsroot", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
+      { name: "usejsontool", type: "boolean", default: __ },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
       { name: "workerreg", type: "number", default: __ },
@@ -8915,6 +9220,7 @@ MiniA.prototype.init = function(args) {
     ])
 
     // Convert and validate boolean arguments
+    var useJsonToolWasDefined = isDef(args.usejsontool)
     args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
     args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
@@ -8931,6 +9237,7 @@ MiniA.prototype.init = function(args) {
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
+    args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -9219,6 +9526,7 @@ MiniA.prototype.init = function(args) {
       this._noJsonPrompt = true
       this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
     }
+    this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
 
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
@@ -9346,6 +9654,14 @@ MiniA.prototype.init = function(args) {
         if (isMap(shellMcpConfig)) aggregatedMcpConfigs.push(shellMcpConfig)
       }
 
+      var jsonToolMcpConfig = __
+      // Optional compatibility shim for models that attempt to call a 'json' tool
+      if (args.usetools === true && args.usejsontool === true) {
+        jsonToolMcpConfig = this._createJsonToolMcpConfig(args)
+        // Keep json as a direct top-level tool when proxy mode is enabled.
+        if (isMap(jsonToolMcpConfig) && toBoolean(args.mcpproxy) !== true) aggregatedMcpConfigs.push(jsonToolMcpConfig)
+      }
+
       // If mcpproxy is enabled, wrap all MCP configs into a single proxy
       if (toBoolean(args.mcpproxy) === true && aggregatedMcpConfigs.length > 0) {
         this.fnI("mcp", `MCP proxy mode enabled. Aggregating ${aggregatedMcpConfigs.length} MCP connection(s) into a single proxy...`)
@@ -9355,6 +9671,10 @@ MiniA.prototype.init = function(args) {
         } else {
           this.fnI("warn", "Failed to create MCP proxy. Falling back to direct connections.")
         }
+      }
+
+      if (toBoolean(args.mcpproxy) === true && isMap(jsonToolMcpConfig)) {
+        aggregatedMcpConfigs.push(jsonToolMcpConfig)
       }
     }
 
@@ -9867,12 +10187,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
+      { name: "usejsontool", type: "boolean", default: __ },
       { name: "mcpproxythreshold", type: "number", default: 0 }
     ])
 
     // Removed verbose knowledge length logging after validation
 
     // Convert and validate boolean arguments
+    var useJsonToolWasDefined = isDef(args.usejsontool)
     args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
     args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
@@ -9886,6 +10208,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
+    args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
+    this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
@@ -10128,8 +10452,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Helper function to check and summarize context during execution
     var checkAndSummarizeContext = () => {
-      // Set smart default if not specified (auto-enable at 50K tokens)
-      var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 50000
+      // maxcontext=0 disables proactive context management; rely on provider overflow recovery
+      var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 0
+      if (effectiveMaxContext <= 0) return
 
       var contextTokens = this._estimateTokens(runtime.context.join(""))
 
@@ -10186,6 +10511,40 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
       }
     }
+
+    var recoverContextAfterProviderOverflow = function(stepNumber, llmType, errorInfo) {
+      if (args.maxcontext !== 0) return false
+      if (!isObject(errorInfo) || errorInfo.contextOverflow !== true) return false
+      if ((runtime.contextOverflowRecoveries || 0) >= 3) return false
+
+      var combinedContext = runtime.context.join("\n")
+      if (!isString(combinedContext) || combinedContext.length === 0) return false
+
+      var beforeTokens = this._estimateTokens(combinedContext)
+      this.fnI("summarize", `Detected provider context-window error (${llmType}, maxcontext=0). Auto-compressing context...`)
+      global.__mini_a_metrics.context_summarizations.inc()
+
+      var summarized = summarize(combinedContext)
+      if (!isString(summarized) || summarized.trim().length === 0) {
+        summarized = combinedContext
+      }
+      if (summarized.length > 30000) {
+        summarized = "[AUTO-TRUNCATED SUMMARY]\n" + summarized.substring(summarized.length - 30000)
+      }
+
+      runtime.context = [`[SUMMARY] Auto-recovery after provider context-window error: ${summarized}`]
+      runtime.contextOverflowRecoveries = (runtime.contextOverflowRecoveries || 0) + 1
+
+      var errorSummaryEntry = this._renderErrorHistory(runtime)
+      if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
+        runtime.context.unshift(errorSummaryEntry)
+      }
+
+      var afterTokens = this._estimateTokens(runtime.context.join("\n"))
+      runtime.context.push(`[OBS ${stepNumber}] (recover) Provider context-window error detected; context compressed from ~${beforeTokens} to ~${afterTokens} tokens.`)
+      this.fnI("size", `Context auto-recovery complete: ~${beforeTokens} -> ~${afterTokens} tokens (attempt ${runtime.contextOverflowRecoveries}/3).`)
+      return true
+    }.bind(this)
 
     // Check if goal is a string or a file path
     if (args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
@@ -10355,7 +10714,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       restoredFromCheckpoint: false,
       successfulActionDetected: false,
       modelToolCallDetected  : false,
+      providerToolUseFailedDetected: false,
+      pendingJsonToolPayload   : __,
       hasEscalated            : false,
+      contextOverflowRecoveries: 0,
       earlyStopThreshold      : baseEarlyStopThreshold,
       earlyStopTriggered      : false,
       earlyStopReason         : "",
@@ -10549,6 +10911,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       runtime.successfulActionDetected = false
       runtime.modelToolCallDetected = false
+      runtime.providerToolUseFailedDetected = false
+      runtime.pendingJsonToolPayload = __
 
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
@@ -10683,6 +11047,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           break
         }
 
+        var thrownToolUseFailed = this._extractProviderToolUseFailedGeneration(e)
+        var thrownResponseToolUseFailed = isObject(e) ? this._extractProviderToolUseFailedGeneration(e.response) : ""
+        if (thrownToolUseFailed.length > 0 || thrownResponseToolUseFailed.length > 0) {
+          runtime.providerToolUseFailedDetected = true
+        }
+
         var recoveredFromThrownError = this._recoverMessageFromProviderError(e)
         if (!(isMap(recoveredFromThrownError) || isArray(recoveredFromThrownError)) && isObject(e) && isDef(e.response)) {
           recoveredFromThrownError = this._recoverMessageFromProviderError(e.response)
@@ -10701,6 +11071,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
           runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
           this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
+          if (recoverContextAfterProviderOverflow(step + 1, llmType, llmErrorInfo)) {
+            if (args.debug || args.verbose) {
+              this.fnI("recover", `Step ${step + 1}: detected provider context-window overflow; compressed context and retrying.`)
+            }
+            continue
+          }
           if (args.debug || args.verbose) {
             this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
           }
@@ -10710,6 +11086,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       var recoveredMsgFromEnvelope = __
       if (isObject(responseWithStats) && isMap(responseWithStats.response)) {
+        var responseToolUseFailed = this._extractProviderToolUseFailedGeneration(responseWithStats.response)
+        if (responseToolUseFailed.length > 0) {
+          runtime.providerToolUseFailedDetected = true
+        }
         recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats.response)
       }
 
@@ -10806,6 +11186,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               break
             }
 
+            var fallbackThrownToolUseFailed = this._extractProviderToolUseFailedGeneration(fallbackErr)
+            var fallbackResponseToolUseFailed = isObject(fallbackErr) ? this._extractProviderToolUseFailedGeneration(fallbackErr.response) : ""
+            if (fallbackThrownToolUseFailed.length > 0 || fallbackResponseToolUseFailed.length > 0) {
+              runtime.providerToolUseFailedDetected = true
+            }
+
             var recoveredFallbackFromThrownError = this._recoverMessageFromProviderError(fallbackErr)
             if (!(isMap(recoveredFallbackFromThrownError) || isArray(recoveredFallbackFromThrownError)) && isObject(fallbackErr) && isDef(fallbackErr.response)) {
               recoveredFallbackFromThrownError = this._recoverMessageFromProviderError(fallbackErr.response)
@@ -10836,6 +11222,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
           var fallbackRecoveredMsgFromEnvelope = __
           if (isObject(fallbackResponseWithStats) && isMap(fallbackResponseWithStats.response)) {
+            var fallbackEnvelopeToolUseFailed = this._extractProviderToolUseFailedGeneration(fallbackResponseWithStats.response)
+            if (fallbackEnvelopeToolUseFailed.length > 0) {
+              runtime.providerToolUseFailedDetected = true
+            }
             fallbackRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(fallbackResponseWithStats.response)
           }
 
@@ -10932,6 +11322,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       if (!recoveredFromEnvelopeApplied && isMap(msg)) {
+        var directMsgToolUseFailed = this._extractProviderToolUseFailedGeneration(msg)
+        if (directMsgToolUseFailed.length > 0) {
+          runtime.providerToolUseFailedDetected = true
+        }
         var recoveredMsg = this._recoverMessageFromProviderError(msg)
         if (isMap(recoveredMsg) || isArray(recoveredMsg)) {
           msg = recoveredMsg
@@ -10994,6 +11388,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         addActionMessage(baseMsg)
       }
 
+      if (actionMessages.length === 0 && (isMap(runtime.pendingJsonToolPayload) || isArray(runtime.pendingJsonToolPayload))) {
+        addActionMessage(runtime.pendingJsonToolPayload)
+        runtime.pendingJsonToolPayload = __
+        runtime.context.push(`[OBS ${step + 1}] (recover) consumed payload from 'json' compatibility tool.`)
+      }
+
       if (actionMessages.length === 0) {
         if (runtime.modelToolCallDetected === true) {
           if (stateUpdatedThisStep && !stateRecordedInContext) {
@@ -11008,11 +11408,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         var baseMsgInfo = isMap(baseMsg) ? `Object with keys: ${Object.keys(baseMsg).join(", ")}` : (isArray(baseMsg) ? `Empty array` : `Type: ${typeof baseMsg}`)
         runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Received: ${baseMsgInfo}`)
-        this._registerRuntimeError(runtime, {
-          category: "permanent",
-          message : "missing action from model",
-          context : { step: step + 1 }
-        })
+        if (runtime.providerToolUseFailedDetected === true) {
+          runtime.context.push(`[OBS ${step + 1}] (recover) Provider returned tool_use_failed payload; treating missing action as transient and retrying.`)
+          this._registerRuntimeError(runtime, {
+            category: "transient",
+            message : "missing action from model after provider tool_use_failed",
+            context : { step: step + 1 }
+          })
+        } else {
+          this._registerRuntimeError(runtime, {
+            category: "permanent",
+            message : "missing action from model",
+            context : { step: step + 1 }
+          })
+        }
         if (stateUpdatedThisStep && !stateRecordedInContext) {
           runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
           stateRecordedInContext = true
@@ -11058,6 +11467,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           flushToolActions()
           break
         }
+        var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
+        var stepLabel = `${step + 1}${stepSuffix}`
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
         var action = origActionRaw.toLowerCase()
@@ -11067,28 +11478,38 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var paramsValue = currentMsg.params
 
         if (origActionRaw.length == 0) {
+          var canInferFinalAction = isString(answerValue) && answerValue.trim().length > 0 && commandValue.length == 0 && isUnDef(paramsValue)
+          if (canInferFinalAction) {
+            origActionRaw = "final"
+            action = "final"
+            currentMsg.action = "final"
+            runtime.context.push(`[OBS ${stepLabel}] (recover) inferred missing 'action' as 'final' from non-empty 'answer'.`)
+          }
+        }
+
+        if (origActionRaw.length == 0) {
           var msgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
-          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Available keys in this entry: ${msgKeys}`)
+          runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Available keys in this entry: ${msgKeys}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "missing action in multi-action entry",
-            context : { step: step + 1 }
+            context : { step: stepLabel }
           })
           break
         }
         if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
           var currentMsgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
           var thoughtInfo = isUnDef(currentMsg.thought) && isUnDef(currentMsg.think) ? "no 'thought' or 'think' field" : `'thought'/'think' field is empty or invalid`
-          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)
+          runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "missing thought from model",
-            context : { step: step + 1 }
+            context : { step: stepLabel }
           })
           break
         }
         if (isDef(currentMsg.action) && currentMsg.action == "final" && isDef(currentMsg.params)) {
-          runtime.context.push(`[OBS ${step + 1}] (error) 'final' action cannot have 'params', use 'answer' instead.`)
+          runtime.context.push(`[OBS ${stepLabel}] (error) 'final' action cannot have 'params', use 'answer' instead.`)
         }
 
         if (!runtime.clearedConsecutiveErrors) {
@@ -11097,8 +11518,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.clearedConsecutiveErrors = true
         }
 
-        var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
-        var stepLabel = `${step + 1}${stepSuffix}`
         var isKnownTool = this.mcpToolToConnection && isDef(this.mcpToolToConnection[origActionRaw])
 
         global.__mini_a_metrics.thoughts_made.inc()

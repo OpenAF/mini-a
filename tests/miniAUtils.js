@@ -730,6 +730,8 @@
     ow.test.assert(isDef(result1.timezone), true, "Should return timezone")
     ow.test.assert(isDef(result1.iso8601), true, "Should return ISO8601 format")
     ow.test.assert(isDef(result1.formatted), true, "Should return formatted time")
+    ow.test.assert(isDef(result1.date), true, "Should return date")
+    ow.test.assert(isDef(result1.time), true, "Should return time")
     ow.test.assert(isDef(result1.unixEpochSeconds), true, "Should return unix epoch seconds")
     ow.test.assert(isDef(result1.unixEpochMilliseconds), true, "Should return unix epoch milliseconds")
     ow.test.assert(result1.unixEpochSeconds > 0, true, "Unix epoch should be positive")
