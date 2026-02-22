@@ -71,6 +71,7 @@ When `mcpproxy=true` is set:
 | `mcpproxy` | boolean | `false` | Enable MCP proxy mode — aggregates all downstream MCP connections under a single `proxy-dispatch` tool |
 | `mcplazy` | boolean | `false` | Defer MCP connection setup until first tool use |
 | `mcpproxythreshold` | number (bytes) | `0` | Global auto-spill threshold. When > 0, any `call` result whose serialized size exceeds this value is automatically written to a temporary file instead of being returned inline. `0` = disabled |
+| `mcpproxytoon` | boolean | `false` | When `mcpproxythreshold > 0`, serialize object/array results with `af.toTOON(...)` before size checks/spill previews, improving readability and searchability for partial reads |
 
 ## The proxy-dispatch Tool
 
@@ -213,6 +214,13 @@ Set `mcpproxythreshold=<bytes>` at startup to automatically spill any result exc
 
 ```shell
 mini-a goal="..." usetools=true mcpproxy=true mcpproxythreshold=51200 \
+  mcp="[...]" useutils=true
+```
+
+Optionally add `mcpproxytoon=true` to serialize large object/array results as TOON text (`af.toTOON(...)`) before spill sizing and previews:
+
+```shell
+mini-a goal="..." usetools=true mcpproxy=true mcpproxythreshold=51200 mcpproxytoon=true \
   mcp="[...]" useutils=true
 ```
 

@@ -7037,6 +7037,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     // Capture auto-spill threshold (0 = disabled) from args at config creation time
     var globalSpillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
       ? Math.floor(args.mcpproxythreshold) : 0
+    var globalSpillToon = toBoolean(args.mcpproxytoon) === true && globalSpillThreshold > 0
 
     // Define the proxy-dispatch function
     var fns = {
@@ -7054,18 +7055,22 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         var includeSchema = params.includeInputSchema === true
         var includeAnnotations = params.includeAnnotations !== false
 
-        var createProxyTempFile = function(prefix, payload) {
+        var createProxyTempFile = function(prefix, payloadText, payloadFormat) {
           var resolvedPrefix = isString(prefix) && prefix.trim().length > 0 ? prefix.trim() : "mini-a-proxy"
+          var resolvedFormat = isString(payloadFormat) ? payloadFormat.trim().toLowerCase() : "json"
+          if (resolvedFormat !== "toon") resolvedFormat = "json"
+          var resolvedSuffix = resolvedFormat === "toon" ? ".toon" : ".json"
+          var textToWrite = isString(payloadText) ? payloadText : stringify(payloadText, __, "")
           var tempPath
           try {
-            var tempFile = java.nio.file.Files.createTempFile(resolvedPrefix + "-", ".json")
+            var tempFile = java.nio.file.Files.createTempFile(resolvedPrefix + "-", resolvedSuffix)
             tempPath = String(tempFile.toAbsolutePath())
           } catch(tempCreateError) {
             throw new Error("Failed to create temporary file: " + (tempCreateError.message || String(tempCreateError)))
           }
 
           try {
-            io.writeFileString(tempPath, stringify(payload, __, ""))
+            io.writeFileString(tempPath, textToWrite)
           } catch(tempWriteError) {
             try {
               if (isString(tempPath) && tempPath.length > 0 && io.fileExists(tempPath)) io.rm(tempPath)
@@ -7102,7 +7107,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           try {
             return af.fromJson(raw)
           } catch(parseError) {
-            throw new Error("Invalid JSON in " + label + " file: " + (parseError.message || String(parseError)))
+            try {
+              return af.fromJSSLON(raw)
+            } catch(parseErrorJSSLON) {
+              throw new Error("Invalid JSON/JSSLON/TOON in " + label + " file: " + (parseError.message || String(parseError)))
+            }
           }
         }
 
@@ -7274,7 +7283,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           if (isString(params.argumentsFile) && params.argumentsFile.trim().length > 0) {
             var fileArgs = readProxyJsonFile(params.argumentsFile, "arguments")
             if (!isMap(fileArgs)) {
-              return { error: "The arguments file must contain a JSON object." }
+              return { error: "The arguments file must contain a JSON/JSSLON/TOON object." }
             }
             inputArgs = fileArgs
           }
@@ -7294,9 +7303,21 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               ? target.client.callTool(toolName, inputArgs, meta)
               : target.client.callTool(toolName, inputArgs)
 
-            // Serialize once for size check, preview, and inline content
+            // Serialize once for size check, preview, and inline content.
+            // When enabled, TOON is used to reduce token usage while keeping structure readable.
             var resultJson = stringify(result, __, "")
-            var resultByteSize = isString(resultJson) ? resultJson.length : 0
+            var resultText = resultJson
+            var resultFormat = "json"
+            if (globalSpillToon && (isMap(result) || isArray(result))) {
+              try {
+                resultText = af.toTOON(result)
+                resultFormat = "toon"
+              } catch(ignoreToonError) {
+                resultText = resultJson
+                resultFormat = "json"
+              }
+            }
+            var resultByteSize = isString(resultText) ? resultText.length : 0
 
             // Auto-spill when result exceeds threshold and file mode not already requested
             var autoSpilled = false
@@ -7307,7 +7328,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
             var resultFile
             if (useResultFile) {
-              resultFile = createProxyTempFile("mini-a-proxy-result", result)
+              resultFile = createProxyTempFile("mini-a-proxy-result", resultText, resultFormat)
             }
 
             // Build rich content text for file-mode results
@@ -7315,24 +7336,28 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             if (useResultFile) {
               var estTokens = Math.ceil(resultByteSize / 4)
               var spillReason = autoSpilled
-                ? "Result auto-spilled to temporary JSON file (exceeded " + callSpillThreshold + " bytes): "
-                : "Result written to temporary JSON file: "
+                ? "Result auto-spilled to temporary " + resultFormat.toUpperCase() + " file (exceeded " + callSpillThreshold + " bytes): "
+                : "Result written to temporary " + resultFormat.toUpperCase() + " file: "
               var previewLines = [
                 spillReason + resultFile + " (auto-deleted at shutdown).",
                 "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens)."
               ]
+              previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
               if (isMap(result)) {
                 previewLines.push("Top-level keys: [" + Object.keys(result).join(", ") + "]")
               } else if (isArray(result)) {
                 previewLines.push("Result is an array with " + result.length + " element(s).")
               }
-              var previewChars = resultJson.length > 300 ? resultJson.substring(0, 300) + "..." : resultJson
-              if (isString(resultJson) && resultJson.length > 0) {
+              var previewSource = isString(resultText) ? resultText : stringify(resultText, __, "")
+              var previewChars = previewSource.length > 300 ? previewSource.substring(0, 300) + "..." : previewSource
+              if (isString(resultText) && resultText.length > 0) {
+                previewLines.push("Preview: " + previewChars)
+              } else if (isString(previewSource) && previewSource.length > 0) {
                 previewLines.push("Preview: " + previewChars)
               }
               contentText = previewLines.join("\n")
             } else {
-              contentText = resultJson
+              contentText = resultText
             }
 
             // Suppress echoing large parsed args when argumentsFile was used
@@ -7349,6 +7374,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               },
               tool      : toolName,
               arguments : argumentsField,
+              resultFormat: resultFormat,
               resultFile: resultFile,
               content: [{ type: "text", text: contentText }]
             }
@@ -7538,11 +7564,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             },
             resultToFile: {
               type       : "boolean",
-              description: "When true for action='call', writes the tool result to a temporary JSON file and returns 'resultFile' instead of embedding full content."
+              description: "When true for action='call', writes the tool result to a temporary file and returns 'resultFile' instead of embedding full content (JSON by default, TOON when mcpproxytoon applies)."
             },
             resultSizeThreshold: {
               type       : "integer",
-              description: "Per-call byte size threshold. When the serialized result exceeds this value, result is written to a temporary file automatically (as if resultToFile=true). Overrides the global mcpproxythreshold. 0 = disabled.",
+              description: "Per-call byte size threshold. When the serialized result exceeds this value, result is written to a temporary file automatically (as if resultToFile=true). Overrides the global mcpproxythreshold. 0 = disabled. If mcpproxytoon=true and global mcpproxythreshold>0, size/preview use TOON serialization.",
               minimum    : 0
             },
             resultFile: {
@@ -9184,6 +9210,7 @@ MiniA.prototype.init = function(args) {
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
+      { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
       { name: "toollog", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
@@ -9239,6 +9266,7 @@ MiniA.prototype.init = function(args) {
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
+    args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
@@ -9832,8 +9860,9 @@ MiniA.prototype.init = function(args) {
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Use {\"action\":\"list\"} to discover tools, then {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one.")
       var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
         ? args.mcpproxythreshold : 0
+      var spillToon = toBoolean(args.mcpproxytoon) === true && spillThreshold > 0
       var spillNote = spillThreshold > 0
-        ? "Results exceeding " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tokens) are auto-spilled to a temporary file automatically."
+        ? "Results exceeding " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tokens) are auto-spilled to a temporary file automatically." + (spillToon ? " Auto-spill serialization uses TOON format." : "")
         : "Set mcpproxythreshold=<bytes> to enable auto-spill; or use resultToFile=true manually."
       baseRules.push(
         "For large MCP payloads, proxy-dispatch supports temporary JSON handoff: " +
@@ -10177,7 +10206,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
-      { name: "mcpproxythreshold", type: "number", default: 0 }
+      { name: "mcpproxythreshold", type: "number", default: 0 },
+      { name: "mcpproxytoon", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -10216,6 +10246,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
+    args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {

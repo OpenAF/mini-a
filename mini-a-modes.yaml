@@ -73,6 +73,7 @@ modes:
       mini-a-docs : true
       toolcachettl: 5000
       mcpproxythreshold: 128000
+      mcpproxytoon     : true
       mcp         : 
       - type   : ojob
         options:

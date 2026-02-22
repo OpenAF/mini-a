@@ -241,6 +241,11 @@ help:
     desc     : Byte threshold to auto-spill large proxy tool results to files (0 disables)
     example  : "0"
     mandatory: false
+  - name     : mcpproxytoon
+    desc     : When mcpproxythreshold > 0, serialize spilled proxy tool results in TOON format for easier search and lower token usage
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : forceplanning
     desc     : Force planning even when heuristics would normally skip it
     example  : "true"
@@ -426,8 +431,8 @@ ojob:
   opacks      :
   - openaf: 20250725
   - mini-a
-  catch       : printErrnl("[" + job.name + "] "); printErr(exception)
-  logToConsole: false   # to change when finished
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __ job.exec)
+  #logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js
 
@@ -503,6 +508,7 @@ jobs:
         mcpdynamic     : mcpdynamic
         mcpproxy       : mcpproxy
         mcpproxythreshold: mcpproxythreshold
+        mcpproxytoon   : mcpproxytoon
         mcplazy        : mcplazy
         useplanning    : useplanning
         forceplanning  : forceplanning
@@ -597,6 +603,7 @@ jobs:
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcpproxy       : toBoolean.isBoolean.default(false)
       mcpproxythreshold: toNumber.isNumber.default(__)
+      mcpproxytoon   : toBoolean.isBoolean.default(false)
       mcplazy        : toBoolean.isBoolean.default(false)
       useplanning    : toBoolean.isBoolean.default(false)
       forceplanning  : toBoolean.isBoolean.default(false)

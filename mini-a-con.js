@@ -5,6 +5,12 @@
 try {
   plugin("Console")
   var args = processExpr(" ")
+  var explicitCLIArgKeys = {}
+  if (isObject(args)) {
+    Object.keys(args).forEach(function(key) {
+      explicitCLIArgKeys[String(key || "").toLowerCase()] = true
+    })
+  }
   function hasRunnableExecValue(value) {
     if (isUnDef(value) || value === null) return false
     if (isString(value)) return value.trim().length > 0
@@ -61,7 +67,7 @@ try {
   }
 
   if (!helpRequested && !cheatsheetRequested) {
-    (function(args) {
+    (function(args, explicitKeys) {
       if (args.__modeApplied === true) return
       if (!isString(args.mode)) return
       var modeName = args.mode.trim()
@@ -140,10 +146,16 @@ try {
       }
 
       var applied = []
+      var skipped = []
       var paramsSource = preset.params
       var applyParam = function(key, value) {
         if (isObject(value) || isArray(value)) value = af.toSLON(value)
         if (isString(key) && key.length > 0) {
+          var normalizedKey = key.toLowerCase()
+          if (normalizedKey !== "mode" && isObject(explicitKeys) && explicitKeys[normalizedKey] === true) {
+            skipped.push(key)
+            return
+          }
           args[key] = value
           applied.push(key)
         }
@@ -175,10 +187,13 @@ try {
       } else {
         log(`Mode '${resolvedKey}' did not change any arguments (overrides already provided).`)
       }
+      if (skipped.length > 0) {
+        log(`Mode '${resolvedKey}' kept explicit CLI overrides for: ${skipped.join(", ")}`)
+      }
 
       args.mode = resolvedKey
       args.__modeApplied = true
-    })(args)
+    })(args, explicitCLIArgKeys)
 
     // Choose
     if (toBoolean(args.modelman) === true) {
@@ -363,6 +378,8 @@ try {
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
+    mcpproxythreshold: { type: "number", description: "Global byte threshold for proxy auto-spill to temporary files (0 disables)" },
+    mcpproxytoon   : { type: "boolean", default: false, description: "When mcpproxythreshold>0, serialize spilled proxy results as TOON text" },
     nosetmcpwd     : { type: "boolean", default: false, description: "Prevent automatic MCP working directory configuration" },
     rpm            : { type: "number", description: "Requests per minute limit" },
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },

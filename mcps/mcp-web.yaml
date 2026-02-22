@@ -72,7 +72,7 @@ todo:
 
       http-request:
         name       : http-request
-        description: Executes HTTP REST requests against a URL and returns the raw $rest response map (POST/PUT/PATCH/DELETE require readwrite=true).
+        description: Executes HTTP REST requests against a URL and returns the raw $rest response map (GET and HEAD are allowed in read-only mode; POST/PUT/PATCH/DELETE require readwrite=true).
         inputSchema:
           type      : object
           properties:
@@ -81,7 +81,7 @@ todo:
               description: The URL to request.
             method:
               type       : string
-              description: HTTP method to use.
+              description: HTTP method to use. HEAD is supported and does not require readwrite=true.
               enum       : [ GET, HEAD, POST, PUT, PATCH, DELETE ]
               default    : GET
             data:
@@ -101,8 +101,8 @@ todo:
           idempotentHint: false
 
     ((fns    )): &MCPFNS
-      web-search: Web search
-      get-url   : Get URL
+      web-search  : Web search
+      get-url     : Get URL
       http-request: HTTP Request
 
   ((else)):
@@ -157,19 +157,24 @@ jobs:
   check:
     in:
       url      : isString
-      style    : isString.oneOf([ "html", "basic", "text", "map" ]).default("basic")
+      style    : isString.oneOf([ "html", "basic", "text", "map" ]).default(__)
   exec : | #js
-    var ws = new WebSearch()
-    return ws.getURL(args.url, args.style)
+    var _s = $rest().get(args.url)
+    if (isDef(args.style)) {
+      var ws = new WebSearch()
+      return ws.getURL(_s, args.style)
+    } else {
+      return _s
+    }
 
-# ---------------
+# -------------------
 - name : HTTP Request
   check:
     in:
-      url      : isString
-      method   : isString.oneOf([ "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE" ]).default("GET")
-      data     : isMap.default(__)
-      headers  : isMap.default(__)
+      url            : isString
+      method         : isString.oneOf([ "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE" ]).default("GET")
+      data           : isMap.default(__)
+      headers        : isMap.default(__)
       throwExceptions: toBoolean.isBoolean.default(false)
   exec : | #js
     var method = String(args.method).toLowerCase()
