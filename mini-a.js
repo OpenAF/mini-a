@@ -11621,7 +11621,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
 
-          var shouldUpdateToolContext = !this._useTools || runtime.providerToolUseFailedDetected === true
+          var shouldUpdateToolContext = !this._useTools || runtime.providerToolUseFailedDetected === true || origActionRaw === "proxy-dispatch"
           pendingToolActions.push({
             toolName     : origActionRaw,
             params       : paramsValue,
