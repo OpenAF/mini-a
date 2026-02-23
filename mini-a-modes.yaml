@@ -38,6 +38,9 @@ modes:
       - type   : ojob
         options:
           job: mcps/mcp-weather.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-net.yaml
       mcpproxy : true
 
   news:
@@ -59,16 +62,19 @@ modes:
   poweruser:
     description: "Power user mode"
     params     :
-      useascii   : true
-      usetools   : true
-      useplanning: false
-      useshell   : true
-      readwrite  : true
-      useutils   : true
-      usestream  : true
-      mcpproxy   : true
-      mini-a-docs: true
-      mcp        : 
+      useascii         : true
+      usetools         : true
+      useplanning      : false
+      useshell         : true
+      readwrite        : true
+      useutils         : true
+      usestream        : true
+      mcpproxy         : true
+      mini-a-docs      : true
+      toolcachettl     : 5000
+      mcpproxythreshold: 51200
+      mcpproxytoon     : true
+      mcp              : 
       - type   : ojob
         options:
           job: mcps/mcp-web.yaml 

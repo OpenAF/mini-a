@@ -896,6 +896,7 @@ jobs:
     if (isUnDef(args.__format)) {
       args.__format = isDef(args.format) ? args.format : "md"
     }
+    args.__interaction_source = "mini-a-web"
     
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)

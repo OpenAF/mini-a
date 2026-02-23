@@ -2,6 +2,8 @@
 // License: Apache 2.0
 // Description: Mini-A utils tool for basic file operations within a specified root directory
 
+loadLib("mini-a-common.js")
+
 /**
  * <odoc>
  * <key>MiniUtilsTool(options) : MiniUtilsTool</key>
@@ -69,7 +71,7 @@ MiniUtilsTool.prototype.init = function(options) {
     return this
   } catch (e) {
     this._initialized = false
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -213,39 +215,12 @@ MiniUtilsTool.prototype._getSkillRelativeToRoot = function(rootPath, targetPath)
 
 MiniUtilsTool.prototype._resolveSkillTemplateFromFolder = function(folderPath) {
   if (!(isString(folderPath) || folderPath instanceof java.lang.String)) return __
-  folderPath = String(folderPath)
-  if (folderPath.trim().length === 0) return __
-  var candidates = this._skillTemplateCandidates || ["SKILL.md", "skill.md"]
-  for (var i = 0; i < candidates.length; i++) {
-    try {
-      var candidatePath = String(new java.io.File(folderPath, candidates[i]).getCanonicalPath())
-      if (!io.fileExists(candidatePath)) continue
-      var info = io.fileInfo(candidatePath)
-      if (isDef(info) && info.isFile === true) return candidatePath
-    } catch (e) {
-    }
-  }
-  return __
+  return __miniAResolveSkillTemplateFromFolder(String(folderPath), this._skillTemplateCandidates)
 }
 
 MiniUtilsTool.prototype._readSkillDescriptionFromTemplate = function(templatePath) {
   if (!(isString(templatePath) || templatePath instanceof java.lang.String)) return __
-  templatePath = String(templatePath)
-  if (templatePath.trim().length === 0) return __
-  try {
-    if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
-    var content = io.readFileString(templatePath)
-    if (!isString(content) || content.length === 0) return __
-    var normalized = String(content).replace(/\r\n/g, "\n")
-    var frontMatterMatch = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)
-    if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
-    var meta = af.fromYAML(frontMatterMatch[1])
-    if (!isObject(meta) || !isString(meta.description)) return __
-    var description = meta.description.replace(/\s+/g, " ").trim()
-    return description.length > 0 ? description : __
-  } catch (e) {
-    return __
-  }
+  return __miniAReadSkillDescriptionFromTemplate(String(templatePath))
 }
 
 MiniUtilsTool.prototype._listSkills = function(params) {
@@ -401,43 +376,7 @@ MiniUtilsTool.prototype._parseSkillArgs = function(rawValue) {
 }
 
 MiniUtilsTool.prototype._renderSkillTemplate = function(template, parsedArgs) {
-  var rendered = isString(template) ? template : String(template || "")
-  var replacedAny = false
-  var args = isObject(parsedArgs) ? parsedArgs : { raw: "", argv: [], argc: 0 }
-
-  var replaceAll = function(placeholder, value) {
-    if (rendered.indexOf(placeholder) >= 0) {
-      replacedAny = true
-      rendered = rendered.split(placeholder).join(value)
-    }
-  }
-
-  var argvString = "[]"
-  try {
-    argvString = stringify(args.argv || [], __, "")
-  } catch (e) {
-    argvString = "[]"
-  }
-
-  replaceAll("{{args}}", args.raw || "")
-  replaceAll("{{argv}}", argvString)
-  replaceAll("{{argc}}", String(isNumber(args.argc) ? args.argc : 0))
-
-  rendered = rendered.replace(/\{\{arg([1-9][0-9]*)\}\}/g, function(_, indexStr) {
-    replacedAny = true
-    var idx = Number(indexStr) - 1
-    if (!isNaN(idx) && idx >= 0 && isArray(args.argv) && idx < args.argv.length) return args.argv[idx]
-    return ""
-  })
-
-  if ((args.argc || 0) > 0 && replacedAny !== true) {
-    rendered += "\n\nArguments (auto-appended):\n"
-    rendered += "- raw: " + (args.raw || "") + "\n"
-    rendered += "- argv: " + argvString + "\n"
-    rendered += "- argc: " + (args.argc || 0) + "\n"
-  }
-
-  return rendered
+  return __miniARenderSkillTemplate(template, parsedArgs)
 }
 
 MiniUtilsTool.prototype._serializeSkillArgv = function(argv) {
@@ -809,7 +748,7 @@ MiniUtilsTool.prototype.readFile = function(params) {
     }
     return details
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -868,7 +807,7 @@ MiniUtilsTool.prototype.listDirectory = function(params) {
 
     return entries
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -953,7 +892,7 @@ MiniUtilsTool.prototype.globFiles = function(params) {
 
     return filtered
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1131,7 +1070,7 @@ MiniUtilsTool.prototype.searchContent = function(params) {
 
     return filtered
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1231,7 +1170,7 @@ MiniUtilsTool.prototype.markdownFiles = function(params) {
 
     return "[ERROR] Unknown markdown operation: " + operation
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1374,7 +1313,7 @@ MiniUtilsTool.prototype.skills = function(params) {
 
     return "[ERROR] Unknown skills operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1420,7 +1359,7 @@ MiniUtilsTool.prototype.getFileInfo = function(params) {
     info.relativePath = this._toRelative(info.path)
     return info
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1476,7 +1415,7 @@ MiniUtilsTool.prototype.writeFile = function(params) {
       encoding: encoding
     }
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1551,7 +1490,7 @@ MiniUtilsTool.prototype.editFile = function(params) {
       contentLength: resultText.length
     }
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1624,7 +1563,7 @@ MiniUtilsTool.prototype.deleteFile = function(params) {
       type: info.isDirectory === true ? "directory" : "file"
     }
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1871,7 +1810,7 @@ MiniUtilsTool.prototype.mathematics = function(params) {
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1895,16 +1834,21 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
       var ZoneId = java.time.ZoneId
       var ZonedDateTime = java.time.ZonedDateTime
       var DateTimeFormatter = java.time.format.DateTimeFormatter
+      var ChronoUnit = java.time.temporal.ChronoUnit
 
       var zone = isDef(params.timezone) ? ZoneId.of(params.timezone) : ZoneId.systemDefault()
       var now = ZonedDateTime.now(zone)
+      var truncatedNow = now.truncatedTo(ChronoUnit.SECONDS)
       var pattern = params.format || "yyyy-MM-dd'T'HH:mm:ssXXX"
       var formatter = DateTimeFormatter.ofPattern(pattern)
+      var timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
 
       return {
         timezone: String(zone.getId()),
         iso8601: String(now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)),
         formatted: String(now.format(formatter)),
+        date: String(now.toLocalDate()),
+        time: String(truncatedNow.toLocalTime().format(timeFormatter)),
         unixEpochSeconds: Number(now.toEpochSecond()),
         unixEpochMilliseconds: Number(now.toInstant().toEpochMilli())
       }
@@ -1937,7 +1881,7 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -1949,7 +1893,7 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
  * - `operation` (string, required): The operation to perform.
  * - For encode/decode: `data` (string/bytes), `format` (base64, hex, url, html)
  * - For hash: `data` (string), `algorithm` (md5, sha1, sha256, sha384, sha512)
- * - For format conversion: `data` (string/object), source/target formats
+ * - For format conversion: `data` (string/object), source/target formats (JSON, YAML, TOON, CSV)
  * - For text operations: operation-specific parameters
  * </odoc>
  */
@@ -2032,6 +1976,12 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
       var obj = isString(data) ? af.fromYAML(data) : data
       var compact = params.compact === true
       return { format: "json", result: af.toJson(obj, compact ? "" : undefined) }
+
+    } else if (op === "json-to-toon" || op === "json2toon") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+      var obj = isString(data) ? af.fromJson(data) : data
+      return { format: "toon", result: af.toTOON(obj) }
 
     } else if (op === "csv-to-json" || op === "csv2json") {
       var data = params.data
@@ -2272,7 +2222,7 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -2383,7 +2333,7 @@ MiniUtilsTool.prototype.pathUtilities = function(params) {
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -2449,7 +2399,7 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
           results.push({ data: result, success: true, operation: opType })
         }
       } catch (e) {
-        results.push({ error: e.message || String(e), success: false, operation: opType })
+        results.push({ error: __miniAErrMsg(e), success: false, operation: opType })
         if (stopOnError) break
       }
     }
@@ -2460,7 +2410,7 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
       results: results
     }
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -2469,7 +2419,7 @@ MiniUtilsTool.prototype.filesystemBatch = function(params) {
  * <key>MiniUtilsTool.validationUtilities(params) : Object</key>
  * Validates data formats and tests conditions.
  * The `params` object can have the following properties:
- * - `operation` (string, required): The operation to perform (validate-json, validate-yaml, validate-regex, validate-url, test-regex, file-exists).
+ * - `operation` (string, required): The operation to perform (validate-json, validate-yaml, validate-toon, validate-regex, validate-url, test-regex, file-exists).
  * - Operation-specific parameters
  * </odoc>
  */
@@ -2486,7 +2436,7 @@ MiniUtilsTool.prototype.validationUtilities = function(params) {
         af.fromJson(data)
         return { valid: true, format: "json" }
       } catch (e) {
-        return { valid: false, format: "json", error: e.message || String(e) }
+        return { valid: false, format: "json", error: __miniAErrMsg(e) }
       }
 
     } else if (op === "validate-yaml") {
@@ -2497,7 +2447,18 @@ MiniUtilsTool.prototype.validationUtilities = function(params) {
         af.fromYAML(data)
         return { valid: true, format: "yaml" }
       } catch (e) {
-        return { valid: false, format: "yaml", error: e.message || String(e) }
+        return { valid: false, format: "yaml", error: __miniAErrMsg(e) }
+      }
+
+    } else if (op === "validate-toon") {
+      var data = params.data
+      if (isUnDef(data)) return "[ERROR] data is required"
+
+      try {
+        af.fromTOON(data)
+        return { valid: true, format: "toon" }
+      } catch (e) {
+        return { valid: false, format: "toon", error: __miniAErrMsg(e) }
       }
 
     } else if (op === "validate-regex") {
@@ -2508,7 +2469,7 @@ MiniUtilsTool.prototype.validationUtilities = function(params) {
         new RegExp(pattern)
         return { valid: true, pattern: pattern }
       } catch (e) {
-        return { valid: false, pattern: pattern, error: e.message || String(e) }
+        return { valid: false, pattern: pattern, error: __miniAErrMsg(e) }
       }
 
     } else if (op === "validate-url") {
@@ -2519,7 +2480,7 @@ MiniUtilsTool.prototype.validationUtilities = function(params) {
         new java.net.URL(url)
         return { valid: true, url: url }
       } catch (e) {
-        return { valid: false, url: url, error: e.message || String(e) }
+        return { valid: false, url: url, error: __miniAErrMsg(e) }
       }
 
     } else if (op === "test-regex") {
@@ -2538,7 +2499,7 @@ MiniUtilsTool.prototype.validationUtilities = function(params) {
           allMatches: matches || []
         }
       } catch (e) {
-        return { valid: false, error: e.message || String(e) }
+        return { valid: false, error: __miniAErrMsg(e) }
       }
 
     } else if (op === "file-exists") {
@@ -2550,13 +2511,13 @@ MiniUtilsTool.prototype.validationUtilities = function(params) {
         var filePath = this._resolve(path)
         return { exists: io.fileExists(filePath), path: this._toRelative(filePath) }
       } catch (e) {
-        return { exists: false, error: e.message || String(e) }
+        return { exists: false, error: __miniAErrMsg(e) }
       }
     }
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -2638,7 +2599,7 @@ MiniUtilsTool.prototype.systemInfo = function(params) {
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -2752,7 +2713,7 @@ MiniUtilsTool.prototype.kvStore = function(params) {
 
     return "[ERROR] Unknown operation: " + op
   } catch (e) {
-    return "[ERROR] " + (e.message || String(e))
+    return "[ERROR] " + __miniAErrMsg(e)
   }
 }
 
@@ -2778,7 +2739,7 @@ MiniUtilsTool._metadataByFn = (function() {
   // Text utilities operation types
   var textEncodeOps = ["encode", "decode"]
   var textHashOps = ["hash"]
-  var textConvertOps = ["json-to-yaml", "json2yaml", "yaml-to-json", "yaml2json", "csv-to-json", "csv2json", "json-to-csv", "json2csv"]
+  var textConvertOps = ["json-to-yaml", "json2yaml", "yaml-to-json", "yaml2json", "json-to-toon", "json2toon", "csv-to-json", "csv2json", "json-to-csv", "json2csv"]
   var textFetchOps = ["webfetch", "fetch"]
   var textManipOps = ["diff", "template", "templify", "replace", "extract", "split", "join", "trim", "line-count", "word-count"]
   var textAllOps = textEncodeOps.concat(textHashOps).concat(textConvertOps).concat(textFetchOps).concat(textManipOps)
@@ -2787,7 +2748,7 @@ MiniUtilsTool._metadataByFn = (function() {
   var pathOps = ["join", "resolve", "parse", "dirname", "basename", "extname", "normalize", "relative", "is-absolute"]
 
   // Validation utilities operation types
-  var validationOps = ["validate-json", "validate-yaml", "validate-regex", "validate-url", "test-regex", "file-exists"]
+  var validationOps = ["validate-json", "validate-yaml", "validate-toon", "validate-regex", "validate-url", "test-regex", "file-exists"]
 
   // System info operation types
   var systemInfoOps = ["environment", "env", "platform", "cwd", "user", "memory", "disk"]
@@ -2958,13 +2919,13 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     textUtilities: {
       name       : "textUtilities",
-      description: "Text/data helper: encode/decode, hash, convert JSON/YAML/CSV, fetch URLs, and manipulate strings. Use for quick transformations or lightweight web fetches.",
+      description: "Text/data helper: encode/decode, hash, convert JSON/YAML/TOON/CSV, fetch URLs, and manipulate strings. Use for quick transformations or lightweight web fetches.",
       inputSchema: {
         type      : "object",
         properties: {
           operation  : {
             type       : "string",
-            description: "Operation type: encode, decode, hash, json-to-yaml, yaml-to-json, csv-to-json, json-to-csv, webfetch, diff, template, replace, extract, split, join, trim, line-count, word-count.",
+            description: "Operation type: encode, decode, hash, json-to-yaml, yaml-to-json, json-to-toon, csv-to-json, json-to-csv, webfetch, diff, template, replace, extract, split, join, trim, line-count, word-count.",
             enum       : textAllOps
           },
           data       : { type: "string", description: "Data to process (text, JSON, YAML, CSV, etc.)." },
@@ -3040,16 +3001,16 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     validationUtilities: {
       name       : "validationUtilities",
-      description: "Validate data formats and test conditions: JSON/YAML syntax, regex patterns, URLs, file existence. Use for: validating input, checking syntax, testing patterns before use.",
+      description: "Validate data formats and test conditions: JSON/YAML/TOON syntax, regex patterns, URLs, file existence. Use for: validating input, checking syntax, testing patterns before use.",
       inputSchema: {
         type      : "object",
         properties: {
           operation    : {
             type       : "string",
-            description: "Operation type: validate-json, validate-yaml, validate-regex, validate-url, test-regex, file-exists.",
+            description: "Operation type: validate-json, validate-yaml, validate-toon, validate-regex, validate-url, test-regex, file-exists.",
             enum       : validationOps
           },
-          data         : { type: "string", description: "Data to validate (JSON/YAML string)." },
+          data         : { type: "string", description: "Data to validate (JSON/YAML/TOON string)." },
           pattern      : { type: "string", description: "Regex pattern to validate or test." },
           text         : { type: "string", description: "Text to test against pattern." },
           url          : { type: "string", description: "URL to validate." },

@@ -585,6 +585,21 @@ docker run --rm \
   outfile=/work/report.md usetools=true mcpproxy=true
 ```
 
+`mcp-web` now exposes both `get-url` (jsoup processing) and `http-request` (direct HTTP verbs).  
+`http-request` supports `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`; mutating verbs require starting `mcp-web` with `readwrite=true`.
+
+Example (`HEAD`, read-only):
+```bash
+mini-a goal="check response headers for rust-lang.org" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml', timeout: 5000)"
+```
+
+Example (`PATCH`, read-write enabled):
+```bash
+mini-a goal="call http-request PATCH on my API endpoint" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml readwrite=true', timeout: 5000)"
+```
+
 ### Web UI via Docker (Provider-Specific Examples)
 
 Run the Mini‑A browser UI inside a container by passing the proper `OAF_MODEL` configuration for your LLM provider and exposing port `12345`. The following examples mount a `history/` directory from the host so conversation transcripts persist across runs.
@@ -695,7 +710,7 @@ The `start()` method accepts various configuration options:
 #### Basic Configuration
 - **`maxsteps`** (number, default: 15): Maximum consecutive steps without a successful action before the agent forces a final answer
 - **`earlystopthreshold`** (number, default: 3, auto-adjusts to 5 with low-cost models): Number of identical consecutive errors before the early stop guard activates. The system automatically increases this threshold when using low-cost models before escalation to give them more recovery opportunities. Set explicitly to override automatic behavior.
-- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." / "No user interaction..." directives afterward so autonomy constraints remain intact
+- **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." directive, and adds the "No user interaction..." remark when running through `mini-a-con` or `mini-a-web`
 - **`chatyouare`** (string): Override the opening chatbot persona sentence when `chatbotmode=true` (inline text or an `@file` path) without touching the rest of the conversational instructions
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
@@ -736,9 +751,11 @@ The `start()` method accepts various configuration options:
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
+- **`usejsontool`** (boolean, default: false): When `usetools=true`, registers an optional compatibility `json` tool. Useful for models that intermittently emit `json` tool calls instead of returning a plain JSON action object.
 - **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
-- **`mcpproxy`** (boolean, default: false): Aggregate all MCP connections (including `mcp="..."` and `useutils=true`) through a single proxy interface that exposes a `proxy-dispatch` tool. This reduces context usage by presenting only one tool to the LLM instead of exposing all tools from all connections individually. The LLM can use `proxy-dispatch` to list, search, and call tools across all downstream MCP connections. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for flow diagrams and advanced usage notes.
+- **`mcpproxy`** (boolean, default: false): Aggregate all MCP connections (including `mcp="..."` and `useutils=true`) through a single proxy interface that exposes a `proxy-dispatch` tool. This reduces context usage by presenting only one tool to the LLM instead of exposing all tools from all connections individually. The LLM can use `proxy-dispatch` to list, search, and call tools across all downstream MCP connections. For large payloads, `proxy-dispatch` also supports `argumentsFile` (load arguments from JSON file) and `resultToFile=true` (store result in temporary JSON `resultFile`). Prefer this for large input/output when `useutils=true` (recommended) or `useshell=true readwrite=true`. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for flow diagrams and advanced usage notes.
+- **`mcpproxytoon`** (boolean, default: false): When `mcpproxythreshold>0`, serialize proxy-spilled object/array results using `af.toTOON(...)` before size checks and previews. This makes `readresult` slices/grep easier to scan and can reduce token usage for partial reads.
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
 ```javascript
@@ -754,6 +771,9 @@ mcpproxy: true
 usetools: true
 mcp: "[ (cmd: 'docker run --rm -i mcp/dockerhub') | (cmd: 'ojob mcps/mcp-time.yaml') ]"
 useutils: true
+
+// Optional compatibility mode (helpful for some gpt-oss-120b runs)
+usejsontool: true
 ```
 
 Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit cache settings). When detected, Mini-A caches results keyed by tool name and parameters for the configured TTL, reusing outputs on subsequent steps to avoid redundant calls.

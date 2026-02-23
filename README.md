@@ -203,6 +203,13 @@ mini-a goal="list all JavaScript files in this directory" useshell=true
 mini-a goal="what time is it in Sydney?" mcp="(cmd: 'ojob mcps/mcp-time.yaml', timeout: 5000)"
 ```
 
+`mcp-web` also includes `http-request` for direct HTTP verbs (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`); use `readwrite=true` when you need mutating verbs.
+
+```bash
+mini-a goal="inspect rust-lang.org response headers" \
+  mcp="(cmd: 'ojob mcps/mcp-web.yaml', timeout: 5000)"
+```
+
 **Testing MCP servers interactively:**
 ```bash
 mini-a mcptest=true mcp="(cmd: 'ojob mcps/mcp-time.yaml')"
@@ -215,7 +222,15 @@ mini-a goal="compare release dates across APIs" \
   mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-fin.yaml')]" \
   useutils=true
 ```
-This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even when multiple MCP servers and the Mini Utils Tool are active. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for a deep dive.
+This keeps the LLM context lean by exposing a single `proxy-dispatch` tool even when multiple MCP servers and the Mini Utils Tool are active. For large tool payloads, `proxy-dispatch` can also load arguments from `argumentsFile` and save results to a temporary JSON `resultFile` (`resultToFile=true`) to avoid context bloat. Prefer this pattern when `useutils=true` (recommended) or `useshell=true readwrite=true` and payloads are expected to be large. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for a deep dive.
+
+For some tool-calling runs with `gpt-oss-120b`, enabling `usejsontool=true` can improve reliability:
+
+```bash
+mini-a goal="what is the current time?" usetools=true mcpproxy=true usejsontool=true
+```
+
+This adds a compatibility shim for accidental `json` tool calls and feeds the payload back into Mini-A's normal action flow.
 
 **Chatbot mode:**
 ```bash
@@ -371,16 +386,18 @@ Mini-A ships with complementary components:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `goal` | Objective the agent should achieve | Required |
-| `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step/no-feedback directives automatically) |
+| `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step directive, and adds the no-feedback remark for `mini-a-con`/`mini-a-web`) |
 | `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
+| `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`) | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
 | `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate Mini-A documentation directly | `false` |
-| `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context | `false` |
+| `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context; supports `argumentsFile` + `resultToFile` for large payload handoff | `false` |
+| `mcpproxytoon` | When `mcpproxythreshold>0`, serialize proxy-spilled results as TOON text (`af.toTOON`) to improve search/read efficiency on large payloads | `false` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |

@@ -5,6 +5,12 @@
 try {
   plugin("Console")
   var args = processExpr(" ")
+  var explicitCLIArgKeys = {}
+  if (isObject(args)) {
+    Object.keys(args).forEach(function(key) {
+      explicitCLIArgKeys[String(key || "").toLowerCase()] = true
+    })
+  }
   function hasRunnableExecValue(value) {
     if (isUnDef(value) || value === null) return false
     if (isString(value)) return value.trim().length > 0
@@ -61,7 +67,7 @@ try {
   }
 
   if (!helpRequested && !cheatsheetRequested) {
-    (function(args) {
+    (function(args, explicitKeys) {
       if (args.__modeApplied === true) return
       if (!isString(args.mode)) return
       var modeName = args.mode.trim()
@@ -140,10 +146,16 @@ try {
       }
 
       var applied = []
+      var skipped = []
       var paramsSource = preset.params
       var applyParam = function(key, value) {
         if (isObject(value) || isArray(value)) value = af.toSLON(value)
         if (isString(key) && key.length > 0) {
+          var normalizedKey = key.toLowerCase()
+          if (normalizedKey !== "mode" && isObject(explicitKeys) && explicitKeys[normalizedKey] === true) {
+            skipped.push(key)
+            return
+          }
           args[key] = value
           applied.push(key)
         }
@@ -175,10 +187,13 @@ try {
       } else {
         log(`Mode '${resolvedKey}' did not change any arguments (overrides already provided).`)
       }
+      if (skipped.length > 0) {
+        log(`Mode '${resolvedKey}' kept explicit CLI overrides for: ${skipped.join(", ")}`)
+      }
 
       args.mode = resolvedKey
       args.__modeApplied = true
-    })(args)
+    })(args, explicitCLIArgKeys)
 
     // Choose
     if (toBoolean(args.modelman) === true) {
@@ -242,6 +257,7 @@ try {
   }
 
   __initializeCon()
+  loadLib("mini-a-common.js")
   loadLib("mini-a.js")
 
   ow.loadFormat()
@@ -321,6 +337,14 @@ try {
     return ansiColor(color, text)
   }
 
+  function unwrapSingleMarkdownCodeBlock(text) {
+    if (!isString(text)) return text
+    var normalized = text.replace(/\r\n/g, "\n")
+    var fencedMatch = normalized.match(/^\s*```[^\n]*\n([\s\S]*?)\n```[ \t]*\s*$/)
+    if (!isArray(fencedMatch) || fencedMatch.length < 2) return text
+    return fencedMatch[1]
+  }
+
   var parameterDefinitions = {
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
@@ -354,6 +378,8 @@ try {
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
+    mcpproxythreshold: { type: "number", description: "Global byte threshold for proxy auto-spill to temporary files (0 disables)" },
+    mcpproxytoon   : { type: "boolean", default: false, description: "When mcpproxythreshold>0, serialize spilled proxy results as TOON text" },
     nosetmcpwd     : { type: "boolean", default: false, description: "Prevent automatic MCP working directory configuration" },
     rpm            : { type: "number", description: "Requests per minute limit" },
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
@@ -619,31 +645,11 @@ try {
   }
 
   function resolveSkillTemplateFromFolder(folderPath) {
-    if (!isString(folderPath) || folderPath.trim().length === 0) return __
-    var candidates = ["SKILL.md", "skill.md"]
-    for (var i = 0; i < candidates.length; i++) {
-      var candidatePath = canonicalizePath(folderPath + "/" + candidates[i])
-      if (io.fileExists(candidatePath) && io.fileInfo(candidatePath).isFile === true) return candidatePath
-    }
-    return __
+    return __miniAResolveSkillTemplateFromFolder(folderPath)
   }
 
   function readSkillDescriptionFromTemplate(templatePath) {
-    if (!isString(templatePath) || templatePath.trim().length === 0) return __
-    try {
-      if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
-      var content = io.readFileString(templatePath)
-      if (!isString(content) || content.length === 0) return __
-      var normalized = String(content).replace(/\r\n/g, "\n")
-      var frontMatterMatch = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)
-      if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
-      var meta = af.fromYAML(frontMatterMatch[1])
-      if (!isObject(meta) || !isString(meta.description)) return __
-      var description = meta.description.replace(/\s+/g, " ").trim()
-      return description.length > 0 ? description : __
-    } catch(readSkillDescriptionError) {
-      return __
-    }
+    return __miniAReadSkillDescriptionFromTemplate(templatePath)
   }
 
   function parseExtraDirPaths(commaSeparated) {
@@ -1045,43 +1051,7 @@ try {
   }
 
   function renderCustomSlashTemplate(template, parsedArgs) {
-    var rendered = isString(template) ? template : String(template || "")
-    var replacedAny = false
-    var args = isObject(parsedArgs) ? parsedArgs : { raw: "", argv: [], argc: 0 }
-
-    function replaceAll(placeholder, value) {
-      if (rendered.indexOf(placeholder) >= 0) {
-        replacedAny = true
-        rendered = rendered.split(placeholder).join(value)
-      }
-    }
-
-    var argvString = "[]"
-    try {
-      argvString = stringify(args.argv || [], __, "")
-    } catch(ignoreArgvStringError) {
-      argvString = "[]"
-    }
-
-    replaceAll("{{args}}", args.raw || "")
-    replaceAll("{{argv}}", argvString)
-    replaceAll("{{argc}}", String(isNumber(args.argc) ? args.argc : 0))
-
-    rendered = rendered.replace(/\{\{arg([1-9][0-9]*)\}\}/g, function(_, indexStr) {
-      replacedAny = true
-      var idx = Number(indexStr) - 1
-      if (!isNaN(idx) && idx >= 0 && isArray(args.argv) && idx < args.argv.length) return args.argv[idx]
-      return ""
-    })
-
-    if ((args.argc || 0) > 0 && replacedAny !== true) {
-      rendered += "\n\nArguments (auto-appended):\n"
-      rendered += "- raw: " + (args.raw || "") + "\n"
-      rendered += "- argv: " + argvString + "\n"
-      rendered += "- argc: " + (args.argc || 0) + "\n"
-    }
-
-    return rendered
+    return __miniARenderSkillTemplate(template, parsedArgs)
   }
 
   function tryExpandInlineSkillInvocation(text) {
@@ -1164,7 +1134,7 @@ try {
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
-      var statsCompletions = ["detailed", "tools"]
+      var statsCompletions = ["detailed", "tools", "out=", "file=", "save=", "json="]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc"]
       var contextCompletions = ["llm", "analyze"]
@@ -1244,11 +1214,26 @@ try {
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
+            var lastSpace = trimmedRemainder.lastIndexOf(" ")
+            var token = lastSpace >= 0 ? trimmedRemainder.substring(lastSpace + 1) : trimmedRemainder
+            var tokenInsertionPoint = insertionPoint + (lastSpace >= 0 ? (lastSpace + 1) : 0)
+            var tokenLower = token.toLowerCase()
+            var fileMatch = token.match(/^(out|file|save|json)=(.*)$/i)
+
+            if (fileMatch) {
+              var keyPrefix = fileMatch[1] + "="
+              var pathPrefix = fileMatch[2]
+              var fileCompletions = getFileCompletions(pathPrefix)
+              fileCompletions.forEach(function(path) {
+                candidates.add(keyPrefix + path)
+              })
+              return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
+            }
 
             statsCompletions.forEach(function(mode) {
-              if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
+              if (mode.indexOf(tokenLower) === 0) candidates.add(mode)
             })
-            return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
           }
 
           // Handle /last command completions
@@ -1325,15 +1310,34 @@ try {
   }
 
   function loadConversationEntries(path) {
+    function _readPayload(convoPath) {
+      if (!isString(convoPath) || convoPath.trim().length === 0) return __
+      try {
+        if (!io.fileExists(convoPath)) return __
+        var parsedPayload = io.readFileJSON(convoPath)
+        if (isObject(parsedPayload)) return parsedPayload
+      } catch (loadError) {
+        print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to read conversation file: " + loadError, errorColor))
+      }
+      return __
+    }
+
     if (!isString(path) || path.trim().length === 0) return []
+    var payload = _readPayload(path)
+    if (isObject(payload) && isArray(payload.c)) return payload.c
+    return []
+  }
+
+  function loadConversationPayload(path) {
+    if (!isString(path) || path.trim().length === 0) return __
     try {
-      if (!io.fileExists(path)) return []
+      if (!io.fileExists(path)) return __
       var payload = io.readFileJSON(path)
-      if (isObject(payload) && isArray(payload.c)) return payload.c
+      if (isObject(payload)) return payload
     } catch (loadError) {
       print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to read conversation file: " + loadError, errorColor))
     }
-    return []
+    return __
   }
 
   function flattenConversationContent(value, depth) {
@@ -1671,6 +1675,149 @@ try {
     return str.substring(0, Math.max(0, maxLen - 1)) + "…"
   }
 
+  function extractGoalFromPlannerPrompt(text) {
+    if (!isString(text)) return __
+    var normalized = text.replace(/\r\n/g, "\n").trim()
+    if (normalized.length === 0) return __
+    var goalMatch = normalized.match(/(?:^|\n)GOAL:\s*([\s\S]*?)(?:\n\s*CURRENT STATE:|$)/i)
+    if (!isArray(goalMatch) || goalMatch.length < 2) return normalized
+    var extracted = goalMatch[1].trim()
+    return extracted.length > 0 ? extracted : normalized
+  }
+
+  function tryParseJSONText(text) {
+    if (!isString(text)) return __
+    var candidate = text.trim()
+    if (candidate.length === 0) return __
+    try {
+      return JSON.parse(candidate)
+    } catch(ignoreDirectParseError) { }
+
+    var fenced = candidate.match(/^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i)
+    if (isArray(fenced) && fenced.length >= 2) {
+      try {
+        return JSON.parse(fenced[1])
+      } catch(ignoreFencedParseError) { }
+    }
+
+    var firstBrace = candidate.indexOf("{")
+    var lastBrace = candidate.lastIndexOf("}")
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(candidate.substring(firstBrace, lastBrace + 1))
+      } catch(ignoreSliceParseError) { }
+    }
+    return __
+  }
+
+  function normalizeAssistantAnswer(text) {
+    var normalized = isString(text) ? text.trim() : ""
+    if (normalized.length === 0) return { display: __, original: __, hasAnswer: false }
+    var parsed = tryParseJSONText(normalized)
+    if (isObject(parsed)) {
+      if (isString(parsed.answer) && parsed.answer.trim().length > 0) {
+        return { display: parsed.answer.trim(), original: parsed, hasAnswer: true }
+      }
+      if (isString(parsed.final_answer) && parsed.final_answer.trim().length > 0) {
+        return { display: parsed.final_answer.trim(), original: parsed, hasAnswer: true }
+      }
+      if (isString(parsed.response) && parsed.response.trim().length > 0) {
+        return { display: parsed.response.trim(), original: parsed, hasAnswer: true }
+      }
+      if (isString(parsed.result) && parsed.result.trim().length > 0) {
+        return { display: parsed.result.trim(), original: parsed, hasAnswer: true }
+      }
+      if (isString(parsed.message) && parsed.message.trim().length > 0) {
+        var parsedAction = isString(parsed.action) ? parsed.action.toLowerCase() : ""
+        var isFinalAction = (parsedAction === "final" || parsedAction === "done" || parsedAction === "finish")
+        return { display: parsed.message.trim(), original: parsed, hasAnswer: isFinalAction }
+      }
+      return { display: __, original: parsed, hasAnswer: false }
+    }
+    return { display: normalized, original: normalized, hasAnswer: true }
+  }
+
+  function extractAnswerText(value, unwrapCodeBlock) {
+    var shouldUnwrap = (unwrapCodeBlock === true)
+    if (isObject(value)) {
+      if (isString(value.answer) && value.answer.trim().length > 0) return shouldUnwrap ? unwrapSingleMarkdownCodeBlock(value.answer) : value.answer
+      if (isString(value.final_answer) && value.final_answer.trim().length > 0) return shouldUnwrap ? unwrapSingleMarkdownCodeBlock(value.final_answer) : value.final_answer
+      if (isString(value.response) && value.response.trim().length > 0) return shouldUnwrap ? unwrapSingleMarkdownCodeBlock(value.response) : value.response
+      return _stringifyFinalResult(value, true)
+    }
+    if (isArray(value)) return _stringifyFinalResult(value, true)
+    if (isDef(value)) {
+      var text = String(value)
+      return shouldUnwrap ? unwrapSingleMarkdownCodeBlock(text) : text
+    }
+    return ""
+  }
+
+  function extractLastGoalAndAnswer(entries) {
+    var pair = { goal: __, answer: __, answerOriginal: __ }
+    if (!isArray(entries) || entries.length === 0) return pair
+
+    var assistantIdx = -1
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var role = isString(entries[i].role) ? entries[i].role.toLowerCase() : ""
+      if (role !== "assistant") continue
+      var answerText = flattenConversationContent(entries[i].content).trim()
+      if (answerText.length === 0) continue
+      var normalizedAnswer = normalizeAssistantAnswer(answerText)
+      if (normalizedAnswer.hasAnswer !== true) continue
+      pair.answer = normalizedAnswer.display
+      pair.answerOriginal = normalizedAnswer.original
+      assistantIdx = i
+      break
+    }
+
+    var userSearchStart = assistantIdx >= 0 ? assistantIdx - 1 : entries.length - 1
+    for (var j = userSearchStart; j >= 0; j--) {
+      var userRole = isString(entries[j].role) ? entries[j].role.toLowerCase() : ""
+      if (userRole !== "user") continue
+      var goalText = flattenConversationContent(entries[j].content).trim()
+      if (goalText.length === 0) continue
+      pair.goal = extractGoalFromPlannerPrompt(goalText)
+      break
+    }
+
+    return pair
+  }
+
+  function restoreLastResultFromConversation() {
+    var convoPath = getConversationPath()
+    var payload = loadConversationPayload(convoPath)
+    var restored = false
+
+    if (isObject(payload) && isObject(payload.last)) {
+      if (isString(payload.last.goal) && payload.last.goal.trim().length > 0) {
+        lastGoalPrompt = payload.last.goal
+        restored = true
+      }
+      if (isDef(payload.last.result)) {
+        lastResult = payload.last.result
+        lastOrigResult = isDef(payload.last.original) ? payload.last.original : payload.last.result
+        restored = true
+      }
+      if (restored) return true
+    }
+
+    var stats = refreshConversationStats(activeAgent)
+    if (!isObject(stats) || !isArray(stats.entries) || stats.entries.length === 0) return false
+    var pair = extractLastGoalAndAnswer(stats.entries)
+    restored = false
+    if (isString(pair.goal) && pair.goal.length > 0) {
+      lastGoalPrompt = pair.goal
+      restored = true
+    }
+    if (isString(pair.answer) && pair.answer.length > 0) {
+      lastResult = pair.answer
+      lastOrigResult = isDef(pair.answerOriginal) ? pair.answerOriginal : pair.answer
+      restored = true
+    }
+    return restored
+  }
+
   function printConversationHistory(limit) {
     var rowsToShow = isNumber(limit) ? Math.max(1, Math.round(limit)) : 10
     var stats = refreshConversationStats()
@@ -1679,22 +1826,29 @@ try {
       return
     }
 
-    var start = Math.max(0, stats.entries.length - rowsToShow)
-    var preview = []
-    for (var i = start; i < stats.entries.length; i++) {
+    var goals = []
+    for (var i = 0; i < stats.entries.length; i++) {
       var entry = stats.entries[i]
-      var content = flattenConversationContent(entry.content)
-      preview.push({
-        index  : "#" + (i + 1),
-        role   : isString(entry.role) ? entry.role : "(unknown)",
-        preview: truncateText(content.replace(/\s+/g, " "), 80)
-      })
+      var role = isString(entry.role) ? entry.role.toLowerCase() : ""
+      if (role !== "user") continue
+      var goalText = extractGoalFromPlannerPrompt(flattenConversationContent(entry.content))
+      goalText = isString(goalText) ? goalText.replace(/\s+/g, " ").trim() : ""
+      if (goalText.length === 0) continue
+      goals.push(goalText)
     }
 
-    print(colorifyText("Recent conversation turns (last " + rowsToShow + ")", accentColor))
-    print(printTable(preview, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
-    if (stats.entries.length > rowsToShow) {
-      print(colorifyText("Showing " + rowsToShow + " of " + stats.entries.length + " messages.", hintColor))
+    if (goals.length === 0) {
+      print(colorifyText("No user goals found in the current conversation.", hintColor))
+      return
+    }
+
+    var start = Math.max(0, goals.length - rowsToShow)
+    print(colorifyText("Recent user goals (last " + rowsToShow + ")", accentColor))
+    for (var gi = start; gi < goals.length; gi++) {
+      print(colorifyText(String(gi - start + 1) + ". ", hintColor) + goals[gi])
+    }
+    if (goals.length > rowsToShow) {
+      print(colorifyText("Showing " + rowsToShow + " of " + goals.length + " user goals.", hintColor))
     }
   }
 
@@ -1977,12 +2131,16 @@ try {
   }
 
   var sessionOptions = resetOptions()
-  var lastResult = __, lastOrigResult = __
+  var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
   var internalParameters = { goalprefix: true }
   var activeAgent = __
   var shutdownHandled = false
   var subtaskLogsByShortId = {}
   var workerRegBootstrapped = false
+
+  if (resumeConversation === true) {
+    restoreLastResultFromConversation()
+  }
 
   function promptLabel() {
     var prefix = colorifyText(basePrompt, accentColor)
@@ -2253,6 +2411,7 @@ try {
       cleanGoal = sessionOptions.goalprefix + cleanGoal
     }
     args.goal = cleanGoal
+    args.__interaction_source = "mini-a-con"
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
     return args
   }
@@ -2275,6 +2434,230 @@ try {
   var _streamOutputStats = {
     totalChars: 0,
     contentChars: 0
+  }
+  var _streamHasRendered = false
+  var _stringifyFinalResult = function(v, pretty) {
+    return stringify(v, __, pretty ? "  " : "")
+  }
+  var _streamMdState = {
+    pending: "",
+    inCodeBlock: false,
+    codeBlockBuffer: "",
+    inTable: false,
+    tableBuffer: "",
+    tableHeaderCandidate: ""
+  }
+  var _streamTableSeparatorRegex = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+  function _isStreamTableSeparator(lineText) {
+    if (!isString(lineText)) return false
+    return _streamTableSeparatorRegex.test(lineText.trim())
+  }
+
+  function _isStreamTableRow(lineText) {
+    if (!isString(lineText)) return false
+    var trimmed = lineText.trim()
+    if (trimmed.length === 0) return false
+    if (_isStreamTableSeparator(trimmed)) return false
+    return trimmed.indexOf("|") >= 0
+  }
+
+  function _isStreamCodeFenceLine(lineText) {
+    if (!isString(lineText)) return false
+    return lineText.trim().indexOf("```") === 0
+  }
+
+  function _isStreamCodeFenceCloseLine(lineText) {
+    if (!isString(lineText)) return false
+    return lineText.trim() === "```"
+  }
+
+  function _streamTableCellCount(lineText) {
+    if (!isString(lineText)) return 0
+    var normalized = lineText.trim()
+    if (normalized.length === 0) return 0
+    if (normalized.indexOf("|") === 0) normalized = normalized.substring(1)
+    if (normalized.lastIndexOf("|") === normalized.length - 1) normalized = normalized.substring(0, normalized.length - 1)
+    if (normalized.length === 0) return 0
+    return normalized.split("|").length
+  }
+
+  function _containsStreamTableSyntax(text) {
+    if (!isString(text) || text.length === 0) return false
+    var lines = text.split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      if (_isStreamTableSeparator(lines[i]) || _isStreamTableRow(lines[i])) return true
+    }
+    return false
+  }
+
+  function _isStreamValidMarkdownTableText(text) {
+    if (!isString(text) || text.length === 0) return false
+    var lines = text.split("\n").filter(function(line) { return line.trim().length > 0 })
+    if (lines.length < 2) return false
+
+    var separatorIdx = -1
+    for (var i = 0; i < lines.length; i++) {
+      if (_isStreamTableSeparator(lines[i])) {
+        separatorIdx = i
+        break
+      }
+    }
+    if (separatorIdx <= 0) return false
+    if (separatorIdx > 1) return false
+
+    var headerLine = lines[separatorIdx - 1]
+    var separatorLine = lines[separatorIdx]
+    if (!_isStreamTableRow(headerLine)) return false
+
+    var headerCols = _streamTableCellCount(headerLine)
+    var separatorCols = _streamTableCellCount(separatorLine)
+    if (headerCols < 2 || separatorCols < 2 || headerCols !== separatorCols) return false
+
+    for (var j = separatorIdx + 1; j < lines.length; j++) {
+      if (!_isStreamTableRow(lines[j])) return false
+      if (_streamTableCellCount(lines[j]) !== headerCols) return false
+    }
+    return true
+  }
+
+  function _printStreamMarkdown(text) {
+    if (!isString(text) || text.length === 0) return
+    _streamHasRendered = true
+    if (_containsStreamTableSyntax(text) && !_isStreamValidMarkdownTableText(text)) {
+      print(text)
+      return
+    }
+    printnl(ow.format.withMD(text))
+  }
+
+  function _flushStreamTableBuffer() {
+    if (_streamMdState.tableBuffer.length === 0) return
+    _printStreamMarkdown(_streamMdState.tableBuffer)
+    _streamMdState.tableBuffer = ""
+    _streamMdState.inTable = false
+  }
+
+  function _flushStreamCodeBlockBuffer() {
+    if (_streamMdState.codeBlockBuffer.length === 0) return
+    _printStreamMarkdown(_streamMdState.codeBlockBuffer)
+    _streamMdState.codeBlockBuffer = ""
+    _streamMdState.inCodeBlock = false
+  }
+
+  function _flushStreamTableHeaderCandidate() {
+    if (_streamMdState.tableHeaderCandidate.length === 0) return
+    _printStreamMarkdown(_streamMdState.tableHeaderCandidate)
+    _streamMdState.tableHeaderCandidate = ""
+  }
+
+  function _resetStreamRenderState() {
+    _streamHasRendered = false
+    _streamMdState.pending = ""
+    _streamMdState.inCodeBlock = false
+    _streamMdState.codeBlockBuffer = ""
+    _streamMdState.inTable = false
+    _streamMdState.tableBuffer = ""
+    _streamMdState.tableHeaderCandidate = ""
+  }
+
+  function _flushStreamRemainder() {
+    if (_streamMdState.pending.length > 0) {
+      if (_streamMdState.inCodeBlock) {
+        _streamMdState.codeBlockBuffer += _streamMdState.pending
+        _streamMdState.pending = ""
+      } else if (_streamMdState.inTable && (_isStreamTableRow(_streamMdState.pending) || _isStreamTableSeparator(_streamMdState.pending))) {
+        _streamMdState.tableBuffer += _streamMdState.pending
+        _streamMdState.pending = ""
+      } else if (!_streamMdState.inTable && _streamMdState.tableHeaderCandidate.length > 0 && _isStreamTableSeparator(_streamMdState.pending)) {
+        _streamMdState.inTable = true
+        _streamMdState.tableBuffer = _streamMdState.tableHeaderCandidate + _streamMdState.pending
+        _streamMdState.tableHeaderCandidate = ""
+        _streamMdState.pending = ""
+      }
+    }
+    _flushStreamCodeBlockBuffer()
+    _flushStreamTableBuffer()
+    _flushStreamTableHeaderCandidate()
+    if (_streamMdState.pending.length > 0) {
+      _printStreamMarkdown(_streamMdState.pending)
+      _streamMdState.pending = ""
+    }
+  }
+
+  function _renderStreamChunk(streamText) {
+    if (!isString(streamText) || streamText.length === 0) return
+    _streamMdState.pending += streamText
+
+    while (true) {
+      var newlineIdx = _streamMdState.pending.indexOf("\n")
+      if (newlineIdx < 0) break
+
+      var line = _streamMdState.pending.substring(0, newlineIdx)
+      _streamMdState.pending = _streamMdState.pending.substring(newlineIdx + 1)
+      var lineWithNl = line + "\n"
+      var isCodeFenceLine = _isStreamCodeFenceLine(line)
+      var isTableLine = _isStreamTableRow(line)
+      var isTableSeparatorLine = _isStreamTableSeparator(line)
+
+      if (_streamMdState.inCodeBlock) {
+        _streamMdState.codeBlockBuffer += lineWithNl
+        if (_isStreamCodeFenceCloseLine(line)) _flushStreamCodeBlockBuffer()
+        continue
+      }
+
+      if (isCodeFenceLine) {
+        _flushStreamTableBuffer()
+        _flushStreamTableHeaderCandidate()
+        _streamMdState.inCodeBlock = true
+        _streamMdState.codeBlockBuffer = lineWithNl
+        continue
+      }
+
+      if (_streamMdState.inTable) {
+        if (isTableLine || isTableSeparatorLine) {
+          _streamMdState.tableBuffer += lineWithNl
+        } else {
+          _flushStreamTableBuffer()
+          _printStreamMarkdown(lineWithNl)
+        }
+        continue
+      }
+
+      if (_streamMdState.tableHeaderCandidate.length > 0) {
+        if (isTableSeparatorLine) {
+          _streamMdState.inTable = true
+          _streamMdState.tableBuffer = _streamMdState.tableHeaderCandidate + lineWithNl
+          _streamMdState.tableHeaderCandidate = ""
+        } else {
+          _flushStreamTableHeaderCandidate()
+          if (isTableLine) {
+            _streamMdState.tableHeaderCandidate = lineWithNl
+          } else {
+            _printStreamMarkdown(lineWithNl)
+          }
+        }
+        continue
+      }
+
+      if (isTableLine) {
+        _streamMdState.tableHeaderCandidate = lineWithNl
+      } else {
+        _printStreamMarkdown(lineWithNl)
+      }
+    }
+
+    // Keep partial lines pending. If we're in a table and receive a separator
+    // line without trailing newline, hold it until the next chunk completes it.
+    if (!_streamMdState.inCodeBlock && !_streamMdState.inTable && _streamMdState.pending.length > 0) {
+      var pendingTrimmed = _streamMdState.pending.trim()
+      var looksLikeTablePiece = _isStreamTableRow(pendingTrimmed) || _isStreamTableSeparator(pendingTrimmed)
+      var looksLikeCodeFence = _isStreamCodeFenceLine(pendingTrimmed)
+      if (!looksLikeTablePiece && !looksLikeCodeFence) {
+        _printStreamMarkdown(_streamMdState.pending)
+        _streamMdState.pending = ""
+      }
+    }
   }
   function _parseDelegateSubtaskMessage(message) {
     if (!isString(message)) return __
@@ -2302,14 +2685,18 @@ try {
   }
 
   function printEvent(type, icon, message, id) {
-    // Handle streaming output with markdown formatting
+    // Handle streaming output
     if (type == "stream") {
+      // Clear inline-event erase state before rendering stream chunks so
+      // future event logs don't wipe already streamed answer text.
+      if (isDef(_prevEventLength)) {
+        print()
+        _prevEventLength = __
+      }
       var streamText = isString(message) ? message : String(message || "")
       _streamOutputStats.totalChars += streamText.length
       _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
-      // Apply markdown formatting to the streamed content
-      var formatted = ow.format.withMD(message)
-      printnl(formatted)
+      _renderStreamChunk(streamText)
       return
     }
     // Ignore user events
@@ -2372,7 +2759,17 @@ try {
       if (!isObject(agentRef.llm) || typeof agentRef.llm.getGPT !== "function") return
       var conversation = agentRef.llm.getGPT().getConversation()
       if (isArray(conversation)) {
-        io.writeFileJSON(convoPath, { u: new Date(), c: conversation }, "")
+        var payload = { u: new Date(), c: conversation }
+        if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
+          payload.last = payload.last || {}
+          payload.last.goal = lastGoalPrompt
+        }
+        if (isDef(lastResult)) {
+          payload.last = payload.last || {}
+          payload.last.result = lastResult
+          payload.last.original = isDef(lastOrigResult) ? lastOrigResult : lastResult
+        }
+        io.writeFileJSON(convoPath, payload, "")
       }
     } catch(ignorePersistError) { }
   }
@@ -2380,6 +2777,7 @@ try {
   function runGoal(goalText) {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
+    _resetStreamRenderState()
     var beforeGoalResult = runHooks("before_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "" })
     if (beforeGoalResult.blocked) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Goal blocked by a before_goal hook.", errorColor))
@@ -2391,6 +2789,7 @@ try {
       effectiveGoal = hookPrefix + "\n\n" + (isString(goalText) ? goalText : "")
     }
 
+    lastGoalPrompt = isString(goalText) ? goalText : (isDef(goalText) ? String(goalText) : "")
     var _args = buildArgs(effectiveGoal)
     if (!ensureModel(_args)) return false
     var agent = new MiniA()
@@ -2442,38 +2841,39 @@ try {
         sleep(75)
         return false
       }).exec()
-      persistConversationSnapshot(agent)
-      refreshConversationStats(agent)
       if (stopRequested) {
         print(colorifyText("Mini-A stopped by user (Esc).", hintColor))
         return false
       }
-      var resultPreview = isString(agentResult) ? agentResult.substring(0, 2000) : (isDef(agentResult) ? stringify(agentResult, __, "").substring(0, 2000) : "")
-      runHooks("after_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "", MINI_A_RESULT: resultPreview })
       lastResult = agentResult
       lastOrigResult = agentOrigResult
+      persistConversationSnapshot(agent)
+      refreshConversationStats(agent)
+      var resultPreview = isString(agentResult) ? agentResult.substring(0, 2000) : (isDef(agentResult) ? stringify(agentResult, __, "").substring(0, 2000) : "")
+      runHooks("after_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "", MINI_A_RESULT: resultPreview })
       if (isUnDef(_args.outfile)) {
         // Skip duplicate output if streaming was used - content already displayed
         if (!_args.usestream) {
           //print(colorifyText("\n🏁 Final answer", successColor))
           print()
           if (isObject(lastResult) || isArray(lastResult)) {
-            print(stringify(lastResult, __, "  "))
+            print(_stringifyFinalResult(lastResult, true))
           } else if (isString(lastResult)) {
-            print(lastResult)
+            print(unwrapSingleMarkdownCodeBlock(lastResult))
           } else if (isDef(lastResult)) {
-            print(stringify(lastResult, __, ""))
+            print(_stringifyFinalResult(lastResult, false))
           }
         } else {
+          _flushStreamRemainder()
           // If streaming was enabled but no visible content was streamed, fallback to final result output.
-          if (_streamOutputStats.contentChars === 0 && isDef(lastResult)) {
+          if (!_streamHasRendered && _streamOutputStats.contentChars === 0 && isDef(lastResult)) {
             print()
             if (isObject(lastResult) || isArray(lastResult)) {
-              print(stringify(lastResult, __, "  "))
+              print(_stringifyFinalResult(lastResult, true))
             } else if (isString(lastResult)) {
-              print(lastResult)
+              print(unwrapSingleMarkdownCodeBlock(lastResult))
             } else {
-              print(stringify(lastResult, __, ""))
+              print(_stringifyFinalResult(lastResult, false))
             }
           }
           // Add newline after streaming output before prompt
@@ -2634,7 +3034,81 @@ try {
     }
   }
 
+  function parseStatsOptions(args) {
+    var parsedArgs
+    if (isObject(args) && isArray(args.argv)) {
+      parsedArgs = {
+        ok: true,
+        raw: isString(args.raw) ? args.raw : "",
+        argv: args.argv,
+        argc: isNumber(args.argc) ? args.argc : args.argv.length
+      }
+    } else {
+      parsedArgs = parseSlashArgs(isString(args) ? args : "")
+    }
+    if (parsedArgs.ok !== true) return parsedArgs
+
+    var options = {
+      showDetailed: false,
+      showTools: false,
+      outputPath: __
+    }
+
+    for (var i = 0; i < parsedArgs.argv.length; i++) {
+      var token = parsedArgs.argv[i]
+      var tokenLower = token.toLowerCase()
+
+      if (tokenLower === "detailed" || tokenLower === "detail" || tokenLower === "full") {
+        options.showDetailed = true
+        continue
+      }
+      if (tokenLower === "tools" || tokenLower === "tool") {
+        options.showTools = true
+        continue
+      }
+
+      var valueFromNext = false
+      var outputKey = ""
+      var outputValue = ""
+      var splitPos = token.indexOf("=")
+
+      if (splitPos > 0) {
+        outputKey = token.substring(0, splitPos).toLowerCase()
+        outputValue = token.substring(splitPos + 1)
+      } else if (tokenLower === "out" || tokenLower === "output" || tokenLower === "file" || tokenLower === "save" || tokenLower === "json") {
+        valueFromNext = true
+        outputKey = tokenLower
+      }
+
+      if (outputKey === "out" || outputKey === "output" || outputKey === "file" || outputKey === "save" || outputKey === "json") {
+        if (valueFromNext) {
+          if (i + 1 >= parsedArgs.argv.length) {
+            return { ok: false, error: "Missing output file path after '" + token + "'." }
+          }
+          outputValue = parsedArgs.argv[++i]
+        }
+        if (!isString(outputValue) || outputValue.trim().length === 0) {
+          return { ok: false, error: "Output file path cannot be empty." }
+        }
+        options.outputPath = outputValue.trim()
+        continue
+      }
+
+      return { ok: false, error: "Unknown /stats argument '" + token + "'." }
+    }
+
+    options.ok = true
+    return options
+  }
+
   function printStats(args) {
+    var statsOptions = parseStatsOptions(args)
+    if (statsOptions.ok !== true) {
+      print(colorifyText("Usage: /stats [detailed] [tools] [out=<file.json>]", errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + statsOptions.error, errorColor))
+      return
+    }
+
     if (!isObject(activeAgent) || typeof activeAgent.getMetrics !== "function") {
       print(colorifyText("No active agent available. Run a goal first to collect metrics.", hintColor))
       return
@@ -2646,16 +3120,10 @@ try {
       return
     }
 
-    var showDetailed = false
-    var showTools = false
-    if (isString(args)) {
-      var argLower = args.toLowerCase().trim()
-      if (argLower === "detailed" || argLower === "detail" || argLower === "full") {
-        showDetailed = true
-      } else if (argLower === "tools" || argLower === "tool") {
-        showTools = true
-      }
-    }
+    var showDetailed = statsOptions.showDetailed === true
+    var showTools = statsOptions.showTools === true
+    var summaryExport = __
+    var exportPayload = __
 
     print(colorifyText("Mini-A Session Statistics", accentColor))
     print()
@@ -2663,9 +3131,20 @@ try {
     // Show general stats by default
     if (!showDetailed && !showTools) {
       var summaryRows = []
+      summaryExport = {
+        goals: {},
+        llm_calls: {},
+        actions: {},
+        performance: {}
+      }
 
       // Goals
       if (isObject(metrics.goals)) {
+        summaryExport.goals = {
+          achieved: metrics.goals.achieved || 0,
+          failed: metrics.goals.failed || 0,
+          stopped: metrics.goals.stopped || 0
+        }
         summaryRows.push({
           category: "Goals",
           metric: "Achieved",
@@ -2685,6 +3164,11 @@ try {
 
       // LLM Calls
       if (isObject(metrics.llm_calls)) {
+        summaryExport.llm_calls = {
+          total: metrics.llm_calls.total || 0,
+          normal: metrics.llm_calls.normal || 0,
+          low_cost: metrics.llm_calls.low_cost || 0
+        }
         summaryRows.push({
           category: "LLM Calls",
           metric: "Total",
@@ -2704,6 +3188,12 @@ try {
 
       // Actions
       if (isObject(metrics.actions)) {
+        summaryExport.actions = {
+          mcp_actions_executed: metrics.actions.mcp_actions_executed || 0,
+          mcp_actions_failed: metrics.actions.mcp_actions_failed || 0,
+          shell_commands_executed: metrics.actions.shell_commands_executed || 0,
+          thoughts_made: metrics.actions.thoughts_made || 0
+        }
         summaryRows.push({
           category: "Actions",
           metric: "MCP Executed",
@@ -2728,6 +3218,13 @@ try {
 
       // Performance
       if (isObject(metrics.performance)) {
+        summaryExport.performance = {
+          steps_taken: metrics.performance.steps_taken || 0
+        }
+        if (metrics.performance.total_session_time_ms > 0) {
+          summaryExport.performance.total_session_time_ms = metrics.performance.total_session_time_ms
+          summaryExport.performance.total_session_time_seconds = Number((metrics.performance.total_session_time_ms / 1000).toFixed(2))
+        }
         summaryRows.push({
           category: "Performance",
           metric: "Steps Taken",
@@ -2744,7 +3241,8 @@ try {
 
       print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       print()
-      print(colorifyText("Use '/stats detailed' for all metrics or '/stats tools' for per-tool statistics", hintColor))
+      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, or add out=<file.json> to save.", hintColor))
+      exportPayload = { mode: "summary", data: summaryExport }
     }
 
     // Show detailed stats
@@ -2752,6 +3250,7 @@ try {
       print(colorifyText("Detailed Statistics:", accentColor))
       print()
       print(printTree(metrics))
+      exportPayload = { mode: (showTools ? "detailed+tools" : "detailed"), data: metrics }
     }
 
     // Show per-tool stats
@@ -2779,10 +3278,49 @@ try {
       } else {
         print(colorifyText("No per-tool statistics available yet.", hintColor))
       }
+      if (!showDetailed) {
+        exportPayload = { mode: "tools", data: isObject(metrics.per_tool_usage) ? metrics.per_tool_usage : {} }
+      }
+    }
+
+    if (isString(statsOptions.outputPath) && statsOptions.outputPath.length > 0) {
+      var payload = {
+        generated_at: new Date(),
+        mode: isObject(exportPayload) && isString(exportPayload.mode) ? exportPayload.mode : "summary",
+        data: isObject(exportPayload) && isDef(exportPayload.data) ? exportPayload.data : {}
+      }
+      try {
+        io.writeFileJSON(statsOptions.outputPath, payload, "")
+        print()
+        print(colorifyText("Statistics written to " + statsOptions.outputPath, successColor))
+      } catch (statsSaveErr) {
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to write statistics file: " + statsSaveErr, errorColor))
+      }
     }
   }
 
   function printHelp() {
+    function formatAlignedHelpLine(commandText, descriptionText, commandColumnWidth) {
+      var commandLabel = isString(commandText) ? commandText : String(commandText)
+      var descriptionLabel = isString(descriptionText) ? descriptionText : String(descriptionText)
+      var padSize = Math.max(2, commandColumnWidth - commandLabel.length + 2)
+      return "  " + colorifyText(commandLabel, "BOLD") + colorifyText(repeat(padSize, " ") + descriptionLabel, hintColor)
+    }
+
+    function appendAlignedHelpRows(targetLines, rows) {
+      if (!isArray(rows) || rows.length === 0) return
+      var commandColumnWidth = 0
+      rows.forEach(function(row) {
+        if (!isObject(row)) return
+        var commandLabel = isString(row.command) ? row.command : String(row.command || "")
+        commandColumnWidth = Math.max(commandColumnWidth, commandLabel.length)
+      })
+      rows.forEach(function(row) {
+        if (!isObject(row)) return
+        targetLines.push(formatAlignedHelpLine(row.command, row.description, commandColumnWidth))
+      })
+    }
+
     var conversationPath = getConversationPath()
     var conversationDisplay = (isString(conversationPath) && conversationPath.length > 0) ? conversationPath : "disabled"
     var lines = [
@@ -2808,9 +3346,9 @@ try {
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
-      "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n conversation turns", hintColor),
+      "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n user goals (one per line)", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
-      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode]       Show session statistics (modes: detailed, tools)", hintColor),
+      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools)", hintColor),
       "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
       "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
@@ -2821,14 +3359,20 @@ try {
     if (commandNames.length > 0) {
       lines.push("")
       lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
+      var customCommandRows = []
       commandNames.forEach(function(name) {
-        lines.push("  " + colorifyText("/" + name, "BOLD") + colorifyText(" [args]       Execute instructions from " + customSlashCommands[name].file, hintColor))
+        customCommandRows.push({
+          command: "/" + name + " [args]",
+          description: "Execute instructions from " + customSlashCommands[name].file
+        })
       })
+      appendAlignedHelpRows(lines, customCommandRows)
     }
     var skillNames = Object.keys(customSkillSlashCommands).sort()
     if (skillNames.length > 0) {
       lines.push("")
       lines.push("Skills from " + colorifyText(customSkillsDirPath, accentColor) + " (skills also support $<name>):")
+      var skillRows = []
       skillNames.forEach(function(name) {
         var skillEntry = customSkillSlashCommands[name]
         var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
@@ -2839,14 +3383,28 @@ try {
           var maxDescriptionLength = Math.max(32, termWidth - (name.length + 20))
           skillHelpText = truncateText(skillEntry.description.replace(/\s+/g, " ").trim(), maxDescriptionLength)
         }
-        lines.push("  " + colorifyText("/" + name, "BOLD") + colorifyText(" [args]   " + skillHelpText, hintColor))
+        skillRows.push({
+          command: "/" + name + " [args]",
+          description: skillHelpText
+        })
       })
+      appendAlignedHelpRows(lines, skillRows)
     }
     var totalHooks = 0
     Object.keys(loadedHooks).forEach(function(ev) { totalHooks += loadedHooks[ev].length })
     if (totalHooks > 0) {
       lines.push("")
-      lines.push("Hooks: " + colorifyText(String(totalHooks) + " hook(s) loaded", hintColor) + " from " + colorifyText(hooksDirPath, accentColor))
+      lines.push("Hooks from " + colorifyText(hooksDirPath, accentColor) + ":")
+      var hookRows = []
+      Object.keys(loadedHooks).sort().forEach(function(eventName) {
+        var hookCount = isArray(loadedHooks[eventName]) ? loadedHooks[eventName].length : 0
+        if (hookCount <= 0) return
+        hookRows.push({
+          command: eventName,
+          description: String(hookCount) + " hook(s) loaded"
+        })
+      })
+      appendAlignedHelpRows(lines, hookRows)
     }
     print( ow.format.withSideLine( lines.join("\n"), __, promptColor, hintColor, ow.format.withSideLineThemes().openCurvedRect) )
   }
@@ -2894,6 +3452,9 @@ try {
   print(colorifyText(miniaLogo, "BOLD") + colorifyText(" console", accentColor))
   print()
   print(colorifyText("Type /help for available commands.", hintColor))
+  if (resumeConversation === true) {
+    print(colorifyText("Use /last to check the previous answer from this resumed conversation.", hintColor))
+  }
 
   const _miniaConReset = function() {
   	if (String(java.lang.System.getProperty("os.name")).match(/Windows/)) return true
@@ -2997,7 +3558,7 @@ try {
         continue
       }
       if (commandLower === "last" || commandLower.indexOf("last ") === 0) {
-        if (isUnDef(lastResult)) {
+        if (isUnDef(lastResult) && isUnDef(lastGoalPrompt)) {
           print(colorifyText("No goal executed yet.", hintColor))
           continue
         }
@@ -3011,19 +3572,20 @@ try {
           }
         }
 
-        if (printMarkdown) {
-          // Print raw result without markdown parsing
-          if (isObject(lastOrigResult) || isArray(lastOrigResult)) {
-            print(stringify(lastOrigResult, __, "  "))
+        if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
+          print(colorifyText("👤 Previous goal:", accentColor))
+          print(lastGoalPrompt)
+          print()
+        }
+
+        if (isDef(lastResult)) {
+          print(colorifyText("Previous answer:", accentColor))
+          if (printMarkdown) {
+            var rawAnswerText = extractAnswerText(lastOrigResult, false)
+            print(rawAnswerText)
           } else {
-            print(String(lastOrigResult))
-          }
-        } else {
-          // Default behavior - print with formatting
-          if (isObject(lastResult) || isArray(lastResult)) {
-            print(stringify(lastResult, __, "  "))
-          } else {
-            print(lastResult)
+            var renderedAnswerText = extractAnswerText(lastResult, true)
+            print(ow.format.withMD(renderedAnswerText))
           }
         }
         continue
@@ -3172,13 +3734,14 @@ try {
         }
         continue
       }
-      if (commandLower === "stats") {
-        printStats()
-        continue
-      }
-      if (commandLower.indexOf("stats ") === 0) {
-        var statsArg = command.substring(6).trim()
-        printStats(statsArg)
+      if (parsedSlashCommand.name === "stats") {
+        var parsedStatsArgs = parseSlashArgs(parsedSlashCommand.argsRaw)
+        if (parsedStatsArgs.ok !== true) {
+          print(colorifyText("Usage: /stats [detailed] [tools] [out=<file.json>]", errorColor))
+          printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedStatsArgs.error, errorColor))
+          continue
+        }
+        printStats(parsedStatsArgs)
         continue
       }
       if (commandLower === "skills") {

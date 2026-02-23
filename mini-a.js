@@ -3,6 +3,7 @@
 // Description: Mini Agent (Mini-A) to achieve goals using an LLM and shell commands.
 
 ow.loadMetrics()
+loadLib("mini-a-common.js")
 
 /**
  * <odoc>
@@ -53,7 +54,8 @@ var MiniA = function() {
   this._planResumeInfo = null
   this._toollogon = false
   this._defaultAgentPersonaLine = "You are a decisive, action-oriented agent that executes efficiently."
-  this._agentDirectiveLine = "Work step-by-step toward your goal. No user interaction or feedback is possible."
+  this._agentDirectiveCoreLine = "Work step-by-step toward your goal."
+  this._agentDirectiveNoInteractionRemark = "No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
 
@@ -167,6 +169,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
+{{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
 
 ## MULTI-ACTION SUPPORT:
@@ -187,6 +190,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
+{{#if shellViaActionPreferred}}• This function-calling rule applies to non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
@@ -221,6 +225,7 @@ Arguments: {
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • Call the proxy-dispatch tool through the JSON "action" field
+{{#if shellViaActionPreferred}}• This proxy-dispatch path is for non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "proxy-dispatch" | "final"
 
 ### How to call MCP tools:
@@ -253,6 +258,7 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 ## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
 • {{toolCount}} MCP tools are available via direct function calling
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
+{{#if shellViaActionPreferred}}• This function-calling rule applies to non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Each tool has its own function signature - call tools directly by their name
 • Tool schemas are provided via the tool interface, so keep prompts concise.
@@ -270,6 +276,7 @@ Arguments: {
 ## MCP TOOL ACCESS (ACTION-BASED):
 • {{toolCount}} MCP tools are available as action types
 • Call MCP tools through the JSON "action" field, just like shell or custom actions
+{{#if shellViaActionPreferred}}• For shell commands, use "action":"shell" with top-level "command"; reserve MCP action names for non-shell tools.{{/if}}
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | [MCP tool name] | "final"
 
 ### How to call MCP tools:
@@ -490,11 +497,12 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 ### TOOL CALLING STEPS
 • If you truly need a tool, reply with a single JSON object following this schema: {"thought":"why the tool is needed","action":"<tool name>","params":{...}}.
 • The "action" must match one of the available tool names exactly; "params" must be a JSON object with the required fields.
+{{#if shellViaActionPreferred}}• Exception: for shell commands use {"thought":"...","action":"shell","command":"..."} (top-level "command", not params.command).{{/if}}
 • After you receive the tool result, continue answering in natural language (use JSON again only if you need another tool).
 {{/if}}
 {{#if useshell}}
 ### SHELL ACCESS
-• You may request shell commands by setting "action":"shell" and providing the POSIX command via "command" (or params.command).
+• You may request shell commands by setting "action":"shell" and providing the POSIX command via top-level "command".
 • Keep commands minimal, avoid destructive operations, and remember pipes/redirection may be blocked unless explicitly allowed.
 {{/if}}
 
@@ -570,6 +578,7 @@ MiniA._activeInstances = []
 MiniA._shutdownHookRegistered = false
 MiniA._registeredWorkers = []
 MiniA._registeredWorkerLastHeartbeat = {}
+MiniA._proxyTempFiles = []
 
 MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
@@ -607,6 +616,7 @@ MiniA._registerShutdownHook = function() {
   addOnOpenAFShutdown(function() {
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
+    try { MiniA._cleanupProxyTempFiles() } catch(ignoreTempCleanupError) {}
     try {
       if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
         $mcp.destroy()
@@ -615,6 +625,23 @@ MiniA._registerShutdownHook = function() {
   })
 
   MiniA._shutdownHookRegistered = true
+}
+
+MiniA._registerProxyTempFile = function(filePath) {
+  if (!isString(filePath) || filePath.length === 0) return
+  if (!isArray(MiniA._proxyTempFiles)) MiniA._proxyTempFiles = []
+  if (MiniA._proxyTempFiles.indexOf(filePath) < 0) MiniA._proxyTempFiles.push(filePath)
+}
+
+MiniA._cleanupProxyTempFiles = function() {
+  if (!isArray(MiniA._proxyTempFiles) || MiniA._proxyTempFiles.length === 0) return
+  MiniA._proxyTempFiles.forEach(function(filePath) {
+    if (!isString(filePath) || filePath.length === 0) return
+    try {
+      if (io.fileExists(filePath)) io.rm(filePath)
+    } catch(ignoreTempDeleteError) {}
+  })
+  MiniA._proxyTempFiles = []
 }
 
 MiniA.buildVisualKnowledge = function(options) {
@@ -888,7 +915,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   var _e = ""
   switch(e) {
   case "user"     : _e = "👤"; break
-  case "exec"     : _e = "⚙️"; break
+  case "exec"     : _e = "⚙️ "; break
   case "shell"    : _e = "🖥️ "; break
   case "think"    : _e = "💡"; break
   case "final"    : _e = "🏁"; break
@@ -905,7 +932,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "libs"     : _e = "📚"; break
   case "info"     : _e = "ℹ️"; break
   case "load"     : _e = "📂"; break
-  case "warn"     : _e = "⚠️ "; break
+  case "warn"     : _e = "⚠️  "; break
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
   default         : _e = e
@@ -1345,12 +1372,24 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     var inTable = false         // Track if inside a table
     var codeBlockBuffer = ""    // Buffer code blocks until complete
     var tableBuffer = ""        // Buffer table rows until complete
-    var tableHeaderSeen = false // Track if table header separator was seen
+    var tableHeaderCandidate = "" // Buffer first row until separator confirms a table
     var firstOutput = true      // Track if first output (for initial newline)
     
-    // Regex to match valid markdown table separator lines (e.g., | --- | :---: | ---: |)
-    // Requires: starting |, one or more columns with dashes (optional alignment colons), ending |
-    var TABLE_SEPARATOR_REGEX = /^\s*\|(\s*:?-+:?\s*\|)+\s*$/
+    // Match markdown table separator rows with or without outer pipes.
+    var TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+    function isTableSeparatorLine(lineText) {
+        if (!isString(lineText)) return false
+        return TABLE_SEPARATOR_REGEX.test(lineText.trim())
+    }
+
+    function isTableRowLine(lineText) {
+        if (!isString(lineText)) return false
+        var trimmed = lineText.trim()
+        if (trimmed.length === 0) return false
+        if (isTableSeparatorLine(trimmed)) return false
+        return trimmed.indexOf("|") >= 0
+    }
 
     function isHexDigit(ch) {
         return /^[0-9a-fA-F]$/.test(ch)
@@ -1466,61 +1505,41 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
                 continue
             }
 
-            // Check for table row (starts with |)
-            if (trimmedLine.indexOf("|") === 0) {
-                // Check if this is a table header separator line
-                var isSeparator = TABLE_SEPARATOR_REGEX.test(trimmedLine)
-                
-                if (!inTable) {
-                    // Starting potential table
-                    if (isSeparator) {
-                        // This is a separator without a header - not a valid table
-                        // Output immediately as regular content
-                        flushContent(line + "\n")
-                        continue
-                    }
-                    // Buffer first line - might be table header
-                    inTable = true
-                    tableBuffer = line + "\n"
-                    tableHeaderSeen = false
+            var isTableLine = isTableRowLine(line)
+            var isSeparatorLine = isTableSeparatorLine(line)
+
+            if (inTable) {
+                if (isTableLine || isSeparatorLine) {
+                    tableBuffer += line + "\n"
                     continue
                 }
-                
-                // Already in table - check if this is the separator
-                if (!tableHeaderSeen) {
-                    if (isSeparator) {
-                        // Found the separator - now we know it's a valid table
-                        tableHeaderSeen = true
-                        tableBuffer += line + "\n"
-                        continue
-                    } else {
-                        // Second line is not a separator - not a valid table
-                        // Flush the buffered header as regular content
-                        flushContent(tableBuffer)
-                        // And flush current line
-                        flushContent(line + "\n")
-                        tableBuffer = ""
-                        inTable = false
-                        tableHeaderSeen = false
-                        continue
-                    }
-                }
-                
-                // tableHeaderSeen is true - valid table continues
-                tableBuffer += line + "\n"
-                continue
-            }
-
-            // If we were in a table and hit a non-table line
-            if (inTable) {
-                // Flush buffered content (valid table or non-table lines with |)
                 flushContent(tableBuffer)
                 tableBuffer = ""
                 inTable = false
-                tableHeaderSeen = false
             }
 
-            // Normal line - output immediately
+            if (tableHeaderCandidate.length > 0) {
+                if (isSeparatorLine) {
+                    inTable = true
+                    tableBuffer = tableHeaderCandidate + line + "\n"
+                    tableHeaderCandidate = ""
+                    continue
+                }
+                flushContent(tableHeaderCandidate)
+                tableHeaderCandidate = ""
+                if (isTableLine) {
+                    tableHeaderCandidate = line + "\n"
+                } else {
+                    flushContent(line + "\n")
+                }
+                continue
+            }
+
+            if (isTableLine) {
+                tableHeaderCandidate = line + "\n"
+                continue
+            }
+
             flushContent(line + "\n")
         }
     }
@@ -1528,8 +1547,30 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     // Flush remaining buffers at end of answer
     function flushRemaining() {
         flushPendingEscapes()
-        if (codeBlockBuffer.length > 0) flushContent(codeBlockBuffer)
+        if (contentBuffer.length > 0 && inCodeBlock) {
+            // If stream ended without a trailing newline, keep any pending
+            // fence/content attached to the current fenced block.
+            codeBlockBuffer += contentBuffer
+            contentBuffer = ""
+        }
+        if (codeBlockBuffer.length > 0) {
+            flushContent(codeBlockBuffer)
+            codeBlockBuffer = ""
+            inCodeBlock = false
+        }
+        if (contentBuffer.length > 0) {
+            if (inTable && (isTableRowLine(contentBuffer) || isTableSeparatorLine(contentBuffer))) {
+                tableBuffer += contentBuffer
+                contentBuffer = ""
+            } else if (!inTable && tableHeaderCandidate.length > 0 && isTableSeparatorLine(contentBuffer)) {
+                inTable = true
+                tableBuffer = tableHeaderCandidate + contentBuffer
+                tableHeaderCandidate = ""
+                contentBuffer = ""
+            }
+        }
         if (tableBuffer.length > 0) flushContent(tableBuffer)
+        if (tableHeaderCandidate.length > 0) flushContent(tableHeaderCandidate)
         if (contentBuffer.length > 0) flushContent(contentBuffer)
         flushContent("\n\n")
     }
@@ -1643,18 +1684,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
                     gptInstance.setConversation(savedConversation)
                 }
             }
-        }, {
-            maxAttempts : 3,
-            initialDelay: 250,
-            maxDelay    : 4000,
-            context     : { source: "llm", operation: "summarize" },
-            onRetry     : function(err, attempt, wait, category) {
-                self.fnI("retry", "Summarization attempt " + attempt + " failed (" + category.type + "). Retrying in " + wait + "ms...")
-                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-                    global.__mini_a_metrics.retries.inc()
-                }
-            }
-        })
+        }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
     } catch (e) {
         var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
         this.fnI("warn", "Summarization failed: " + (summaryError.reason || e))
@@ -3663,12 +3693,7 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
         if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
         if (isFunction(analyzerLLM.promptWithStats)) return analyzerLLM.promptWithStats(analysisPrompt)
         return analyzerLLM.prompt(analysisPrompt)
-      }, {
-        maxAttempts : 2,
-        initialDelay: 250,
-        maxDelay    : 2000,
-        context     : { source: "llm", operation: "plan-analysis" }
-      })
+      }, this._llmRetryOptions("Plan analysis", { operation: "plan-analysis" }, { maxAttempts: 2, maxDelay: 2000 }))
 
       if (isObject(analysisResponse)) {
         if (isFunction(controls && controls.afterCall)) {
@@ -3723,15 +3748,7 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
         return validatorLLM.promptJSONWithStats(critiquePrompt)
       }
       return validatorLLM.promptWithStats(critiquePrompt)
-    }, {
-      maxAttempts : 3,
-      initialDelay: 400,
-      maxDelay    : 4000,
-      context     : { source: "llm", operation: "plan-critique" },
-      onRetry     : (err, attempt, wait) => {
-        this.fnI("retry", `Plan critique attempt ${attempt} failed (${err}). Retrying in ${wait}ms...`)
-      }
-    })
+    }, this._llmRetryOptions("Plan critique", { operation: "plan-critique" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
     var totalTokens = this._getTotalTokens(stats)
@@ -4052,15 +4069,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
     if (isFunction(plannerLLM.promptWithStats)) return plannerLLM.promptWithStats(prompt)
     var result = plannerLLM.prompt(prompt)
     return { response: result, stats: {} }
-  }, {
-    maxAttempts : 3,
-    initialDelay: 500,
-    maxDelay    : 4000,
-    context     : { source: "llm", operation: "plan-generate" },
-    onRetry     : (err, attempt, wait) => {
-      this.fnI("retry", `Plan generation attempt ${attempt} failed (${err}). Retrying in ${wait}ms...`)
-    }
-  })
+  }, this._llmRetryOptions("Plan generation", { operation: "plan-generate" }, { initialDelay: 500 }))
 
   var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
   var totalTokens = this._getTotalTokens(stats)
@@ -4898,7 +4907,12 @@ MiniA.prototype._cleanCodeBlocks = function(text) {
  * Parse JSON payloads returned by models, including fenced or embedded JSON.
  */
 MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
-    if (isMap(rawResponse) || isArray(rawResponse)) return rawResponse
+    if (isMap(rawResponse)) {
+        var recoveredDirect = this._extractJsonActionFromPseudoToolCall(rawResponse)
+        if (isMap(recoveredDirect) || isArray(recoveredDirect)) return recoveredDirect
+        return rawResponse
+    }
+    if (isArray(rawResponse)) return rawResponse
     if (!isString(rawResponse)) return __
 
     var candidates = []
@@ -4915,7 +4929,11 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
     var parseCandidate = candidate => {
         if (!isString(candidate)) return __
         if (!candidate.startsWith("{") && !candidate.startsWith("[")) return __
-        return jsonParse(candidate, __, __, true)
+        var parsed = jsonParse(candidate, __, __, true)
+        if (!(isMap(parsed) || isArray(parsed))) return parsed
+        var recovered = this._extractJsonActionFromPseudoToolCall(parsed)
+        if (isMap(recovered) || isArray(recovered)) return recovered
+        return parsed
     }
 
     addCandidate(rawResponse)
@@ -4935,6 +4953,68 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
     for (var i = 0; i < candidates.length; i++) {
         var parsed = parseCandidate(candidates[i])
         if (isMap(parsed) || isArray(parsed)) return parsed
+    }
+
+    return __
+}
+
+MiniA.prototype._extractJsonActionFromPseudoToolCall = function(payload) {
+    var parseArguments = args => {
+        if (isMap(args) || isArray(args)) return args
+        if (!isString(args)) return __
+        var parsed = this._parseJsonCandidate(args)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+        return __
+    }
+
+    if (!isMap(payload)) return __
+    if (isDef(payload.action)) return payload
+
+    if (isMap(payload.arguments) && isDef(payload.arguments.action)) return payload.arguments
+    if (isString(payload.arguments)) {
+        var parsedPayloadArguments = parseArguments(payload.arguments)
+        if (isMap(parsedPayloadArguments) && isDef(parsedPayloadArguments.action)) return parsedPayloadArguments
+    }
+
+    var payloadName = isString(payload.name) ? payload.name.toLowerCase() : ""
+    if (payloadName === "json") {
+        var parsedNamedArguments = parseArguments(payload.arguments)
+        if (isMap(parsedNamedArguments) || isArray(parsedNamedArguments)) return parsedNamedArguments
+    }
+
+    if (isMap(payload.function)) {
+        var functionName = isString(payload.function.name) ? payload.function.name.toLowerCase() : ""
+        if (functionName === "json") {
+            var parsedFunctionArguments = parseArguments(payload.function.arguments)
+            if (isMap(parsedFunctionArguments) || isArray(parsedFunctionArguments)) return parsedFunctionArguments
+        }
+    }
+
+    if (isArray(payload.tool_calls)) {
+        for (var i = 0; i < payload.tool_calls.length; i++) {
+            var toolCall = payload.tool_calls[i]
+            if (!isMap(toolCall)) continue
+            var toolFunction = isMap(toolCall.function) ? toolCall.function : {}
+            var toolName = isString(toolCall.name)
+              ? toolCall.name.toLowerCase()
+              : (isString(toolFunction.name) ? toolFunction.name.toLowerCase() : "")
+            if (toolName !== "json") continue
+            var parsedToolArguments = parseArguments(isDef(toolCall.arguments) ? toolCall.arguments : toolFunction.arguments)
+            if (isMap(parsedToolArguments) || isArray(parsedToolArguments)) return parsedToolArguments
+        }
+    }
+
+    if (isArray(payload.choices)) {
+        for (var j = 0; j < payload.choices.length; j++) {
+            var choice = payload.choices[j]
+            if (!isMap(choice)) continue
+            var recoveredFromChoice = this._extractJsonActionFromPseudoToolCall(choice)
+            if (isMap(recoveredFromChoice) || isArray(recoveredFromChoice)) return recoveredFromChoice
+            if (isMap(choice.message)) {
+                var recoveredFromMessage = this._extractJsonActionFromPseudoToolCall(choice.message)
+                if (isMap(recoveredFromMessage) || isArray(recoveredFromMessage)) return recoveredFromMessage
+            }
+        }
     }
 
     return __
@@ -5055,26 +5135,71 @@ MiniA.prototype._parseJsonCandidate = function(rawText) {
     return __
 }
 
-MiniA.prototype._recoverMessageFromProviderError = function(rawPayload) {
-    var payload = isMap(rawPayload) ? rawPayload : {}
-    var errorPayload = __
+MiniA.prototype._extractProviderToolUseFailedGeneration = function(rawPayload) {
+    var queue = [ rawPayload ]
+    var seen = {}
+    var stringCandidates = []
 
-    if (isMap(payload.error)) errorPayload = payload.error
-    if (isUnDef(errorPayload) && isMap(payload.response) && isMap(payload.response.error)) {
-        errorPayload = payload.response.error
+    while (queue.length > 0) {
+        var current = queue.shift()
+        if (isUnDef(current) || current === null) continue
+
+        if (isString(current)) {
+            if (current.indexOf("failed_generation") >= 0) stringCandidates.push(current)
+            continue
+        }
+
+        if (isArray(current)) {
+            current.forEach(entry => queue.push(entry))
+            continue
+        }
+
+        if (!isMap(current)) continue
+
+        var currentId = md5(stringify(current, __, ""))
+        if (seen[currentId]) continue
+        seen[currentId] = true
+
+        var errorCode = isString(current.code) ? current.code.toLowerCase() : ""
+        var failedGeneration = isString(current.failed_generation) ? current.failed_generation : ""
+        if (errorCode === "tool_use_failed" && failedGeneration.length > 0) return failedGeneration
+
+        if (isString(current.message) && current.message.indexOf("failed_generation") >= 0) {
+            stringCandidates.push(current.message)
+        }
+
+        Object.keys(current).forEach(key => queue.push(current[key]))
     }
-    if (!isMap(errorPayload)) return __
 
-    var errorCode = isString(errorPayload.code) ? errorPayload.code : ""
-    var failedGeneration = isString(errorPayload.failed_generation) ? errorPayload.failed_generation : ""
-    if (errorCode !== "tool_use_failed" || failedGeneration.length === 0) return __
+    for (var i = 0; i < stringCandidates.length; i++) {
+        var text = stringCandidates[i]
+        if (!isString(text)) continue
+        var match = text.match(/"failed_generation"\s*:\s*"((?:\\.|[^"\\])*)"/)
+        if (!isArray(match) || match.length < 2) continue
+        var rawEscaped = match[1]
+        var decodedObj = jsonParse('{"x":"' + rawEscaped + '"}', __, __, true)
+        if (isMap(decodedObj) && isString(decodedObj.x) && decodedObj.x.length > 0) return decodedObj.x
+    }
+
+    return ""
+}
+
+MiniA.prototype._recoverMessageFromProviderError = function(rawPayload) {
+    var failedGeneration = this._extractProviderToolUseFailedGeneration(rawPayload)
+    if (!isString(failedGeneration) || failedGeneration.length === 0) return __
 
     var parsedFailure = this._parseJsonCandidate(failedGeneration)
+    if (!isMap(parsedFailure) && !isArray(parsedFailure)) {
+        var nestedString = jsonParse(failedGeneration, __, __, true)
+        if (isString(nestedString)) {
+            parsedFailure = this._parseJsonCandidate(nestedString)
+        }
+    }
     if (!isMap(parsedFailure) && !isArray(parsedFailure)) return __
 
-    if (isMap(parsedFailure) && isString(parsedFailure.name) && parsedFailure.name.toLowerCase() === "json" && isMap(parsedFailure.arguments)) {
-        return parsedFailure.arguments
-    }
+    var recovered = this._extractJsonActionFromPseudoToolCall(parsedFailure)
+    if (isMap(recovered) || isArray(recovered)) return recovered
+
     if (isMap(parsedFailure) && isDef(parsedFailure.action)) {
         return parsedFailure
     }
@@ -5641,9 +5766,18 @@ MiniA.prototype._categorizeError = function(error, context) {
   var normalized = isString(message) ? message.toLowerCase() : ""
   if (normalized.length === 0 && isString(err.code)) normalized = err.code.toLowerCase()
 
+  if (this._isContextOverflowError(err)) {
+    return {
+      type           : "permanent",
+      reason         : message && message.length > 0 ? message : "model context window exceeded",
+      contextOverflow: true
+    }
+  }
+
   var transientSignals = [
     "timeout", "temporar", "rate limit", "throttle", "econnreset", "econnrefused", "unreachable",
-    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open"
+    "network", "backoff", "retry", "429", "503", "504", "connection closed", "circuit open",
+    "tool call validation failed", "tool_use_failed", "attempted to call tool 'json'"
   ]
   var permanentSignals = ["invalid", "syntax", "parse", "unknown action", "not found", "missing", "denied"]
 
@@ -5668,6 +5802,76 @@ MiniA.prototype._categorizeError = function(error, context) {
   }
 
   return { type: category.type, reason: message }
+}
+
+MiniA.prototype._isContextOverflowError = function(error) {
+  var err = isObject(error) ? error : {}
+  if (isString(error)) err = { message: error }
+  if (!isObject(err)) return false
+
+  var samples = []
+  var add = value => {
+    if (!isString(value)) return
+    var text = value.trim()
+    if (text.length === 0) return
+    samples.push(text.toLowerCase())
+  }
+
+  add(err.message)
+  add(err.error)
+  add(err.code)
+  add(err.type)
+
+  if (isObject(err.response)) {
+    add(err.response.message)
+    add(err.response.error)
+    add(err.response.code)
+    add(err.response.type)
+    if (isObject(err.response.error)) {
+      add(err.response.error.message)
+      add(err.response.error.error)
+      add(err.response.error.code)
+      add(err.response.error.type)
+      add(err.response.error.status)
+    }
+  }
+
+  var normalized = samples.join(" | ")
+  if (normalized.length === 0) return false
+
+  var directSignals = [
+    "context_length_exceeded",
+    "model_context_window_exceeded",
+    "maximum context length",
+    "max context length",
+    "context window",
+    "prompt is too long",
+    "prompt too long",
+    "input token count",
+    "input too long",
+    "too many tokens",
+    "token limit exceeded",
+    "input length and max_tokens exceed context limit",
+    "input length and `max_tokens` exceed context limit",
+    "exceeds the maximum number of tokens"
+  ]
+
+  for (var i = 0; i < directSignals.length; i++) {
+    if (normalized.indexOf(directSignals[i]) >= 0) return true
+  }
+
+  var hasSizeTarget =
+    normalized.indexOf("context") >= 0 ||
+    normalized.indexOf("token") >= 0 ||
+    normalized.indexOf("prompt") >= 0 ||
+    normalized.indexOf("input") >= 0
+  var hasOverflowSignal =
+    normalized.indexOf("exceed") >= 0 ||
+    normalized.indexOf("too long") >= 0 ||
+    normalized.indexOf("limit") >= 0 ||
+    normalized.indexOf("maximum") >= 0
+
+  return hasSizeTarget && hasOverflowSignal
 }
 
 MiniA.prototype._withExponentialBackoff = function(operation, options) {
@@ -5725,6 +5929,30 @@ MiniA.prototype._withExponentialBackoff = function(operation, options) {
 
   if (isFunction(opts.onFailure)) opts.onFailure(lastError, attempts, lastCategory)
   throw lastError
+}
+
+/**
+ * Returns a standard options object for _withExponentialBackoff LLM calls.
+ * Provides consistent retry behaviour with metric tracking across all LLM call sites.
+ *
+ * @param {string} label       - Human-readable label used in retry log messages.
+ * @param {object} [ctx]       - Extra fields merged into the context object (e.g. { operation: "summarize" }).
+ * @param {object} [overrides] - Any options that should override the defaults (maxAttempts, maxDelay, onRetry, …).
+ */
+MiniA.prototype._llmRetryOptions = function(label, ctx, overrides) {
+  var self = this
+  return merge({
+    maxAttempts : 3,
+    initialDelay: 250,
+    maxDelay    : 4000,
+    context     : merge({ source: "llm" }, ctx || {}),
+    onRetry     : function(err, attempt, wait, category) {
+      self.fnI("retry", label + " attempt " + attempt + " failed (" + (isObject(category) ? category.type : String(err)) + "). Retrying in " + wait + "ms...")
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
+        global.__mini_a_metrics.retries.inc()
+      }
+    }
+  }, overrides || {})
 }
 
 MiniA.prototype._updateErrorHistory = function(runtime, entry) {
@@ -6033,12 +6261,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         }
       }
 
-      var text
-      if (isString(output)) {
-        text = output
-      } else {
-        text = stringify(output, __, "")
-      }
+      var text = isString(output) ? output : stringify(output, __, "")
       if (!isString(text) || text.length === 0) text = stringify(output, __, "")
       if (!isString(text) || text.length === 0) text = "null"
 
@@ -6317,6 +6540,105 @@ MiniA.prototype._createShellMcpConfig = function(args) {
   }
 }
 
+MiniA.prototype._createJsonToolMcpConfig = function(args) {
+  try {
+    if (toBoolean(args.usejsontool) !== true) return __
+
+    var parent = this
+    var fns = {
+      json: function(params) {
+        var payload = params
+        if (!(isMap(payload) || isArray(payload))) payload = {}
+        if (isObject(parent._runtime)) {
+          parent._runtime.pendingJsonToolPayload = payload
+        }
+        return {
+          content: [{ type: "text", text: "JSON payload accepted." }],
+          accepted: true
+        }
+      }
+    }
+
+    var fnsMeta = {
+      json: {
+        name       : "json",
+        description: "Compatibility shim: accept a JSON action payload and pass it back to Mini-A for normal processing.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            thought: { type: "string", description: "Reasoning/thought string for the step." },
+            action : {
+              oneOf: [
+                { type: "string" },
+                {
+                  type : "array",
+                  items: {
+                    type      : "object",
+                    properties: {
+                      action : { type: "string" },
+                      command: { type: "string" },
+                      answer : { type: "string" },
+                      state  : { type: "object" },
+                      params : { type: "object" }
+                    },
+                    required: ["action"]
+                  }
+                }
+              ],
+              description: "Action name (string) or action batch (array) for compatibility payloads."
+            },
+            command: { type: "string", description: "Shell command when action is shell." },
+            answer : { type: "string", description: "Final answer text when action is final." },
+            state  : { type: "object", description: "Optional state object to persist." },
+            params : { type: "object", description: "Optional action parameters." }
+          }
+        }
+      }
+    }
+
+    return {
+      id     : "mini-a-json-tool",
+      type   : "dummy",
+      options: {
+        name   : "mini-a-json-tool",
+        fns    : fns,
+        fnsMeta: fnsMeta
+      }
+    }
+  } catch (e) {
+    var errMsg = isObject(e) && isString(e.message) ? e.message : String(e)
+    this.fnI("warn", `Failed to prepare Mini-A json MCP: ${errMsg}`)
+    return __
+  }
+}
+
+MiniA.prototype._isOpenAIOssJsonToolModel = function(modelConfig) {
+  if (!isMap(modelConfig)) return false
+
+  var modelName = ""
+  if (isString(modelConfig.model) && modelConfig.model.trim().length > 0) {
+    modelName = modelConfig.model.trim()
+  } else if (isMap(modelConfig.options) && isString(modelConfig.options.model) && modelConfig.options.model.trim().length > 0) {
+    modelName = modelConfig.options.model.trim()
+  }
+
+  if (!isString(modelName) || modelName.length === 0) return false
+
+  var normalized = modelName.toLowerCase()
+  return normalized.indexOf("gpt-oss-120b") >= 0 || normalized.indexOf("gpt-oss-20b") >= 0
+}
+
+MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasDefined) {
+  if (!isMap(args)) return
+  if (toBoolean(useJsonToolWasDefined) === true) return
+  if (toBoolean(args.usejsontool) === true) return
+
+  if (this._isOpenAIOssJsonToolModel(this._oaf_model)) {
+    args.usejsontool = true
+    this.fnI("info", "Model is gpt-oss-120b/20b and usejsontool is not set: enabling usejsontool=true compatibility mode.")
+  }
+}
+
 MiniA.prototype._createDelegationMcpConfig = function(args) {
   try {
     if (isUnDef(this._subtaskManager)) {
@@ -6496,6 +6818,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         connections       : {},
         aliasToId         : {},
         idToAlias         : {},
+        defaultConnectionId: __,
         catalog           : [],
         toolToConnections : {},
         aliasCounter      : 0,
@@ -6569,8 +6892,20 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       var state = global.__mcpProxyState__
       if (!isObject(state) || isUnDef(identifier)) return __
       if (isString(identifier) && identifier.length > 0) {
-        if (isObject(state.connections) && isObject(state.connections[identifier])) return identifier
-        if (isObject(state.aliasToId) && isString(state.aliasToId[identifier])) return state.aliasToId[identifier]
+        var normalized = identifier.trim()
+        var lowered = normalized.toLowerCase()
+        if (isObject(state.connections) && isObject(state.connections[normalized])) return normalized
+        if (isObject(state.aliasToId) && isString(state.aliasToId[normalized])) return state.aliasToId[normalized]
+        if (lowered === "default" || lowered === "primary") {
+          if (isString(state.defaultConnectionId) && isObject(state.connections) && isObject(state.connections[state.defaultConnectionId])) {
+            return state.defaultConnectionId
+          }
+          var connectionIds = Object.keys(state.connections || {})
+          if (connectionIds.length > 0) {
+            state.defaultConnectionId = connectionIds[0]
+            return state.defaultConnectionId
+          }
+        }
       }
       return __
     }
@@ -6694,12 +7029,20 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         lastRefreshed      : now(),
         lastError          : __
       }
+      if (!isString(state.defaultConnectionId) || !isObject(state.connections[state.defaultConnectionId])) {
+        state.defaultConnectionId = connectionId
+      }
 
       parent.fnI("info", `[mcp-proxy] Connection #${index + 1} ready as '${alias}' with ${extracted.tools.length} tool(s).`)
     })
 
     helpers.rebuildIndexes()
     state.lastUpdated = now()
+
+    // Capture auto-spill threshold (0 = disabled) from args at config creation time
+    var globalSpillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
+      ? Math.floor(args.mcpproxythreshold) : 0
+    var globalSpillToon = toBoolean(args.mcpproxytoon) === true && globalSpillThreshold > 0
 
     // Define the proxy-dispatch function
     var fns = {
@@ -6717,20 +7060,70 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         var includeSchema = params.includeInputSchema === true
         var includeAnnotations = params.includeAnnotations !== false
 
-        var resolveConnectionId = function(identifier) {
-          if (typeof helpers.resolveConnectionId === "function") {
-            return helpers.resolveConnectionId(identifier)
+        var createProxyTempFile = function(prefix, payloadText, payloadFormat) {
+          var resolvedPrefix = isString(prefix) && prefix.trim().length > 0 ? prefix.trim() : "mini-a-proxy"
+          var resolvedFormat = isString(payloadFormat) ? payloadFormat.trim().toLowerCase() : "json"
+          if (resolvedFormat !== "toon") resolvedFormat = "json"
+          var resolvedSuffix = resolvedFormat === "toon" ? ".toon" : ".json"
+          var textToWrite = isString(payloadText) ? payloadText : stringify(payloadText, __, "")
+          var tempPath
+          try {
+            var tempFile = java.nio.file.Files.createTempFile(resolvedPrefix + "-", resolvedSuffix)
+            tempPath = String(tempFile.toAbsolutePath())
+          } catch(tempCreateError) {
+            throw new Error("Failed to create temporary file: " + (tempCreateError.message || String(tempCreateError)))
           }
-          if (!isString(identifier) || identifier.length === 0) return __
-          if (isObject(state.connections) && isObject(state.connections[identifier])) return identifier
-          if (isObject(state.aliasToId) && isString(state.aliasToId[identifier])) return state.aliasToId[identifier]
-          return __
+
+          try {
+            io.writeFileString(tempPath, textToWrite)
+          } catch(tempWriteError) {
+            try {
+              if (isString(tempPath) && tempPath.length > 0 && io.fileExists(tempPath)) io.rm(tempPath)
+            } catch(ignoreRmError) {}
+            throw new Error("Failed to write temporary file: " + (tempWriteError.message || String(tempWriteError)))
+          }
+
+          try {
+            if (isDef(java.io.File)) {
+              new java.io.File(tempPath).deleteOnExit()
+            }
+          } catch(ignoreDeleteOnExitError) {}
+
+          if (typeof MiniA !== "undefined" && isFunction(MiniA._registerProxyTempFile)) {
+            MiniA._registerProxyTempFile(tempPath)
+          }
+
+          return tempPath
+        }
+
+        var readProxyJsonFile = function(filePath, label) {
+          var path = isString(filePath) ? filePath.trim() : ""
+          if (path.length === 0) {
+            throw new Error("Missing path for " + label + ".")
+          }
+          if (!io.fileExists(path)) {
+            throw new Error("File for " + label + " does not exist: " + path)
+          }
+          var fileInfo = io.fileInfo(path)
+          if (!isMap(fileInfo) || fileInfo.isFile !== true) {
+            throw new Error("Path for " + label + " is not a file: " + path)
+          }
+          var raw = io.readFileString(path)
+          try {
+            return af.fromJson(raw)
+          } catch(parseError) {
+            try {
+              return af.fromJSSLON(raw)
+            } catch(parseErrorJSSLON) {
+              throw new Error("Invalid JSON/JSSLON/TOON in " + label + " file: " + (parseError.message || String(parseError)))
+            }
+          }
         }
 
         var refreshTargets = []
         if (params.refresh === true) {
           if (isString(connectionRef) && connectionRef.length > 0) {
-            var resolvedId = resolveConnectionId(connectionRef)
+            var resolvedId = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(resolvedId)) {
               return { error: "Unknown connection identifier '" + connectionRef + "' supplied for refresh." }
             }
@@ -6775,7 +7168,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         if (action === "list") {
           var targetIds = []
           if (isString(connectionRef) && connectionRef.length > 0) {
-            var resolved = resolveConnectionId(connectionRef)
+            var resolved = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(resolved)) {
               return { error: "Unknown connection identifier '" + connectionRef + "'." }
             }
@@ -6805,7 +7198,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
           var searchableIds = []
           if (isString(connectionRef) && connectionRef.length > 0) {
-            var resolvedSearchId = resolveConnectionId(connectionRef)
+            var resolvedSearchId = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(resolvedSearchId)) {
               return { error: "Unknown connection identifier '" + connectionRef + "'." }
             }
@@ -6870,7 +7263,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
           var connectionId
           if (isString(connectionRef) && connectionRef.length > 0) {
-            connectionId = resolveConnectionId(connectionRef)
+            connectionId = helpers.resolveConnectionId(connectionRef)
             if (isUnDef(connectionId)) {
               return { error: "Unknown connection identifier '" + connectionRef + "'." }
             }
@@ -6892,13 +7285,100 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
 
           var inputArgs = isMap(params.arguments) ? params.arguments : {}
+          if (isString(params.argumentsFile) && params.argumentsFile.trim().length > 0) {
+            var fileArgs = readProxyJsonFile(params.argumentsFile, "arguments")
+            if (!isMap(fileArgs)) {
+              return { error: "The arguments file must contain a JSON/JSSLON/TOON object." }
+            }
+            inputArgs = fileArgs
+          }
           var meta = isMap(params.meta) ? params.meta : __
+          var useResultFile = toBoolean(params.resultToFile) === true
+
+          // Per-call threshold (overrides global); 0 = use global
+          var callSpillThreshold = isNumber(params.resultSizeThreshold) && params.resultSizeThreshold > 0
+            ? Math.floor(params.resultSizeThreshold)
+            : globalSpillThreshold
+
+          // Track if argumentsFile was used to suppress echoing large args
+          var usedArgumentsFile = isString(params.argumentsFile) && params.argumentsFile.trim().length > 0
 
           try {
             var result = isDef(meta)
               ? target.client.callTool(toolName, inputArgs, meta)
               : target.client.callTool(toolName, inputArgs)
-            return {
+
+            var resultPayload = result
+            if (isMap(result) && isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
+              var parsedPayload = jsonParse(String(result.content[0].text), __, __, true)
+              if (isMap(parsedPayload) || isArray(parsedPayload)) {
+                resultPayload = parsedPayload
+              }
+            }
+
+            // Serialize once for size check, preview, and inline content.
+            // When enabled, TOON is used to reduce token usage while keeping structure readable.
+            var resultJson = stringify(resultPayload, __, "")
+            var resultText = resultJson
+            var resultFormat = "json"
+            if (globalSpillToon && (isMap(resultPayload) || isArray(resultPayload))) {
+              try {
+                resultText = af.toTOON(resultPayload)
+                resultFormat = "toon"
+              } catch(ignoreToonError) {
+                resultText = resultJson
+                resultFormat = "json"
+              }
+            }
+            var resultByteSize = isString(resultText) ? resultText.length : 0
+
+            // Auto-spill when result exceeds threshold and file mode not already requested
+            var autoSpilled = false
+            if (!useResultFile && callSpillThreshold > 0 && resultByteSize > callSpillThreshold) {
+              useResultFile = true
+              autoSpilled = true
+            }
+
+            var resultFile
+            if (useResultFile) {
+              resultFile = createProxyTempFile("mini-a-proxy-result", resultText, resultFormat)
+            }
+
+            // Build rich content text for file-mode results
+            var contentText
+            if (useResultFile) {
+              var estTokens = Math.ceil(resultByteSize / 4)
+              var spillReason = autoSpilled
+                ? "Result auto-spilled to temporary " + resultFormat.toUpperCase() + " file (exceeded " + callSpillThreshold + " bytes): "
+                : "Result written to temporary " + resultFormat.toUpperCase() + " file: "
+              var previewLines = [
+                spillReason + resultFile + " (auto-deleted at shutdown).",
+                "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens)."
+              ]
+              previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
+              if (isMap(resultPayload)) {
+                previewLines.push("Top-level keys: [" + Object.keys(resultPayload).join(", ") + "]")
+              } else if (isArray(resultPayload)) {
+                previewLines.push("Result is an array with " + resultPayload.length + " element(s).")
+              }
+              var previewSource = isString(resultText) ? resultText : stringify(resultText, __, "")
+              var previewChars = previewSource.length > 300 ? previewSource.substring(0, 300) + "..." : previewSource
+              if (isString(resultText) && resultText.length > 0) {
+                previewLines.push("Preview: " + previewChars)
+              } else if (isString(previewSource) && previewSource.length > 0) {
+                previewLines.push("Preview: " + previewChars)
+              }
+              contentText = previewLines.join("\n")
+            } else {
+              contentText = resultText
+            }
+
+            // Suppress echoing large parsed args when argumentsFile was used
+            var argumentsField = usedArgumentsFile
+              ? { _fromFile: params.argumentsFile.trim() }
+              : inputArgs
+
+            var responseObj = {
               action    : "call",
               connection: {
                 id    : target.id,
@@ -6906,22 +7386,156 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 serverInfo: isDef(target.serverInfo) ? (helpers.deepClone ? helpers.deepClone(target.serverInfo) : target.serverInfo) : __
               },
               tool      : toolName,
-              arguments : inputArgs,
-              result    : result,
-              content: [{ type: "text", text: stringify(result, __, "") }]
+              arguments : argumentsField,
+              resultFormat: resultFormat,
+              resultFile: resultFile,
+              content: [{ type: "text", text: contentText }]
             }
+
+            if (autoSpilled) responseObj.autoSpilled = true
+            if (!useResultFile && resultByteSize > 0) responseObj.estimatedTokens = Math.ceil(resultByteSize / 4)
+
+            return responseObj
+
           } catch(e) {
             return {
               action    : "call",
               connection: { id: target.id, alias: target.alias },
               tool      : toolName,
-              error     : e.message || String(e),
-              content: [{ type: "text", text: "Error: " + (e.message || String(e)) }]
+              error     : __miniAErrMsg(e),
+              content: [{ type: "text", text: "Error: " + __miniAErrMsg(e) }]
             }
           }
         }
 
-        return { error: "Unsupported action '" + params.action + "'. Use list, search, or call." }
+        // Read back a previously spilled result file — bypasses auto-spill threshold
+        if (action === "readresult") {
+          var resultFilePath = isString(params.resultFile) ? params.resultFile.trim() : ""
+          if (resultFilePath.length === 0) {
+            return { error: "readresult requires 'resultFile' parameter with the path returned by a prior call." }
+          }
+          // Default op is 'stat' — safe first look before committing to full content
+          var rop = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
+          // maxBytes limits content returned by op='read'; 0 = unlimited
+          var ropMaxBytes = isNumber(params.maxBytes) && params.maxBytes >= 0 ? Math.floor(params.maxBytes) : 0
+          try {
+            var spilledRaw = io.readFileString(resultFilePath)
+            var spilledByteSize = isString(spilledRaw) ? spilledRaw.length : 0
+
+            // stat: size/line-count only, no content
+            if (rop === "stat") {
+              var statLineCount = spilledRaw.split("\n").length
+              var statText = "File: " + resultFilePath + "\nSize: " + spilledByteSize + " bytes (~" + Math.ceil(spilledByteSize / 4) + " tokens)\nLines: " + statLineCount
+              return {
+                action: "readresult", op: "stat", resultFile: resultFilePath,
+                byteSize: spilledByteSize, lineCount: statLineCount,
+                estimatedTokens: Math.ceil(spilledByteSize / 4),
+                content: [{ type: "text", text: statText }]
+              }
+            }
+
+            var ropLines = spilledRaw.split("\n")
+            var ropTotalLines = ropLines.length
+
+            // slice: lines fromLine..toLine (1-based, inclusive)
+            if (rop === "slice") {
+              var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine) : 1
+              var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)   : ropTotalLines
+              if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
+              var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
+              return {
+                action: "readresult", op: "slice", resultFile: resultFilePath,
+                fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
+                content: [{ type: "text", text: sliceText }],
+                estimatedTokens: Math.ceil(sliceText.length / 4)
+              }
+            }
+
+            // head: first N lines
+            if (rop === "head") {
+              var headN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
+              var headText = ropLines.slice(0, headN).join("\n")
+              return {
+                action: "readresult", op: "head", resultFile: resultFilePath,
+                lines: headN, totalLines: ropTotalLines,
+                content: [{ type: "text", text: headText }],
+                estimatedTokens: Math.ceil(headText.length / 4)
+              }
+            }
+
+            // tail: last N lines
+            if (rop === "tail") {
+              var tailN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
+              var tailText = ropLines.slice(Math.max(0, ropTotalLines - tailN)).join("\n")
+              return {
+                action: "readresult", op: "tail", resultFile: resultFilePath,
+                lines: tailN, totalLines: ropTotalLines,
+                content: [{ type: "text", text: tailText }],
+                estimatedTokens: Math.ceil(tailText.length / 4)
+              }
+            }
+
+            // grep: search for pattern, return matching lines with optional context
+            if (rop === "grep") {
+              var grepPat = isString(params.pattern) ? params.pattern : ""
+              if (grepPat.length === 0) return { error: "readresult op='grep' requires a 'pattern' parameter." }
+              var grepCtx = isNumber(params.context) && params.context >= 0 ? Math.floor(params.context) : 0
+              var grepRx
+              try {
+                grepRx = new RegExp(grepPat, "i")
+              } catch(rxErr) {
+                grepRx = new RegExp(grepPat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+              }
+              var grepInclude = {}
+              var grepMatchCount = 0
+              for (var gi = 0; gi < ropLines.length; gi++) {
+                if (grepRx.test(ropLines[gi])) {
+                  grepMatchCount++
+                  for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
+                    grepInclude[gc] = true
+                  }
+                }
+              }
+              var grepParts = []
+              var grepLast = -1
+              for (var gi2 = 0; gi2 < ropLines.length; gi2++) {
+                if (grepInclude[gi2]) {
+                  if (grepLast >= 0 && gi2 > grepLast + 1) grepParts.push("---")
+                  grepParts.push((gi2 + 1) + ": " + ropLines[gi2])
+                  grepLast = gi2
+                }
+              }
+              var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
+              return {
+                action: "readresult", op: "grep", resultFile: resultFilePath,
+                pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
+                content: [{ type: "text", text: grepText }],
+                estimatedTokens: Math.ceil(grepText.length / 4)
+              }
+            }
+
+            // read: full content inline (or truncated when maxBytes set and exceeded)
+            var readContent = spilledRaw
+            var readTruncated = false
+            if (ropMaxBytes > 0 && spilledByteSize > ropMaxBytes) {
+              readContent = spilledRaw.substring(0, ropMaxBytes)
+              readTruncated = true
+            }
+            var readResponse = {
+              action: "readresult", op: "read", resultFile: resultFilePath,
+              totalLines: ropTotalLines, byteSize: spilledByteSize,
+              content: [{ type: "text", text: readContent + (readTruncated ? "\n[TRUNCATED at " + ropMaxBytes + " bytes. " + (spilledByteSize - ropMaxBytes) + " bytes remaining. Use op='slice' with fromLine/toLine or op='grep' with pattern to access remaining content.]" : "") }],
+              estimatedTokens: Math.ceil(readContent.length / 4)
+            }
+            if (readTruncated) readResponse.truncated = true
+            return readResponse
+
+          } catch(readErr) {
+            return { error: "Failed to read result file '" + resultFilePath + "': " + (readErr.message || String(readErr)) }
+          }
+        }
+
+        return { error: "Unsupported action '" + params.action + "'. Use list, search, call, or readresult." }
       }
     }
 
@@ -6934,12 +7548,12 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           properties: {
             action: {
               type       : "string",
-              description: "Operation to perform: list, search, or call.",
-              enum       : [ "list", "search", "call" ]
+              description: "Operation to perform: list, search, call, or readresult. Use 'readresult' to retrieve the content of a previously spilled result file (from resultFile) without triggering further auto-spill.",
+              enum       : [ "list", "search", "call", "readresult" ]
             },
             connection: {
               type       : "string",
-              description: "Optional connection identifier or alias. When omitted, actions operate across all registered connections."
+              description: "Optional connection identifier or alias. Special aliases 'default' and 'primary' resolve to the proxy default connection. When omitted, actions operate across all registered connections."
             },
             query: {
               type       : "string",
@@ -6953,9 +7567,60 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               type       : "object",
               description: "Input arguments forwarded to the downstream MCP tool when action is 'call'."
             },
+            argumentsFile: {
+              type       : "string",
+              description: "Optional path to a JSON file containing tool arguments. When provided, it overrides 'arguments'."
+            },
             meta: {
               type       : "object",
               description: "Optional metadata object forwarded to the downstream MCP call."
+            },
+            resultToFile: {
+              type       : "boolean",
+              description: "When true for action='call', writes the tool result to a temporary file and returns 'resultFile' instead of embedding full content (JSON by default, TOON when mcpproxytoon applies)."
+            },
+            resultSizeThreshold: {
+              type       : "integer",
+              description: "Per-call byte size threshold. When the serialized result exceeds this value, result is written to a temporary file automatically (as if resultToFile=true). Overrides the global mcpproxythreshold. 0 = disabled. If mcpproxytoon=true and global mcpproxythreshold>0, size/preview use TOON serialization.",
+              minimum    : 0
+            },
+            resultFile: {
+              type       : "string",
+              description: "For action='readresult': path to a previously spilled result file (as returned in 'resultFile' from a prior call). The file content is returned inline without triggering auto-spill."
+            },
+            op: {
+              type       : "string",
+              description: "Sub-operation for action='readresult'. 'stat' (DEFAULT — always use first): byte size and line count only. 'read': full content inline (use only when stat confirms size is manageable). 'head': first N lines. 'tail': last N lines. 'slice': lines fromLine..toLine. 'grep': lines matching pattern with optional context.",
+              enum       : [ "stat", "read", "head", "tail", "slice", "grep" ]
+            },
+            fromLine: {
+              type       : "integer",
+              description: "For op='slice': 1-based start line (inclusive).",
+              minimum    : 1
+            },
+            toLine: {
+              type       : "integer",
+              description: "For op='slice': 1-based end line (inclusive).",
+              minimum    : 1
+            },
+            lines: {
+              type       : "integer",
+              description: "For op='head' or op='tail': number of lines to return (default 50).",
+              minimum    : 1
+            },
+            pattern: {
+              type       : "string",
+              description: "For op='grep': regular expression (case-insensitive) to search for. Falls back to literal match if invalid regex."
+            },
+            context: {
+              type       : "integer",
+              description: "For op='grep': number of lines of context to include before and after each match (default 0).",
+              minimum    : 0
+            },
+            maxBytes: {
+              type       : "integer",
+              description: "For op='read': maximum bytes to return inline. Content beyond this limit is truncated with a notice. 0 = no limit (default). Recommended: set to a safe token budget e.g. 50000.",
+              minimum    : 0
             },
             limit: {
               type       : "integer",
@@ -8025,7 +8690,7 @@ Selected tools (JSON array only):`
     var validToolNames = allTools.map(t => t.name)
     return selectedTools.filter(name => validToolNames.indexOf(name) >= 0)
   } catch (e) {
-    this.fnI("warn", `LLM tool selection failed: ${e.message || e}`)
+    this.fnI("warn", `LLM tool selection failed: ${__miniAErrMsg(e)}`)
     return []
   }
 }
@@ -8202,7 +8867,7 @@ MiniA.prototype._selectConnectionAndToolsByLLM = function(goal, allTools, llmIns
   try {
     parsed = JSON.parse(response)
   } catch (e) {
-    this.fnI("warn", `Connection-level LLM selection returned invalid JSON: ${e.message || e}`)
+    this.fnI("warn", `Connection-level LLM selection returned invalid JSON: ${__miniAErrMsg(e)}`)
     return []
   }
 
@@ -8307,7 +8972,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return lcSelected
       }
     } catch (e) {
-      this.fnI("warn", `Low-cost LLM tool selection failed: ${e.message || e}`)
+      this.fnI("warn", `Low-cost LLM tool selection failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8323,7 +8988,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return llmSelected
       }
     } catch (e) {
-      this.fnI("warn", `Main LLM tool selection failed: ${e.message || e}`)
+      this.fnI("warn", `Main LLM tool selection failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8343,7 +9008,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return connectionFallbackSelection
       }
     } catch (e) {
-      this.fnI("warn", `Low-cost LLM connection chooser failed: ${e.message || e}`)
+      this.fnI("warn", `Low-cost LLM connection chooser failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8359,7 +9024,7 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
         return connectionFallbackSelection
       }
     } catch (e) {
-      this.fnI("warn", `Primary LLM connection chooser failed: ${e.message || e}`)
+      this.fnI("warn", `Primary LLM connection chooser failed: ${__miniAErrMsg(e)}`)
     }
   }
 
@@ -8557,6 +9222,8 @@ MiniA.prototype.init = function(args) {
       { name: "shelltimeout", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
+      { name: "mcpproxythreshold", type: "number", default: 0 },
+      { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
       { name: "toollog", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
@@ -8574,6 +9241,7 @@ MiniA.prototype.init = function(args) {
       { name: "utilsroot", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
+      { name: "usejsontool", type: "boolean", default: __ },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
       { name: "workerreg", type: "number", default: __ },
@@ -8586,6 +9254,7 @@ MiniA.prototype.init = function(args) {
     ])
 
     // Convert and validate boolean arguments
+    var useJsonToolWasDefined = isDef(args.usejsontool)
     args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
     args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
@@ -8602,6 +9271,7 @@ MiniA.prototype.init = function(args) {
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
+    args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
@@ -8609,6 +9279,7 @@ MiniA.prototype.init = function(args) {
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
+    args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
@@ -8755,29 +9426,11 @@ MiniA.prototype.init = function(args) {
 
     // Load additional libraries if specified
     if (isDef(args.libs) && args.libs.length > 0) {
-      args.libs.split(",").map(r => r.trim()).filter(r => r.length > 0).forEach(lib => {
-        this.fnI("libs", `Loading library: ${lib}...`)
-        try {
-          if (lib.startsWith("@")) {
-            if (/^\@([^\/]+)\/(.+)\.js$/.test(lib)) {
-              var _ar = lib.match(/^\@([^\/]+)\/(.+)\.js$/)
-              var _path = getOPackPath(_ar[1])
-              var _file = _path + "/" + _ar[2] + ".js"
-              if (io.fileExists(_file)) {
-                loadLib(_file)
-              } else {
-                this.fnI("error", `Library '${lib}' not found.`)
-              }
-            } else {
-              this.fnI("error", `Library '${lib}' does not have the correct format (@oPack/library.js).`)
-            }
-          } else {
-            loadLib(lib)
-          }
-        } catch(e) {
-          this.fnI("error", `Failed to load library ${lib}: ${e.message}`)
-        }
-      })
+      var _self = this
+      __miniALoadLibraries(args.libs,
+        function(msg) { _self.fnI("libs",  msg) },
+        function(msg) { _self.fnI("error", msg) }
+      )
     }
 
     // Check the need to init auditch
@@ -8890,6 +9543,7 @@ MiniA.prototype.init = function(args) {
       this._noJsonPrompt = true
       this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
     }
+    this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
 
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
@@ -9017,6 +9671,14 @@ MiniA.prototype.init = function(args) {
         if (isMap(shellMcpConfig)) aggregatedMcpConfigs.push(shellMcpConfig)
       }
 
+      var jsonToolMcpConfig = __
+      // Optional compatibility shim for models that attempt to call a 'json' tool
+      if (args.usetools === true && args.usejsontool === true) {
+        jsonToolMcpConfig = this._createJsonToolMcpConfig(args)
+        // Keep json as a direct top-level tool when proxy mode is enabled.
+        if (isMap(jsonToolMcpConfig) && toBoolean(args.mcpproxy) !== true) aggregatedMcpConfigs.push(jsonToolMcpConfig)
+      }
+
       // If mcpproxy is enabled, wrap all MCP configs into a single proxy
       if (toBoolean(args.mcpproxy) === true && aggregatedMcpConfigs.length > 0) {
         this.fnI("mcp", `MCP proxy mode enabled. Aggregating ${aggregatedMcpConfigs.length} MCP connection(s) into a single proxy...`)
@@ -9026,6 +9688,10 @@ MiniA.prototype.init = function(args) {
         } else {
           this.fnI("warn", "Failed to create MCP proxy. Falling back to direct connections.")
         }
+      }
+
+      if (toBoolean(args.mcpproxy) === true && isMap(jsonToolMcpConfig)) {
+        aggregatedMcpConfigs.push(jsonToolMcpConfig)
       }
     }
 
@@ -9205,11 +9871,41 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Use {\"action\":\"list\"} to discover tools, then {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one.")
+      var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
+        ? args.mcpproxythreshold : 0
+      var spillToon = toBoolean(args.mcpproxytoon) === true && spillThreshold > 0
+      var spillNote = spillThreshold > 0
+        ? "Results exceeding " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tokens) are auto-spilled to a temporary file automatically." + (spillToon ? " Auto-spill serialization uses TOON format." : "")
+        : "Set mcpproxythreshold=<bytes> to enable auto-spill; or use resultToFile=true manually."
+      baseRules.push(
+        "For large MCP payloads, proxy-dispatch supports temporary JSON handoff: " +
+        "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
+        "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
+        spillNote + " " +
+        "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
+        "To inspect or retrieve a spilled result file, use action='readresult' with the 'resultFile' path — this bypasses auto-spill entirely. " +
+        "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
+        "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
+        "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
+        "Do NOT use a downstream tool (e.g. filesystemQuery) to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
+        "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
+        "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
+      )
+      baseRules.push(
+        "Prefer file handoff when payloads are large and files are accessible via useutils=true (recommended) or useshell=true readwrite=true. " +
+        "For small payloads (<10KB), inline is simpler. " +
+        "The 'estimatedTokens' field in inline results shows approximate token cost — use it to decide proactively whether to use 'resultToFile=true' next time."
+      )
+    }
+    if (args.useshell === true && args.usetools === true) {
+      baseRules.push("When shell and tools are both enabled, always execute shell with action=\"shell\" and top-level command. Do not invoke shell as an MCP tool/function.")
     }
 
+    var shellViaActionPreferred = args.useshell === true && this._useTools === true
+    var promptUseMcpProxy = this._useMcpProxy === true || toBoolean(args.mcpproxy) === true
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
-    if (this._useMcpProxy === true && isObject(global.__mcpProxyState__)) {
+    if (promptUseMcpProxy === true && isObject(global.__mcpProxyState__)) {
       var proxyState = global.__mcpProxyState__
       var proxyNames = []
       if (isMap(proxyState.toolToConnections)) {
@@ -9220,20 +9916,24 @@ MiniA.prototype.init = function(args) {
           .filter(name => isString(name) && name.length > 0)
       }
       proxyNames = proxyNames.filter(name => name !== "proxy-dispatch")
+      if (shellViaActionPreferred) proxyNames = proxyNames.filter(name => name !== "shell")
       proxyNames.sort()
       if (proxyNames.length > 0) {
         proxyToolCount = proxyNames.length
         proxyToolsList = proxyNames.join(", ")
+      } else {
+        proxyToolCount = 0
       }
     }
 
     if (args.chatbotmode) {
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
-      var chatToolsList = this.mcpToolNames.join(", ")
+      var chatbotVisibleToolNames = this.mcpToolNames.filter(name => !(shellViaActionPreferred && name === "shell"))
+      var chatToolsList = chatbotVisibleToolNames.join(", ")
       var chatbotToolDetails = []
       if (this.mcpTools.length > 0 && !this._useTools) {
-        chatbotToolDetails = this.mcpTools.map(tool => {
+        chatbotToolDetails = this.mcpTools.filter(tool => !(shellViaActionPreferred && tool.name === "shell")).map(tool => {
           var summary = this._getToolSchemaSummary(tool)
           return {
             name       : summary.name,
@@ -9244,21 +9944,26 @@ MiniA.prototype.init = function(args) {
         })
       }
 
-      this._actionsList = chatActions.concat(this.mcpToolNames).join(" | ")
+      var chatActionSet = {}
+      chatActions.concat(chatbotVisibleToolNames).forEach(name => {
+        if (isString(name) && name.length > 0) chatActionSet[name] = true
+      })
+      this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
         knowledge     : trimmedKnowledge,
         hasKnowledge  : trimmedKnowledge.length > 0,
         hasRules      : baseRules.length > 0,
         rules         : baseRules,
-        hasTools      : this.mcpTools.length > 0,
-        toolCount     : this.mcpTools.length,
-        toolsPlural   : this.mcpTools.length !== 1,
+        hasTools      : chatbotVisibleToolNames.length > 0,
+        toolCount     : chatbotVisibleToolNames.length,
+        toolsPlural   : chatbotVisibleToolNames.length !== 1,
         toolsList     : chatToolsList,
         hasToolDetails: chatbotToolDetails.length > 0,
         toolDetails   : chatbotToolDetails,
         markdown      : args.format == "md",
-        useshell      : args.useshell
+        useshell      : args.useshell,
+        shellViaActionPreferred: shellViaActionPreferred
       }
       this._systemInst = this._getCachedSystemPrompt("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT)
     } else {
@@ -9277,9 +9982,14 @@ MiniA.prototype.init = function(args) {
       var simplePlanStyle = this._isSimplePlanStyle()
       var stepContext = simplePlanStyle ? this._buildStepContext(this._agentState ? this._agentState.plan : null) : null
 
+      var agentDirectiveLine = this._agentDirectiveCoreLine
+      if (this._shouldIncludeNoUserInteractionRemark(args)) {
+        agentDirectiveLine += " " + this._agentDirectiveNoInteractionRemark
+      }
+
       var agentPayload = {
         agentPersonaLine: agentPersonaLine,
-        agentDirectiveLine: this._agentDirectiveLine,
+        agentDirectiveLine: agentDirectiveLine,
         actionsWordNumber: actionsWordNumber,
         actionsList      : promptActionsList,
         useshell         : args.useshell,
@@ -9290,7 +10000,8 @@ MiniA.prototype.init = function(args) {
         isMachine        : (isDef(args.format) && args.format != "md"),
         usetools         : this._useTools,
         usetoolsActual   : this._useToolsActual,
-        useMcpProxy      : this._useMcpProxy,
+        useMcpProxy      : promptUseMcpProxy,
+        shellViaActionPreferred: shellViaActionPreferred,
         toolCount        : this.mcpTools.length,
         proxyToolCount   : proxyToolCount,
         proxyToolsList   : proxyToolsList,
@@ -9313,6 +10024,13 @@ MiniA.prototype.init = function(args) {
   } catch(ee) {
     this._isInitialized = false
   }
+}
+
+MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
+  if (!isMap(args)) return false
+  if (!isString(args.__interaction_source)) return false
+  var source = args.__interaction_source.trim().toLowerCase()
+  return source === "mini-a-con" || source === "mini-a-web"
 }
 
 /**
@@ -9499,12 +10217,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "utilsroot", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
-      { name: "usemath", type: "boolean", default: false }
+      { name: "usemath", type: "boolean", default: false },
+      { name: "usejsontool", type: "boolean", default: __ },
+      { name: "mcpproxythreshold", type: "number", default: 0 },
+      { name: "mcpproxytoon", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
 
     // Convert and validate boolean arguments
+    var useJsonToolWasDefined = isDef(args.usejsontool)
     args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
     args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
@@ -9518,6 +10240,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
+    args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
+    this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
@@ -9533,6 +10257,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
+    args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
+    if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
+    args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
@@ -9716,18 +10443,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var summarizer = summarizeLLM.withInstructions(instructionText)
           if (!self._noJsonPrompt && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(ctx)
           return summarizer.promptWithStats(ctx)
-        }, {
-          maxAttempts : 3,
-          initialDelay: 250,
-          maxDelay    : 4000,
-          context     : { source: "llm", operation: "summarize" },
-          onRetry     : (err, attempt, wait, category) => {
-            this.fnI("retry", `Summarization attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-              global.__mini_a_metrics.retries.inc()
-            }
-          }
-        })
+        }, this._llmRetryOptions("Summarization", { operation: "summarize" }))
       } catch (e) {
         var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
         this.fnI("warn", `Summarization failed: ${summaryError.reason || e}`)
@@ -9758,8 +10474,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Helper function to check and summarize context during execution
     var checkAndSummarizeContext = () => {
-      // Set smart default if not specified (auto-enable at 50K tokens)
-      var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 50000
+      // maxcontext=0 disables proactive context management; rely on provider overflow recovery
+      var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 0
+      if (effectiveMaxContext <= 0) return
 
       var contextTokens = this._estimateTokens(runtime.context.join(""))
 
@@ -9817,6 +10534,40 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    var recoverContextAfterProviderOverflow = function(stepNumber, llmType, errorInfo) {
+      if (args.maxcontext !== 0) return false
+      if (!isObject(errorInfo) || errorInfo.contextOverflow !== true) return false
+      if ((runtime.contextOverflowRecoveries || 0) >= 3) return false
+
+      var combinedContext = runtime.context.join("\n")
+      if (!isString(combinedContext) || combinedContext.length === 0) return false
+
+      var beforeTokens = this._estimateTokens(combinedContext)
+      this.fnI("summarize", `Detected provider context-window error (${llmType}, maxcontext=0). Auto-compressing context...`)
+      global.__mini_a_metrics.context_summarizations.inc()
+
+      var summarized = summarize(combinedContext)
+      if (!isString(summarized) || summarized.trim().length === 0) {
+        summarized = combinedContext
+      }
+      if (summarized.length > 30000) {
+        summarized = "[AUTO-TRUNCATED SUMMARY]\n" + summarized.substring(summarized.length - 30000)
+      }
+
+      runtime.context = [`[SUMMARY] Auto-recovery after provider context-window error: ${summarized}`]
+      runtime.contextOverflowRecoveries = (runtime.contextOverflowRecoveries || 0) + 1
+
+      var errorSummaryEntry = this._renderErrorHistory(runtime)
+      if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
+        runtime.context.unshift(errorSummaryEntry)
+      }
+
+      var afterTokens = this._estimateTokens(runtime.context.join("\n"))
+      runtime.context.push(`[OBS ${stepNumber}] (recover) Provider context-window error detected; context compressed from ~${beforeTokens} to ~${afterTokens} tokens.`)
+      this.fnI("size", `Context auto-recovery complete: ~${beforeTokens} -> ~${afterTokens} tokens (attempt ${runtime.contextOverflowRecoveries}/3).`)
+      return true
+    }.bind(this)
+
     // Check if goal is a string or a file path
     if (args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
       this.fnI("load", `Loading goal from file: ${args.goal}...`)
@@ -9843,13 +10594,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
     })
 
-    // Set proxy mode flag early
-    this._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
+    // When mcpproxy=true, build the prompt in proxy mode even before connections exist.
+    // The proxy connection is created during init(), so gating on existing connections
+    // can produce stale/non-proxy instructions in the first model turn.
+    var promptProxyMode = usingMcpProxy
 
-    if (usingMcpProxy && hasMcpProxyConnection) {
+    // Set proxy mode flag early
+    this._useMcpProxy = promptProxyMode
+
+    if (promptProxyMode) {
       // MCP proxy mode: useToolsActual depends on whether usetools=true
       this._useToolsActual = this._useTools === true
-      this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()")
+      var proxyPresetSuffix = hasMcpProxyConnection ? " (connection already present)" : " (connection will be initialized)"
+      this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()" + proxyPresetSuffix)
     } else if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
       // Check if LLM supports function calling (non-proxy mode)
       this._useToolsActual = isDef(this.llm) && typeof this.llm.withMcpTools === "function"
@@ -9985,7 +10742,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       restoredFromCheckpoint: false,
       successfulActionDetected: false,
       modelToolCallDetected  : false,
+      providerToolUseFailedDetected: false,
+      pendingJsonToolPayload   : __,
       hasEscalated            : false,
+      contextOverflowRecoveries: 0,
       earlyStopThreshold      : baseEarlyStopThreshold,
       earlyStopTriggered      : false,
       earlyStopReason         : "",
@@ -10179,6 +10939,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       runtime.successfulActionDetected = false
       runtime.modelToolCallDetected = false
+      runtime.providerToolUseFailedDetected = false
+      runtime.pendingJsonToolPayload = __
 
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
@@ -10291,38 +11053,62 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             return currentLLM.promptJSONWithStats(prompt)
           }
           return currentLLM.promptWithStats(prompt)
-        }, {
-          maxAttempts : 3,
-          initialDelay: 250,
-          maxDelay    : 6000,
-          context     : { source: "llm", llmType: llmType, step: step + 1 },
-          onRetry     : (err, attempt, wait, category) => {
-            this.fnI("retry", `${llmType} model attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-              global.__mini_a_metrics.retries.inc()
-            }
-          },
-          onFailure   : (err, attempts, category) => {
+        }, this._llmRetryOptions(llmType + " model", { llmType: llmType, step: step + 1 }, {
+          maxDelay  : 6000,
+          onFailure : (err, attempts, category) => {
             if (isObject(category) && category.type === "transient") {
               this.fnI("warn", `${llmType} model failed after ${attempts} attempts due to transient error: ${err && err.message}`)
             }
           }
-        })
+        }))
       } catch (e) {
         if (this.state == "stop" || (isObject(e) && e.miniAStop === true)) {
           break
         }
-        var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
-        runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
-        this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
-        if (args.debug || args.verbose) {
-          this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+
+        var thrownToolUseFailed = this._extractProviderToolUseFailedGeneration(e)
+        var thrownResponseToolUseFailed = isObject(e) ? this._extractProviderToolUseFailedGeneration(e.response) : ""
+        if (thrownToolUseFailed.length > 0 || thrownResponseToolUseFailed.length > 0) {
+          runtime.providerToolUseFailedDetected = true
         }
-        continue
+
+        var recoveredFromThrownError = this._recoverMessageFromProviderError(e)
+        if (!(isMap(recoveredFromThrownError) || isArray(recoveredFromThrownError)) && isObject(e) && isDef(e.response)) {
+          recoveredFromThrownError = this._recoverMessageFromProviderError(e.response)
+        }
+
+        if (isMap(recoveredFromThrownError) || isArray(recoveredFromThrownError)) {
+          responseWithStats = {
+            response: recoveredFromThrownError,
+            stats   : {}
+          }
+          runtime.context.push(`[OBS ${step + 1}] (recover) Parsed model action from thrown provider tool_use_failed payload.`)
+          if (args.debug || args.verbose) {
+            this.fnI("recover", `Recovered step ${step + 1} message from thrown provider tool_use_failed error.`)
+          }
+        } else {
+          var llmErrorInfo = this._categorizeError(e, { source: "llm", llmType: llmType })
+          runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model call failed: ${llmErrorInfo.reason}`)
+          this._registerRuntimeError(runtime, { category: llmErrorInfo.type, message: llmErrorInfo.reason, context: { step: step + 1, llmType: llmType } })
+          if (recoverContextAfterProviderOverflow(step + 1, llmType, llmErrorInfo)) {
+            if (args.debug || args.verbose) {
+              this.fnI("recover", `Step ${step + 1}: detected provider context-window overflow; compressed context and retrying.`)
+            }
+            continue
+          }
+          if (args.debug || args.verbose) {
+            this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+          }
+          continue
+        }
       }
 
       var recoveredMsgFromEnvelope = __
       if (isObject(responseWithStats) && isMap(responseWithStats.response)) {
+        var responseToolUseFailed = this._extractProviderToolUseFailedGeneration(responseWithStats.response)
+        if (responseToolUseFailed.length > 0) {
+          runtime.providerToolUseFailedDetected = true
+        }
         recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats.response)
       }
 
@@ -10402,36 +11188,52 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 return this.llm.promptJSONWithStats(prompt)
               }
               return this.llm.promptWithStats(prompt)
-            }, {
-              maxAttempts : 3,
-              initialDelay: 250,
-              maxDelay    : 6000,
-              context     : { source: "llm", llmType: "main", reason: "fallback" },
-              onRetry     : (err, attempt, wait, category) => {
-                this.fnI("retry", `Main fallback model attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-                if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-                  global.__mini_a_metrics.retries.inc()
-                }
-              }
-            })
+            }, this._llmRetryOptions("Main fallback model", { llmType: "main", reason: "fallback" }, { maxDelay: 6000 }))
           } catch (fallbackErr) {
             if (this.state == "stop" || (isObject(fallbackErr) && fallbackErr.miniAStop === true)) {
               break
             }
-            var fallbackErrorInfo = this._categorizeError(fallbackErr, { source: "llm", llmType: "main", reason: "fallback" })
-            runtime.context.push(`[OBS ${step + 1}] (error) main fallback model failed: ${fallbackErrorInfo.reason}`)
-            this._registerRuntimeError(runtime, {
-              category: fallbackErrorInfo.type,
-              message : fallbackErrorInfo.reason,
-              context : { step: step + 1, llmType: "main" }
-            })
-            if (args.debug || args.verbose) {
-              this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+
+            var fallbackThrownToolUseFailed = this._extractProviderToolUseFailedGeneration(fallbackErr)
+            var fallbackResponseToolUseFailed = isObject(fallbackErr) ? this._extractProviderToolUseFailedGeneration(fallbackErr.response) : ""
+            if (fallbackThrownToolUseFailed.length > 0 || fallbackResponseToolUseFailed.length > 0) {
+              runtime.providerToolUseFailedDetected = true
             }
-            continue
+
+            var recoveredFallbackFromThrownError = this._recoverMessageFromProviderError(fallbackErr)
+            if (!(isMap(recoveredFallbackFromThrownError) || isArray(recoveredFallbackFromThrownError)) && isObject(fallbackErr) && isDef(fallbackErr.response)) {
+              recoveredFallbackFromThrownError = this._recoverMessageFromProviderError(fallbackErr.response)
+            }
+
+            if (isMap(recoveredFallbackFromThrownError) || isArray(recoveredFallbackFromThrownError)) {
+              fallbackResponseWithStats = {
+                response: recoveredFallbackFromThrownError,
+                stats   : {}
+              }
+              runtime.context.push(`[OBS ${step + 1}] (recover) Parsed fallback model action from thrown provider tool_use_failed payload.`)
+              if (args.debug || args.verbose) {
+                this.fnI("recover", `Recovered step ${step + 1} fallback message from thrown provider tool_use_failed error.`)
+              }
+            } else {
+              var fallbackErrorInfo = this._categorizeError(fallbackErr, { source: "llm", llmType: "main", reason: "fallback" })
+              runtime.context.push(`[OBS ${step + 1}] (error) main fallback model failed: ${fallbackErrorInfo.reason}`)
+              this._registerRuntimeError(runtime, {
+                category: fallbackErrorInfo.type,
+                message : fallbackErrorInfo.reason,
+                context : { step: step + 1, llmType: "main" }
+              })
+              if (args.debug || args.verbose) {
+                this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+              }
+              continue
+            }
           }
           var fallbackRecoveredMsgFromEnvelope = __
           if (isObject(fallbackResponseWithStats) && isMap(fallbackResponseWithStats.response)) {
+            var fallbackEnvelopeToolUseFailed = this._extractProviderToolUseFailedGeneration(fallbackResponseWithStats.response)
+            if (fallbackEnvelopeToolUseFailed.length > 0) {
+              runtime.providerToolUseFailedDetected = true
+            }
             fallbackRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(fallbackResponseWithStats.response)
           }
 
@@ -10528,6 +11330,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       if (!recoveredFromEnvelopeApplied && isMap(msg)) {
+        var directMsgToolUseFailed = this._extractProviderToolUseFailedGeneration(msg)
+        if (directMsgToolUseFailed.length > 0) {
+          runtime.providerToolUseFailedDetected = true
+        }
         var recoveredMsg = this._recoverMessageFromProviderError(msg)
         if (isMap(recoveredMsg) || isArray(recoveredMsg)) {
           msg = recoveredMsg
@@ -10590,6 +11396,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         addActionMessage(baseMsg)
       }
 
+      if (actionMessages.length === 0 && (isMap(runtime.pendingJsonToolPayload) || isArray(runtime.pendingJsonToolPayload))) {
+        addActionMessage(runtime.pendingJsonToolPayload)
+        runtime.pendingJsonToolPayload = __
+        runtime.context.push(`[OBS ${step + 1}] (recover) consumed payload from 'json' compatibility tool.`)
+      }
+
       if (actionMessages.length === 0) {
         if (runtime.modelToolCallDetected === true) {
           if (stateUpdatedThisStep && !stateRecordedInContext) {
@@ -10604,11 +11416,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         var baseMsgInfo = isMap(baseMsg) ? `Object with keys: ${Object.keys(baseMsg).join(", ")}` : (isArray(baseMsg) ? `Empty array` : `Type: ${typeof baseMsg}`)
         runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Received: ${baseMsgInfo}`)
-        this._registerRuntimeError(runtime, {
-          category: "permanent",
-          message : "missing action from model",
-          context : { step: step + 1 }
-        })
+        if (runtime.providerToolUseFailedDetected === true) {
+          runtime.context.push(`[OBS ${step + 1}] (recover) Provider returned tool_use_failed payload; treating missing action as transient and retrying.`)
+          this._registerRuntimeError(runtime, {
+            category: "transient",
+            message : "missing action from model after provider tool_use_failed",
+            context : { step: step + 1 }
+          })
+        } else {
+          this._registerRuntimeError(runtime, {
+            category: "permanent",
+            message : "missing action from model",
+            context : { step: step + 1 }
+          })
+        }
         if (stateUpdatedThisStep && !stateRecordedInContext) {
           runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
           stateRecordedInContext = true
@@ -10654,6 +11475,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           flushToolActions()
           break
         }
+        var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
+        var stepLabel = `${step + 1}${stepSuffix}`
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
         var action = origActionRaw.toLowerCase()
@@ -10663,28 +11486,38 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var paramsValue = currentMsg.params
 
         if (origActionRaw.length == 0) {
+          var canInferFinalAction = isString(answerValue) && answerValue.trim().length > 0 && commandValue.length == 0 && isUnDef(paramsValue)
+          if (canInferFinalAction) {
+            origActionRaw = "final"
+            action = "final"
+            currentMsg.action = "final"
+            runtime.context.push(`[OBS ${stepLabel}] (recover) inferred missing 'action' as 'final' from non-empty 'answer'.`)
+          }
+        }
+
+        if (origActionRaw.length == 0) {
           var msgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
-          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Available keys in this entry: ${msgKeys}`)
+          runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Available keys in this entry: ${msgKeys}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "missing action in multi-action entry",
-            context : { step: step + 1 }
+            context : { step: stepLabel }
           })
           break
         }
         if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
           var currentMsgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
           var thoughtInfo = isUnDef(currentMsg.thought) && isUnDef(currentMsg.think) ? "no 'thought' or 'think' field" : `'thought'/'think' field is empty or invalid`
-          runtime.context.push(`[OBS ${step + 1}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)
+          runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
             message : "missing thought from model",
-            context : { step: step + 1 }
+            context : { step: stepLabel }
           })
           break
         }
         if (isDef(currentMsg.action) && currentMsg.action == "final" && isDef(currentMsg.params)) {
-          runtime.context.push(`[OBS ${step + 1}] (error) 'final' action cannot have 'params', use 'answer' instead.`)
+          runtime.context.push(`[OBS ${stepLabel}] (error) 'final' action cannot have 'params', use 'answer' instead.`)
         }
 
         if (!runtime.clearedConsecutiveErrors) {
@@ -10693,8 +11526,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.clearedConsecutiveErrors = true
         }
 
-        var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
-        var stepLabel = `${step + 1}${stepSuffix}`
         var isKnownTool = this.mcpToolToConnection && isDef(this.mcpToolToConnection[origActionRaw])
 
         global.__mini_a_metrics.thoughts_made.inc()
@@ -10834,11 +11665,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
 
+          var shouldUpdateToolContext = !this._useTools || runtime.providerToolUseFailedDetected === true || origActionRaw === "proxy-dispatch"
           pendingToolActions.push({
             toolName     : origActionRaw,
             params       : paramsValue,
             stepLabel    : stepLabel,
-            updateContext: !this._useTools
+            updateContext: shouldUpdateToolContext
           })
           continue
         }
@@ -10990,18 +11822,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           return finalLLM.promptJSONWithStats(finalPrompt)
         }
         return finalLLM.promptWithStats(finalPrompt)
-      }, {
-        maxAttempts : 3,
-        initialDelay: 250,
-        maxDelay    : 6000,
-        context     : { source: "llm", operation: "final" },
-        onRetry     : (err, attempt, wait, category) => {
-          this.fnI("retry", `Final answer attempt ${attempt} failed (${category.type}). Retrying in ${wait}ms...`)
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.retries)) {
-            global.__mini_a_metrics.retries.inc()
-          }
-        }
-      })
+      }, this._llmRetryOptions("Final answer", { operation: "final" }, { maxDelay: 6000 }))
     } catch (finalErr) {
       var finalErrorInfo = this._categorizeError(finalErr, { source: "llm", operation: "final" })
       runtime.context.push(`[OBS FINAL] (error) final answer request failed: ${finalErrorInfo.reason}`)
@@ -11069,7 +11890,7 @@ MiniA.prototype._runChatbotMode = function(options) {
     var maxSteps = Math.max(1, args.maxsteps || 10)
     var pendingPrompt = isString(args.goal) ? args.goal : stringify(args.goal, __, "")
     var finalAnswer
-    var toolNames = this.mcpToolNames.slice()
+    var toolNames = this.mcpToolNames.filter(name => !(args.useshell === true && this._useTools === true && name === "shell"))
 
     // Initialize runtime object for chatbot mode
     var runtime = this._runtime = {
@@ -11445,15 +12266,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
         return validatorLLM.promptJSONWithStats(validationPrompt)
       }
       return validatorLLM.promptWithStats(validationPrompt)
-    }, {
-      maxAttempts : 3,
-      initialDelay: 400,
-      maxDelay    : 4000,
-      context     : { source: "llm", operation: "deep-research-validation" },
-      onRetry     : (err, attempt, wait) => {
-        this.fnI("retry", `Research validation attempt ${attempt} failed. Retrying in ${wait}ms...`)
-      }
-    })
+    }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
     var totalTokens = this._getTotalTokens(stats)

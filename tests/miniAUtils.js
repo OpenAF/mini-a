@@ -381,6 +381,24 @@
     }
   }
 
+  exports.testTextAndValidationToon = function() {
+    var tool = new MiniUtilsTool()
+    var sample = { name: "mini-a", enabled: true, version: 1 }
+
+    var toToon = tool.textUtilities({ operation: "json-to-toon", data: sample })
+    ow.test.assert(isMap(toToon), true, "json-to-toon should return result object")
+    ow.test.assert(toToon.format === "toon", true, "json-to-toon should report toon format")
+    ow.test.assert(isString(toToon.result), true, "json-to-toon should return TOON text")
+
+    var validToon = tool.validationUtilities({ operation: "validate-toon", data: toToon.result })
+    ow.test.assert(validToon.valid === true, true, "validate-toon should accept valid TOON")
+    ow.test.assert(validToon.format === "toon", true, "validate-toon should report toon format")
+
+    var malformedToon = tool.validationUtilities({ operation: "validate-toon", data: "not: [valid TOON" })
+    ow.test.assert(isMap(malformedToon), true, "validate-toon should return validation result for malformed TOON")
+    ow.test.assert(malformedToon.format === "toon", true, "malformed validate-toon should report toon format")
+  }
+
   exports.testTodoOps = function() {
     var tool = new MiniUtilsTool()
 
@@ -552,6 +570,9 @@
     ow.test.assert(modifyOps.indexOf("edit") >= 0, true, "Should include edit operation in filesystemModify")
     var textOps = metadata.textUtilities.inputSchema.properties.operation.enum || []
     ow.test.assert(textOps.indexOf("webfetch") >= 0, true, "Should include webfetch operation in textUtilities")
+    ow.test.assert(textOps.indexOf("json-to-toon") >= 0, true, "Should include json-to-toon operation in textUtilities")
+    var validationOps = metadata.validationUtilities.inputSchema.properties.operation.enum || []
+    ow.test.assert(validationOps.indexOf("validate-toon") >= 0, true, "Should include validate-toon operation in validationUtilities")
     var kvOps = metadata.kvStore.inputSchema.properties.operation.enum || []
     ow.test.assert(kvOps.indexOf("todo-write") >= 0, true, "Should include todo-write operation in kvStore")
     var markdownOps = metadata.markdownFiles.inputSchema.properties.operation.enum || []
@@ -730,6 +751,8 @@
     ow.test.assert(isDef(result1.timezone), true, "Should return timezone")
     ow.test.assert(isDef(result1.iso8601), true, "Should return ISO8601 format")
     ow.test.assert(isDef(result1.formatted), true, "Should return formatted time")
+    ow.test.assert(isDef(result1.date), true, "Should return date")
+    ow.test.assert(isDef(result1.time), true, "Should return time")
     ow.test.assert(isDef(result1.unixEpochSeconds), true, "Should return unix epoch seconds")
     ow.test.assert(isDef(result1.unixEpochMilliseconds), true, "Should return unix epoch milliseconds")
     ow.test.assert(result1.unixEpochSeconds > 0, true, "Unix epoch should be positive")
