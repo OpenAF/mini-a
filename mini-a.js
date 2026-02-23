@@ -1547,7 +1547,17 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     // Flush remaining buffers at end of answer
     function flushRemaining() {
         flushPendingEscapes()
-        if (codeBlockBuffer.length > 0) flushContent(codeBlockBuffer)
+        if (contentBuffer.length > 0 && inCodeBlock) {
+            // If stream ended without a trailing newline, keep any pending
+            // fence/content attached to the current fenced block.
+            codeBlockBuffer += contentBuffer
+            contentBuffer = ""
+        }
+        if (codeBlockBuffer.length > 0) {
+            flushContent(codeBlockBuffer)
+            codeBlockBuffer = ""
+            inCodeBlock = false
+        }
         if (contentBuffer.length > 0) {
             if (inTable && (isTableRowLine(contentBuffer) || isTableSeparatorLine(contentBuffer))) {
                 tableBuffer += contentBuffer
@@ -6251,12 +6261,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         }
       }
 
-      var text
-      if (isString(output)) {
-        text = output
-      } else {
-        text = stringify(output, __, "")
-      }
+      var text = isString(output) ? output : stringify(output, __, "")
       if (!isString(text) || text.length === 0) text = stringify(output, __, "")
       if (!isString(text) || text.length === 0) text = "null"
 
@@ -7303,14 +7308,22 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               ? target.client.callTool(toolName, inputArgs, meta)
               : target.client.callTool(toolName, inputArgs)
 
+            var resultPayload = result
+            if (isMap(result) && isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
+              var parsedPayload = jsonParse(String(result.content[0].text), __, __, true)
+              if (isMap(parsedPayload) || isArray(parsedPayload)) {
+                resultPayload = parsedPayload
+              }
+            }
+
             // Serialize once for size check, preview, and inline content.
             // When enabled, TOON is used to reduce token usage while keeping structure readable.
-            var resultJson = stringify(result, __, "")
+            var resultJson = stringify(resultPayload, __, "")
             var resultText = resultJson
             var resultFormat = "json"
-            if (globalSpillToon && (isMap(result) || isArray(result))) {
+            if (globalSpillToon && (isMap(resultPayload) || isArray(resultPayload))) {
               try {
-                resultText = af.toTOON(result)
+                resultText = af.toTOON(resultPayload)
                 resultFormat = "toon"
               } catch(ignoreToonError) {
                 resultText = resultJson
@@ -7343,10 +7356,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens)."
               ]
               previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
-              if (isMap(result)) {
-                previewLines.push("Top-level keys: [" + Object.keys(result).join(", ") + "]")
-              } else if (isArray(result)) {
-                previewLines.push("Result is an array with " + result.length + " element(s).")
+              if (isMap(resultPayload)) {
+                previewLines.push("Top-level keys: [" + Object.keys(resultPayload).join(", ") + "]")
+              } else if (isArray(resultPayload)) {
+                previewLines.push("Result is an array with " + resultPayload.length + " element(s).")
               }
               var previewSource = isString(resultText) ? resultText : stringify(resultText, __, "")
               var previewChars = previewSource.length > 300 ? previewSource.substring(0, 300) + "..." : previewSource

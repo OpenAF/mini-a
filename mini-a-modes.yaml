@@ -62,19 +62,19 @@ modes:
   poweruser:
     description: "Power user mode"
     params     :
-      useascii    : true
-      usetools    : true
-      useplanning : false
-      useshell    : true
-      readwrite   : true
-      useutils    : true
-      usestream   : true
-      mcpproxy    : true
-      mini-a-docs : true
-      toolcachettl: 5000
-      mcpproxythreshold: 128000
+      useascii         : true
+      usetools         : true
+      useplanning      : false
+      useshell         : true
+      readwrite        : true
+      useutils         : true
+      usestream        : true
+      mcpproxy         : true
+      mini-a-docs      : true
+      toolcachettl     : 5000
+      mcpproxythreshold: 51200
       mcpproxytoon     : true
-      mcp         : 
+      mcp              : 
       - type   : ojob
         options:
           job: mcps/mcp-web.yaml 

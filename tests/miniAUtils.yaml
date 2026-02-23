@@ -67,6 +67,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWebFetch
 
+- name: MiniA Utils Tests::TextAndValidationToon
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTextAndValidationToon
+
 - name: MiniA Utils Tests::TodoOps
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -163,6 +168,7 @@ todo:
 - MiniA Utils Tests::GlobQuery
 - MiniA Utils Tests::EditFile
 - MiniA Utils Tests::WebFetch
+- MiniA Utils Tests::TextAndValidationToon
 - MiniA Utils Tests::TodoOps
 - MiniA Utils Tests::PathSecurity
 - MiniA Utils Tests::MarkdownFiles
