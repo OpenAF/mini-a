@@ -78,8 +78,6 @@ files:
 - examples/learn-from-chat.yaml
 - examples/planning-demo.sh
 - examples/summary.yaml
-- mcps/.openaf_precompiled/.t8-20260222
-- mcps/.openaf_precompiled/websearch_js.class
 - mcps/CREATING.md
 - mcps/EXTERNAL-MCPS.md
 - mcps/README.md
@@ -150,8 +148,6 @@ filesHash:
   examples/learn-from-chat.yaml: 37d0b1e07559c4853d0ea6c144d462269068a20d
   examples/planning-demo.sh: 05c0ef0a5f2452466a01e80158434de0ed29a9a3
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
-  mcps/.openaf_precompiled/.t8-20260222: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  mcps/.openaf_precompiled/websearch_js.class: 6354c02bd4d9410211b923bb2c5d3e900433b346
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
   mcps/README.md: 48cd32be7e50ea81ea0da10d0703e5eacebef55b
