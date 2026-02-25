@@ -756,6 +756,12 @@ The `start()` method accepts various configuration options:
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
 - **`mcpproxy`** (boolean, default: false): Aggregate all MCP connections (including `mcp="..."` and `useutils=true`) through a single proxy interface that exposes a `proxy-dispatch` tool. This reduces context usage by presenting only one tool to the LLM instead of exposing all tools from all connections individually. The LLM can use `proxy-dispatch` to list, search, and call tools across all downstream MCP connections. For large payloads, `proxy-dispatch` also supports `argumentsFile` (load arguments from JSON file) and `resultToFile=true` (store result in temporary JSON `resultFile`). Prefer this for large input/output when `useutils=true` (recommended) or `useshell=true readwrite=true`. See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for flow diagrams and advanced usage notes.
 - **`mcpproxytoon`** (boolean, default: false): When `mcpproxythreshold>0`, serialize proxy-spilled object/array results using `af.toTOON(...)` before size checks and previews. This makes `readresult` slices/grep easier to scan and can reduce token usage for partial reads.
+- **`mcpprogcall`** (boolean, default: false): Start a per-session localhost HTTP bridge that lets generated scripts (bash/Python/JS) list/search/call MCP tools programmatically. The bridge prompt snippet is injected automatically. Requires `useshell=true` if you expect scripts to run.
+- **`mcpprogcallport`** (number, default: `0`): Port for the bridge server (`0` auto-selects a free local port).
+- **`mcpprogcallmaxbytes`** (number, default: `4096`): Max inline JSON response size. Larger results are stored and returned via `resultId`.
+- **`mcpprogcallresultttl`** (number, default: `600`): TTL in seconds for stored oversized results retrievable through `/result/{id}`.
+- **`mcpprogcalltools`** (string, default: empty): Optional comma-separated allowlist of tool names exposed by the bridge.
+- **`mcpprogcallbatchmax`** (number, default: `10`): Maximum calls accepted in one `/call-tools-batch` request.
 - **`toolcachettl`** (number, optional): Override the default cache duration (milliseconds) for deterministic tool results when no per-tool metadata is provided
 
 ```javascript
@@ -775,6 +781,42 @@ useutils: true
 // Optional compatibility mode (helpful for some gpt-oss-120b runs)
 usejsontool: true
 ```
+
+##### Programmatic MCP tool calling (HTTP bridge)
+
+When `mcpprogcall=true`, Mini-A starts a local HTTP server bound to `127.0.0.1` and exposes MCP tools through REST endpoints so scripts can call tools in loops, batches, and conditional workflows.
+
+At runtime, Mini-A injects these environment variables into shell subprocesses:
+- `MINI_A_PTC_PORT` — bound localhost port
+- `MINI_A_PTC_TOKEN` — bearer token required by every request (`X-Mini-A-Token` header)
+- `MINI_A_PTC_DIR` — per-session writable temp directory (removed on cleanup)
+
+Available endpoints:
+- `GET /list-tools` (append `?schema=1` to include input schemas)
+- `GET /search-tools?q=...`
+- `POST /call-tool` with `{ "name": "...", "params": { ... } }`
+- `POST /call-tools-batch` with `{ "calls": [{ "id": "...", "name": "...", "params": { ... } }] }`
+- `GET /result/{id}` (retrieve oversized stored result)
+- `GET /result/{id}?offset=N&limit=M` (paginate large stored result payloads)
+
+Example:
+
+```bash
+mini-a goal="query time + weather tools in one script and summarize" \
+  useshell=true usetools=true mcpprogcall=true \
+  mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-weather.yaml')]"
+```
+
+Example script call:
+
+```bash
+curl -s -X POST "http://127.0.0.1:$MINI_A_PTC_PORT/call-tool" \
+  -H "X-Mini-A-Token: $MINI_A_PTC_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"time-current","params":{"timezone":"UTC"}}'
+```
+
+Use `mcpprogcalltools=toolA,toolB` to limit exposed tools when tighter boundaries are required.
 
 Tools advertise determinism via MCP metadata (e.g., `annotations.readOnlyHint`, `annotations.idempotentHint`, or explicit cache settings). When detected, Mini-A caches results keyed by tool name and parameters for the configured TTL, reusing outputs on subsequent steps to avoid redundant calls.
 

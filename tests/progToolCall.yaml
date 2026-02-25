@@ -1,0 +1,138 @@
+jobs:
+- name: ProgToolCall Tests::Init
+  exec: args.tests = require("tests/progToolCall.js")
+
+- name: ProgToolCall Tests::ServerStartStop
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testServerStartsAndStopsCleanly
+
+- name: ProgToolCall Tests::TokenRejection
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTokenRejection
+
+- name: ProgToolCall Tests::ListToolsShape
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testListToolsReturnsExpectedShape
+
+- name: ProgToolCall Tests::ListToolsProxy
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testListToolsProxyAware
+
+- name: ProgToolCall Tests::SearchToolsFilter
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchToolsFiltersCorrectly
+
+- name: ProgToolCall Tests::CallToolHappy
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCallToolHappyPath
+
+- name: ProgToolCall Tests::CallToolError
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCallToolErrorPath
+
+- name: ProgToolCall Tests::CallToolMissingName
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCallToolMissingName
+
+- name: ProgToolCall Tests::OversizedResult
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOversizedResultSpillsToResultStore
+
+- name: ProgToolCall Tests::ResultPagination
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultPagination
+
+- name: ProgToolCall Tests::ResultTTL
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultTTLExpiry
+
+- name: ProgToolCall Tests::Batch
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBatchEndpoint
+
+- name: ProgToolCall Tests::BatchMax
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBatchEnforcesMaxCalls
+
+- name: ProgToolCall Tests::Allowlist
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolAllowlist
+
+- name: ProgToolCall Tests::TOONNormalization
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTOONResponseNormalization
+
+- name: ProgToolCall Tests::JSONPassthrough
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJSONObjectResultPassedThrough
+
+- name: ProgToolCall Tests::TempDir
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTempDirCreationAndCleanup
+
+- name: ProgToolCall Tests::EnvVars
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEnvVarsAreCorrect
+
+- name: ProgToolCall Tests::UniquePerInstance
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEachInstanceGetsUniquePortAndToken
+
+- name: ProgToolCall Tests::ResultNotFound
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultNotFoundReturnsError
+
+- name: ProgToolCall Tests::CompactManifest
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCompactToolManifestHelperWithProxy
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- ProgToolCall Tests::ServerStartStop
+- ProgToolCall Tests::TokenRejection
+- ProgToolCall Tests::ListToolsShape
+- ProgToolCall Tests::ListToolsProxy
+- ProgToolCall Tests::SearchToolsFilter
+- ProgToolCall Tests::CallToolHappy
+- ProgToolCall Tests::CallToolError
+- ProgToolCall Tests::CallToolMissingName
+- ProgToolCall Tests::OversizedResult
+- ProgToolCall Tests::ResultPagination
+- ProgToolCall Tests::ResultTTL
+- ProgToolCall Tests::Batch
+- ProgToolCall Tests::BatchMax
+- ProgToolCall Tests::Allowlist
+- ProgToolCall Tests::TOONNormalization
+- ProgToolCall Tests::JSONPassthrough
+- ProgToolCall Tests::TempDir
+- ProgToolCall Tests::EnvVars
+- ProgToolCall Tests::UniquePerInstance
+- ProgToolCall Tests::ResultNotFound
+- ProgToolCall Tests::CompactManifest

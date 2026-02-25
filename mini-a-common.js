@@ -105,6 +105,55 @@ function __miniARenderSkillTemplate(template, parsedArgs) {
 }
 
 /**
+ * Builds a compact tool manifest array for /list-tools responses.
+ * When proxyState is provided (mcpproxy=true), reads from the proxy connection catalog
+ * so the listing is proxy-aware (includes connection alias).
+ * Without proxyState, falls back to the plain tools array.
+ *
+ * @param {Array}   tools      - agent.mcpTools array (fallback when no proxy state)
+ * @param {Object}  [proxyState] - global.__mcpProxyState__ when mcpproxy=true
+ * @param {boolean} [withSchema] - if true, include inputSchema per tool
+ * @returns {Array} compact tool entries: { name, description[, connection][, inputSchema] }
+ */
+function __miniABuildCompactToolManifest(tools, proxyState, withSchema) {
+  withSchema = withSchema === true
+  var result = []
+
+  if (isObject(proxyState) && isObject(proxyState.connections)) {
+    Object.keys(proxyState.connections).forEach(function(connId) {
+      var conn = proxyState.connections[connId]
+      if (!isObject(conn) || !isArray(conn.tools)) return
+      var alias = isString(conn.alias) ? conn.alias : connId
+      conn.tools.forEach(function(tool) {
+        if (!isObject(tool) || !isString(tool.name)) return
+        if (tool.name === "proxy-dispatch") return
+        var desc = isString(tool.description) ? tool.description : ""
+        var entry = {
+          name       : tool.name,
+          description: desc.split("\n")[0].trim(),
+          connection : alias
+        }
+        if (withSchema && isObject(tool.inputSchema)) entry.inputSchema = tool.inputSchema
+        result.push(entry)
+      })
+    })
+  } else if (isArray(tools)) {
+    tools.forEach(function(tool) {
+      if (!isObject(tool) || !isString(tool.name)) return
+      var desc = isString(tool.description) ? tool.description : ""
+      var entry = {
+        name       : tool.name,
+        description: desc.split("\n")[0].trim()
+      }
+      if (withSchema && isObject(tool.inputSchema)) entry.inputSchema = tool.inputSchema
+      result.push(entry)
+    })
+  }
+
+  return result
+}
+
+/**
  * Loads additional libraries from a comma-separated string.
  * Supports both plain file paths and @oPack/library.js notation.
  *

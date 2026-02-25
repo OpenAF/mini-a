@@ -318,6 +318,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Circuit Breakers** - Automatic connection health management with cooldown periods
   - **Lazy Initialization** - Deferred MCP connection establishment for faster startup (`mcplazy=true`)
   - **Proxy Aggregation** - Collapse all MCP connections (including Mini Utils Tool) into a single `proxy-dispatch` tool to minimize context usage (`mcpproxy=true`)
+  - **Programmatic Tool Calling** - Optional per-session localhost HTTP bridge for calling MCP tools from scripts executed by the agent (`mcpprogcall=true`, requires `useshell=true`)
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, office documents, and more
 - **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
@@ -375,6 +376,7 @@ Mini-A ships with complementary components:
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
+- **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
 - **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
@@ -398,6 +400,12 @@ Mini-A ships with complementary components:
 | `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate Mini-A documentation directly | `false` |
 | `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context; supports `argumentsFile` + `resultToFile` for large payload handoff | `false` |
 | `mcpproxytoon` | When `mcpproxythreshold>0`, serialize proxy-spilled results as TOON text (`af.toTOON`) to improve search/read efficiency on large payloads | `false` |
+| `mcpprogcall` | Start a per-session localhost HTTP bridge so generated scripts can list/search/call MCP tools programmatically; requires `useshell=true` for script execution | `false` |
+| `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
+| `mcpprogcallmaxbytes` | Max inline JSON response size before storing oversized tool results under `/result/{id}` | `4096` |
+| `mcpprogcallresultttl` | Time-to-live in seconds for oversized stored results returned by `/result/{id}` | `600` |
+| `mcpprogcalltools` | Optional comma-separated allowlist of tool names exposed through the bridge | `""` |
+| `mcpprogcallbatchmax` | Max calls accepted per `/call-tools-batch` request | `10` |
 | `chatbotmode` | Conversational assistant mode | `false` |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
