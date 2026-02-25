@@ -11511,6 +11511,23 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       // Normalize model response into a sequence of action requests
       var baseMsg = msg
+      if (isMap(baseMsg) && isUnDef(baseMsg.action) && (isDef(baseMsg.error) || isDef(baseMsg.message))) {
+        var payloadErrorInfo = this._categorizeError(baseMsg, { source: "llm", llmType: llmType, step: step + 1, sourceType: "response-payload" })
+        if (isObject(payloadErrorInfo) && payloadErrorInfo.contextOverflow === true) {
+          runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model returned context-window overflow payload: ${payloadErrorInfo.reason}`)
+          this._registerRuntimeError(runtime, {
+            category: payloadErrorInfo.type,
+            message : payloadErrorInfo.reason,
+            context : { step: step + 1, llmType: llmType, source: "response-payload" }
+          })
+          if (recoverContextAfterProviderOverflow(step + 1, llmType, payloadErrorInfo)) {
+            if (args.debug || args.verbose) {
+              this.fnI("recover", `Step ${step + 1}: detected provider context-window overflow from response payload; compressed context and retrying.`)
+            }
+            continue
+          }
+        }
+      }
       var stateUpdatedThisStep = false
       var stateRecordedInContext = false
       var updatedStateSnapshot = stateSnapshot
