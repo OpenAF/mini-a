@@ -5542,7 +5542,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     }
     io.writeFileString(args.outfile, textAnswer || "(no answer)")
     this.fnI("done", `Final answer written to ${args.outfile}`)
-    return
+    return textAnswer
   }
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
