@@ -8223,6 +8223,21 @@ MiniA.prototype._numberInWords = num => {
     return num.toString()
 }
 
+MiniA.prototype._truncateShellOutput = function(output, maxBytes) {
+    if (!isString(output) || output.length === 0) return output
+    var limit = isNumber(maxBytes) && maxBytes > 0 ? maxBytes : 8000
+    if (output.length <= limit) return output
+    var headSize = Math.floor(limit * 0.5)
+    var tailSize = Math.floor(limit * 0.4)
+    var head = output.substring(0, headSize)
+    var tail = output.substring(output.length - tailSize)
+    var totalLines = (output.match(/\n/g) || []).length + 1
+    return head
+        + "\n--- [" + output.length + " chars / ~" + totalLines + " lines total"
+        + " — truncated; use 'head -n N', 'tail -n N', or 'grep' to retrieve more] ---\n"
+        + tail
+}
+
 MiniA.prototype._runCommand = function(args) {
     _$(args.command, "args.command").isString().$_()
     args.readwrite  = _$(args.readwrite, "args.readwrite").isBoolean().default(false)
@@ -8233,6 +8248,7 @@ MiniA.prototype._runCommand = function(args) {
     var extraBanValue = isDef(args.shellbanextra) ? args.shellbanextra : this._shellExtraBanned
     var allowPipesValue = isDef(args.shellallowpipes) ? args.shellallowpipes : this._shellAllowPipes
     var shellTimeoutValue = isDef(args.shelltimeout) ? args.shelltimeout : this._shellTimeout
+    var shellMaxBytesValue = isDef(args.shellmaxbytes) ? args.shellmaxbytes : this._shellMaxBytes
 
     args.shellallowpipes = _$(toBoolean(allowPipesValue), "args.shellallowpipes").isBoolean().default(false)
     args.shelltimeout = _$(shellTimeoutValue, "args.shelltimeout").isNumber().default(__)
@@ -8340,6 +8356,7 @@ MiniA.prototype._runCommand = function(args) {
         if (isObject(this._progCallEnv)) shellExec = shellExec.envs(this._progCallEnv)
         var _r = shellExec.get(0)
         args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
+        args.output = this._truncateShellOutput(args.output, shellMaxBytesValue)
         args.executedCommand = finalCommand
         global.__mini_a_metrics.shell_commands_executed.inc()
         var afterShellResult = this._runHook("after_shell", {
@@ -9265,6 +9282,7 @@ MiniA.prototype.init = function(args) {
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" },
       { name: "shelltimeout", type: "number", default: __ },
+      { name: "shellmaxbytes", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
@@ -9344,6 +9362,8 @@ MiniA.prototype.init = function(args) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
+    args.shellmaxbytes = _$(args.shellmaxbytes, "args.shellmaxbytes").isNumber().default(__)
+    if (isNumber(args.shellmaxbytes) && args.shellmaxbytes <= 0) args.shellmaxbytes = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
@@ -9468,6 +9488,7 @@ MiniA.prototype.init = function(args) {
     }
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._shellTimeout = args.shelltimeout
+    this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
@@ -10133,6 +10154,9 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
  * - shellbatch (boolean, default=false): If true, runs in batch mode without prompting for command execution approval.
  * - shelltimeout (number, optional): Maximum shell command runtime in milliseconds before timing out.
+ * - shellmaxbytes (number, optional): Maximum shell output size in chars. When exceeded the output
+ *   is replaced with a head+tail excerpt separated by an informative banner. Default is 8000 chars.
+ *   Set to 0 or leave unset to use the default. Pass a large value to raise the limit.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
  * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP (only when useutils=true).
@@ -10286,6 +10310,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "shellallow", type: "string", default: __ },
       { name: "shellbanextra", type: "string", default: __ },
       { name: "shelltimeout", type: "number", default: __ },
+      { name: "shellmaxbytes", type: "number", default: __ },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
       { name: "outputfile", type: "string", default: __ },
@@ -10337,6 +10362,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
     args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
+    args.shellmaxbytes = _$(args.shellmaxbytes, "args.shellmaxbytes").isNumber().default(__)
+    if (isNumber(args.shellmaxbytes) && args.shellmaxbytes <= 0) args.shellmaxbytes = __
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
@@ -10376,6 +10403,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellBatch = args.shellbatch
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._shellTimeout = args.shelltimeout
+    this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
@@ -12271,7 +12299,6 @@ MiniA.prototype._runChatbotMode = function(options) {
             })
             var shellOutput = isDef(shellResult) && isString(shellResult.output) ? shellResult.output : ""
             if (!isString(shellOutput) || shellOutput.length === 0) shellOutput = "(no output)"
-            if (shellOutput.length > 4000) shellOutput = shellOutput.substring(0, 4000) + "\n[truncated]"
             pendingPrompt = `Shell command '${commandValue}' output:\n${shellOutput}\nUse this result to determine your next action or final answer.`
             handled = true
             break
