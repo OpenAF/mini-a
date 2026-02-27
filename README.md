@@ -338,7 +338,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Autonomous Delegation** - LLM decides when to delegate via `delegate-subtask` tool
   - **Manual Delegation** - Console commands for interactive control (`/delegate`, `/subtasks`, `/subtask`)
   - **Depth Tracking** - Configurable nesting limits with automatic retry and deadline enforcement
-- **Conversation Persistence** - Save and resume conversations across sessions
+- **Conversation Persistence** - Save and resume conversations across sessions (`conversation=...`; in `mini-a-con`, use `resume=true` to continue the latest thread)
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
@@ -427,6 +427,7 @@ Mini-A ships with complementary components:
 | `rpm` | Rate limit (requests per minute) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
 | `shelltimeout` | Maximum shell command runtime in milliseconds before timeout | - |
+| `shellmaxbytes` | Maximum shell output size (chars) before truncating to a head/tail excerpt with guidance | - |
 | `toollog` | JSSLON definition for a dedicated tool-log channel capturing MCP tool inputs/outputs | - |
 | `showthinking` | Surface XML-tagged thinking blocks from model responses as thought logs | `false` |
 | `verbose` / `debug` | Enable detailed logging | `false` |

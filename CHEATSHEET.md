@@ -140,6 +140,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
 | `readwrite` | boolean | `false` | Allow read-write operations without confirmation |
 | `checkall` | boolean | `false` | Ask for confirmation before executing any shell command |
 | `shellbatch` | boolean | `false` | Run in batch mode without prompting for command approval |
+| `shellmaxbytes` | number | - | Cap shell output size in chars; oversized output is shown as head/tail with a truncation banner |
 | `shellallow` | string | - | Comma-separated list of banned commands to explicitly allow |
 | `shellbanextra` | string | - | Additional comma-separated commands to ban |
 | `shellallowpipes` | boolean | `false` | Allow pipes, redirection, and shell control operators |
@@ -162,6 +163,9 @@ mini-a goal="analyze files" useshell=true shell="docker exec sandbox"
 
 # Allow pipes and redirection
 mini-a goal="find large files" useshell=true shellallowpipes=true
+
+# Cap shell output to avoid context blowups
+mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 ```
 
 ---
@@ -496,6 +500,9 @@ mini-a goal="track remediation tasks" \
 # Load conversation history
 mini-a goal="continue previous discussion" \
   conversation=chat-history.json
+
+# Resume directly from latest saved conversation turn (mini-a-con)
+mini-a conversation=chat-history.json resume=true
 
 # Context management
 mini-a goal="analyze large codebase" \

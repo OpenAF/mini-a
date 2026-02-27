@@ -468,6 +468,13 @@ Arguments: {
 {{{this}}}
 {{/each}}
 
+{{#if availableSkills}}
+## AVAILABLE SKILLS:
+{{#each availableSkillsList}}
+• {{name}}{{#if description}}: {{description}}{{/if}}
+{{/each}}
+Use the \`skills\` tool (operation="render" or "invoke") to use them.
+{{/if}}
 {{#if knowledge}}
 ## KNOWLEDGE:
 {{{knowledge}}}
@@ -6246,6 +6253,13 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     var includeSkillsTool = toBoolean(args.useskills) === true
+    if (includeSkillsTool) {
+      try {
+        this._availableSkills = fileTool._listSkills({})
+      } catch(e) {
+        this._availableSkills = []
+      }
+    }
     methodNames = methodNames.filter(function(name) {
       return isFunction(fileTool[name])
     })
@@ -9335,6 +9349,7 @@ MiniA.prototype.init = function(args) {
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    if (args.useskills === true) args.useutils = true
     args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
@@ -10116,7 +10131,11 @@ MiniA.prototype.init = function(args) {
         currentTask      : stepContext ? stepContext.currentTask : "",
         nextStep         : stepContext ? stepContext.nextStep : 1,
         completedSteps   : stepContext ? stepContext.completedSteps : "",
-        remainingSteps   : stepContext ? stepContext.remainingSteps : ""
+        remainingSteps   : stepContext ? stepContext.remainingSteps : "",
+        availableSkills    : isArray(this._availableSkills) && this._availableSkills.length > 0,
+        availableSkillsList: isArray(this._availableSkills)
+          ? this._availableSkills.map(function(s) { return { name: s.name, description: s.description } })
+          : []
       }
       this._systemInst = this._getCachedSystemPrompt("agent", agentPayload, this._SYSTEM_PROMPT)
     }

@@ -68,6 +68,7 @@ modes:
       useshell         : true
       readwrite        : true
       useutils         : true
+      useskills        : true
       usestream        : true
       mcpproxy         : true
       mini-a-docs      : true

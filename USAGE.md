@@ -781,6 +781,7 @@ The `start()` method accepts various configuration options:
 - **`shell`** (string): Prefix applied to every shell command (use with `useshell=true`)
 - **`shellprefix`** (string): Override the shell prefix embedded inside stored plans or MCP executions so converted tasks run against the right environment
 - **`shelltimeout`** (number): Maximum shell command runtime in milliseconds before timeout
+- **`shellmaxbytes`** (number, optional): Cap shell output size in characters. When exceeded, Mini-A keeps a head/tail excerpt and inserts a truncation banner. Defaults to `8000` when unset.
 - **`readwrite`** (boolean, default: false): Allow read/write operations on filesystem
 - **`checkall`** (boolean, default: false): Ask for confirmation before executing any shell command
 - **`shellallow`** (string): Comma-separated list of banned commands that should be explicitly allowed
@@ -906,6 +907,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
+- **`resume`** (boolean, default: false, `mini-a-con`): Reuse the last conversation and restore the most recent goal/result context when running from the interactive console (`mini-a` / `opack exec mini-a`)
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Mode Presets
@@ -2199,6 +2201,12 @@ agent.start({
     goal: "Continue our previous discussion about code optimization",
     conversation: "chat-history.json"
 })
+```
+
+Resume the last conversation directly from the interactive console:
+
+```bash
+mini-a conversation=chat-history.json resume=true
 ```
 
 ### Context Management
