@@ -170,7 +170,7 @@ filesHash:
   mcps/mcp-random.yaml: ac2ee99722a6ae2baeb14e19d4f881ce03e369c4
   mcps/mcp-rss.yaml: 42413cd8146ce049d9e8aeb82265be23ef17213e
   mcps/mcp-s3.yaml: 845a363c5ca9d291a1ab24dad80972b6651b1a29
-  mcps/mcp-shell.yaml: ce8b702efa515b704720f0d4e73a0093c1e4b699
+  mcps/mcp-shell.yaml: e47f7c641c4728d495897ee95f920472abb8fc4b
   mcps/mcp-ssh.yaml: 06f3c50811f9cf23e9442f62fad59a8ebdfcd1c9
   mcps/mcp-telco.yaml: ec228f93cf7bfa9dfe73a2417d45370327463cdb
   mcps/mcp-time.yaml: fd4e494a2d73d5579912ce8c66fcbb3204046917
