@@ -177,6 +177,13 @@ mini-a goal="find large files" useshell=true shellallowpipes=true
 | `mcpdynamic` | boolean | `false` | Analyze goal and only register relevant MCP tools |
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
+| `mcpproxytoon` | boolean | `false` | Serialize proxy-spilled object/array results as TOON text when `mcpproxythreshold>0` |
+| `mcpprogcall` | boolean | `false` | Start a per-session localhost HTTP bridge so scripts can list/search/call MCP tools programmatically (requires `useshell=true` for script execution) |
+| `mcpprogcallport` | number | `0` | Port for programmatic tool-calling bridge (`0` auto-selects a free port) |
+| `mcpprogcallmaxbytes` | number | `4096` | Max inline JSON size before spilling oversized results to `/result/{id}` |
+| `mcpprogcallresultttl` | number | `600` | TTL in seconds for spilled results available via `/result/{id}` |
+| `mcpprogcalltools` | string | `""` | Optional comma-separated allowlist of tool names exposed by the bridge |
+| `mcpprogcallbatchmax` | number | `10` | Maximum calls accepted by `/call-tools-batch` |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`; filesystemQuery read supports byte/line ranges and countLines) |
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
@@ -232,6 +239,16 @@ mini-a goal="compare S3 usage with database stats" \
   usetools=true mcpproxy=true useutils=true
 ```
 See [docs/MCPPROXY-FEATURE.md](docs/MCPPROXY-FEATURE.md) for full workflows and the `proxy-dispatch` action set.
+
+**Programmatic Tool Calling Bridge (script-driven MCP calls):**
+```bash
+mini-a goal="run MCP tool calls from a script and summarize output" \
+  useshell=true usetools=true mcpprogcall=true \
+  mcp="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-weather.yaml')]"
+
+# Inside generated shell scripts use:
+# MINI_A_PTC_PORT, MINI_A_PTC_TOKEN, MINI_A_PTC_DIR
+```
 
 ### Built-in MCPs
 

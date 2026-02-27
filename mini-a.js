@@ -609,6 +609,17 @@ MiniA._stopAllRegistrationServers = function() {
   })
 }
 
+MiniA._stopAllProgCallServers = function() {
+  if (!isArray(MiniA._activeInstances)) return
+  MiniA._activeInstances.forEach(function(agent) {
+    if (!isObject(agent) || isUnDef(agent._progCallServer)) return
+    try { agent._progCallServer.stop() } catch(ignoreProgCallStop) {}
+    agent._progCallServer = __
+    agent._progCallEnv    = __
+    agent._progCallTmpDir = __
+  })
+}
+
 MiniA._registerShutdownHook = function() {
   if (MiniA._shutdownHookRegistered === true) return
   if (typeof addOnOpenAFShutdown !== "function") return
@@ -617,6 +628,7 @@ MiniA._registerShutdownHook = function() {
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
     try { MiniA._cleanupProxyTempFiles() } catch(ignoreTempCleanupError) {}
+    try { MiniA._stopAllProgCallServers() } catch(ignoreProgCallStopError) {}
     try {
       if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
         $mcp.destroy()
@@ -8033,53 +8045,85 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
 MiniA.prototype._deduplicateContext = function(contextArray) {
   if (!isArray(contextArray)) return contextArray
 
-  var deduplicated = []
+  var self = this
+  var keepAlways = { "STATE": true, "SUMMARY": true, "ERROR": true }
+  var typeBudget = {
+    "OBS": 12,
+    "ACT": 8,
+    "THOUGHT": 8,
+    "ERROR": 10,
+    "RECOVERY": 6
+  }
+  var obsClassBudget = {
+    "error": 3,
+    "warn": 3,
+    "recover": 3,
+    "shell": 4,
+    "default": 4
+  }
+  var perTypeCounts = {}
+  var perObsClassCounts = {}
   var seen = {}
-  var similarityCache = {}
+  var deduplicated = []
 
-  for (var i = 0; i < contextArray.length; i++) {
+  var normalizeEntry = function(entry) {
+    if (!isString(entry)) return ""
+    var t = entry
+      .toLowerCase()
+      .replace(/\[obs\s+[^\]]+\]/g, "[obs]")
+      .replace(/\[(act|thought|error|state|summary)\s+[^\]]+\]/g, "[$1]")
+      .replace(/https?:\/\/\S+/g, "<url>")
+      .replace(/[0-9a-f]{8,}/g, "<hex>")
+      .replace(/\d+(\.\d+)?/g, "N")
+      .replace(/\s+/g, " ")
+      .trim()
+    if (t.length > 320) t = t.substring(0, 320)
+    return t
+  }
+
+  var getType = function(entry) {
+    var m = isString(entry) ? entry.match(/^\[(\w+)/) : __
+    return m ? String(m[1]).toUpperCase() : "UNKNOWN"
+  }
+
+  var getObsClass = function(entry) {
+    if (!isString(entry)) return "default"
+    var m = entry.match(/\[OBS[^\]]*\]\s*\(([\w-]+)\)/i)
+    if (!m || !isString(m[1])) return "default"
+    return String(m[1]).toLowerCase()
+  }
+
+  // Iterate from newest to oldest so we keep the most recent/highest value context.
+  for (var i = contextArray.length - 1; i >= 0; i--) {
     var entry = contextArray[i]
-    var entryTypeMatch = entry.match(/^\[(\w+)/)
-    var entryType = entryTypeMatch ? entryTypeMatch[1] : "UNKNOWN"
+    if (!isString(entry) || entry.length === 0) continue
 
-    // Always keep STATE and SUMMARY entries
-    if (entryType === "STATE" || entryType === "SUMMARY") {
-      deduplicated.push(entry)
-      continue
-    }
+    var entryType = getType(entry)
+    var fingerprint = normalizeEntry(entry)
+    if (fingerprint.length > 0 && isDef(seen[fingerprint])) continue
+    if (fingerprint.length > 0) seen[fingerprint] = true
 
-    // Deduplicate identical entries
-    var normalized = entry.replace(/\d+(\.\d+)?/g, "N").trim()
-    if (seen[normalized]) {
-      if (this.args.debug) {
-        this.fnI("debug", `Skipping duplicate: ${entry.substring(0, 50)}...`)
-      }
-      continue
-    }
-    seen[normalized] = true
+    if (!keepAlways[entryType]) {
+      var budget = isNumber(typeBudget[entryType]) ? typeBudget[entryType] : 8
+      perTypeCounts[entryType] = (perTypeCounts[entryType] || 0) + 1
+      if (perTypeCounts[entryType] > budget) continue
 
-    // Deduplicate similar OBS entries (same tool, different results)
-    if (entryType === "OBS") {
-      var toolMatch = entry.match(/\[OBS[\s\d.]+\]\s*\((\w+)\)/)
-      if (toolMatch) {
-        var toolName = toolMatch[1]
-        var cacheKey = entryType + "_" + toolName
-
-        // Keep only last 2 observations per tool
-        if (!similarityCache[cacheKey]) similarityCache[cacheKey] = []
-        similarityCache[cacheKey].push(i)
-
-        if (similarityCache[cacheKey].length > 2) {
-          var oldIdx = similarityCache[cacheKey].shift()
-          // Skip this entry if it's the old one
-          if (i === oldIdx) continue
-        }
+      if (entryType === "OBS") {
+        var obsClass = getObsClass(entry)
+        var obsBudget = isNumber(obsClassBudget[obsClass]) ? obsClassBudget[obsClass] : obsClassBudget.default
+        var obsKey = "OBS_" + obsClass
+        perObsClassCounts[obsKey] = (perObsClassCounts[obsKey] || 0) + 1
+        if (perObsClassCounts[obsKey] > obsBudget) continue
       }
     }
 
     deduplicated.push(entry)
   }
 
+  deduplicated.reverse()
+  if (self.args && self.args.debug) {
+    self.fnI("debug", `Context dedup kept ${deduplicated.length}/${contextArray.length} entries`)
+  }
   return deduplicated
 }
 
@@ -8293,6 +8337,7 @@ MiniA.prototype._runCommand = function(args) {
         )
         var shellExec = $sh(shInput)
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
+        if (isObject(this._progCallEnv)) shellExec = shellExec.envs(this._progCallEnv)
         var _r = shellExec.get(0)
         args.output = _r.stdout + (isDef(_r.stderr) && _r.stderr.length > 0 ? "\n[stderr] " + _r.stderr : "")
         args.executedCommand = finalCommand
@@ -9250,7 +9295,13 @@ MiniA.prototype.init = function(args) {
       { name: "maxconcurrent", type: "number", default: 4 },
       { name: "delegationmaxdepth", type: "number", default: 3 },
       { name: "delegationtimeout", type: "number", default: 300000 },
-      { name: "delegationmaxretries", type: "number", default: 2 }
+      { name: "delegationmaxretries", type: "number", default: 2 },
+      { name: "mcpprogcall", type: "boolean", default: false },
+      { name: "mcpprogcallport", type: "number", default: 0 },
+      { name: "mcpprogcallmaxbytes", type: "number", default: 4096 },
+      { name: "mcpprogcallresultttl", type: "number", default: 600 },
+      { name: "mcpprogcalltools", type: "string", default: "" },
+      { name: "mcpprogcallbatchmax", type: "number", default: 10 }
     ])
 
     // Convert and validate boolean arguments
@@ -9285,6 +9336,7 @@ MiniA.prototype.init = function(args) {
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usedelegation = _$(toBoolean(args.usedelegation), "args.usedelegation").isBoolean().default(false)
+    args.mcpprogcall = _$(toBoolean(args.mcpprogcall), "args.mcpprogcall").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
@@ -9859,6 +9911,34 @@ MiniA.prototype.init = function(args) {
 
     if (args.format == "json") rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
+    // Programmatic tool calling — start HTTP bridge server when mcpprogcall=true
+    if (args.mcpprogcall === true && isUnDef(this._progCallServer)) {
+      if (args.useshell !== true) {
+        this.fnI("warn", "mcpprogcall=true requires useshell=true to execute scripts. " +
+          "The HTTP server will start but scripts cannot be run without shell access.")
+      }
+      if (typeof MiniAProgCallServer !== "function") loadLib("mini-a-progcall.js")
+      if (typeof MiniAProgCallServer === "function") {
+        var _progCallSrv = new MiniAProgCallServer(this)
+        _progCallSrv.start({
+          port        : args.mcpprogcallport,
+          maxBytes    : args.mcpprogcallmaxbytes,
+          resultTTL   : args.mcpprogcallresultttl,
+          allowedTools: args.mcpprogcalltools,
+          batchMax    : args.mcpprogcallbatchmax
+        })
+        this._progCallServer = _progCallSrv
+        this._progCallEnv    = _progCallSrv.envVars()
+        this._progCallTmpDir = _progCallSrv._tmpDir
+        args.knowledge = isString(args.knowledge) && args.knowledge.length > 0
+          ? args.knowledge + _progCallSrv.promptSnippet()
+          : _progCallSrv.promptSnippet().trim()
+        this.fnI("progcall", "Programmatic tool calling server started on port " + _progCallSrv._port + ".")
+      } else {
+        this.fnI("warn", "mini-a-progcall.js could not be loaded; mcpprogcall disabled.")
+      }
+    }
+
     var trimmedKnowledge = args.knowledge.trim()
     var agentPersonaLine = this._defaultAgentPersonaLine
     if (isString(args.youare) && args.youare.trim().length > 0) agentPersonaLine = args.youare.trim()
@@ -10430,46 +10510,131 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       //var llmType = this._use_lc ? "low-cost" : "main"
       var summarizeLLM = this.llm
       var llmType = "main"
-
-      var originalTokens = this._estimateTokens(ctx)
-      global.__mini_a_metrics.summaries_original_tokens.getAdd(originalTokens)
-
       var instructionText = "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
-      var summaryResponseWithStats
       var self = this
-      try {
-        summaryResponseWithStats = this._withExponentialBackoff(function() {
-          addCall()
-          var summarizer = summarizeLLM.withInstructions(instructionText)
-          if (!self._noJsonPrompt && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(ctx)
-          return summarizer.promptWithStats(ctx)
-        }, this._llmRetryOptions("Summarization", { operation: "summarize" }))
-      } catch (e) {
-        var summaryError = this._categorizeError(e, { source: "llm", operation: "summarize" })
-        this.fnI("warn", `Summarization failed: ${summaryError.reason || e}`)
-        if (isObject(runtime)) {
-          this._updateErrorHistory(runtime, { category: summaryError.type, message: `summarize: ${summaryError.reason}`, context: { operation: "summarize" } })
+
+      var summarizeSingle = function(inputCtx, customInstructionText) {
+        var text = isString(inputCtx) ? inputCtx : ""
+        if (text.trim().length === 0) return ""
+        var originalTokens = self._estimateTokens(text)
+        global.__mini_a_metrics.summaries_original_tokens.getAdd(originalTokens)
+
+        var summaryResponseWithStats
+        try {
+          summaryResponseWithStats = self._withExponentialBackoff(function() {
+            addCall()
+            var summarizer = summarizeLLM.withInstructions(isString(customInstructionText) ? customInstructionText : instructionText)
+            if (!self._noJsonPrompt && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(text)
+            return summarizer.promptWithStats(text)
+          }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
+        } catch (e) {
+          var summaryError = self._categorizeError(e, { source: "llm", operation: "summarize" })
+          self.fnI("warn", `Summarization failed: ${summaryError.reason || e}`)
+          if (isObject(runtime)) {
+            self._updateErrorHistory(runtime, { category: summaryError.type, message: `summarize: ${summaryError.reason}`, context: { operation: "summarize" } })
+          }
+          // Never return full original payload on failure; keep a compact fallback.
+          return "[SUMMARY FALLBACK] " + text.substring(0, 1200)
         }
-        return ctx
+
+        if (args.debug) {
+          print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
+
+        var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
+        var summaryTokenTotal = self._getTotalTokens(summaryStats)
+        registerCallUsage(summaryTokenTotal)
+        global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
+        global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
+        global.__mini_a_metrics.llm_normal_calls.inc()
+        global.__mini_a_metrics.summaries_made.inc()
+
+        var responseText = isObject(summaryResponseWithStats) && isString(summaryResponseWithStats.response)
+          ? summaryResponseWithStats.response
+          : ""
+        var finalTokens = self._estimateTokens(responseText)
+        global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
+        global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
+
+        var tokenStatsMsg = self._formatTokenStats(summaryStats)
+        self.fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
+        return responseText
       }
-      if (args.debug) {
-        print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+
+      var splitByTokenBudget = function(inputCtx, chunkTokenBudget, maxChunks) {
+        var text = isString(inputCtx) ? inputCtx : ""
+        if (text.length === 0) return []
+        var budget = Math.max(800, Math.floor(chunkTokenBudget))
+        var limit = Math.max(2, Math.floor(maxChunks))
+        var lines = text.split("\n")
+        var chunks = []
+        var current = []
+        var currentTokens = 0
+
+        var flush = function() {
+          if (current.length > 0) {
+            chunks.push(current.join("\n"))
+            current = []
+            currentTokens = 0
+          }
+        }
+
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i]
+          var lineTokens = Math.max(1, self._estimateTokens(line))
+          if (lineTokens > budget) {
+            flush()
+            var maxCharsPerPart = Math.max(400, budget * 4)
+            var offset = 0
+            while (offset < line.length) {
+              chunks.push(line.substring(offset, offset + maxCharsPerPart))
+              offset += maxCharsPerPart
+              if (chunks.length >= limit) break
+            }
+            if (chunks.length >= limit) break
+            continue
+          }
+
+          if (currentTokens + lineTokens > budget) flush()
+          current.push(line)
+          currentTokens += lineTokens
+
+          if (chunks.length >= limit) break
+        }
+        flush()
+        return chunks.slice(0, limit)
       }
-      var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
-      var summaryTokenTotal = this._getTotalTokens(summaryStats)
-      registerCallUsage(summaryTokenTotal)
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
-      global.__mini_a_metrics.llm_normal_calls.inc()
-      global.__mini_a_metrics.summaries_made.inc()
-      
-      var finalTokens = this._estimateTokens(summaryResponseWithStats.response)
-      global.__mini_a_metrics.summaries_final_tokens.getAdd(finalTokens)
-      global.__mini_a_metrics.summaries_tokens_reduced.getAdd(Math.max(0, originalTokens - finalTokens))
-      
-      var tokenStatsMsg = this._formatTokenStats(summaryStats)
-      this.fnI("output", `Context summarized using ${llmType} model. ${tokenStatsMsg.length > 0 ? "Summary " + tokenStatsMsg.toLowerCase() : ""}`)
-      return summaryResponseWithStats.response
+
+      var inputTokens = this._estimateTokens(ctx)
+      // Preflight: avoid one-shot summarization when payload is likely too large.
+      var chunkThreshold = args.maxcontext > 0 ? Math.max(4000, Math.floor(args.maxcontext * 0.45)) : 12000
+      var chunkBudget = Math.max(1500, Math.floor(chunkThreshold * 0.45))
+      var maxChunks = 24
+
+      if (inputTokens <= chunkThreshold) return summarizeSingle(ctx, instructionText)
+
+      this.fnI("summarize", `Large summary payload (~${inputTokens} tokens). Applying chunked summarization...`)
+      var chunks = splitByTokenBudget(ctx, chunkBudget, maxChunks)
+      if (chunks.length <= 1) return summarizeSingle(ctx, instructionText)
+
+      var chunkSummaries = []
+      for (var c = 0; c < chunks.length; c++) {
+        var chunkInstruction = instructionText + "\n4) Focus this pass only on the provided chunk and keep the output compact."
+        var chunkSummary = summarizeSingle(chunks[c], chunkInstruction)
+        if (isString(chunkSummary) && chunkSummary.length > 0) {
+          chunkSummaries.push(`[CHUNK ${c + 1}/${chunks.length}] ${chunkSummary}`)
+        }
+      }
+
+      if (chunkSummaries.length === 0) return "[SUMMARY FALLBACK] Unable to summarize context chunks."
+
+      var merged = chunkSummaries.join("\n")
+      var mergedInstruction = instructionText + "\n4) Merge chunk summaries into a single concise result with no redundancy."
+      var mergedSummary = summarizeSingle(merged, mergedInstruction)
+      if (!isString(mergedSummary) || mergedSummary.trim().length === 0) {
+        return "[SUMMARY FALLBACK] " + merged.substring(0, 3000)
+      }
+      return mergedSummary
     }
 
     // Helper function to check and summarize context during execution
@@ -11346,6 +11511,23 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       // Normalize model response into a sequence of action requests
       var baseMsg = msg
+      if (isMap(baseMsg) && isUnDef(baseMsg.action) && (isDef(baseMsg.error) || isDef(baseMsg.message))) {
+        var payloadErrorInfo = this._categorizeError(baseMsg, { source: "llm", llmType: llmType, step: step + 1, sourceType: "response-payload" })
+        if (isObject(payloadErrorInfo) && payloadErrorInfo.contextOverflow === true) {
+          runtime.context.push(`[OBS ${step + 1}] (error) ${llmType} model returned context-window overflow payload: ${payloadErrorInfo.reason}`)
+          this._registerRuntimeError(runtime, {
+            category: payloadErrorInfo.type,
+            message : payloadErrorInfo.reason,
+            context : { step: step + 1, llmType: llmType, source: "response-payload" }
+          })
+          if (recoverContextAfterProviderOverflow(step + 1, llmType, payloadErrorInfo)) {
+            if (args.debug || args.verbose) {
+              this.fnI("recover", `Step ${step + 1}: detected provider context-window overflow from response payload; compressed context and retrying.`)
+            }
+            continue
+          }
+        }
+      }
       var stateUpdatedThisStep = false
       var stateRecordedInContext = false
       var updatedStateSnapshot = stateSnapshot
