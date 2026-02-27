@@ -149,6 +149,46 @@ timeout: 1500
 failBlocks: true
 ```
 
+Example `kubectl-readonly.yaml` — restricts the agent to read-only `kubectl` subcommands only:
+
+```yaml
+name: kubectl-readonly
+event: before_shell
+failBlocks: true
+injectOutput: false
+timeout: 3000
+command: |
+  bash -c '
+    cmd="$MINI_A_SHELL_COMMAND"
+    if ! echo "$cmd" | grep -qE "(^|[|;&[:space:]])kubectl([[:space:]]|$)"; then
+      exit 0
+    fi
+    subcmd=$(echo "$cmd" | grep -oP "kubectl\s+\K\S+")
+    readonly_cmds="get describe logs explain top version api-resources api-versions cluster-info diff"
+    for allowed in $readonly_cmds; do
+      [ "$subcmd" = "$allowed" ] && exit 0
+    done
+    echo "BLOCKED: kubectl \"$subcmd\" is not a read-only command" >&2
+    exit 1
+  '
+```
+
+This hook fires on every shell command. It exits 0 (allow) if `kubectl` is not present, or if the subcommand is in the read-only allowlist (`get`, `describe`, `logs`, `explain`, `top`, `version`, `api-resources`, `api-versions`, `cluster-info`, `diff`). Any other subcommand (`apply`, `delete`, `exec`, `rollout`, etc.) causes it to exit 1 and block execution.
+
+To use this hook from a custom directory without placing it in `~/.openaf-mini-a/hooks/`, launch mini-a with `extrahooks`:
+
+```bash
+mini-a extrahooks=/path/to/my-hooks
+```
+
+Or combine with other hook directories:
+
+```bash
+mini-a extrahooks=/path/to/my-hooks,/path/to/team-hooks
+```
+
+Where `/path/to/my-hooks/kubectl-readonly.yaml` contains the definition above. Hooks from all directories are merged — the kubectl guard fires alongside any other hooks already loaded from `~/.openaf-mini-a/hooks/`.
+
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
 - `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving up to the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. When enough history exists, Mini-A always leaves at least one older entry eligible for summarization. Use this when you want to reclaim tokens but keep the high-level context available to the agent.
