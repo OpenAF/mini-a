@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260227'
+version: '20260228'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -132,7 +132,7 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: d2d883a1ca5d0b43b31858c67b3f3d58f15d37dd
+  CHEATSHEET.md: 8097a655172b1f2286b722bc982258a5e173588c
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
@@ -177,7 +177,7 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 0ab80b1035f8c80830ef5e7b6ba087f999d493c3
-  mini-a-con.js: c1cde4401dc56508b51ad704bb97e3151077be34
+  mini-a-con.js: 7f384881a82a61308249bc30f7c9b067a33dad19
   mini-a-mcptest.js: 58209cce343d9df717b50d55e720c8ad1a5eaa72
   mini-a-modelman.js: 7e508fdbd7cf22d14093796efe6999d559b1a557
   mini-a-modes.yaml: 6350dc5064e07fc8edc7eea949fa7b60e8ca1c76
