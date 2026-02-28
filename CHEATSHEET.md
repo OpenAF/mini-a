@@ -960,6 +960,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
 | `/save <path>` | Save the last final answer to the provided file path |
+| `/cls` | Clear the console screen |
 | `/<name> [args...]` | Execute slash template from `~/.openaf-mini-a/commands/<name>.md`, `~/.openaf-mini-a/skills/<name>.md`, or `~/.openaf-mini-a/skills/<name>/SKILL.md` |
 | `/help` | Show help information |
 | `/quit` or `/exit` | Exit console |

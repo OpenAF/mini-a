@@ -283,7 +283,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "context", "compact", "summarize", "history", "model", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -3349,6 +3349,7 @@ try {
       "  " + colorifyText("/last", "BOLD") + colorifyText(" [md]          Print the previous final answer (md: raw markdown)", hintColor),
       "  " + colorifyText("/save", "BOLD") + colorifyText(" [file.md]     Save the last response to a file (default: response.md)", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation and accumulated metrics", hintColor),
+      "  " + colorifyText("/cls", "BOLD") + colorifyText("                Clear the console screen", hintColor),
       "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
@@ -3628,6 +3629,10 @@ try {
       }
       if (commandLower === "clear") {
         clearConversationHistory()
+        continue
+      }
+      if (commandLower === "cls") {
+        cls()
         continue
       }
       if (commandLower === "context") {
