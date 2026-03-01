@@ -111,6 +111,8 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | Grok       | grok-4-1-fast-non-reasoning | ```export OAF_MODEL="( type: openai, key: 'xai-...', url: 'https://api.x.ai', model: grok-4-1-fast-non-reasoning, timeout: 900000, temperature: 0, noSystem: false)"``` | 
 | Groq       | gpt-oss-120b     | ```export OAF_MODEL="(type: openai, key: 'your-grok-key', url: 'https://api.groq.com/openai', model: openai/gpt-oss-120b, timeout: 900000, temperature: 0)"``` |
 | Groq       | gpt-oss-20b      | ```export OAF_MODEL="(type: openai, key: 'your-grok-key', url: 'https://api.groq.com/openai', model: openai/gpt-oss-20b, timeout: 900000, temperature: 0)"``` |
+| Mistral    | magistral-medium-latest | ```export OAF_MODEL="(type: openai, model: 'magistral-medium-latest', url: 'https://api.mistral.ai', key: '...', timeout: 900000, temperature: 0, noSystem: false)"``` |
+| Mistral    | magistral-small-latest | ```export OAF_MODEL="(type: openai, model: 'magistral-small-latest', url: 'https://api.mistral.ai', key: '...', timeout: 900000, temperature: 0, noSystem: false)"``` |
 | Ollama     | gemma3                  | ```export OAF_MODEL="(type: ollama, model: 'gemma3', url: 'http://localhost:11434', timeout: 900000)"``` |
 | Ollama     | devstral-2:123b-cloud   | ```export OAF_MODEL="(type: ollama, model: 'devstral-2:123b-cloud', url: 'http://localhost:11434', timeout: 900000)"``` |
 | Ollama     | deepseek-r1:8b          | ```export OAF_MODEL="(type: ollama, model: 'deepseek-r1:8b', url: 'http://localhost:11434', timeout: 900000)"``` |
