@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260228'
+version: '20260301'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -132,7 +132,7 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 8097a655172b1f2286b722bc982258a5e173588c
+  CHEATSHEET.md: a27b199f4370be1496888dcab189a6594bcf0074
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
