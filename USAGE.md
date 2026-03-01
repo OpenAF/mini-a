@@ -754,6 +754,7 @@ The `start()` method accepts various configuration options:
 - **`chatyouare`** (string): Override the opening chatbot persona sentence when `chatbotmode=true` (inline text or an `@file` path) without touching the rest of the conversational instructions
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
+- **`debugfile`** (string, optional): Redirect all debug output to a file as NDJSON instead of printing colored blocks on screen. Implies `debug=true`. Each line is a JSON object with a `ts` (ISO timestamp) and either `type:"event"` (with `event` and `message` fields, one per agent event) or `type:"block"` (with `label` and `content` fields, for raw LLM prompt/response payloads). Use `$from(io.readFileNDJSON("debug.log")).equals("label","STEP_PROMPT").select()` to filter specific block types.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt

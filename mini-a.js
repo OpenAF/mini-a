@@ -576,6 +576,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._enablePlanning = false
   this._hasExternalPlan = false
   this._planningPhase = "none"  // Tracks planning phase: "none" | "planning" | "execution"
+  this._debugFile = ""
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -982,6 +983,13 @@ MiniA.prototype.setInteractionFn = function(afn) {
   this._fnI = afn
 }
 
+MiniA.prototype._debugOut = function(label, text) {
+  try {
+    var rec = stringify({ ts: new Date().toISOString(), type: "block", label: label, content: text }, __, "")
+    io.writeFileString(this._debugFile, rec + "\n", __, true)
+  } catch(_e) {}
+}
+
 MiniA.prototype.setHookFn = function(fn) {
   this._hookFn = isFunction(fn) ? fn : null
 }
@@ -1014,6 +1022,12 @@ MiniA.prototype.fnI = function(event, message) {
       e : event,
       m : message
     })
+  }
+  if (isString(this._debugFile) && this._debugFile.length > 0) {
+    try {
+      var rec = stringify({ ts: new Date().toISOString(), type: "event", event: event, message: message }, __, "")
+      io.writeFileString(this._debugFile, rec + "\n", __, true)
+    } catch(_e) {}
   }
   return this._fnI(event, message)
 }
@@ -1711,7 +1725,11 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     }
 
     if (opts.debug) {
+      if (this._debugFile) {
+        this._debugOut("SUMMARIZE_RESPONSE", stringify(summaryResponseWithStats))
+      } else {
         print(ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides))
+      }
     }
 
     var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
@@ -3132,7 +3150,7 @@ MiniA.prototype._logPlanUpdate = function(message, level) {
   }
   if (isString(this._planLogFile) && this._planLogFile.length > 0) {
     try {
-      io.writeFileString(this._planLogFile, formatted + "\n", true)
+      io.writeFileString(this._planLogFile, formatted + "\n", __, true)
     } catch(e) {
       this.fnI("warn", `Failed to write plan log '${this._planLogFile}': ${e}`)
     }
@@ -9132,7 +9150,11 @@ MiniA.prototype._applySystemInstructions = function(args) {
   var systemTokens = this._estimateTokens(this._systemInst)
   this.fnI("size", `System prompt ~${systemTokens} tokens`)
   if (toBoolean(args.debug)) {
-    print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
+    if (this._debugFile) {
+      this._debugOut("SYSTEM_INSTRUCTION", this._systemInst)
+    } else {
+      print( ow.format.withSideLine(">>>\n" + this._systemInst + "\n>>>", __, "FG(196)", "BG(52),WHITE", ow.format.withSideLineThemes().doubleLineBothSides) )
+    }
   }
 }
 
@@ -9341,6 +9363,9 @@ MiniA.prototype.init = function(args) {
     args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
     args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
+    args.debugfile = _$(args.debugfile, "args.debugfile").isString().default("")
+    if (args.debugfile.length > 0) args.debug = true
+    this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
     args.showthinking = _$(toBoolean(args.showthinking), "args.showthinking").isBoolean().default(false)
@@ -9842,7 +9867,11 @@ MiniA.prototype.init = function(args) {
                   }
                 }
                 if (args.debug) {
-                  print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+                  if (parent._debugFile) {
+                    parent._debugOut("TOOL_RESULT", r)
+                  } else {
+                    print( ow.format.withSideLine("---\n" + colorify(r, { bgcolor: "BG(22),BLACK"}) + "\n---", __, "FG(46)", "BG(22),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+                  }
                 }
 
                 if (parent._useTools && typeof parent._finalizeToolExecution === "function") {
@@ -10354,6 +10383,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.verbose = _$(toBoolean(args.verbose), "args.verbose").isBoolean().default(false)
     args.readwrite = _$(toBoolean(args.readwrite), "args.readwrite").isBoolean().default(false)
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
+    args.debugfile = _$(args.debugfile, "args.debugfile").isString().default("")
+    if (args.debugfile.length > 0) args.debug = true
+    this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
@@ -10585,7 +10617,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (args.debug) {
-          print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+          if (self._debugFile) {
+            self._debugOut("SUMMARIZE_RESPONSE", stringify(summaryResponseWithStats))
+          } else {
+            print( ow.format.withSideLine("<--\n" + stringify(summaryResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+          }
         }
 
         var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
@@ -11229,7 +11265,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
       // Get model response and parse as JSON
       if (args.debug) {
-        print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        if (this._debugFile) {
+          this._debugOut("STEP_PROMPT", prompt)
+        } else {
+          print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
       }
 
       // Create streaming delta handler if streaming is enabled
@@ -11332,7 +11372,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           responseToPrint.response = recoveredMsgFromEnvelope
           responseToPrint.recoveredFromProviderToolUseFailed = true
         }
-        print( ow.format.withSideLine("<--\n" + stringify(responseToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        if (this._debugFile) {
+          this._debugOut("LLM_RESPONSE", stringify(responseToPrint))
+        } else {
+          print( ow.format.withSideLine("<--\n" + stringify(responseToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
       }
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var responseTokenTotal = this._getTotalTokens(stats)
@@ -11457,7 +11501,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               fallbackToPrint.response = fallbackRecoveredMsgFromEnvelope
               fallbackToPrint.recoveredFromProviderToolUseFailed = true
             }
-            print( ow.format.withSideLine("<--\n" + stringify(fallbackToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+            if (this._debugFile) {
+              this._debugOut("FALLBACK_RESPONSE", stringify(fallbackToPrint))
+            } else {
+              print( ow.format.withSideLine("<--\n" + stringify(fallbackToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+            }
           }
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
@@ -11538,7 +11586,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       if (args.debug) {
-        print( ow.format.withSideLine("<<<\n" + colorify(msg, { bgcolor: "BG(230),BLACK"}) + "\n<<<", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        if (this._debugFile) {
+          this._debugOut("NORMALIZED_MSG", msg)
+        } else {
+          print( ow.format.withSideLine("<<<\n" + colorify(msg, { bgcolor: "BG(230),BLACK"}) + "\n<<<", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
       }
 
       if (!recoveredFromEnvelopeApplied && isMap(msg)) {
@@ -12063,7 +12115,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return "(no answer)"
     }
     if (args.debug) {
-      print( ow.format.withSideLine("<--\n" + stringify(finalResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+      if (this._debugFile) {
+        this._debugOut("FINAL_RESPONSE", stringify(finalResponseWithStats))
+      } else {
+        print( ow.format.withSideLine("<--\n" + stringify(finalResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+      }
     }
     var finalStats = isObject(finalResponseWithStats) ? finalResponseWithStats.stats : {}
     var finalTokenTotal = this._getTotalTokens(finalStats)
@@ -12146,7 +12202,11 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       beforeCall()
       if (args.debug) {
-        print( ow.format.withSideLine(">>>\n" + pendingPrompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        if (this._debugFile) {
+          this._debugOut("CHATBOT_PROMPT", pendingPrompt)
+        } else {
+          print( ow.format.withSideLine(">>>\n" + pendingPrompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
       }
 
       var responseWithStats
@@ -12176,7 +12236,11 @@ MiniA.prototype._runChatbotMode = function(options) {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
       }
       if (args.debug) {
-        print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        if (this._debugFile) {
+          this._debugOut("CHATBOT_RESPONSE", stringify(responseWithStats))
+        } else {
+          print( ow.format.withSideLine("<--\n" + stringify(responseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
       }
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var chatbotTokenTotal = this._getTotalTokens(stats)
@@ -12393,7 +12457,11 @@ MiniA.prototype._runChatbotMode = function(options) {
         fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
       }
       if (args.debug) {
-        print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        if (this._debugFile) {
+          this._debugOut("CHATBOT_FALLBACK_RESPONSE", stringify(fallbackResponseWithStats))
+        } else {
+          print( ow.format.withSideLine("<--\n" + stringify(fallbackResponseWithStats) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
+        }
       }
       var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
       var fallbackTokenTotal = this._getTotalTokens(fallbackStats)

@@ -348,6 +348,7 @@ try {
   var parameterDefinitions = {
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
+    debugfile      : { type: "string", description: "Write debug output to this file instead of screen (implies debug=true)" },
     raw            : { type: "boolean", default: false, description: "Return raw LLM output without formatting adjustments" },
     showthinking   : { type: "boolean", default: false, description: "Surface XML-tagged model thinking blocks as thought logs (uses raw prompt calls)" },
     youare         : { type: "string", description: "Override the opening 'You are...' sentence in the agent prompt" },

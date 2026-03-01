@@ -2,6 +2,28 @@
 
 ## Recent Updates
 
+### Debug File Output (`debugfile` parameter)
+
+**Change**: Added `debugfile=<path>` argument to redirect debug output from the screen to a plain-text NDJSON file.
+
+**What's New**:
+- Pass `debugfile=debug.log` to capture all debug data to a file instead of printing ANSI-colored boxes on screen
+- Implies `debug=true` — no need to pass both
+- Each line of the output file is a self-contained JSON object:
+  - `{"ts":"...","type":"event","event":"...","message":"..."}` — one per agent interaction event (`input`, `output`, `think`, `exec`, `warn`, etc.)
+  - `{"ts":"...","type":"block","label":"...","content":"..."}` — raw LLM prompt/response payloads (`STEP_PROMPT`, `LLM_RESPONSE`, `TOOL_RESULT`, `CHATBOT_RESPONSE`, etc.)
+- Normal agent events still display on screen; only the noisy raw data blocks are silenced
+
+**Example**:
+```bash
+mini-a goal="summarize README.md" debugfile=debug.log useshell=true
+
+# Filter specific block types from the log
+ojob - code='$from(io.readFileNDJSON("debug.log")).equals("label","STEP_PROMPT").select()'
+```
+
+---
+
 ### Dynamic Worker Registration (workerreg / workerregurl)
 
 **Change**: Added dynamic worker self-registration so worker instances can register, heartbeat, and deregister with one or more parent Mini-A instances.

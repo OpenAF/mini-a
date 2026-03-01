@@ -58,6 +58,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-key')"
 | `earlystopthreshold` | number | `3` (5 with LC) | Identical consecutive errors before early stop (auto-adjusts for low-cost models) |
 | `verbose` | boolean | `false` | Enable verbose logging |
 | `debug` | boolean | `false` | Enable debug mode with detailed logs |
+| `debugfile` | string | - | Redirect debug output to a file as NDJSON instead of screen (implies `debug=true`) |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
 | `outfile` | string | - | Path to save final answer (if not provided, prints to console) |
 
