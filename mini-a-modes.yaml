@@ -75,6 +75,7 @@ modes:
       toolcachettl     : 5000
       mcpproxythreshold: 51200
       mcpproxytoon     : true
+      mcpprogcall      : false
       mcp              : 
       - type   : ojob
         options:

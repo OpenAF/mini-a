@@ -91,8 +91,12 @@ help:
     example  : "/path/to/hooks1,/path/to/hooks2"
     mandatory: false
   - name     : outfile
-    desc     : Output file path to save the final answer (if not provided, prints to console)
+    desc     : Output file path to save the final answer (if not provided, prints to console). In deep research mode, only the research output is written here.
     example  : "/path/to/output.txt"
+    mandatory: false
+  - name     : outfileall
+    desc     : "Deep research only: output file path to save the full results (cycle history, verdicts, learnings). If not provided, the full results print to console."
+    example  : "/path/to/full-results.md"
     mandatory: false
   - name     : knowledge
     desc     : "Additional knowledge or context to provide to the agent (in the form of a string or a path to a text file)"
@@ -477,6 +481,7 @@ jobs:
         youare         : youare
         chatyouare    : chatyouare
         outfile        : outfile
+        outfileall     : outfileall
         outputfile     : outputfile
         libs           : libs
         model          : model
@@ -573,6 +578,7 @@ jobs:
       youare         : isString.default(__)
       chatyouare     : isString.default(__)
       outfile        : isString.default(__)
+      outfileall     : isString.default(__)
       outputfile     : isString.default(__)
       libs           : isString.default(__)
       model          : default(__)

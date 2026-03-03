@@ -955,6 +955,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "warn"     : _e = "⚠️  "; break
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
+  case "progcall" : _e = "📟"; break
   default         : _e = e
   }
   cFn(_e, m, this._id)
@@ -5560,14 +5561,10 @@ MiniA.prototype._appendExecutionNotesToPlan = function(args) {
  * Process and return final answer based on format requirements
  */
 MiniA.prototype._processFinalAnswer = function(answer, args) {
-  var textAnswer = answer
   if (isDef(args.outfile)) {
-    if (args.format != 'raw' && args.format != 'md' && isDef(args.__format)) {
-      textAnswer = $o(answer, args, __, true)
-    }
-    io.writeFileString(args.outfile, textAnswer || "(no answer)")
+    io.writeFileString(args.outfile, answer || "(no answer)")
     this.fnI("done", `Final answer written to ${args.outfile}`)
-    return textAnswer
+    return answer
   }
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
@@ -9310,6 +9307,7 @@ MiniA.prototype.init = function(args) {
         { name: "chatyouare", type: "string", default: "" },
         { name: "youare", type: "string", default: "" },
         { name: "outfile", type: "string", default: __ },
+        { name: "outfileall", type: "string", default: __ },
       { name: "libs", type: "string", default: "" },
       { name: "model", type: "string", default: __ },
       { name: "modellc", type: "string", default: __ },
@@ -10273,11 +10271,24 @@ MiniA.prototype.start = function(args) {
             
             // Format the final result with cycle metadata
             var formattedResult = this._formatDeepResearchResult(deepResearchState, finalOutput || "(no output)")
-            
+
             var totalTime = now() - sessionStartTime
             global.__mini_a_metrics.total_session_time.set(totalTime)
-            
-            return formattedResult
+
+            if (isDef(args.outfile)) {
+                io.writeFileString(args.outfile, finalOutput || "(no output)")
+                this.fnI("done", `Deep research output written to ${args.outfile}`)
+            }
+
+            if (isDef(args.outfileall)) {
+                io.writeFileString(args.outfileall, formattedResult)
+                this.fnI("done", `Deep research full results written to ${args.outfileall}`)
+            } else if (isDef(args.outfile)) {
+                // outfile only holds the research output; print full summary to console so it's not lost
+                print($o("\n" + formattedResult, args, __, true))
+            }
+
+            return isDef(args.outfile) ? (finalOutput || "(no output)") : $o("\n" + formattedResult, args, __, true)
         } else {
             // Normal mode: run once
             return this._startInternal(args, sessionStartTime)
@@ -10350,6 +10361,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "chatyouare", type: "string", default: "" },
       { name: "youare", type: "string", default: "" },
       { name: "outfile", type: "string", default: __ },
+      { name: "outfileall", type: "string", default: __ },
       { name: "libs", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "maxcontext", type: "number", default: 0 },
@@ -12703,6 +12715,7 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   // Create a copy of args for this cycle
   var argsForCycle = Object.assign({}, args)
   argsForCycle.deepresearch = false // Prevent recursive deep research
+  delete argsForCycle.outfile // Prevent per-cycle writes; final result written after all cycles
   
   // Augment knowledge for this cycle
   if (cycleKnowledge.length > 0) {
@@ -12720,8 +12733,14 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
     // Force re-init for each cycle
     this._isInitialized = false
     if (originalState === "stop") this.state = "idle"
-    
+    this._origAnswer = __  // reset so we can detect whether it was set this cycle
+
     researchOutput = this._startInternal(argsForCycle, cycleStartTime)
+    // _processFinalAnswer stores the raw answer in _origAnswer before applying $o formatting.
+    // Use it so validation and file output receive plain text, not console-formatted output.
+    if (isString(this._origAnswer) && this._origAnswer.length > 0) {
+      researchOutput = this._origAnswer
+    }
   } catch (cycleErr) {
     this.fnI("error", `Cycle ${cycleNum} failed: ${cycleErr}`)
     researchOutput = "(cycle failed: " + cycleErr + ")"
