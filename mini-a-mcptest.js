@@ -604,7 +604,7 @@ function mainMCPTest(args) {
                     if (sessionOptions.showtimeelapsed) {
                         printElapsedTime(startTime, "List tools")
                     }
-                    if (isUnDef(tools) || isUnDef(tools.tools) || tools.length == 0) {
+                    if (isUnDef(tools) || isUnDef(tools.tools) || tools.tools.length == 0) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No tools available.", errorColor) + "\n")
                     } else {
                         tools = tools.tools
@@ -631,7 +631,7 @@ function mainMCPTest(args) {
                     if (sessionOptions.showtimeelapsed) {
                         printElapsedTime(startTime, "List tools")
                     }
-                    if (isUnDef(tools) || isUnDef(tools.tools) || tools.length == 0) {
+                    if (isUnDef(tools) || isUnDef(tools.tools) || tools.tools.length == 0) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No tools available.", errorColor) + "\n")
                     } else {
                         tools = tools.tools

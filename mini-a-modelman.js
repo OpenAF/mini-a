@@ -101,8 +101,7 @@ function buildOAFModel(args) {
             var _m = _models.map(r => r.id).sort()
             var _id = askChoose( "Choose a model: ", _m, 8 )
             _out.model = _m[_id]
-          }
-          if (isDef(_models[0].name)) {
+          } else if (isDef(_models[0].name)) {
             var _m = _models.map(r => r.name).map(r => r.replace(/^models\//, "")).sort()
             var _name = askChoose( "Choose a model: ", _m, 8 )
             _out.model = _m[_name]
@@ -121,7 +120,7 @@ function buildOAFModel(args) {
 
     // AWS Bedrock definitions use nested options instead of a top-level
     // model property. Handle the prompt flow separately for clarity.
-    if (args.init.providers[iProvider] == "bedrock" && isUnDef(_out.model) && (_out.model == null || _out.model == "")) {
+    if (args.init.providers[iProvider] == "bedrock" && (isUnDef(_out.model) || _out.model == null || _out.model == "")) {
       if (isUnDef(_out)) _out = {}
       if (isUnDef(_out.options)) _out.options = {}
 
@@ -137,8 +136,7 @@ function buildOAFModel(args) {
           var _m = _models.map(r => r.modelId).sort()
           var _modelId = askChoose( "Choose a model: ", _m, 8 )
           _out.options.model = _m[_modelId]
-        }
-        if (isDef(_models[0].name)) {
+        } else if (isDef(_models[0].name)) {
           var _m = _models.map(r => r.name).map(r => r.replace(/^models\//, "")).sort()
           var _name = askChoose( "Choose a model: ", _m, 8 )
           _out.options.model = _m[_name]
@@ -244,7 +242,7 @@ function mainOAFModel(args) {
             var _name = ask("📥 Name of the definition to import: ")
             if (isUnDef(_name) || _name.length == 0) break
             var _obj  = ask("📥 Paste the definition content (in SLON/JSON format): ")
-            var _obj = af.fromJSSLON(_obj)
+            _obj = af.fromJSSLON(_obj)
             if (isMap(_obj)) {
               print("💾 Importing definition '" + _name + "'...")
               _sec.set(_name, _obj, "models")
@@ -276,12 +274,13 @@ function mainOAFModel(args) {
             }
             break
         case _options.length - 2: // Delete existing definitions
-            selectedIndexes = askChooseMultiple("🗑️  Choose definitions to delete (use space to select, enter to confirm): ", _lst.sort(), 8)
+            var _sortedLst = _lst.sort()
+            var selectedIndexes = askChooseMultiple("🗑️  Choose definitions to delete (use space to select, enter to confirm): ", _sortedLst, 8)
             if (selectedIndexes.length > 0) {
                 print("✖️ Deleting definitions...")
-                selectedIndexes.forEach(defName => {
-                    _sec.unset(defName, "models")
-                    print("   definition '" + defName + "' deleted!")
+                selectedIndexes.forEach(idx => {
+                    _sec.unset(_sortedLst[idx], "models")
+                    print("   definition '" + _sortedLst[idx] + "' deleted!")
                 })
             }
             
