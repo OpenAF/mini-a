@@ -274,19 +274,26 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-api-key')"
 
 | Operation | Model Used | Reason |
 |-----------|------------|--------|
-| Initial planning (Step 0) | Main Model | Critical first step requires best reasoning |
+| Initial planning (Step 0, simple goals) | Low-Cost Model | Simple goals don't require heavy reasoning on step 0 |
+| Initial planning (Step 0, medium/complex goals) | Main Model | Complex goals need best reasoning from the start |
 | Routine operations | Low-Cost Model | Cost-effective for simple tasks |
 | Context summarization | Low-Cost Model | Simple text condensation task |
 | Error recovery | Main Model | After 2+ consecutive errors |
 | Complex reasoning | Main Model | When thinking loops or stuck patterns detected |
 | Invalid JSON fallback | Main Model | When low-cost model produces invalid responses |
+| Context window overflow | Main Model | When context exceeds `lccontextlimit` (if set) |
+| After sustained recovery | Low-Cost Model | De-escalates automatically after `deescalate` clean steps |
 
 **Smart Escalation Triggers:**
+- Context token count ≥ `lccontextlimit` (when set via `lccontextlimit=N`)
 - 2+ consecutive errors
 - 3+ consecutive thoughts without action
 - 5+ total thoughts (thinking loop detection)
 - 4+ steps without meaningful progress
 - Repeating similar thoughts detected
+
+**Automatic De-escalation:**
+After escalating to the main model, Mini-A tracks successful steps. Once `deescalate` consecutive clean steps are completed (default: 3), it automatically reverts to the low-cost model. Override with `deescalate=N`.
 
 ### Managing Model Definitions Interactively
 
@@ -760,6 +767,11 @@ The `start()` method accepts various configuration options:
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` to prefill a bundle of related flags
+
+#### Dual-Model Controls
+- **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
+- **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
+- **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
 
 #### Planning Controls
 - **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON/YAML plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
@@ -2008,13 +2020,13 @@ export OAF_LC_MODEL="(type: ollama, model: 'llama3', url: 'http://localhost:1143
 ```bash
 export OAF_MODEL="(type: gemini, model: gemini-2.5-pro, key: 'your-gemini-key')"
 export OAF_LC_MODEL="(type: gemini, model: gemini-2.5-flash, key: 'your-gemini-key')"
-# Main model auto-enables no-JSON prompt behavior when this is unset.
-# Low-cost Gemini still requires explicit opt-in:
-export OAF_MINI_A_NOJSONPROMPT=true
-export OAF_MINI_A_LCNOJSONPROMPT=true
+# Both main and low-cost Gemini models auto-enable no-JSON prompt behavior when these are unset.
+# No manual override needed; set explicitly only to force the opposite behavior:
+# export OAF_MINI_A_NOJSONPROMPT=false
+# export OAF_MINI_A_LCNOJSONPROMPT=false
 ```
 
-> **Note**: For Gemini main models, Mini-A automatically enables no-JSON prompt mode when `OAF_MINI_A_NOJSONPROMPT` is not defined. For Gemini low-cost models, set `OAF_MINI_A_LCNOJSONPROMPT=true` to avoid compatibility issues; Mini-A warns if that low-cost flag is missing.
+> **Note**: For Gemini models (both main and low-cost), Mini-A automatically enables no-JSON prompt mode when the respective environment variable (`OAF_MINI_A_NOJSONPROMPT` / `OAF_MINI_A_LCNOJSONPROMPT`) is not defined. No manual configuration is required.
 
 **Log Output Examples:**
 
@@ -2392,7 +2404,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `actions` | `thoughts_made`, `thinks_made`, `finals_made`, `mcp_actions_executed`, `mcp_actions_failed`, `shell_commands_executed`, `shell_commands_blocked`, `shell_commands_approved`, `shell_commands_denied`, `unknown_actions` | Operational footprint: mental steps, final responses, MCP usage, and shell gatekeeping outcomes. |
 | `planning` | `disabled_simple_goal`, `plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned` | Visibility into the planning engine—when it was bypassed, generated plans, LLM critique validation passes/failures, and replans triggered by runtime feedback. The `plans_validated` counter tracks all LLM critiques run, while `plans_validation_failed` counts verdicts of `REVISE`. Dynamic replanning adjustments are logged separately in plan metadata. |
 | `performance` | `steps_taken`, `total_session_time_ms`, `avg_step_time_ms`, `max_context_tokens`, `llm_estimated_tokens`, `llm_actual_tokens`, `llm_normal_tokens`, `llm_lc_tokens` | Execution pacing and token consumption for cost analysis. |
-| `behavior_patterns` | `escalations`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that highlight unhealthy loops or parser problems. |
+| `behavior_patterns` | `escalations`, `escalation_consecutive_errors`, `escalation_consecutive_thoughts`, `escalation_thought_loop`, `escalation_steps_without_action`, `escalation_similar_thoughts`, `escalation_context_window`, `retries`, `consecutive_errors`, `consecutive_thoughts`, `json_parse_failures`, `action_loops_detected`, `thinking_loops_detected`, `similar_thoughts_detected` | Signals that highlight unhealthy loops or parser problems. Per-reason escalation counters show which trigger fires most frequently. |
 | `summarization` | `summaries_made`, `summaries_skipped`, `summaries_forced`, `context_summarizations`, `summaries_tokens_reduced`, `summaries_original_tokens`, `summaries_final_tokens` | Auto-summarization activity and token savings. |
 | `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Dynamic tool selection metrics tracking how tools are selected when `mcpdynamic=true`. Shows usage of keyword matching, LLM-based selection (low-cost and main models), connection-level chooser fallbacks, and full catalog fallback. Includes stemming, synonym matching, n-grams, and fuzzy matching capabilities. |
 | `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |

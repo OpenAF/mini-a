@@ -67,7 +67,9 @@ var MiniA = function() {
 
   // Check OAF_MINI_A_LCNOJSONPROMPT environment variable to disable promptJSONWithStats for low-cost model
   // This allows different settings for main and low-cost models (e.g., Gemini low-cost with Claude main)
-  this._noJsonPromptLC = toBoolean(getEnv("OAF_MINI_A_LCNOJSONPROMPT"))
+  var _noJsonPromptLCEnvValue = getEnv("OAF_MINI_A_LCNOJSONPROMPT")
+  this._noJsonPromptLC = toBoolean(_noJsonPromptLCEnvValue)
+  this._noJsonPromptLCEnvDefined = isDef(_noJsonPromptLCEnvValue)
 
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
@@ -132,6 +134,12 @@ var MiniA = function() {
     delegation_retried: $atomic(0, "long"),
     mcp_circuit_breaker_trips: $atomic(0, "long"),
     mcp_circuit_breaker_resets: $atomic(0, "long"),
+    escalation_consecutive_errors: $atomic(0, "long"),
+    escalation_consecutive_thoughts: $atomic(0, "long"),
+    escalation_thought_loop: $atomic(0, "long"),
+    escalation_steps_without_action: $atomic(0, "long"),
+    escalation_similar_thoughts: $atomic(0, "long"),
+    escalation_context_window: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
     mcp_lazy_init_failed: $atomic(0, "long"),
     deep_research_sessions: $atomic(0, "long"),
@@ -1113,6 +1121,12 @@ MiniA.prototype.getMetrics = function() {
         },
         behavior_patterns: {
             escalations: global.__mini_a_metrics.escalations.get(),
+            escalation_consecutive_errors: global.__mini_a_metrics.escalation_consecutive_errors.get(),
+            escalation_consecutive_thoughts: global.__mini_a_metrics.escalation_consecutive_thoughts.get(),
+            escalation_thought_loop: global.__mini_a_metrics.escalation_thought_loop.get(),
+            escalation_steps_without_action: global.__mini_a_metrics.escalation_steps_without_action.get(),
+            escalation_similar_thoughts: global.__mini_a_metrics.escalation_similar_thoughts.get(),
+            escalation_context_window: global.__mini_a_metrics.escalation_context_window.get(),
             retries: global.__mini_a_metrics.retries.get(),
             consecutive_errors: global.__mini_a_metrics.consecutive_errors.get(),
             consecutive_thoughts: global.__mini_a_metrics.consecutive_thoughts.get(),
@@ -1384,6 +1398,20 @@ MiniA.prototype._formatTokenStats = function(stats) {
     if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
     if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
+}
+
+/**
+ * Print a one-line LC cost summary if dual-model is enabled and both token buckets are non-zero.
+ */
+MiniA.prototype._logLcCostSummary = function() {
+  if (!this._use_lc) return
+  var mainTokens = global.__mini_a_metrics.llm_normal_tokens.get()
+  var lcTokens   = global.__mini_a_metrics.llm_lc_tokens.get()
+  if (mainTokens > 0 && lcTokens > 0) {
+    var total = mainTokens + lcTokens
+    var lcShare = Math.round(lcTokens / total * 100)
+    this.fnI("info", `[cost] Main: ${mainTokens} tokens | LC: ${lcTokens} tokens | LC share: ${lcShare}%`)
+  }
 }
 
 /**
@@ -5666,6 +5694,8 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     global.__mini_a_metrics.goals_achieved.inc()
   }
 
+  this._logLcCostSummary()
+
   if (args.raw) {
     return answer || "(no answer)"
   } else {
@@ -9660,9 +9690,10 @@ MiniA.prototype.init = function(args) {
       this._use_lc = true
       this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
 
-      // Warn if Gemini model is used without OAF_MINI_A_LCNOJSONPROMPT=true
-      if (this._oaf_lc_model.type === "gemini" && !this._noJsonPromptLC) {
-        this.fnI("warn", `Low-cost model is Gemini: OAF_MINI_A_LCNOJSONPROMPT should be set to true to avoid issues with Gemini models`)
+      // Auto-enable no-json prompt mode for Gemini LC model when OAF_MINI_A_LCNOJSONPROMPT is not defined.
+      if (this._oaf_lc_model.type === "gemini" && !this._noJsonPromptLC && !this._noJsonPromptLCEnvDefined) {
+        this._noJsonPromptLC = true
+        this.fnI("info", `LC model is Gemini and OAF_MINI_A_LCNOJSONPROMPT is not set: forcing OAF_MINI_A_LCNOJSONPROMPT=true behavior`)
       }
     } else {
       this._use_lc = false
@@ -10297,6 +10328,7 @@ MiniA.prototype.start = function(args) {
         global.__mini_a_metrics.goals_failed.inc()
         global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
         this.state = "stop"
+        this._logLcCostSummary()
         var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
         this.fnI("error", `Agent failed: ${errMsg}`)
         return
@@ -10596,11 +10628,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Summarize context if too long
     var summarize = ctx => {
-      // Use normal cost LLM for summarization
-      //var summarizeLLM = this._use_lc ? this.lc_llm : this.llm
-      //var llmType = this._use_lc ? "low-cost" : "main"
-      var summarizeLLM = this.llm
-      var llmType = "main"
+      var summarizeLLM = (this._use_lc && isObject(this.lc_llm)) ? this.lc_llm : this.llm
+      var llmType = (this._use_lc && isObject(this.lc_llm)) ? "low-cost" : "main"
       var instructionText = "You are condensing an agent's working notes.\n1) KEEP (verbatim or lightly normalized): current goal, constraints, explicit decisions, and facts directly advancing the goal.\n2) COMPRESS tangents, detours, and dead-ends into terse bullets.\n3) RECORD open questions and next actions."
       var self = this
 
@@ -10615,7 +10644,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           summaryResponseWithStats = self._withExponentialBackoff(function() {
             addCall()
             var summarizer = summarizeLLM.withInstructions(isString(customInstructionText) ? customInstructionText : instructionText)
-            if (!self._noJsonPrompt && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(text)
+            var noJsonForSummarize = (summarizeLLM === self.lc_llm) ? self._noJsonPromptLC : self._noJsonPrompt
+            if (!noJsonForSummarize && isFunction(summarizer.promptJSONWithStats)) return summarizer.promptJSONWithStats(text)
             return summarizer.promptWithStats(text)
           }, self._llmRetryOptions("Summarization", { operation: "summarize" }))
         } catch (e) {
@@ -10640,8 +10670,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var summaryTokenTotal = self._getTotalTokens(summaryStats)
         registerCallUsage(summaryTokenTotal)
         global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
-        global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
-        global.__mini_a_metrics.llm_normal_calls.inc()
+        if (summarizeLLM === self.lc_llm) {
+          global.__mini_a_metrics.llm_lc_tokens.getAdd(summaryTokenTotal)
+          global.__mini_a_metrics.llm_lc_calls.inc()
+        } else {
+          global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
+          global.__mini_a_metrics.llm_normal_calls.inc()
+        }
         global.__mini_a_metrics.summaries_made.inc()
 
         var responseText = isObject(summaryResponseWithStats) && isString(summaryResponseWithStats.response)
@@ -11005,6 +11040,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       providerToolUseFailedDetected: false,
       pendingJsonToolPayload   : __,
       hasEscalated            : false,
+      successfulStepsSinceEscalation: 0,
       contextOverflowRecoveries: 0,
       earlyStopThreshold      : baseEarlyStopThreshold,
       earlyStopTriggered      : false,
@@ -11036,6 +11072,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     var goalComplexityLevel = goalComplexity && goalComplexity.level ? goalComplexity.level : "medium"
     var escalationLimits = escalationThresholds[goalComplexityLevel] || escalationThresholds.medium
+    var deescalateThreshold = isDef(args.deescalate) ? parseInt(args.deescalate) : 3
+    var lcContextLimit = isDef(args.lccontextlimit) ? parseInt(args.lccontextlimit) : 0
 
     if (args.debug || args.verbose) {
       this.fnI("info", `Goal complexity assessed as: ${goalComplexityLevel}`)
@@ -11110,6 +11148,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (!hasError) {
         runtime.stepsWithoutAction = 0
         runtime.successfulActionDetected = true
+        if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
       }
       runtime.totalThoughts = Math.max(0, runtime.totalThoughts - 1)
       runtime.recentSimilarThoughts = []
@@ -11226,26 +11265,43 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var shouldEscalate = false
       var escalationReason = ""
 
+      // De-escalate back to low-cost model after sustained recovery
+      if (runtime.hasEscalated && runtime.successfulStepsSinceEscalation >= deescalateThreshold) {
+        runtime.hasEscalated = false
+        runtime.successfulStepsSinceEscalation = 0
+        this.fnI("info", "De-escalating back to low-cost model after sustained recovery")
+      }
+
       if (this._use_lc && step > 0) {
+        // Escalate if context exceeds the configured LC context window limit
+        if (!shouldEscalate && lcContextLimit > 0 && contextTokens >= lcContextLimit) {
+          shouldEscalate = true
+          escalationReason = `context ${contextTokens} tokens exceeds LC limit ${lcContextLimit}`
+          global.__mini_a_metrics.escalation_context_window.inc()
+        }
         // Escalate for consecutive errors
-        if (runtime.consecutiveErrors >= escalationLimits.errors) {
+        if (!shouldEscalate && runtime.consecutiveErrors >= escalationLimits.errors) {
           shouldEscalate = true
           escalationReason = `${runtime.consecutiveErrors} consecutive errors (threshold: ${escalationLimits.errors})`
+          global.__mini_a_metrics.escalation_consecutive_errors.inc()
         }
         // Escalate for too many consecutive thoughts without action
         else if (runtime.consecutiveThoughts >= escalationLimits.thoughts) {
           shouldEscalate = true
           escalationReason = `${runtime.consecutiveThoughts} consecutive thoughts without action (threshold: ${escalationLimits.thoughts})`
+          global.__mini_a_metrics.escalation_consecutive_thoughts.inc()
         }
         // Escalate if too many thoughts overall (thinking loop)
         else if (runtime.totalThoughts >= escalationLimits.totalThoughts && step > 0) {
           shouldEscalate = true
           escalationReason = `${runtime.totalThoughts} total thoughts indicating thinking loop (threshold: ${escalationLimits.totalThoughts})`
+          global.__mini_a_metrics.escalation_thought_loop.inc()
         }
         // Escalate if no meaningful actions in recent steps
         else if (runtime.stepsWithoutAction >= escalationLimits.stepsWithoutAction) {
           shouldEscalate = true
           escalationReason = `${runtime.stepsWithoutAction} steps without meaningful progress (threshold: ${escalationLimits.stepsWithoutAction})`
+          global.__mini_a_metrics.escalation_steps_without_action.inc()
         }
         // Escalate if similar thoughts are repeating (stuck pattern)
         else if (runtime.recentSimilarThoughts.length >= 3) {
@@ -11259,11 +11315,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (similarCount >= 2) {
             shouldEscalate = true
             escalationReason = `repeating similar thoughts (${similarCount + 1} similar thoughts)`
+            global.__mini_a_metrics.escalation_similar_thoughts.inc()
           }
         }
       }
       
-      var useLowCost = this._use_lc && step > 0 && !shouldEscalate
+      var useLowCost = this._use_lc && (step > 0 || goalComplexityLevel === "simple") && !shouldEscalate
       var currentLLM = useLowCost ? this.lc_llm : this.llm
       var llmType = useLowCost ? "low-cost" : "main"
       
@@ -11937,6 +11994,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.recentSimilarThoughts = []
           global.__mini_a_metrics.consecutive_thoughts.set(0)
           runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
 
           runtime.lastActions.push(`shell: ${commandValue}`)
           if (runtime.lastActions.length > 3) runtime.lastActions.shift()
@@ -11998,6 +12056,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           runtime.stepsWithoutAction = 0
           global.__mini_a_metrics.consecutive_thoughts.set(0)
           runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
 
           var totalTime = now() - sessionStartTime
           global.__mini_a_metrics.total_session_time.set(totalTime)
