@@ -340,6 +340,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Depth Tracking** - Configurable nesting limits with automatic retry and deadline enforcement
 - **Conversation Persistence** - Save and resume conversations across sessions (`conversation=...`; in `mini-a-con`, use `resume=true` to continue the latest thread)
 - **Rate Limiting** - Built-in rate limiting for API usage control
+- **Eval Framework** - End-to-end LLM evaluation system with LLM judging, golden-file regression testing, tag filtering, and CI-friendly exit codes (see [docs/EVALS.md](docs/EVALS.md))
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
@@ -349,6 +350,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
+- **[Eval System](docs/EVALS.md)** - End-to-end LLM evaluation, golden-file regression testing, and CI integration
 - **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
 - **[Delegation Guide](docs/DELEGATION.md)** - Hierarchical task decomposition with local and remote delegation
 - **[MCP Proxy Guide](docs/MCPPROXY-FEATURE.md)** - How to consolidate multiple MCP connections behind one `proxy-dispatch` tool
@@ -376,6 +378,7 @@ Mini-A ships with complementary components:
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
+- **`mini-a-eval.js`** - `MiniAEval` class powering the eval framework (agent runner, LLM judge, golden file management, JSON report writer)
 - **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
 - **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
@@ -506,13 +509,33 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ### Running Tests
 
-Run the test suite from the repository root:
+Run the unit test suite from the repository root:
 
 ```bash
 ojob tests/autoTestAll.yaml
 ```
 
 The run generates an `autoTestAll.results.json` file with detailed results—inspect it locally and delete it before your final commit.
+
+### Running Evals
+
+Run end-to-end LLM quality evals against the bundled cases:
+
+```bash
+# General goals eval (requires OAF_MODEL)
+ojob evals/evals.yaml
+
+# With a dedicated cheap judge model
+ojob evals/evals.yaml judgeModel=haiku
+
+# Skills-specific eval
+ojob evals/evals-skills.yaml
+
+# Capture golden reference files on a trusted baseline
+ojob evals/evals.yaml updateGolden=true
+```
+
+See **[docs/EVALS.md](docs/EVALS.md)** for the full eval guide including case file format, judge modes, golden file workflow, and CI integration.
 
 ## Community
 

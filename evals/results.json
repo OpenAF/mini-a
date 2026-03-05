@@ -1,0 +1,858 @@
+{
+  "timestamp": "2026-03-05T04:54:03.106Z",
+  "summary": {
+    "total": 7,
+    "pass": 1,
+    "fail": 6,
+    "avgScore": 0.143
+  },
+  "results": [
+    {
+      "id": "basic-math-multiply",
+      "goal": "What is 17 * 6? Answer only with the number, nothing else.",
+      "answer": "(no answer)",
+      "score": 0,
+      "reasoning": "Fallback: substring match (no judge model configured)",
+      "passed": false,
+      "threshold": 0.9,
+      "judgeMode": "llm",
+      "durationMs": 44,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 24,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    },
+    {
+      "id": "basic-math-add",
+      "goal": "What is 234 + 567? Answer only with the number, nothing else.",
+      "answer": "(no answer)",
+      "score": 0,
+      "reasoning": "Fallback: substring match (no judge model configured)",
+      "passed": false,
+      "threshold": 0.9,
+      "judgeMode": "llm",
+      "durationMs": 36,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 27,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    },
+    {
+      "id": "basic-string-reverse",
+      "goal": "Reverse the string 'hello'. Answer only with the reversed string, nothing else.",
+      "answer": "(no answer)",
+      "score": 0,
+      "reasoning": "Fallback: substring match (no judge model configured)",
+      "passed": false,
+      "threshold": 0.9,
+      "judgeMode": "llm",
+      "durationMs": 38,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 30,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    },
+    {
+      "id": "basic-capital-city",
+      "goal": "What is the capital city of France? Answer only with the city name.",
+      "answer": "(no answer)",
+      "score": 0,
+      "reasoning": "Fallback: substring match (no judge model configured)",
+      "passed": false,
+      "threshold": 0.9,
+      "judgeMode": "llm",
+      "durationMs": 37,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 33,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    },
+    {
+      "id": "summarize-openaf",
+      "goal": "Summarize in one sentence: OpenAF is a JavaScript scripting framework for OpenAF that provides a rich set of built-in utilities, an oJob orchestration system, and AI/LLM integration capabilities.",
+      "answer": "(no answer)",
+      "score": 1,
+      "reasoning": "Golden compare: Fallback: substring match (no judge model configured)",
+      "passed": true,
+      "threshold": 0.7,
+      "judgeMode": "golden",
+      "durationMs": 39,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 36,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    },
+    {
+      "id": "list-three-colors",
+      "goal": "List exactly three primary colors of light (RGB). Format as a comma-separated list, nothing else.",
+      "answer": "(no answer)",
+      "score": 0,
+      "reasoning": "Fallback: substring match (no judge model configured)",
+      "passed": false,
+      "threshold": 0.8,
+      "judgeMode": "llm",
+      "durationMs": 39,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 39,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    },
+    {
+      "id": "count-words",
+      "goal": "How many words are in this sentence: 'The quick brown fox jumps over the lazy dog'? Answer only with the number.",
+      "answer": "(no answer)",
+      "score": 0,
+      "reasoning": "Fallback: substring match (no judge model configured)",
+      "passed": false,
+      "threshold": 0.9,
+      "judgeMode": "llm",
+      "durationMs": 36,
+      "metrics": {
+        "llm_calls": {
+          "normal": 0,
+          "low_cost": 0,
+          "total": 0,
+          "fallback_to_main": 0
+        },
+        "goals": {
+          "achieved": 0,
+          "failed": 0,
+          "stopped": 0
+        },
+        "actions": {
+          "thoughts_made": 0,
+          "thinks_made": 0,
+          "finals_made": 0,
+          "mcp_actions_executed": 0,
+          "mcp_actions_failed": 0,
+          "shell_commands_executed": 0,
+          "shell_commands_blocked": 0,
+          "shell_commands_approved": 0,
+          "shell_commands_denied": 0,
+          "unknown_actions": 0
+        },
+        "planning": {
+          "disabled_simple_goal": 0,
+          "plans_generated": 0,
+          "plans_validated": 0,
+          "plans_validation_failed": 0,
+          "plans_replanned": 0
+        },
+        "performance": {
+          "steps_taken": 42,
+          "total_session_time_ms": 0,
+          "avg_step_time_ms": 0,
+          "max_context_tokens": 49,
+          "llm_estimated_tokens": 0,
+          "llm_actual_tokens": 0,
+          "llm_normal_tokens": 0,
+          "llm_lc_tokens": 0
+        },
+        "behavior_patterns": {
+          "escalations": 0,
+          "escalation_consecutive_errors": 0,
+          "escalation_consecutive_thoughts": 0,
+          "escalation_thought_loop": 0,
+          "escalation_steps_without_action": 0,
+          "escalation_similar_thoughts": 0,
+          "escalation_context_window": 0,
+          "retries": 0,
+          "consecutive_errors": 4,
+          "consecutive_thoughts": 0,
+          "json_parse_failures": 0,
+          "action_loops_detected": 0,
+          "thinking_loops_detected": 0,
+          "similar_thoughts_detected": 0
+        },
+        "summarization": {
+          "summaries_made": 0,
+          "summaries_skipped": 0,
+          "summaries_forced": 0,
+          "context_summarizations": 0,
+          "summaries_tokens_reduced": 0,
+          "summaries_original_tokens": 0,
+          "summaries_final_tokens": 0
+        },
+        "tool_selection": {
+          "dynamic_used": 0,
+          "keyword": 0,
+          "llm_lc": 0,
+          "llm_main": 0,
+          "connection_chooser_lc": 0,
+          "connection_chooser_main": 0,
+          "fallback_all": 0
+        },
+        "tool_cache": {
+          "hits": 0,
+          "misses": 0,
+          "total_requests": 0,
+          "hit_rate": "0%"
+        },
+        "mcp_resilience": {
+          "circuit_breaker_trips": 0,
+          "circuit_breaker_resets": 0,
+          "lazy_init_success": 0,
+          "lazy_init_failed": 0
+        },
+        "per_tool_usage": {},
+        "delegation": {
+          "total": 0,
+          "running": 0,
+          "completed": 0,
+          "failed": 0,
+          "cancelled": 0,
+          "timedout": 0,
+          "retried": 0,
+          "workers_total": 0,
+          "workers_static": 0,
+          "workers_dynamic": 0,
+          "workers_healthy": 0
+        },
+        "deep_research": {
+          "sessions": 0,
+          "cycles": 0,
+          "validations_passed": 0,
+          "validations_failed": 0,
+          "early_success": 0,
+          "max_cycles_reached": 0
+        }
+      }
+    }
+  ]
+}

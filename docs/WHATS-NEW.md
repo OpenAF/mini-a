@@ -2,6 +2,39 @@
 
 ## Recent Updates
 
+### Eval Framework (`evals/`)
+
+**Change**: Added a complete end-to-end evaluation framework for measuring agent quality.
+
+**What's New**:
+- `mini-a-eval.js` — `MiniAEval` class: runs isolated agent per case, judges answer with a cheap LLM, manages golden reference files, writes JSON reports
+- `evals/evals.yaml` — dynamic ojob that loads cases from any YAML file, runs them, prints per-case PASS/FAIL, exits with code 1 on failures (CI-ready)
+- `evals/evals-skills.yaml` — same as above, focused on skill-template cases
+- `evals/cases/basic-tasks.yaml` and `evals/cases/skills-cases.yaml` — bundled example cases
+- `evals/golden/` — directory for golden reference `.txt` files (committed to track regressions)
+- `skills()` method extended with a `test` operation: render a skill and optionally run the agent to inspect the result programmatically
+
+**Judge modes**:
+- `llm` — scores 0.0–1.0 using a cheap model against an `expected` string
+- `golden` — first run saves the answer; subsequent runs compare via LLM judge
+- `both` — runs both judges, passes only if `min(llm, golden) >= threshold`
+
+**Example**:
+```bash
+# First run: captures golden files
+ojob evals/evals.yaml updateGolden=true
+
+# Subsequent runs: regression check
+ojob evals/evals.yaml judgeModel=haiku
+
+# Filter by tag
+ojob evals/evals.yaml tags=math,basic
+```
+
+For full documentation, see **[docs/EVALS.md](EVALS.md)**.
+
+---
+
 ### Debug File Output (`debugfile` parameter)
 
 **Change**: Added `debugfile=<path>` argument to redirect debug output from the screen to a plain-text NDJSON file.

@@ -1356,11 +1356,11 @@ MiniUtilsTool.prototype.skills = function(params) {
       if (params.run === true) {
         loadLib("mini-a.js")
         var testAgent = new MiniA()
-        var testAgentArgs = merge({}, isMap(params.agentArgs) ? params.agentArgs : {}, {
-          goal    : rendered,
-          maxsteps: typeof params.maxsteps === "number" ? params.maxsteps : 5,
-          silent  : true
-        })
+        // merge() in OpenAF takes exactly 2 arguments — set goal/maxsteps directly
+        var testAgentArgs = merge({}, isMap(params.agentArgs) ? params.agentArgs : {})
+        testAgentArgs.goal     = rendered
+        testAgentArgs.maxsteps = typeof params.maxsteps === "number" ? params.maxsteps : 5
+        testAgentArgs.silent   = true
         testAgent.init(testAgentArgs)
         out.answer  = testAgent.start(testAgentArgs)
         out.metrics = testAgent.getMetrics()

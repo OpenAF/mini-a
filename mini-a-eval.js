@@ -38,13 +38,14 @@ MiniAEval.prototype.init = function(args) {
   this._goldenDir       = args.goldenDir     || "evals/golden"
   this._updateGolden    = args.updateGolden  === true
   this._defaultAgentArgs = {
-    model   : args.model,
-    mcp     : args.mcp,
     maxsteps: args.maxsteps || 10,
     silent  : true,
     useshell: false,
     useutils: false
   }
+  // Only include model/mcp when actually provided to avoid polluting agent args with undefined
+  if (isString(args.model) && args.model.trim().length > 0) this._defaultAgentArgs.model = args.model
+  if (isDef(args.mcp) && args.mcp !== null) this._defaultAgentArgs.mcp = args.mcp
 }
 
 /**
@@ -56,7 +57,9 @@ MiniAEval.prototype.init = function(args) {
 MiniAEval.prototype._runAgent = function(goal, caseAgentArgs) {
   loadLib("mini-a.js")
   var agent = new MiniA()
-  var agentArgs = merge({}, this._defaultAgentArgs, caseAgentArgs || {}, { goal: goal })
+  // merge() in OpenAF takes exactly 2 arguments — chain to avoid losing args
+  var agentArgs = merge(merge({}, this._defaultAgentArgs), caseAgentArgs || {})
+  agentArgs.goal = goal
   agent.init(agentArgs)
   var answer = agent.start(agentArgs)
   return {
@@ -128,7 +131,7 @@ MiniAEval.prototype._loadGolden = function(caseId) {
 /** Save golden content for a case. Creates directories as needed. */
 MiniAEval.prototype._saveGolden = function(caseId, answer) {
   var p = this._goldenPath(caseId)
-  io.mkdirs(this._goldenDir)
+  io.mkdir(this._goldenDir)
   io.writeFileString(p, answer)
 }
 
@@ -302,11 +305,12 @@ MiniAEval.prototype.getSummary = function() {
  */
 MiniAEval.prototype.writeReport = function(outFile) {
   outFile = outFile || "evals/results.json"
-  io.mkdirs(String(new java.io.File(outFile).getParent()))
+  var parentPath = String(new java.io.File(outFile).getParent())
+  if (isString(parentPath) && parentPath.length > 0) io.mkdir(parentPath)
   var report = {
     timestamp: new Date().toISOString(),
     summary  : this.getSummary(),
     results  : this._results
   }
-  io.writeFileString(outFile, af.toJSON(report, __, 2))
+  io.writeFileString(outFile, stringify(report))
 }
