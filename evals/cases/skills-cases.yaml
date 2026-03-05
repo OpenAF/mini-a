@@ -1,0 +1,37 @@
+# Skills-specific eval cases for mini-a.
+# These cases use the 'skill' field to render a skill template as the agent goal.
+#
+# Fields:
+#   id         - unique identifier (used for golden file name)
+#   skill      - skill name (rendered via MiniUtilsTool skills render)
+#   skillArgs  - arguments string passed to the skill render
+#   goal       - used directly if skill is not set
+#   judge      - "llm" | "golden" | "both"
+#   expected   - reference text for llm judge
+#   threshold  - pass/fail cutoff 0.0-1.0 (default 0.7)
+#   maxsteps   - per-case agent step limit
+#   tags       - list of tags for filtering
+
+cases:
+- id        : skill-render-only
+  goal      : "List the first 5 prime numbers in order, separated by commas. Answer only with the numbers."
+  judge     : llm
+  expected  : "2, 3, 5, 7, 11"
+  threshold : 0.9
+  maxsteps  : 5
+  tags      : [skills, math]
+
+- id        : skill-summary-golden
+  goal      : "In exactly two sentences, explain what a REST API is."
+  judge     : golden
+  threshold : 0.7
+  maxsteps  : 8
+  tags      : [skills, golden, text]
+
+- id        : skill-step-plan
+  goal      : "Create a brief numbered step-by-step plan (3-5 steps) for migrating a PostgreSQL database schema to a new version. Be concise."
+  judge     : both
+  expected  : "step-by-step plan for database migration"
+  threshold : 0.7
+  maxsteps  : 10
+  tags      : [skills, planning]

@@ -1,0 +1,67 @@
+# Basic general eval cases for mini-a
+# Each case runs the full agent loop and judges the result.
+#
+# Fields:
+#   id         - unique identifier (used for golden file name)
+#   goal       - prompt sent to the agent
+#   judge      - "llm" | "golden" | "both"
+#   expected   - reference answer for llm judge (optional for golden)
+#   threshold  - pass/fail cutoff, 0.0-1.0 (default 0.7)
+#   maxsteps   - per-case step limit override
+#   tags       - list of tags for filtering
+
+cases:
+- id       : basic-math-multiply
+  goal     : "What is 17 * 6? Answer only with the number, nothing else."
+  judge    : llm
+  expected : "102"
+  threshold: 0.9
+  maxsteps : 5
+  tags     : [basic, math]
+
+- id       : basic-math-add
+  goal     : "What is 234 + 567? Answer only with the number, nothing else."
+  judge    : llm
+  expected : "801"
+  threshold: 0.9
+  maxsteps : 5
+  tags     : [basic, math]
+
+- id       : basic-string-reverse
+  goal     : "Reverse the string 'hello'. Answer only with the reversed string, nothing else."
+  judge    : llm
+  expected : "olleh"
+  threshold: 0.9
+  maxsteps : 5
+  tags     : [basic, string]
+
+- id       : basic-capital-city
+  goal     : "What is the capital city of France? Answer only with the city name."
+  judge    : llm
+  expected : "Paris"
+  threshold: 0.9
+  maxsteps : 5
+  tags     : [basic, knowledge]
+
+- id       : summarize-openaf
+  goal     : "Summarize in one sentence: OpenAF is a JavaScript scripting framework for OpenAF that provides a rich set of built-in utilities, an oJob orchestration system, and AI/LLM integration capabilities."
+  judge    : golden
+  threshold: 0.7
+  maxsteps : 8
+  tags     : [basic, text, golden]
+
+- id       : list-three-colors
+  goal     : "List exactly three primary colors of light (RGB). Format as a comma-separated list, nothing else."
+  judge    : llm
+  expected : "Red, Green, Blue"
+  threshold: 0.8
+  maxsteps : 5
+  tags     : [basic, knowledge]
+
+- id       : count-words
+  goal     : "How many words are in this sentence: 'The quick brown fox jumps over the lazy dog'? Answer only with the number."
+  judge    : llm
+  expected : "9"
+  threshold: 0.9
+  maxsteps : 5
+  tags     : [basic, counting]

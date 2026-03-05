@@ -1179,13 +1179,16 @@ MiniUtilsTool.prototype.markdownFiles = function(params) {
  * <key>MiniUtilsTool.skills(params) : Object|Array</key>
  * Discovers and uses installed skills from configured skill roots.
  * The `params` object supports:
- * - `operation` (string, optional): `list` (default), `search`, `read`, `render`, or `invoke`.
- * - `name` (string, required for `read`/`render`/`invoke`): Skill name.
+ * - `operation` (string, optional): `list` (default), `search`, `read`, `render`, `invoke`, or `test`.
+ * - `name` (string, required for `read`/`render`/`invoke`/`test`): Skill name.
  * - `query` (string, required for `search`): Query string to match skill metadata.
- * - `args` (string, optional): Raw arguments used by `render`.
- * - `argv` (array, optional): Explicit argument list for `render` (overrides parsed `args`).
+ * - `args` (string, optional): Raw arguments used by `render`/`test`.
+ * - `argv` (array, optional): Explicit argument list for `render`/`test` (overrides parsed `args`).
  * - `includeHidden` (boolean, optional): Include hidden entries for discovery.
  * - `compact` (boolean, optional): Return compact payload.
+ * - `run` (boolean, optional, `test` only): If true, also run a mini-a agent with the rendered prompt.
+ * - `maxsteps` (number, optional, `test` only): Max agent steps when run=true (default: 5).
+ * - `agentArgs` (object, optional, `test` only): Extra args merged into the agent init call.
  * </odoc>
  */
 MiniUtilsTool.prototype.skills = function(params) {
@@ -1200,6 +1203,7 @@ MiniUtilsTool.prototype.skills = function(params) {
     if (op === "expand") op = "render"
     if (op === "apply") op = "render"
     if (op === "run") op = "invoke"
+    if (op === "exec") op = "test"
 
     var listParams = {
       includeHidden: params.includeHidden === true
@@ -1309,6 +1313,61 @@ MiniUtilsTool.prototype.skills = function(params) {
         invocation   : skillInvocation,
         slashCommand : slashInvocation
       }
+    }
+
+    if (op === "test") {
+      // params: { name, args, argv, run (bool), maxsteps, agentArgs }
+      if (!isString(params.name) || params.name.trim().length === 0) return "[ERROR] name is required"
+      var requestedName = params.name.trim().toLowerCase()
+      var discovered = this._listSkills({ includeHidden: params.includeHidden === true })
+      var selected = __
+      for (var i = 0; i < discovered.length; i++) {
+        if (discovered[i].name === requestedName) { selected = discovered[i]; break }
+      }
+      if (isUnDef(selected)) return "[ERROR] Skill not found: " + params.name
+
+      var content = io.readFileString(selected.templatePath)
+
+      var parsedArgs
+      if (isArray(params.argv)) {
+        var argv = params.argv.map(function(value) { return String(value) })
+        var rawFromArgv = this._serializeSkillArgv(argv)
+        parsedArgs = {
+          ok  : true,
+          raw : isString(params.args) ? params.args : rawFromArgv,
+          argv: argv,
+          argc: argv.length
+        }
+      } else {
+        parsedArgs = this._parseSkillArgs(isString(params.args) ? params.args : "")
+      }
+      if (!isMap(parsedArgs) || parsedArgs.ok !== true) {
+        return "[ERROR] " + (isMap(parsedArgs) && isString(parsedArgs.error) ? parsedArgs.error : "Invalid skill arguments")
+      }
+
+      var rendered = this._renderSkillTemplate(content, parsedArgs)
+      var out = {
+        skillName: selected.name,
+        skillArgs: parsedArgs.raw,
+        rendered : rendered,
+        run      : false
+      }
+
+      if (params.run === true) {
+        loadLib("mini-a.js")
+        var testAgent = new MiniA()
+        var testAgentArgs = merge({}, isMap(params.agentArgs) ? params.agentArgs : {}, {
+          goal    : rendered,
+          maxsteps: typeof params.maxsteps === "number" ? params.maxsteps : 5,
+          silent  : true
+        })
+        testAgent.init(testAgentArgs)
+        out.answer  = testAgent.start(testAgentArgs)
+        out.metrics = testAgent.getMetrics()
+        out.run     = true
+      }
+
+      return out
     }
 
     return "[ERROR] Unknown skills operation: " + op

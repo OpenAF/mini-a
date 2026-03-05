@@ -1,0 +1,119 @@
+# Author: Nuno Aguiar
+# License: Apache 2.0
+help:
+  text   : |
+    Run end-to-end LLM evals for mini-a. Reads eval cases from a YAML file,
+    runs the full agent loop for each case, judges answers with a cheap LLM,
+    and writes a JSON report.
+
+    Examples:
+      ojob evals/evals.yaml casesFile=evals/cases/basic-tasks.yaml
+      ojob evals/evals.yaml casesFile=evals/cases/basic-tasks.yaml updateGolden=true
+      ojob evals/evals.yaml casesFile=evals/cases/basic-tasks.yaml tags=math,basic
+  expects:
+  - name     : casesFile
+    desc     : Path to a YAML file with a top-level 'cases' array
+    example  : evals/cases/basic-tasks.yaml
+    mandatory: false
+  - name     : judgeModel
+    desc     : Model id for the judge LLM (cheap model recommended, e.g. haiku)
+    example  : haiku
+    mandatory: false
+  - name     : judgeProvider
+    desc     : Provider prefix for the judge model (optional, prepended as provider/model)
+    example  : anthropic
+    mandatory: false
+  - name     : goldenDir
+    desc     : Directory for golden reference text files
+    example  : evals/golden
+    mandatory: false
+  - name     : updateGolden
+    desc     : Set to true to overwrite existing golden files with current answers
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : outputFile
+    desc     : Path for the JSON report output
+    example  : evals/results.json
+    mandatory: false
+  - name     : tags
+    desc     : Comma-separated tag filter — only cases with at least one matching tag are run
+    example  : basic,math
+    mandatory: false
+  - name     : model
+    desc     : Agent model id (defaults to OAF_MODEL env var)
+    mandatory: false
+  - name     : maxsteps
+    desc     : Default maximum agent steps per case
+    example  : "10"
+    mandatory: false
+
+init:
+  casesFile    : evals/cases/basic-tasks.yaml
+  judgeModel   : ""
+  judgeProvider: ""
+  goldenDir    : evals/golden
+  updateGolden : false
+  outputFile   : evals/results.json
+  tags         : ""
+  maxsteps     : 10
+
+jobs:
+- name: MiniAEval::Init
+  exec: |
+    load("mini-a-eval.js")
+    args.evalRunner = new MiniAEval()
+    args.evalRunner.init({
+      judgeModel   : args.judgeModel    || "",
+      judgeProvider: args.judgeProvider || "",
+      goldenDir    : args.goldenDir     || "evals/golden",
+      updateGolden : toBoolean(args.updateGolden) === true,
+      model        : args.model,
+      maxsteps     : isDef(args.maxsteps) ? Number(args.maxsteps) : 10
+    })
+    var casesFile = args.casesFile || "evals/cases/basic-tasks.yaml"
+    if (!io.fileExists(casesFile)) throw new Error("Cases file not found: " + casesFile)
+    var allCases = io.readFileYAML(casesFile).cases || []
+    if (isString(args.tags) && args.tags.trim().length > 0) {
+      var tagSet = args.tags.split(",").map(function(t) { return t.trim() })
+      allCases = allCases.filter(function(c) {
+        return isArray(c.tags) && c.tags.some(function(t) { return tagSet.indexOf(t) >= 0 })
+      })
+    }
+    args.cases = allCases
+    print("Loaded " + args.cases.length + " case(s) from " + casesFile)
+
+- name: MiniAEval::RunCases
+  from: MiniAEval::Init
+  exec: |
+    for (var i = 0; i < args.cases.length; i++) {
+      var c = args.cases[i]
+      print("  Running [" + c.id + "] ...")
+      var result = args.evalRunner.runCase(c)
+      var status = result.passed ? "PASS" : "FAIL"
+      print("  [" + c.id + "] " + status + "  score=" + result.score.toFixed(3) + "  (" + result.reasoning + ")")
+    }
+
+- name: MiniAEval::Report
+  from: MiniAEval::RunCases
+  exec: |
+    var summary = args.evalRunner.getSummary()
+    print("")
+    print("=== Eval Summary ===")
+    print("PASS: " + summary.pass + " / " + summary.total + "  avgScore=" + summary.avgScore)
+    if (summary.fail > 0) print("FAIL: " + summary.fail)
+    var outFile = args.outputFile || "evals/results.json"
+    args.evalRunner.writeReport(outFile)
+    print("Report written to: " + outFile)
+    if (summary.fail > 0) exit(1)
+
+todo:
+- MiniAEval::Init
+- MiniAEval::RunCases
+- MiniAEval::Report
+
+ojob:
+  opacks:
+  - oJob-common
+  sequential: true
+  shareArgs  : true
