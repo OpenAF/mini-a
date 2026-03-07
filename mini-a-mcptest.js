@@ -106,6 +106,37 @@ function listMCPTools(mcpClient, showElapsed) {
     }
 }
 
+// Show MCP server info
+function showMCPServerInfo(mcpClient, showElapsed) {
+    try {
+        var startTime = now()
+        var toolsResult = mcpClient.listTools()
+        if (showElapsed) {
+            printElapsedTime(startTime, "Get MCP server info")
+        }
+
+        var serverInfo = __
+        if (isDef(mcpClient.getInfo)) {
+            serverInfo = mcpClient.getInfo()
+        }
+
+        print("\n" + ansiColor("BOLD", "🖥️  MCP Server Information:"))
+        print(ansiColor("FAINT", "──────────────────────────"))
+
+        if (isUnDef(serverInfo)) {
+            print(ansiColor("FAINT", "No server information available from this MCP server."))
+        } else if (isString(serverInfo)) {
+            print(serverInfo)
+        } else {
+            print(printTree(serverInfo))
+        }
+        print()
+    } catch(e) {
+        print(ansiColor("ITALIC,FG(196)", "!!") + ansiColor("FG(196)", " Failed to get server info: " + e.message))
+        print()
+    }
+}
+
 // Show tool details
 function showToolDetails(tool) {
     print("\n" + ansiColor("BOLD,FG(41)", "Tool: " + tool.name))
@@ -539,6 +570,7 @@ function mainMCPTest(args) {
             // Connected
             _options = [
                 "📋 List tools",
+                "🖥️  Show MCP server info",
                 "🔧 Call a tool",
                 "🔍 Show tool details",
                 "🔌 New connection",
@@ -594,6 +626,12 @@ function mainMCPTest(args) {
                     print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP connection. Please create a new connection first.", errorColor) + "\n")
                 } else {
                     listMCPTools(_mcpClient, sessionOptions.showtimeelapsed)
+                }
+            } else if (optionText.indexOf("Show MCP server info") >= 0) {
+                if (isUnDef(_mcpClient)) {
+                    print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP connection. Please create a new connection first.", errorColor) + "\n")
+                } else {
+                    showMCPServerInfo(_mcpClient, sessionOptions.showtimeelapsed)
                 }
             } else if (optionText.indexOf("Call a tool") >= 0) {
                 if (isUnDef(_mcpClient)) {
