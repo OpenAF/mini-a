@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260304'
+version: '20260307'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -178,7 +178,7 @@ filesHash:
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 0ab80b1035f8c80830ef5e7b6ba087f999d493c3
   mini-a-con.js: a46a4f7bfd1ceb018fa33a57d7a18bc4e113d9f7
-  mini-a-mcptest.js: b46e79907f6a0d26ba4c9294ba564583b167c45b
+  mini-a-mcptest.js: 2f3c8fc012efb6b09160f919ba6755f366944c6d
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
   mini-a-modes.yaml: b49a75237b636a935eecb3d17f5163486f581cf4
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
