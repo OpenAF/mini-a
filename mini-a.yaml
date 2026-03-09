@@ -66,13 +66,18 @@ help:
     example  : "sandbox-exec -f /path/to/profile.sb"
     mandatory: false
   - name     : usesandbox
-    desc     : Enable built-in OS sandbox presets for shell commands (off/auto/linux/macos/windows)
+    desc     : Enable built-in OS sandbox presets for shell commands (off/auto/linux/macos/windows); warns when unavailable or best-effort
     example  : "auto"
     mandatory: false
   - name     : sandboxprofile
-    desc     : Optional sandbox profile path required by some presets (e.g., macOS sandbox-exec)
+    desc     : Optional macOS sandbox profile path (otherwise Mini-A auto-generates a restrictive temporary .sb profile)
     example  : "/path/to/profile.sb"
     mandatory: false
+  - name     : sandboxnonetwork
+    desc     : Disable network inside the built-in sandbox when supported (Windows remains best-effort)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : shelltimeout
     desc     : Maximum shell command execution time in milliseconds before timeout
     example  : "30000"

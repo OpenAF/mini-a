@@ -23,6 +23,9 @@ var MiniA = function() {
   this._shellPrefix = ""
   this._shellSandboxMode = ""
   this._shellSandboxProfile = ""
+  this._shellSandboxAutoProfile = ""
+  this._shellSandboxRuntimeDir = ""
+  this._shellSandboxRuntimeDirError = ""
   this._toolCacheSettings = {}
   this._toolInfoByName = {}
   this._lazyMcpConnections = {}
@@ -645,6 +648,7 @@ MiniA._registerShutdownHook = function() {
   addOnOpenAFShutdown(function() {
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
+    try { MiniA._cleanupSandboxTempFiles() } catch(ignoreSandboxTempCleanupError) {}
     try { MiniA._cleanupProxyTempFiles() } catch(ignoreTempCleanupError) {}
     try { MiniA._stopAllProgCallServers() } catch(ignoreProgCallStopError) {}
     try {
@@ -655,6 +659,23 @@ MiniA._registerShutdownHook = function() {
   })
 
   MiniA._shutdownHookRegistered = true
+}
+
+MiniA._registerSandboxTempFile = function(filePath) {
+  if (!isString(filePath) || filePath.length === 0) return
+  if (!isArray(MiniA._sandboxTempFiles)) MiniA._sandboxTempFiles = []
+  if (MiniA._sandboxTempFiles.indexOf(filePath) < 0) MiniA._sandboxTempFiles.push(filePath)
+}
+
+MiniA._cleanupSandboxTempFiles = function() {
+  if (!isArray(MiniA._sandboxTempFiles) || MiniA._sandboxTempFiles.length === 0) return
+  MiniA._sandboxTempFiles.forEach(function(filePath) {
+    if (!isString(filePath) || filePath.length === 0) return
+    try {
+      if (io.fileExists(filePath)) io.rm(filePath)
+    } catch(ignoreTempDeleteError) {}
+  })
+  MiniA._sandboxTempFiles = []
 }
 
 MiniA._registerProxyTempFile = function(filePath) {
@@ -1937,51 +1958,456 @@ MiniA.prototype._detectHostOs = function() {
     return "unknown"
 }
 
+MiniA.prototype._escapeShellArgDoubleQuotes = function(value) {
+    var text = isString(value) ? value : String(value)
+    return text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+MiniA.prototype._escapePowerShellSingleQuotes = function(value) {
+    var text = isString(value) ? value : String(value)
+    return text.replace(/'/g, "''")
+}
+
+MiniA.prototype._getSandboxHostPaths = function() {
+    var envPwd = ""
+    var cwd = ""
+    var tempDir = ""
+    var homeDir = ""
+
+    try { envPwd = String(java.lang.System.getenv("PWD") || "") } catch(ignorePwd) {}
+    try { cwd = String(java.lang.System.getProperty("user.dir", "") || "") } catch(ignoreCwd) {}
+    try { tempDir = String(java.lang.System.getProperty("java.io.tmpdir", "") || "") } catch(ignoreTemp) {}
+    try { homeDir = String(java.lang.System.getProperty("user.home", "") || "") } catch(ignoreHome) {}
+
+    if (envPwd.length > 0) cwd = envPwd
+    if (cwd.length === 0) cwd = "."
+    if (tempDir.length === 0) tempDir = "/tmp"
+
+    return {
+      cwd : cwd,
+      temp: tempDir,
+      home: homeDir
+    }
+}
+
+MiniA.prototype._getSandboxRuntimeDir = function() {
+    if (isString(this._shellSandboxRuntimeDir) && this._shellSandboxRuntimeDir.length > 0) {
+      if (io.fileExists(this._shellSandboxRuntimeDir) && isMap(io.fileInfo(this._shellSandboxRuntimeDir)) && io.fileInfo(this._shellSandboxRuntimeDir).isDirectory === true) {
+        return this._shellSandboxRuntimeDir
+      }
+      this._shellSandboxRuntimeDir = ""
+    }
+
+    this._shellSandboxRuntimeDirError = ""
+    var hostPaths = this._getSandboxHostPaths()
+    var registerRuntimeDir = function(path) {
+      if (!isString(path) || path.length === 0) return ""
+      try {
+        if (isDef(java.io.File)) new java.io.File(path).deleteOnExit()
+      } catch(ignoreDeleteOnExitRuntimeDirError) {}
+      if (typeof MiniA !== "undefined" && isFunction(MiniA._registerSandboxTempFile)) MiniA._registerSandboxTempFile(path)
+      this._shellSandboxRuntimeDir = path
+      return path
+    }.bind(this)
+
+    try {
+      if (isMap(io) && isFunction(io.createTempDir)) {
+        return registerRuntimeDir(io.createTempDir("mini-a-sandbox-", isString(hostPaths.temp) && hostPaths.temp.length > 0 ? hostPaths.temp : __))
+      }
+      this._shellSandboxRuntimeDirError = "io.createTempDir is not available in this OpenAF runtime."
+    } catch(runtimeCreateError) {
+      this._shellSandboxRuntimeDirError = runtimeCreateError.message || String(runtimeCreateError)
+    }
+
+    try {
+      var baseDir = isString(hostPaths.temp) && hostPaths.temp.length > 0
+        ? java.nio.file.Paths.get(hostPaths.temp)
+        : __
+      var tempDir = isDef(baseDir)
+        ? java.nio.file.Files.createTempDirectory(baseDir, "mini-a-sandbox-")
+        : java.nio.file.Files.createTempDirectory("mini-a-sandbox-")
+      return registerRuntimeDir(String(tempDir.toAbsolutePath()))
+    } catch(javaTempDirError) {
+      this._shellSandboxRuntimeDirError = javaTempDirError.message || String(javaTempDirError)
+    }
+
+    try {
+      var tempFile = java.nio.file.Files.createTempFile("mini-a-sandbox-", ".dir")
+      var tempPath = String(tempFile.toAbsolutePath())
+      try { io.rm(tempPath) } catch(ignoreTempPlaceholderDeleteError) {}
+      io.mkdir(tempPath)
+      return registerRuntimeDir(tempPath)
+    } catch(fallbackRuntimeCreateError) {
+      this._shellSandboxRuntimeDirError = fallbackRuntimeCreateError.message || String(fallbackRuntimeCreateError)
+    }
+
+    try {
+      var tempRoot = isString(hostPaths.temp) && hostPaths.temp.length > 0 ? hostPaths.temp : "."
+      var tempPathManual = tempRoot.replace(/[\\\/]+$/, "") + "/mini-a-sandbox-" + nowNano()
+      io.mkdir(tempPathManual)
+      if (io.fileExists(tempPathManual) && isMap(io.fileInfo(tempPathManual)) && io.fileInfo(tempPathManual).isDirectory === true) {
+        return registerRuntimeDir(tempPathManual)
+      }
+    } catch(manualRuntimeCreateError) {
+      this._shellSandboxRuntimeDirError = manualRuntimeCreateError.message || String(manualRuntimeCreateError)
+    }
+
+    try {
+      if (isUnDef(this._shellSandboxRuntimeDirError) || String(this._shellSandboxRuntimeDirError).length === 0) {
+        this._shellSandboxRuntimeDirError = "Unknown runtime directory creation failure."
+      }
+    } catch(ignoreSandboxRuntimeErrorSet) {}
+
+    return ""
+}
+
+MiniA.prototype._isCommandAvailable = function(commandName) {
+    var name = isString(commandName) ? commandName.trim() : ""
+    if (name.length === 0) return false
+
+    try {
+      var pathEnv = String(java.lang.System.getenv("PATH") || "")
+      if (pathEnv.length === 0) return false
+      var separator = java.io.File.pathSeparator
+      var pathParts = String(pathEnv).split(separator)
+      var isWindows = this._detectHostOs() === "windows"
+      var extensions = [""]
+
+      if (isWindows) {
+        var pathExt = String(java.lang.System.getenv("PATHEXT") || ".EXE;.CMD;.BAT;.COM")
+        extensions = pathExt.split(";").map(function(ext) { return ext.toLowerCase() })
+        if (extensions.indexOf("") < 0) extensions.unshift("")
+      }
+
+      for (var i = 0; i < pathParts.length; i++) {
+        var part = String(pathParts[i] || "").trim()
+        if (part.length === 0) continue
+        for (var j = 0; j < extensions.length; j++) {
+          var suffix = extensions[j]
+          var candidate = new java.io.File(part, isWindows ? name + suffix : name)
+          if (candidate.exists() && candidate.isFile() && candidate.canExecute()) return true
+        }
+      }
+    } catch(ignoreCommandLookupError) {}
+
+    return false
+}
+
+MiniA.prototype._createTempSandboxProfile = function(args) {
+    var tempPath
+    var hostPaths = this._getSandboxHostPaths()
+    var runtimeDir = this._getSandboxRuntimeDir()
+    if (runtimeDir.length === 0) {
+      var runtimeDirError = isString(this._shellSandboxRuntimeDirError) && this._shellSandboxRuntimeDirError.length > 0
+        ? ": " + this._shellSandboxRuntimeDirError
+        : "."
+      return {
+        profile: "",
+        warning: "Failed to create temporary macOS sandbox runtime directory" + runtimeDirError
+      }
+    }
+
+    var runtimeTmp = runtimeDir + "/tmp"
+    var runtimeHome = runtimeDir + "/home"
+    try {
+      io.mkdir(runtimeTmp)
+      io.mkdir(runtimeHome)
+    } catch(ignoreSandboxDirCreateError) {}
+
+    var writePaths = [runtimeTmp, runtimeHome]
+    if (toBoolean(args.readwrite) === true && isString(hostPaths.cwd) && hostPaths.cwd.length > 0) writePaths.push(hostPaths.cwd)
+
+    var profileLines = [
+      "version 1",
+      "(deny default)",
+      "(allow process-exec)",
+      "(allow process-fork)",
+      "(allow signal (target self))",
+      "(allow sysctl-read)",
+      "(allow file-read*)"
+    ]
+
+    if (toBoolean(args.sandboxnonetwork) !== true) {
+      profileLines.splice(6, 0, "(allow network*)")
+    }
+
+    writePaths.filter(function(path, index, arr) {
+      return isString(path) && path.length > 0 && arr.indexOf(path) === index
+    }).forEach(function(path) {
+      profileLines.push("(allow file-write* (subpath \"" + String(path).replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"))")
+    })
+
+    var profileText = profileLines.join("\n") + "\n"
+
+    try {
+      var tempFile = java.nio.file.Files.createTempFile("mini-a-sandbox-", ".sb")
+      tempPath = String(tempFile.toAbsolutePath())
+    } catch(tempCreateError) {
+      return {
+        profile: "",
+        warning: "Failed to create temporary macOS sandbox profile: " + (tempCreateError.message || String(tempCreateError))
+      }
+    }
+
+    try {
+      io.writeFileString(tempPath, profileText)
+    } catch(tempWriteError) {
+      try {
+        if (isString(tempPath) && tempPath.length > 0 && io.fileExists(tempPath)) io.rm(tempPath)
+      } catch(ignoreRmError) {}
+      return {
+        profile: "",
+        warning: "Failed to write temporary macOS sandbox profile: " + (tempWriteError.message || String(tempWriteError))
+      }
+    }
+
+    try {
+      if (isDef(java.io.File)) new java.io.File(tempPath).deleteOnExit()
+    } catch(ignoreDeleteOnExitError) {}
+
+    if (typeof MiniA !== "undefined" && isFunction(MiniA._registerSandboxTempFile)) {
+      MiniA._registerSandboxTempFile(tempPath)
+    }
+
+    this._shellSandboxAutoProfile = tempPath
+    return {
+      profile: tempPath,
+      warning: "usesandbox=macos: sandboxprofile not provided; using generated restrictive profile " + tempPath + "."
+    }
+}
+
+MiniA.prototype._resolveMacOSSandboxProfile = function(profilePath, args) {
+    var providedPath = isString(profilePath) ? profilePath.trim() : ""
+    if (providedPath.length > 0) {
+      if (io.fileExists(providedPath) && isMap(io.fileInfo(providedPath)) && io.fileInfo(providedPath).isFile === true) {
+        return { profile: providedPath, warning: "" }
+      }
+      return { profile: "", warning: "sandboxprofile file not found or is not a file: " + providedPath }
+    }
+
+    if (isString(this._shellSandboxAutoProfile) && this._shellSandboxAutoProfile.length > 0) {
+      if (io.fileExists(this._shellSandboxAutoProfile) && isMap(io.fileInfo(this._shellSandboxAutoProfile)) && io.fileInfo(this._shellSandboxAutoProfile).isFile === true) {
+        return { profile: this._shellSandboxAutoProfile, warning: "usesandbox=macos: sandboxprofile not provided; reusing temporary generated profile " + this._shellSandboxAutoProfile + "." }
+      }
+      this._shellSandboxAutoProfile = ""
+    }
+
+    return this._createTempSandboxProfile(args)
+}
+
+MiniA.prototype._buildLinuxSandboxConfig = function(args) {
+    if (!this._isCommandAvailable("bwrap")) {
+      return {
+        mode         : "linux",
+        prefix       : "",
+        warning      : "usesandbox=linux requested but bubblewrap ('bwrap') is not available; running without OS sandbox.",
+        backend      : "bwrap",
+        status       : "unavailable",
+        effectiveMode: "off"
+      }
+    }
+
+    var hostPaths = this._getSandboxHostPaths()
+    var parts = [
+      "bwrap",
+      "--die-with-parent",
+      "--proc", "/proc",
+      "--dev", "/dev",
+      "--ro-bind", "/", "/",
+      "--chdir", "\"$PWD\"",
+      "--unshare-user",
+      "--unshare-pid",
+      "--unshare-uts",
+      "--unshare-cgroup",
+      "--tmpfs", "/tmp",
+      "--tmpfs", "/var/tmp",
+      "--dir", "/tmp/mini-a-home",
+      "--setenv", "HOME", "/tmp/mini-a-home",
+      "--setenv", "TMPDIR", "/tmp",
+      "--setenv", "TMP", "/tmp",
+      "--setenv", "TEMP", "/tmp"
+    ]
+
+    if (toBoolean(args.sandboxnonetwork) === true) parts.push("--unshare-net")
+
+    if (toBoolean(args.readwrite) === true) {
+      if (isString(hostPaths.cwd) && hostPaths.cwd.length > 0) parts.push("--bind", "\"" + this._escapeShellArgDoubleQuotes(hostPaths.cwd) + "\"", "\"" + this._escapeShellArgDoubleQuotes(hostPaths.cwd) + "\"")
+      if (isString(hostPaths.temp) && hostPaths.temp.length > 0) parts.push("--bind", "\"" + this._escapeShellArgDoubleQuotes(hostPaths.temp) + "\"", "\"" + this._escapeShellArgDoubleQuotes(hostPaths.temp) + "\"")
+    }
+
+    parts.push("--", "/bin/sh", "-lc")
+    return {
+      mode         : "linux",
+      prefix       : parts.join(" "),
+      warning      : "usesandbox=linux: bubblewrap active with "
+        + (toBoolean(args.readwrite) === true
+          ? "writable current directory and temp paths"
+          : "read-only host filesystem and private temp/home paths")
+        + (toBoolean(args.sandboxnonetwork) === true ? ", and network access disabled." : "."),
+      backend      : "bwrap",
+      status       : "applied",
+      effectiveMode: "linux"
+    }
+}
+
+MiniA.prototype._buildMacOSSandboxConfig = function(args) {
+    if (!this._isCommandAvailable("sandbox-exec")) {
+      return {
+        mode         : "macos",
+        prefix       : "",
+        warning      : "usesandbox=macos requested but 'sandbox-exec' is not available; running without OS sandbox.",
+        backend      : "sandbox-exec",
+        status       : "unavailable",
+        effectiveMode: "off"
+      }
+    }
+
+    var macProfile = this._resolveMacOSSandboxProfile(isString(args.sandboxprofile) ? args.sandboxprofile : "", args)
+    if (macProfile.profile.length === 0) {
+      return {
+        mode         : "macos",
+        prefix       : "",
+        warning      : macProfile.warning + " Running without OS sandbox.",
+        backend      : "sandbox-exec",
+        status       : "unavailable",
+        effectiveMode: "off"
+      }
+    }
+
+    return {
+      mode         : "macos",
+      prefix       : "sandbox-exec -f \"" + this._escapeShellArgDoubleQuotes(macProfile.profile) + "\" /bin/sh -lc",
+      warning      : (isString(macProfile.warning) && macProfile.warning.length > 0 ? macProfile.warning + " " : "")
+        + "usesandbox=macos: sandbox-exec active with "
+        + (toBoolean(args.readwrite) === true
+          ? "writable current directory and temp paths"
+          : "read-only host filesystem and private temp/home paths")
+        + (toBoolean(args.sandboxnonetwork) === true ? ", and network access disabled." : "."),
+      backend      : "sandbox-exec",
+      status       : "applied",
+      effectiveMode: "macos"
+    }
+}
+
+MiniA.prototype._buildWindowsSandboxConfig = function(args) {
+    var hostPaths = this._getSandboxHostPaths()
+    var runtimeDir = this._getSandboxRuntimeDir()
+    var runtimeTmp = runtimeDir.length > 0 ? runtimeDir + "/tmp" : hostPaths.temp
+    var runtimeHome = runtimeDir.length > 0 ? runtimeDir + "/home" : hostPaths.temp
+
+    try {
+      if (runtimeDir.length > 0) {
+        io.mkdir(runtimeTmp)
+        io.mkdir(runtimeHome)
+      }
+    } catch(ignoreWindowsSandboxDirCreateError) {}
+
+    return {
+      mode         : "windows",
+      prefix       : "",
+      warning      : "usesandbox=windows: applying best-effort PowerShell restrictions with "
+        + (toBoolean(args.readwrite) === true
+          ? "writable current directory and isolated temp/home paths"
+          : "isolated temp/home paths")
+        + (toBoolean(args.sandboxnonetwork) === true
+          ? ", plus best-effort network blocking. This is weaker than Linux bubblewrap and does not provide hard filesystem or guaranteed network isolation."
+          : ". This is weaker than Linux bubblewrap" + (toBoolean(args.readwrite) === true ? "." : " and does not provide hard filesystem isolation.")),
+      backend      : "powershell",
+      status       : "best-effort",
+      effectiveMode: "windows",
+      runtimeTmp   : runtimeTmp,
+      runtimeHome  : runtimeHome,
+      cwd          : hostPaths.cwd
+    }
+}
+
 MiniA.prototype._resolveSandboxPrefix = function(mode, args) {
     var sandboxMode = isString(mode) ? mode.trim().toLowerCase() : ""
-    if (sandboxMode.length === 0) return { mode: "off", prefix: "", warning: "" }
+    if (sandboxMode.length === 0) return { mode: "off", prefix: "", warning: "", backend: "", status: "off", effectiveMode: "off" }
     if (["false", "off", "none", "disabled", "0", "no"].indexOf(sandboxMode) >= 0) {
-      return { mode: "off", prefix: "", warning: "" }
+      return { mode: "off", prefix: "", warning: "", backend: "", status: "off", effectiveMode: "off" }
     }
 
     var host = this._detectHostOs()
     if (sandboxMode === "true" || sandboxMode === "on" || sandboxMode === "1") sandboxMode = "auto"
     if (sandboxMode === "auto") sandboxMode = host
 
-    var profilePath = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
     switch(sandboxMode) {
       case "linux":
-        return {
-          mode   : "linux",
-          prefix : "bwrap --die-with-parent --proc /proc --dev /dev --ro-bind / / --chdir \"$PWD\" --unshare-user --unshare-pid --unshare-uts --unshare-cgroup -- /bin/sh -lc",
-          warning: ""
-        }
+        return this._buildLinuxSandboxConfig(args)
       case "macos":
-        if (profilePath.length === 0) {
-          return {
-            mode   : "macos",
-            prefix : "",
-            warning: "usesandbox=macos requires sandboxprofile=<path.sb> (sandbox-exec profile)."
-          }
-        }
-        return {
-          mode   : "macos",
-          prefix : "sandbox-exec -f " + profilePath + " /bin/sh -lc",
-          warning: ""
-        }
+        return this._buildMacOSSandboxConfig(args)
       case "windows":
-        return {
-          mode   : "windows",
-          prefix : "powershell -NoLogo -NoProfile -NonInteractive -Command",
-          warning: "usesandbox=windows selected. Configure Windows Defender Application Control, AppContainer, or a before_shell hook for stronger OS isolation."
-        }
+        return this._buildWindowsSandboxConfig(args)
       default:
         return {
-          mode   : sandboxMode,
-          prefix : "",
-          warning: "Unknown usesandbox mode '" + sandboxMode + "'. Use auto/linux/macos/windows/off."
+          mode         : sandboxMode,
+          prefix       : "",
+          warning      : "Unknown usesandbox mode '" + sandboxMode + "'. Use auto/linux/macos/windows/off.",
+          backend      : "",
+          status       : "unknown",
+          effectiveMode: "off"
         }
     }
+}
+
+MiniA.prototype._buildSandboxExecution = function(sandboxCfg, commandBeforeSandbox, args) {
+    var original = isString(commandBeforeSandbox) ? commandBeforeSandbox : ""
+    if (!isMap(sandboxCfg) || !isString(sandboxCfg.mode) || sandboxCfg.mode.length === 0 || sandboxCfg.mode === "off") {
+      return { finalCommand: original, shInput: original }
+    }
+
+    if (sandboxCfg.mode === "windows" && sandboxCfg.status !== "off") {
+      var runtimeTmp = isString(sandboxCfg.runtimeTmp) && sandboxCfg.runtimeTmp.length > 0 ? sandboxCfg.runtimeTmp : this._getSandboxHostPaths().temp
+      var runtimeHome = isString(sandboxCfg.runtimeHome) && sandboxCfg.runtimeHome.length > 0 ? sandboxCfg.runtimeHome : runtimeTmp
+      var cwd = isString(sandboxCfg.cwd) && sandboxCfg.cwd.length > 0 ? sandboxCfg.cwd : this._getSandboxHostPaths().cwd
+      var script = [
+        "$ErrorActionPreference = 'Stop'",
+        "$ProgressPreference = 'SilentlyContinue'",
+        "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'",
+        "$env:TEMP = '" + this._escapePowerShellSingleQuotes(runtimeTmp) + "'",
+        "$env:TMP = '" + this._escapePowerShellSingleQuotes(runtimeTmp) + "'",
+        "$env:TMPDIR = '" + this._escapePowerShellSingleQuotes(runtimeTmp) + "'",
+        "$env:HOME = '" + this._escapePowerShellSingleQuotes(runtimeHome) + "'",
+        "$env:USERPROFILE = '" + this._escapePowerShellSingleQuotes(runtimeHome) + "'",
+        toBoolean(args.sandboxnonetwork) === true ? "$env:HTTP_PROXY = 'http://127.0.0.1:9'" : "",
+        toBoolean(args.sandboxnonetwork) === true ? "$env:HTTPS_PROXY = 'http://127.0.0.1:9'" : "",
+        toBoolean(args.sandboxnonetwork) === true ? "$env:ALL_PROXY = 'http://127.0.0.1:9'" : "",
+        toBoolean(args.sandboxnonetwork) === true ? "$env:NO_PROXY = '*'" : "",
+        toBoolean(args.sandboxnonetwork) === true ? "[System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy('http://127.0.0.1:9')" : "",
+        "Set-Location -LiteralPath '" + this._escapePowerShellSingleQuotes(cwd) + "'",
+        "& cmd.exe /d /s /c '" + this._escapePowerShellSingleQuotes(original) + "'"
+      ].filter(function(line) { return isString(line) && line.length > 0 }).join("; ")
+
+      return {
+        finalCommand: "powershell -NoLogo -NoProfile -NonInteractive -Command " + script,
+        shInput: ["powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]
+      }
+    }
+
+    if (isString(sandboxCfg.prefix) && sandboxCfg.prefix.length > 0) {
+      var sbParts = this._splitShellPrefix(sandboxCfg.prefix)
+      if (!isArray(sbParts) || sbParts.length === 0) sbParts = [sandboxCfg.prefix]
+      var finalCommand = sandboxCfg.prefix + " " + original
+      var sbInput = sbParts.slice()
+      sbInput.push(original)
+      return { finalCommand: finalCommand, shInput: sbInput }
+    }
+
+    return { finalCommand: original, shInput: original }
+}
+
+MiniA.prototype._shouldLogSandboxWarning = function(warningText) {
+    if (!isString(warningText) || warningText.length === 0) return false
+
+    if (
+      warningText.indexOf("usesandbox=macos: sandboxprofile not provided; reusing temporary generated profile ") === 0 ||
+      warningText.indexOf("usesandbox=macos: sandboxprofile not provided; using generated restrictive profile ") === 0
+    ) {
+      return isObject(this._sessionArgs) && (toBoolean(this._sessionArgs.debug) || toBoolean(this._sessionArgs.verbose))
+    }
+
+    return true
 }
 
 
@@ -6622,7 +7048,8 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix,
             shelltimeout   : isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout,
             usesandbox     : isDef(p.usesandbox) ? p.usesandbox : args.usesandbox,
-            sandboxprofile : isDef(p.sandboxprofile) ? p.sandboxprofile : args.sandboxprofile
+            sandboxprofile : isDef(p.sandboxprofile) ? p.sandboxprofile : args.sandboxprofile,
+            sandboxnonetwork: isDef(p.sandboxnonetwork) ? p.sandboxnonetwork : args.sandboxnonetwork
           })
           var out = result && isString(result.output) ? result.output : stringify(result, __, "")
           if (!isString(out) || out.length === 0) out = "(no output)"
@@ -6650,8 +7077,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellallowpipes: { type: "boolean", description: "Allow pipes/redirection/control operators." },
             shellprefix    : { type: "string", description: "Prefix to prepend to the command (e.g., 'docker exec -it <cid> sh -lc')." },
             shelltimeout   : { type: "number", description: "Maximum command execution time in milliseconds." },
-            usesandbox     : { type: "string", description: "Sandbox mode preset (off|auto|linux|macos|windows)." },
-            sandboxprofile : { type: "string", description: "Sandbox profile path when required by the selected preset." }
+            usesandbox     : { type: "string", description: "Sandbox mode preset (off|auto|linux|macos|windows); warns when unavailable or best-effort." },
+            sandboxprofile : { type: "string", description: "Optional macOS sandbox profile path; otherwise Mini-A generates a restrictive temporary .sb profile." },
+            sandboxnonetwork: { type: "boolean", description: "Disable network inside the built-in sandbox when supported; Windows remains best-effort." }
           },
           required: ["command"]
         }
@@ -8373,10 +8801,12 @@ MiniA.prototype._runCommand = function(args) {
     var shellMaxBytesValue = isDef(args.shellmaxbytes) ? args.shellmaxbytes : this._shellMaxBytes
     var sandboxModeValue = isDef(args.usesandbox) ? args.usesandbox : this._shellSandboxMode
     var sandboxProfileValue = isDef(args.sandboxprofile) ? args.sandboxprofile : this._shellSandboxProfile
+    var sandboxNoNetworkValue = isDef(args.sandboxnonetwork) ? args.sandboxnonetwork : this._shellSandboxNoNetwork
 
     args.shellallowpipes = _$(toBoolean(allowPipesValue), "args.shellallowpipes").isBoolean().default(false)
     args.shelltimeout = _$(shellTimeoutValue, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
+    args.sandboxnonetwork = _$(toBoolean(sandboxNoNetworkValue), "args.sandboxnonetwork").isBoolean().default(false)
 
     const baseBanned = [
         "rm","sudo","chmod","chown","mv","scp","ssh","docker","podman","kubectl",
@@ -8451,8 +8881,12 @@ MiniA.prototype._runCommand = function(args) {
       }
       finalCommand = originalCommand
       var shInput = originalCommand
-      var sandboxCfg = this._resolveSandboxPrefix(sandboxModeValue, { sandboxprofile: sandboxProfileValue })
-      if (isString(sandboxCfg.warning) && sandboxCfg.warning.length > 0) this.fnI("warn", sandboxCfg.warning)
+      var sandboxCfg = this._resolveSandboxPrefix(sandboxModeValue, {
+        sandboxprofile: sandboxProfileValue,
+        readwrite     : args.readwrite,
+        sandboxnonetwork: args.sandboxnonetwork
+      })
+      if (this._shouldLogSandboxWarning(sandboxCfg.warning)) this.fnI("warn", sandboxCfg.warning)
       if (isString(shellPrefix) && shellPrefix.length > 0) {
         var needsSpace = /\s$/.test(shellPrefix)
         finalCommand = shellPrefix + (needsSpace ? "" : " ") + originalCommand
@@ -8462,15 +8896,9 @@ MiniA.prototype._runCommand = function(args) {
         commandParts.push(originalCommand)
         shInput = commandParts
       }
-      if (isString(sandboxCfg.prefix) && sandboxCfg.prefix.length > 0) {
-        var sbParts = this._splitShellPrefix(sandboxCfg.prefix)
-        if (!isArray(sbParts) || sbParts.length === 0) sbParts = [sandboxCfg.prefix]
-        var commandBeforeSandbox = finalCommand
-        finalCommand = sandboxCfg.prefix + " " + commandBeforeSandbox
-        var sbInput = sbParts.slice()
-        sbInput.push(commandBeforeSandbox)
-        shInput = sbInput
-      }
+      var sandboxExecution = this._buildSandboxExecution(sandboxCfg, finalCommand, args)
+      finalCommand = sandboxExecution.finalCommand
+      shInput = sandboxExecution.shInput
       var beforeShellResult = this._runHook("before_shell", { MINI_A_SHELL_COMMAND: finalCommand })
       if (isArray(beforeShellResult.outputs) && beforeShellResult.outputs.length > 0 && isObject(this._runtime)) {
         beforeShellResult.outputs.forEach(function(o) {
@@ -9421,6 +9849,7 @@ MiniA.prototype.init = function(args) {
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
       { name: "sandboxprofile", type: "string", default: __ },
+      { name: "sandboxnonetwork", type: "boolean", default: false },
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" },
       { name: "shelltimeout", type: "number", default: __ },
@@ -9475,6 +9904,7 @@ MiniA.prototype.init = function(args) {
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
     args.sandboxprofile = _$(args.sandboxprofile, "args.sandboxprofile").isString().default(__)
+    args.sandboxnonetwork = _$(toBoolean(args.sandboxnonetwork), "args.sandboxnonetwork").isBoolean().default(false)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
     args.showthinking = _$(toBoolean(args.showthinking), "args.showthinking").isBoolean().default(false)
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
@@ -9637,6 +10067,7 @@ MiniA.prototype.init = function(args) {
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._shellSandboxMode = isString(args.usesandbox) ? args.usesandbox.trim() : ""
     this._shellSandboxProfile = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
+    this._shellSandboxNoNetwork = args.sandboxnonetwork
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
@@ -10308,8 +10739,9 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
  * - useshell (boolean, default=false): Whether to allow shell command execution.
  * - shell (string, optional): Prefix to add before each shell command when useshell=true.
- * - usesandbox (string, optional): Enable OS sandboxing preset for shell commands (auto/linux/macos/windows/off).
- * - sandboxprofile (string, optional): Sandbox profile path required by some presets (e.g., macOS sandbox-exec).
+ * - usesandbox (string, optional): Enable OS sandboxing preset for shell commands (auto/linux/macos/windows/off), with warnings when unavailable or best-effort.
+ * - sandboxprofile (string, optional): Optional macOS sandbox profile path; Mini-A otherwise generates a restrictive temporary .sb profile.
+ * - sandboxnonetwork (boolean, default=false): Disable network inside the built-in sandbox when supported; Windows remains best-effort.
  * - shellallow (string, optional): Comma-separated list of commands allowed even if usually banned.
  * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
@@ -10485,6 +10917,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
       { name: "sandboxprofile", type: "string", default: __ },
+      { name: "sandboxnonetwork", type: "boolean", default: false },
       { name: "shellallow", type: "string", default: __ },
       { name: "shellbanextra", type: "string", default: __ },
       { name: "shelltimeout", type: "number", default: __ },
@@ -10519,6 +10952,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
     args.sandboxprofile = _$(args.sandboxprofile, "args.sandboxprofile").isString().default(__)
+    args.sandboxnonetwork = _$(toBoolean(args.sandboxnonetwork), "args.sandboxnonetwork").isBoolean().default(false)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
@@ -10587,6 +11021,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
     this._shellSandboxMode = isString(args.usesandbox) ? args.usesandbox.trim() : ""
     this._shellSandboxProfile = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
+    this._shellSandboxNoNetwork = args.sandboxnonetwork
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
@@ -12059,7 +12494,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 shellprefix    : args.shellprefix,
                 shelltimeout   : args.shelltimeout,
                 usesandbox     : args.usesandbox,
-                sandboxprofile : args.sandboxprofile
+                sandboxprofile : args.sandboxprofile,
+                sandboxnonetwork: args.sandboxnonetwork
               },
               stepLabel    : stepLabel,
               updateContext: !this._useTools
@@ -12077,7 +12513,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             shellallowpipes: args.shellallowpipes,
             shelltimeout   : args.shelltimeout,
             usesandbox     : args.usesandbox,
-            sandboxprofile : args.sandboxprofile
+            sandboxprofile : args.sandboxprofile,
+            sandboxnonetwork: args.sandboxnonetwork
           }).output
           runtime.context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
           runtime.context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
@@ -12545,7 +12982,8 @@ MiniA.prototype._runChatbotMode = function(options) {
               shellallowpipes: args.shellallowpipes,
               shelltimeout   : args.shelltimeout,
               usesandbox     : args.usesandbox,
-              sandboxprofile : args.sandboxprofile
+              sandboxprofile : args.sandboxprofile,
+              sandboxnonetwork: args.sandboxnonetwork
             })
             var shellOutput = isDef(shellResult) && isString(shellResult.output) ? shellResult.output : ""
             if (!isString(shellOutput) || shellOutput.length === 0) shellOutput = "(no output)"

@@ -94,4 +94,140 @@
     ow.test.assert(isDef(enabled.options.fns.skills), true, "Should expose skills tool when useskills=true")
     ow.test.assert(isDef(enabled.options.fnsMeta.skills), true, "Should expose skills metadata when useskills=true")
   }
+
+  exports.testLinuxSandboxWarnsWhenBwrapMissing = function() {
+    var agent = createAgent()
+    agent._isCommandAvailable = function(name) { return false }
+
+    var sandbox = agent._resolveSandboxPrefix("linux", { readwrite: false })
+    ow.test.assert(sandbox.mode === "linux", true, "Should keep linux mode")
+    ow.test.assert(sandbox.status === "unavailable", true, "Should mark linux sandbox as unavailable")
+    ow.test.assert(sandbox.prefix === "", true, "Should not emit prefix when bwrap is missing")
+    ow.test.assert(sandbox.warning.indexOf("bwrap") >= 0, true, "Should mention missing bwrap")
+  }
+
+  exports.testLinuxSandboxAddsWritableBinds = function() {
+    var agent = createAgent()
+    agent._isCommandAvailable = function(name) { return name === "bwrap" }
+    agent._getSandboxHostPaths = function() {
+      return { cwd: "/tmp/work", temp: "/tmp", home: "/home/test" }
+    }
+
+    var sandbox = agent._resolveSandboxPrefix("linux", { readwrite: true })
+    ow.test.assert(sandbox.status === "applied", true, "Should apply linux sandbox when bwrap is available")
+    ow.test.assert(sandbox.prefix.indexOf("--bind \"/tmp/work\" \"/tmp/work\"") >= 0, true, "Should make cwd writable when readwrite=true")
+    ow.test.assert(sandbox.prefix.indexOf("--bind \"/tmp\" \"/tmp\"") >= 0, true, "Should make temp writable when readwrite=true")
+  }
+
+  exports.testLinuxSandboxCanDisableNetwork = function() {
+    var agent = createAgent()
+    agent._isCommandAvailable = function(name) { return name === "bwrap" }
+    agent._getSandboxHostPaths = function() {
+      return { cwd: "/tmp/work", temp: "/tmp", home: "/home/test" }
+    }
+
+    var sandbox = agent._resolveSandboxPrefix("linux", { readwrite: false, sandboxnonetwork: true })
+    ow.test.assert(sandbox.status === "applied", true, "Should apply linux sandbox when bwrap is available")
+    ow.test.assert(sandbox.prefix.indexOf("--unshare-net") >= 0, true, "Should disable network when sandboxnonetwork=true")
+    ow.test.assert(sandbox.warning.indexOf("network access disabled") >= 0, true, "Should mention disabled network access")
+  }
+
+  exports.testMacSandboxGeneratesRestrictiveProfile = function() {
+    var agent = createAgent()
+    agent._getSandboxHostPaths = function() {
+      return { cwd: "/tmp/mini-a-project", temp: "/tmp", home: "/Users/test" }
+    }
+    var runtimeBase = "/tmp/mini-a-test-runtime-" + nowNano()
+    try { io.mkdir(runtimeBase) } catch(ignoreRuntimeCreate) {}
+    agent._getSandboxRuntimeDir = function() { return runtimeBase }
+
+    var generated = agent._createTempSandboxProfile({ readwrite: false })
+    ow.test.assert(isString(generated.profile) && generated.profile.length > 0, true, "Should generate a temporary profile")
+    ow.test.assert(generated.warning.indexOf("generated restrictive profile") >= 0, true, "Should mention generated restrictive profile")
+
+    var profileText = io.readFileString(generated.profile)
+    ow.test.assert(profileText.indexOf("(deny default)") >= 0, true, "Generated profile should deny by default")
+    ow.test.assert(profileText.indexOf("(allow file-read*)") >= 0, true, "Generated profile should allow reads")
+    ow.test.assert(profileText.indexOf("(allow network*)") >= 0, true, "Generated profile should allow network by default")
+    ow.test.assert(profileText.indexOf("/tmp/mini-a-project") < 0, true, "Read-only mode should not allow writing to cwd")
+
+    agent._isCommandAvailable = function(name) { return name === "sandbox-exec" }
+    agent._resolveMacOSSandboxProfile = function(profilePath, args) {
+      return { profile: generated.profile, warning: generated.warning }
+    }
+    var sandbox = agent._buildMacOSSandboxConfig({ readwrite: false, sandboxprofile: generated.profile })
+    ow.test.assert(sandbox.status === "applied", true, "Should build macOS sandbox config when sandbox-exec is available")
+    ow.test.assert(sandbox.prefix.indexOf("sandbox-exec -f ") === 0, true, "Should execute through sandbox-exec")
+  }
+
+  exports.testMacSandboxCanDisableNetwork = function() {
+    var agent = createAgent()
+    agent._getSandboxHostPaths = function() {
+      return { cwd: "/tmp/mini-a-project", temp: "/tmp", home: "/Users/test" }
+    }
+    var runtimeBase = "/tmp/mini-a-test-runtime-" + nowNano()
+    try { io.mkdir(runtimeBase) } catch(ignoreRuntimeCreate) {}
+    agent._getSandboxRuntimeDir = function() { return runtimeBase }
+
+    var generated = agent._createTempSandboxProfile({ readwrite: false, sandboxnonetwork: true })
+    var profileText = io.readFileString(generated.profile)
+    ow.test.assert(profileText.indexOf("(allow network*)") < 0, true, "Generated profile should omit network allowance when sandboxnonetwork=true")
+
+    agent._isCommandAvailable = function(name) { return name === "sandbox-exec" }
+    agent._resolveMacOSSandboxProfile = function(profilePath, args) {
+      return { profile: generated.profile, warning: generated.warning }
+    }
+    var sandbox = agent._buildMacOSSandboxConfig({ readwrite: false, sandboxnonetwork: true, sandboxprofile: generated.profile })
+    ow.test.assert(sandbox.warning.indexOf("network access disabled") >= 0, true, "Should mention disabled network access")
+  }
+
+  exports.testWindowsSandboxBuildsBestEffortExecution = function() {
+    var agent = createAgent()
+    agent._getSandboxHostPaths = function() {
+      return { cwd: "C:/work/project", temp: "C:/Temp", home: "C:/Users/test" }
+    }
+
+    var sandbox = agent._resolveSandboxPrefix("windows", { readwrite: false })
+    ow.test.assert(sandbox.status === "best-effort", true, "Should classify windows sandbox as best-effort")
+    ow.test.assert(sandbox.warning.indexOf("weaker than Linux bubblewrap") >= 0, true, "Should warn about weaker isolation")
+
+    var execution = agent._buildSandboxExecution(sandbox, "dir", { readwrite: false })
+    ow.test.assert(isArray(execution.shInput), true, "Windows sandbox should build array execution input")
+    ow.test.assert(execution.shInput[0] === "powershell", true, "Windows sandbox should launch PowerShell")
+    ow.test.assert(execution.shInput[5].indexOf("ConstrainedLanguage") >= 0, true, "PowerShell script should use constrained language mode")
+    ow.test.assert(execution.shInput[5].indexOf("cmd.exe /d /s /c 'dir'") >= 0, true, "PowerShell script should execute the original command")
+  }
+
+  exports.testWindowsSandboxBestEffortNoNetwork = function() {
+    var agent = createAgent()
+    agent._getSandboxHostPaths = function() {
+      return { cwd: "C:/work/project", temp: "C:/Temp", home: "C:/Users/test" }
+    }
+
+    var sandbox = agent._resolveSandboxPrefix("windows", { readwrite: false, sandboxnonetwork: true })
+    ow.test.assert(sandbox.warning.indexOf("best-effort network blocking") >= 0, true, "Should warn that network blocking is best-effort")
+
+    var execution = agent._buildSandboxExecution(sandbox, "dir", { readwrite: false, sandboxnonetwork: true })
+    ow.test.assert(execution.shInput[5].indexOf("$env:HTTP_PROXY = 'http://127.0.0.1:9'") >= 0, true, "PowerShell script should set blocking proxy environment")
+    ow.test.assert(execution.shInput[5].indexOf("DefaultWebProxy") >= 0, true, "PowerShell script should set the default .NET proxy")
+  }
+
+  exports.testMacSandboxReuseWarningIsDebugOnly = function() {
+    var agent = createAgent()
+    var warning = "usesandbox=macos: sandboxprofile not provided; reusing temporary generated profile /tmp/test.sb."
+    var firstUseWarning = "usesandbox=macos: sandboxprofile not provided; using generated restrictive profile /tmp/test.sb."
+
+    ow.test.assert(agent._shouldLogSandboxWarning(warning) === false, true, "Reuse warning should be hidden by default")
+    ow.test.assert(agent._shouldLogSandboxWarning(firstUseWarning) === false, true, "Generated profile warning should be hidden by default")
+
+    agent._sessionArgs = { debug: true }
+    ow.test.assert(agent._shouldLogSandboxWarning(warning) === true, true, "Reuse warning should be shown in debug mode")
+    ow.test.assert(agent._shouldLogSandboxWarning(firstUseWarning) === true, true, "Generated profile warning should be shown in debug mode")
+
+    agent._sessionArgs = { verbose: true }
+    ow.test.assert(agent._shouldLogSandboxWarning(warning) === true, true, "Reuse warning should be shown in verbose mode")
+    ow.test.assert(agent._shouldLogSandboxWarning(firstUseWarning) === true, true, "Generated profile warning should be shown in verbose mode")
+
+    ow.test.assert(agent._shouldLogSandboxWarning("usesandbox=macos requested but 'sandbox-exec' is not available; running without OS sandbox.") === true, true, "Real sandbox failures should still be shown")
+  }
 })()
