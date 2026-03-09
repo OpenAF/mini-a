@@ -792,6 +792,8 @@ The `start()` method accepts various configuration options:
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
 - **`shell`** (string): Prefix applied to every shell command (use with `useshell=true`)
+- **`usesandbox`** (string, default: `off`): Apply built-in OS sandbox presets for shell commands (`off`,`auto`,`linux`,`macos`,`windows`)
+- **`sandboxprofile`** (string): Optional profile path needed by some presets (for example `usesandbox=macos` with `sandbox-exec`)
 - **`shellprefix`** (string): Override the shell prefix embedded inside stored plans or MCP executions so converted tasks run against the right environment
 - **`shelltimeout`** (number): Maximum shell command runtime in milliseconds before timeout
 - **`shellmaxbytes`** (number, optional): Cap shell output size in characters. When exceeded, Mini-A keeps a head/tail excerpt and inserts a truncation banner. Defaults to `8000` when unset.
@@ -2156,7 +2158,20 @@ You can adjust this policy using the shell safety options:
 
 ### Shell Prefix Strategies by Operating System
 
+Mini-A now also supports `usesandbox=...` presets for common operating systems. Keep using `shell=...` when you need custom runtimes (Docker/Podman/firejail/custom wrappers).
+
 Use `shell=...` together with `useshell=true` when you want Mini-A to execute every command through an external sandbox or container runtime. The command filter continues to evaluate the original command string, and the prefix is appended immediately before execution.
+
+#### Built-in `usesandbox` presets
+- `usesandbox=auto`: Detect host OS and apply the default preset for that platform.
+- `usesandbox=linux`: Uses a `bwrap` profile (`--unshare-*`, read-only root bind, `/bin/sh -lc`) for OS-level isolation.
+- `usesandbox=macos`: Uses `sandbox-exec -f <sandboxprofile> /bin/sh -lc` (requires `sandboxprofile=`).
+- `usesandbox=windows`: Launches through PowerShell and is intended to be combined with WDAC/AppContainer or hooks.
+
+#### Hook alternatives (recommended for strict policy)
+- Use `before_shell` hooks to deny commands by path, arguments, time window, or user context.
+- Use `after_shell` hooks to audit output, redact sensitive data, and trigger alerts.
+- Combine hooks with `usesandbox`/`shell=` so both policy checks and OS-level isolation are active.
 
 #### macOS (sandbox-exec)
 - **Use the built-in restriction flags when:** you only need to block specific binaries (e.g. combine `shellallow`, `shellbanextra`, `shellallowpipes`, and `checkall=true`). This keeps commands on the host without additional tooling.

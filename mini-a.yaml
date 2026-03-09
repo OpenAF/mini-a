@@ -65,6 +65,14 @@ help:
     desc     : Prefix applied to every shell command (requires useshell=true)
     example  : "sandbox-exec -f /path/to/profile.sb"
     mandatory: false
+  - name     : usesandbox
+    desc     : Enable built-in OS sandbox presets for shell commands (off/auto/linux/macos/windows)
+    example  : "auto"
+    mandatory: false
+  - name     : sandboxprofile
+    desc     : Optional sandbox profile path required by some presets (e.g., macOS sandbox-exec)
+    example  : "/path/to/profile.sb"
+    mandatory: false
   - name     : shelltimeout
     desc     : Maximum shell command execution time in milliseconds before timeout
     example  : "30000"
@@ -476,6 +484,8 @@ jobs:
         debug          : debug
         useshell       : useshell
         shell          : shell
+        usesandbox     : usesandbox
+        sandboxprofile : sandboxprofile
         extrahooks     : extrahooks
         knowledge      : knowledge
         youare         : youare
@@ -573,6 +583,8 @@ jobs:
       debug          : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)
       shell          : isString.default(__)
+      usesandbox     : isString.default(__)
+      sandboxprofile : isString.default(__)
       extrahooks     : isString.default(__)
       knowledge      : isString.default(__)
       youare         : isString.default(__)

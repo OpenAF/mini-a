@@ -21,6 +21,8 @@ var MiniA = function() {
   this._mcpConnectionAliases = {}
   this._mcpConnectionAliasToId = {}
   this._shellPrefix = ""
+  this._shellSandboxMode = ""
+  this._shellSandboxProfile = ""
   this._toolCacheSettings = {}
   this._toolInfoByName = {}
   this._lazyMcpConnections = {}
@@ -1923,6 +1925,63 @@ MiniA.prototype._splitShellPrefix = function(value) {
     if (current.length > 0) result.push(current)
 
     return result.length > 0 ? result : [prefix]
+}
+
+MiniA.prototype._detectHostOs = function() {
+    try {
+      var name = String(java.lang.System.getProperty("os.name", "")).toLowerCase()
+      if (name.indexOf("mac") >= 0 || name.indexOf("darwin") >= 0) return "macos"
+      if (name.indexOf("win") >= 0) return "windows"
+      if (name.indexOf("linux") >= 0) return "linux"
+    } catch(e) {}
+    return "unknown"
+}
+
+MiniA.prototype._resolveSandboxPrefix = function(mode, args) {
+    var sandboxMode = isString(mode) ? mode.trim().toLowerCase() : ""
+    if (sandboxMode.length === 0) return { mode: "off", prefix: "", warning: "" }
+    if (["false", "off", "none", "disabled", "0", "no"].indexOf(sandboxMode) >= 0) {
+      return { mode: "off", prefix: "", warning: "" }
+    }
+
+    var host = this._detectHostOs()
+    if (sandboxMode === "true" || sandboxMode === "on" || sandboxMode === "1") sandboxMode = "auto"
+    if (sandboxMode === "auto") sandboxMode = host
+
+    var profilePath = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
+    switch(sandboxMode) {
+      case "linux":
+        return {
+          mode   : "linux",
+          prefix : "bwrap --die-with-parent --proc /proc --dev /dev --ro-bind / / --chdir \"$PWD\" --unshare-user --unshare-pid --unshare-uts --unshare-cgroup -- /bin/sh -lc",
+          warning: ""
+        }
+      case "macos":
+        if (profilePath.length === 0) {
+          return {
+            mode   : "macos",
+            prefix : "",
+            warning: "usesandbox=macos requires sandboxprofile=<path.sb> (sandbox-exec profile)."
+          }
+        }
+        return {
+          mode   : "macos",
+          prefix : "sandbox-exec -f " + profilePath + " /bin/sh -lc",
+          warning: ""
+        }
+      case "windows":
+        return {
+          mode   : "windows",
+          prefix : "powershell -NoLogo -NoProfile -NonInteractive -Command",
+          warning: "usesandbox=windows selected. Configure Windows Defender Application Control, AppContainer, or a before_shell hook for stronger OS isolation."
+        }
+      default:
+        return {
+          mode   : sandboxMode,
+          prefix : "",
+          warning: "Unknown usesandbox mode '" + sandboxMode + "'. Use auto/linux/macos/windows/off."
+        }
+    }
 }
 
 
@@ -6561,7 +6620,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
             shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
             shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix,
-            shelltimeout   : isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout
+            shelltimeout   : isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout,
+            usesandbox     : isDef(p.usesandbox) ? p.usesandbox : args.usesandbox,
+            sandboxprofile : isDef(p.sandboxprofile) ? p.sandboxprofile : args.sandboxprofile
           })
           var out = result && isString(result.output) ? result.output : stringify(result, __, "")
           if (!isString(out) || out.length === 0) out = "(no output)"
@@ -6588,7 +6649,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellbanextra  : { type: "string", description: "Comma-separated extra banned commands." },
             shellallowpipes: { type: "boolean", description: "Allow pipes/redirection/control operators." },
             shellprefix    : { type: "string", description: "Prefix to prepend to the command (e.g., 'docker exec -it <cid> sh -lc')." },
-            shelltimeout   : { type: "number", description: "Maximum command execution time in milliseconds." }
+            shelltimeout   : { type: "number", description: "Maximum command execution time in milliseconds." },
+            usesandbox     : { type: "string", description: "Sandbox mode preset (off|auto|linux|macos|windows)." },
+            sandboxprofile : { type: "string", description: "Sandbox profile path when required by the selected preset." }
           },
           required: ["command"]
         }
@@ -8308,6 +8371,8 @@ MiniA.prototype._runCommand = function(args) {
     var allowPipesValue = isDef(args.shellallowpipes) ? args.shellallowpipes : this._shellAllowPipes
     var shellTimeoutValue = isDef(args.shelltimeout) ? args.shelltimeout : this._shellTimeout
     var shellMaxBytesValue = isDef(args.shellmaxbytes) ? args.shellmaxbytes : this._shellMaxBytes
+    var sandboxModeValue = isDef(args.usesandbox) ? args.usesandbox : this._shellSandboxMode
+    var sandboxProfileValue = isDef(args.sandboxprofile) ? args.sandboxprofile : this._shellSandboxProfile
 
     args.shellallowpipes = _$(toBoolean(allowPipesValue), "args.shellallowpipes").isBoolean().default(false)
     args.shelltimeout = _$(shellTimeoutValue, "args.shelltimeout").isNumber().default(__)
@@ -8386,6 +8451,8 @@ MiniA.prototype._runCommand = function(args) {
       }
       finalCommand = originalCommand
       var shInput = originalCommand
+      var sandboxCfg = this._resolveSandboxPrefix(sandboxModeValue, { sandboxprofile: sandboxProfileValue })
+      if (isString(sandboxCfg.warning) && sandboxCfg.warning.length > 0) this.fnI("warn", sandboxCfg.warning)
       if (isString(shellPrefix) && shellPrefix.length > 0) {
         var needsSpace = /\s$/.test(shellPrefix)
         finalCommand = shellPrefix + (needsSpace ? "" : " ") + originalCommand
@@ -8394,6 +8461,15 @@ MiniA.prototype._runCommand = function(args) {
         var commandParts = prefixParts.slice()
         commandParts.push(originalCommand)
         shInput = commandParts
+      }
+      if (isString(sandboxCfg.prefix) && sandboxCfg.prefix.length > 0) {
+        var sbParts = this._splitShellPrefix(sandboxCfg.prefix)
+        if (!isArray(sbParts) || sbParts.length === 0) sbParts = [sandboxCfg.prefix]
+        var commandBeforeSandbox = finalCommand
+        finalCommand = sandboxCfg.prefix + " " + commandBeforeSandbox
+        var sbInput = sbParts.slice()
+        sbInput.push(commandBeforeSandbox)
+        shInput = sbInput
       }
       var beforeShellResult = this._runHook("before_shell", { MINI_A_SHELL_COMMAND: finalCommand })
       if (isArray(beforeShellResult.outputs) && beforeShellResult.outputs.length > 0 && isObject(this._runtime)) {
@@ -9343,6 +9419,8 @@ MiniA.prototype.init = function(args) {
       { name: "modellc", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "shell", type: "string", default: "" },
+      { name: "usesandbox", type: "string", default: __ },
+      { name: "sandboxprofile", type: "string", default: __ },
       { name: "shellallow", type: "string", default: "" },
       { name: "shellbanextra", type: "string", default: "" },
       { name: "shelltimeout", type: "number", default: __ },
@@ -9395,6 +9473,8 @@ MiniA.prototype.init = function(args) {
     if (args.debugfile.length > 0) args.debug = true
     this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
+    args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
+    args.sandboxprofile = _$(args.sandboxprofile, "args.sandboxprofile").isString().default(__)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
     args.showthinking = _$(toBoolean(args.showthinking), "args.showthinking").isBoolean().default(false)
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
@@ -9555,6 +9635,8 @@ MiniA.prototype.init = function(args) {
       this._toolCacheDefaultTtl = args.toolcachettl
     }
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
+    this._shellSandboxMode = isString(args.usesandbox) ? args.usesandbox.trim() : ""
+    this._shellSandboxProfile = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
@@ -10226,6 +10308,8 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
  * - useshell (boolean, default=false): Whether to allow shell command execution.
  * - shell (string, optional): Prefix to add before each shell command when useshell=true.
+ * - usesandbox (string, optional): Enable OS sandboxing preset for shell commands (auto/linux/macos/windows/off).
+ * - sandboxprofile (string, optional): Sandbox profile path required by some presets (e.g., macOS sandbox-exec).
  * - shellallow (string, optional): Comma-separated list of commands allowed even if usually banned.
  * - shellallowpipes (boolean, default=false): Allow usage of pipes, redirection, and shell control operators.
  * - shellbanextra (string, optional): Comma-separated list of additional commands to ban.
@@ -10399,6 +10483,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "maxcontext", type: "number", default: 0 },
       { name: "rules", type: "string", default: "" },
       { name: "shell", type: "string", default: "" },
+      { name: "usesandbox", type: "string", default: __ },
+      { name: "sandboxprofile", type: "string", default: __ },
       { name: "shellallow", type: "string", default: __ },
       { name: "shellbanextra", type: "string", default: __ },
       { name: "shelltimeout", type: "number", default: __ },
@@ -10431,6 +10517,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.debugfile.length > 0) args.debug = true
     this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
+    args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
+    args.sandboxprofile = _$(args.sandboxprofile, "args.sandboxprofile").isString().default(__)
     args.raw = _$(toBoolean(args.raw), "args.raw").isBoolean().default(false)
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
@@ -10497,6 +10585,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellAllowPipes = args.shellallowpipes
     this._shellBatch = args.shellbatch
     this._shellPrefix = isString(args.shellprefix) ? args.shellprefix.trim() : ""
+    this._shellSandboxMode = isString(args.usesandbox) ? args.usesandbox.trim() : ""
+    this._shellSandboxProfile = isString(args.sandboxprofile) ? args.sandboxprofile.trim() : ""
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
@@ -11967,7 +12057,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 shellbanextra  : args.shellbanextra,
                 shellallowpipes: args.shellallowpipes,
                 shellprefix    : args.shellprefix,
-                shelltimeout   : args.shelltimeout
+                shelltimeout   : args.shelltimeout,
+                usesandbox     : args.usesandbox,
+                sandboxprofile : args.sandboxprofile
               },
               stepLabel    : stepLabel,
               updateContext: !this._useTools
@@ -11983,7 +12075,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             shellallow     : args.shellallow,
             shellbanextra  : args.shellbanextra,
             shellallowpipes: args.shellallowpipes,
-            shelltimeout   : args.shelltimeout
+            shelltimeout   : args.shelltimeout,
+            usesandbox     : args.usesandbox,
+            sandboxprofile : args.sandboxprofile
           }).output
           runtime.context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
           runtime.context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
@@ -12449,7 +12543,9 @@ MiniA.prototype._runChatbotMode = function(options) {
               shellallow     : args.shellallow,
               shellbanextra  : args.shellbanextra,
               shellallowpipes: args.shellallowpipes,
-              shelltimeout   : args.shelltimeout
+              shelltimeout   : args.shelltimeout,
+              usesandbox     : args.usesandbox,
+              sandboxprofile : args.sandboxprofile
             })
             var shellOutput = isDef(shellResult) && isString(shellResult.output) ? shellResult.output : ""
             if (!isString(shellOutput) || shellOutput.length === 0) shellOutput = "(no output)"

@@ -391,6 +391,8 @@ Mini-A ships with complementary components:
 | `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step directive, and adds the no-feedback remark for `mini-a-con`/`mini-a-web`) |
 | `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |
+| `usesandbox` | Apply built-in OS sandbox presets for shell commands (`off`,`auto`,`linux`,`macos`,`windows`) | `off` |
+| `sandboxprofile` | Optional profile path used by sandbox backends that require one (for example macOS `sandbox-exec`) | - |
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
@@ -485,11 +487,14 @@ Mini-A includes built-in security features:
 - **Interactive Confirmation** - Optional approval for each command (`checkall=true`)
 - **Read-Only Mode** - File system protection enabled by default
 - **Shell Isolation** - Shell access disabled by default
-- **Sandboxing Support** - Use `shell=...` prefix for Docker, Podman, or OS sandboxes
+- **Sandboxing Support** - Use `usesandbox=...` presets or `shell=...` prefix for Docker/Podman/custom sandboxes
+- **Hook-based Guardrails** - Add `before_shell`/`after_shell` hooks to enforce organization-specific policy
 
 **Example with Docker sandbox:**
 ```bash
 docker run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work ubuntu:24.04 sleep infinity
+mini-a goal="analyze files" useshell=true usesandbox=linux
+# or keep custom wrappers
 mini-a goal="analyze files" useshell=true shell="docker exec mini-a-sandbox"
 ```
 
