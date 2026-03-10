@@ -439,7 +439,7 @@ ojob:
   opacks      :
   - openaf: 20250725
   - mini-a
-  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __ job.exec)
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
   #logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js

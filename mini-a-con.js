@@ -214,6 +214,7 @@ try {
       exit(0)
     } else if (isDef(args.goal) && hasRunnableExecArg !== true) {
       // Start cli mode
+      if (!isString(args.goal)) args.goal = String(args.goal)
       oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
       exit(0)
     }
