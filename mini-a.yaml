@@ -65,6 +65,19 @@ help:
     desc     : Prefix applied to every shell command (requires useshell=true)
     example  : "sandbox-exec -f /path/to/profile.sb"
     mandatory: false
+  - name     : usesandbox
+    desc     : Enable built-in OS sandbox presets for shell commands (off/auto/linux/macos/windows); warns when unavailable or best-effort
+    example  : "auto"
+    mandatory: false
+  - name     : sandboxprofile
+    desc     : Optional macOS sandbox profile path (otherwise Mini-A auto-generates a restrictive temporary .sb profile)
+    example  : "/path/to/profile.sb"
+    mandatory: false
+  - name     : sandboxnonetwork
+    desc     : Disable network inside the built-in sandbox when supported (Windows remains best-effort)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : shelltimeout
     desc     : Maximum shell command execution time in milliseconds before timeout
     example  : "30000"
@@ -476,6 +489,8 @@ jobs:
         debug          : debug
         useshell       : useshell
         shell          : shell
+        usesandbox     : usesandbox
+        sandboxprofile : sandboxprofile
         extrahooks     : extrahooks
         knowledge      : knowledge
         youare         : youare
@@ -573,6 +588,8 @@ jobs:
       debug          : toBoolean.isBoolean.default(false)
       useshell       : toBoolean.isBoolean.default(false)
       shell          : isString.default(__)
+      usesandbox     : isString.default(__)
+      sandboxprofile : isString.default(__)
       extrahooks     : isString.default(__)
       knowledge      : isString.default(__)
       youare         : isString.default(__)

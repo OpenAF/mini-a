@@ -391,6 +391,9 @@ Mini-A ships with complementary components:
 | `youare` | Override the opening persona sentence in the system prompt (inline text or `@file` path) to craft specialized agents | `"You are a goal-oriented agent running in background."` (Mini-A still appends the step-by-step directive, and adds the no-feedback remark for `mini-a-con`/`mini-a-web`) |
 | `chatyouare` | Override the chatbot persona sentence when `chatbotmode=true` (inline text or `@file` path) | `"You are a helpful conversational AI assistant."` |
 | `useshell` | Allow shell command execution | `false` |
+| `usesandbox` | Apply built-in OS sandbox presets for shell commands (`off`,`auto`,`linux`,`macos`,`windows`); warns and may degrade when the backend is unavailable | `off` |
+| `sandboxprofile` | Optional macOS profile path for `sandbox-exec`; when omitted, Mini-A generates a restrictive temporary `.sb` profile | - |
+| `sandboxnonetwork` | Disable network inside the built-in sandbox when supported; Windows remains best-effort | `false` |
 | `readwrite` | Allow file system modifications | `false` |
 | `mcp` | MCP server configuration (single or array) | - |
 | `usetools` | Register MCP tools with the model | `false` |
@@ -485,11 +488,21 @@ Mini-A includes built-in security features:
 - **Interactive Confirmation** - Optional approval for each command (`checkall=true`)
 - **Read-Only Mode** - File system protection enabled by default
 - **Shell Isolation** - Shell access disabled by default
-- **Sandboxing Support** - Use `shell=...` prefix for Docker, Podman, or OS sandboxes
+- **Sandboxing Support** - Use `usesandbox=...` presets for built-in host restrictions, or `shell=...` for Docker/Podman/custom sandboxes with stronger isolation
+- **Hook-based Guardrails** - Add `before_shell`/`after_shell` hooks to enforce organization-specific policy
+
+Built-in sandbox presets now report their real protection level:
+- `linux`: uses `bwrap` when available; otherwise Mini-A warns and runs unsandboxed.
+- `macos`: uses `sandbox-exec` with either your `sandboxprofile` or a generated restrictive temporary profile.
+- `windows`: applies best-effort PowerShell restrictions with isolated temp/home paths, but does not provide Linux-equivalent filesystem isolation.
+- `sandboxnonetwork=true`: disables network access in the built-in Linux/macOS sandboxes and applies best-effort proxy/network clamps on Windows.
+- `readwrite=true`: relaxes the built-in sandbox only for the current working directory and temp paths when the backend supports it.
 
 **Example with Docker sandbox:**
 ```bash
 docker run -d --rm --name mini-a-sandbox -v "$PWD":/work -w /work ubuntu:24.04 sleep infinity
+mini-a goal="analyze files" useshell=true usesandbox=linux
+# or keep custom wrappers
 mini-a goal="analyze files" useshell=true shell="docker exec mini-a-sandbox"
 ```
 

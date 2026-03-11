@@ -792,6 +792,9 @@ The `start()` method accepts various configuration options:
 #### Shell and File System Access
 - **`useshell`** (boolean, default: false): Allow shell command execution
 - **`shell`** (string): Prefix applied to every shell command (use with `useshell=true`)
+- **`usesandbox`** (string, default: `off`): Apply built-in OS sandbox presets for shell commands (`off`,`auto`,`linux`,`macos`,`windows`). Mini-A warns when the requested backend is unavailable or only best-effort.
+- **`sandboxprofile`** (string): Optional macOS profile path for `sandbox-exec`; if omitted, Mini-A auto-generates a restrictive temporary `.sb` profile
+- **`sandboxnonetwork`** (boolean, default: `false`): Disable network inside the built-in sandbox when supported. Linux/macOS enforce it through the sandbox backend; Windows applies best-effort proxy/network clamps only.
 - **`shellprefix`** (string): Override the shell prefix embedded inside stored plans or MCP executions so converted tasks run against the right environment
 - **`shelltimeout`** (number): Maximum shell command runtime in milliseconds before timeout
 - **`shellmaxbytes`** (number, optional): Cap shell output size in characters. When exceeded, Mini-A keeps a head/tail excerpt and inserts a truncation banner. Defaults to `8000` when unset.
@@ -2156,18 +2159,50 @@ You can adjust this policy using the shell safety options:
 
 ### Shell Prefix Strategies by Operating System
 
+Mini-A now also supports `usesandbox=...` presets for common operating systems. Keep using `shell=...` when you need custom runtimes (Docker/Podman/firejail/custom wrappers).
+
 Use `shell=...` together with `useshell=true` when you want Mini-A to execute every command through an external sandbox or container runtime. The command filter continues to evaluate the original command string, and the prefix is appended immediately before execution.
+
+#### Built-in `usesandbox` presets
+- `usesandbox=auto`: Detect host OS and apply the default preset for that platform.
+- `usesandbox=linux`: Uses `bwrap` when available. The built-in policy keeps the host filesystem read-only by default, gives the command a private temp/home area, only makes the current working directory plus temp writable when `readwrite=true`, and disables networking when `sandboxnonetwork=true`.
+- `usesandbox=macos`: Uses `sandbox-exec -f <sandboxprofile> /bin/sh -lc`. If `sandboxprofile` is omitted, Mini-A generates a restrictive temporary profile with read access to the host, private temp/home write access, optional current-directory writes when `readwrite=true`, and no network allowance when `sandboxnonetwork=true`.
+- `usesandbox=windows`: Uses a best-effort PowerShell wrapper that isolates temp/home paths, narrows the environment, and uses Constrained Language Mode. When `sandboxnonetwork=true`, Mini-A also applies best-effort proxy/environment blocking. It does not provide Linux-equivalent filesystem or guaranteed network isolation and should be combined with WDAC/AppContainer or hooks for stronger policy.
+- If the selected backend is unavailable (for example `bwrap` or `sandbox-exec` is missing), Mini-A warns and continues without the requested OS sandbox.
+
+#### Hook alternatives (recommended for strict policy)
+- Use `before_shell` hooks to deny commands by path, arguments, time window, or user context.
+- Use `after_shell` hooks to audit output, redact sensitive data, and trigger alerts.
+- Combine hooks with `usesandbox`/`shell=` so both policy checks and OS-level sandboxing or wrappers are active.
 
 #### macOS (sandbox-exec)
 - **Use the built-in restriction flags when:** you only need to block specific binaries (e.g. combine `shellallow`, `shellbanextra`, `shellallowpipes`, and `checkall=true`). This keeps commands on the host without additional tooling.
-- **Use `shell=` when:** you want the macOS sandbox to enforce file/network rules defined in a `.sb` profile.
-- **Pros:** native isolation, no additional daemons required, works on Intel and Apple Silicon.
-- **Cons:** sandbox profiles can be verbose; access to developer tools may require profile tweaks.
+- **Use built-in `usesandbox=macos` when:** you want Mini-A to generate a restrictive host sandbox automatically, with `readwrite=true` widening writes only to the current working directory and temp paths.
+- **Use `shell=` when:** you want a custom `.sb` profile or a stronger container/runtime boundary than the built-in host profile.
+- **Pros:** native host restrictions, no additional daemons required, works on Intel and Apple Silicon.
+- **Cons:** `sandbox-exec` availability varies by macOS version; profiles can still need tuning for some developer tools.
+- **Generated profile behavior:** read access to the host is allowed, writes go to the private sandbox temp/home by default, and `readwrite=true` adds current-directory writes.
+- **Network control:** set `sandboxnonetwork=true` to omit `network*` from the generated profile.
 - **Example:**
   ```bash
-  mini-a goal="catalog ~/Projects" useshell=true \
-    shell="sandbox-exec -f /usr/share/sandbox/default.sb"
+  mini-a goal="catalog ~/Projects" useshell=true usesandbox=macos
   ```
+
+#### Linux (bubblewrap)
+- **Use built-in `usesandbox=linux` when:** `bwrap` is installed and you want read-only host access by default with a private temp/home area.
+- **Use `shell=` when:** you need a containerized runtime, custom namespace/network policy, or a guaranteed writable environment beyond Mini-A's `readwrite=true` handling.
+- **Pros:** strongest built-in isolation, namespace separation, clear writable scope when enabled.
+- **Cons:** depends on `bwrap`; if unavailable Mini-A warns and falls back to unsandboxed execution.
+- **Behavior:** host filesystem is read-only by default, `readwrite=true` adds writes to the current working directory and temp paths only.
+- **Network control:** set `sandboxnonetwork=true` to add `--unshare-net`.
+
+#### Windows (best effort PowerShell)
+- **Use built-in `usesandbox=windows` when:** you want safer defaults around temp/home isolation and a reduced PowerShell environment without adding extra tooling.
+- **Use `shell=` or platform tooling when:** you need enforceable OS policy such as WDAC, AppContainer, Windows Sandbox, or another external isolation boundary.
+- **Pros:** no extra dependency, clearer warnings, isolated temp/home paths for command execution.
+- **Cons:** best-effort only; no Linux-equivalent namespace or filesystem enforcement.
+- **Behavior:** PowerShell runs with `ConstrainedLanguage`, isolated temp/home paths, and explicit warnings about the weaker protection level.
+- **Network control:** `sandboxnonetwork=true` only applies best-effort proxy/environment blocking; use WDAC/AppContainer/Windows Sandbox if you need enforceable network isolation.
 
 #### macOS Sequoia (container CLI)
 - **Use the restriction flags when:** you trust the host environment and just need confirmation prompts or per-command allowlists.
@@ -2202,7 +2237,7 @@ Use `shell=...` together with `useshell=true` when you want Mini-A to execute ev
   mini-a goal="list source files" useshell=true shell="podman exec mini-a-sandbox"
   ```
 
-> **Tip:** Mix and match strategies. You can still require confirmations (`checkall=true`) or tweak allowlists (`shellallow=...`) even when commands are routed through Docker, Podman, or sandbox-exec.
+> **Tip:** Mix and match strategies. `shellallow`, `shellbanextra`, `shellallowpipes`, `checkall`, and `before_shell`/`after_shell` hooks remain separate policy layers even when `usesandbox` or `shell=` is active.
 
 ## Advanced Usage Patterns
 

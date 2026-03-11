@@ -37,6 +37,46 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testUtilsMcpSkillsToggle
 
+- name: MiniA Core Tests::LinuxSandboxWarnsWhenMissing
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLinuxSandboxWarnsWhenBwrapMissing
+
+- name: MiniA Core Tests::LinuxSandboxWritableBinds
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLinuxSandboxAddsWritableBinds
+
+- name: MiniA Core Tests::LinuxSandboxNoNetwork
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLinuxSandboxCanDisableNetwork
+
+- name: MiniA Core Tests::MacSandboxRestrictiveProfile
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMacSandboxGeneratesRestrictiveProfile
+
+- name: MiniA Core Tests::MacSandboxNoNetwork
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMacSandboxCanDisableNetwork
+
+- name: MiniA Core Tests::WindowsSandboxBestEffort
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWindowsSandboxBuildsBestEffortExecution
+
+- name: MiniA Core Tests::WindowsSandboxNoNetwork
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWindowsSandboxBestEffortNoNetwork
+
+- name: MiniA Core Tests::MacSandboxReuseWarning
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMacSandboxReuseWarningIsDebugOnly
+
 include:
 - oJobTest.yaml
 
@@ -52,3 +92,11 @@ todo:
 - MiniA Core Tests::ErrorHistory
 - MiniA Core Tests::NormalizeToolResult
 - MiniA Core Tests::UtilsMcpSkillsToggle
+- MiniA Core Tests::LinuxSandboxWarnsWhenMissing
+- MiniA Core Tests::LinuxSandboxWritableBinds
+- MiniA Core Tests::LinuxSandboxNoNetwork
+- MiniA Core Tests::MacSandboxRestrictiveProfile
+- MiniA Core Tests::MacSandboxNoNetwork
+- MiniA Core Tests::WindowsSandboxBestEffort
+- MiniA Core Tests::WindowsSandboxNoNetwork
+- MiniA Core Tests::MacSandboxReuseWarning
