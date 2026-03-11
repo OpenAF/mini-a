@@ -40,15 +40,15 @@ help:
     example  : "8888"
     mandatory: false
   - name     : pathField
-    desc     : Document field holding the source file path (default: path)
+    desc     : "Document field holding the source file path (default: path)"
     example  : "path"
     mandatory: false
   - name     : contentField
-    desc     : Document field holding full text content (default: content)
+    desc     : "Document field holding full text content (default: content)"
     example  : "content"
     mandatory: false
   - name     : titleField
-    desc     : Document field holding the document title (default: title)
+    desc     : "Document field holding the document title (default: title)"
     example  : "title"
     mandatory: false
 
