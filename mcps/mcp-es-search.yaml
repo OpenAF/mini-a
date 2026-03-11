@@ -199,8 +199,6 @@ jobs:
 - name : Init
   check:
     in:
-      url         : isString
-      index       : isString
       toolPrefix  : isString.default("")
       label       : isString.default("")
       user        : isString.default(__)
@@ -210,6 +208,8 @@ jobs:
       titleField  : isString.default("title")
   exec : | #js
     if (isUnDef(global.__es)) {
+      //ow.loadJava()
+      //ow.java.setIgnoreSSLDomains(["127.0.0.1"])
       loadLib(getOPackPath("ElasticSearch") + "/elasticsearch.js")
       global.__es             = new ElasticSearch(args.url, args.user, args.password)
       global.__esIndex        = args.index
@@ -229,7 +229,7 @@ jobs:
       query    : isString
       size     : toNumber.isNumber.default(5)
       from     : toNumber.isNumber.default(0)
-      fields   : isArray.default(["title","content"])
+      fields   : isArray.default(__)
       filter   : isMap.default(__)
       highlight: toBoolean.isBoolean.default(true)
   exec : | #js
@@ -245,7 +245,7 @@ jobs:
       query: {
         multi_match: {
           query : args.query,
-          fields: args.fields
+          fields: isDef(args.fields) ? args.fields : [ titleField, contentField ]
         }
       }
     }
