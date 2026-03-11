@@ -7,7 +7,7 @@
 #   title field   : document title, may be absent       (titleField,   default: title)
 #
 # Multi-instance coexistence: pass toolPrefix (e.g. toolPrefix=docs-) so tools are
-# exposed as docs-search/docs-get/docs-read/docs-info instead of the es-* defaults.
+# exposed as docs-search/docs-get/docs-read/docs-info instead of the * defaults.
 # Use label for a human-readable name injected into descriptions via tplDesc.
 
 help:
@@ -68,9 +68,9 @@ todo:
         title  : OpenAF mini-a MCP ElasticSearch/OpenSearch server
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
-      es-search:
-        name       : es-search
-        description: "Full-text search in the {{index}} index ({{label}}) with optional metadata filtering and ES-native highlights."
+      search:
+        name       : search
+        description: "Full-text search in the {{index}} index ({{label}}) with optional metadata filtering and native highlights."
         inputSchema:
           type      : object
           properties:
@@ -96,12 +96,12 @@ todo:
               description: Return highlighted excerpts around matches (default true).
           required: [ query ]
         annotations:
-          title         : es-search
+          title         : search
           readOnlyHint  : true
           idempotentHint: true
 
-      es-get:
-        name       : es-get
+      get:
+        name       : get
         description: "Get a document by ID or path from the {{index}} index ({{label}}), returning metadata and an optional content preview."
         inputSchema:
           type      : object
@@ -116,12 +116,12 @@ todo:
               type       : integer
               description: Number of content lines to include as preview (0 = none, default 0).
         annotations:
-          title         : es-get
+          title         : get
           readOnlyHint  : true
           idempotentHint: true
 
-      es-read:
-        name       : es-read
+      read:
+        name       : read
         description: "Retrieve a portion of a document's content from the {{index}} index ({{label}}). Use this to avoid flooding context with full large documents."
         inputSchema:
           type      : object
@@ -152,29 +152,25 @@ todo:
               description: Max matches to return in regex mode (default 20).
           required: [ id ]
         annotations:
-          title         : es-read
+          title         : read
           readOnlyHint  : true
           idempotentHint: true
 
-      es-info:
-        name       : es-info
-        description: "Get index statistics and field mappings for the {{index}} ES/OpenSearch cluster ({{label}}). Omit the index parameter to list all available indices."
+      info:
+        name       : info
+        description: "Get statistics and field mappings for the configured {{index}} ES/OpenSearch index ({{label}})."
         inputSchema:
           type      : object
-          properties:
-            index:
-              type       : string
-              description: Specific index name; omit to list all available indices.
         annotations:
-          title         : es-info
+          title         : info
           readOnlyHint  : true
           idempotentHint: true
 
     ((fns    )): &MCPFNS
-      es-search: ES search
-      es-get   : ES get
-      es-read  : ES read
-      es-info  : ES info
+      search: ES search
+      get   : ES get
+      read  : ES read
+      info  : ES info
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
@@ -213,18 +209,21 @@ jobs:
       contentField: isString.default("content")
       titleField  : isString.default("title")
   exec : | #js
-    loadLib(getOPackPath("ElasticSearch") + "/elasticsearch.js")
-    global.__es             = new ElasticSearch(args.url, args.user, args.password)
-    global.__esIndex        = args.index
-    global.__esLabel        = args.label || args.index
-    global.__esPathField    = args.pathField
-    global.__esContentField = args.contentField
-    global.__esTitleField   = args.titleField
-    // propagate resolved label back to args so tplDesc can render {{label}} in descriptions
-    args.label = global.__esLabel
+    if (isUnDef(global.__es)) {
+      loadLib(getOPackPath("ElasticSearch") + "/elasticsearch.js")
+      global.__es             = new ElasticSearch(args.url, args.user, args.password)
+      global.__esIndex        = args.index
+      global.__esLabel        = args.label || args.index
+      global.__esPathField    = args.pathField
+      global.__esContentField = args.contentField
+      global.__esTitleField   = args.titleField
+      // propagate resolved label back to args so tplDesc can render {{label}} in descriptions
+      args.label = global.__esLabel
+    }
 
-# ---------------
+# ----------------
 - name : ES search
+  from : Init
   check:
     in:
       query    : isString
@@ -289,8 +288,9 @@ jobs:
       })
     }
 
-# ----------
+# -------------
 - name : ES get
+  from : Init
   check:
     in:
       id           : isString.default(__)
@@ -343,8 +343,9 @@ jobs:
 
     return out
 
-# -----------
+# --------------
 - name : ES read
+  from : Init
   check:
     in:
       id           : isString
@@ -429,43 +430,29 @@ jobs:
       to_line    : toLine
     }
 
-# -----------
+# --------------
 - name : ES info
-  check:
-    in:
-      index: isString.default(__)
+  from : Init
   exec : | #js
     var es       = global.__es
-    var defIndex = isDef(args.index) ? args.index : global.__esIndex
+    var defIndex = global.__esIndex
+    var statsArr = es.getIndice(defIndex)
+    var mapping  = es.getIndexMapping(defIndex)
+    var fields   = []
 
-    if (isUnDef(args.index)) {
-      return es.getIndices(true).map(function(i) {
-        return {
-          index     : i.index,
-          docs_count: i.docsCount,
-          store_size: i.storeSize,
-          status    : i.status
-        }
-      })
-    } else {
-      var statsArr = es.getIndice(defIndex)
-      var mapping  = es.getIndexMapping(defIndex)
-      var fields   = []
-
-      if (isDef(mapping) && isDef(mapping.mappings) && isDef(mapping.mappings.properties)) {
-        Object.keys(mapping.mappings.properties).forEach(function(f) {
-          fields.push({
-            name: f,
-            type: mapping.mappings.properties[f].type || "object"
-          })
+    if (isDef(mapping) && isDef(mapping.mappings) && isDef(mapping.mappings.properties)) {
+      Object.keys(mapping.mappings.properties).forEach(function(f) {
+        fields.push({
+          name: f,
+          type: mapping.mappings.properties[f].type || "object"
         })
-      }
+      })
+    }
 
-      var st = isArray(statsArr) && statsArr.length ? statsArr[0] : {}
-      return {
-        index     : defIndex,
-        docs_count: isDef(st["docs.count"]) ? Number(st["docs.count"]) : __,
-        store_size: isDef(st["store.size"]) ? Number(st["store.size"]) : __,
-        fields    : fields
-      }
+    var st = isArray(statsArr) && statsArr.length ? statsArr[0] : {}
+    return {
+      index     : defIndex,
+      docs_count: isDef(st["docs.count"]) ? Number(st["docs.count"]) : __,
+      store_size: isDef(st["store.size"]) ? Number(st["store.size"]) : __,
+      fields    : fields
     }
