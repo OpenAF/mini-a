@@ -133,12 +133,12 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 16ae4804980fb19d7ae0f6d15fddedfcfb57778d
+  CHEATSHEET.md: 481fb92a6d540b86e5e32a680aee9d0de152fffc
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: ee5c2b595156a25fff4367435926e599b1bd8bfd
-  USAGE.md: 22da6cba520ae52145aa5d8808177a19376a9c8f
+  USAGE.md: 2a3de30c829954a86efa9ae991d02232e8c243a1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 59c81b7209ff4d3438a3ba11cf6a27ce92d8dd4e
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
@@ -189,7 +189,7 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: d31c0b1a27f8805b6635154ae8a1680d0832cc72
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: fea846ffd9f18d4d34164d43c25449f3822ba649
+  mini-a.js: 78acfe8d27d1253e56a0d43aae41ad38e7fed8e6
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: d23d0df1c14b2a1584436ad850598af1ae0247cd
   public/index.md: 2cbe230a032a34dce810c5db9e76f32f94fb8f49
