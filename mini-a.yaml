@@ -243,6 +243,16 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usesvg
+    desc     : Encourage secure raw SVG outputs rendered as data URI images in the web UI
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usevectors
+    desc     : Enable vector graphics guidance bundle (usesvg + usediagrams)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usestream
     desc     : Enable streaming output - display LLM tokens as they arrive in real-time
     example  : "true"
@@ -529,6 +539,8 @@ jobs:
         useascii       : useascii
         usemaps        : usemaps
         usemath        : usemath
+        usesvg         : usesvg
+        usevectors     : usevectors
         usestream      : usestream
         mcpdynamic     : mcpdynamic
         mcpproxy       : mcpproxy
@@ -628,6 +640,8 @@ jobs:
       useascii       : toBoolean.isBoolean.default(false)
       usemaps        : toBoolean.isBoolean.default(false)
       usemath        : toBoolean.isBoolean.default(false)
+      usesvg         : toBoolean.isBoolean.default(false)
+      usevectors     : toBoolean.isBoolean.default(false)
       usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcpproxy       : toBoolean.isBoolean.default(false)
@@ -777,6 +791,10 @@ jobs:
       return { outputs: outputs, blocked: blocked }
     }
     if (isDef(args.usemermaid) && isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
+    if (isDef(args.usevectors)) {
+      if (isUnDef(args.usesvg) || !args.usesvg) args.usesvg = true
+      if (isUnDef(args.usediagrams) || !args.usediagrams) args.usediagrams = true
+    }
     if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
     if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
     if (isDef(args.maxcontent) && isUnDef(args.maxcontext)) args.maxcontext = args.maxcontent

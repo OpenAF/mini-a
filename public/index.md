@@ -1786,6 +1786,36 @@
         return processed;
     }
 
+
+    let svgBlockStore = [];
+
+    function preprocessSvgBlocks(markdown) {
+        if (!markdown) return markdown;
+        svgBlockStore = [];
+        let counter = 0;
+        const pattern = /```svg\s*\n([\s\S]*?)\n```/gmi;
+
+        return markdown.replace(pattern, (match, content) => {
+            const id = counter++;
+            svgBlockStore.push({ id, content: content || '' });
+            return `<div class="svg-placeholder" data-svg-id="${id}"></div>`;
+        });
+    }
+
+    function postprocessSvgBlocks(html) {
+        if (!html || svgBlockStore.length === 0) return html;
+
+        let processed = html;
+        svgBlockStore.forEach(item => {
+            const placeholder = `<div class="svg-placeholder" data-svg-id="${item.id}"></div>`;
+            const replacement = `<pre><code class="language-svg">${escapeHtml(item.content)}</code></pre>`;
+            processed = processed.replace(placeholder, replacement);
+        });
+
+        svgBlockStore = [];
+        return processed;
+    }
+
     /* ========== GLOBAL STATE VARIABLES ========== */
     let currentSessionUuid = null;
     let pollingInterval = null;
@@ -2512,7 +2542,7 @@
         destroyRenderedCharts();
 
         // Post-process to restore any chart blocks that were preprocessed
-        const processedHtml = postprocessChartBlocks(htmlContent);
+        const processedHtml = postprocessSvgBlocks(postprocessChartBlocks(htmlContent));
 
         // Track if content is being streamed
         const isStreaming = streamActive && !conversationFinished;
@@ -2657,6 +2687,7 @@
         await renderMermaidDiagrams();
         await renderChartBlocks();
         renderLeafletMaps();
+        renderSvgBlocks();
 
         // Initialize table sorters for any tables in the new content
         if (typeof initializeTableSorters === 'function') {
@@ -2675,11 +2706,12 @@
         const nextContent = rawContent || '';
         if (nextContent === lastRenderedRaw) return;
 
-        const preprocessed = preprocessChartBlocks(nextContent);
+        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(nextContent));
         const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
+        setTimeout(() => renderSvgBlocks(), 140);
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         lastRenderedRaw = nextContent;
@@ -3236,6 +3268,98 @@
         } catch (error) {
             console.error('Mermaid re-rendering error:', error);
         }
+    }
+
+    function sanitizeSvgContent(rawSvg) {
+        if (typeof rawSvg !== 'string') return '';
+
+        let sanitized = rawSvg.trim();
+        if (sanitized.length === 0) return '';
+
+        sanitized = sanitized
+            .replace(/<\s*(script|foreignObject|iframe|embed|object)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gim, '')
+            .replace(/<\s*(script|foreignObject|iframe|embed|object)\b[^>]*\/?>/gim, '')
+            .replace(/\son[a-z0-9:_-]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gim, '');
+
+        sanitized = sanitized.replace(/\s(?:href|xlink:href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gim, (match, fullValue, q1, q2, q3) => {
+            const rawValue = (q1 || q2 || q3 || '').trim();
+            const lowerValue = rawValue.toLowerCase();
+            const isFragment = rawValue.startsWith('#');
+            const isSafeImageData = lowerValue.startsWith('data:image/');
+            if (isFragment || isSafeImageData) return match;
+            return '';
+        });
+
+        sanitized = sanitized.replace(/\s[a-z0-9:_-]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gim, (match) => {
+            const eqIndex = match.indexOf('=');
+            if (eqIndex < 0) return match;
+            const attrName = match.slice(0, eqIndex).trim().toLowerCase();
+            if (attrName === 'href' || attrName === 'xlink:href') return match;
+
+            const rawPart = match.slice(eqIndex + 1).trim();
+            const unquoted = rawPart.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
+            if (unquoted.startsWith('javascript:')) return '';
+            if (unquoted.startsWith('data:') && !unquoted.startsWith('data:image/')) return '';
+            return match;
+        });
+
+        return sanitized;
+    }
+
+    function renderSvgBlocks() {
+        if (!resultsDiv) return;
+
+        const isDark = typeof _isD !== 'undefined' && _isD;
+        const background = isDark ? '#101218' : '#f8fafc';
+        const border = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.18)';
+
+        const svgBlocks = resultsDiv.querySelectorAll('pre code.language-svg, pre code.svg');
+        svgBlocks.forEach((block) => {
+            if (block.dataset.svgRendered === 'true') return;
+
+            const rawSvg = (block.textContent || '').trim();
+            const pre = block.parentElement;
+            if (!pre || rawSvg.length === 0 || rawSvg.toLowerCase().indexOf('<svg') === -1) {
+                block.dataset.svgRendered = 'true';
+                return;
+            }
+
+            const sanitizedSvg = sanitizeSvgContent(rawSvg);
+            if (sanitizedSvg.length === 0 || sanitizedSvg.toLowerCase().indexOf('<svg') === -1) {
+                block.dataset.svgRendered = 'true';
+                return;
+            }
+
+            const encoded = btoa(unescape(encodeURIComponent(sanitizedSvg)));
+            const imageSrc = 'data:image/svg+xml;base64,' + encoded;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'svg-rendered-block';
+            wrapper.style.background = background;
+            wrapper.style.border = '1px solid ' + border;
+            wrapper.style.borderRadius = '8px';
+            wrapper.style.padding = '10px';
+            wrapper.style.margin = '12px 0';
+            wrapper.style.overflow = 'auto';
+            wrapper.setAttribute('data-svg-source', sanitizedSvg);
+
+            const image = document.createElement('img');
+            image.src = imageSrc;
+            image.alt = 'Rendered SVG graphic';
+            image.style.display = 'block';
+            image.style.maxWidth = '100%';
+            image.style.height = 'auto';
+
+            wrapper.appendChild(image);
+            pre.replaceWith(wrapper);
+            block.dataset.svgRendered = 'true';
+        });
+
+        const rendered = resultsDiv.querySelectorAll('.svg-rendered-block[data-svg-source]');
+        rendered.forEach((container) => {
+            container.style.background = background;
+            container.style.border = '1px solid ' + border;
+        });
     }
 
     /* ========== LEAFLET MAPS RENDERING ========== */
@@ -4289,12 +4413,13 @@
 
         currentSessionUuid = entry.uuid;
 
-        const preprocessed = preprocessChartBlocks(entry.content || '');
+        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(entry.content || ''));
         const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
+        setTimeout(() => renderSvgBlocks(), 140);
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         refreshHistoryPanel();
@@ -4340,7 +4465,7 @@
                     planPanel.removeAttribute('open');
                 }
             }
-            const preprocessed = preprocessChartBlocks(data.content || '');
+            const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(data.content || ''));
             const htmlContent = converter.makeHtml(preprocessed);
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -5244,6 +5369,10 @@
 
         if (typeof reRenderLeafletMaps === 'function') {
             setTimeout(() => reRenderLeafletMaps(), 140);
+        }
+
+        if (typeof renderSvgBlocks === 'function') {
+            setTimeout(() => renderSvgBlocks(), 140);
         }
     }
 
