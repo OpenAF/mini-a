@@ -3361,6 +3361,9 @@
         let sanitized = rawSvg.trim();
         if (sanitized.length === 0) return '';
 
+        // Ensure XML entity validity (e.g. bare '&' in text nodes)
+        sanitized = sanitized.replace(/&(?!(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);)/gim, '&amp;');
+
         sanitized = sanitized
             .replace(/<\s*(script|foreignObject|iframe|embed|object)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gim, '')
             .replace(/<\s*(script|foreignObject|iframe|embed|object)\b[^>]*\/?>/gim, '')
@@ -3391,6 +3394,41 @@
         return sanitized;
     }
 
+    function validateSvgXmlContent(svgText) {
+        if (typeof svgText !== 'string' || svgText.trim().length === 0) {
+            return { valid: false, reason: 'Empty SVG content.' };
+        }
+
+        if (typeof DOMParser === 'undefined') {
+            return { valid: true, reason: '' };
+        }
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgText, 'image/svg+xml');
+            const parserErrorNode = doc.querySelector('parsererror');
+
+            if (parserErrorNode) {
+                const message = (parserErrorNode.textContent || '').trim();
+                return {
+                    valid: false,
+                    reason: message || 'Malformed SVG XML.'
+                };
+            }
+
+            if (!doc.documentElement || String(doc.documentElement.nodeName).toLowerCase() !== 'svg') {
+                return { valid: false, reason: 'Root element is not <svg>.' };
+            }
+
+            return { valid: true, reason: '' };
+        } catch (error) {
+            return {
+                valid: false,
+                reason: (error && error.message) ? error.message : 'Unable to parse SVG XML.'
+            };
+        }
+    }
+
     function renderSvgBlocks() {
         if (!resultsDiv) return;
 
@@ -3411,6 +3449,24 @@
 
             const sanitizedSvg = sanitizeSvgContent(rawSvg);
             if (sanitizedSvg.length === 0 || sanitizedSvg.toLowerCase().indexOf('<svg') === -1) {
+                block.dataset.svgRendered = 'true';
+                return;
+            }
+
+            const validation = validateSvgXmlContent(sanitizedSvg);
+            if (!validation.valid) {
+                if (!pre.previousElementSibling || !pre.previousElementSibling.classList.contains('svg-invalid-notice')) {
+                    const notice = document.createElement('div');
+                    notice.className = 'svg-invalid-notice';
+                    notice.style.background = isDark ? '#2b1d1d' : '#fff4f4';
+                    notice.style.border = isDark ? '1px solid #7a3a3a' : '1px solid #f0b0b0';
+                    notice.style.color = isDark ? '#ffd2d2' : '#8a2b2b';
+                    notice.style.borderRadius = '8px';
+                    notice.style.padding = '10px';
+                    notice.style.margin = '12px 0 8px 0';
+                    notice.textContent = 'Unable to render SVG preview: invalid SVG XML. Showing source instead.';
+                    pre.parentElement.insertBefore(notice, pre);
+                }
                 block.dataset.svgRendered = 'true';
                 return;
             }
