@@ -1629,6 +1629,7 @@
             "customizedHeaderId"      : true,
             "parseImgDimensions"      : true,
             "simplifiedAutoLink"      : true,
+            "ghCodeBlocks"            : true,
             "strikethrough"           : true,
             "tables"                  : true,
             "tablesHeaderId"          : true,
@@ -1783,6 +1784,45 @@
         
         // Clear the store after processing
         chartBlockStore = [];
+        return processed;
+    }
+
+
+    let svgBlockStore = [];
+
+    function preprocessSvgBlocks(markdown) {
+        if (!markdown) return markdown;
+        svgBlockStore = [];
+        let counter = 0;
+        const closedFencePattern = /(^|\n)[ \t]*```[ \t]*svg(?:[^\r\n]*)\r?\n([\s\S]*?)\r?\n[ \t]*```(?=\n|$)/gmi;
+        const unclosedFencePattern = /(^|\n)[ \t]*```[ \t]*svg(?:[^\r\n]*)\r?\n([\s\S]*?<svg\b[\s\S]*?<\s*\/\s*svg\s*>)/gmi;
+        const bareSvgPattern = /(^|\n)([ \t]*)(<svg\b[\s\S]*?<\s*\/\s*svg\s*>)(?=\n|$)/gmi;
+
+        const toPlaceholder = (prefix, content) => {
+            const id = counter++;
+            svgBlockStore.push({ id, content: content || '' });
+            return `${prefix}<div class="svg-placeholder" data-svg-id="${id}"></div>`;
+        };
+
+        let processed = markdown.replace(closedFencePattern, (match, prefix, content) => toPlaceholder(prefix, content));
+        processed = processed.replace(unclosedFencePattern, (match, prefix, content) => toPlaceholder(prefix, content));
+        processed = processed.replace(bareSvgPattern, (match, prefix, indent, content) => toPlaceholder(prefix + (indent || ''), content));
+        processed = processed.replace(/(^|\n)[ \t]*```[ \t]*svg(?:[^\r\n]*)[ \t]*(?=\n|$)/gmi, '$1');
+
+        return processed;
+    }
+
+    function postprocessSvgBlocks(html) {
+        if (!html || svgBlockStore.length === 0) return html;
+
+        let processed = html;
+        svgBlockStore.forEach(item => {
+            const placeholder = `<div class="svg-placeholder" data-svg-id="${item.id}"></div>`;
+            const replacement = `<pre><code class="language-svg">${escapeHtml(item.content)}</code></pre>`;
+            processed = processed.replace(placeholder, replacement);
+        });
+
+        svgBlockStore = [];
         return processed;
     }
 
@@ -1997,6 +2037,80 @@
             }
         }
         return '';
+    }
+
+    function tryParseAssistantJson(text) {
+        if (typeof text !== 'string') return null;
+        const candidate = text.trim();
+        if (!candidate) return null;
+
+        try {
+            return JSON.parse(candidate);
+        } catch (_) { /* ignore */ }
+
+        const fenced = candidate.match(/^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i);
+        if (fenced && fenced[1]) {
+            try {
+                return JSON.parse(fenced[1]);
+            } catch (_) { /* ignore */ }
+        }
+
+        const firstBrace = candidate.indexOf('{');
+        const lastBrace = candidate.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            try {
+                return JSON.parse(candidate.substring(firstBrace, lastBrace + 1));
+            } catch (_) { /* ignore */ }
+        }
+
+        return null;
+    }
+
+    function extractAssistantAnswerText(text) {
+        const parsed = tryParseAssistantJson(text);
+        if (!parsed || typeof parsed !== 'object') return null;
+
+        const candidates = ['answer', 'final_answer', 'response', 'result'];
+        for (let i = 0; i < candidates.length; i++) {
+            const key = candidates[i];
+            if (typeof parsed[key] === 'string' && parsed[key].trim().length > 0) {
+                return parsed[key].trim();
+            }
+        }
+
+        if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+            const action = typeof parsed.action === 'string' ? parsed.action.toLowerCase() : '';
+            if (action === 'final' || action === 'done' || action === 'finish') {
+                return parsed.message.trim();
+            }
+        }
+
+        return null;
+    }
+
+    function normalizeRenderedConversationText(text) {
+        if (!text) return '';
+        const input = String(text);
+        const lines = input.split('\n');
+        const normalized = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            if (trimmed === 'final' || trimmed === 'assistant' || trimmed === '🤖') {
+                const remainder = lines.slice(i + 1).join('\n').trim();
+                const answer = extractAssistantAnswerText(remainder);
+                if (answer) {
+                    normalized.push(line);
+                    normalized.push(answer);
+                    return normalized.join('\n');
+                }
+            }
+            normalized.push(line);
+        }
+
+        const answerOnly = extractAssistantAnswerText(input);
+        return answerOnly || input;
     }
 
     function extractFirstUserPromptFromEvents(events) {
@@ -2512,7 +2626,7 @@
         destroyRenderedCharts();
 
         // Post-process to restore any chart blocks that were preprocessed
-        const processedHtml = postprocessChartBlocks(htmlContent);
+        const processedHtml = postprocessSvgBlocks(postprocessChartBlocks(htmlContent));
 
         // Track if content is being streamed
         const isStreaming = streamActive && !conversationFinished;
@@ -2657,6 +2771,7 @@
         await renderMermaidDiagrams();
         await renderChartBlocks();
         renderLeafletMaps();
+        renderSvgBlocks();
 
         // Initialize table sorters for any tables in the new content
         if (typeof initializeTableSorters === 'function') {
@@ -2675,11 +2790,13 @@
         const nextContent = rawContent || '';
         if (nextContent === lastRenderedRaw) return;
 
-        const preprocessed = preprocessChartBlocks(nextContent);
+        const normalizedContent = normalizeRenderedConversationText(nextContent);
+        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(normalizedContent));
         const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
+        setTimeout(() => renderSvgBlocks(), 140);
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         lastRenderedRaw = nextContent;
@@ -3236,6 +3353,154 @@
         } catch (error) {
             console.error('Mermaid re-rendering error:', error);
         }
+    }
+
+    function sanitizeSvgContent(rawSvg) {
+        if (typeof rawSvg !== 'string') return '';
+
+        let sanitized = rawSvg.trim();
+        if (sanitized.length === 0) return '';
+
+        // Ensure XML entity validity (e.g. bare '&' in text nodes)
+        sanitized = sanitized.replace(/&(?!(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);)/gim, '&amp;');
+
+        sanitized = sanitized
+            .replace(/<\s*(script|foreignObject|iframe|embed|object)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gim, '')
+            .replace(/<\s*(script|foreignObject|iframe|embed|object)\b[^>]*\/?>/gim, '')
+            .replace(/\son[a-z0-9:_-]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gim, '');
+
+        sanitized = sanitized.replace(/\s(?:href|xlink:href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gim, (match, fullValue, q1, q2, q3) => {
+            const rawValue = (q1 || q2 || q3 || '').trim();
+            const lowerValue = rawValue.toLowerCase();
+            const isFragment = rawValue.startsWith('#');
+            const isSafeImageData = lowerValue.startsWith('data:image/');
+            if (isFragment || isSafeImageData) return match;
+            return '';
+        });
+
+        sanitized = sanitized.replace(/\s[a-z0-9:_-]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gim, (match) => {
+            const eqIndex = match.indexOf('=');
+            if (eqIndex < 0) return match;
+            const attrName = match.slice(0, eqIndex).trim().toLowerCase();
+            if (attrName === 'href' || attrName === 'xlink:href') return match;
+
+            const rawPart = match.slice(eqIndex + 1).trim();
+            const unquoted = rawPart.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
+            if (unquoted.startsWith('javascript:')) return '';
+            if (unquoted.startsWith('data:') && !unquoted.startsWith('data:image/')) return '';
+            return match;
+        });
+
+        return sanitized;
+    }
+
+    function validateSvgXmlContent(svgText) {
+        if (typeof svgText !== 'string' || svgText.trim().length === 0) {
+            return { valid: false, reason: 'Empty SVG content.' };
+        }
+
+        if (typeof DOMParser === 'undefined') {
+            return { valid: true, reason: '' };
+        }
+
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(svgText, 'image/svg+xml');
+            const parserErrorNode = doc.querySelector('parsererror');
+
+            if (parserErrorNode) {
+                const message = (parserErrorNode.textContent || '').trim();
+                return {
+                    valid: false,
+                    reason: message || 'Malformed SVG XML.'
+                };
+            }
+
+            if (!doc.documentElement || String(doc.documentElement.nodeName).toLowerCase() !== 'svg') {
+                return { valid: false, reason: 'Root element is not <svg>.' };
+            }
+
+            return { valid: true, reason: '' };
+        } catch (error) {
+            return {
+                valid: false,
+                reason: (error && error.message) ? error.message : 'Unable to parse SVG XML.'
+            };
+        }
+    }
+
+    function renderSvgBlocks() {
+        if (!resultsDiv) return;
+
+        const isDark = typeof _isD !== 'undefined' && _isD;
+        const background = isDark ? '#101218' : '#f8fafc';
+        const border = isDark ? 'rgba(230,230,230,0.2)' : 'rgba(33,37,41,0.18)';
+
+        const svgBlocks = resultsDiv.querySelectorAll('pre code.language-svg, pre code.svg');
+        svgBlocks.forEach((block) => {
+            if (block.dataset.svgRendered === 'true') return;
+
+            const rawSvg = (block.textContent || '').trim();
+            const pre = block.parentElement;
+            if (!pre || rawSvg.length === 0 || rawSvg.toLowerCase().indexOf('<svg') === -1) {
+                block.dataset.svgRendered = 'true';
+                return;
+            }
+
+            const sanitizedSvg = sanitizeSvgContent(rawSvg);
+            if (sanitizedSvg.length === 0 || sanitizedSvg.toLowerCase().indexOf('<svg') === -1) {
+                block.dataset.svgRendered = 'true';
+                return;
+            }
+
+            const validation = validateSvgXmlContent(sanitizedSvg);
+            if (!validation.valid) {
+                if (!pre.previousElementSibling || !pre.previousElementSibling.classList.contains('svg-invalid-notice')) {
+                    const notice = document.createElement('div');
+                    notice.className = 'svg-invalid-notice';
+                    notice.style.background = isDark ? '#2b1d1d' : '#fff4f4';
+                    notice.style.border = isDark ? '1px solid #7a3a3a' : '1px solid #f0b0b0';
+                    notice.style.color = isDark ? '#ffd2d2' : '#8a2b2b';
+                    notice.style.borderRadius = '8px';
+                    notice.style.padding = '10px';
+                    notice.style.margin = '12px 0 8px 0';
+                    notice.textContent = 'Unable to render SVG preview: invalid SVG XML. Showing source instead.';
+                    pre.parentElement.insertBefore(notice, pre);
+                }
+                block.dataset.svgRendered = 'true';
+                return;
+            }
+
+            const encoded = btoa(unescape(encodeURIComponent(sanitizedSvg)));
+            const imageSrc = 'data:image/svg+xml;base64,' + encoded;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'svg-rendered-block';
+            wrapper.style.background = background;
+            wrapper.style.border = '1px solid ' + border;
+            wrapper.style.borderRadius = '8px';
+            wrapper.style.padding = '10px';
+            wrapper.style.margin = '12px 0';
+            wrapper.style.overflow = 'auto';
+            wrapper.setAttribute('data-svg-source', sanitizedSvg);
+
+            const image = document.createElement('img');
+            image.src = imageSrc;
+            image.alt = 'Rendered SVG graphic';
+            image.style.display = 'block';
+            image.style.maxWidth = '100%';
+            image.style.height = 'auto';
+
+            wrapper.appendChild(image);
+            pre.replaceWith(wrapper);
+            block.dataset.svgRendered = 'true';
+        });
+
+        const rendered = resultsDiv.querySelectorAll('.svg-rendered-block[data-svg-source]');
+        rendered.forEach((container) => {
+            container.style.background = background;
+            container.style.border = '1px solid ' + border;
+        });
     }
 
     /* ========== LEAFLET MAPS RENDERING ========== */
@@ -4289,12 +4554,13 @@
 
         currentSessionUuid = entry.uuid;
 
-        const preprocessed = preprocessChartBlocks(entry.content || '');
+        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(entry.content || ''));
         const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         resetPlanPanel();
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }
         forceRenderChartBlocks();
+        setTimeout(() => renderSvgBlocks(), 140);
         if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
         __refreshDarkMode();
         refreshHistoryPanel();
@@ -4340,7 +4606,7 @@
                     planPanel.removeAttribute('open');
                 }
             }
-            const preprocessed = preprocessChartBlocks(data.content || '');
+            const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(data.content || ''));
             const htmlContent = converter.makeHtml(preprocessed);
             await updateResultsContent(htmlContent);
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
@@ -5244,6 +5510,10 @@
 
         if (typeof reRenderLeafletMaps === 'function') {
             setTimeout(() => reRenderLeafletMaps(), 140);
+        }
+
+        if (typeof renderSvgBlocks === 'function') {
+            setTimeout(() => renderSvgBlocks(), 140);
         }
     }
 

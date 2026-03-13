@@ -413,6 +413,8 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
 | `usecharts` | boolean | `false` | Encourage Chart.js charts in output |
 | `useascii` | boolean | `false` | Encourage enhanced UTF-8/ANSI visual output with colors and emojis |
 | `usemaps` | boolean | `false` | Encourage Leaflet JSON blocks for interactive maps (renders in console transcript and web UI) |
+| `usesvg` | boolean | `false` | Encourage raw SVG blocks rendered securely as image data URIs in the web UI |
+| `usevectors` | boolean | `false` | Enable infographic-focused vector guidance bundle (`usesvg=true` + `usediagrams=true`) |
 | `format` | string | `md` | Output format (`md` or `json`) |
 | `outputfile` | string | - | Alternative key for `outfile`, used mainly during plan conversions |
 

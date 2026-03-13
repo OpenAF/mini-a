@@ -702,8 +702,9 @@ MiniA.buildVisualKnowledge = function(options) {
   var useAscii = _$(toBoolean(options.useAscii), "options.useAscii").isBoolean().default(false)
   var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
   var useMath = _$(toBoolean(options.useMath), "options.useMath").isBoolean().default(false)
+  var useSvg = _$(toBoolean(options.useSvg), "options.useSvg").isBoolean().default(false)
 
-  if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath) return ""
+  if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath && !useSvg) return ""
 
   var existingKnowledge = isString(options.existingKnowledge) ? options.existingKnowledge : ""
   // Check if visual guidance already exists AND matches current flags
@@ -713,8 +714,9 @@ MiniA.buildVisualKnowledge = function(options) {
     var hasAscii = existingKnowledge.indexOf("ASCII/UTF-8 visuals") >= 0
     var hasMaps = existingKnowledge.indexOf("Interactive Maps:") >= 0
     var hasMath = existingKnowledge.indexOf("Math formulas:") >= 0
+    var hasSvg = existingKnowledge.indexOf("SVG graphics:") >= 0 || existingKnowledge.indexOf("Illustrations and custom visuals:") >= 0
     // Only return early if existing guidance matches current flags
-    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps && useMath === hasMath) {
+    if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps && useMath === hasMath && useSvg === hasSvg) {
       return ""
     }
   }
@@ -863,6 +865,23 @@ MiniA.buildVisualKnowledge = function(options) {
     )
   }
 
+  if (useSvg) {
+    visualParts.push(
+      "Illustrations and custom visuals:\n" +
+      "  - For custom illustrations, output a ```svg``` fenced block with complete `<svg>...</svg>` markup.\n" +
+      "  - In vector/infographic mode, default to a polished SVG infographic whenever visuals improve understanding.\n" +
+      "  - Build the infographic for fast scanning: headline, clear sections, visual hierarchy, concise labels, and callouts.\n" +
+      "  - Prefer infographic structures (panels, KPI cards, legends, timelines, comparisons, process steps, annotated layouts, icon-supported summaries) over standalone art.\n" +
+      "  - If the task includes data, comparisons, steps, metrics, or recommendations, use an infographic-first layout instead of prose-first output.\n" +
+      "  - Keep visuals polished and readable: balanced spacing, intentional color, clear contrast/depth, not plain wireframes.\n" +
+      "  - Always include `viewBox` or explicit `width` and `height`.\n" +
+      "  - Never include `<script>`, event handler attributes (`on*`), `<foreignObject>`, `javascript:` URIs, or external resource references.\n" +
+      "  - Allowed tags: svg, g, path, rect, circle, ellipse, line, polyline, polygon, text, tspan, defs, linearGradient, radialGradient, clipPath, mask, pattern, use (internal `#id` only), marker, symbol, title, desc.\n" +
+      "  - Use this format for custom illustrations, icons, technical drawings, annotated diagrams, infographics, geometric patterns, and UI mockups.\n" +
+      "  - Prefer Mermaid for standard flow/sequence/entity/timeline-style diagrams when Mermaid types apply."
+    )
+  }
+
   var checklist = "\n\nVisual selection checklist:"
   var nextIndex = 1
   if (useDiagrams) {
@@ -895,6 +914,12 @@ MiniA.buildVisualKnowledge = function(options) {
   }
   if (useMath) {
     checklist += "\n" + nextIndex + ". Any mathematical expression, equation, or derivation -> use LaTeX math fences ($...$ or $$...$$)."
+    nextIndex++
+  }
+  if (useSvg) {
+    checklist += "\n" + nextIndex + ". Rich infographic, annotated summary, or custom illustration -> use a self-contained SVG block with safe static elements only."
+    nextIndex++
+    checklist += "\n" + nextIndex + ". Standard process/flow/timeline diagrams -> prefer Mermaid when a supported type exists; otherwise use a custom illustration."
     nextIndex++
   }
   checklist += "\n\nIf no visual type above applies to the user's request (e.g., purely narrative or conversational queries), you may provide text-only output without explanation."
@@ -9918,6 +9943,12 @@ MiniA.prototype.init = function(args) {
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
     args.usemaps = _$(toBoolean(args.usemaps), "args.usemaps").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
+    args.usesvg = _$(toBoolean(args.usesvg), "args.usesvg").isBoolean().default(false)
+    args.usevectors = _$(toBoolean(args.usevectors), "args.usevectors").isBoolean().default(false)
+    if (args.usevectors === true) {
+      args.usesvg = true
+      args.usediagrams = true
+    }
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
@@ -10047,6 +10078,7 @@ MiniA.prototype.init = function(args) {
       useAscii: args.useascii,
       useMaps: args.usemaps,
       useMath: args.usemath,
+      useSvg: args.usesvg,
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {
@@ -10962,6 +10994,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
+    args.usesvg = _$(toBoolean(args.usesvg), "args.usesvg").isBoolean().default(false)
+    args.usevectors = _$(toBoolean(args.usevectors), "args.usevectors").isBoolean().default(false)
+    if (args.usevectors === true) {
+      args.usesvg = true
+      args.usediagrams = true
+    }
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)

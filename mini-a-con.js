@@ -372,6 +372,8 @@ try {
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },
     usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },
     useascii       : { type: "boolean", default: false, description: "Enable ASCII-based visuals in knowledge prompt" },
+    usesvg         : { type: "boolean", default: false, description: "Encourage secure raw SVG visuals in knowledge prompt" },
+    usevectors     : { type: "boolean", default: false, description: "Enable infographic-focused vector bundle (usesvg + usediagrams)" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
@@ -2411,6 +2413,11 @@ try {
     if (isDef(args.usemermaid)) {
       if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
       delete args.usemermaid
+    }
+    if (isDef(args.usevectors)) {
+      if (isUnDef(args.usesvg) || !args.usesvg) args.usesvg = args.usevectors
+      if (isUnDef(args.usediagrams) || !args.usediagrams) args.usediagrams = args.usevectors
+      delete args.usevectors
     }
     if (isDef(args.valgoal)) {
       if (isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
