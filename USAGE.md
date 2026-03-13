@@ -895,7 +895,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Visual Guidance
 - **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
-- **`usecharts`** (boolean, default: false): Hint the model to provide Chart.js snippets for data visualization tasks
+- **`usecharts`** (boolean, default: false): Hint the model to provide Chart.js snippets for data visualization tasks. When combined with `usesvg=true` or `usevectors=true`, supported charts should still be emitted as chart configs instead of being drawn manually as SVG/vector art; SVG remains the fallback for unsupported chart forms or custom illustrations.
 - **`useascii`** (boolean, default: false): Encourage enhanced UTF-8/ANSI visual output for rich terminal displays. When enabled, Mini-A guides the model to use:
   - **Full UTF-8 characters**: Box-drawing (┌─┐│└┘├┤┬┴┼╔═╗║╚╝╠╣╦╩╬), arrows (→←↑↓⇒⇐⇑⇓➔➜➡), bullets (•●○◦◉◎◘◙), shapes (▪▫▬▭▮▯■□▲△▼▽◆◇), and mathematical symbols (∞≈≠≤≥±×÷√∑∏∫∂∇)
   - **Strategic emoji**: Status indicators (✅❌⚠️🔴🟢🟡), workflow symbols (🔄🔁⏸️▶️⏹️), category icons (📁📂📄🔧⚙️🔑🔒), and semantic markers (💡🎯🚀⭐🏆)

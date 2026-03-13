@@ -410,7 +410,7 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
 |-----------|------|---------|-------------|
 | `usediagrams` | boolean | `false` | Encourage Mermaid diagrams in output |
 | `usemermaid` | boolean | `false` | Alias for `usediagrams` |
-| `usecharts` | boolean | `false` | Encourage Chart.js charts in output |
+| `usecharts` | boolean | `false` | Encourage Chart.js charts in output; when combined with `usesvg`/`usevectors`, prefer chart configs for supported charts and reserve SVG for unsupported chart forms or custom illustrations |
 | `useascii` | boolean | `false` | Encourage enhanced UTF-8/ANSI visual output with colors and emojis |
 | `usemaps` | boolean | `false` | Encourage Leaflet JSON blocks for interactive maps (renders in console transcript and web UI) |
 | `usesvg` | boolean | `false` | Encourage raw SVG blocks rendered securely as image data URIs in the web UI |

@@ -757,6 +757,8 @@ MiniA.buildVisualKnowledge = function(options) {
     __flags.MD_CHART = true
     visualParts.push(
       "Charts (strict format):\n" +
+      "  - When a requested visual is a chart and this chart bundle is enabled, prefer a chart fence over drawing the chart as SVG/vector artwork.\n" +
+      "  - Only fall back to SVG/vector output for chart-like visuals when the intended chart is not supported by the available chart types/plugins or when the task is clearly asking for a custom illustration rather than a renderable chart.\n" +
       "  - Wrap only the config object inside ```chart``` (aliases: chartjs, chart.js).\n" +
       "  - Include `type`, `data.labels`, and at least one dataset; add palettes and `options` as needed.\n" +
       "  - Optional `canvas: { width, height }` block controls sizing when helpful.\n" +
@@ -870,6 +872,7 @@ MiniA.buildVisualKnowledge = function(options) {
       "Illustrations and custom visuals:\n" +
       "  - For custom illustrations, output a ```svg``` fenced block with complete `<svg>...</svg>` markup.\n" +
       "  - In vector/infographic mode, default to a polished SVG infographic whenever visuals improve understanding.\n" +
+      "  - If chart rendering guidance is also enabled, do NOT draw ordinary charts in SVG/vector form when a supported chart type can be expressed with the chart fence; reserve SVG for unsupported chart designs or non-chart custom visuals.\n" +
       "  - Build the infographic for fast scanning: headline, clear sections, visual hierarchy, concise labels, and callouts.\n" +
       "  - Prefer infographic structures (panels, KPI cards, legends, timelines, comparisons, process steps, annotated layouts, icon-supported summaries) over standalone art.\n" +
       "  - If the task includes data, comparisons, steps, metrics, or recommendations, use an infographic-first layout instead of prose-first output.\n" +
@@ -895,6 +898,10 @@ MiniA.buildVisualKnowledge = function(options) {
     nextIndex++
     checklist += "\n" + nextIndex + ". Composition or ratios -> pie or doughnut chart."
     nextIndex++
+    if (useSvg) {
+      checklist += "\n" + nextIndex + ". If both chart and SVG guidance apply -> use the chart fence for supported charts; use SVG only for unsupported chart forms or custom illustrations."
+      nextIndex++
+    }
   }
   if (useAscii) {
     checklist += "\n" + nextIndex + ". Quick overviews or lightweight structure -> UTF-8 box-drawing diagrams with ANSI color coding for status/hierarchy."
