@@ -373,7 +373,7 @@ try {
     usecharts      : { type: "boolean", default: false, description: "Encourage Chart.js visuals in knowledge prompt" },
     useascii       : { type: "boolean", default: false, description: "Enable ASCII-based visuals in knowledge prompt" },
     usesvg         : { type: "boolean", default: false, description: "Encourage secure raw SVG visuals in knowledge prompt" },
-    usevectors     : { type: "boolean", default: false, description: "Enable vector bundle (usesvg + usediagrams)" },
+    usevectors     : { type: "boolean", default: false, description: "Enable infographic-focused vector bundle (usesvg + usediagrams)" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },

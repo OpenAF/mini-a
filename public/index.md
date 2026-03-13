@@ -1629,6 +1629,7 @@
             "customizedHeaderId"      : true,
             "parseImgDimensions"      : true,
             "simplifiedAutoLink"      : true,
+            "ghCodeBlocks"            : true,
             "strikethrough"           : true,
             "tables"                  : true,
             "tablesHeaderId"          : true,
@@ -1793,13 +1794,22 @@
         if (!markdown) return markdown;
         svgBlockStore = [];
         let counter = 0;
-        const pattern = /```svg\s*\n([\s\S]*?)\n```/gmi;
+        const closedFencePattern = /(^|\n)[ \t]*```[ \t]*svg(?:[^\r\n]*)\r?\n([\s\S]*?)\r?\n[ \t]*```(?=\n|$)/gmi;
+        const unclosedFencePattern = /(^|\n)[ \t]*```[ \t]*svg(?:[^\r\n]*)\r?\n([\s\S]*?<svg\b[\s\S]*?<\s*\/\s*svg\s*>)/gmi;
+        const bareSvgPattern = /(^|\n)([ \t]*)(<svg\b[\s\S]*?<\s*\/\s*svg\s*>)(?=\n|$)/gmi;
 
-        return markdown.replace(pattern, (match, content) => {
+        const toPlaceholder = (prefix, content) => {
             const id = counter++;
             svgBlockStore.push({ id, content: content || '' });
-            return `<div class="svg-placeholder" data-svg-id="${id}"></div>`;
-        });
+            return `${prefix}<div class="svg-placeholder" data-svg-id="${id}"></div>`;
+        };
+
+        let processed = markdown.replace(closedFencePattern, (match, prefix, content) => toPlaceholder(prefix, content));
+        processed = processed.replace(unclosedFencePattern, (match, prefix, content) => toPlaceholder(prefix, content));
+        processed = processed.replace(bareSvgPattern, (match, prefix, indent, content) => toPlaceholder(prefix + (indent || ''), content));
+        processed = processed.replace(/(^|\n)[ \t]*```[ \t]*svg(?:[^\r\n]*)[ \t]*(?=\n|$)/gmi, '$1');
+
+        return processed;
     }
 
     function postprocessSvgBlocks(html) {
@@ -2027,6 +2037,80 @@
             }
         }
         return '';
+    }
+
+    function tryParseAssistantJson(text) {
+        if (typeof text !== 'string') return null;
+        const candidate = text.trim();
+        if (!candidate) return null;
+
+        try {
+            return JSON.parse(candidate);
+        } catch (_) { /* ignore */ }
+
+        const fenced = candidate.match(/^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i);
+        if (fenced && fenced[1]) {
+            try {
+                return JSON.parse(fenced[1]);
+            } catch (_) { /* ignore */ }
+        }
+
+        const firstBrace = candidate.indexOf('{');
+        const lastBrace = candidate.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            try {
+                return JSON.parse(candidate.substring(firstBrace, lastBrace + 1));
+            } catch (_) { /* ignore */ }
+        }
+
+        return null;
+    }
+
+    function extractAssistantAnswerText(text) {
+        const parsed = tryParseAssistantJson(text);
+        if (!parsed || typeof parsed !== 'object') return null;
+
+        const candidates = ['answer', 'final_answer', 'response', 'result'];
+        for (let i = 0; i < candidates.length; i++) {
+            const key = candidates[i];
+            if (typeof parsed[key] === 'string' && parsed[key].trim().length > 0) {
+                return parsed[key].trim();
+            }
+        }
+
+        if (typeof parsed.message === 'string' && parsed.message.trim().length > 0) {
+            const action = typeof parsed.action === 'string' ? parsed.action.toLowerCase() : '';
+            if (action === 'final' || action === 'done' || action === 'finish') {
+                return parsed.message.trim();
+            }
+        }
+
+        return null;
+    }
+
+    function normalizeRenderedConversationText(text) {
+        if (!text) return '';
+        const input = String(text);
+        const lines = input.split('\n');
+        const normalized = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmed = line.trim();
+            if (trimmed === 'final' || trimmed === 'assistant' || trimmed === '🤖') {
+                const remainder = lines.slice(i + 1).join('\n').trim();
+                const answer = extractAssistantAnswerText(remainder);
+                if (answer) {
+                    normalized.push(line);
+                    normalized.push(answer);
+                    return normalized.join('\n');
+                }
+            }
+            normalized.push(line);
+        }
+
+        const answerOnly = extractAssistantAnswerText(input);
+        return answerOnly || input;
     }
 
     function extractFirstUserPromptFromEvents(events) {
@@ -2706,7 +2790,8 @@
         const nextContent = rawContent || '';
         if (nextContent === lastRenderedRaw) return;
 
-        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(nextContent));
+        const normalizedContent = normalizeRenderedConversationText(nextContent);
+        const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(normalizedContent));
         const htmlContent = converter.makeHtml(preprocessed);
         await updateResultsContent(htmlContent);
         try { hljs.highlightAll(); } catch (e) { /* ignore */ }

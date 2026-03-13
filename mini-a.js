@@ -714,7 +714,7 @@ MiniA.buildVisualKnowledge = function(options) {
     var hasAscii = existingKnowledge.indexOf("ASCII/UTF-8 visuals") >= 0
     var hasMaps = existingKnowledge.indexOf("Interactive Maps:") >= 0
     var hasMath = existingKnowledge.indexOf("Math formulas:") >= 0
-    var hasSvg = existingKnowledge.indexOf("SVG graphics:") >= 0
+    var hasSvg = existingKnowledge.indexOf("SVG graphics:") >= 0 || existingKnowledge.indexOf("Illustrations and custom visuals:") >= 0
     // Only return early if existing guidance matches current flags
     if (useDiagrams === hasDiagrams && useCharts === hasCharts && useAscii === hasAscii && useMaps === hasMaps && useMath === hasMath && useSvg === hasSvg) {
       return ""
@@ -867,12 +867,17 @@ MiniA.buildVisualKnowledge = function(options) {
 
   if (useSvg) {
     visualParts.push(
-      "SVG graphics:\n" +
-      "  - Use ```svg``` fences with complete `<svg>...</svg>` markup.\n" +
+      "Illustrations and custom visuals:\n" +
+      "  - For custom illustrations, output a ```svg``` fenced block with complete `<svg>...</svg>` markup.\n" +
+      "  - In vector/infographic mode, default to a polished SVG infographic whenever visuals improve understanding.\n" +
+      "  - Build the infographic for fast scanning: headline, clear sections, visual hierarchy, concise labels, and callouts.\n" +
+      "  - Prefer infographic structures (panels, KPI cards, legends, timelines, comparisons, process steps, annotated layouts, icon-supported summaries) over standalone art.\n" +
+      "  - If the task includes data, comparisons, steps, metrics, or recommendations, use an infographic-first layout instead of prose-first output.\n" +
+      "  - Keep visuals polished and readable: balanced spacing, intentional color, clear contrast/depth, not plain wireframes.\n" +
       "  - Always include `viewBox` or explicit `width` and `height`.\n" +
       "  - Never include `<script>`, event handler attributes (`on*`), `<foreignObject>`, `javascript:` URIs, or external resource references.\n" +
       "  - Allowed tags: svg, g, path, rect, circle, ellipse, line, polyline, polygon, text, tspan, defs, linearGradient, radialGradient, clipPath, mask, pattern, use (internal `#id` only), marker, symbol, title, desc.\n" +
-      "  - Use SVG for custom illustrations, icons, technical drawings, annotated diagrams, infographics, and geometric patterns.\n" +
+      "  - Use this format for custom illustrations, icons, technical drawings, annotated diagrams, infographics, geometric patterns, and UI mockups.\n" +
       "  - Prefer Mermaid for standard flow/sequence/entity/timeline-style diagrams when Mermaid types apply."
     )
   }
@@ -912,9 +917,9 @@ MiniA.buildVisualKnowledge = function(options) {
     nextIndex++
   }
   if (useSvg) {
-    checklist += "\n" + nextIndex + ". Custom vector illustrations or technical drawings -> use an SVG block with safe static elements only."
+    checklist += "\n" + nextIndex + ". Rich infographic, annotated summary, or custom illustration -> use a self-contained SVG block with safe static elements only."
     nextIndex++
-    checklist += "\n" + nextIndex + ". Standard process/flow/timeline diagrams -> prefer Mermaid when a supported type exists; otherwise use SVG."
+    checklist += "\n" + nextIndex + ". Standard process/flow/timeline diagrams -> prefer Mermaid when a supported type exists; otherwise use a custom illustration."
     nextIndex++
   }
   checklist += "\n\nIf no visual type above applies to the user's request (e.g., purely narrative or conversational queries), you may provide text-only output without explanation."

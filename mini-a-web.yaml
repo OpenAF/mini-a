@@ -79,6 +79,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usevectors
+    desc     : "Boolean to enable/disable infographic-focused vector guidance bundle (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useascii
     desc     : "Boolean to enable/disable ASCII art sketch generation (default: false)"
     example  : "true"
@@ -688,11 +693,24 @@ todo:
   ((uri          )): /md2html
   ((execURI      )): | #js
     try {
+      function inlineSvgCodeBlocks(markdown) {
+        if (!isString(markdown) || markdown.length == 0) return markdown
+        return markdown.replace(/(^|\n)```svg\s*\n([\s\S]*?)\n```(?=\n|$)/gmi, (match, prefix, content) => {
+          var svgContent = isString(content) ? content.trim() : ""
+          if (svgContent.length == 0) return prefix
+          return prefix + svgContent + "\n"
+        })
+      }
+
       var postData = jsonParse(request.files.postData)
       var markdown = (isDef(postData.markdown) ? ("" + postData.markdown) : "").trim()
 
       if (markdown.length == 0) {
         return ow.server.httpd.reply({ error: "markdown is required" })
+      }
+
+      if (global.__usevectors) {
+        markdown = inlineSvgCodeBlocks(markdown)
       }
 
       var html = ow.template.html.genStaticVersion4MD(markdown)
@@ -816,6 +834,7 @@ jobs:
       planlog         : isString().default(__)
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
+      usevectors      : toBoolean().isBoolean().default(false)
       useascii        : toBoolean().isBoolean().default(false)
       usemath         : toBoolean().isBoolean().default(false)
       historys3bucket : isString().default(__)
@@ -849,6 +868,7 @@ jobs:
     global.__usestream = args.usestream
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
+    global.__usevectors = args.usevectors
     global.__usemath = args.usemath
     global.__planState = {}
     global.__sseQueues = {}
