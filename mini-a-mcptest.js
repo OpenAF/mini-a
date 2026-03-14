@@ -1,6 +1,6 @@
 // Mini-A MCP Tester
-// Provides an interactive console workflow to test MCP servers (STDIO or HTTP remote)
-// and call their tools with custom parameters
+// Provides an interactive console workflow to test MCP servers across
+// the transports and config shapes supported by OpenAF's $mcp().
 plugin("Console")
 
 // Get command line arguments
@@ -15,14 +15,92 @@ if (isDef(args.libs) && args.libs.length > 0) {
     __miniALoadLibraries(args.libs, log, logErr)
 }
 
+function parseOptionalJSSLON(label, rawValue, expectedType) {
+    if (isUnDef(rawValue) || String(rawValue).trim() == "") return __
+
+    var parsed = af.fromJSSLON(String(rawValue).trim())
+    if (expectedType == "map" && !isMap(parsed)) {
+        throw new Error(label + " must be a map/object.")
+    }
+    if (expectedType == "array" && !isArray(parsed)) {
+        throw new Error(label + " must be an array.")
+    }
+    return parsed
+}
+
+function summarizeMCPConfig(config) {
+    if (!isMap(config)) return "(invalid config)"
+
+    var type = String(config.type || (isDef(config.cmd) ? "stdio" : "remote")).toLowerCase()
+    if (type == "http") type = "remote"
+    if (type == "remote" && config.sse === true) type = "sse"
+
+    if (type == "stdio") return "stdio: " + String(config.cmd || "(missing cmd)")
+    if (type == "ojob") {
+        var jobName = isMap(config.options) && isDef(config.options.job) ? String(config.options.job) : "(missing job)"
+        return "ojob: " + jobName
+    }
+    if (type == "dummy") return "dummy"
+
+    var target = isDef(config.url) ? String(config.url) : "(missing url)"
+    return type + ": " + target
+}
+
+function normalizeMCPConfigInput(rawConfig) {
+    var config = rawConfig
+
+    if (isString(config)) config = af.fromJSSLON(config)
+
+    if (isArray(config)) {
+        if (config.length == 0) throw new Error("No MCP configuration entries were provided.")
+        if (config.length == 1) return config[0]
+
+        var choices = config.map((cfg, idx) => "[" + (idx + 1) + "] " + summarizeMCPConfig(cfg)).concat(["🔙 Cancel"])
+        var chosen = askChoose("Select which MCP configuration to test: ", choices, Math.min(choices.length, 10))
+        if (chosen >= config.length) return __
+        return config[chosen]
+    }
+
+    if (!isMap(config)) {
+        throw new Error("MCP configuration should be an object/map or an array of objects/maps.")
+    }
+
+    return config
+}
+
+function enrichMCPConfig(config) {
+    var _config = clone(config)
+
+    var _timeout = ask("Enter timeout in milliseconds (leave blank for default 30000): ")
+    if (_timeout != "" && !isNaN(_timeout)) {
+        _config.timeout = Number(_timeout)
+    }
+
+    var _extra = ask("Extra $mcp options as JSSLON/JSON (blank to skip, e.g. \"(shared: true, clientInfo: (name: 'Mini-A MCP Tester', version: '1.0.0'))\"): ")
+    if (isDef(_extra) && _extra.trim() != "") {
+        var _extraParsed = parseOptionalJSSLON("Extra $mcp options", _extra, "map")
+        _config = merge(_config, _extraParsed)
+    }
+
+    return _config
+}
+
 // Create MCP connection configuration
 function buildMCPConfig(args) {
     var _config = {}
 
     print()
-    var _connectionType = askChoose("Choose MCP connection type: ", ["STDIO (local command)", "HTTP Remote", "🔙 Cancel"])
+    var _connectionType = askChoose("Choose MCP connection type: ", [
+        "STDIO (local command)",
+        "HTTP Remote",
+        "HTTP SSE",
+        "oJob MCP",
+        "Dummy MCP",
+        "Raw $mcp config",
+        "🔙 Cancel"
+    ])
 
-    if (_connectionType == 2) {
+    if (_connectionType == 6) {
         return null
     }
 
@@ -34,12 +112,6 @@ function buildMCPConfig(args) {
             return null
         }
         _config.cmd = _cmd.trim()
-
-        // Optional timeout
-        var _timeout = ask("Enter timeout in milliseconds (leave blank for default 30000): ")
-        if (_timeout != "" && !isNaN(_timeout)) {
-            _config.timeout = Number(_timeout)
-        }
     } else if (_connectionType == 1) {
         // HTTP Remote connection
         var _url = ask("Enter the MCP HTTP URL (e.g., 'http://localhost:9090/mcp'): ")
@@ -49,15 +121,59 @@ function buildMCPConfig(args) {
         }
         _config.type = "remote"
         _config.url = _url.trim()
-
-        // Optional timeout
-        var _timeout = ask("Enter timeout in milliseconds (leave blank for default 30000): ")
-        if (_timeout != "" && !isNaN(_timeout)) {
-            _config.timeout = Number(_timeout)
+    } else if (_connectionType == 2) {
+        var _sseUrl = ask("Enter the MCP SSE URL (e.g., 'http://localhost:9090/mcp'): ")
+        if (isUnDef(_sseUrl) || _sseUrl.trim() == "") {
+            print(ansiColor("ITALIC,FG(196)", "!!") + ansiColor("FG(196)", " URL cannot be empty."))
+            return null
         }
+        _config.type = "sse"
+        _config.sse = true
+        _config.url = _sseUrl.trim()
+    } else if (_connectionType == 3) {
+        _config.type = "ojob"
+        _config.options = {}
+
+        var _job = ask("Enter the oJob file path (e.g., 'mcps/mcp-time.yaml'): ")
+        if (isUnDef(_job) || _job.trim() == "") {
+            print(ansiColor("ITALIC,FG(196)", "!!") + ansiColor("FG(196)", " Job path cannot be empty."))
+            return null
+        }
+        _config.options.job = _job.trim()
+
+        var _jobArgs = ask("Optional oJob args as JSSLON/JSON map (blank to skip): ")
+        if (isDef(_jobArgs) && _jobArgs.trim() != "") {
+            _config.options.args = parseOptionalJSSLON("oJob args", _jobArgs, "map")
+        }
+
+        var _jobInit = ask("Optional oJob init entry or array as JSSLON/JSON (blank to skip): ")
+        if (isDef(_jobInit) && _jobInit.trim() != "") {
+            var _parsedInit = parseOptionalJSSLON("oJob init", _jobInit)
+            _config.options.init = _parsedInit
+        }
+    } else if (_connectionType == 4) {
+        _config.type = "dummy"
+        _config.options = {}
+
+        var _dummyFns = ask("Dummy MCP functions as JSSLON/JSON map (blank for empty): ")
+        if (isDef(_dummyFns) && _dummyFns.trim() != "") {
+            _config.options.fns = parseOptionalJSSLON("Dummy functions", _dummyFns, "map")
+        }
+
+        var _dummyMeta = ask("Dummy MCP metadata as JSSLON/JSON map (blank for empty): ")
+        if (isDef(_dummyMeta) && _dummyMeta.trim() != "") {
+            _config.options.fnsMeta = parseOptionalJSSLON("Dummy metadata", _dummyMeta, "map")
+        }
+    } else if (_connectionType == 5) {
+        var _raw = ask("Enter the full $mcp config as JSSLON/JSON: ")
+        if (isUnDef(_raw) || _raw.trim() == "") {
+            print(ansiColor("ITALIC,FG(196)", "!!") + ansiColor("FG(196)", " Config cannot be empty."))
+            return null
+        }
+        _config = normalizeMCPConfigInput(_raw)
     }
 
-    return _config
+    return enrichMCPConfig(_config)
 }
 
 // Helper function to print elapsed time
@@ -414,7 +530,7 @@ function mainMCPTest(args) {
                 } else {
                     _currentConfig.debug = false
                 }
-                print("🔌 Connecting to MCP server from mcp= parameter...")
+                print("🔌 Connecting to MCP server: " + summarizeMCPConfig(_currentConfig))
                 _mcpClient = $mcp(_currentConfig)
                 var startTime = now()
                 _mcpClient.initialize()
@@ -460,7 +576,7 @@ function mainMCPTest(args) {
                 } else {
                     _currentConfig.debug = false
                 }
-                print("🔌 Connecting to MCP server from mcp= parameter...")
+                print("🔌 Connecting to MCP server: " + summarizeMCPConfig(_currentConfig))
                 _mcpClient = $mcp(_currentConfig)
                 var startTime = now()
                 _mcpClient.initialize()
@@ -524,12 +640,7 @@ function mainMCPTest(args) {
     if (isDef(args.mcp)) {
         var config = __
         try {
-            // Parse mcp parameter (can be SLON/JSON string or object)
-            if (isString(args.mcp)) {
-                config = af.fromJSSLON(args.mcp)
-            } else if (isMap(args.mcp)) {
-                config = args.mcp
-            }
+            config = normalizeMCPConfigInput(args.mcp)
 
             if (isDef(config)) {
                 if (sessionOptions.debug) {
@@ -537,7 +648,7 @@ function mainMCPTest(args) {
                 } else {
                     config.debug = false
                 }
-                print("🔌 Connecting to MCP server from mcp= parameter...")
+                print("🔌 Connecting to MCP server from mcp= parameter: " + summarizeMCPConfig(config))
                 _mcpClient = $mcp(config)
                 var startTime = now()
                 _mcpClient.initialize()
@@ -605,7 +716,7 @@ function mainMCPTest(args) {
                 var config = buildMCPConfig(args)
                 if (isDef(config)) {
                     config = merge(config, { debug: sessionOptions.debug })
-                    print("\n🔌 Connecting to MCP server...")
+                    print("\n🔌 Connecting to MCP server: " + summarizeMCPConfig(config))
                     try {
                         _mcpClient = $mcp(config)
                         var startTime = now()

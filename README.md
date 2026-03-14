@@ -273,14 +273,20 @@ For HTTP remote MCP servers:
 mini-a mcptest=true mcp="(type: remote, url: 'http://localhost:9090/mcp')"
 ```
 
+For SSE-based MCP servers:
+```bash
+mini-a mcptest=true mcp="(type: sse, url: 'http://localhost:9090/mcp')"
+```
+
 ### MCP Tester Features
 
 The interactive tester provides:
 
-- **Connection Management** - Connect to both STDIO (local command) and HTTP Remote MCP servers
+- **Connection Management** - Connect to STDIO, HTTP Remote, HTTP SSE, oJob, dummy, or raw `$mcp(...)` configurations
 - **Tool Discovery** - List all available tools from the connected MCP server
 - **Tool Inspection** - View detailed information about tool parameters, types, and descriptions
 - **Interactive Tool Calling** - Call any MCP tool with custom parameters through guided prompts
+- **Advanced Config Support** - Merge extra `$mcp` options such as `shared`, `clientInfo`, `auth`, `strict`, `blacklist`, or future transport flags via JSSLON/JSON
 - **Configuration Options** - Adjust settings like debug mode, tool selection display size, and result parsing
 - **Library Loading** - Load additional OpenAF libraries for extended functionality using `libs=` parameter
 
@@ -297,11 +303,11 @@ The interactive tester provides:
 mini-a mcptest=true
 
 # 1. Choose "New connection"
-# 2. Select "STDIO (local command)"
-# 3. Enter: ojob mcps/mcp-time.yaml
-# 4. Choose "List tools" to see available tools
-# 5. Choose "Call a tool" to test a specific tool
-# 6. Follow the prompts to enter parameters
+# 2. Select "HTTP SSE" or "Raw $mcp config" when you need newer transport/options support
+# 3. Enter the URL or the full JSSLON config
+# 4. Optionally merge extra $mcp options such as "(shared: true, clientInfo: (name: 'Mini-A MCP Tester'))"
+# 5. Choose "List tools" to see available tools
+# 6. Choose "Call a tool" to test a specific tool
 ```
 
 The tester includes automatic cleanup with shutdown handlers to properly close MCP connections when exiting.
