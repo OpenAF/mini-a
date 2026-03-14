@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260313'
+version: '20260314'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -137,7 +137,7 @@ filesHash:
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: ee5c2b595156a25fff4367435926e599b1bd8bfd
+  README.md: 998f040a60796e16fcc7d1ff19ff8a36e92df77f
   USAGE.md: 2a3de30c829954a86efa9ae991d02232e8c243a1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 59c81b7209ff4d3438a3ba11cf6a27ce92d8dd4e
@@ -180,7 +180,7 @@ filesHash:
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 0ab80b1035f8c80830ef5e7b6ba087f999d493c3
   mini-a-con.js: 69cafe9a11f9f9c8d7100e9e0cd7538a08e30ca3
-  mini-a-mcptest.js: 2f3c8fc012efb6b09160f919ba6755f366944c6d
+  mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
   mini-a-modes.yaml: b49a75237b636a935eecb3d17f5163486f581cf4
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
