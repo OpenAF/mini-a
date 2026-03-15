@@ -1746,6 +1746,27 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
 }
 
 /**
+ * Create a passthrough streaming handler for providers that emit plain text
+ * deltas (non-JSON). This keeps output visible when promptStreamWithStats is
+ * used without JSON envelopes.
+ */
+MiniA.prototype._createPlainStreamDeltaHandler = function() {
+    var self = this
+    var firstOutput = true
+
+    return function onDelta(chunk) {
+      if (isUnDef(chunk)) return
+      var text = isString(chunk) ? chunk : String(chunk)
+      if (text.length === 0) return
+      if (firstOutput) {
+        self.fnI("stream", "\n")
+        firstOutput = false
+      }
+      self.fnI("stream", text)
+    }
+}
+
+/**
  * Summarize text using the LLM with retry logic and metrics tracking.
  * This method is designed to condense conversation history or agent notes.
  *
@@ -11911,16 +11932,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
       }
 
-      // Create streaming delta handler if streaming is enabled
-      var onDelta = args.usestream ? this._createStreamDeltaHandler(args) : null
+      var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
       var canStream = args.usestream && isFunction(currentLLM.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
+      // Create the right streaming delta handler based on the streaming API used.
+      var onDelta = null
+      if (args.usestream) {
+        onDelta = canStreamJson && !noJsonPromptFlag
+          ? this._createStreamDeltaHandler(args)
+          : this._createPlainStreamDeltaHandler()
+      }
 
       var responseWithStats
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
-          var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
           var jsonFlag = !noJsonPromptFlag
           if (args.showthinking) {
             // Streaming not compatible with showthinking - use regular prompts
@@ -12857,10 +12883,15 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
 
       var responseWithStats
-      // Create streaming delta handler if streaming is enabled
-      var onDelta = args.usestream ? this._createStreamDeltaHandler(args) : null
       var canStream = args.usestream && isFunction(this.llm.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(this.llm.promptStreamJSONWithStats)
+      // Create the right streaming delta handler based on the streaming API used.
+      var onDelta = null
+      if (args.usestream) {
+        onDelta = canStreamJson && !this._noJsonPrompt && args.format == "json"
+          ? this._createStreamDeltaHandler(args)
+          : this._createPlainStreamDeltaHandler()
+      }
 
       // Use new promptJSONWithStatsRaw if available for showthinking
       if (args.showthinking) {
