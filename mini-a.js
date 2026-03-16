@@ -9760,6 +9760,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       var hasMcpProxyConnection = Object.keys(parent._mcpConnections || {}).some(function(id) {
         return id === md5("mini-a-mcp-proxy") || id.indexOf("mini-a-mcp-proxy") >= 0
       })
+      var proxyAlreadyRegistered = usingMcpProxy && isObject(llmInstance) && llmInstance.__miniAProxyDispatchRegistered === true
 
       // Set proxy mode flag
       parent._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
@@ -9770,15 +9771,18 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
         parent.fnI("info", "MCP proxy mode enabled - using function calling for proxy-dispatch tool.")
         parent._useToolsActual = true  // Confirm function calling mode for proxy (already set before init)
 
-        // Even if LLM doesn't have withMcpTools, proceed with registration
-        // The proxy-dispatch tool will be registered via the OpenAI functions format
-        if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
-          parent.fnI("warn", "Model doesn't have withMcpTools method, but proxy-dispatch tool should still be registered via functions interface.")
-        }
-      } else if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
-        // Check if LLM actually supports function calling (non-proxy mode)
-        parent.fnI("warn", "usetools=true but model doesn't support function calling. Falling back to action-based mode.")
-        parent._useToolsActual = false  // Confirm action-based mode
+      // Even if LLM doesn't have withMcpTools, proceed with registration
+      // The proxy-dispatch tool will be registered via the OpenAI functions format
+      if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
+        parent.fnI("warn", "Model doesn't have withMcpTools method, but proxy-dispatch tool should still be registered via functions interface.")
+      } else if (proxyAlreadyRegistered) {
+        parent.fnI("mcp", "Skipping proxy-dispatch registration because it is already attached to this LLM instance.")
+        return llmInstance
+      }
+    } else if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
+      // Check if LLM actually supports function calling (non-proxy mode)
+      parent.fnI("warn", "usetools=true but model doesn't support function calling. Falling back to action-based mode.")
+      parent._useToolsActual = false  // Confirm action-based mode
         return llmInstance
       } else {
         parent._useToolsActual = true  // Confirm function calling is supported
@@ -9820,6 +9824,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
           }
 
           if (isDef(result)) updated = result
+          if (isProxyConnection && isObject(updated)) updated.__miniAProxyDispatchRegistered = true
         } catch (e) {
           var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
           parent.fnI("warn", `Failed to register MCP tools on LLM: ${errMsg}`)
@@ -9829,10 +9834,17 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       return updated
     }
 
+    // When init() was skipped (agent reused across multiple run() calls, _isInitialized=true),
+    // this.llm already has tools from the previous run. Restore the bare snapshot to avoid
+    // accumulating duplicate proxy-dispatch entries on each subsequent call.
+    if (isDef(this._llmNoTools)) this.llm = this._llmNoTools
+    this._llmNoTools = this.llm  // save bare LLM before tool registration for fallback
     var updatedMainLLM = registerMcpTools(this.llm)
     if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
 
     if (this._use_lc && isDef(this.lc_llm)) {
+      if (isDef(this._lcLlmNoTools)) this.lc_llm = this._lcLlmNoTools
+      this._lcLlmNoTools = this.lc_llm
       var updatedLowCostLLM = registerMcpTools(this.lc_llm)
       if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
     }
@@ -10296,6 +10308,9 @@ MiniA.prototype.init = function(args) {
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
     if (this._use_val) this.val_llm = $llm(this._oaf_val_model)
+    // Clear bare-LLM snapshots so _registerMcpToolsForGoal doesn't restore stale ones
+    this._llmNoTools = __
+    this._lcLlmNoTools = __
 
     // Check the need to init debugch for main LLM
     if (isDef(args.debugch) && args.debugch.length > 0) {
@@ -11961,12 +11976,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             return currentLLM.promptWithStats(prompt)
           }
-          if (canStreamJson && !noJsonPromptFlag) {
+          // When function calling is active (_useToolsActual), skip format:json constraint —
+          // sending both "tools" and "format:json" simultaneously breaks Ollama thinking models
+          // (e.g. qwen3.x) which return {"error":"..."} when these modes conflict.
+          var skipJsonFormat = this._useToolsActual === true
+          if (canStreamJson && !noJsonPromptFlag && !skipJsonFormat) {
             return currentLLM.promptStreamJSONWithStats(prompt, __, __, __, __, onDelta)
           } else if (canStream) {
             return currentLLM.promptStreamWithStats(prompt, __, __, __, __, __, onDelta)
           }
-          if (!noJsonPromptFlag && isDef(currentLLM.promptJSONWithStats)) {
+          if (!noJsonPromptFlag && !skipJsonFormat && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
           }
           return currentLLM.promptWithStats(prompt)
@@ -12210,11 +12229,27 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
+          var _geminiModelName = useLowCost
+            ? (isMap(this._oaf_lc_model) ? (this._oaf_lc_model.model || "") : "")
+            : (isMap(this._oaf_model) ? (this._oaf_model.model || "") : "")
+          var _geminiModelType = useLowCost
+            ? (isMap(this._oaf_lc_model) ? (this._oaf_lc_model.type || "") : "")
+            : (isMap(this._oaf_model) ? (this._oaf_model.type || "") : "")
           var isGeminiEmptyText = isString(rmsg) && rmsg.trim().length === 0 && (
-            (useLowCost && isMap(this._oaf_lc_model) && this._oaf_lc_model.type === "gemini") ||
-            (!useLowCost && isMap(this._oaf_model) && this._oaf_model.type === "gemini")
+            _geminiModelType === "gemini" ||
+            (_geminiModelType === "ollama" && _geminiModelName.toLowerCase().indexOf("gemini") >= 0)
           )
           if (isGeminiEmptyText) {
+            // When Gemini via Ollama is used with function calling active and returns empty text,
+            // the model made a tool call but the OpenAF Ollama integration doesn't auto-execute it.
+            // Retrying will loop forever — fall back to action-based mode instead.
+            if (this._useToolsActual === true && _geminiModelType === "ollama" && isDef(this._llmNoTools)) {
+              this._useToolsActual = false
+              this.llm = this._llmNoTools
+              runtime.context.push(`[OBS ${step + 1}] (recover) Gemini via Ollama returned empty response with tools active (tool call not executed by runtime). Disabling function calling and retrying in action-based mode.`)
+              this.fnI("warn", `Step ${step + 1}: Gemini via Ollama returned empty response with tools active. Falling back to action-based mode.`)
+              continue
+            }
             runtime.context.push(`[OBS ${step + 1}] (warn) empty text response from Gemini; treating as transient and continuing.`)
             this._registerRuntimeError(runtime, {
               category: "transient",
@@ -12290,6 +12325,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             continue
           }
+        } else if (this._useToolsActual === true && isDef(baseMsg.error) && isUnDef(baseMsg.action) && isDef(this._llmNoTools)) {
+          // Model returned a bare {"error":"..."} with tools active — likely the model/runtime
+          // doesn't support tool calling (e.g. Ollama thinking models). Fall back to the bare
+          // LLM (no tools) and switch to action-based mode so the next step succeeds.
+          this._useToolsActual = false
+          this.llm = this._llmNoTools
+          runtime.context.push(`[OBS ${step + 1}] (recover) model returned error payload with tools active: "${baseMsg.error}". Disabling function calling and retrying in action-based mode.`)
+          this.fnI("warn", `Step ${step + 1}: model rejected tool-calling request ("${baseMsg.error}"). Falling back to action-based mode without tools.`)
+          continue
         }
       }
       var stateUpdatedThisStep = false
@@ -12428,8 +12472,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var action = origActionRaw.toLowerCase()
         var thoughtValue = jsonParse(((currentMsg.thought || currentMsg.think || "") + "").trim())
         var commandValue = ((currentMsg.command || "") + "").trim()
-        var answerValue = ((isObject(currentMsg.answer) ? stringify(currentMsg.answer,__,"") : currentMsg.answer) || "")
+        var _rawAnswer = currentMsg.answer
+        // Fallback: model used {"action":"final","arguments":{"answer":"..."}} instead of top-level "answer"
+        if (isUnDef(_rawAnswer) && isMap(currentMsg.arguments) && isDef(currentMsg.arguments.answer)) _rawAnswer = currentMsg.arguments.answer
+        var answerValue = ((isObject(_rawAnswer) ? stringify(_rawAnswer,__,"") : _rawAnswer) || "")
         var paramsValue = currentMsg.params
+        // Fallback: some LLMs (e.g. Gemini via Ollama) use "arguments" (OpenAI function-calling key)
+        // instead of "params" when they cannot properly execute function calls and embed the call in JSON content.
+        if (isUnDef(paramsValue) && isMap(currentMsg.arguments)) paramsValue = currentMsg.arguments
 
         if (origActionRaw.length == 0) {
           var canInferFinalAction = isString(answerValue) && answerValue.trim().length > 0 && commandValue.length == 0 && isUnDef(paramsValue)
@@ -12888,7 +12938,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       if (args.usestream) {
-        onDelta = canStreamJson && !this._noJsonPrompt && args.format == "json"
+        onDelta = canStreamJson && !this._noJsonPrompt && args.format == "json" && this._useToolsActual !== true
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
       }
@@ -12904,7 +12954,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
-      } else if (canStreamJson && !this._noJsonPrompt && args.format == "json") {
+      } else if (canStreamJson && !this._noJsonPrompt && args.format == "json" && this._useToolsActual !== true) {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
       } else if (canStream) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
@@ -13015,6 +13065,7 @@ MiniA.prototype._runChatbotMode = function(options) {
 
           if (toolNames.indexOf(actionName) >= 0) {
             var paramsValue = currentMsg.params
+            if (isUnDef(paramsValue) && isMap(currentMsg.arguments)) paramsValue = currentMsg.arguments
             if (isUnDef(paramsValue) || !isMap(paramsValue)) {
               pendingPrompt = `Tool request for '${actionName}' is missing a valid 'params' object. Reply with JSON including proper params or continue without that tool.`
               handled = true
