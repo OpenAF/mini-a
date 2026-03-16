@@ -466,6 +466,12 @@ todo:
         })
         // Only pass conversation parameter for new conversations to avoid overwriting in-memory state
         if (isNewConversation) {
+          if (isMap(postData.browserContext)) {
+            startArgs.browsercontext = jsonParse(stringify(postData.browserContext, __, ""), __, __, true)
+          } else if (isString(postData.browserContext) && postData.browserContext.trim().length > 0) {
+            var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
+            if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
+          }
           startArgs.conversation = global._mini_a_web_loadFile(_hfile)
         }
         var _rma = lma.start(startArgs)

@@ -4983,6 +4983,28 @@
         return html;
     }
 
+    function collectBrowserContext() {
+        const colorScheme = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+            ? 'dark'
+            : 'light';
+        const promptStyles = (typeof window !== 'undefined' && promptInput) ? window.getComputedStyle(promptInput) : null;
+        const resultsRect = resultsDiv ? resultsDiv.getBoundingClientRect() : null;
+        const locationPort = (typeof window !== 'undefined' && window.location && window.location.port)
+            ? parseInt(window.location.port, 10)
+            : NaN;
+
+        return {
+            viewportWidth: (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 0,
+            viewportHeight: (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 0,
+            panelWidth: resultsRect ? Math.round(resultsRect.width) : 0,
+            panelHeight: resultsRect ? Math.round(resultsRect.height) : 0,
+            fontSize: promptStyles ? promptStyles.fontSize : '',
+            colorScheme,
+            devicePixelRatio: (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1,
+            serverPort: Number.isFinite(locationPort) ? locationPort : 0
+        };
+    }
+
     async function handleSubmit() {
         if (isProcessing) {
             await stopProcessing();
@@ -4999,6 +5021,8 @@
 
         try {
             if (!currentSessionUuid) currentSessionUuid = getOrCreateSessionUuid();
+            const shouldSendBrowserContext = !lastRawContent && (!Array.isArray(lastKnownHistory) || lastKnownHistory.length === 0);
+            const browserContext = shouldSendBrowserContext ? collectBrowserContext() : null;
 
             // Add user prompt to display immediately
             const userPromptHtml = formatUserPromptHtml(finalPrompt);
@@ -5009,7 +5033,7 @@
             const response = await fetch('/prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid })
+                body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext })
             });
 
             if (!response.ok) throw new Error('Failed to submit prompt');
