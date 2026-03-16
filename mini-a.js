@@ -703,6 +703,7 @@ MiniA.buildVisualKnowledge = function(options) {
   var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
   var useMath = _$(toBoolean(options.useMath), "options.useMath").isBoolean().default(false)
   var useSvg = _$(toBoolean(options.useSvg), "options.useSvg").isBoolean().default(false)
+  var browserContext = isMap(options.browserContext) ? options.browserContext : __
 
   if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath && !useSvg) return ""
 
@@ -883,6 +884,18 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - Use this format for custom illustrations, icons, technical drawings, annotated diagrams, infographics, geometric patterns, and UI mockups.\n" +
       "  - Prefer Mermaid for standard flow/sequence/entity/timeline-style diagrams when Mermaid types apply."
     )
+
+    if (isMap(browserContext) && Object.keys(browserContext).length > 0) {
+      visualParts.push(
+        "Browser context hints for SVG/vector rendering:\n" +
+        "  - Use this browser context to tune layout density, typography scale, and contrast for the expected viewport.\n" +
+        "  - Keep SVG dimensions and composition aligned with the available panel width to avoid clipping.\n" +
+        "  - browserContext:\n" +
+        "    ```json\n" +
+        stringify(browserContext, __, "  ") + "\n" +
+        "    ```"
+      )
+    }
   }
 
   var checklist = "\n\nVisual selection checklist:"
@@ -10120,6 +10133,14 @@ MiniA.prototype.init = function(args) {
       args.usesvg = true
       args.usediagrams = true
     }
+    if (isMap(args.browsercontext)) {
+      args.browsercontext = jsonParse(stringify(args.browsercontext, __, ""), __, __, true)
+    } else if (isString(args.browsercontext) && args.browsercontext.trim().length > 0) {
+      var parsedBrowserContext = af.fromJSSLON(args.browsercontext)
+      args.browsercontext = isMap(parsedBrowserContext) ? parsedBrowserContext : __
+    } else {
+      args.browsercontext = __
+    }
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
@@ -10250,6 +10271,7 @@ MiniA.prototype.init = function(args) {
       useMaps: args.usemaps,
       useMath: args.usemath,
       useSvg: args.usesvg,
+      browserContext: args.browsercontext,
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {
