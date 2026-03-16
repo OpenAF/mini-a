@@ -12107,16 +12107,22 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             return currentLLM.promptWithStats(prompt)
           }
-          // When function calling is active (_useToolsActual), skip format:json constraint —
-          // sending both "tools" and "format:json" simultaneously breaks Ollama thinking models
-          // (e.g. qwen3.x) which return {"error":"..."} when these modes conflict.
-          var skipJsonFormat = this._useToolsActual === true
-          if (canStreamJson && !noJsonPromptFlag && !skipJsonFormat) {
+          // When function calling is active, skip format:json only for Ollama models.
+          // Some Ollama thinking models fail when both "tools" and "format:json" are requested.
+          var currentModelConfig = useLowCost ? this._oaf_lc_model : this._oaf_model
+          var isOllamaToolJsonConflict = this._useToolsActual === true
+            && isMap(currentModelConfig)
+            && isString(currentModelConfig.type)
+            && currentModelConfig.type.toLowerCase() === "ollama"
+          // usejsontool models respond via tool_calls; tool_calls are not auto-executed
+          // in streaming mode, so pendingJsonToolPayload would never be set. Use non-streaming.
+          var isJsonToolMode = toBoolean(args.usejsontool) === true
+          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode) {
             return currentLLM.promptStreamJSONWithStats(prompt, __, __, __, __, onDelta)
-          } else if (canStream) {
+          } else if (canStream && !isJsonToolMode) {
             return currentLLM.promptStreamWithStats(prompt, __, __, __, __, __, onDelta)
           }
-          if (!noJsonPromptFlag && !skipJsonFormat && isDef(currentLLM.promptJSONWithStats)) {
+          if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
           }
           return currentLLM.promptWithStats(prompt)
