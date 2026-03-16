@@ -5624,6 +5624,137 @@ MiniA.prototype._extractJsonActionFromPseudoToolCall = function(payload) {
     return __
 }
 
+MiniA.prototype._extractToolCallActions = function(payload, allowedTools) {
+    var results = []
+    var seen = {}
+    var allowed = {}
+
+    if (isArray(allowedTools)) {
+        allowedTools.forEach(toolName => {
+            if (isString(toolName) && toolName.trim().length > 0) allowed[toolName.trim().toLowerCase()] = true
+        })
+    }
+
+    var parseArguments = args => {
+        if (isMap(args)) return args
+        if (isString(args)) {
+            var parsed = this._parseJsonCandidate(args)
+            if (isMap(parsed)) return parsed
+        }
+        return {}
+    }
+
+    var shouldAcceptTool = toolName => {
+        if (!isString(toolName) || toolName.trim().length === 0) return false
+        if (Object.keys(allowed).length === 0) return true
+        return allowed[toolName.trim().toLowerCase()] === true
+    }
+
+    var addToolCall = (toolName, args, source) => {
+        if (!shouldAcceptTool(toolName)) return
+        var normalizedArgs = parseArguments(args)
+        var normalizedTool = toolName.trim()
+        var key = normalizedTool + "::" + stringify(normalizedArgs, __, "")
+        if (seen[key]) return
+        seen[key] = true
+        results.push({
+            thought: isString(source) && source.length > 0 ? source : `Use tool '${normalizedTool}'`,
+            action : normalizedTool,
+            params : normalizedArgs
+        })
+    }
+
+    var visit = value => {
+        if (isUnDef(value)) return
+        if (isArray(value)) {
+            value.forEach(visit)
+            return
+        }
+        if (!isMap(value)) return
+
+        if (isArray(value.tool_calls)) {
+            value.tool_calls.forEach(toolCall => {
+                if (!isMap(toolCall)) return
+                var fn = isMap(toolCall.function) ? toolCall.function : {}
+                var toolName = isString(toolCall.name) ? toolCall.name : fn.name
+                var toolArgs = isDef(toolCall.arguments) ? toolCall.arguments : fn.arguments
+                addToolCall(toolName, toolArgs, value.thought || value.think)
+            })
+        }
+
+        if (isMap(value.function) && isString(value.function.name) && isDef(value.function.arguments)) {
+            addToolCall(value.function.name, value.function.arguments, value.thought || value.think)
+        }
+
+        if (isMap(value.message)) visit(value.message)
+        if (isMap(value.response)) visit(value.response)
+        if (isArray(value.responses)) visit(value.responses)
+        if (isArray(value.choices)) visit(value.choices)
+        if (isArray(value.events)) {
+            value.events.forEach(evt => {
+                if (isMap(evt.message)) visit(evt.message)
+                else visit(evt)
+            })
+        }
+        if (isMap(value.delta)) visit(value.delta)
+    }
+
+    visit(payload)
+    return results
+}
+
+MiniA.prototype._resolveDebugChannelName = function(channelSpec, defaultName) {
+    if (isMap(channelSpec) && isString(channelSpec.name) && channelSpec.name.trim().length > 0) return channelSpec.name.trim()
+    if (!isString(channelSpec) || channelSpec.trim().length === 0) return defaultName
+    var trimmed = channelSpec.trim()
+    if (trimmed.charAt(0) === "{" || trimmed.charAt(0) === "(") {
+        try {
+            var parsed = af.fromJSSLON(trimmed)
+            if (isMap(parsed) && isString(parsed.name) && parsed.name.trim().length > 0) return parsed.name.trim()
+        } catch(ignore) {}
+    }
+    return trimmed
+}
+
+MiniA.prototype._snapshotDebugChannel = function(channelSpec, defaultName) {
+    try {
+        var channelName = this._resolveDebugChannelName(channelSpec, defaultName)
+        if (!isString(channelName) || channelName.trim().length === 0) return __
+        if ($ch().list().indexOf(channelName) < 0) return { name: channelName, count: 0 }
+        return { name: channelName, count: $ch(channelName).getKeys().length }
+    } catch(ignore) {
+        return __
+    }
+}
+
+MiniA.prototype._extractToolCallActionsFromDebugChannel = function(snapshot, allowedTools, waitMs) {
+    try {
+        if (!isMap(snapshot) || !isString(snapshot.name) || snapshot.name.trim().length === 0) return []
+        if ($ch().list().indexOf(snapshot.name) < 0) return []
+        var maxWait = isNumber(waitMs) && waitMs >= 0 ? waitMs : 400
+        var deadline = now() + maxWait
+        do {
+            var entries = $ch(snapshot.name).getAll()
+            if (isMap(entries)) entries = Object.keys(entries).map(k => entries[k])
+            if (isArray(entries) && entries.length > 0) {
+                entries = entries
+                    .filter(entry => isMap(entry))
+                    .sort((a, b) => Number(a._t || 0) - Number(b._t || 0))
+                var start = isNumber(snapshot.count) && snapshot.count >= 0 ? snapshot.count : 0
+                if (start < entries.length) {
+                    var extracted = this._extractToolCallActions(entries.slice(start), allowedTools)
+                    if (extracted.length > 0) return extracted
+                }
+            }
+            if (now() >= deadline) break
+            sleep(50, true)
+        } while (true)
+        return []
+    } catch(ignore) {
+        return []
+    }
+}
+
 /**
  * Extract possible text segments from raw LLM responses across vendors.
  */
@@ -12379,6 +12510,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         baseMsg.forEach(addActionMessage)
       } else if (isMap(baseMsg) && isArray(baseMsg.action)) {
         baseMsg.action.forEach(addActionMessage)
+      } else if (isMap(baseMsg) && isUnDef(baseMsg.action)) {
+        this._extractToolCallActions(baseMsg, this.mcpToolNames).forEach(addActionMessage)
       } else if (isMap(baseMsg) && !isString(baseMsg.action)) {
         var receivedType = isUnDef(baseMsg.action) ? "undefined" : (isArray(baseMsg.action) ? "array" : typeof baseMsg.action)
         runtime.context.push(`[OBS ${step + 1}] (error) invalid top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Received 'action' as ${receivedType}: ${stringify(baseMsg.action, __, "")}. Available keys: ${Object.keys(baseMsg).join(", ")}`)
@@ -12906,8 +13039,27 @@ MiniA.prototype._runChatbotMode = function(options) {
       currentStepNumber  : 0
     }
 
+    var hasToolCallsPayload = value => {
+      if (isUnDef(value)) return false
+      if (isArray(value)) {
+        for (var i = 0; i < value.length; i++) {
+          if (hasToolCallsPayload(value[i])) return true
+        }
+        return false
+      }
+      if (!isMap(value)) return false
+      if (isArray(value.tool_calls) && value.tool_calls.length > 0) return true
+      if (isMap(value.message) && hasToolCallsPayload(value.message)) return true
+      if (isMap(value.function) && isString(value.function.name) && value.function.name.trim().length > 0) return true
+      if (isMap(value.response) && hasToolCallsPayload(value.response)) return true
+      if (isArray(value.responses) && hasToolCallsPayload(value.responses)) return true
+      if (isArray(value.choices) && hasToolCallsPayload(value.choices)) return true
+      return false
+    }
+
     for (var step = 0; step < maxSteps && this.state != "stop"; step++) {
       runtime.currentStepNumber = step + 1
+      runtime.modelToolCallDetected = false
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
 
@@ -12922,6 +13074,8 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       var contextEstimate = conversationTokens + promptTokens
       this.fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
+
+      var chatbotDebugSnapshot = this._snapshotDebugChannel(args.debugch, "__mini_a_llm_debug")
 
       beforeCall()
       if (args.debug) {
@@ -13003,6 +13157,8 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
       var handled = false
       var parsedResponse = __
+      var extractedResponseText = isString(rawResponse) ? rawResponse : this._extractPrimaryResponseText(rawResponse)
+      var toolCallsRequested = hasToolCallsPayload(rawResponse) || hasToolCallsPayload(responseWithStats)
 
       if (isMap(rawResponse) || isArray(rawResponse)) {
         parsedResponse = rawResponse
@@ -13041,8 +13197,17 @@ MiniA.prototype._runChatbotMode = function(options) {
         parsedResponse.forEach(addActionEntry)
       } else if (isMap(parsedResponse) && isArray(parsedResponse.action)) {
         parsedResponse.action.forEach(addActionEntry)
+      } else if (isMap(parsedResponse) && isUnDef(parsedResponse.action)) {
+        this._extractToolCallActions(parsedResponse, toolNames).forEach(addActionEntry)
       } else if (isMap(parsedResponse) && isString(parsedResponse.action)) {
         addActionEntry(parsedResponse)
+      }
+
+      if (actionEntries.length === 0) {
+        this._extractToolCallActions(responseWithStats, toolNames).forEach(addActionEntry)
+      }
+      if (actionEntries.length === 0) {
+        this._extractToolCallActionsFromDebugChannel(chatbotDebugSnapshot, toolNames).forEach(addActionEntry)
       }
 
       if (actionEntries.length > 0) {
@@ -13147,6 +13312,20 @@ MiniA.prototype._runChatbotMode = function(options) {
           handled = true
           break
         }
+      }
+
+      if (!handled && actionEntries.length === 0 && runtime.modelToolCallDetected === true) {
+        pendingPrompt = "Use the tool result to continue helping the user. Provide any remaining actions or the final answer."
+        handled = true
+      }
+
+      var emptyVisibleResponse = !isString(extractedResponseText) || extractedResponseText.trim().length === 0
+      if (!handled && isUnDef(finalAnswer) && this._useToolsActual === true && isDef(this._llmNoTools) && toolCallsRequested === true && runtime.modelToolCallDetected !== true && emptyVisibleResponse) {
+        this._useToolsActual = false
+        this.llm = this._llmNoTools
+        pendingPrompt = isString(args.goal) ? args.goal : stringify(args.goal, __, "")
+        this.fnI("warn", `Step ${step + 1}: model requested tool calling but no tool execution completed. Falling back to action-based mode.`)
+        handled = true
       }
 
       var stepTime = now() - stepStartTime
