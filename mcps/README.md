@@ -25,6 +25,7 @@
 | mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
 | mcp-telco  | Telecommunications utilities MCP (country codes, phone number info) | STDIO/HTTP | (included) | [mcp-telco.yaml](mcp-telco.yaml)   |
 | mcp-weather | Weather information MCP (wttr.in)         | STDIO/HTTP | (included) | [mcp-weather.yaml](mcp-weather.yaml) |
+| mcp-ollama-web-search | Ollama web search API MCP      | STDIO/HTTP       | (included) | [mcp-ollama-web-search.yaml](mcp-ollama-web-search.yaml) |
 | mcp-web    | Web search and URL fetching MCP | STDIO/HTTP       | (included) | [mcp-web.yaml](mcp-web.yaml)       |
 | mcp-math   | Mathematical operations and unit conversions | STDIO/HTTP | (included) | [mcp-math.yaml](mcp-math.yaml)     |
 
