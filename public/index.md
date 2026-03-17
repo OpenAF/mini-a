@@ -4989,15 +4989,29 @@
             : 'light';
         const promptStyles = (typeof window !== 'undefined' && promptInput) ? window.getComputedStyle(promptInput) : null;
         const resultsRect = resultsDiv ? resultsDiv.getBoundingClientRect() : null;
+        const rawViewportWidth = (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 0;
+        const rawViewportHeight = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 0;
         const locationPort = (typeof window !== 'undefined' && window.location && window.location.port)
             ? parseInt(window.location.port, 10)
             : NaN;
 
+        const conversationViewportWidth = resultsRect
+            ? Math.max(0, Math.min(resultsRect.right, rawViewportWidth) - Math.max(resultsRect.left, 0))
+            : 0;
+        const conversationViewportHeight = resultsRect
+            ? Math.max(0, Math.min(resultsRect.bottom, rawViewportHeight) - Math.max(resultsRect.top, 0))
+            : 0;
+
         return {
-            viewportWidth: (typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 0,
-            viewportHeight: (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 0,
+            viewportWidth: rawViewportWidth,
+            viewportHeight: rawViewportHeight,
             panelWidth: resultsRect ? Math.round(resultsRect.width) : 0,
             panelHeight: resultsRect ? Math.round(resultsRect.height) : 0,
+            conversationViewportWidth: Math.round(conversationViewportWidth),
+            conversationViewportHeight: Math.round(conversationViewportHeight),
+            conversationScrollTop: resultsDiv ? Math.round(resultsDiv.scrollTop) : 0,
+            conversationScrollHeight: resultsDiv ? Math.round(resultsDiv.scrollHeight) : 0,
+            conversationClientHeight: resultsDiv ? Math.round(resultsDiv.clientHeight) : 0,
             fontSize: promptStyles ? promptStyles.fontSize : '',
             colorScheme,
             devicePixelRatio: (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1,
