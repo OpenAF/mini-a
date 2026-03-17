@@ -466,6 +466,12 @@ todo:
         })
         // Only pass conversation parameter for new conversations to avoid overwriting in-memory state
         if (isNewConversation) {
+          if (isMap(postData.browserContext)) {
+            startArgs.browsercontext = jsonParse(stringify(postData.browserContext, __, ""), __, __, true)
+          } else if (isString(postData.browserContext) && postData.browserContext.trim().length > 0) {
+            var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
+            if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
+          }
           startArgs.conversation = global._mini_a_web_loadFile(_hfile)
         }
         var _rma = lma.start(startArgs)
@@ -835,6 +841,7 @@ jobs:
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
       usevectors      : toBoolean().isBoolean().default(false)
+      browsercontext  : isString().default(__)
       useascii        : toBoolean().isBoolean().default(false)
       usemath         : toBoolean().isBoolean().default(false)
       historys3bucket : isString().default(__)
@@ -918,6 +925,36 @@ jobs:
     }
     args.__interaction_source = "mini-a-web"
     
+    var browserContext = __
+    if (isMap(args.browsercontext)) {
+      browserContext = jsonParse(stringify(args.browsercontext, __, ""), __, __, true)
+    } else if (isString(args.browsercontext) && args.browsercontext.trim().length > 0) {
+      var parsedBrowserContext = af.fromJSSLON(args.browsercontext)
+      if (isMap(parsedBrowserContext)) {
+        browserContext = parsedBrowserContext
+      } else if (toBoolean(args.browsercontext)) {
+        browserContext = true
+      }
+    } else if (toBoolean(args.browsercontext)) {
+      browserContext = true
+    }
+
+    if ((args.usevectors || args.usesvg) && isUnDef(browserContext)) {
+      browserContext = true
+    }
+
+    if ((args.usevectors || args.usesvg) && isNumber(args.onport) && browserContext === true) {
+      browserContext = {
+        viewportWidth: 1280,
+        panelWidth: 720,
+        fontSize: "16px",
+        colorScheme: "dark",
+        devicePixelRatio: 2,
+        serverPort: args.onport
+      }
+    }
+
+    args.browsercontext = browserContext
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
     if (!toBoolean(args.mcplazy) || needsWorkerRegBootstrap) {

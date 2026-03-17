@@ -703,6 +703,7 @@ MiniA.buildVisualKnowledge = function(options) {
   var useMaps = _$(toBoolean(options.useMaps), "options.useMaps").isBoolean().default(false)
   var useMath = _$(toBoolean(options.useMath), "options.useMath").isBoolean().default(false)
   var useSvg = _$(toBoolean(options.useSvg), "options.useSvg").isBoolean().default(false)
+  var browserContext = isMap(options.browserContext) ? options.browserContext : __
 
   if (!useDiagrams && !useCharts && !useAscii && !useMaps && !useMath && !useSvg) return ""
 
@@ -723,12 +724,18 @@ MiniA.buildVisualKnowledge = function(options) {
 
   var visualParts = []
 
-  visualParts.push(
-    "Visual output guidance (concise):\n\n" +
-    "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.\n" +
-    "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.\n" +
+  var introLines = [
+    "Visual output guidance (concise):\n",
+    "- Default to including a diagram, chart, or UTF-8/ANSI visual whenever structure, flow, hierarchy, metrics, or comparisons are involved.",
+    "- Always pair the visual with a short caption (1-2 sentences) summarizing the insight.",
     "- In your explanatory text and captions, refer only to the visual type (e.g., 'diagram', 'chart', 'table', 'map') without mentioning the technical implementation (Mermaid, Chart.js, Leaflet, ANSI codes, etc.)."
-  )
+  ]
+  if (useSvg && (useCharts || useDiagrams)) {
+    introLines.push(
+      "- INTENT OVERRIDE — When the user's request contains words like 'infographic', 'poster', 'banner', 'flyer', 'draw', 'design', 'illustrate', 'layout', 'mockup', or 'wireframe', treat SVG as the primary output format immediately, regardless of other enabled modes. Do not default to a chart or Mermaid diagram for these requests."
+    )
+  }
+  visualParts.push(introLines.join("\n"))
 
   if (useDiagrams) {
     visualParts.push(
@@ -871,7 +878,7 @@ MiniA.buildVisualKnowledge = function(options) {
     visualParts.push(
       "Illustrations and custom visuals:\n" +
       "  - For custom illustrations, output a ```svg``` fenced block with complete `<svg>...</svg>` markup.\n" +
-      "  - In vector/infographic mode, default to a polished SVG infographic whenever visuals improve understanding.\n" +
+      "  - In vector/infographic mode, use SVG primarily for infographics, annotated summaries, custom artwork, technical drawings, and UI mockups rather than standard structural diagrams.\n" +
       "  - If chart rendering guidance is also enabled, do NOT draw ordinary charts in SVG/vector form when a supported chart type can be expressed with the chart fence; reserve SVG for unsupported chart designs or non-chart custom visuals.\n" +
       "  - Build the infographic for fast scanning: headline, clear sections, visual hierarchy, concise labels, and callouts.\n" +
       "  - Prefer infographic structures (panels, KPI cards, legends, timelines, comparisons, process steps, annotated layouts, icon-supported summaries) over standalone art.\n" +
@@ -881,12 +888,28 @@ MiniA.buildVisualKnowledge = function(options) {
       "  - Never include `<script>`, event handler attributes (`on*`), `<foreignObject>`, `javascript:` URIs, or external resource references.\n" +
       "  - Allowed tags: svg, g, path, rect, circle, ellipse, line, polyline, polygon, text, tspan, defs, linearGradient, radialGradient, clipPath, mask, pattern, use (internal `#id` only), marker, symbol, title, desc.\n" +
       "  - Use this format for custom illustrations, icons, technical drawings, annotated diagrams, infographics, geometric patterns, and UI mockups.\n" +
-      "  - Prefer Mermaid for standard flow/sequence/entity/timeline-style diagrams when Mermaid types apply."
+      "  - Prefer Mermaid for standard flow, sequence, entity, architecture, dependency, and timeline-style structural diagrams when Mermaid types apply."
     )
+
+    if (isMap(browserContext) && Object.keys(browserContext).length > 0) {
+      visualParts.push(
+        "Browser context hints for SVG/vector rendering:\n" +
+        "  - Use this browser context to tune layout density, typography scale, and contrast for the expected viewport.\n" +
+        "  - Keep SVG dimensions and composition aligned with the available panel width to avoid clipping.\n" +
+        "  - browserContext:\n" +
+        "    ```json\n" +
+        stringify(browserContext, __, "  ") + "\n" +
+        "    ```"
+      )
+    }
   }
 
   var checklist = "\n\nVisual selection checklist:"
   var nextIndex = 1
+  if (useSvg && (useCharts || useDiagrams)) {
+    checklist += "\n" + nextIndex + ". User says 'infographic', 'poster', 'banner', 'flyer', 'draw', 'design', 'illustrate', 'layout', 'mockup', or 'wireframe' -> SVG is the primary output; charts or Mermaid diagrams may appear as embedded sub-elements only if they genuinely help."
+    nextIndex++
+  }
   if (useDiagrams) {
     checklist += "\n" + nextIndex + ". Relationships or flows -> diagram with graph or sequence."
     nextIndex++
@@ -926,7 +949,7 @@ MiniA.buildVisualKnowledge = function(options) {
   if (useSvg) {
     checklist += "\n" + nextIndex + ". Rich infographic, annotated summary, or custom illustration -> use a self-contained SVG block with safe static elements only."
     nextIndex++
-    checklist += "\n" + nextIndex + ". Standard process/flow/timeline diagrams -> prefer Mermaid when a supported type exists; otherwise use a custom illustration."
+    checklist += "\n" + nextIndex + ". Standard process/flow/timeline/architecture diagrams -> prefer Mermaid when a supported type exists; otherwise use a custom illustration."
     nextIndex++
   }
   checklist += "\n\nIf no visual type above applies to the user's request (e.g., purely narrative or conversational queries), you may provide text-only output without explanation."
@@ -10120,6 +10143,23 @@ MiniA.prototype.init = function(args) {
       args.usesvg = true
       args.usediagrams = true
     }
+    if (isMap(args.browsercontext)) {
+      args.browsercontext = jsonParse(stringify(args.browsercontext, __, ""), __, __, true)
+    } else if (isString(args.browsercontext) && args.browsercontext.trim().length > 0) {
+      var parsedBrowserContext = af.fromJSSLON(args.browsercontext)
+      if (isMap(parsedBrowserContext)) {
+        args.browsercontext = parsedBrowserContext
+      } else if (toBoolean(args.browsercontext) === true) {
+        args.browsercontext = true
+      } else {
+        args.browsercontext = __
+      }
+    } else if (toBoolean(args.browsercontext) === true) {
+      args.browsercontext = true
+    } else {
+      args.browsercontext = __
+    }
+    if ((args.usesvg === true || args.usevectors === true) && isUnDef(args.browsercontext)) args.browsercontext = true
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
@@ -10250,6 +10290,7 @@ MiniA.prototype.init = function(args) {
       useMaps: args.usemaps,
       useMath: args.usemath,
       useSvg: args.usesvg,
+      browserContext: args.browsercontext,
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {
@@ -11174,6 +11215,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       args.usesvg = true
       args.usediagrams = true
     }
+    if ((args.usesvg === true || args.usevectors === true) && isUnDef(args.browsercontext)) args.browsercontext = true
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
