@@ -185,11 +185,11 @@ filesHash:
   mini-a-modes.yaml: f7d6ff644e318bd2d7ced31ad02c355e3f0529e5
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
   mini-a-subtask.js: 9070832a702e01d236b004719e92b0f4721aa3ec
-  mini-a-utils.js: 9f515d757fdc1fee45f34c0230dce0394274db0d
+  mini-a-utils.js: 5e1540f09524ee8e96ae558da3459832dc80ee24
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 370e18c59f3294a3e1cfdba8e33f1e905748c86c
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: 3f535c26c78ec14db3c5a0c89219d23c99481675
+  mini-a.js: fae2ae3de33a2d08a9df06717e4e7908ae925792
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 2e02370c1b20ea2e3768da70d6bbf9a94d689742
   public/index.md: 9591c474624f4128506bd41eb628fcecf532eb31
@@ -200,7 +200,7 @@ filesHash:
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
   tests/coreFunctionality.js: e194cdd81ba92b7a09aa4fe7699aa3cdbb5eb0f3
   tests/coreFunctionality.yaml: 5ddb708bf0a5fcc0cf5f9e3df9afbb0a8b6d3602
-  tests/miniAUtils.js: 0d95dba41905b23fb86ef4a5edbc4d62759059a6
-  tests/miniAUtils.yaml: ea171b5f2e9b66b1debdebad15dbfa556261168e
+  tests/miniAUtils.js: acb9350254265bf877bb1dd523b2a8773ae4a0f4
+  tests/miniAUtils.yaml: 6139fd1eed5e760b2bc401e2852b3163b9e4e19d
   tests/progToolCall.js: 83228632725f51069fc2a61490e31cdec340315c
   tests/progToolCall.yaml: e85ca324d9bc0d612ce4ac48214c4b55b9861959
