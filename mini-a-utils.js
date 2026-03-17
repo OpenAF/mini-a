@@ -2605,7 +2605,7 @@ MiniUtilsTool.prototype.systemInfo = function(params) {
 
 /**
  * <odoc>
- * <key>MiniUtilsTool.kvStore(params) : Object</key>
+ * <key>MiniUtilsTool.memoryStore(params) : Object</key>
  * Simple key-value store for temporary data storage during execution.
  * The `params` object can have the following properties:
  * - `operation` (string, required): The operation to perform (set, get, delete, list, clear).
@@ -2613,16 +2613,12 @@ MiniUtilsTool.prototype.systemInfo = function(params) {
  * - For get/delete: `key` (string)
  * </odoc>
  */
-MiniUtilsTool.prototype.kvStore = function(params) {
+MiniUtilsTool.prototype.memoryStore = function(params) {
   params = params || {}
   var op = (params.operation || "").toLowerCase()
 
-  // Initialize store if not exists
   if (isUnDef(this._kvStore)) {
     this._kvStore = {}
-  }
-  if (isUnDef(this._todoList)) {
-    this._todoList = []
   }
 
   try {
@@ -2688,7 +2684,33 @@ MiniUtilsTool.prototype.kvStore = function(params) {
       var count = Object.keys(this._kvStore).length
       this._kvStore = {}
       return { cleared: count }
-    } else if (op === "todo-write") {
+    }
+
+    return "[ERROR] Unknown operation: " + op
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.todoList(params) : Object</key>
+ * Lightweight in-memory todo list helper for temporary task tracking during execution.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): The operation to perform (write, read).
+ * - For write: `items` (array) or `item` (single value), `append` (boolean)
+ * </odoc>
+ */
+MiniUtilsTool.prototype.todoList = function(params) {
+  params = params || {}
+  var op = (params.operation || "").toLowerCase()
+
+  if (isUnDef(this._todoList)) {
+    this._todoList = []
+  }
+
+  try {
+    if (op === "write") {
       var items = params.items
       var item = params.item
       var append = params.append === true
@@ -2704,10 +2726,10 @@ MiniUtilsTool.prototype.kvStore = function(params) {
       } else if (isDef(item)) {
         nextList.push(item)
       }
+
       this._todoList = nextList
       return { count: this._todoList.length, items: this._todoList.slice(0) }
-
-    } else if (op === "todo-read") {
+    } else if (op === "read") {
       return { count: this._todoList.length, items: this._todoList.slice(0) }
     }
 
@@ -2753,8 +2775,8 @@ MiniUtilsTool._metadataByFn = (function() {
   // System info operation types
   var systemInfoOps = ["environment", "env", "platform", "cwd", "user", "memory", "disk"]
 
-  // KV store operation types
-  var kvStoreOps = ["set", "get", "delete", "list", "clear", "todo-write", "todo-read"]
+  var memoryStoreOps = ["set", "get", "delete", "list", "clear"]
+  var todoListOps = ["write", "read"]
   var markdownOps = ["list", "search", "read", "get", "view", "cat"]
   var skillOps = ["list", "search", "read", "get", "view", "cat", "render", "use", "expand", "apply", "invoke", "run"]
 
@@ -3037,22 +3059,37 @@ MiniUtilsTool._metadataByFn = (function() {
         required : []
       }
     },
-    kvStore: {
-      name       : "kvStore",
-      description: "Ephemeral state helper: key/value cache plus a lightweight todo list. Use for short-lived state between steps.",
+    memoryStore: {
+      name       : "memoryStore",
+      description: "Ephemeral memory helper: store and retrieve short-lived key/value data between steps.",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
-            description: "Operation type: set, get, delete, list, clear, todo-write, todo-read.",
-            enum       : kvStoreOps
+            description: "Operation type: set, get, delete, list, clear.",
+            enum       : memoryStoreOps
           },
           key      : { type: "string", description: "Key for set/get/delete operations." },
           value    : { description: "Value to store (any type)." },
-          ttl      : { type: "number", description: "Time-to-live in milliseconds." },
-          items    : { type: "array", description: "Todo items array for todo-write operation." },
-          item     : { type: "string", description: "Single todo item for todo-write operation." },
+          ttl      : { type: "number", description: "Time-to-live in milliseconds." }
+        },
+        required : ["operation"]
+      }
+    },
+    todoList: {
+      name       : "todoList",
+      description: "Lightweight in-memory todo list helper. Use for short task lists that only need write/read behavior.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation type: write or read.",
+            enum       : todoListOps
+          },
+          items    : { type: "array", description: "Todo items array for write operation." },
+          item     : { description: "Single todo item for write operation." },
           append   : { type: "boolean", description: "Append to existing todo list when true." }
         },
         required : ["operation"]

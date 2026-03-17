@@ -399,16 +399,85 @@
     ow.test.assert(malformedToon.format === "toon", true, "malformed validate-toon should report toon format")
   }
 
+  exports.testMemoryStoreOps = function() {
+    var tool = new MiniUtilsTool()
+
+    var setResult = tool.memoryStore({ operation: "set", key: "alpha", value: 123 })
+    ow.test.assert(setResult.stored === true, true, "Should store memory entry")
+
+    var getResult = tool.memoryStore({ operation: "get", key: "alpha" })
+    ow.test.assert(getResult.found === true, true, "Should get stored memory entry")
+    ow.test.assert(getResult.value === 123, true, "Should return stored memory value")
+
+    var listResult = tool.memoryStore({ operation: "list" })
+    ow.test.assert(listResult.count === 1, true, "Should list stored memory keys")
+    ow.test.assert(listResult.keys.indexOf("alpha") >= 0, true, "Should include stored key")
+
+    var deleteResult = tool.memoryStore({ operation: "delete", key: "alpha" })
+    ow.test.assert(deleteResult.deleted === true, true, "Should delete stored memory entry")
+
+    var expiredSetResult = tool.memoryStore({ operation: "set", key: "ttl-key", value: "soon gone", ttl: 1 })
+    ow.test.assert(expiredSetResult.stored === true, true, "Should store ttl entry")
+    sleep(20, true)
+
+    var expiredGetResult = tool.memoryStore({ operation: "get", key: "ttl-key" })
+    ow.test.assert(expiredGetResult.found === false, true, "Should expire ttl entry")
+    ow.test.assert(expiredGetResult.expired === true, true, "Should flag expired ttl entry")
+
+    tool.memoryStore({ operation: "set", key: "beta", value: "x" })
+    tool.memoryStore({ operation: "set", key: "gamma", value: "y" })
+    var clearResult = tool.memoryStore({ operation: "clear" })
+    ow.test.assert(clearResult.cleared === 2, true, "Should clear all remaining memory entries")
+  }
+
+  exports.testTodoListOps = function() {
+    var tool = new MiniUtilsTool()
+
+    var writeResult = tool.todoList({ operation: "write", items: ["first", "second"] })
+    ow.test.assert(writeResult.count === 2, true, "Should write todo items")
+
+    var appendResult = tool.todoList({ operation: "write", item: "third", append: true })
+    ow.test.assert(appendResult.count === 3, true, "Should append todo items")
+
+    var overwriteResult = tool.todoList({ operation: "write", item: "reset" })
+    ow.test.assert(overwriteResult.count === 1, true, "Should overwrite todo items when append is false")
+    ow.test.assert(overwriteResult.items[0] === "reset", true, "Should replace todo list contents")
+
+    var readResult = tool.todoList({ operation: "read" })
+    ow.test.assert(readResult.count === 1, true, "Should read todo items")
+    ow.test.assert(readResult.items[0] === "reset", true, "Should read latest todo item")
+  }
+
+  exports.testTodoListValidation = function() {
+    var tool = new MiniUtilsTool()
+
+    var invalidItemsResult = tool.todoList({ operation: "write", items: "nope" })
+    ow.test.assert(isString(invalidItemsResult) && invalidItemsResult.indexOf("[ERROR]") === 0, true, "Should reject non-array todo items")
+
+    var missingItemsResult = tool.todoList({ operation: "write" })
+    ow.test.assert(isString(missingItemsResult) && missingItemsResult.indexOf("[ERROR]") === 0, true, "Should require todo items or item")
+  }
+
+  exports.testMemoryStoreValidation = function() {
+    var tool = new MiniUtilsTool()
+
+    var missingKeyResult = tool.memoryStore({ operation: "get" })
+    ow.test.assert(isString(missingKeyResult) && missingKeyResult.indexOf("[ERROR]") === 0, true, "Should require key for memory get")
+
+    var missingValueResult = tool.memoryStore({ operation: "set", key: "alpha" })
+    ow.test.assert(isString(missingValueResult) && missingValueResult.indexOf("[ERROR]") === 0, true, "Should require value for memory set")
+  }
+
   exports.testTodoOps = function() {
     var tool = new MiniUtilsTool()
 
-    var writeResult = tool.kvStore({ operation: "todo-write", items: ["first", "second"] })
-    ow.test.assert(writeResult.count === 2, true, "Should write todo items")
+    var writeResult = tool.todoList({ operation: "write", items: ["first", "second"] })
+    ow.test.assert(writeResult.count === 2, true, "Should write todo items through todoList")
 
-    var appendResult = tool.kvStore({ operation: "todo-write", item: "third", append: true })
-    ow.test.assert(appendResult.count === 3, true, "Should append todo items")
+    var appendResult = tool.todoList({ operation: "write", item: "third", append: true })
+    ow.test.assert(appendResult.count === 3, true, "Should append todo items through todoList")
 
-    var readResult = tool.kvStore({ operation: "todo-read" })
+    var readResult = tool.todoList({ operation: "read" })
     ow.test.assert(readResult.count === 3, true, "Should read todo items")
   }
 
@@ -563,6 +632,9 @@
     ow.test.assert(methods.indexOf("skills") >= 0, true, "Should include skills method")
     ow.test.assert(methods.indexOf("mathematics") >= 0, true, "Should include mathematics method")
     ow.test.assert(methods.indexOf("timeUtilities") >= 0, true, "Should include timeUtilities method")
+    ow.test.assert(methods.indexOf("memoryStore") >= 0, true, "Should include memoryStore method")
+    ow.test.assert(methods.indexOf("todoList") >= 0, true, "Should include todoList method")
+    ow.test.assert(methods.indexOf("kvStore") === -1, true, "Should not include kvStore method")
 
     var queryOps = metadata.filesystemQuery.inputSchema.properties.operation.enum || []
     ow.test.assert(queryOps.indexOf("glob") >= 0, true, "Should include glob operation in filesystemQuery")
@@ -573,8 +645,11 @@
     ow.test.assert(textOps.indexOf("json-to-toon") >= 0, true, "Should include json-to-toon operation in textUtilities")
     var validationOps = metadata.validationUtilities.inputSchema.properties.operation.enum || []
     ow.test.assert(validationOps.indexOf("validate-toon") >= 0, true, "Should include validate-toon operation in validationUtilities")
-    var kvOps = metadata.kvStore.inputSchema.properties.operation.enum || []
-    ow.test.assert(kvOps.indexOf("todo-write") >= 0, true, "Should include todo-write operation in kvStore")
+    ow.test.assert(isUnDef(metadata.kvStore), true, "Should not include kvStore metadata")
+    var memoryOps = metadata.memoryStore.inputSchema.properties.operation.enum || []
+    ow.test.assert(memoryOps.indexOf("set") >= 0, true, "Should include set operation in memoryStore")
+    var todoOps = metadata.todoList.inputSchema.properties.operation.enum || []
+    ow.test.assert(todoOps.indexOf("write") >= 0, true, "Should include write operation in todoList")
     var markdownOps = metadata.markdownFiles.inputSchema.properties.operation.enum || []
     ow.test.assert(markdownOps.indexOf("search") >= 0, true, "Should include search operation in markdownFiles")
     var skillOps = metadata.skills.inputSchema.properties.operation.enum || []

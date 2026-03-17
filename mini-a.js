@@ -7099,6 +7099,28 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         if (["delete", "remove", "rm", "deletefile"].indexOf(op) >= 0) return "Deleting path" + pathPart + "."
       }
 
+      if (name === "memoryStore") {
+        if (op === "set") {
+          if (isString(payload.key) && payload.key.trim().length > 0) return "Storing memory key " + _quoted(payload.key.trim()) + "."
+          return "Storing memory value."
+        }
+        if (op === "get") {
+          if (isString(payload.key) && payload.key.trim().length > 0) return "Reading memory key " + _quoted(payload.key.trim()) + "."
+          return "Reading memory value."
+        }
+        if (op === "delete") {
+          if (isString(payload.key) && payload.key.trim().length > 0) return "Deleting memory key " + _quoted(payload.key.trim()) + "."
+          return "Deleting memory value."
+        }
+        if (op === "list") return "Listing memory keys."
+        if (op === "clear") return "Clearing memory store."
+      }
+
+      if (name === "todoList") {
+        if (op === "write") return "Updating todo list."
+        if (op === "read") return "Reading todo list."
+      }
+
       if (name === "timeUtilities") {
         if (op === "" || op === "current-time" || op === "current") {
           if (isString(payload.timezone) && payload.timezone.trim().length > 0) {

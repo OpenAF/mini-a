@@ -72,6 +72,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testTextAndValidationToon
 
+- name: MiniA Utils Tests::MemoryStoreOps
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryStoreOps
+
+- name: MiniA Utils Tests::TodoListOps
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTodoListOps
+
+- name: MiniA Utils Tests::TodoListValidation
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTodoListValidation
+
+- name: MiniA Utils Tests::MemoryStoreValidation
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryStoreValidation
+
 - name: MiniA Utils Tests::TodoOps
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -169,6 +189,10 @@ todo:
 - MiniA Utils Tests::EditFile
 - MiniA Utils Tests::WebFetch
 - MiniA Utils Tests::TextAndValidationToon
+- MiniA Utils Tests::MemoryStoreOps
+- MiniA Utils Tests::TodoListOps
+- MiniA Utils Tests::TodoListValidation
+- MiniA Utils Tests::MemoryStoreValidation
 - MiniA Utils Tests::TodoOps
 - MiniA Utils Tests::PathSecurity
 - MiniA Utils Tests::MarkdownFiles
