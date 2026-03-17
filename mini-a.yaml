@@ -795,6 +795,7 @@ jobs:
       if (isUnDef(args.usesvg) || !args.usesvg) args.usesvg = true
       if (isUnDef(args.usediagrams) || !args.usediagrams) args.usediagrams = true
     }
+    if (args.usesvg === true && isUnDef(args.browsercontext)) args.browsercontext = true
     if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
     if (isDef(args.rtm) && isUnDef(args.rpm)) args.rpm = args.rtm
     if (isDef(args.maxcontent) && isUnDef(args.maxcontext)) args.maxcontext = args.maxcontent

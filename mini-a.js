@@ -10137,10 +10137,19 @@ MiniA.prototype.init = function(args) {
       args.browsercontext = jsonParse(stringify(args.browsercontext, __, ""), __, __, true)
     } else if (isString(args.browsercontext) && args.browsercontext.trim().length > 0) {
       var parsedBrowserContext = af.fromJSSLON(args.browsercontext)
-      args.browsercontext = isMap(parsedBrowserContext) ? parsedBrowserContext : __
+      if (isMap(parsedBrowserContext)) {
+        args.browsercontext = parsedBrowserContext
+      } else if (toBoolean(args.browsercontext) === true) {
+        args.browsercontext = true
+      } else {
+        args.browsercontext = __
+      }
+    } else if (toBoolean(args.browsercontext) === true) {
+      args.browsercontext = true
     } else {
       args.browsercontext = __
     }
+    if ((args.usesvg === true || args.usevectors === true) && isUnDef(args.browsercontext)) args.browsercontext = true
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
@@ -11196,6 +11205,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       args.usesvg = true
       args.usediagrams = true
     }
+    if ((args.usesvg === true || args.usevectors === true) && isUnDef(args.browsercontext)) args.browsercontext = true
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)

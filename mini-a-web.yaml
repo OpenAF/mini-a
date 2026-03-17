@@ -930,10 +930,20 @@ jobs:
       browserContext = jsonParse(stringify(args.browsercontext, __, ""), __, __, true)
     } else if (isString(args.browsercontext) && args.browsercontext.trim().length > 0) {
       var parsedBrowserContext = af.fromJSSLON(args.browsercontext)
-      if (isMap(parsedBrowserContext)) browserContext = parsedBrowserContext
+      if (isMap(parsedBrowserContext)) {
+        browserContext = parsedBrowserContext
+      } else if (toBoolean(args.browsercontext)) {
+        browserContext = true
+      }
+    } else if (toBoolean(args.browsercontext)) {
+      browserContext = true
     }
 
-    if ((args.usevectors || args.usesvg) && isNumber(args.onport) && isUnDef(browserContext)) {
+    if ((args.usevectors || args.usesvg) && isUnDef(browserContext)) {
+      browserContext = true
+    }
+
+    if ((args.usevectors || args.usesvg) && isNumber(args.onport) && browserContext === true) {
       browserContext = {
         viewportWidth: 1280,
         panelWidth: 720,

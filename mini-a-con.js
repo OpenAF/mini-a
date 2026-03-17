@@ -2419,6 +2419,9 @@ try {
       if (isUnDef(args.usediagrams) || !args.usediagrams) args.usediagrams = args.usevectors
       delete args.usevectors
     }
+    if (args.usesvg === true && isUnDef(args.browsercontext)) {
+      args.browsercontext = true
+    }
     if (isDef(args.valgoal)) {
       if (isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
       delete args.valgoal
