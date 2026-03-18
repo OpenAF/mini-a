@@ -96,25 +96,29 @@ try {
         return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
       }
       var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-      var customModesPath = resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml")
-      if (io.fileExists(customModesPath)) {
-        try {
-          var customLoaded = io.readFileYAML(customModesPath)
-          var customPresets = {}
-          if (isMap(customLoaded) && isMap(customLoaded.modes)) {
-            customPresets = customLoaded.modes
-          } else if (isMap(customLoaded)) {
-            customPresets = customLoaded
+      ;[
+        resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml"),
+        resolveCanonicalPath(modesHome, ".openaf-mini-a/modes.yaml")
+      ].forEach(function(customModesPath) {
+        if (io.fileExists(customModesPath)) {
+          try {
+            var customLoaded = io.readFileYAML(customModesPath)
+            var customPresets = {}
+            if (isMap(customLoaded) && isMap(customLoaded.modes)) {
+              customPresets = customLoaded.modes
+            } else if (isMap(customLoaded)) {
+              customPresets = customLoaded
+            }
+            // Merge custom modes with default modes (later custom files override earlier ones)
+            if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
+              presets = merge(presets, customPresets)
+            }
+          } catch(e) {
+            var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+            logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
           }
-          // Merge custom modes with default modes (custom overrides defaults)
-          if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
-            presets = merge(presets, customPresets)
-          }
-        } catch(e) {
-          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-          logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
         }
-      }
+      })
 
       if (!isMap(presets) || Object.keys(presets).length === 0) {
         logWarn(`Mode '${modeName}' requested but no presets are defined.`)
@@ -277,14 +281,16 @@ try {
   var historyHome           = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
   var historyFilePath       = resolveCanonicalPath(historyHome, historyFileName)
   var conversationFileName  = ".openaf-mini-a_session.json"
-  var conversationFilePath  = resolveCanonicalPath(historyHome, conversationFileName)
+  var legacyConversationFilePath = resolveCanonicalPath(historyHome, conversationFileName)
+  var historyRootPath       = canonicalizePath(historyHome + "/.openaf-mini-a")
+  var conversationHistoryDirPath = canonicalizePath(historyRootPath + "/history")
   var customCommandsDirPath = canonicalizePath(historyHome + "/.openaf-mini-a/commands")
   var customSkillsDirPath   = canonicalizePath(historyHome + "/.openaf-mini-a/skills")
   var hooksDirPath          = canonicalizePath(historyHome + "/.openaf-mini-a/hooks")
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -292,18 +298,6 @@ try {
   var loadedHooks              = {}
   var resumeConversation    = parseBoolean(findArgumentValue(args, "resume")) === true
   var conversationArgValue  = findArgumentValue(args, "conversation")
-  var initialConversationPath = isString(conversationArgValue) && conversationArgValue.trim().length > 0
-    ? canonicalizePath(conversationArgValue)
-    : conversationFilePath
-
-  if (resumeConversation !== true && isString(initialConversationPath) && initialConversationPath.trim().length > 0) {
-    try {
-      if (io.fileExists(initialConversationPath) && io.fileInfo(initialConversationPath).isFile) io.rm(initialConversationPath)
-      lastConversationStats = __
-    } catch (conversationResetError) {
-      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to reset conversation at startup: " + conversationResetError, errorColor))
-    }
-  }
 
   try {
     if (isDef(con) && typeof con.getConsoleReader === "function") {
@@ -336,6 +330,74 @@ try {
   function colorifyText(text, color) {
     if (!colorSupport || isUnDef(color)) return text
     return ansiColor(color, text)
+  }
+
+  function incMetric(name, amount) {
+    var delta = isNumber(amount) ? amount : 1
+    if (!isObject(global.__mini_a_metrics) || !isObject(global.__mini_a_metrics[name]) || !isFunction(global.__mini_a_metrics[name].inc)) return
+    try { global.__mini_a_metrics[name].inc(delta) } catch(ignoreMetricInc) { }
+  }
+
+  function ensureDirectory(path) {
+    if (!isString(path) || path.trim().length === 0) return false
+    try {
+      if (!io.fileExists(path)) io.mkdir(path)
+      return io.fileExists(path) && io.fileInfo(path).isDirectory === true
+    } catch(ignoreEnsureDirError) {
+      return false
+    }
+  }
+
+  function formatHistoryFileTimestamp(value) {
+    var dateValue = value
+    if (!isDate(dateValue)) dateValue = new Date(isDef(value) ? value : now())
+    return String(new java.text.SimpleDateFormat("yyyyMMdd-HHmmss").format(dateValue))
+  }
+
+  function parseTimestampValue(value) {
+    if (isUnDef(value) || value === null) return __
+    if (isDate(value)) return value
+    if (isNumber(value)) {
+      var numericDate = new Date(value)
+      return isNaN(numericDate.getTime()) ? __ : numericDate
+    }
+    if (isString(value)) {
+      var trimmed = value.trim()
+      if (trimmed.length === 0) return __
+      var parsedDate = new Date(trimmed)
+      if (!isNaN(parsedDate.getTime())) return parsedDate
+    }
+    return __
+  }
+
+  function getConversationTimestamps(payload, fileInfo) {
+    var createdAt = __
+    var updatedAt = __
+    if (isObject(payload)) {
+      createdAt = parseTimestampValue(payload.created_at)
+      if (isUnDef(createdAt)) createdAt = parseTimestampValue(payload.createdAt)
+      if (isUnDef(createdAt)) createdAt = parseTimestampValue(payload.u)
+      updatedAt = parseTimestampValue(payload.updated_at)
+      if (isUnDef(updatedAt)) updatedAt = parseTimestampValue(payload.updatedAt)
+      if (isUnDef(updatedAt)) updatedAt = parseTimestampValue(payload.u)
+    }
+    if (isUnDef(updatedAt) && isObject(fileInfo)) updatedAt = parseTimestampValue(fileInfo.lastModified)
+    if (isUnDef(createdAt) && isDef(updatedAt)) createdAt = updatedAt
+    if (isUnDef(createdAt) && isObject(fileInfo)) createdAt = parseTimestampValue(fileInfo.createTime)
+    return { createdAt: createdAt, updatedAt: updatedAt }
+  }
+
+  function buildHistoryConversationPath() {
+    ensureDirectory(historyRootPath)
+    ensureDirectory(conversationHistoryDirPath)
+    var baseName = "conversation-" + formatHistoryFileTimestamp(new Date())
+    var candidate = canonicalizePath(conversationHistoryDirPath + "/" + baseName + ".json")
+    var suffix = 1
+    while (io.fileExists(candidate)) {
+      candidate = canonicalizePath(conversationHistoryDirPath + "/" + baseName + "-" + suffix + ".json")
+      suffix += 1
+    }
+    return candidate
   }
 
   function unwrapSingleMarkdownCodeBlock(text) {
@@ -409,6 +471,10 @@ try {
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
+    usehistory     : { type: "boolean", default: false, description: "List previous console conversations from ~/.openaf-mini-a/history" },
+    historykeep    : { type: "boolean", default: false, description: "Keep console conversations under ~/.openaf-mini-a/history" },
+    historykeepperiod: { type: "number", description: "Delete kept conversation files older than this many minutes" },
+    historykeepcount: { type: "number", description: "Keep only the newest N kept conversation files" },
     outfile        : { type: "string", description: "Save final answer to file" },
     outputfile     : { type: "string", description: "Alias for outfile for plan conversions" },
     planfile       : { type: "string", description: "Plan file to load or save before execution" },
@@ -450,7 +516,7 @@ try {
     extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" }
   }
 
-  if (isDef(parameterDefinitions.conversation) && !(io.fileExists(conversationFilePath) && io.fileInfo(conversationFilePath).isDirectory)) parameterDefinitions.conversation.default = conversationFilePath
+  if (isDef(parameterDefinitions.conversation) && !(io.fileExists(legacyConversationFilePath) && io.fileInfo(legacyConversationFilePath).isDirectory)) parameterDefinitions.conversation.default = legacyConversationFilePath
   var sessionParameterNames = Object.keys(parameterDefinitions).sort()
 
   var cliPrimaryOptionKeys = {
@@ -513,7 +579,7 @@ try {
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
       { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },
-      { option: "resume=true", description: "Reuse the last conversation and continue from where you left." },
+      { option: "resume=true", description: "Resume a previous conversation (interactive picker when usehistory=true)." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." },
       { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." }
@@ -1319,7 +1385,196 @@ try {
         return configured
       }
     }
-    return conversationFilePath
+    return legacyConversationFilePath
+  }
+
+  function isHistoryConversationPath(path) {
+    if (!isString(path) || path.trim().length === 0) return false
+    return canonicalizePath(path).indexOf(conversationHistoryDirPath + "/") === 0
+  }
+
+  function listSavedConversationFiles() {
+    if (!ensureDirectory(historyRootPath) || !ensureDirectory(conversationHistoryDirPath)) return []
+    var listing = []
+    try {
+      var dirEntries = io.listFiles(conversationHistoryDirPath)
+      if (!isObject(dirEntries) || !isArray(dirEntries.files)) return []
+      dirEntries.files.forEach(function(fileEntry) {
+        if (!isObject(fileEntry) || fileEntry.isFile !== true) return
+        if (!isString(fileEntry.filename) || fileEntry.filename.toLowerCase().slice(-5) !== ".json") return
+        var filePath = canonicalizePath(fileEntry.canonicalPath || (conversationHistoryDirPath + "/" + fileEntry.filename))
+        var payload = loadConversationPayload(filePath)
+        var stamps = getConversationTimestamps(payload, fileEntry)
+        var entries = isObject(payload) && isArray(payload.c) ? payload.c : []
+        var pair = extractLastGoalAndAnswer(entries)
+        listing.push({
+          path       : filePath,
+          fileName   : fileEntry.filename,
+          createdAt  : stamps.createdAt,
+          updatedAt  : stamps.updatedAt,
+          messageCount: entries.length,
+          lastGoal   : isString(pair.goal) ? pair.goal : "",
+          payload    : payload
+        })
+      })
+    } catch(ignoreListHistoryError) { }
+    listing.sort(function(a, b) {
+      var aTime = isDate(a.updatedAt) ? a.updatedAt.getTime() : (isDate(a.createdAt) ? a.createdAt.getTime() : 0)
+      var bTime = isDate(b.updatedAt) ? b.updatedAt.getTime() : (isDate(b.createdAt) ? b.createdAt.getTime() : 0)
+      return bTime - aTime
+    })
+    return listing
+  }
+
+  function pruneConversationHistory() {
+    if (toBoolean(sessionOptions.historykeep) !== true && toBoolean(sessionOptions.usehistory) !== true) return 0
+    var keepPeriod = Number(sessionOptions.historykeepperiod)
+    var keepCount = Number(sessionOptions.historykeepcount)
+    var useKeepPeriod = (!isNaN(keepPeriod) && keepPeriod > 0)
+    var useKeepCount = (!isNaN(keepCount) && keepCount > 0)
+    if (!useKeepPeriod && !useKeepCount) return 0
+    var files = listSavedConversationFiles()
+    if (files.length === 0) return 0
+    var threshold = useKeepPeriod ? (now() - (keepPeriod * 60 * 1000)) : __
+    var deleteTargets = {}
+    var deleted = 0
+    var deletedByPeriod = 0
+    var deletedByCount = 0
+    if (useKeepPeriod) {
+      files.forEach(function(entry) {
+        var compareDate = isDate(entry.updatedAt) ? entry.updatedAt : entry.createdAt
+        if (!isDate(compareDate) || compareDate.getTime() >= threshold) return
+        deleteTargets[entry.path] = deleteTargets[entry.path] || {}
+        deleteTargets[entry.path].period = true
+      })
+    }
+    if (useKeepCount && files.length > keepCount) {
+      files.slice(keepCount).forEach(function(entry) {
+        deleteTargets[entry.path] = deleteTargets[entry.path] || {}
+        deleteTargets[entry.path].count = true
+      })
+    }
+    Object.keys(deleteTargets).forEach(function(path) {
+      try {
+        if (io.fileExists(path) && io.fileInfo(path).isFile) {
+          io.rm(path)
+          deleted += 1
+          if (deleteTargets[path].period === true) deletedByPeriod += 1
+          if (deleteTargets[path].count === true) deletedByCount += 1
+        }
+      } catch(ignoreDeleteConversationError) { }
+    })
+    if (deleted > 0) incMetric("history_files_deleted", deleted)
+    if (deletedByPeriod > 0) incMetric("history_files_deleted_by_period", deletedByPeriod)
+    if (deletedByCount > 0) incMetric("history_files_deleted_by_count", deletedByCount)
+    return deleted
+  }
+
+  function formatConversationHistoryStamp(value) {
+    if (!isDate(value)) return "n/a"
+    return String(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(value))
+  }
+
+  function truncateForConsoleWidth(text, maxLen) {
+    var str = isString(text) ? text : String(text || "")
+    var limit = isNumber(maxLen) ? Math.max(4, Math.round(maxLen)) : 72
+    if (str.length <= limit) return str
+    return str.substring(0, Math.max(1, limit - 3)) + "..."
+  }
+
+  function chooseConversationToResume() {
+    var files = listSavedConversationFiles()
+    if (files.length === 0) return __
+    var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+    var choices = files.map(function(entry, idx) {
+      var stamp = formatConversationHistoryStamp(isDate(entry.updatedAt) ? entry.updatedAt : entry.createdAt)
+      var prefix = "💬 [" + (idx + 1) + "] " + stamp + " (" + entry.messageCount + " msg) "
+      var maxSummaryLen = Math.max(24, termWidth - prefix.length - 6)
+      var summary = entry.lastGoal && entry.lastGoal.length > 0
+        ? truncateForConsoleWidth(entry.lastGoal.replace(/\s+/g, " ").trim(), maxSummaryLen)
+        : "(no goal captured)"
+      return prefix + summary
+    }).concat(["🆕 Start new conversation"])
+    var selected = askChoose("Choose a conversation to resume: ", choices, Math.min(choices.length, 10))
+    if (!isNumber(selected) || selected < 0 || selected >= files.length) return __
+    return files[selected]
+  }
+
+  function initializeConversationPath(recordSessionMetric) {
+    var explicitConversation = isString(conversationArgValue) && conversationArgValue.trim().length > 0
+    var resolvedConversationPath = explicitConversation ? canonicalizePath(conversationArgValue) : legacyConversationFilePath
+
+    if (toBoolean(sessionOptions.historykeep) === true || toBoolean(sessionOptions.usehistory) === true) {
+      ensureDirectory(historyRootPath)
+      ensureDirectory(conversationHistoryDirPath)
+    }
+
+    var deletedFiles = pruneConversationHistory()
+    if (deletedFiles > 0) {
+      print(colorifyText("Deleted " + deletedFiles + " expired conversation file" + (deletedFiles === 1 ? "" : "s") + ".", hintColor))
+    }
+
+    if (!explicitConversation && resumeConversation === true && toBoolean(sessionOptions.usehistory) === true) {
+      var selectedConversation = chooseConversationToResume()
+      if (isObject(selectedConversation) && isString(selectedConversation.path) && selectedConversation.path.length > 0) {
+        resolvedConversationPath = selectedConversation.path
+      } else if (toBoolean(sessionOptions.historykeep) === true) {
+        resolvedConversationPath = buildHistoryConversationPath()
+      }
+    } else if (!explicitConversation && toBoolean(sessionOptions.historykeep) === true) {
+      if (resumeConversation === true) {
+        var savedFiles = listSavedConversationFiles()
+        if (savedFiles.length > 0 && isString(savedFiles[0].path) && savedFiles[0].path.length > 0) resolvedConversationPath = savedFiles[0].path
+        else resolvedConversationPath = buildHistoryConversationPath()
+      } else {
+        resolvedConversationPath = buildHistoryConversationPath()
+      }
+    }
+
+    sessionOptions.conversation = resolvedConversationPath
+
+    if (resumeConversation !== true && isString(resolvedConversationPath) && resolvedConversationPath.trim().length > 0) {
+      try {
+        if (io.fileExists(resolvedConversationPath) && io.fileInfo(resolvedConversationPath).isFile) io.rm(resolvedConversationPath)
+        lastConversationStats = __
+      } catch (conversationResetError) {
+        printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to reset conversation at startup: " + conversationResetError, errorColor))
+      }
+    }
+
+    if (recordSessionMetric === true) {
+      if (resumeConversation === true) incMetric("history_sessions_resumed")
+      else incMetric("history_sessions_started")
+    }
+  }
+
+  function restoreConversationSelection() {
+    var explicitConversation = isString(conversationArgValue) && conversationArgValue.trim().length > 0
+    var restoredPath = explicitConversation ? canonicalizePath(conversationArgValue) : getConversationPath()
+
+    if (!explicitConversation && toBoolean(sessionOptions.usehistory) === true) {
+      var selectedConversation = chooseConversationToResume()
+      if (isObject(selectedConversation) && isString(selectedConversation.path) && selectedConversation.path.length > 0) {
+        restoredPath = selectedConversation.path
+      } else if (toBoolean(sessionOptions.historykeep) === true) {
+        restoredPath = buildHistoryConversationPath()
+      }
+    } else if (!explicitConversation && toBoolean(sessionOptions.historykeep) === true) {
+      var savedFiles = listSavedConversationFiles()
+      if (savedFiles.length > 0 && isString(savedFiles[0].path) && savedFiles[0].path.length > 0) restoredPath = savedFiles[0].path
+      else restoredPath = buildHistoryConversationPath()
+    }
+
+    sessionOptions.conversation = restoredPath
+    lastConversationStats = __
+    historyFileKeptRecorded = false
+    restoreLastResultFromConversation()
+    refreshConversationStats()
+    incMetric("history_sessions_resumed")
+
+    if (isString(restoredPath) && restoredPath.length > 0) {
+      print(colorifyText("Restored conversation from " + restoredPath, successColor))
+    }
   }
 
   function loadConversationEntries(path) {
@@ -1900,6 +2155,10 @@ try {
         } catch(ignoreClearError) {}
       }
       lastConversationStats = __
+      if (toBoolean(sessionOptions.historykeep) === true && isHistoryConversationPath(convoPath)) {
+        sessionOptions.conversation = buildHistoryConversationPath()
+        historyFileKeptRecorded = false
+      }
       resetMetrics()
       print(colorifyText("Conversation and metrics cleared. Future goals will start fresh.", successColor))
     } catch (clearError) {
@@ -2145,11 +2404,14 @@ try {
 
   var sessionOptions = resetOptions()
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
-  var internalParameters = { goalprefix: true }
+  var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true }
   var activeAgent = __
   var shutdownHandled = false
   var subtaskLogsByShortId = {}
   var workerRegBootstrapped = false
+  var historyFileKeptRecorded = false
+
+  initializeConversationPath(true)
 
   if (resumeConversation === true) {
     restoreLastResultFromConversation()
@@ -2175,6 +2437,17 @@ try {
       lines.push(nextLine)
     }
     return lines.join("\n")
+  }
+
+  function unwrapConsoleQuotedValue(value) {
+    if (!isString(value)) return value
+    if (value.length < 2) return value
+    var firstChar = value.charAt(0)
+    var lastChar = value.charAt(value.length - 1)
+    if ((firstChar === "\"" || firstChar === "'") && lastChar === firstChar) {
+      return value.substring(1, value.length - 1)
+    }
+    return value
   }
 
   function setOption(name, rawValue) {
@@ -2205,9 +2478,30 @@ try {
       value = parsedNum
     } else if (def.type === "string") {
       if (!isString(value)) value = String(value)
+      value = unwrapConsoleQuotedValue(value)
     }
     sessionOptions[key] = value
-    if (key === "conversation") lastConversationStats = __
+    if (key === "conversation") {
+      lastConversationStats = __
+      historyFileKeptRecorded = false
+    } else if (key === "historykeep") {
+      if (value === true) {
+        ensureDirectory(historyRootPath)
+        ensureDirectory(conversationHistoryDirPath)
+        if (!isHistoryConversationPath(getConversationPath()) && !isString(conversationArgValue)) {
+          sessionOptions.conversation = buildHistoryConversationPath()
+          historyFileKeptRecorded = false
+          lastConversationStats = __
+        }
+      } else if (value === false && !isString(conversationArgValue) && isHistoryConversationPath(getConversationPath())) {
+        sessionOptions.conversation = legacyConversationFilePath
+        historyFileKeptRecorded = false
+        lastConversationStats = __
+      }
+    } else if (key === "usehistory" && value === true) {
+      ensureDirectory(historyRootPath)
+      ensureDirectory(conversationHistoryDirPath)
+    }
     print(colorifyText("Set " + key + "=" + value, successColor))
   }
 
@@ -2222,7 +2516,14 @@ try {
     } else {
       delete sessionOptions[key]
     }
-    if (key === "conversation") lastConversationStats = __
+    if (key === "conversation") {
+      lastConversationStats = __
+      historyFileKeptRecorded = false
+    } else if (key === "historykeep" && !isString(conversationArgValue) && isHistoryConversationPath(getConversationPath())) {
+      sessionOptions.conversation = legacyConversationFilePath
+      historyFileKeptRecorded = false
+      lastConversationStats = __
+    }
     print(colorifyText("Cleared parameter " + key, successColor))
   }
 
@@ -2239,8 +2540,7 @@ try {
     }
     var current = sessionOptions[key]
     var toggled = current === true ? false : true
-    sessionOptions[key] = toggled
-    print(colorifyText("Toggled " + key + " -> " + toggled, successColor))
+    setOption(key, toggled)
   }
 
   /**
@@ -2780,7 +3080,16 @@ try {
       if (!isObject(agentRef.llm) || typeof agentRef.llm.getGPT !== "function") return
       var conversation = agentRef.llm.getGPT().getConversation()
       if (isArray(conversation)) {
-        var payload = { u: new Date(), c: conversation }
+        var existingPayload = loadConversationPayload(convoPath)
+        var nowDate = new Date()
+        var stamps = getConversationTimestamps(existingPayload, __)
+        var payload = {
+          u         : nowDate,
+          c         : conversation,
+          created_at: isDate(stamps.createdAt) ? stamps.createdAt : nowDate,
+          updated_at: nowDate
+        }
+        if (isObject(existingPayload) && isObject(existingPayload.last)) payload.last = clone(existingPayload.last)
         if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
           payload.last = payload.last || {}
           payload.last.goal = lastGoalPrompt
@@ -2791,6 +3100,10 @@ try {
           payload.last.original = isDef(lastOrigResult) ? lastOrigResult : lastResult
         }
         io.writeFileJSON(convoPath, payload, "")
+        if (!historyFileKeptRecorded && isHistoryConversationPath(convoPath)) {
+          incMetric("history_files_kept")
+          historyFileKeptRecorded = true
+        }
       }
     } catch(ignorePersistError) { }
   }
@@ -3344,6 +3657,7 @@ try {
 
     var conversationPath = getConversationPath()
     var conversationDisplay = (isString(conversationPath) && conversationPath.length > 0) ? conversationPath : "disabled"
+    var historyDisplay = conversationHistoryDirPath
     var lines = [
       "• Type a goal and press Enter to launch Mini-A. Press " + colorifyText("Esc", accentColor) + colorifyText(" during execution to request a stop.", hintColor),
       "• Enter '" + colorifyText("\"\"\"", accentColor) + "' on a new line to compose multi-line goals.",
@@ -3353,6 +3667,7 @@ try {
       "• Notes: skills can also be executed with " + colorifyText("$skill [args]", accentColor) + colorifyText(".", hintColor),
       "• Use Tab to complete slash commands and ↑/↓ to browse history saved at " + colorifyText(historyFilePath, accentColor) + ".",
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
+      "• Saved history files live under " + colorifyText(historyDisplay, accentColor) + " when " + colorifyText("historykeep=true", accentColor) + colorifyText(".", hintColor),
       "",
       "Commands (prefix with '/'):",
       "  " + colorifyText("/help", "BOLD") + colorifyText("               Show this help message", hintColor),
@@ -3361,6 +3676,7 @@ try {
       "  " + colorifyText("/unset", "BOLD") + colorifyText(" <key>        Clear a parameter", hintColor),
       "  " + colorifyText("/show", "BOLD") + colorifyText(" [prefix]      Display configured parameters (filtered by prefix)", hintColor),
       "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
+      "  " + colorifyText("/restore", "BOLD") + colorifyText("            Restore a saved conversation like resume=true", hintColor),
       "  " + colorifyText("/last", "BOLD") + colorifyText(" [md]          Print the previous final answer (md: raw markdown)", hintColor),
       "  " + colorifyText("/save", "BOLD") + colorifyText(" [file.md]     Save the last response to a file (default: response.md)", hintColor),
       "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation and accumulated metrics", hintColor),
@@ -3476,6 +3792,9 @@ try {
   print(colorifyText("Type /help for available commands.", hintColor))
   if (resumeConversation === true) {
     print(colorifyText("Use /last to check the previous answer from this resumed conversation.", hintColor))
+    if (toBoolean(sessionOptions.usehistory) === true && isUnDef(conversationArgValue)) {
+      print(colorifyText("Resume selection reads from " + conversationHistoryDirPath + ".", hintColor))
+    }
   }
 
   const _miniaConReset = function() {
@@ -3576,7 +3895,13 @@ try {
       if (commandLower === "reset") {
         sessionOptions = resetOptions()
         lastConversationStats = __
+        historyFileKeptRecorded = false
+        initializeConversationPath(false)
         print(colorifyText("Parameters reset to defaults.", successColor))
+        continue
+      }
+      if (commandLower === "restore") {
+        restoreConversationSelection()
         continue
       }
       if (commandLower === "last" || commandLower.indexOf("last ") === 0) {

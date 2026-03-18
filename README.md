@@ -344,7 +344,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Autonomous Delegation** - LLM decides when to delegate via `delegate-subtask` tool
   - **Manual Delegation** - Console commands for interactive control (`/delegate`, `/subtasks`, `/subtask`)
   - **Depth Tracking** - Configurable nesting limits with automatic retry and deadline enforcement
-- **Conversation Persistence** - Save and resume conversations across sessions (`conversation=...`; in `mini-a-con`, use `resume=true` to continue the latest thread)
+- **Conversation Persistence** - Save and resume conversations across sessions (`conversation=...`; in `mini-a-con`, combine `usehistory=true`, `historykeep=true`, and `resume=true` to pick and continue prior console threads stored under `~/.openaf-mini-a/history/`; use `historykeepperiod=` and/or `historykeepcount=` for retention)
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
@@ -386,7 +386,7 @@ Mini-A ships with complementary components:
 - **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
-- **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml`)
+- **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml` or `~/.openaf-mini-a/modes.yaml`)
 - **`public/`** - Browser interface assets
 
 ## Common Configuration Options
@@ -422,7 +422,7 @@ Mini-A ships with complementary components:
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
-| `mode` | Apply preset from `mini-a-modes.yaml` or `~/.openaf-mini-a_modes.yaml` | - |
+| `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
 | `workers` | Comma-separated list of worker URLs for remote delegation (`workers=http://host1:8080,http://host2:8080`) | - |

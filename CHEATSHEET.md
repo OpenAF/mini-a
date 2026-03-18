@@ -546,7 +546,7 @@ mini-a mode=chatbot goal="help me plan a trip"
 # Use web mode
 ./mini-a-web.sh mode=web onport=8888
 
-# Custom preset (in ~/.openaf-mini-a_modes.yaml)
+# Custom preset (in ~/.openaf-mini-a/modes.yaml)
 modes:
   mypreset:
     useshell: true

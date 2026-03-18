@@ -324,7 +324,7 @@ oJob wrappers (for example `ojob mini-a.yaml modelman=true`).
 
 ## Mode Presets
 
-Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones) before applying any explicit flags you provide on the command line.
+Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` and `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and `~/.openaf-mini-a/modes.yaml` overrides the legacy file when both exist) before applying any explicit flags you provide on the command line.
 
 Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mode=` on the command line (helpful when using the `mini-a` alias). Explicit `mode=` arguments continue to take precedence over the environment variable.
 
@@ -340,12 +340,12 @@ Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mo
 
 ### Creating Custom Presets
 
-Create your own presets by creating a `~/.openaf-mini-a_modes.yaml` file in your home directory. Custom modes are automatically merged with the built-in presets from `mini-a-modes.yaml`, with custom definitions taking precedence. The agent loads both YAML files on each run, so custom additions and overrides are immediately available.
+Create your own presets by creating either a `~/.openaf-mini-a_modes.yaml` file or a `~/.openaf-mini-a/modes.yaml` file in your home directory. Custom modes are automatically merged with the built-in presets from `mini-a-modes.yaml`, with custom definitions taking precedence. If both custom files exist, `~/.openaf-mini-a/modes.yaml` overrides the legacy file. The agent loads these YAML files on each run, so custom additions and overrides are immediately available.
 
 **Example custom preset:**
 
 ```yaml
-# In ~/.openaf-mini-a_modes.yaml
+# In ~/.openaf-mini-a/modes.yaml
 modes:
   mypreset:
     useshell: true
@@ -766,7 +766,7 @@ The `start()` method accepts various configuration options:
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
-- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` to prefill a bundle of related flags
+- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 
 #### Dual-Model Controls
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
@@ -925,11 +925,16 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
-- **`resume`** (boolean, default: false, `mini-a-con`): Reuse the last conversation and restore the most recent goal/result context when running from the interactive console (`mini-a` / `opack exec mini-a`)
+- **`resume`** (boolean, default: false, `mini-a-con`): Resume a previous console conversation. When `conversation` is omitted and `usehistory=true`, the console lists `~/.openaf-mini-a/history/*.json` and lets you choose which thread to continue.
+- **`usehistory`** (boolean, default: false, `mini-a-con`): Enable console history discovery from `~/.openaf-mini-a/history/`.
+- **`historykeep`** (boolean, default: false, `mini-a-con`): Store console conversation files in `~/.openaf-mini-a/history/` using `conversation-yyyyMMdd-HHmmss.json` style names.
+- **`historykeepperiod`** (number, `mini-a-con`): Automatically delete kept conversation files older than the provided number of minutes.
+- **`historykeepcount`** (number, `mini-a-con`): Automatically delete kept conversation files beyond the newest N entries.
+  - When both `historykeepperiod` and `historykeepcount` are set, either rule can prune a saved conversation file.
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Mode Presets
-- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
+- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and the new path overrides the legacy one when both exist). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access.
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`) exposing `init`, `filesystemQuery`, `filesystemModify`, and `markdownFiles` actions.
@@ -2259,6 +2264,14 @@ Resume the last conversation directly from the interactive console:
 mini-a conversation=chat-history.json resume=true
 ```
 
+Or keep console sessions in the default history folder and choose one interactively when resuming:
+
+```bash
+mini-a usehistory=true historykeep=true resume=true
+```
+
+Console history payloads now keep both `created_at` and `updated_at` timestamps in addition to the conversation entries, which makes retention and manual inspection easier.
+
 ### Context Management
 
 ```javascript
@@ -2427,6 +2440,7 @@ This will show:
 Mini-A records extensive counters that help track behaviour and costs:
 
 - Call `agent.getMetrics()` to obtain a snapshot grouped by LLM usage, outcomes, shell approvals/denials, context management, and summarization activity.
+- Console history flows also update `history` metrics so you can track started/resumed sessions plus kept/deleted conversation files when using `mini-a-con`, including separate counters for age-based and count-based pruning.
 - OpenAF automatically registers these counters under the `mini-a` namespace via `ow.metrics.add('mini-a', ...)`, so collectors that understand OpenAF metrics can scrape them.
 - Metrics are updated live as the agent progresses, making them ideal for dashboards or alerting when an agent gets stuck.
 
@@ -2447,6 +2461,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
 | `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
 | `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy`, `avgDurationMs`, `maxDepthUsed` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle, retries, worker pool composition/health, average duration, and deepest nesting level reached. |
+| `history` | `sessions_started`, `sessions_resumed`, `files_kept`, `files_deleted`, `files_deleted_by_period`, `files_deleted_by_count` | Console conversation history metrics. Tracks new vs resumed console sessions, how many history files were kept, and how many were pruned overall, by age rule, or by count rule. |
 
 These counters mirror what is exported via `ow.metrics.add('mini-a', ...)`, so the same structure appears in Prometheus/Grafana when scraped through OpenAF.
 
