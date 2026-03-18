@@ -110,7 +110,6 @@ modes:
       mcpproxy   : true
       mcpproxythreshold: 51200
       mcpproxytoon     : true
-      usehistory       : true
       historykeep      : true
       historykeepperiod: 10080
       historykeepcount : 15
