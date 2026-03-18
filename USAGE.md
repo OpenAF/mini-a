@@ -324,7 +324,7 @@ oJob wrappers (for example `ojob mini-a.yaml modelman=true`).
 
 ## Mode Presets
 
-Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones) before applying any explicit flags you provide on the command line.
+Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` and `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and `~/.openaf-mini-a/modes.yaml` overrides the legacy file when both exist) before applying any explicit flags you provide on the command line.
 
 Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mode=` on the command line (helpful when using the `mini-a` alias). Explicit `mode=` arguments continue to take precedence over the environment variable.
 
@@ -340,12 +340,12 @@ Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mo
 
 ### Creating Custom Presets
 
-Create your own presets by creating a `~/.openaf-mini-a_modes.yaml` file in your home directory. Custom modes are automatically merged with the built-in presets from `mini-a-modes.yaml`, with custom definitions taking precedence. The agent loads both YAML files on each run, so custom additions and overrides are immediately available.
+Create your own presets by creating either a `~/.openaf-mini-a_modes.yaml` file or a `~/.openaf-mini-a/modes.yaml` file in your home directory. Custom modes are automatically merged with the built-in presets from `mini-a-modes.yaml`, with custom definitions taking precedence. If both custom files exist, `~/.openaf-mini-a/modes.yaml` overrides the legacy file. The agent loads these YAML files on each run, so custom additions and overrides are immediately available.
 
 **Example custom preset:**
 
 ```yaml
-# In ~/.openaf-mini-a_modes.yaml
+# In ~/.openaf-mini-a/modes.yaml
 modes:
   mypreset:
     useshell: true
@@ -766,7 +766,7 @@ The `start()` method accepts various configuration options:
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
-- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` to prefill a bundle of related flags
+- **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 
 #### Dual-Model Controls
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
@@ -929,7 +929,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Mode Presets
-- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml) or `~/.openaf-mini-a_modes.yaml` (custom modes override built-in ones). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
+- **`mode`** (string): Shortcut for loading a preset argument bundle from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and the new path overrides the legacy one when both exist). Presets are merged before explicit flags, so command-line overrides always win. Bundled configurations include:
   - `shell` – Enables read-only shell access.
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`) exposing `init`, `filesystemQuery`, `filesystemModify`, and `markdownFiles` actions.

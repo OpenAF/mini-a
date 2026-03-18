@@ -79,15 +79,17 @@ jobs:
       apiKey : isString.default(__)
       baseUrl: isString.default("https://ollama.com")
   exec : | #js
-    if (isUnDef(args.apiKey) && isDef(__envs.OLLAMA_API_KEY)) args.apiKey = __envs.OLLAMA_API_KEY
-    _$(args.apiKey, "apiKey").isString().$_()
+    if (isUnDef(global.__ollamaWebSearchConfig)) {
+      if (isUnDef(args.apiKey) && isDef(__envs.OLLAMA_API_KEY)) args.apiKey = __envs.OLLAMA_API_KEY
+      _$(args.apiKey, "apiKey").isString().$_()
 
-    global.__ollamaWebSearchConfig = {
-      baseUrl: String(args.baseUrl).replace(/\/$/, ""),
-      apiKey : args.apiKey
+      global.__ollamaWebSearchConfig = {
+        baseUrl: String(args.baseUrl).replace(/\/$/, ""),
+        apiKey : args.apiKey
+      }
     }
 
-# --------------------
+# ------------------------
 - name : Ollama web search
   from : Init
   check:

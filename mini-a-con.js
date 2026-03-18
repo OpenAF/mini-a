@@ -96,25 +96,29 @@ try {
         return io.fileInfo((basePath || ".") + "/" + fileName).canonicalPath
       }
       var modesHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-      var customModesPath = resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml")
-      if (io.fileExists(customModesPath)) {
-        try {
-          var customLoaded = io.readFileYAML(customModesPath)
-          var customPresets = {}
-          if (isMap(customLoaded) && isMap(customLoaded.modes)) {
-            customPresets = customLoaded.modes
-          } else if (isMap(customLoaded)) {
-            customPresets = customLoaded
+      ;[
+        resolveCanonicalPath(modesHome, ".openaf-mini-a_modes.yaml"),
+        resolveCanonicalPath(modesHome, ".openaf-mini-a/modes.yaml")
+      ].forEach(function(customModesPath) {
+        if (io.fileExists(customModesPath)) {
+          try {
+            var customLoaded = io.readFileYAML(customModesPath)
+            var customPresets = {}
+            if (isMap(customLoaded) && isMap(customLoaded.modes)) {
+              customPresets = customLoaded.modes
+            } else if (isMap(customLoaded)) {
+              customPresets = customLoaded
+            }
+            // Merge custom modes with default modes (later custom files override earlier ones)
+            if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
+              presets = merge(presets, customPresets)
+            }
+          } catch(e) {
+            var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
+            logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
           }
-          // Merge custom modes with default modes (custom overrides defaults)
-          if (isMap(customPresets) && Object.keys(customPresets).length > 0) {
-            presets = merge(presets, customPresets)
-          }
-        } catch(e) {
-          var errMsg = (isDef(e) && isString(e.message)) ? e.message : e
-          logWarn(`Failed to load custom mode presets from '${customModesPath}': ${errMsg}`)
         }
-      }
+      })
 
       if (!isMap(presets) || Object.keys(presets).length === 0) {
         logWarn(`Mode '${modeName}' requested but no presets are defined.`)
@@ -2177,6 +2181,17 @@ try {
     return lines.join("\n")
   }
 
+  function unwrapConsoleQuotedValue(value) {
+    if (!isString(value)) return value
+    if (value.length < 2) return value
+    var firstChar = value.charAt(0)
+    var lastChar = value.charAt(value.length - 1)
+    if ((firstChar === "\"" || firstChar === "'") && lastChar === firstChar) {
+      return value.substring(1, value.length - 1)
+    }
+    return value
+  }
+
   function setOption(name, rawValue) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
@@ -2205,6 +2220,7 @@ try {
       value = parsedNum
     } else if (def.type === "string") {
       if (!isString(value)) value = String(value)
+      value = unwrapConsoleQuotedValue(value)
     }
     sessionOptions[key] = value
     if (key === "conversation") lastConversationStats = __
