@@ -2739,6 +2739,134 @@ MiniUtilsTool.prototype.todoList = function(params) {
   }
 }
 
+MiniUtilsTool.prototype._ask = function(prompt, mask) {
+  return ask(prompt, mask)
+}
+
+MiniUtilsTool.prototype._askEncrypt = function(prompt) {
+  return askEncrypt(prompt)
+}
+
+MiniUtilsTool.prototype._ask1 = function(prompt, options) {
+  return ask1(prompt, options)
+}
+
+MiniUtilsTool.prototype._askChoose = function(prompt, options, max, help) {
+  return askChoose(prompt, options, max, help)
+}
+
+MiniUtilsTool.prototype._askChooseMultiple = function(prompt, options, max, help) {
+  return askChooseMultiple(prompt, options, max, help)
+}
+
+MiniUtilsTool.prototype._askStruct = function(questions) {
+  return askStruct(questions)
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.userInput(params) : Object</key>
+ * Interactively asks the user for input using OpenAF ask* helpers.
+ * This tool is intended for interactive console sessions.
+ * The `params` object can have the following properties:
+ * - `operation` (string, required): ask, secret, char, choose, multiple, struct
+ * - `prompt` (string): Prompt text for ask/secret/char/choose/multiple
+ * - `mask` (string): Optional mask character for ask
+ * - `options` (array): Allowed/available options for char/choose/multiple
+ * - `max` (number): Optional max display size for choose/multiple
+ * - `help` (string): Optional help text for choose/multiple
+ * - `output` (string): For choose/multiple/struct, set to `index` to return selected indexes
+ * - `questions` (array): askStruct-compatible question definitions for operation=struct
+ * </odoc>
+ */
+MiniUtilsTool.prototype.userInput = function(params) {
+  params = params || {}
+  var op = String(params.operation || "ask").toLowerCase()
+
+  try {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.user_input_requested)) {
+      global.__mini_a_metrics.user_input_requested.inc()
+    }
+
+    var result
+    var prompt = isString(params.prompt) ? params.prompt : ""
+    var options = isArray(params.options) ? params.options : __
+    var outputMode = isString(params.output) ? params.output.toLowerCase().trim() : ""
+
+    switch(op) {
+    case "ask":
+    case "question":
+      if (prompt.length === 0) return "[ERROR] prompt is required"
+      result = {
+        operation: "ask",
+        answer   : this._ask(prompt, params.mask)
+      }
+      break
+    case "secret":
+    case "password":
+    case "encrypt":
+      if (prompt.length === 0) return "[ERROR] prompt is required"
+      result = {
+        operation: "secret",
+        answer   : this._askEncrypt(prompt)
+      }
+      break
+    case "char":
+    case "ask1":
+      if (prompt.length === 0) return "[ERROR] prompt is required"
+      if (!isArray(options) || options.length === 0) return "[ERROR] options array is required"
+      result = {
+        operation: "char",
+        answer   : this._ask1(prompt, options)
+      }
+      break
+    case "choose":
+      if (prompt.length === 0) return "[ERROR] prompt is required"
+      if (!isArray(options) || options.length === 0) return "[ERROR] options array is required"
+      var selectedIndex = this._askChoose(prompt, options, params.max, params.help)
+      result = {
+        operation    : "choose",
+        selectedIndex: selectedIndex,
+        answer       : outputMode === "index" ? selectedIndex : options[selectedIndex]
+      }
+      break
+    case "multiple":
+    case "multi":
+      if (prompt.length === 0) return "[ERROR] prompt is required"
+      if (!isArray(options) || options.length === 0) return "[ERROR] options array is required"
+      var selectedValues = this._askChooseMultiple(prompt, options, params.max, params.help)
+      result = {
+        operation: "multiple",
+        count    : isArray(selectedValues) ? selectedValues.length : 0,
+        answer   : outputMode === "index" && isArray(selectedValues)
+          ? selectedValues.map(function(entry) { return options.indexOf(entry) })
+          : selectedValues
+      }
+      break
+    case "struct":
+    case "form":
+      if (!isArray(params.questions) || params.questions.length === 0) return "[ERROR] questions array is required"
+      result = {
+        operation: "struct",
+        answers  : this._askStruct(params.questions)
+      }
+      break
+    default:
+      return "[ERROR] Unknown operation: " + op
+    }
+
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.user_input_completed)) {
+      global.__mini_a_metrics.user_input_completed.inc()
+    }
+    return result
+  } catch (e) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.user_input_failed)) {
+      global.__mini_a_metrics.user_input_failed.inc()
+    }
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
 MiniUtilsTool._metadataByFn = (function() {
   var queryReadOps = ["read", "readfile", "get", "view"]
   var queryListOps = ["list", "ls", "listdirectory", "dir"]
@@ -2777,6 +2905,7 @@ MiniUtilsTool._metadataByFn = (function() {
 
   var memoryStoreOps = ["set", "get", "delete", "list", "clear"]
   var todoListOps = ["write", "read"]
+  var userInputOps = ["ask", "question", "secret", "password", "encrypt", "char", "ask1", "choose", "multiple", "multi", "struct", "form"]
   var markdownOps = ["list", "search", "read", "get", "view", "cat"]
   var skillOps = ["list", "search", "read", "get", "view", "cat", "render", "use", "expand", "apply", "invoke", "run"]
 
@@ -3093,6 +3222,58 @@ MiniUtilsTool._metadataByFn = (function() {
           append   : { type: "boolean", description: "Append to existing todo list when true." }
         },
         required : ["operation"]
+      }
+    },
+    userInput: {
+      name       : "userInput",
+      description: "Interactive user-input helper for mini-a-con console sessions. Ask free-form, secret, single-choice, multi-choice, or structured questions through OpenAF ask* prompts.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation type: ask, secret, char, choose, multiple, or struct.",
+            enum       : userInputOps,
+            default    : "ask"
+          },
+          prompt   : { type: "string", description: "Prompt shown to the user for ask/secret/char/choose/multiple operations." },
+          mask     : { type: "string", description: "Optional mask character for ask operation." },
+          options  : { type: "array", items: {}, description: "Allowed or selectable options for char/choose/multiple operations." },
+          max      : { type: "number", description: "Optional max number of options to display at once for choose/multiple." },
+          help     : { type: "string", description: "Optional help text shown during choose/multiple operations." },
+          output   : { type: "string", description: "Optional output mode. Set to 'index' to return selected indexes for choose/multiple or askStruct questions configured that way." },
+          questions: {
+            type       : "array",
+            description: "askStruct-compatible question definitions for operation=struct.",
+            items      : {
+              type      : "object",
+              properties: {
+                name   : { type: "string", description: "Stable field name for the question." },
+                prompt : { type: "string", description: "Prompt shown to the user." },
+                type   : { type: "string", description: "Question type: question, secret, char, choose, multiple." },
+                options: { type: "array", items: {}, description: "Selectable options for char/choose/multiple question types." },
+                max    : { type: "number", description: "Optional max display size for choose/multiple." },
+                help   : { type: "string", description: "Optional help text." },
+                output : { type: "string", description: "Optional output mode. Set to 'index' to return indexes instead of values." }
+              },
+              required : ["name"]
+            }
+          }
+        },
+        allOf: [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["ask", "question", "secret", "password", "encrypt", "char", "ask1", "choose", "multiple", "multi"] } } },
+            then: { required: ["prompt"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["char", "ask1", "choose", "multiple", "multi"] } } },
+            then: { required: ["options"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["struct", "form"] } } },
+            then: { required: ["questions"] }
+          }
+        ]
       }
     },
     markdownFiles: {

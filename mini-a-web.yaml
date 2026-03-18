@@ -142,6 +142,14 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : utilsallow
+    desc     : "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true"
+    example  : "filesystemQuery,markdownFiles"
+    mandatory: false
+  - name     : utilsdeny
+    desc     : "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)"
+    example  : "systemInfo,textUtilities"
+    mandatory: false
   - name     : chatbotmode
     desc     : "Run Mini-A in chatbot mode without agent planning prompts"
     example  : "false"
@@ -855,6 +863,8 @@ jobs:
       mcplazy        : toBoolean().isBoolean().default(false)
       toolcachettl   : toNumber().isNumber().default(__)
       useutils       : toBoolean().isBoolean().default(false)
+      utilsallow     : isString().default(__)
+      utilsdeny      : isString().default(__)
       chatbotmode    : toBoolean().isBoolean().default(false)
       format         : isString().default(__)
       auditch        : isString().default(__)

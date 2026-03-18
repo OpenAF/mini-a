@@ -429,6 +429,8 @@ try {
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     usetools       : { type: "boolean", default: false, description: "Register MCP tools directly on the model" },
     useutils       : { type: "boolean", default: false, description: "Enable bundled Mini Utils Tool utilities" },
+    utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
+    utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },
     "mini-a-docs"  : { type: "boolean", default: false, description: "When true (with useutils=true), point utilsroot to the Mini-A opack path so the LLM can inspect Mini-A documentation files." },
     usediagrams    : { type: "boolean", default: false, description: "Encourage Mermaid diagrams in knowledge prompt" },
     usemermaid     : { type: "boolean", default: false, description: "Alias for usediagrams (Mermaid diagrams guidance)" },

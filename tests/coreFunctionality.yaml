@@ -37,6 +37,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testUtilsMcpSkillsToggle
 
+- name: MiniA Core Tests::UtilsMcpAllowAndDeny
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUtilsMcpAllowAndDenyFilters
+
 - name: MiniA Core Tests::LinuxSandboxWarnsWhenMissing
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -92,6 +97,7 @@ todo:
 - MiniA Core Tests::ErrorHistory
 - MiniA Core Tests::NormalizeToolResult
 - MiniA Core Tests::UtilsMcpSkillsToggle
+- MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::LinuxSandboxWarnsWhenMissing
 - MiniA Core Tests::LinuxSandboxWritableBinds
 - MiniA Core Tests::LinuxSandboxNoNetwork

@@ -192,7 +192,9 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mcpprogcalltools` | string | `""` | Optional comma-separated allowlist of tool names exposed by the bridge |
 | `mcpprogcallbatchmax` | number | `10` | Maximum calls accepted by `/call-tools-batch` |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
-| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`; filesystemQuery read supports byte/line ranges and countLines) |
+| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput` (`mini-a-con`) |
+| `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
+| `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
 
@@ -237,6 +239,12 @@ mini-a goal="analyze local files" \
 ```bash
 mini-a goal="list markdown docs in the Mini-A package and summarize CHEATSHEET.md" \
   useutils=true mini-a-docs=true
+```
+
+**Limit bundled utils exposure:**
+```bash
+mini-a goal="inspect docs only" \
+  useutils=true utilsallow=filesystemQuery,markdownFiles utilsdeny=filesystemModify
 ```
 
 **Proxy Aggregation (single tool exposed):**

@@ -200,7 +200,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : useutils
-    desc     : Automatically register Mini Utils Tool utilities as an MCP connection
+    desc     : Automatically register Mini Utils Tool utilities as an MCP connection (includes console-only userInput when running mini-a-con)
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -212,6 +212,14 @@ help:
   - name     : utilsroot
     desc     : Root directory for Mini Utils Tool file operations (only when useutils=true)
     example  : "/path/to/project"
+    mandatory: false
+  - name     : utilsallow
+    desc     : Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true
+    example  : "filesystemQuery,markdownFiles"
+    mandatory: false
+  - name     : utilsdeny
+    desc     : Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)
+    example  : "systemInfo,textUtilities"
     mandatory: false
   - name     : usediagrams
     desc     : Encourage Mermaid diagrams by priming the agent with diagram guidance
@@ -583,6 +591,8 @@ jobs:
         extraskills    : extraskills
         secpass        : secpass
         utilsroot      : utilsroot
+        utilsallow     : utilsallow
+        utilsdeny      : utilsdeny
         saveplannotes  : saveplannotes
   check:
     in:
@@ -684,6 +694,8 @@ jobs:
       extraskills    : isString.default(__)
       secpass        : isString.default(__)
       utilsroot      : isString.default(__)
+      utilsallow     : isString.default(__)
+      utilsdeny      : isString.default(__)
       saveplannotes  : toBoolean.isBoolean.default(false)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)

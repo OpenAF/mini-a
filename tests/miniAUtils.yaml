@@ -97,6 +97,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testTodoOps
 
+- name: MiniA Utils Tests::UserInput
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUserInput
+
 - name: MiniA Utils Tests::PathSecurity
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -194,6 +199,7 @@ todo:
 - MiniA Utils Tests::TodoListValidation
 - MiniA Utils Tests::MemoryStoreValidation
 - MiniA Utils Tests::TodoOps
+- MiniA Utils Tests::UserInput
 - MiniA Utils Tests::PathSecurity
 - MiniA Utils Tests::MarkdownFiles
 - MiniA Utils Tests::Skills

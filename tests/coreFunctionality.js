@@ -95,6 +95,28 @@
     ow.test.assert(isDef(enabled.options.fnsMeta.skills), true, "Should expose skills metadata when useskills=true")
   }
 
+  exports.testUtilsMcpAllowAndDenyFilters = function() {
+    var agent = createAgent()
+
+    var allowOnly = agent._createUtilsMcpConfig({ useutils: true, utilsallow: "filesystemQuery, markdownFiles" })
+    ow.test.assert(isMap(allowOnly) && isMap(allowOnly.options), true, "Should build utils MCP config with utilsallow")
+    ow.test.assert(Object.keys(allowOnly.options.fns).length === 2, true, "Should only expose allowlisted tools")
+    ow.test.assert(isDef(allowOnly.options.fns.filesystemQuery), true, "Should keep allowlisted filesystemQuery")
+    ow.test.assert(isDef(allowOnly.options.fns.markdownFiles), true, "Should keep allowlisted markdownFiles")
+    ow.test.assert(isUnDef(allowOnly.options.fns.timeUtilities), true, "Should hide non-allowlisted tools")
+
+    var denySome = agent._createUtilsMcpConfig({ useutils: true, utilsdeny: "systemInfo, textUtilities" })
+    ow.test.assert(isMap(denySome) && isMap(denySome.options), true, "Should build utils MCP config with utilsdeny")
+    ow.test.assert(isUnDef(denySome.options.fns.systemInfo), true, "Should hide denied systemInfo")
+    ow.test.assert(isUnDef(denySome.options.fns.textUtilities), true, "Should hide denied textUtilities")
+    ow.test.assert(isDef(denySome.options.fns.filesystemQuery), true, "Should keep tools not in denylist")
+
+    var denyWins = agent._createUtilsMcpConfig({ useutils: true, utilsallow: "filesystemQuery,timeUtilities", utilsdeny: "timeUtilities" })
+    ow.test.assert(isMap(denyWins) && isMap(denyWins.options), true, "Should build utils MCP config when both filters are present")
+    ow.test.assert(isDef(denyWins.options.fns.filesystemQuery), true, "Should keep tool present only in allowlist")
+    ow.test.assert(isUnDef(denyWins.options.fns.timeUtilities), true, "Denylist should override allowlist")
+  }
+
   exports.testLinuxSandboxWarnsWhenBwrapMissing = function() {
     var agent = createAgent()
     agent._isCommandAvailable = function(name) { return false }

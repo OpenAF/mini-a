@@ -159,6 +159,9 @@ var MiniA = function() {
     history_files_deleted: $atomic(0, "long"),
     history_files_deleted_by_period: $atomic(0, "long"),
     history_files_deleted_by_count: $atomic(0, "long"),
+    user_input_requested: $atomic(0, "long"),
+    user_input_completed: $atomic(0, "long"),
+    user_input_failed: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -1219,6 +1222,11 @@ MiniA.prototype.getMetrics = function() {
             thinking_loops_detected: global.__mini_a_metrics.thinking_loops_detected.get(),
             similar_thoughts_detected: global.__mini_a_metrics.similar_thoughts_detected.get()
         },
+        user_interaction: {
+            requests: global.__mini_a_metrics.user_input_requested.get(),
+            completed: global.__mini_a_metrics.user_input_completed.get(),
+            failed: global.__mini_a_metrics.user_input_failed.get()
+        },
         summarization: {
             summaries_made: global.__mini_a_metrics.summaries_made.get(),
             summaries_skipped: global.__mini_a_metrics.summaries_skipped.get(),
@@ -2017,6 +2025,17 @@ MiniA.prototype._parseListOption = function(value) {
         .split(",")
         .map(v => v.trim().toLowerCase())
         .filter(v => v.length > 0)
+}
+
+MiniA.prototype._parseUtilsToolList = function(value) {
+    var list = this._parseListOption(value)
+    var seen = {}
+    return list.filter(function(entry) {
+        if (!isString(entry) || entry.length === 0) return false
+        if (seen[entry]) return false
+        seen[entry] = true
+        return true
+    })
 }
 
 MiniA.prototype._splitShellPrefix = function(value) {
@@ -7044,6 +7063,29 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (includeSkillsTool !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "skills" })
     }
+    if (this._supportsConsoleUserInput(args) !== true) {
+      methodNames = methodNames.filter(function(name) { return name !== "userInput" })
+    }
+    var utilsAllow = this._parseUtilsToolList(args.utilsallow)
+    if (utilsAllow.length > 0) {
+      var allowMap = {}
+      utilsAllow.forEach(function(name) {
+        allowMap[name] = true
+      })
+      methodNames = methodNames.filter(function(name) {
+        return allowMap[String(name).toLowerCase()] === true
+      })
+    }
+    var utilsDeny = this._parseUtilsToolList(args.utilsdeny)
+    if (utilsDeny.length > 0) {
+      var denyMap = {}
+      utilsDeny.forEach(function(name) {
+        denyMap[name] = true
+      })
+      methodNames = methodNames.filter(function(name) {
+        return denyMap[String(name).toLowerCase()] !== true
+      })
+    }
 
     if (methodNames.length === 0) return __
 
@@ -7160,6 +7202,15 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       if (name === "todoList") {
         if (op === "write") return "Updating todo list."
         if (op === "read") return "Reading todo list."
+      }
+
+      if (name === "userInput") {
+        if (["ask", "question"].indexOf(op) >= 0) return "Asking the user for input."
+        if (["secret", "password", "encrypt"].indexOf(op) >= 0) return "Asking the user for secret input."
+        if (["char", "ask1"].indexOf(op) >= 0) return "Asking the user for a single-character choice."
+        if (op === "choose") return "Asking the user to choose one option."
+        if (["multiple", "multi"].indexOf(op) >= 0) return "Asking the user to choose multiple options."
+        if (["struct", "form"].indexOf(op) >= 0) return "Asking the user a structured set of questions."
       }
 
       if (name === "timeUtilities") {
@@ -10155,6 +10206,8 @@ MiniA.prototype.init = function(args) {
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
+      { name: "utilsallow", type: "string", default: __ },
+      { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
@@ -10249,6 +10302,8 @@ MiniA.prototype.init = function(args) {
     if (isNumber(args.shellmaxbytes) && args.shellmaxbytes <= 0) args.shellmaxbytes = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
+    args.utilsdeny = _$(args.utilsdeny, "args.utilsdeny").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
       args.utilsroot = getOPackPath("mini-a")
       this.fnI("info", "mini-a-docs=true: using Mini-A opack path as utilsroot for documentation access.")
@@ -11031,7 +11086,15 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
   if (!isMap(args)) return false
   if (!isString(args.__interaction_source)) return false
   var source = args.__interaction_source.trim().toLowerCase()
-  return source === "mini-a-con" || source === "mini-a-web"
+  if (source === "mini-a-con") return this._supportsConsoleUserInput(args) !== true
+  return source === "mini-a-web"
+}
+
+MiniA.prototype._supportsConsoleUserInput = function(args) {
+  if (!isMap(args)) return false
+  if (toBoolean(args.useutils) !== true) return false
+  if (!isString(args.__interaction_source)) return false
+  return args.__interaction_source.trim().toLowerCase() === "mini-a-con"
 }
 
 /**
@@ -11064,6 +11127,8 @@ MiniA.prototype._shouldIncludeNoUserInteractionRemark = function(args) {
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
  * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP (only when useutils=true).
  * - utilsroot (string, optional): Root directory for Mini Utils Tool file operations (only when useutils=true).
+ * - utilsallow (string, optional): Comma-separated allowlist of Mini Utils MCP tool names to expose.
+ * - utilsdeny (string, optional): Comma-separated denylist of Mini Utils MCP tool names to hide; applied after utilsallow.
  * - mini-a-docs (boolean, default=false): When true and utilsroot is not set, auto-set utilsroot to getOPackPath("mini-a") so the LLM can inspect Mini-A documentation with useutils tools.
  * - knowledge (string, optional): Additional knowledge or context for the agent. Can be a string or a path to a file.
  * - outfile (string, optional): Path to a file where the final answer will be written.
@@ -11241,6 +11306,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
+      { name: "utilsallow", type: "string", default: __ },
+      { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
@@ -11303,6 +11370,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
+    args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
+    args.utilsdeny = _$(args.utilsdeny, "args.utilsdeny").isString().default(__)
     if (args["mini-a-docs"] === true && (!isString(args.utilsroot) || args.utilsroot.trim().length === 0)) {
       args.utilsroot = getOPackPath("mini-a")
       this.fnI("info", "mini-a-docs=true: using Mini-A opack path as utilsroot for documentation access.")

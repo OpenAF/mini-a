@@ -481,6 +481,84 @@
     ow.test.assert(readResult.count === 3, true, "Should read todo items")
   }
 
+  exports.testUserInput = function() {
+    var tool = new MiniUtilsTool()
+    var originals = {
+      _ask              : tool._ask,
+      _askEncrypt       : tool._askEncrypt,
+      _ask1             : tool._ask1,
+      _askChoose        : tool._askChoose,
+      _askChooseMultiple: tool._askChooseMultiple,
+      _askStruct        : tool._askStruct
+    }
+
+    try {
+      tool._ask = function(prompt, mask) {
+        return "plain:" + prompt + ":" + (isDef(mask) ? mask : "")
+      }
+      tool._askEncrypt = function(prompt) {
+        return "secret:" + prompt
+      }
+      tool._ask1 = function(prompt, options) {
+        return String(options[0])
+      }
+      tool._askChoose = function(prompt, options, max, help) {
+        return 1
+      }
+      tool._askChooseMultiple = function(prompt, options, max, help) {
+        return [ options[0], options[2] ]
+      }
+      tool._askStruct = function(questions) {
+        return questions.map(function(question) {
+          return { name: question.name, answer: "value-for-" + question.name }
+        })
+      }
+
+      var askResult = tool.userInput({ operation: "ask", prompt: "Name?", mask: "*" })
+      ow.test.assert(askResult.answer === "plain:Name?:*", true, "Should call ask for plain questions")
+
+      var secretResult = tool.userInput({ operation: "secret", prompt: "Password?" })
+      ow.test.assert(secretResult.answer === "secret:Password?", true, "Should call askEncrypt for secret questions")
+
+      var charResult = tool.userInput({ operation: "char", prompt: "Continue?", options: ["y", "n"] })
+      ow.test.assert(charResult.answer === "y", true, "Should call ask1 for char questions")
+
+      var chooseResult = tool.userInput({ operation: "choose", prompt: "Pick one", options: ["alpha", "beta", "gamma"] })
+      ow.test.assert(chooseResult.selectedIndex === 1, true, "Should expose selected index for choose")
+      ow.test.assert(chooseResult.answer === "beta", true, "Should return selected value for choose")
+
+      var chooseIndexResult = tool.userInput({ operation: "choose", prompt: "Pick one", options: ["alpha", "beta"], output: "index" })
+      ow.test.assert(chooseIndexResult.answer === 1, true, "Should support index output for choose")
+
+      var multipleResult = tool.userInput({ operation: "multiple", prompt: "Pick many", options: ["a", "b", "c"] })
+      ow.test.assert(isArray(multipleResult.answer), true, "Should return array for multiple")
+      ow.test.assert(multipleResult.answer.join(",") === "a,c", true, "Should return selected values for multiple")
+
+      var multipleIndexResult = tool.userInput({ operation: "multiple", prompt: "Pick many", options: ["a", "b", "c"], output: "index" })
+      ow.test.assert(multipleIndexResult.answer.join(",") === "0,2", true, "Should support index output for multiple")
+
+      var structResult = tool.userInput({
+        operation: "struct",
+        questions: [
+          { name: "username", prompt: "Username" },
+          { name: "role", prompt: "Role", type: "choose", options: ["dev", "ops"] }
+        ]
+      })
+      ow.test.assert(isArray(structResult.answers), true, "Should return askStruct answers")
+      ow.test.assert(structResult.answers[0].name === "username", true, "Should preserve askStruct answer names")
+
+      var invalidResult = tool.userInput({ operation: "choose", prompt: "Pick one" })
+      ow.test.assert(isString(invalidResult) && invalidResult.indexOf("[ERROR]") === 0, true, "Should validate required options")
+    } finally {
+      tool._ask = originals._ask
+      tool._askEncrypt = originals._askEncrypt
+      tool._ask1 = originals._ask1
+      tool._askChoose = originals._askChoose
+      tool._askChooseMultiple = originals._askChooseMultiple
+      tool._askStruct = originals._askStruct
+    }
+  }
+
   exports.testPathSecurity = function() {
     var testDir = createTestDir()
     var outsideDir = createTestDir()
@@ -622,6 +700,7 @@
     ow.test.assert(isDef(metadata.skills), true, "Should include skills metadata")
     ow.test.assert(isDef(metadata.mathematics), true, "Should include mathematics metadata")
     ow.test.assert(isDef(metadata.timeUtilities), true, "Should include timeUtilities metadata")
+    ow.test.assert(isDef(metadata.userInput), true, "Should include userInput metadata")
 
     var methods = MiniUtilsTool.getExposedMethodNames()
     ow.test.assert(isArray(methods), true, "Should return method names array")
@@ -632,6 +711,7 @@
     ow.test.assert(methods.indexOf("skills") >= 0, true, "Should include skills method")
     ow.test.assert(methods.indexOf("mathematics") >= 0, true, "Should include mathematics method")
     ow.test.assert(methods.indexOf("timeUtilities") >= 0, true, "Should include timeUtilities method")
+    ow.test.assert(methods.indexOf("userInput") >= 0, true, "Should include userInput method")
     ow.test.assert(methods.indexOf("memoryStore") >= 0, true, "Should include memoryStore method")
     ow.test.assert(methods.indexOf("todoList") >= 0, true, "Should include todoList method")
     ow.test.assert(methods.indexOf("kvStore") === -1, true, "Should not include kvStore method")
@@ -650,6 +730,9 @@
     ow.test.assert(memoryOps.indexOf("set") >= 0, true, "Should include set operation in memoryStore")
     var todoOps = metadata.todoList.inputSchema.properties.operation.enum || []
     ow.test.assert(todoOps.indexOf("write") >= 0, true, "Should include write operation in todoList")
+    var userInputOps = metadata.userInput.inputSchema.properties.operation.enum || []
+    ow.test.assert(userInputOps.indexOf("choose") >= 0, true, "Should include choose operation in userInput")
+    ow.test.assert(userInputOps.indexOf("struct") >= 0, true, "Should include struct operation in userInput")
     var markdownOps = metadata.markdownFiles.inputSchema.properties.operation.enum || []
     ow.test.assert(markdownOps.indexOf("search") >= 0, true, "Should include search operation in markdownFiles")
     var skillOps = metadata.skills.inputSchema.properties.operation.enum || []
