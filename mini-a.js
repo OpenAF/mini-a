@@ -153,6 +153,12 @@ var MiniA = function() {
     deep_research_validations_failed: $atomic(0, "long"),
     deep_research_early_success: $atomic(0, "long"),
     deep_research_max_cycles_reached: $atomic(0, "long"),
+    history_sessions_started: $atomic(0, "long"),
+    history_sessions_resumed: $atomic(0, "long"),
+    history_files_kept: $atomic(0, "long"),
+    history_files_deleted: $atomic(0, "long"),
+    history_files_deleted_by_period: $atomic(0, "long"),
+    history_files_deleted_by_count: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -1285,8 +1291,43 @@ MiniA.prototype.getMetrics = function() {
             validations_failed: global.__mini_a_metrics.deep_research_validations_failed.get(),
             early_success: global.__mini_a_metrics.deep_research_early_success.get(),
             max_cycles_reached: global.__mini_a_metrics.deep_research_max_cycles_reached.get()
+        },
+        history: {
+            sessions_started: global.__mini_a_metrics.history_sessions_started.get(),
+            sessions_resumed: global.__mini_a_metrics.history_sessions_resumed.get(),
+            files_kept: global.__mini_a_metrics.history_files_kept.get(),
+            files_deleted: global.__mini_a_metrics.history_files_deleted.get(),
+            files_deleted_by_period: global.__mini_a_metrics.history_files_deleted_by_period.get(),
+            files_deleted_by_count: global.__mini_a_metrics.history_files_deleted_by_count.get()
         }
     }
+}
+
+MiniA.prototype._writeConversationPayload = function(path) {
+  if (!isString(path) || path.trim().length === 0) return
+  try {
+    var existing = __
+    if (io.fileExists(path)) {
+      try { existing = io.readFileJSON(path) } catch(ignoreReadConversation) { }
+    }
+
+    var nowDate = new Date()
+    var payload = {
+      u : nowDate,
+      c : this.llm.getGPT().getConversation()
+    }
+
+    if (isObject(existing) && isObject(existing.last)) payload.last = existing.last
+
+    if (isObject(existing) && isDef(existing.created_at)) payload.created_at = existing.created_at
+    else if (isObject(existing) && isDef(existing.createdAt)) payload.created_at = existing.createdAt
+    else if (isObject(existing) && isDef(existing.u)) payload.created_at = existing.u
+    else payload.created_at = nowDate
+
+    payload.updated_at = nowDate
+
+    io.writeFileJSON(path, payload, "")
+  } catch(ignoreWriteConversation) { }
 }
 
 MiniA.prototype._syncDelegationMetrics = function() {
@@ -12299,7 +12340,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // Store history
       if (isDef(args.conversation)) {
         // Always store the main LLM conversation for consistency
-        io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
+        this._writeConversationPayload(args.conversation)
       }
       
       var msg
@@ -13071,7 +13112,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this.fnI("output", `Final response received. ${finalTokenStatsMsg}`)
 
     // Store history
-    if (isDef(args.conversation)) io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
+    if (isDef(args.conversation)) this._writeConversationPayload(args.conversation)
     
     // Extract final answer
     if (args.format != 'raw') {
@@ -13209,7 +13250,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       this.fnI("output", `Chatbot model responded. ${tokenStatsMsg}`)
 
       if (isDef(args.conversation)) {
-        io.writeFileJSON(args.conversation, { u: new Date(), c: this.llm.getGPT().getConversation() }, "")
+        this._writeConversationPayload(args.conversation)
       }
 
       var rawResponse = responseWithStats.response

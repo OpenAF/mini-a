@@ -344,7 +344,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Autonomous Delegation** - LLM decides when to delegate via `delegate-subtask` tool
   - **Manual Delegation** - Console commands for interactive control (`/delegate`, `/subtasks`, `/subtask`)
   - **Depth Tracking** - Configurable nesting limits with automatic retry and deadline enforcement
-- **Conversation Persistence** - Save and resume conversations across sessions (`conversation=...`; in `mini-a-con`, use `resume=true` to continue the latest thread)
+- **Conversation Persistence** - Save and resume conversations across sessions (`conversation=...`; in `mini-a-con`, combine `usehistory=true`, `historykeep=true`, and `resume=true` to pick and continue prior console threads stored under `~/.openaf-mini-a/history/`; use `historykeepperiod=` and/or `historykeepcount=` for retention)
 - **Rate Limiting** - Built-in rate limiting for API usage control
 - **Metrics & Observability** - Comprehensive runtime metrics for monitoring and cost tracking
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)

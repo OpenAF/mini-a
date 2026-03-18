@@ -925,7 +925,12 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
-- **`resume`** (boolean, default: false, `mini-a-con`): Reuse the last conversation and restore the most recent goal/result context when running from the interactive console (`mini-a` / `opack exec mini-a`)
+- **`resume`** (boolean, default: false, `mini-a-con`): Resume a previous console conversation. When `conversation` is omitted and `usehistory=true`, the console lists `~/.openaf-mini-a/history/*.json` and lets you choose which thread to continue.
+- **`usehistory`** (boolean, default: false, `mini-a-con`): Enable console history discovery from `~/.openaf-mini-a/history/`.
+- **`historykeep`** (boolean, default: false, `mini-a-con`): Store console conversation files in `~/.openaf-mini-a/history/` using `conversation-yyyyMMdd-HHmmss.json` style names.
+- **`historykeepperiod`** (number, `mini-a-con`): Automatically delete kept conversation files older than the provided number of minutes.
+- **`historykeepcount`** (number, `mini-a-con`): Automatically delete kept conversation files beyond the newest N entries.
+  - When both `historykeepperiod` and `historykeepcount` are set, either rule can prune a saved conversation file.
 - **`state`** (object|string): Initial structured state (JSON/SLON) injected before the first step and persisted across turns
 
 #### Mode Presets
@@ -2259,6 +2264,14 @@ Resume the last conversation directly from the interactive console:
 mini-a conversation=chat-history.json resume=true
 ```
 
+Or keep console sessions in the default history folder and choose one interactively when resuming:
+
+```bash
+mini-a usehistory=true historykeep=true resume=true
+```
+
+Console history payloads now keep both `created_at` and `updated_at` timestamps in addition to the conversation entries, which makes retention and manual inspection easier.
+
 ### Context Management
 
 ```javascript
@@ -2427,6 +2440,7 @@ This will show:
 Mini-A records extensive counters that help track behaviour and costs:
 
 - Call `agent.getMetrics()` to obtain a snapshot grouped by LLM usage, outcomes, shell approvals/denials, context management, and summarization activity.
+- Console history flows also update `history` metrics so you can track started/resumed sessions plus kept/deleted conversation files when using `mini-a-con`, including separate counters for age-based and count-based pruning.
 - OpenAF automatically registers these counters under the `mini-a` namespace via `ow.metrics.add('mini-a', ...)`, so collectors that understand OpenAF metrics can scrape them.
 - Metrics are updated live as the agent progresses, making them ideal for dashboards or alerting when an agent gets stuck.
 
@@ -2447,6 +2461,7 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
 | `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
 | `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy`, `avgDurationMs`, `maxDepthUsed` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle, retries, worker pool composition/health, average duration, and deepest nesting level reached. |
+| `history` | `sessions_started`, `sessions_resumed`, `files_kept`, `files_deleted`, `files_deleted_by_period`, `files_deleted_by_count` | Console conversation history metrics. Tracks new vs resumed console sessions, how many history files were kept, and how many were pruned overall, by age rule, or by count rule. |
 
 These counters mirror what is exported via `ow.metrics.add('mini-a', ...)`, so the same structure appears in Prometheus/Grafana when scraped through OpenAF.
 
