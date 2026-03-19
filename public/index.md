@@ -1895,6 +1895,20 @@
     applyAttachmentAvailability(false);
 
     /* ========== UTILITY FUNCTIONS ========== */
+    function resolveAppUrl(path) {
+        const cleanPath = String(path || '').replace(/^\/+/, '');
+
+        if (typeof document !== 'undefined' && document.baseURI) {
+            return new URL(cleanPath, document.baseURI).toString();
+        }
+
+        if (typeof window !== 'undefined' && window.location) {
+            return new URL(cleanPath, window.location.href).toString();
+        }
+
+        return cleanPath;
+    }
+
     function isAtBottom() {
         if (!resultsDiv) return true;
         const threshold = 50; // Allow margin for rounding errors
@@ -2238,7 +2252,7 @@
         }
 
         try {
-            const response = await fetch('/result', {
+            const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid })
@@ -2457,7 +2471,7 @@
                 throw new Error('No conversation available to export.');
             }
 
-            const response = await fetch('/md2html', {
+            const response = await fetch(resolveAppUrl('md2html'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ markdown: markdownText })
@@ -2597,7 +2611,7 @@
             resetPlanPanel();
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
 
-            const response = await fetch('/prompt', {
+            const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ prompt: promptForRetry, uuid: retryUuid })
@@ -4304,7 +4318,7 @@
         let shouldEnableMath = false;
 
         try {
-            const response = await fetch('/info', {
+            const response = await fetch(resolveAppUrl('info'), {
                 headers: { 'Accept': 'application/json' }
             });
 
@@ -4379,7 +4393,7 @@
             .filter(uuid => typeof uuid === 'string' && uuid.length > 0);
 
         await Promise.allSettled(uuidsToClear.map(uuid => {
-            return fetch('/clear', {
+            return fetch(resolveAppUrl('clear'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid, force: true })
@@ -4421,7 +4435,7 @@
 
         if (entry && entry.uuid) {
             try {
-                await fetch('/clear', {
+                await fetch(resolveAppUrl('clear'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json; charset=utf-8' },
                     body: JSON.stringify({ uuid: entry.uuid, force: true })
@@ -4516,7 +4530,7 @@
         }
 
         try {
-            const response = await fetch('/load-history', {
+            const response = await fetch(resolveAppUrl('load-history'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify(payload)
@@ -4582,7 +4596,7 @@
         }
 
         try {
-            const response = await fetch('/result', {
+            const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid })
@@ -4932,7 +4946,7 @@
         stopStream();
         
         if (currentSessionUuid) {
-            fetch('/result', {
+            fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid: currentSessionUuid, request: 'stop' })
@@ -4984,7 +4998,7 @@
     }
 
     function collectBrowserContext() {
-        const colorScheme = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        const colorScheme = (document.body.classList.contains('markdown-body-dark') || _isD === true || (typeof __isDark !== 'undefined' && __isDark))
             ? 'dark'
             : 'light';
         const promptStyles = (typeof window !== 'undefined' && promptInput) ? window.getComputedStyle(promptInput) : null;
@@ -5044,7 +5058,7 @@
             lastRawContent += userPromptDiv;
             await renderRawContent(lastRawContent);
 
-            const response = await fetch('/prompt', {
+            const response = await fetch(resolveAppUrl('prompt'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ prompt: finalPrompt, uuid: currentSessionUuid, browserContext })
@@ -5067,7 +5081,7 @@
 
     async function pollOnce() {
         try {
-            const response = await fetch('/result', {
+            const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid: currentSessionUuid })
@@ -5209,7 +5223,7 @@
         streamActive = true;
         streamBuffer = '';
 
-        const streamUrl = '/stream?uuid=' + encodeURIComponent(uuid);
+        const streamUrl = resolveAppUrl('stream') + '?uuid=' + encodeURIComponent(uuid);
         streamSource = new EventSource(streamUrl);
         streamSource.addEventListener('stream', (event) => {
             if (!event || !event.data) return;
@@ -5264,7 +5278,7 @@
     async function sendPing(uuid) {
         if (!uuid) return;
         try {
-            await fetch('/ping', {
+            await fetch(resolveAppUrl('ping'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid })
@@ -5284,7 +5298,7 @@
         }
 
         if (uuidToClear) {
-            fetch('/clear', {
+            fetch(resolveAppUrl('clear'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
                 body: JSON.stringify({ uuid: uuidToClear })
@@ -5567,4 +5581,4 @@
     bindThemeListener(window.matchMedia('(prefers-color-scheme: dark)'));
     bindThemeListener(window.matchMedia('(prefers-color-scheme: light)'));
 </script>
-<script src="/js/mdtablesort.js"></script>
+<script src="js/mdtablesort.js"></script>
