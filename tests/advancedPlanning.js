@@ -17,9 +17,32 @@
     var agent = createAgent()
     var simple = agent._assessGoalComplexity("List two colors")
     ow.test.assert(simple.level === "simple", true, "Simple goal should be simple")
+    ow.test.assert(isNumber(simple.score), true, "Simple goal should have a numeric score")
+    ow.test.assert(isArray(simple.signals), true, "Simple goal should have a signals array")
     var complexGoal = "Design, implement, and validate a data pipeline with error handling and documentation"
     var complex = agent._assessGoalComplexity(complexGoal)
     ow.test.assert(["medium", "complex"].indexOf(complex.level) >= 0, true, "Complex goal should be flagged")
+    ow.test.assert(isNumber(complex.score) && complex.score > 0, true, "Complex goal should have a positive score")
+    ow.test.assert(isArray(complex.signals) && complex.signals.length > 0, true, "Complex goal should have signals")
+  }
+
+  exports.testGoalAssessmentDomainSignals = function() {
+    var agent = createAgent()
+    var result = agent._assessGoalComplexity("Refactor and optimize the authentication module")
+    ow.test.assert(["medium", "complex"].indexOf(result.level) >= 0, true, "Domain-keyword goal should be flagged")
+    ow.test.assert(result.signals.some(function(s) { return s.startsWith("domain:") }), true, "Should detect domain keywords")
+  }
+
+  exports.testGoalAssessmentNegationSignals = function() {
+    var agent = createAgent()
+    var result = agent._assessGoalComplexity("List files without including hidden directories")
+    ow.test.assert(result.signals.indexOf("negation-modifier") >= 0, true, "Should detect negation modifier")
+  }
+
+  exports.testGoalAssessmentEntityCount = function() {
+    var agent = createAgent()
+    var result = agent._assessGoalComplexity("Process all 50 files and generate reports")
+    ow.test.assert(result.signals.indexOf("entity-count") >= 0, true, "Should detect entity count signal")
   }
 
   exports.testSimplePlanGeneration = function() {

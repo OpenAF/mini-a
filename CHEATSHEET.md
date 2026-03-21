@@ -86,6 +86,10 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `model` | Override OAF_MODEL for this session | `model="(type: openai, model: gpt-4, key: '...')"` |
 | `modellc` | Override OAF_LC_MODEL for this session | `modellc="(type: openai, model: gpt-3.5-turbo, key: '...')"` |
 | `modelman` | Launch interactive model manager | `modelman=true` |
+| `modellock` | Lock model tier: `"main"`, `"lc"`, or `"auto"` (default) | `modellock=lc` |
+| `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
+| `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
+| `llmcomplexity` | Use LC model to validate "medium" complexity heuristic (default: `false`) | `llmcomplexity=true` |
 
 ### Provider Examples
 

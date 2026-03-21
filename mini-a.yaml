@@ -457,6 +457,25 @@ help:
     desc     : Override the low-cost model configuration used for summarization and tool selection (string or JSON/SLON map)
     example  : "anthropic/claude-3-5-haiku-20241022"
     mandatory: false
+  - name     : modellock
+    desc     : Force Mini-A to always use a specific model tier, bypassing dynamic escalation. Values: "main", "lc", or "auto" (default)
+    example  : "lc"
+    mandatory: false
+    options  : ["main", "lc", "auto"]
+  - name     : lcescalatedefer
+    desc     : When true (default), defer escalation by one step if the LC response confidence is >= 0.7
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : lcbudget
+    desc     : Maximum total LC token usage before permanently switching to the main model for the session (0 = unlimited)
+    example  : "50000"
+    mandatory: false
+  - name     : llmcomplexity
+    desc     : When true, fire a quick LC model call to validate "medium" complexity heuristic results
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : saveplannotes
     desc     : Save execution notes back to the plan file after execution
     example  : "true"
@@ -594,6 +613,10 @@ jobs:
         utilsallow     : utilsallow
         utilsdeny      : utilsdeny
         saveplannotes  : saveplannotes
+        modellock      : modellock
+        lcescalatedefer: lcescalatedefer
+        lcbudget       : lcbudget
+        llmcomplexity  : llmcomplexity
   check:
     in:
       goal           : isString
@@ -697,6 +720,10 @@ jobs:
       utilsallow     : isString.default(__)
       utilsdeny      : isString.default(__)
       saveplannotes  : toBoolean.isBoolean.default(false)
+      modellock      : isString.default(__)
+      lcescalatedefer: toBoolean.isBoolean.default(true)
+      lcbudget       : toNumber.isNumber.default(0)
+      llmcomplexity  : toBoolean.isBoolean.default(false)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     var _ma = new MiniA()
