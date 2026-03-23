@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260319'
+version: '20260323'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -134,12 +134,12 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 8594b3bf2a24d1ba4c548f6e028ace3556fdc455
+  CHEATSHEET.md: 818f63cb54c87bdaff75f0080e288168a55f2dee
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   README.md: 9d2135fc46c08206587c60c4c697baf29d9de657
-  USAGE.md: cb65d127f3145b295cfc000f5c0440a9f48084b2
+  USAGE.md: c42d2e0a108102394129df0b36815621947648f0
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 59c81b7209ff4d3438a3ba11cf6a27ce92d8dd4e
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
@@ -191,13 +191,13 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 02027d502a11b5281510a83fb57c037955302976
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: f675b37307a29b62e90e870534972e7964de7529
+  mini-a.js: 4acfd1bb20dbacea4514d80be68937d94941ed7c
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 7d85f775555b56ad289cdf80a88e8600bbcaa7dd
+  mini-a.yaml: 168e55be4034bb0f5ae644a31f4ca89bcfd5c5ba
   public/index.md: e7069d5a5a4804342f77fb67c6804471ceafb4a7
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
-  tests/advancedPlanning.js: 8e0fefd35f96a3dfa4513f8721c31a1f751f25d4
-  tests/advancedPlanning.yaml: 9c8f4dcb3d3bba1eda4343dfe7eda1b80126f78b
+  tests/advancedPlanning.js: 57f4ac338a45d4f3a76bc698356108643b4ff9a5
+  tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
   tests/coreFunctionality.js: 28745488703f5bdc18e2e81409baaf808ed61b89
