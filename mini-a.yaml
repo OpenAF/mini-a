@@ -458,7 +458,7 @@ help:
     example  : "anthropic/claude-3-5-haiku-20241022"
     mandatory: false
   - name     : modellock
-    desc     : Force Mini-A to always use a specific model tier, bypassing dynamic escalation. Values: "main", "lc", or "auto" (default)
+    desc     : "Force Mini-A to always use a specific model tier, bypassing dynamic escalation. Values: \"main\", \"lc\", or \"auto\" (default)"
     example  : "lc"
     mandatory: false
     options  : ["main", "lc", "auto"]
