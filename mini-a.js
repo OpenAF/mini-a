@@ -64,6 +64,16 @@ var MiniA = function() {
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
 
+  // Escalation history for outcome-based feedback loop (Issue 4)
+  this._escalationHistory = []
+  this._adaptiveThresholds = {}
+
+  // Per-step cost tracker (Issue 5)
+  this._costTracker = {
+    lc:   { calls: 0, totalTokens: 0, estimatedUSD: 0 },
+    main: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
+  }
+
   // Check OAF_MINI_A_NOJSONPROMPT environment variable to disable promptJSONWithStats
   // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
   this._noJsonPromptEnvValue = getEnv("OAF_MINI_A_NOJSONPROMPT")
@@ -1538,6 +1548,29 @@ MiniA.prototype._logLcCostSummary = function() {
     var total = mainTokens + lcTokens
     var lcShare = Math.round(lcTokens / total * 100)
     this.fnI("info", `[cost] Main: ${mainTokens} tokens | LC: ${lcTokens} tokens | LC share: ${lcShare}%`)
+  }
+}
+
+/**
+ * Returns the current escalation history and adaptive thresholds for this session.
+ * Each history entry: { step, reason, resolved: bool, stepsToResolve: number }
+ */
+MiniA.prototype.getEscalationStats = function() {
+  return {
+    history           : (this._escalationHistory || []).slice(),
+    adaptiveThresholds: isMap(this._adaptiveThresholds) ? Object.assign({}, this._adaptiveThresholds) : {}
+  }
+}
+
+/**
+ * Returns per-model token cost statistics for this session.
+ * { lc: { calls, totalTokens, estimatedUSD }, main: { calls, totalTokens, estimatedUSD } }
+ */
+MiniA.prototype.getCostStats = function() {
+  var ct = this._costTracker || { lc: {}, main: {} }
+  return {
+    lc  : Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.lc),
+    main: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.main)
   }
 }
 
@@ -6448,6 +6481,13 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
 
   this._logLcCostSummary()
 
+  // Issue 5: Print detailed cost summary in verbose mode
+  if (args.verbose && isMap(this._costTracker)) {
+    var lc = this._costTracker.lc
+    var mn = this._costTracker.main
+    this.fnI("info", `Cost summary: LC ${lc.calls} calls / ${lc.totalTokens} tokens, Main ${mn.calls} calls / ${mn.totalTokens} tokens`)
+  }
+
   if (args.raw) {
     return answer || "(no answer)"
   } else {
@@ -8999,20 +9039,80 @@ MiniA.prototype._deduplicateContext = function(contextArray) {
 }
 
 MiniA.prototype._assessGoalComplexity = function(goal) {
-  if (!isString(goal) || goal.length === 0) return { level: "medium" }
+  if (!isString(goal) || goal.length === 0) return { level: "medium", score: 0, signals: [] }
 
   var tokens = this._estimateTokens(goal)
+  var signals = []
+  var score = 0
+
+  // --- Baseline heuristics ---
+  // Token length scoring: +3 for very long goals (>200), +1 for moderate (>100).
+  // Multi-step/conditions/multiple-tasks each add +1 to signal compositional complexity.
   var hasMultiStep = /\band\b|\bthen\b|first.*second|step\s*\d+/i.test(goal)
   var hasConditions = /\bif\b|\bunless\b|\bwhen\b/i.test(goal)
   var hasMultipleTasks = /\d+\.\s|\d+\)\s|;\s*\w+|,\s*\w+.*\w+.*\w+/i.test(goal)
 
+  if (tokens > 200) { score += 3; signals.push("long-goal") }
+  else if (tokens > 100) { score += 1; signals.push("moderate-length") }
+
+  if (hasMultiStep) { score += 1; signals.push("multi-step") }
+  if (hasConditions) { score += 1; signals.push("conditions") }
+  if (hasMultipleTasks) { score += 1; signals.push("multiple-tasks") }
+
+  // --- Domain-complexity keywords ---
+  var domainKeywords = [
+    "refactor", "architect", "migrate", "debug", "security",
+    "optimize", "integrate", "deploy", "test", "validate",
+    "analyze", "analyse", "performance", "infrastructure", "pipeline"
+  ]
+  var goalLower = goal.toLowerCase()
+  domainKeywords.forEach(function(kw) {
+    if (goalLower.indexOf(kw) >= 0) {
+      score += 1
+      signals.push("domain:" + kw)
+    }
+  })
+
+  // --- Negation & scope modifiers ---
+  var negationPatterns = [
+    /\bdo not\b/i, /\bwithout\b/i, /\bexcept\b/i,
+    /\bonly if\b/i, /\bunless\b/i, /\bnot including\b/i, /\bexcluding\b/i
+  ]
+  negationPatterns.forEach(function(pat) {
+    if (pat.test(goal)) {
+      score += 1
+      signals.push("negation-modifier")
+    }
+  })
+
+  // --- Entity / file count signals ---
+  // Multiple file paths
+  var filePaths = goal.match(/[\/\\][\w\-./\\]+/g)
+  if (filePaths && filePaths.length >= 2) {
+    score += 1
+    signals.push("multiple-paths")
+  }
+  // Numeric range or large quantity (e.g. "50 files", "3 services", "all 20")
+  var numericQuantity = goal.match(/\b(?:all\s+)?\d+\s+(?:file|service|repo|module|component|test|endpoint|table|class|function)s?\b/ig)
+  if (numericQuantity && numericQuantity.length >= 1) {
+    score += 1
+    signals.push("entity-count")
+  }
+  // URLs
+  var urls = goal.match(/https?:\/\/\S+/g)
+  if (urls && urls.length >= 2) {
+    score += 1
+    signals.push("multiple-urls")
+  }
+
+  // --- Classify by score ---
   var level
-  // Complex: Long goals with multiple steps AND conditions, or very long goals
-  if (tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
+  // Complex: score >= 5, or classic complex conditions still apply
+  if (score >= 5 || tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
     level = "complex"
   }
-  // Medium: Moderate length with steps OR conditions, or multiple tasks
-  else if (tokens > 100 || hasMultiStep || hasMultipleTasks) {
+  // Medium: score >= 2, or classic medium conditions
+  else if (score >= 2 || tokens > 100 || hasMultiStep || hasMultipleTasks) {
     level = "medium"
   }
   // Simple: Short, direct goals
@@ -9020,7 +9120,67 @@ MiniA.prototype._assessGoalComplexity = function(goal) {
     level = "simple"
   }
 
-  return { level: level }
+  // Deduplicate signals
+  var uniqueSignals = signals.filter(function(s, i) { return signals.indexOf(s) === i })
+
+  return { level: level, score: score, signals: uniqueSignals }
+}
+
+/**
+ * Compute a lightweight confidence score [0,1] for an LC model response.
+ * Used to decide whether to defer escalation by one step.
+ * @param {*} response  - The parsed response object (or string) from the LC model
+ * @param {Array} recentThoughts - Array of recent thought strings for repetition detection
+ * @returns {number} score in [0,1]
+ */
+MiniA.prototype._scoreLCResponse = function(response, recentThoughts) {
+  if (isUnDef(response) || response === null) return 0
+
+  var score = 0
+
+  // 1. JSON validity (already triggers fallback, but also feed into score)
+  var parsed = response
+  if (isString(response)) {
+    try { parsed = jsonParse(response, __, __, true) } catch(e) { parsed = __ }
+  }
+  if (!isMap(parsed) && !isArray(parsed)) return 0  // completely invalid → 0
+
+  score += 0.25  // valid JSON
+
+  // 2. Completeness: has thought + (action or final_answer)
+  if (isMap(parsed)) {
+    var hasThought = isString(parsed.thought) && parsed.thought.trim().length > 0
+    var hasAction = isMap(parsed.action) && isString(parsed.action.name) && parsed.action.name.trim().length > 0
+    var hasFinalAnswer = isString(parsed.final_answer) && parsed.final_answer.trim().length > 0
+
+    if (hasThought) score += 0.25
+    if (hasAction || hasFinalAnswer) score += 0.25
+
+    // 3. Repetition check: penalise if thought is nearly identical to a recent thought
+    if (hasThought && isArray(recentThoughts) && recentThoughts.length > 0) {
+      var thoughtWords = parsed.thought.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 3 })
+      var repeated = false
+      for (var i = 0; i < recentThoughts.length; i++) {
+        var prevWords = recentThoughts[i].toLowerCase().split(/\s+/).filter(function(w) { return w.length > 3 })
+        if (thoughtWords.length === 0 || prevWords.length === 0) continue
+        var common = thoughtWords.filter(function(w) { return prevWords.indexOf(w) >= 0 })
+        var overlap = common.length / Math.min(thoughtWords.length, prevWords.length)
+        if (overlap >= 0.8) { repeated = true; break }
+      }
+      if (repeated) score -= 0.3
+    }
+
+    // 4. Action specificity: params should be non-trivially short
+    if (hasAction && isMap(parsed.action.params)) {
+      var paramValues = Object.keys(parsed.action.params).map(function(k) { return "" + parsed.action.params[k] })
+      var hasSubstantialParam = paramValues.some(function(v) { return v.trim().length > 3 })
+      if (hasSubstantialParam) score += 0.25
+    } else if (hasFinalAnswer && parsed.final_answer.trim().length > 10) {
+      score += 0.25
+    }
+  }
+
+  return Math.max(0, Math.min(1, score))
 }
 
 MiniA.prototype._callMcpTool = function(toolName, params) {
@@ -11952,6 +12112,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       pendingJsonToolPayload   : __,
       hasEscalated            : false,
       successfulStepsSinceEscalation: 0,
+      _escalationDeferred     : false,
       contextOverflowRecoveries: 0,
       earlyStopThreshold      : baseEarlyStopThreshold,
       earlyStopTriggered      : false,
@@ -11982,13 +12143,74 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       complex: { errors: 2, thoughts: 3, totalThoughts: 5, stepsWithoutAction: 3 }
     }
     var goalComplexityLevel = goalComplexity && goalComplexity.level ? goalComplexity.level : "medium"
+
+    // Issue 6: LLM-assisted complexity assessment for ambiguous medium results
+    if (toBoolean(args.llmcomplexity) && goalComplexityLevel === "medium" && this._use_lc && isObject(this.lc_llm)) {
+      try {
+        // Use a fixed instruction prefix; include the goal as a quoted, sanitized string
+        // to reduce prompt-injection risk from adversarial goal text.
+        var safeGoalText = (args.goal || "").replace(/[`"\\]/g, function(c) { return "\\" + c })
+        var lcComplexityPrompt = `Rate the complexity of this task as "simple", "medium", or "complex". Respond with JSON only: {"complexity": "<level>"}\n\nTask: "${safeGoalText}"`
+        var lcComplexityResp = isFunction(this.lc_llm.promptJSONWithStats)
+          ? this.lc_llm.promptJSONWithStats(lcComplexityPrompt)
+          : this.lc_llm.promptWithStats(lcComplexityPrompt)
+        var lcComplexityParsed = isObject(lcComplexityResp) ? lcComplexityResp.response : lcComplexityResp
+        if (isString(lcComplexityParsed)) {
+          try { lcComplexityParsed = jsonParse(lcComplexityParsed, __, __, true) } catch(e) {}
+        }
+        if (isMap(lcComplexityParsed) && isString(lcComplexityParsed.complexity)) {
+          var llmLevel = lcComplexityParsed.complexity.toLowerCase().trim()
+          if (llmLevel === "simple" || llmLevel === "medium" || llmLevel === "complex") {
+            if (args.debug || args.verbose) {
+              this.fnI("info", `LLM complexity assessment: ${llmLevel} (overrides heuristic: ${goalComplexityLevel})`)
+            }
+            goalComplexityLevel = llmLevel
+          }
+        }
+      } catch(lcComplexityErr) {
+        if (args.debug || args.verbose) {
+          this.fnI("warn", `LLM complexity assessment failed: ${lcComplexityErr && lcComplexityErr.message}`)
+        }
+      }
+    }
+
     var escalationLimits = escalationThresholds[goalComplexityLevel] || escalationThresholds.medium
     var deescalateThreshold = isDef(args.deescalate) ? parseInt(args.deescalate) : 3
     var lcContextLimit = isDef(args.lccontextlimit) ? parseInt(args.lccontextlimit) : 0
 
+    // Issue 1: Model lock flag — "main", "lc", or unset/auto
+    var modelLock = isString(args.modellock) && args.modellock.trim().length > 0 ? args.modellock.trim().toLowerCase() : "auto"
+    if (modelLock !== "main" && modelLock !== "lc") modelLock = "auto"
+
+    // Issue 3: Confidence-based escalation deferral
+    var lcEscalateDefer = isDef(args.lcescalatedefer) ? toBoolean(args.lcescalatedefer) : true
+
+    // Issue 5: LC token budget
+    var lcBudget = isDef(args.lcbudget) ? parseInt(args.lcbudget) : 0
+    var lcBudgetExceeded = false
+
+    // Reset per-run cost tracker
+    this._costTracker = {
+      lc:   { calls: 0, totalTokens: 0, estimatedUSD: 0 },
+      main: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
+    }
+    // Reset escalation history for fresh run
+    this._escalationHistory = []
+    this._adaptiveThresholds = {}
+
     if (args.debug || args.verbose) {
       this.fnI("info", `Goal complexity assessed as: ${goalComplexityLevel}`)
+      if (isArray(goalComplexity.signals) && goalComplexity.signals.length > 0) {
+        this.fnI("info", `Complexity signals: ${goalComplexity.signals.join(", ")}`)
+      }
       this.fnI("info", `Escalation thresholds: errors=${escalationLimits.errors}, thoughts=${escalationLimits.thoughts}, totalThoughts=${escalationLimits.totalThoughts}`)
+    }
+
+    // Issue 1: Log model lock startup message
+    if (modelLock === "main") {
+      this.fnI("info", "Model lock active: always using main model")
+    } else if (modelLock === "lc") {
+      this.fnI("info", "Model lock active: always using lc model")
     }
 
     var currentToolContext = {}
@@ -12176,70 +12398,164 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var shouldEscalate = false
       var escalationReason = ""
 
-      // De-escalate back to low-cost model after sustained recovery
-      if (runtime.hasEscalated && runtime.successfulStepsSinceEscalation >= deescalateThreshold) {
-        runtime.hasEscalated = false
-        runtime.successfulStepsSinceEscalation = 0
-        this.fnI("info", "De-escalating back to low-cost model after sustained recovery")
-      }
+      // Issue 1: Model lock — short-circuit all dynamic escalation logic
+      if (modelLock === "main") {
+        // Always use main model; no escalation/de-escalation needed
+        shouldEscalate = false
+      } else if (modelLock === "lc") {
+        // Always use LC model; prevent any escalation
+        shouldEscalate = false
+      } else {
+        // Issue 5: LC budget exceeded → permanently lock to main
+        if (lcBudgetExceeded) {
+          shouldEscalate = true
+          escalationReason = "lc budget exceeded"
+        }
 
-      if (this._use_lc && step > 0) {
-        // Escalate if context exceeds the configured LC context window limit
-        if (!shouldEscalate && lcContextLimit > 0 && contextTokens >= lcContextLimit) {
-          shouldEscalate = true
-          escalationReason = `context ${contextTokens} tokens exceeds LC limit ${lcContextLimit}`
-          global.__mini_a_metrics.escalation_context_window.inc()
-        }
-        // Escalate for consecutive errors
-        if (!shouldEscalate && runtime.consecutiveErrors >= escalationLimits.errors) {
-          shouldEscalate = true
-          escalationReason = `${runtime.consecutiveErrors} consecutive errors (threshold: ${escalationLimits.errors})`
-          global.__mini_a_metrics.escalation_consecutive_errors.inc()
-        }
-        // Escalate for too many consecutive thoughts without action
-        else if (runtime.consecutiveThoughts >= escalationLimits.thoughts) {
-          shouldEscalate = true
-          escalationReason = `${runtime.consecutiveThoughts} consecutive thoughts without action (threshold: ${escalationLimits.thoughts})`
-          global.__mini_a_metrics.escalation_consecutive_thoughts.inc()
-        }
-        // Escalate if too many thoughts overall (thinking loop)
-        else if (runtime.totalThoughts >= escalationLimits.totalThoughts && step > 0) {
-          shouldEscalate = true
-          escalationReason = `${runtime.totalThoughts} total thoughts indicating thinking loop (threshold: ${escalationLimits.totalThoughts})`
-          global.__mini_a_metrics.escalation_thought_loop.inc()
-        }
-        // Escalate if no meaningful actions in recent steps
-        else if (runtime.stepsWithoutAction >= escalationLimits.stepsWithoutAction) {
-          shouldEscalate = true
-          escalationReason = `${runtime.stepsWithoutAction} steps without meaningful progress (threshold: ${escalationLimits.stepsWithoutAction})`
-          global.__mini_a_metrics.escalation_steps_without_action.inc()
-        }
-        // Escalate if similar thoughts are repeating (stuck pattern)
-        else if (runtime.recentSimilarThoughts.length >= 3) {
-          var similarCount = 0
-          var lastThought = runtime.recentSimilarThoughts[runtime.recentSimilarThoughts.length - 1]
-          for (var i = 0; i < runtime.recentSimilarThoughts.length - 1; i++) {
-            if (isSimilarThought(lastThought, runtime.recentSimilarThoughts[i])) {
-              similarCount++
+        // De-escalate back to low-cost model after sustained recovery
+        if (!lcBudgetExceeded && runtime.hasEscalated && runtime.successfulStepsSinceEscalation >= deescalateThreshold) {
+          // Issue 4: Mark last escalation as resolved
+          if (isArray(this._escalationHistory) && this._escalationHistory.length > 0) {
+            var lastEntry = this._escalationHistory[this._escalationHistory.length - 1]
+            if (lastEntry && lastEntry.resolved === false) {
+              lastEntry.resolved = true
+              lastEntry.stepsToResolve = runtime.successfulStepsSinceEscalation
+              // Adaptive threshold adjustment
+              var sameReason = this._escalationHistory.filter(function(e) { return e.reason === lastEntry.reason })
+              if (sameReason.length >= 3) {
+                var resolvedQuick = sameReason.filter(function(e) { return e.resolved && e.stepsToResolve <= 1 })
+                var resolveRate = sameReason.filter(function(e) { return e.resolved }).length / sameReason.length
+                var adaptKey = lastEntry.reason
+                if (!isMap(this._adaptiveThresholds)) this._adaptiveThresholds = {}
+                if (resolvedQuick.length >= 3 && resolvedQuick.length === sameReason.length) {
+                  // All resolved within 1 step → raise threshold
+                  var curThresh = isDef(this._adaptiveThresholds[adaptKey]) ? this._adaptiveThresholds[adaptKey] : escalationLimits.errors
+                  this._adaptiveThresholds[adaptKey] = curThresh + 1
+                  if (args.debug || args.verbose) {
+                    this.fnI("info", `Adaptive threshold: ${adaptKey} raised to ${this._adaptiveThresholds[adaptKey]} (${resolvedQuick.length}/${sameReason.length} resolved in ≤1 step)`)
+                  }
+                } else if (resolveRate < 0.5) {
+                  // Low resolve rate → lower threshold (escalate sooner)
+                  var curThresh2 = isDef(this._adaptiveThresholds[adaptKey]) ? this._adaptiveThresholds[adaptKey] : escalationLimits.errors
+                  this._adaptiveThresholds[adaptKey] = Math.max(1, curThresh2 - 1)
+                  if (args.debug || args.verbose) {
+                    this.fnI("info", `Adaptive threshold: ${adaptKey} lowered to ${this._adaptiveThresholds[adaptKey]} (resolve rate ${Math.round(resolveRate * 100)}% < 50%)`)
+                  }
+                }
+              }
             }
           }
-          if (similarCount >= 2) {
+          runtime.hasEscalated = false
+          runtime.successfulStepsSinceEscalation = 0
+          this.fnI("info", "De-escalating back to low-cost model after sustained recovery")
+        }
+
+        if (this._use_lc && step > 0 && !shouldEscalate) {
+          // Apply adaptive thresholds when available
+          var adaptedLimits = Object.assign({}, escalationLimits)
+          if (isMap(this._adaptiveThresholds)) {
+            if (isDef(this._adaptiveThresholds["consecutive_errors"])) adaptedLimits.errors = this._adaptiveThresholds["consecutive_errors"]
+            if (isDef(this._adaptiveThresholds["consecutive_thoughts"])) adaptedLimits.thoughts = this._adaptiveThresholds["consecutive_thoughts"]
+          }
+
+          // Escalate if context exceeds the configured LC context window limit
+          if (!shouldEscalate && lcContextLimit > 0 && contextTokens >= lcContextLimit) {
             shouldEscalate = true
-            escalationReason = `repeating similar thoughts (${similarCount + 1} similar thoughts)`
-            global.__mini_a_metrics.escalation_similar_thoughts.inc()
+            escalationReason = `context ${contextTokens} tokens exceeds LC limit ${lcContextLimit}`
+            global.__mini_a_metrics.escalation_context_window.inc()
+          }
+          // Escalate for consecutive errors
+          if (!shouldEscalate && runtime.consecutiveErrors >= adaptedLimits.errors) {
+            shouldEscalate = true
+            escalationReason = "consecutive_errors"
+            global.__mini_a_metrics.escalation_consecutive_errors.inc()
+          }
+          // Escalate for too many consecutive thoughts without action
+          else if (runtime.consecutiveThoughts >= adaptedLimits.thoughts) {
+            shouldEscalate = true
+            escalationReason = "consecutive_thoughts"
+            global.__mini_a_metrics.escalation_consecutive_thoughts.inc()
+          }
+          // Escalate if too many thoughts overall (thinking loop)
+          else if (runtime.totalThoughts >= escalationLimits.totalThoughts && step > 0) {
+            shouldEscalate = true
+            escalationReason = `${runtime.totalThoughts} total thoughts indicating thinking loop (threshold: ${escalationLimits.totalThoughts})`
+            global.__mini_a_metrics.escalation_thought_loop.inc()
+          }
+          // Escalate if no meaningful actions in recent steps
+          else if (runtime.stepsWithoutAction >= escalationLimits.stepsWithoutAction) {
+            shouldEscalate = true
+            escalationReason = `${runtime.stepsWithoutAction} steps without meaningful progress (threshold: ${escalationLimits.stepsWithoutAction})`
+            global.__mini_a_metrics.escalation_steps_without_action.inc()
+          }
+          // Escalate if similar thoughts are repeating (stuck pattern)
+          else if (runtime.recentSimilarThoughts.length >= 3) {
+            var similarCount = 0
+            var lastThought = runtime.recentSimilarThoughts[runtime.recentSimilarThoughts.length - 1]
+            for (var i = 0; i < runtime.recentSimilarThoughts.length - 1; i++) {
+              if (isSimilarThought(lastThought, runtime.recentSimilarThoughts[i])) {
+                similarCount++
+              }
+            }
+            if (similarCount >= 2) {
+              shouldEscalate = true
+              escalationReason = `repeating similar thoughts (${similarCount + 1} similar thoughts)`
+              global.__mini_a_metrics.escalation_similar_thoughts.inc()
+            }
+          }
+
+          // Issue 3: Confidence-based deferral — if LC response confidence is high, defer by 1 step
+          if (shouldEscalate && lcEscalateDefer && !runtime._escalationDeferred) {
+            var lastRmsg = runtime.context.length > 0 ? runtime.context[runtime.context.length - 1] : __
+            var lcConf = this._scoreLCResponse(lastRmsg, runtime.recentSimilarThoughts)
+            if (lcConf >= 0.7) {
+              this.fnI("info", `LC response confidence ${lcConf.toFixed(2)} — deferring escalation by 1 step`)
+              shouldEscalate = false
+              runtime._escalationDeferred = true
+            } else {
+              runtime._escalationDeferred = false
+            }
+          } else if (shouldEscalate && runtime._escalationDeferred) {
+            // Deferred step also triggered escalation — escalate immediately regardless of score
+            runtime._escalationDeferred = false
           }
         }
       }
-      
-      var useLowCost = this._use_lc && (step > 0 || goalComplexityLevel === "simple") && !shouldEscalate
+
+      // Issue 1: Determine model to use based on modellock
+      var useLowCost
+      if (modelLock === "main") {
+        useLowCost = false
+      } else if (modelLock === "lc" && this._use_lc) {
+        useLowCost = true
+      } else {
+        useLowCost = this._use_lc && (step > 0 || goalComplexityLevel === "simple") && !shouldEscalate
+      }
+
       var currentLLM = useLowCost ? this.lc_llm : this.llm
       var llmType = useLowCost ? "low-cost" : "main"
       
       // Inform about escalation
-      if (this._use_lc && shouldEscalate && step > 0) {
-        this.fnI("warn", `Escalating to main model: ${escalationReason}`)
+      if (modelLock === "auto" && this._use_lc && shouldEscalate && step > 0) {
+        var escalationDisplay
+        if (escalationReason === "consecutive_errors") {
+          var errThresh = isMap(this._adaptiveThresholds) && isDef(this._adaptiveThresholds["consecutive_errors"])
+            ? this._adaptiveThresholds["consecutive_errors"] : escalationLimits.errors
+          escalationDisplay = `${runtime.consecutiveErrors} consecutive errors (threshold: ${errThresh})`
+        } else if (escalationReason === "consecutive_thoughts") {
+          var thoughThresh = isMap(this._adaptiveThresholds) && isDef(this._adaptiveThresholds["consecutive_thoughts"])
+            ? this._adaptiveThresholds["consecutive_thoughts"] : escalationLimits.thoughts
+          escalationDisplay = `${runtime.consecutiveThoughts} consecutive thoughts without action (threshold: ${thoughThresh})`
+        } else {
+          escalationDisplay = escalationReason
+        }
+        this.fnI("warn", `Escalating to main model: ${escalationDisplay}`)
         global.__mini_a_metrics.escalations.inc()
         runtime.hasEscalated = true
+        // Issue 4: Record escalation in history
+        if (isArray(this._escalationHistory)) {
+          this._escalationHistory.push({ step: step, reason: escalationReason, resolved: false, stepsToResolve: 0 })
+        }
       }
       
       this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
@@ -12251,6 +12567,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           print( ow.format.withSideLine(">>>\n" + prompt + "\n>>>", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
         }
       }
+
 
       var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
       var canStream = args.usestream && isFunction(currentLLM.promptStreamWithStats)
@@ -12385,9 +12702,24 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (useLowCost) {
         global.__mini_a_metrics.llm_lc_calls.inc()
         global.__mini_a_metrics.llm_lc_tokens.getAdd(responseTokenTotal)
+        // Issue 5: Update per-session cost tracker for LC
+        if (isMap(this._costTracker)) {
+          this._costTracker.lc.calls++
+          this._costTracker.lc.totalTokens += responseTokenTotal
+        }
+        // Issue 5: Check LC budget
+        if (lcBudget > 0 && !lcBudgetExceeded && isMap(this._costTracker) && this._costTracker.lc.totalTokens >= lcBudget) {
+          lcBudgetExceeded = true
+          this.fnI("warn", `LC token budget (${lcBudget}) exceeded — switching to main model for remainder of session`)
+        }
       } else {
         global.__mini_a_metrics.llm_normal_calls.inc()
         global.__mini_a_metrics.llm_normal_tokens.getAdd(responseTokenTotal)
+        // Issue 5: Update per-session cost tracker for main
+        if (isMap(this._costTracker)) {
+          this._costTracker.main.calls++
+          this._costTracker.main.totalTokens += responseTokenTotal
+        }
       }
 
       var rmsg = responseWithStats.response

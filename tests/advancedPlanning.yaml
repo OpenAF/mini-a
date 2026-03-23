@@ -7,6 +7,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testGoalAssessment
 
+- name: MiniA Tests::GoalAssessmentDomainSignals
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGoalAssessmentDomainSignals
+
+- name: MiniA Tests::GoalAssessmentNegationSignals
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGoalAssessmentNegationSignals
+
+- name: MiniA Tests::GoalAssessmentEntityCount
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGoalAssessmentEntityCount
+
 - name: MiniA Tests::SimplePlan
   from: MiniA Tests::Init
   to  : oJob Test
@@ -36,6 +51,9 @@ ojob:
 
 todo:
 - MiniA Tests::GoalAssessment
+- MiniA Tests::GoalAssessmentDomainSignals
+- MiniA Tests::GoalAssessmentNegationSignals
+- MiniA Tests::GoalAssessmentEntityCount
 - MiniA Tests::SimplePlan
 - MiniA Tests::TreePlan
 - MiniA Tests::Validation
