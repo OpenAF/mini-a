@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260323'
+version: '20260324'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -91,6 +91,7 @@ files:
 - mcps/mcp-math.yaml
 - mcps/mcp-mini-a.yaml
 - mcps/mcp-net.yaml
+- mcps/mcp-oaf-browse.yaml
 - mcps/mcp-oaf.yaml
 - mcps/mcp-oafp.yaml
 - mcps/mcp-office.yaml
@@ -166,6 +167,7 @@ filesHash:
   mcps/mcp-math.yaml: 60944a11b129d9eca27888ef0ef189b33023a432
   mcps/mcp-mini-a.yaml: 208cd53acbda9973934bc1cac32e848d1376ad92
   mcps/mcp-net.yaml: dff5115d164807f71c61f9ff153e96553144e6a9
+  mcps/mcp-oaf-browse.yaml: 0e080b18dda09a7dd645dd9d0db2f7868eba8b62
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
   mcps/mcp-oafp.yaml: 53b765ccf2ecd338d3a65ef3f65509bab63b1556
   mcps/mcp-office.yaml: e5c2b9aa612ec98f39c3126322922905d7306b02
