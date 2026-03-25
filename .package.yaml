@@ -63,9 +63,6 @@ files:
 - .github/version.svg
 - .github/workflows/github-action.yml
 - .odoc.db
-- .openaf_precompiled/.t8-20260324
-- .openaf_precompiled/mini-a-common_js.class
-- .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -149,9 +146,6 @@ filesHash:
   .github/version.svg: 03a0e106998ab20e0098cd9ef754bc244857f0c1
   .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/.t8-20260324: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  .openaf_precompiled/mini-a-common_js.class: 965339e7a395c5a4ef286e8a44ff715f80bd5874
-  .openaf_precompiled/mini-a-utils_js.class: e028e2dad5a3bb6427e4cd1c70a5061ae5394026
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
   CHEATSHEET.md: 818f63cb54c87bdaff75f0080e288168a55f2dee
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
