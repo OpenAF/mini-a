@@ -1032,7 +1032,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   })
 
   // Handle streaming output directly without formatting
-  if (e === "stream") {
+  if (e === "stream" || e === "planner_stream") {
     cFn("", m, this._id)
     return
   }
@@ -1580,8 +1580,11 @@ MiniA.prototype.getCostStats = function() {
  * markdown elements (code blocks, tables) are finished before outputting.
  * Handles escape sequences and closing quotes properly.
  */
-MiniA.prototype._createStreamDeltaHandler = function(args) {
+MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     var self = this
+    opts = isMap(opts) ? opts : {}
+    var fieldName = isString(opts.fieldName) && opts.fieldName.length > 0 ? opts.fieldName : "answer"
+    var eventName = isString(opts.eventName) && opts.eventName.length > 0 ? opts.eventName : "stream"
     var decodeUnicodeEscapes = toBoolean(isObject(args) ? args.useascii : false) === true
     var jsonBuffer = ""         // Buffer for finding "answer" field
     var contentBuffer = ""      // Buffer for decoded content
@@ -1590,6 +1593,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
     var escapeNext = false
     var unicodeEscapeActive = false
     var unicodeEscapeBuffer = ""
+    var fieldRegex = new RegExp('"' + fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"\\s*:\\s*"')
     var inCodeBlock = false     // Track if inside ``` code block
     var inTable = false         // Track if inside a table
     var codeBlockBuffer = ""    // Buffer code blocks until complete
@@ -1679,10 +1683,10 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
         if (text.length > 0) {
             // Add initial newline before first output
             if (firstOutput) {
-                self.fnI("stream", "\n")
+                self.fnI(eventName, "\n")
                 firstOutput = false
             }
-            self.fnI("stream", text)
+            self.fnI(eventName, text)
         }
     }
 
@@ -1806,7 +1810,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
                 // Still looking for "answer" field
                 jsonBuffer += c
                 if (!answerDetected) {
-                    var answerMatch = jsonBuffer.match(/"answer"\s*:\s*"/)
+                    var answerMatch = jsonBuffer.match(fieldRegex)
                     if (answerMatch) {
                         answerDetected = true
                         streamingAnswer = true
@@ -1857,6 +1861,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args) {
  */
 MiniA.prototype._createPlainStreamDeltaHandler = function() {
     var self = this
+    var eventName = arguments.length > 0 && isString(arguments[0]) && arguments[0].length > 0 ? arguments[0] : "stream"
     var firstOutput = true
 
     return function onDelta(chunk) {
@@ -1864,10 +1869,10 @@ MiniA.prototype._createPlainStreamDeltaHandler = function() {
       var text = isString(chunk) ? chunk : String(chunk)
       if (text.length === 0) return
       if (firstOutput) {
-        self.fnI("stream", "\n")
+        self.fnI(eventName, "\n")
         firstOutput = false
       }
-      self.fnI("stream", text)
+      self.fnI(eventName, text)
     }
 }
 
@@ -12570,14 +12575,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
 
       var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
+      var streamIntent = "answer"
+      if (useLowCost) {
+        var isLikelyDirectAnswerStep = step === 0 && goalComplexityLevel === "simple" && runtime.context.length === 0
+        streamIntent = isLikelyDirectAnswerStep ? "answer" : "planner"
+      }
+      var plannerStreaming = streamIntent === "planner"
       var canStream = args.usestream && isFunction(currentLLM.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       if (args.usestream) {
-        onDelta = canStreamJson && !noJsonPromptFlag
-          ? this._createStreamDeltaHandler(args)
-          : this._createPlainStreamDeltaHandler()
+        onDelta = plannerStreaming && !noJsonPromptFlag
+          ? this._createStreamDeltaHandler(args, {
+              fieldName: "thought",
+              eventName: "planner_stream"
+            })
+          : canStreamJson && !noJsonPromptFlag
+            ? this._createStreamDeltaHandler(args, {
+              fieldName: streamIntent === "planner" ? "thought" : "answer",
+              eventName: streamIntent === "planner" ? "planner_stream" : "stream"
+            })
+            : this._createPlainStreamDeltaHandler(streamIntent === "planner" ? "planner_stream" : "stream")
       }
 
       var responseWithStats

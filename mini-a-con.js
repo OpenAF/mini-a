@@ -2750,7 +2750,8 @@ try {
     warn   : "FG(214)",
     info   : hintColor,
     plan   : "FG(135)",
-    stream : "RESET"
+    stream : "RESET",
+    planner_stream: "FG(223)"
   }
 
   var _prevEventLength = __
@@ -3009,7 +3010,7 @@ try {
 
   function printEvent(type, icon, message, id) {
     // Handle streaming output
-    if (type == "stream") {
+    if (type == "stream" || type == "planner_stream") {
       // Clear inline-event erase state before rendering stream chunks so
       // future event logs don't wipe already streamed answer text.
       if (isDef(_prevEventLength)) {
@@ -3017,9 +3018,13 @@ try {
         _prevEventLength = __
       }
       var streamText = isString(message) ? message : String(message || "")
-      _streamOutputStats.totalChars += streamText.length
-      _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
-      _renderStreamChunk(streamText)
+      if (type == "stream") {
+        _streamOutputStats.totalChars += streamText.length
+        _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
+        _renderStreamChunk(streamText)
+      } else {
+        printnl(colorifyText(streamText, eventPalette.planner_stream))
+      }
       return
     }
     // Ignore user events

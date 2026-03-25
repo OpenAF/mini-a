@@ -56,7 +56,16 @@ version: '20260323'
 dependencies:
   openaf: '>=20250915'
 files:
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+- .github/mini-a-con-screenshot.png
+- .github/mini-a-web-screenshot1.jpg
+- .github/version.svg
+- .github/workflows/github-action.yml
 - .odoc.db
+- .openaf_precompiled/.t8-20260324
+- .openaf_precompiled/mini-a-common_js.class
+- .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -91,6 +100,7 @@ files:
 - mcps/mcp-math.yaml
 - mcps/mcp-mini-a.yaml
 - mcps/mcp-net.yaml
+- mcps/mcp-oaf-browse.yaml
 - mcps/mcp-oaf.yaml
 - mcps/mcp-oafp.yaml
 - mcps/mcp-office.yaml
@@ -132,7 +142,16 @@ files:
 - tests/progToolCall.js
 - tests/progToolCall.yaml
 filesHash:
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  .github/mini-a-con-screenshot.png: cb5fdf4b3013f482abbe9e4b358e6f0137a741e0
+  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
+  .github/version.svg: 03a0e106998ab20e0098cd9ef754bc244857f0c1
+  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20260324: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a-common_js.class: 965339e7a395c5a4ef286e8a44ff715f80bd5874
+  .openaf_precompiled/mini-a-utils_js.class: e028e2dad5a3bb6427e4cd1c70a5061ae5394026
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
   CHEATSHEET.md: 818f63cb54c87bdaff75f0080e288168a55f2dee
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
@@ -166,6 +185,7 @@ filesHash:
   mcps/mcp-math.yaml: 60944a11b129d9eca27888ef0ef189b33023a432
   mcps/mcp-mini-a.yaml: 208cd53acbda9973934bc1cac32e848d1376ad92
   mcps/mcp-net.yaml: dff5115d164807f71c61f9ff153e96553144e6a9
+  mcps/mcp-oaf-browse.yaml: 0e080b18dda09a7dd645dd9d0db2f7868eba8b62
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
   mcps/mcp-oafp.yaml: 53b765ccf2ecd338d3a65ef3f65509bab63b1556
   mcps/mcp-office.yaml: e5c2b9aa612ec98f39c3126322922905d7306b02
@@ -181,7 +201,7 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 0ab80b1035f8c80830ef5e7b6ba087f999d493c3
-  mini-a-con.js: ae1dfd5d4f19ea63ef32b30f188126f7abadd2af
+  mini-a-con.js: 7084df49c16b9caed39c469e8101cf92ff411dbe
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
   mini-a-modes.yaml: df993142849483aa33fdc1762549bc29cea4b0c8
@@ -189,12 +209,12 @@ filesHash:
   mini-a-subtask.js: 9070832a702e01d236b004719e92b0f4721aa3ec
   mini-a-utils.js: f5872f0164abd2d6235409e7d58fcde3e8443d40
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 02027d502a11b5281510a83fb57c037955302976
+  mini-a-web.yaml: e4c90824bfc221ced2ee7595a709d3f60e6fdb29
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: 4acfd1bb20dbacea4514d80be68937d94941ed7c
+  mini-a.js: 58d367fe17bea91a1f7da83a246de252650ecb2e
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 168e55be4034bb0f5ae644a31f4ca89bcfd5c5ba
-  public/index.md: e7069d5a5a4804342f77fb67c6804471ceafb4a7
+  public/index.md: 86a1db6255f875dc2755bb0d5ee29a2a74e9e9e3
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 57f4ac338a45d4f3a76bc698356108643b4ff9a5
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4

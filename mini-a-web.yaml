@@ -320,6 +320,12 @@ todo:
                 }
                 return
               }
+              if (e == "planner_stream") {
+                if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                  global._mini_a_web_ssePush(uuid, "planner_stream", { message: m })
+                }
+                return
+              }
               var _e = ""
               switch(e) {
               case "user"     : _e = "👤"; break
@@ -446,6 +452,9 @@ todo:
                 }
               }
               global.__res[uuid].push({ event: _e, message: m })
+              if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
+                global._mini_a_web_ssePush(uuid, "interaction", { event: _e })
+              }
               // Only sync to S3 after user prompts (not on every event)
               if (_e == "👤" && isFunction(global._mini_a_web_storeHistory)) {
                 try {
@@ -492,6 +501,9 @@ todo:
           }
         }
         global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+          global._mini_a_web_ssePush(uuid, "interaction", { event: "final" })
+        }
         if (global.__usestream && isFunction(global._mini_a_web_sseClose)) {
           global._mini_a_web_sseClose(uuid, "finished")
         }
