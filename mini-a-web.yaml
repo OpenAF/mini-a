@@ -47,6 +47,10 @@ help:
     desc     : "Maximum conversation tokens before Mini-A summarizes context (default: 200000)"
     example  : "200000"
     mandatory: false
+  - name     : maxpromptchars
+    desc     : "Maximum accepted prompt size in characters (default: 120000)"
+    example  : "120000"
+    mandatory: false
   - name     : useplanning
     desc     : "Boolean to enable/disable task planning (default: false)"
     example  : "true"
@@ -167,7 +171,6 @@ help:
     desc     : "SLON/JSON definition of a channel that records tool calls, arguments and responses"
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
-
 include:
 - oJobHTTPd.yaml
 
@@ -244,9 +247,20 @@ todo:
   ((execURI      )): | #js
     var _res = { error: "check server logs" }
     try {
+      function __normalizePromptInput(value) {
+        var text = isString(value) ? value : (isDef(value) ? String(value) : "")
+        text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+        text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+        var maxPromptChars = isNumber(global.__maxpromptchars) && global.__maxpromptchars > 0 ? global.__maxpromptchars : 120000
+        if (text.length > maxPromptChars) {
+          throw "prompt exceeds max allowed length (" + maxPromptChars + " chars)"
+        }
+        return text
+      }
       
       // Parse POST data
       var postData = jsonParse(request.files.postData)
+      postData.prompt = __normalizePromptInput(postData.prompt)
       // Validate UUID or generate a new one
       if (isDef(postData.uuid)) {
         _res.uuid = postData.uuid
@@ -298,7 +312,7 @@ todo:
               } else if (r.event == "🤖" || r.event == "⬅️") {
                 _data.push( { role: "assistant", content: r.message } )
               } else if (r.event == "⚙️" || r.event == "🖥️") {
-                _data.push( { role: "system", content: r.message } )
+                _data.push( { role: "assistant", content: "[TOOL_OUTPUT] " + r.message } )
               }
             }
             if (_data.length > 0) {
@@ -309,9 +323,6 @@ todo:
       
           // Initialize MiniA
           lma = new MiniA()
-          lma.init(merge(global.maArgs, {
-            conversation: global._mini_a_web_loadFile(_hfile)
-          }))
           lma.setInteractionFn( (e, m) => {
             try {
               if (e == "stream") {
@@ -470,6 +481,9 @@ todo:
               delete global.__planState[uuid]
             }
           })
+          lma.init(merge(global.maArgs, {
+            conversation: global._mini_a_web_loadFile(_hfile)
+          }))
           global.__conversations[ uuid ] = lma
         } else {
           lma = global.__conversations[ uuid ]
@@ -849,6 +863,7 @@ jobs:
       usestream       : toBoolean().isBoolean().default(false)
       logpromptheaders: isString().default("")
       maxcontext      : toNumber().isNumber().default(200000)
+      maxpromptchars  : toNumber().isNumber().default(120000)
       usehistory      : toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
@@ -895,6 +910,7 @@ jobs:
     global.__lastActivity = { }
     global.__showexecs = args.showexecs
     global.__usestream = args.usestream
+    global.__maxpromptchars = args.maxpromptchars
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__useattach = args.useattach
     global.__usevectors = args.usevectors

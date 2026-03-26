@@ -444,6 +444,10 @@ help:
     desc     : SLON/JSON definition of a debug channel for low-cost LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-lc-llm-debug.log'))"
     mandatory: false
+  - name     : debugvalch
+    desc     : SLON/JSON definition of a debug channel for validation LLM debugging (requires $llm.setDebugCh support)
+    example  : "(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"
+    mandatory: false
   - name     : nosetmcpwd
     desc     : Do not set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location
     example  : "true"
@@ -605,6 +609,7 @@ jobs:
         toollog        : toollog
         debugch        : debugch
         debuglcch      : debuglcch
+        debugvalch     : debugvalch
         nosetmcpwd     : nosetmcpwd
         miniadocs      : miniadocs
         extraskills    : extraskills
@@ -712,6 +717,7 @@ jobs:
       toollog        : default(__)
       debugch        : default(__)
       debuglcch      : default(__)
+      debugvalch     : default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)
       miniadocs      : toBoolean.isBoolean.default(false)
       extraskills    : isString.default(__)
@@ -848,7 +854,11 @@ jobs:
     }
     if (isArray(beforeGoalResult.outputs) && beforeGoalResult.outputs.length > 0) {
       var hookPrefix = beforeGoalResult.outputs.map(function(o) { return "[Hook " + o.hookName + "] " + o.output }).join("\n")
-      args.goal = hookPrefix + "\n\n" + originalGoalText
+      if (isString(args.hookcontext) && args.hookcontext.length > 0) {
+        args.hookcontext = args.hookcontext + "\n" + hookPrefix
+      } else {
+        args.hookcontext = hookPrefix
+      }
     }
     if (isFunction(_ma.setHookFn)) {
       _ma.setHookFn(function(event, contextVars) {
