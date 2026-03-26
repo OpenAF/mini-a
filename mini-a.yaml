@@ -848,7 +848,11 @@ jobs:
     }
     if (isArray(beforeGoalResult.outputs) && beforeGoalResult.outputs.length > 0) {
       var hookPrefix = beforeGoalResult.outputs.map(function(o) { return "[Hook " + o.hookName + "] " + o.output }).join("\n")
-      args.goal = hookPrefix + "\n\n" + originalGoalText
+      if (isString(args.hookcontext) && args.hookcontext.length > 0) {
+        args.hookcontext = args.hookcontext + "\n" + hookPrefix
+      } else {
+        args.hookcontext = hookPrefix
+      }
     }
     if (isFunction(_ma.setHookFn)) {
       _ma.setHookFn(function(event, contextVars) {
