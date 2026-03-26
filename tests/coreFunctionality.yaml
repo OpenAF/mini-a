@@ -12,6 +12,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testExtractEmbeddedFinalAction
 
+- name: MiniA Core Tests::TaskLanePolicyProbeDetection
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTaskLanePolicyProbeDetection
+
+- name: MiniA Core Tests::ConfigureDebugChannel
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConfigureDebugChannelCreatesOrReconfiguresChannel
+
 - name: MiniA Core Tests::ToolCacheKeys
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -92,6 +102,8 @@ ojob:
 todo:
 - MiniA Core Tests::CleanCodeBlocks
 - MiniA Core Tests::ExtractFinalAction
+- MiniA Core Tests::TaskLanePolicyProbeDetection
+- MiniA Core Tests::ConfigureDebugChannel
 - MiniA Core Tests::ToolCacheKeys
 - MiniA Core Tests::CategorizeError
 - MiniA Core Tests::ErrorHistory

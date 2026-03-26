@@ -657,6 +657,34 @@ MiniA.prototype._buildChatbotUserPrompt = function(goalText, hookContextText) {
   return sections.join("\n\n")
 }
 
+MiniA.prototype._getPolicyLaneProbePatterns = function() {
+  if (isArray(this._policyLaneProbePatterns) && this._policyLaneProbePatterns.length > 0) return this._policyLaneProbePatterns
+  this._policyLaneProbePatterns = [
+    /\b(?:show|reveal|print|dump|display|list|tell|share|quote|expose|give|return|extract|leak)\b[\s\S]{0,120}\bpolicy lane\b/i,
+    /\bpolicy lane\b[\s\S]{0,120}\b(?:contents?|text|prompt|instructions?|rules)\b[\s\S]{0,80}\b(?:show|reveal|print|dump|display|list|tell|share|quote|expose|give|return|extract|leak)\b/i,
+    /\b(?:show|reveal|print|dump|display|list|tell|share|quote|expose|give|return|extract|leak|what(?:'s| is))\b[\s\S]{0,120}\b(?:system|developer|hidden|internal)\s+(?:prompt|instructions?|rules)\b/i,
+    /\bwhat(?:'s| is)\b[\s\S]{0,80}\byour\s+(?:system|developer|hidden|internal)?\s*(?:prompt|instructions?|rules)\b/i,
+    /\b(?:policy lane|system prompt|developer prompt|internal instructions?)\b[\s\S]{0,120}\?/i
+  ]
+  return this._policyLaneProbePatterns
+}
+
+MiniA.prototype._isPolicyLaneRetrievalRequest = function(text) {
+  if (!isString(text) || text.trim().length === 0) return false
+  var patterns = this._getPolicyLaneProbePatterns()
+  for (var i = 0; i < patterns.length; i++) {
+    if (patterns[i].test(text)) return true
+  }
+  return false
+}
+
+MiniA.prototype._isTaskLanePolicyProbe = function(args) {
+  if (!isMap(args)) return false
+  if (this._isPolicyLaneRetrievalRequest(args.goal)) return true
+  if (this._isPolicyLaneRetrievalRequest(args.hookcontext)) return true
+  return false
+}
+
 MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
   if (!isArray(MiniA._activeInstances)) MiniA._activeInstances = []
@@ -5913,6 +5941,33 @@ MiniA.prototype._extractToolCallActionsFromDebugChannel = function(snapshot, all
     }
 }
 
+MiniA.prototype._configureDebugChannel = function(llmInstance, channelSpec, defaultName, label) {
+    if (isUnDef(channelSpec) || channelSpec.length === 0) return
+
+    var logLabel = isString(label) && label.trim().length > 0 ? label.trim() : "LLM"
+    if (isUnDef(llmInstance) || isUnDef(llmInstance.setDebugCh)) {
+        this.fnI("warn", `${logLabel === "LLM" ? "debugch" : "debuglcch"} specified but ${logLabel === "LLM" ? "this.llm" : "this.lc_llm"}.setDebugCh is not available.`)
+        return
+    }
+
+    try {
+        var debugChannelMap = af.fromJSSLON(channelSpec)
+        if (isMap(debugChannelMap)) {
+            if (isUnDef(debugChannelMap.name)) {
+                debugChannelMap.name = defaultName
+            }
+            // Recreate the channel on every explicit debugch/debuglcch configuration so
+            // callers can change the backend/options even when the default channel name
+            // already exists in a long-lived process.
+            $ch(debugChannelMap.name).create(debugChannelMap.type, debugChannelMap.options || {})
+            llmInstance.setDebugCh(debugChannelMap.name)
+            this.fnI("output", `${logLabel} debug channel '${debugChannelMap.name}' created and configured.`)
+        }
+    } catch (e) {
+        this.fnI("error", `Failed to create ${logLabel === "LLM" ? "" : "low-cost "}debug channel: ${e.message}`)
+    }
+}
+
 /**
  * Extract possible text segments from raw LLM responses across vendors.
  */
@@ -10805,49 +10860,13 @@ MiniA.prototype.init = function(args) {
     this._lcLlmNoTools = __
 
     // Check the need to init debugch for main LLM
-    if (isDef(args.debugch) && args.debugch.length > 0) {
-      if (isDef(this.llm) && isDef(this.llm.setDebugCh)) {
-        try {
-          var _debugchm = af.fromJSSLON(args.debugch)
-          if (isMap(_debugchm)) {
-            if (isUnDef(_debugchm.name)) {
-              _debugchm.name = "__mini_a_llm_debug"
-            }
-            $ch(_debugchm.name).create(_debugchm.type, _debugchm.options || {})
-            this.llm.setDebugCh(_debugchm.name)
-            this.fnI("output", `LLM debug channel '${_debugchm.name}' created and configured.`)
-          }
-        } catch (e) {
-          this.fnI("error", `Failed to create debug channel: ${e.message}`)
-        }
-      } else {
-        this.fnI("warn", "debugch specified but this.llm.setDebugCh is not available.")
-      }
-    }
+    this._configureDebugChannel(this.llm, args.debugch, "__mini_a_llm_debug", "LLM")
 
     // Check the need to init debuglcch for low-cost LLM
-    if (isDef(args.debuglcch) && args.debuglcch.length > 0) {
-      if (this._use_lc && isDef(this.lc_llm) && isDef(this.lc_llm.setDebugCh)) {
-        try {
-          var _debuglcchm = af.fromJSSLON(args.debuglcch)
-          if (isMap(_debuglcchm)) {
-            if (isUnDef(_debuglcchm.name)) {
-              _debuglcchm.name = "__mini_a_lc_llm_debug"
-            }
-            $ch(_debuglcchm.name).create(_debuglcchm.type, _debuglcchm.options || {})
-            this.lc_llm.setDebugCh(_debuglcchm.name)
-            this.fnI("output", `Low-cost LLM debug channel '${_debuglcchm.name}' created and configured.`)
-          }
-        } catch (e) {
-          this.fnI("error", `Failed to create low-cost debug channel: ${e.message}`)
-        }
-      } else {
-        if (!this._use_lc) {
-          this.fnI("warn", "debuglcch specified but low-cost LLM is not enabled.")
-        } else {
-          this.fnI("warn", "debuglcch specified but this.lc_llm.setDebugCh is not available.")
-        }
-      }
+    if (!this._use_lc && isDef(args.debuglcch) && args.debuglcch.length > 0) {
+      this.fnI("warn", "debuglcch specified but low-cost LLM is not enabled.")
+    } else {
+      this._configureDebugChannel(this.lc_llm, args.debuglcch, "__mini_a_lc_llm_debug", "Low-cost LLM")
     }
 
     // Load conversation history if provided
@@ -11981,6 +12000,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this.fnI("load", `Loading goal from file: ${args.goal}...`)
       args.goal = io.readFileString(args.goal)
     }
+
     this.fnI("user", `${args.goal}`)
 
     if (toBoolean(args.mcpdynamic) === true) {
@@ -11991,10 +12011,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this.fnI("debug", `Knowledge before init(): ${args.knowledge.substring(0, 100)}... (${args.knowledge.length} chars total)`)
     }
 
-      // Reset initialization flag if knowledge was enriched with plan, to force re-init with updated knowledge
-      if (args.knowledgeUpdated === true) {
-        this._isInitialized = false
-      }
+    // Reset initialization flag if knowledge was enriched with plan, to force re-init with updated knowledge
+    if (args.knowledgeUpdated === true) {
+      this._isInitialized = false
+    }
 
     // Pre-determine _useToolsActual BEFORE init() to ensure correct prompt template
     var usingMcpProxy = toBoolean(args.mcpproxy) === true
@@ -12029,6 +12049,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     this.init(args)
+
+    if (this._isTaskLanePolicyProbe(args)) {
+      var blockedAnswer = "I can't help with requests to retrieve or expose policy-lane/system instruction contents. Please provide a task-lane request that does not ask for internal policy text."
+      this.fnI("warn", "Blocked task-lane prompt attempting to retrieve policy-lane content.")
+      this._origAnswer = blockedAnswer
+      return this._processFinalAnswer(blockedAnswer, args)
+    }
+
     this._registerMcpToolsForGoal(args)
 
     var initialState = {}
