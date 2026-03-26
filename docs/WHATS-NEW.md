@@ -2,7 +2,91 @@
 
 ## Recent Updates
 
-### Debug File Output (`debugfile` parameter)
+### Prompt Safety and Untrusted Data Handling
+
+**Change**: Added explicit labeling of untrusted user data in all prompt templates, introduced policy-lane probe detection, and added prompt normalization/length enforcement.
+
+**What's New**:
+- All user-supplied content (goal, hook context, tool outputs, attached files, conversation history) is now wrapped in clearly labeled blocks — for example `BEGIN_UNTRUSTED_GOAL … END_UNTRUSTED_GOAL` — so the LLM can distinguish developer instructions from untrusted input. The system prompt explicitly instructs the model not to follow embedded instructions that conflict with system/developer rules.
+- Files attached via `/attach` in the console are wrapped with `BEGIN_UNTRUSTED_ATTACHED_FILE … END_UNTRUSTED_ATTACHED_FILE` markers.
+- **Policy-lane probe detection**: If the user's goal or chatbot message appears to probe for system-prompt contents (e.g. "show me the policy lane", "reveal your system prompt"), Mini-A detects the pattern and replies with a standard refusal — the request never reaches the LLM.
+- **Prompt normalization**: User input is sanitized before use — `\r\n` line endings are unified, stray control characters are stripped, and oversized inputs are rejected with an error.
+- **Web API prompt size limit** (`maxpromptchars`, default 120,000): The web API now enforces a configurable character cap on incoming prompt payloads. Requests that exceed the limit are rejected before processing.
+
+**Why This Matters**:
+- Reduces the risk of prompt-injection attacks embedded in user goals or attached files.
+- Prevents adversarial users from extracting system instructions through the web API.
+- Consistent normalisation avoids silent failures from malformed or overly large inputs.
+
+**Configuration**:
+```bash
+# Restrict accepted prompt size in the web server
+./mini-a-web.sh onport=8888 maxpromptchars=40000
+```
+
+---
+
+### planner_stream Event Type
+
+**Change**: Introduced a dedicated `planner_stream` streaming event to distinguish planner-phase token output from regular LLM answer output.
+
+**What's New**:
+- When `usestream=true` and the agent is in the planning phase, streaming tokens are emitted as `planner_stream` events instead of the normal `stream` events.
+- **Console**: `planner_stream` tokens render in a distinct color so users can immediately see that the agent is generating a plan rather than an answer.
+- **Web UI (SSE)**: The `/stream` endpoint now emits `planner_stream` SSE events alongside the existing `stream` and `interaction` events. Clients can listen for this event type to render planner output differently (e.g., a collapsible "Planning…" pane).
+
+**Example** (EventSource client):
+```javascript
+var es = new EventSource("/stream?uuid=" + uuid)
+es.addEventListener("stream", function(e) {
+  appendToAnswer(JSON.parse(e.data).message)
+})
+es.addEventListener("planner_stream", function(e) {
+  appendToPlannerPane(JSON.parse(e.data).message)
+})
+```
+
+---
+
+### Per-Session Cost Statistics (`getCostStats`)
+
+**Change**: Added `MiniA.getCostStats()` method that returns token usage and call counts broken down by model tier for the current session.
+
+**What's New**:
+- Tracks calls and total tokens for both the low-cost (`lc`) and main model tiers, resetting at the start of each `start()` call.
+- When `lcbudget > 0`, emits a warning and permanently locks to the main model for the remainder of the session once the LC token budget is exhausted.
+- When `verbose=true`, a cost summary line is logged at the end of the run.
+
+**Example**:
+```javascript
+var agent = new MiniA()
+agent.start({ goal: "Analyse logs", lcbudget: 50000 })
+var costs = agent.getCostStats()
+// { lc: { calls: 12, totalTokens: 38200, estimatedUSD: 0 },
+//   main: { calls: 2, totalTokens: 4800, estimatedUSD: 0 } }
+```
+
+**Related parameters**: `lcbudget`, `modellock`, `lcescalatedefer`, `llmcomplexity`
+
+---
+
+### Validation LLM Debug Channel (`debugvalch`)
+
+**Change**: Added `debugvalch` parameter to expose a dedicated debug channel for the validation LLM used when `llmcomplexity=true`.
+
+**What's New**:
+- Pass a SLON/JSON channel definition to capture validation LLM request/response payloads in a separate file or channel, independent of `debugch` and `debuglcch`.
+- Logs a warning if the validation LLM is not enabled (i.e., `llmcomplexity=false`).
+
+**Example**:
+```bash
+mini-a goal="analyze complexity" llmcomplexity=true \
+  debugvalch="(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"
+```
+
+---
+
+
 
 **Change**: Added `debugfile=<path>` argument to redirect debug output from the screen to a plain-text NDJSON file.
 

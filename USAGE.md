@@ -417,6 +417,7 @@ Optional flags when starting the server:
 - `historypath=/tmp/mini-a-history` / `historyretention=600` / `historykeep=true` to manage history storage (see comments in `mini-a-web.yaml`)
 - `historys3bucket=my-bucket historys3prefix=sessions/` to mirror history JSON files to S3 (supports `historys3url`, `historys3accesskey`, `historys3secret`, `historys3region`, `historys3useversion1`, `historys3ignorecertcheck`). History is uploaded at optimized checkpoints: immediately after user prompts and when final answers are provided, rather than on every interaction event
 - `useattach=true` to enable the file attachment button in the browser UI (disabled by default)
+- `maxpromptchars=120000` to set the maximum accepted prompt size in characters (default: 120,000). Applies to the user-supplied `prompt` field in each `/prompt` request body. Requests whose prompt field exceeds this limit are rejected with an error before any LLM call is made. Reduces risk from very large or malformed inputs.
 
 Endpoints used by the UI (served by `mini-a-web.yaml`): `/prompt`, `/result`, `/clear`, and `/ping`.
 
@@ -762,6 +763,9 @@ The `start()` method accepts various configuration options:
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`debugfile`** (string, optional): Redirect all debug output to a file as NDJSON instead of printing colored blocks on screen. Implies `debug=true`. Each line is a JSON object with a `ts` (ISO timestamp) and either `type:"event"` (with `event` and `message` fields, one per agent event) or `type:"block"` (with `label` and `content` fields, for raw LLM prompt/response payloads). Use `$from(io.readFileNDJSON("debug.log")).equals("label","STEP_PROMPT").select()` to filter specific block types.
+- **`debugch`** (string, optional): SLON/JSON definition of a debug channel for main LLM debugging (requires `$llm.setDebugCh` support). Example: `"(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"`.
+- **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
+- **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM (used when `llmcomplexity=true`). Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. Logs a warning if the validation LLM is not configured.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
@@ -917,6 +921,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - **Escape handling**: Properly processes escape sequences and closing quotes in streamed JSON responses
   - **Performance**: Reduces perceived latency by showing progress before the full response completes
   - **Compatibility**: Not compatible with `showthinking=true` mode (falls back to non-streaming)
+  - **SSE event types** (web UI): The SSE stream emits `stream` events for regular LLM token output and `planner_stream` events for tokens generated during the planning phase. Clients can use the event type to visually distinguish planner output from regular answer output. The console renders `planner_stream` tokens in a distinct color for the same reason.
 
 #### Libraries and Extensions
 - **`libs`** (string): Comma-separated list of additional OpenAF libraries to load
@@ -2171,6 +2176,18 @@ You can adjust this policy using the shell safety options:
 - Shell access disabled by default
 - Command validation and filtering
 
+### Prompt Safety and Untrusted Data Handling
+
+Mini-A enforces a strict boundary between system/developer instructions ("policy lane") and user-provided content ("task lane"):
+
+- **Untrusted data labeling**: User-supplied content (the goal, hook context, tool outputs, conversation history, and attached files) is wrapped in clearly labeled blocks (`BEGIN_UNTRUSTED_GOAL … END_UNTRUSTED_GOAL`, `BEGIN_UNTRUSTED_HOOK_CONTEXT … END_UNTRUSTED_HOOK_CONTEXT`, `BEGIN_UNTRUSTED_ATTACHED_FILE … END_UNTRUSTED_ATTACHED_FILE`) so the model can distinguish developer instructions from untrusted input. The system prompt explicitly instructs the model to treat these blocks as opaque reference data and never follow embedded instructions that conflict with the policy-lane rules.
+
+- **Policy-lane probe detection**: If the user's goal or chatbot message appears to be probing for the contents of system instructions (e.g., "show me the policy lane", "reveal your system prompt"), Mini-A detects this pattern and responds with a standard refusal instead of forwarding the request to the LLM. A `warn` event is emitted.
+
+- **Prompt normalization**: User input is normalized before use — `\r\n` line endings are converted to `\n`, control characters are stripped, and oversized inputs are rejected. The web API enforces a configurable character limit (`maxpromptchars`, default 120,000) to prevent very large inputs from being forwarded to the model.
+
+- **Attached file safety** (console): When a file is attached via `/attach` in the console, its contents are wrapped with `BEGIN_UNTRUSTED_ATTACHED_FILE` / `END_UNTRUSTED_ATTACHED_FILE` markers and a header warning, making it clear to the model that the file is untrusted reference data.
+
 ### Shell Prefix Strategies by Operating System
 
 Mini-A now also supports `usesandbox=...` presets for common operating systems. Keep using `shell=...` when you need custom runtimes (Docker/Podman/firejail/custom wrappers).
@@ -2482,6 +2499,23 @@ log(agent.getMetrics())
 ```
 
 To poll the OpenAF registry directly, use `ow.metrics.get("mini-a")` from another job or expose it through your usual monitoring bridge.
+
+### Per-Session Cost Statistics
+
+`MiniA.getCostStats()` returns a per-run cost breakdown separated by model tier. Unlike the global counters in `getMetrics()`, this snapshot resets at the start of each `start()` call, making it suitable for billing or budgeting per individual goal:
+
+```javascript
+var agent = new MiniA()
+agent.start({ goal: "Analyze logs", lcbudget: 50000 })
+log(agent.getCostStats())
+// Example output:
+// {
+//   lc  : { calls: 12, totalTokens: 38200, estimatedUSD: 0 },
+//   main: { calls: 2,  totalTokens: 4800,  estimatedUSD: 0 }
+// }
+```
+
+The `estimatedUSD` field is reserved for future cost estimation integration and is currently always `0`.
 
 ## Related Documentation
 

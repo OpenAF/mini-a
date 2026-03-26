@@ -59,6 +59,9 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-key')"
 | `verbose` | boolean | `false` | Enable verbose logging |
 | `debug` | boolean | `false` | Enable debug mode with detailed logs |
 | `debugfile` | string | - | Redirect debug output to a file as NDJSON instead of screen (implies `debug=true`) |
+| `debugch` | string | - | SLON/JSON debug channel for main LLM (requires `$llm.setDebugCh`) |
+| `debuglcch` | string | - | SLON/JSON debug channel for low-cost LLM |
+| `debugvalch` | string | - | SLON/JSON debug channel for validation LLM (used when `llmcomplexity=true`) |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
 | `outfile` | string | - | Path to save final answer (if not provided, prints to console) |
 
@@ -938,6 +941,9 @@ mini-a goal="migrate database to new schema" \
 ./mini-a-web.sh onport=8888 \
   usehistory=true historykeep=true \
   useattach=true usediagrams=true usecharts=true
+
+# Restrict accepted prompt size (default is 120000 chars)
+./mini-a-web.sh onport=8888 maxpromptchars=40000
 ```
 
 ### SSH Remote Execution
