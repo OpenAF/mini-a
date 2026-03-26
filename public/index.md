@@ -1325,6 +1325,32 @@
         width: 40%;
     }
 
+    .preview.has-text::before,
+    .preview.has-text::after {
+        opacity: 0.18;
+    }
+
+    .preview-text {
+        position: absolute;
+        left: 1rem;
+        right: 1rem;
+        top: 0.7rem;
+        bottom: 0.7rem;
+        z-index: 1;
+        display: none;
+        color: var(--text);
+        font-size: 0.92rem;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0.72;
+    }
+
+    .preview.has-text .preview-text {
+        display: block;
+    }
+
     @keyframes shimmer {
         0% { background-position: 0% 50%; }
         100% { background-position: -200% 50%; }
@@ -1855,6 +1881,11 @@
     let streamSource = null;
     let streamBuffer = '';
     let streamRenderTimer = null;
+    let plannerStreamBuffer = '';
+    let plannerRenderTimer = null;
+    let immediatePollTimer = null;
+    let pollInFlight = false;
+    let pollQueued = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -4761,13 +4792,49 @@
         const el = document.createElement('div');
         el.id = PREVIEW_ID;
         el.className = 'preview';
+        const text = document.createElement('div');
+        text.className = 'preview-text';
+        el.appendChild(text);
         resultsDiv.appendChild(el);
+        syncPreviewText();
         scrollResultsToBottom();
     }
 
     function removePreview() {
         const el = document.getElementById(PREVIEW_ID);
         if (el) el.remove();
+    }
+
+    function getPlannerPreviewText() {
+        const text = (plannerStreamBuffer || '').replace(/\r/g, '').trim();
+        if (!text) return '';
+        const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+        if (lines.length === 0) return '';
+        return lines[lines.length - 1];
+    }
+
+    function syncPreviewText() {
+        const preview = document.getElementById(PREVIEW_ID);
+        if (!preview) return;
+        const textNode = preview.querySelector('.preview-text');
+        if (!textNode) return;
+        const text = getPlannerPreviewText();
+        if (text.length > 0) {
+            textNode.textContent = text;
+            preview.classList.add('has-text');
+        } else {
+            textNode.textContent = '';
+            preview.classList.remove('has-text');
+        }
+    }
+
+    function schedulePlannerRender() {
+        if (plannerRenderTimer) return;
+        plannerRenderTimer = setTimeout(() => {
+            plannerRenderTimer = null;
+            addPreview();
+            syncPreviewText();
+        }, 60);
     }
 
     /* ========== PLAN PANEL HELPERS ========== */
@@ -5080,16 +5147,28 @@
     }
 
     async function pollOnce() {
+        if (pollInFlight) {
+            pollQueued = true;
+            return;
+        }
+        const pollUuid = currentSessionUuid;
+        if (!pollUuid) {
+            return;
+        }
+        pollInFlight = true;
         try {
             const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ uuid: currentSessionUuid })
+                body: JSON.stringify({ uuid: pollUuid })
             });
 
             if (!response.ok) throw new Error('Failed to fetch results');
 
             const data = await response.json();
+            if (pollUuid !== currentSessionUuid) {
+                return;
+            }
 
                 if (Array.isArray(data.history)) {
                     lastKnownHistory = sanitizeHistoryEvents(data.history);
@@ -5107,9 +5186,9 @@
                 if (rawContent !== lastRawContent) {
                     lastRawContent = rawContent;
                     if (streamActive) {
-                        // During streaming, just update lastRawContent
-                        // SSE events will trigger renders using lastRawContent + streamBuffer
-                        // This avoids re-rendering/flickering previous answers
+                        // During streaming, re-render with the latest polled event log plus any
+                        // streamed answer tokens so think/thought/status lines appear immediately.
+                        await renderRawContent(mergeFinalContentWithStream(rawContent, streamBuffer));
                     } else {
                         await renderRawContent(rawContent);
                     }
@@ -5147,6 +5226,12 @@
             await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
             forceRenderChartBlocks();
             stopProcessing();
+        } finally {
+            pollInFlight = false;
+            if (pollQueued) {
+                pollQueued = false;
+                setTimeout(() => pollOnce(), 0);
+            }
         }
     }
 
@@ -5170,6 +5255,13 @@
         const base = rawContent || '';
         const stream = streamedChunk || '';
         if (!hasVisibleStreamText(stream)) return base;
+        const extractedAnswer = extractAssistantAnswerText(base);
+        if (typeof extractedAnswer === 'string' && extractedAnswer.length > 0) {
+            if (extractedAnswer.indexOf(stream) !== -1) return base;
+            if (stream.indexOf(extractedAnswer) !== -1) return base;
+        }
+        const normalizedBase = normalizeRenderedConversationText(base);
+        if (normalizedBase.indexOf(stream) !== -1) return base;
         if (base.indexOf(stream) !== -1) return base;
         return appendWithOverlap(base, stream);
     }
@@ -5192,6 +5284,16 @@
             clearTimeout(streamRenderTimer);
             streamRenderTimer = null;
         }
+        plannerStreamBuffer = '';
+        if (plannerRenderTimer) {
+            clearTimeout(plannerRenderTimer);
+            plannerRenderTimer = null;
+        }
+        if (immediatePollTimer) {
+            clearTimeout(immediatePollTimer);
+            immediatePollTimer = null;
+        }
+        syncPreviewText();
 
         // Clean up streaming animations
         if (resultsDiv) {
@@ -5209,9 +5311,18 @@
             streamRenderTimer = null;
             // Use lastRawContent from polling (includes previous conversation + user prompt)
             // plus streamBuffer (SSE delta tokens) to avoid re-rendering/flickering
-            const combined = lastRawContent + streamBuffer;
+            const combined = mergeFinalContentWithStream(lastRawContent, streamBuffer);
             await renderRawContent(combined);
         }, 80);
+    }
+
+    function scheduleImmediatePoll(delayMs) {
+        const delay = typeof delayMs === 'number' ? delayMs : 25;
+        if (immediatePollTimer) return;
+        immediatePollTimer = setTimeout(() => {
+            immediatePollTimer = null;
+            pollOnce();
+        }, delay);
     }
 
     function startStream(uuid) {
@@ -5222,6 +5333,8 @@
         stopStream();
         streamActive = true;
         streamBuffer = '';
+        plannerStreamBuffer = '';
+        syncPreviewText();
 
         const streamUrl = resolveAppUrl('stream') + '?uuid=' + encodeURIComponent(uuid);
         streamSource = new EventSource(streamUrl);
@@ -5234,6 +5347,15 @@
             streamBuffer += chunk;
             scheduleStreamRender();
         });
+        streamSource.addEventListener('planner_stream', (event) => {
+            if (!event || !event.data) return;
+            let payload = {};
+            try { payload = JSON.parse(event.data); } catch (e) { payload = {}; }
+            const chunk = payload.message || '';
+            if (!chunk) return;
+            plannerStreamBuffer += chunk;
+            schedulePlannerRender();
+        });
         streamSource.addEventListener('plan', (event) => {
             if (!event || !event.data) return;
             try {
@@ -5241,10 +5363,15 @@
                 if (payload && payload.plan) updatePlanPanel(payload.plan);
             } catch (e) { /* ignore */ }
         });
+        streamSource.addEventListener('interaction', () => {
+            plannerStreamBuffer = '';
+            syncPreviewText();
+            scheduleImmediatePoll(10);
+        });
         streamSource.addEventListener('done', () => {
             streamActive = false;
-            streamBuffer = '';
             stopStream();
+            scheduleImmediatePoll(0);
         });
         streamSource.addEventListener('error', (event) => {
             console.error('SSE error:', event);
