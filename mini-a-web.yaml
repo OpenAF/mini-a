@@ -171,15 +171,6 @@ help:
     desc     : "SLON/JSON definition of a channel that records tool calls, arguments and responses"
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
-  - name     : debugch
-    desc     : "SLON/JSON definition of a debug channel for LLM debugging"
-    example  : "(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"
-    mandatory: false
-  - name     : debuglcch
-    desc     : "SLON/JSON definition of a debug channel for low-cost LLM debugging"
-    example  : "(type: file, options: (file: '/tmp/mini-a-lc-llm-debug.log'))"
-    mandatory: false
-
 include:
 - oJobHTTPd.yaml
 
@@ -202,7 +193,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, usemath: global.__usemath, debugch: args.debugch, debuglcch: args.debuglcch }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, usemath: global.__usemath }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -905,8 +896,6 @@ jobs:
       format         : isString().default(__)
       auditch        : isString().default(__)
       toollog        : isString().default(__)
-      debugch        : isString().default(__)
-      debuglcch      : isString().default(__)
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)

@@ -5941,33 +5941,6 @@ MiniA.prototype._extractToolCallActionsFromDebugChannel = function(snapshot, all
     }
 }
 
-MiniA.prototype._configureDebugChannel = function(llmInstance, channelSpec, defaultName, label) {
-    if (isUnDef(channelSpec) || channelSpec.length === 0) return
-
-    var logLabel = isString(label) && label.trim().length > 0 ? label.trim() : "LLM"
-    if (isUnDef(llmInstance) || isUnDef(llmInstance.setDebugCh)) {
-        this.fnI("warn", `${logLabel === "LLM" ? "debugch" : "debuglcch"} specified but ${logLabel === "LLM" ? "this.llm" : "this.lc_llm"}.setDebugCh is not available.`)
-        return
-    }
-
-    try {
-        var debugChannelMap = af.fromJSSLON(channelSpec)
-        if (isMap(debugChannelMap)) {
-            if (isUnDef(debugChannelMap.name)) {
-                debugChannelMap.name = defaultName
-            }
-            // Recreate the channel on every explicit debugch/debuglcch configuration so
-            // callers can change the backend/options even when the default channel name
-            // already exists in a long-lived process.
-            $ch(debugChannelMap.name).create(debugChannelMap.type, debugChannelMap.options || {})
-            llmInstance.setDebugCh(debugChannelMap.name)
-            this.fnI("output", `${logLabel} debug channel '${debugChannelMap.name}' created and configured.`)
-        }
-    } catch (e) {
-        this.fnI("error", `Failed to create ${logLabel === "LLM" ? "" : "low-cost "}debug channel: ${e.message}`)
-    }
-}
-
 /**
  * Extract possible text segments from raw LLM responses across vendors.
  */
@@ -10452,6 +10425,7 @@ MiniA.prototype.init = function(args) {
       { name: "toollog", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
+      { name: "debugvalch", type: "string", default: __ },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
       { name: "forceplanning", type: "boolean", default: false },
@@ -10860,13 +10834,74 @@ MiniA.prototype.init = function(args) {
     this._lcLlmNoTools = __
 
     // Check the need to init debugch for main LLM
-    this._configureDebugChannel(this.llm, args.debugch, "__mini_a_llm_debug", "LLM")
+    if (isDef(args.debugch) && args.debugch.length > 0) {
+      if (isDef(this.llm) && isDef(this.llm.setDebugCh)) {
+        try {
+          var _debugchm = af.fromJSSLON(args.debugch)
+          if (isMap(_debugchm)) {
+            if (isUnDef(_debugchm.name)) {
+              _debugchm.name = "__mini_a_llm_debug"
+            }
+            $ch(_debugchm.name).create(_debugchm.type, _debugchm.options || {})
+            this.llm.setDebugCh(_debugchm.name)
+            this.fnI("output", `LLM debug channel '${_debugchm.name}' created and configured.`)
+          }
+        } catch (e) {
+          this.fnI("error", `Failed to create debug channel: ${e.message}`)
+        }
+      } else {
+        this.fnI("warn", "debugch specified but this.llm.setDebugCh is not available.")
+      }
+    }
 
     // Check the need to init debuglcch for low-cost LLM
-    if (!this._use_lc && isDef(args.debuglcch) && args.debuglcch.length > 0) {
-      this.fnI("warn", "debuglcch specified but low-cost LLM is not enabled.")
-    } else {
-      this._configureDebugChannel(this.lc_llm, args.debuglcch, "__mini_a_lc_llm_debug", "Low-cost LLM")
+    if (isDef(args.debuglcch) && args.debuglcch.length > 0) {
+      if (this._use_lc && isDef(this.lc_llm) && isDef(this.lc_llm.setDebugCh)) {
+        try {
+          var _debuglcchm = af.fromJSSLON(args.debuglcch)
+          if (isMap(_debuglcchm)) {
+            if (isUnDef(_debuglcchm.name)) {
+              _debuglcchm.name = "__mini_a_lc_llm_debug"
+            }
+            $ch(_debuglcchm.name).create(_debuglcchm.type, _debuglcchm.options || {})
+            this.lc_llm.setDebugCh(_debuglcchm.name)
+            this.fnI("output", `Low-cost LLM debug channel '${_debuglcchm.name}' created and configured.`)
+          }
+        } catch (e) {
+          this.fnI("error", `Failed to create low-cost debug channel: ${e.message}`)
+        }
+      } else {
+        if (!this._use_lc) {
+          this.fnI("warn", "debuglcch specified but low-cost LLM is not enabled.")
+        } else {
+          this.fnI("warn", "debuglcch specified but this.lc_llm.setDebugCh is not available.")
+        }
+      }
+    }
+
+    // Check the need to init debugvalch for validation LLM
+    if (isDef(args.debugvalch) && args.debugvalch.length > 0) {
+      if (this._use_val && isDef(this.val_llm) && isDef(this.val_llm.setDebugCh)) {
+        try {
+          var _debugvalchm = af.fromJSSLON(args.debugvalch)
+          if (isMap(_debugvalchm)) {
+            if (isUnDef(_debugvalchm.name)) {
+              _debugvalchm.name = "__mini_a_val_llm_debug"
+            }
+            $ch(_debugvalchm.name).create(_debugvalchm.type, _debugvalchm.options || {})
+            this.val_llm.setDebugCh(_debugvalchm.name)
+            this.fnI("output", `Validation LLM debug channel '${_debugvalchm.name}' created and configured.`)
+          }
+        } catch (e) {
+          this.fnI("error", `Failed to create validation debug channel: ${e.message}`)
+        }
+      } else {
+        if (!this._use_val) {
+          this.fnI("warn", "debugvalch specified but validation LLM is not enabled.")
+        } else {
+          this.fnI("warn", "debugvalch specified but this.val_llm.setDebugCh is not available.")
+        }
+      }
     }
 
     // Load conversation history if provided
