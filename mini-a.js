@@ -63,6 +63,7 @@ var MiniA = function() {
   this._agentDirectiveNoInteractionRemark = "No user interaction or feedback is possible."
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
+  this._activeConversationModel = __
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -1389,6 +1390,10 @@ MiniA.prototype.getMetrics = function() {
 MiniA.prototype._writeConversationPayload = function(path) {
   if (!isString(path) || path.trim().length === 0) return
   try {
+    if (this._use_lc && this._activeConversationModel === "lc") {
+      this._copyConversationBetweenLlms(this.lc_llm, this.llm)
+    }
+
     var existing = __
     if (io.fileExists(path)) {
       try { existing = io.readFileJSON(path) } catch(ignoreReadConversation) { }
@@ -1411,6 +1416,63 @@ MiniA.prototype._writeConversationPayload = function(path) {
 
     io.writeFileJSON(path, payload, "")
   } catch(ignoreWriteConversation) { }
+}
+
+MiniA.prototype._copyConversationBetweenLlms = function(sourceLLM, targetLLM) {
+  if (!isObject(sourceLLM) || !isObject(targetLLM)) return false
+  if (sourceLLM === targetLLM) return true
+  if (!isFunction(sourceLLM.getGPT) || !isFunction(targetLLM.getGPT)) return false
+
+  try {
+    var sourceGPT = sourceLLM.getGPT()
+    var targetGPT = targetLLM.getGPT()
+    if (!isObject(sourceGPT) || !isObject(targetGPT)) return false
+
+    if (isFunction(sourceGPT.exportConversation) && isFunction(targetGPT.importConversation)) {
+      targetGPT.importConversation(sourceGPT.exportConversation())
+      return true
+    }
+
+    if (isFunction(sourceGPT.getConversation) && isFunction(targetGPT.setConversation)) {
+      var conversation = sourceGPT.getConversation()
+      if (isArray(conversation)) {
+        targetGPT.setConversation(jsonParse(stringify(conversation, __, ""), __, __, true))
+      } else {
+        targetGPT.setConversation(conversation)
+      }
+      return true
+    }
+  } catch (e) {
+    return false
+  }
+
+  return false
+}
+
+MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
+  if (!this._use_lc) {
+    this._activeConversationModel = "main"
+    return false
+  }
+  if (!isString(targetModelName) || (targetModelName !== "main" && targetModelName !== "lc")) return false
+
+  var previousModelName = this._activeConversationModel
+  if (!isString(previousModelName) || previousModelName.length === 0) {
+    this._activeConversationModel = targetModelName
+    return false
+  }
+  if (previousModelName === targetModelName) return false
+
+  var sourceLLM = previousModelName === "lc" ? this.lc_llm : this.llm
+  var targetLLM = targetModelName === "lc" ? this.lc_llm : this.llm
+  var moved = this._copyConversationBetweenLlms(sourceLLM, targetLLM)
+
+  if (!moved) {
+    this.fnI("warn", `Failed to synchronize conversation when switching from ${previousModelName} to ${targetModelName} model`)
+  }
+
+  this._activeConversationModel = targetModelName
+  return moved
 }
 
 MiniA.prototype._syncDelegationMetrics = function() {
@@ -10829,6 +10891,7 @@ MiniA.prototype.init = function(args) {
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
     if (this._use_val) this.val_llm = $llm(this._oaf_val_model)
+    this._activeConversationModel = "main"
     // Clear bare-LLM snapshots so _registerMcpToolsForGoal doesn't restore stale ones
     this._llmNoTools = __
     this._lcLlmNoTools = __
@@ -10907,8 +10970,9 @@ MiniA.prototype.init = function(args) {
     // Load conversation history if provided
     if (isDef(args.conversation) && io.fileExists(args.conversation)) {
       this.fnI("load", `Loading conversation history from ${args.conversation}...`)
-      this.llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
-      if (this._use_lc) this.lc_llm.getGPT().setConversation( io.readFileJSON(args.conversation).c )
+      var storedConversation = io.readFileJSON(args.conversation).c
+      this.llm.getGPT().setConversation(storedConversation)
+      if (this._use_lc) this._copyConversationBetweenLlms(this.llm, this.lc_llm)
     }
 
     // Using MCP (single or multiple connections)
@@ -12640,6 +12704,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         useLowCost = this._use_lc && (step > 0 || goalComplexityLevel === "simple") && !shouldEscalate
       }
 
+      this._syncConversationForModelSwitch(useLowCost ? "lc" : "main")
       var currentLLM = useLowCost ? this.lc_llm : this.llm
       var llmType = useLowCost ? "low-cost" : "main"
       
@@ -12877,6 +12942,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.json_parse_failures.inc()
           global.__mini_a_metrics.retries.inc()
+          this._syncConversationForModelSwitch("main")
           var fallbackResponseWithStats
           try {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
