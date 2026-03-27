@@ -56,6 +56,22 @@ function __miniAReadSkillDescriptionFromTemplate(templatePath) {
 }
 
 /**
+ * Removes leading YAML front-matter from markdown content when present.
+ * Intended for slash command / skill template processing, so metadata blocks
+ * used for listing do not leak into rendered prompts.
+ *
+ * @param {string} markdownText - Raw markdown text.
+ * @returns {string} markdown without the leading front-matter block.
+ */
+function __miniAStripMarkdownFrontMatter(markdownText) {
+  if (!isString(markdownText) || markdownText.length === 0) return ""
+  var normalized = String(markdownText).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
+  var frontMatterMatch = normalized.match(/^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/)
+  if (!frontMatterMatch) return normalized
+  return normalized.substring(frontMatterMatch[0].length)
+}
+
+/**
  * Renders a skill template by substituting {{args}}, {{argv}}, {{argc}},
  * and positional {{arg1}}…{{argN}} placeholders.
  * If the template contains no placeholders but arguments were provided,

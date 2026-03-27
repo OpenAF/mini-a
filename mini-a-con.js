@@ -1170,7 +1170,7 @@ try {
           return { changed: false, text: goalText }
         }
 
-        var skillTemplate = io.readFileString(matchedSkillDef.file)
+        var skillTemplate = __miniAStripMarkdownFrontMatter(io.readFileString(matchedSkillDef.file))
         var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
         goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, matchedSkillDef)
         var prefix = goalText.substring(0, tokenStart)
@@ -3285,7 +3285,7 @@ try {
     }
 
     try {
-      var template = io.readFileString(matchedDef.file)
+      var template = __miniAStripMarkdownFrontMatter(io.readFileString(matchedDef.file))
       var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
       goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
       return runGoal(goalFromTemplate) === true
@@ -3867,7 +3867,7 @@ try {
             printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedSkillArgs.error, errorColor))
             continue
           }
-          var skillTemplate = io.readFileString(_matchedSkillDef.file)
+          var skillTemplate = __miniAStripMarkdownFrontMatter(io.readFileString(_matchedSkillDef.file))
           var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
           goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, _matchedSkillDef)
           runGoal(goalFromSkillTemplate)
@@ -4252,7 +4252,7 @@ try {
             printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedArgs.error, errorColor))
             continue
           }
-          var template = io.readFileString(_matchedDef.file)
+          var template = __miniAStripMarkdownFrontMatter(io.readFileString(_matchedDef.file))
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
           runGoal(goalFromTemplate)
