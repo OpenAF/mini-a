@@ -733,6 +733,27 @@ try {
     return __miniAReadSkillDescriptionFromTemplate(templatePath)
   }
 
+  function readTemplateHelpText(templatePath) {
+    if (!isString(templatePath) || templatePath.trim().length === 0) return __
+    try {
+      if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
+      var content = io.readFileString(templatePath)
+      if (!isString(content) || content.length === 0) return __
+      var normalized = String(content).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
+      var frontMatterMatch = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/)
+      if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
+      var meta = af.fromYAML(frontMatterMatch[1])
+      if (!isObject(meta)) return __
+
+      var description = isString(meta.description) ? meta.description.replace(/\s+/g, " ").trim() : ""
+      if (description.length > 0) return description
+
+      var name = isString(meta.name) ? meta.name.replace(/\s+/g, " ").trim() : ""
+      if (name.length > 0) return name
+    } catch (e) {}
+    return __
+  }
+
   function parseExtraDirPaths(commaSeparated) {
     if (!isString(commaSeparated) || commaSeparated.trim().length === 0) return []
     return commaSeparated.split(",")
@@ -800,7 +821,7 @@ try {
           file: fullPath,
           sourceType: sourceType,
           sourceCategory: sourceCategory,
-          description: (sourceType === "folder") ? readSkillDescriptionFromTemplate(fullPath) : __
+          description: (sourceType === "folder") ? readSkillDescriptionFromTemplate(fullPath) : readTemplateHelpText(fullPath)
         }
       })
     } catch (loadError) {
@@ -3643,15 +3664,85 @@ try {
   }
 
   function printHelp() {
-    function formatAlignedHelpLine(commandText, descriptionText, commandColumnWidth) {
+    function wrapHelpText(text, maxWidth) {
+      var normalized = isString(text) ? text : String(text)
+      normalized = normalized.replace(/\s+/g, " ").trim()
+      if (normalized.length === 0) return [""]
+
+      var width = Math.max(8, maxWidth)
+      var words = normalized.split(" ")
+      var wrapped = []
+      var current = ""
+
+      function pushCurrent() {
+        if (current.length > 0) {
+          wrapped.push(current)
+          current = ""
+        }
+      }
+
+      words.forEach(function(word) {
+        var token = isString(word) ? word : String(word)
+        if (token.length <= 0) return
+
+        while (token.length > width) {
+          if (current.length > 0) pushCurrent()
+          wrapped.push(token.substring(0, width))
+          token = token.substring(width)
+        }
+
+        if (current.length === 0) {
+          current = token
+          return
+        }
+
+        if ((current.length + 1 + token.length) <= width) {
+          current += " " + token
+        } else {
+          pushCurrent()
+          current = token
+        }
+      })
+
+      pushCurrent()
+      return wrapped.length > 0 ? wrapped : [""]
+    }
+
+    function formatAlignedHelpLines(commandText, descriptionText, commandColumnWidth, maxLineWidth) {
       var commandLabel = isString(commandText) ? commandText : String(commandText)
       var descriptionLabel = isString(descriptionText) ? descriptionText : String(descriptionText)
       var padSize = Math.max(2, commandColumnWidth - commandLabel.length + 2)
-      return "  " + colorifyText(commandLabel, "BOLD") + colorifyText(repeat(padSize, " ") + descriptionLabel, hintColor)
+      var leftPrefix = "  "
+      var continuationPrefix = leftPrefix + repeat(commandColumnWidth + 2, " ")
+      var firstLinePrefixWidth = leftPrefix.length + commandLabel.length + padSize
+      var continuationPrefixWidth = continuationPrefix.length
+      var firstLineWidth = Math.max(8, maxLineWidth - firstLinePrefixWidth)
+      var continuationWidth = Math.max(8, maxLineWidth - continuationPrefixWidth)
+      var wrapped = wrapHelpText(descriptionLabel, firstLineWidth)
+      var lines = []
+
+      wrapped.forEach(function(part, idx) {
+        if (idx === 0) {
+          lines.push(
+            leftPrefix +
+            colorifyText(commandLabel, "BOLD") +
+            colorifyText(repeat(padSize, " ") + part, hintColor)
+          )
+        } else {
+          var continuationWrapped = wrapHelpText(part, continuationWidth)
+          continuationWrapped.forEach(function(continuationPart) {
+            lines.push(continuationPrefix + colorifyText(continuationPart, hintColor))
+          })
+        }
+      })
+
+      return lines
     }
 
     function appendAlignedHelpRows(targetLines, rows) {
       if (!isArray(rows) || rows.length === 0) return
+      var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+      var maxLineWidth = Math.max(20, termWidth - 1)
       var commandColumnWidth = 0
       rows.forEach(function(row) {
         if (!isObject(row)) return
@@ -3660,7 +3751,9 @@ try {
       })
       rows.forEach(function(row) {
         if (!isObject(row)) return
-        targetLines.push(formatAlignedHelpLine(row.command, row.description, commandColumnWidth))
+        formatAlignedHelpLines(row.command, row.description, commandColumnWidth, maxLineWidth).forEach(function(line) {
+          targetLines.push(line)
+        })
       })
     }
 
@@ -3708,9 +3801,14 @@ try {
       lines.push("Custom commands from " + colorifyText(customCommandsDirPath, accentColor) + ":")
       var customCommandRows = []
       commandNames.forEach(function(name) {
+        var commandEntry = customSlashCommands[name]
+        var commandHelpText = "Execute instructions from " + customSlashCommands[name].file
+        if (isObject(commandEntry) && isString(commandEntry.description) && commandEntry.description.trim().length > 0) {
+          commandHelpText = commandEntry.description.replace(/\s+/g, " ").trim()
+        }
         customCommandRows.push({
           command: "/" + name + " [args]",
-          description: "Execute instructions from " + customSlashCommands[name].file
+          description: commandHelpText
         })
       })
       appendAlignedHelpRows(lines, customCommandRows)
@@ -3725,10 +3823,8 @@ try {
         var sourceHint = (isObject(skillEntry) && skillEntry.sourceType === "folder") ? "folder skill" : "template skill"
         var fallbackHelp = "Execute " + sourceHint + " from " + customSkillSlashCommands[name].file
         var skillHelpText = fallbackHelp
-        if (isObject(skillEntry) && skillEntry.sourceType === "folder" && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
-          var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
-          var maxDescriptionLength = Math.max(32, termWidth - (name.length + 20))
-          skillHelpText = truncateText(skillEntry.description.replace(/\s+/g, " ").trim(), maxDescriptionLength)
+        if (isObject(skillEntry) && isString(skillEntry.description) && skillEntry.description.trim().length > 0) {
+          skillHelpText = skillEntry.description.replace(/\s+/g, " ").trim()
         }
         skillRows.push({
           command: "/" + name + " [args]",
