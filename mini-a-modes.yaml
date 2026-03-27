@@ -76,6 +76,7 @@ modes:
       mcpproxythreshold: 51200
       mcpproxytoon     : true
       mcpprogcall      : false
+      llmcomplexity    : true
       mcp              : 
       - type   : ojob
         options:
@@ -110,6 +111,7 @@ modes:
       mcpproxy   : true
       mcpproxythreshold: 51200
       mcpproxytoon     : true
+      llmcomplexity    : true
       historykeepperiod: 10080
       historykeepcount : 15
       mcp              :
