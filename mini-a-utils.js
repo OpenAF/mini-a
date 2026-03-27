@@ -1244,6 +1244,7 @@ MiniUtilsTool.prototype.skills = function(params) {
       if (isUnDef(selected)) return "[ERROR] Skill not found: " + params.name
 
       var content = io.readFileString(selected.templatePath)
+      var processedContent = __miniAStripMarkdownFrontMatter(content)
       if (op === "read") {
         if (params.compact === true) {
           return {
@@ -1278,7 +1279,7 @@ MiniUtilsTool.prototype.skills = function(params) {
         return "[ERROR] " + (isMap(parsedArgs) && isString(parsedArgs.error) ? parsedArgs.error : "Invalid skill arguments")
       }
 
-      var rendered = this._renderSkillTemplate(content, parsedArgs)
+      var rendered = this._renderSkillTemplate(processedContent, parsedArgs)
       var invocationSuffix = isString(parsedArgs.raw) && parsedArgs.raw.length > 0 ? " " + parsedArgs.raw : ""
       var skillInvocation = "$" + selected.name + invocationSuffix
       var slashInvocation = "/" + selected.name + invocationSuffix
