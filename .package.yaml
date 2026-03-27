@@ -183,7 +183,7 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: 289be721332db2c28f09b9b6f24376bf46f51ac8
+  mini-a-con.js: f1a2db263ff5ff8d40fc9c5b4c1b96d72eaf740a
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
   mini-a-modes.yaml: 5e09b04973e34ddb2093099270cb5cecdb7aa2d7
