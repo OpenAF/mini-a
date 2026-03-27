@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260326'
+version: '20260327'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -193,7 +193,7 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: eead0d9fac3d104c14ff46860a6fd93b0c3fa14b
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: ba683db9ea7de570bc86aa21bc4b2e98b78a8d2b
+  mini-a.js: 5f773c03c1226937d0fca67fe1a541a28299b9f8
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cd7c86b2489728dcd35c62c43c508fb11142b023
   public/index.md: 86a1db6255f875dc2755bb0d5ee29a2a74e9e9e3
