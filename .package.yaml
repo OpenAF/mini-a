@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260327'
+version: '20260328'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -135,12 +135,12 @@ files:
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: c2c7040a4eaf63d54372232e898b7005df64f22b
+  CHEATSHEET.md: e4073d438fd2aa440f439b7c85bf9917545f73f3
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 9d2135fc46c08206587c60c4c697baf29d9de657
-  USAGE.md: 82e831c8926ec0b92965c581f9913bc993314c36
+  README.md: bd8edeeed6015f42690cc1849af30b3c292af8b0
+  USAGE.md: 7a5bc8c06a70a026ffdf94e72420d5c4ceb413d3
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 59c81b7209ff4d3438a3ba11cf6a27ce92d8dd4e
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
