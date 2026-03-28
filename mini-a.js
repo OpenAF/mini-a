@@ -10837,6 +10837,12 @@ MiniA.prototype.init = function(args) {
       throw new Error(_msg)
     }
 
+    // Re-evaluate low-cost model config on every init() call so reused MiniA instances
+    // do not keep a stale LC model when the current run doesn't define one.
+    this._oaf_lc_model = __
+    this.lc_llm = __
+    this._use_lc = false
+
     if (isUnDef(this._oaf_lc_model) || isDef(args.modellc)) {
       var overrideLcModel = parseModelConfig(args.modellc, "modellc parameter", true)
       if (isDef(overrideLcModel)) this._oaf_lc_model = overrideLcModel
