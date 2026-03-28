@@ -96,6 +96,7 @@ files:
 - mcps/mcp-oafp.yaml
 - mcps/mcp-office.yaml
 - mcps/mcp-ollama-web-search.yaml
+- mcps/mcp-pass.yaml
 - mcps/mcp-proxy.yaml
 - mcps/mcp-random.yaml
 - mcps/mcp-rss.yaml
@@ -156,7 +157,7 @@ filesHash:
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
-  mcps/README.md: c4d58a0e7ed1a830973fa364b91258abcd9b5c9c
+  mcps/README.md: fd918e10f097cb36543b0bdedd786e0ac06dcc12
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
@@ -172,6 +173,7 @@ filesHash:
   mcps/mcp-oafp.yaml: 53b765ccf2ecd338d3a65ef3f65509bab63b1556
   mcps/mcp-office.yaml: e5c2b9aa612ec98f39c3126322922905d7306b02
   mcps/mcp-ollama-web-search.yaml: c1560dce42bf93908f1ada49ff59fc416362e397
+  mcps/mcp-pass.yaml: 26bee5bbf3ef30d820193b982744ea244faedcb7
   mcps/mcp-proxy.yaml: 05450b1153b07aa22d4cd9aea2299bd620de7a22
   mcps/mcp-random.yaml: ac2ee99722a6ae2baeb14e19d4f881ce03e369c4
   mcps/mcp-rss.yaml: 42413cd8146ce049d9e8aeb82265be23ef17213e
