@@ -245,7 +245,8 @@ jobs:
     var _maxPaths = Math.max(1, Number(args.maxPaths || 0))
     var _maxResults = Math.max(1, Number(args.maxResults || 0))
     var _visited = {}
-    var _results = []
+    ow.loadObj()
+    var _results = new ow.obj.syncArray()
 
     var _stringify = function(v) {
       if (isUnDef(v) || isNull(v)) return __
@@ -298,9 +299,59 @@ jobs:
       return _candidates
     }
 
+    var _toInt = function(v, _fallback) {
+      var _n = Number(v)
+      if (isNaN(_n) || !isFinite(_n)) return _fallback
+      return Math.floor(_n)
+    }
+
+    var _fetchListEntries = function(_path) {
+      var _baseParams = isMap(args.params) ? clone(args.params) : {}
+      var _initial = global.__browseApiCall__("list", _path, _baseParams)
+      var _allEntries = isMap(_initial) && isArray(_initial.list) ? _initial.list.slice(0) : []
+
+      var _pageInfo = isMap(_initial) ? _initial.pageInfo : __
+      if (!isMap(_pageInfo)) return _allEntries
+
+      var _currentPage = _toInt(_pageInfo.page, _toInt(_baseParams.page, 1))
+      if (_currentPage < 1) _currentPage = 1
+      var _totalPages = _toInt(_pageInfo.totalPages, __)
+      var _hasNext = _pageInfo.hasNext === true
+
+      if (!(isDef(_totalPages) && _totalPages > _currentPage) && !_hasNext) return _allEntries
+
+      // Protect against malformed pagination metadata causing endless loops.
+      var _safetyMaxPages = 10000
+      var _nextPage = _currentPage + 1
+      while (_nextPage <= _safetyMaxPages) {
+        if (isDef(_totalPages) && _nextPage > _totalPages) break
+        if (!isDef(_totalPages) && !_hasNext) break
+
+        var _pageParams = merge(clone(_baseParams), { page: _nextPage })
+        var _nextRes = global.__browseApiCall__("list", _path, _pageParams)
+        if (!isMap(_nextRes)) break
+
+        var _nextEntries = isArray(_nextRes.list) ? _nextRes.list : []
+        if (_nextEntries.length > 0) _allEntries = _allEntries.concat(_nextEntries)
+
+        var _nextInfo = isMap(_nextRes.pageInfo) ? _nextRes.pageInfo : __
+        if (!isMap(_nextInfo)) break
+        _hasNext = _nextInfo.hasNext === true
+
+        var _nextReportedPage = _toInt(_nextInfo.page, _nextPage)
+        if (_nextReportedPage < _nextPage) _nextReportedPage = _nextPage
+        _totalPages = _toInt(_nextInfo.totalPages, _totalPages)
+
+        if (!(isDef(_totalPages) && _nextReportedPage < _totalPages) && !_hasNext) break
+        _nextPage = _nextReportedPage + 1
+      }
+
+      return _allEntries
+    }
+
     var _level = [ _startPath ]
     var _depth = 0
-    while (_level.length > 0 && _depth <= _maxDepth && Object.keys(_visited).length < _maxPaths && _results.length < _maxResults) {
+    while (_level.length > 0 && _depth <= _maxDepth && Object.keys(_visited).length < _maxPaths && _results.length() < _maxResults) {
       var _batchPaths = []
       _level.forEach(function(_path) {
         var _k = String(_path || "")
@@ -311,28 +362,27 @@ jobs:
 
       var _nextPaths = []
       var _batchResults = pForEach(_batchPaths, function(_path) {
-        return $do(function() {
-          var _res = global.__browseApiCall__("list", _path, args.params)
-          var _entries = isMap(_res) && isArray(_res.list) ? _res.list : []
+        try {
+          var _entries = _fetchListEntries(_path)
           return {
             path   : _path,
             entries: _entries
           }
-        }, function(_e) {
+        } catch(_e) {
           return {
             path   : _path,
             entries: [],
             error  : String(_e.message || _e)
           }
-        })
+        }
       })
 
       _batchResults.forEach(function(_r) {
         if (!isMap(_r) || !isArray(_r.entries)) return
         _r.entries.forEach(function(_entry) {
-          if (_results.length >= _maxResults) return
+          if (_results.length() >= _maxResults) return
           if (_matchesAnyField(_entry)) {
-            _results.push({
+            _results.add({
               fromPath: _r.path,
               entry   : _entry
             })
@@ -349,4 +399,4 @@ jobs:
       _depth++
     }
 
-    return _results
+    return _results.toArray()
