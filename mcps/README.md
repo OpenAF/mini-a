@@ -6,6 +6,7 @@
 |------------|---------------------------------|------------------|------------|------------------------------------|
 | mcp-db     | Database access MCP             | STDIO/HTTP       | (included) | [mcp-db.yaml](mcp-db.yaml)         |
 | mcp-email  | Email sending MCP               | STDIO/HTTP       | (included) | [mcp-email.yaml](mcp-email.yaml)   |
+| mcp-es-search | ElasticSearch/OpenSearch full-text search MCP | STDIO/HTTP | ElasticSearch | [mcp-es-search.yaml](mcp-es-search.yaml) |
 | mcp-file   | Local file management MCP       | STDIO/HTTP       | (included) | [mcp-file.yaml](mcp-file.yaml)     |
 | mcp-notify | Notification MCP (Pushover)     | STDIO/HTTP       | ```opack install notifications``` | Provided by the `notifications` oPack (see its documentation) |
 | mcp-net    | Network utility MCP             | STDIO/HTTP       | (included) | [mcp-net.yaml](mcp-net.yaml)       |
@@ -19,8 +20,10 @@
 | mcp-mini-a | Mini-A agent runner MCP         | STDIO/HTTP       | (included) | [mcp-mini-a.yaml](mcp-mini-a.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
+| mcp-oaf-browse | Generic browse MCP backed by the oJob-common HTTP Browse API | STDIO/HTTP | (included) | [mcp-oaf-browse.yaml](mcp-oaf-browse.yaml) |
 | mcp-oafp   | OpenAF processor (oafp) runner & docs MCP | STDIO/HTTP | (included) | [mcp-oafp.yaml](mcp-oafp.yaml)   |
 | mcp-office | Office file utilities (XLSX/DOCX via plugin-XLS) | STDIO/HTTP | plugin-XLS | [mcp-office.yaml](mcp-office.yaml) |
+| mcp-pass   | MCP passthrough/merge server    | STDIO/HTTP       | (included) | [mcp-pass.yaml](mcp-pass.yaml)     |
 | mcp-rss    | RSS discovery and retrieval MCP | STDIO/HTTP       | (included) | [mcp-rss.yaml](mcp-rss.yaml)       |
 | mcp-s3     | S3 object storage MCP           | STDIO/HTTP       | (included) | [mcp-s3.yaml](mcp-s3.yaml)         |
 | mcp-telco  | Telecommunications utilities MCP (country codes, phone number info) | STDIO/HTTP | (included) | [mcp-telco.yaml](mcp-telco.yaml)   |
@@ -207,6 +210,7 @@ Available tools (functions) exposed by `mcp-ch`:
 - `ch-unset`    : Unset a value in a data channel (input: `dataCh`, `key`). Requires channel to be writable.
 - `ch-set-all`  : Set multiple values using `keyFieldsList` and `valuesList` (requires writable channel).
 - `ch-unset-all`: Unset multiple values using `keyFieldsList` and `valuesList` (requires writable channel).
+- `ch-list`     : List all configured data channels.
 
 Example: start as HTTP remote server on port 12345 with two channels (one simple read-only and one file-backed writable):
 
@@ -258,6 +262,37 @@ Example — call `shell-batch` remotely:
 oafp in=mcp data="(type: remote, url: 'http://localhost:8888/mcp', tool: shell-batch, params: (commands: ['echo hello','date']))"
 ```
 
+#### mcp-es-search
+
+`mcp-es-search` exposes a focused read-only interface over an ElasticSearch or OpenSearch index. It is designed for documentation or knowledge-base retrieval, with optional `toolPrefix` support so multiple indexes can coexist in the same agent session without name collisions.
+
+Key arguments:
+
+- `url` and `index` (required): endpoint and default index to query.
+- `toolPrefix` (optional): prepends tool names, for example `docs-` creates `docs-search`, `docs-get`, `docs-read`, `docs-info`.
+- `label` (optional): human-readable description injected into tool metadata.
+- `user` / `password` (optional): HTTP Basic authentication.
+- `pathField`, `contentField`, `titleField` (optional): map the document schema when your index does not use the defaults.
+
+Tools:
+
+- `search`: full-text search with optional metadata filters and native highlights.
+- `get`: fetch a document by `_id` or by exact `pathField` value.
+- `read`: read a controlled slice of document content (`head`, `tail`, explicit line ranges, or regex matches).
+- `info`: inspect index statistics and field mappings.
+
+Example — search an indexed documentation corpus:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-es-search.yaml url=http://localhost:9200 index=docs toolPrefix=docs- label=\"Project docs\"', tool: docs-search, params: (query: 'authentication token', size: 5))"
+```
+
+Example — read just the first lines of a matched document:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-es-search.yaml url=http://localhost:9200 index=docs', tool: read, params: (id: 'README.md', mode: 'head', lines: 40))"
+```
+
 #### mcp-oaf
 
 This MCP serves OpenAF, oJob and oAFp documentation and cli utilities over STDIO or as an HTTP remote server. It exposes tools such as:
@@ -277,6 +312,30 @@ Example — request OpenAF help remotely (HTTP mode on port 8888):
 
 ```bash
 oafp in=mcp data="(type: remote, url: 'http://localhost:8888/mcp', tool: openaf-doc, params: (search: 'help'))"
+```
+
+#### mcp-oaf-browse
+
+`mcp-oaf-browse` turns an existing oJob-common HTTP Browse API into MCP tools. This is useful when you already have a browse-style HTTP endpoint and want Mini-A to explore it through stable `list`/`get`/`search` operations instead of custom prompt logic.
+
+Key arguments:
+
+- `browseAPIURL` and `browseUri` (required): base Browse API endpoint and the target browse root.
+- `label` (optional): descriptive label shown in tool descriptions.
+- `toolPrefix` (optional): prefixes tool names to avoid collisions.
+- `headers` (optional): HTTP headers sent on every Browse API request.
+- `defaultParams` (optional): query parameters merged into every Browse API request.
+
+Tools:
+
+- `list`: enumerate entries beneath the configured browse root.
+- `get`: retrieve a single object by relative path.
+- `search`: recursively search browse results using a regex with configurable depth and result limits.
+
+Example — expose a local Browse API subtree as MCP tools:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-oaf-browse.yaml browseAPIURL=http://127.0.0.1:8091/api/browse browseUri=/files label=\"Workspace files\" toolPrefix=files-', tool: files-list, params: (path: 'docs'))"
 ```
 
 #### mcp-kube
@@ -351,6 +410,54 @@ Example — search for filters documentation mentioning SQL:
 
 ```bash
 oafp in=mcp data="(cmd: 'ojob mcps/mcp-oafp.yaml', tool: search-doc, params: (query: 'sql'))"
+```
+
+#### mcp-office
+
+`mcp-office` wraps `plugin-XLS` helpers so Mini-A can read or write XLSX and DOCX files within a restricted root directory. It defaults to read-only mode; start it with `readwrite=true` to enable the write tools.
+
+Arguments:
+
+- `root` (optional, default current directory): base directory that all office file operations must stay inside.
+- `readwrite` (optional, default `false`): enables write operations.
+- `onport` (optional): expose the MCP over HTTP instead of STDIO.
+
+Tools:
+
+- `xlsx-read-table`: read a worksheet region into a JSON table.
+- `xlsx-write-table`: write an array of objects into an XLSX/XLS sheet.
+- `docx-read-paragraphs`: extract ordered paragraphs from a DOCX file.
+- `docx-write-paragraphs`: create or append DOCX paragraphs and an optional table.
+
+Example — read the first worksheet rows from a workbook:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-office.yaml root=./data', tool: xlsx-read-table, params: (path: 'report.xlsx', sheet: 'Finance', startColumn: 'A', startRow: 1, maxRows: 10))"
+```
+
+Example — write a DOCX summary (requires `readwrite=true`):
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-office.yaml root=./docs readwrite=true', tool: docx-write-paragraphs, params: (path: 'summary.docx', paragraphs: ['Weekly summary', (text: 'Status green', style: 'Heading2')], createMissingDirs: true))"
+```
+
+#### mcp-pass
+
+`mcp-pass` is a passthrough MCP combiner. You point it at one `mainmcp` plus zero or more `othermcps`, and it republishes the union of their tools through a single MCP surface. Unlike `mcp-proxy`, it does not expose a dispatcher tool; it forwards the downstream tools directly.
+
+Arguments:
+
+- `mainmcp` (required): primary MCP connection descriptor.
+- `othermcps` (optional): array of extra MCP connection descriptors whose tools should be merged in.
+- `usesse` (optional): when serving over HTTP, return responses as Server-Sent Events.
+- `uri` (optional): custom HTTP route prefix when serving remotely.
+
+Example — republish one remote MCP plus extra helpers under a single endpoint:
+
+```bash
+ojob mcps/mcp-pass.yaml onport=9091 \
+  mainmcp="(type: remote, url: 'http://localhost:8080/mcp')" \
+  othermcps="[(cmd: 'ojob mcps/mcp-time.yaml'), (cmd: 'ojob mcps/mcp-random.yaml')]"
 ```
 
 #### mcp-shell
@@ -457,6 +564,26 @@ Example — compare revenue growth across two tickers:
 ```bash
 mini-a goal="chart revenue for NVDA vs AMD" \
   mcp="(cmd: 'ojob mcps/mcp-fin.yaml', timeout: 5000)" rpm=20
+```
+
+#### mcp-ollama-web-search
+
+`mcp-ollama-web-search` forwards web queries to Ollama's `web_search` API. It is useful when you want a managed search provider exposed as a simple MCP tool instead of scraping search engines directly.
+
+Arguments:
+
+- `apiKey` (required unless `OLLAMA_API_KEY` is set): Ollama API key.
+- `baseUrl` (optional, default `https://ollama.com`): alternate Ollama API base URL.
+- `onport` (optional): expose the MCP over HTTP.
+
+Tool:
+
+- `web-search`: submit a `query` and optional extra payload `options` to Ollama's API.
+
+Example — run a search through Ollama:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-ollama-web-search.yaml apiKey=<ollama_api_key>', tool: web-search, params: (query: 'OpenAF MCP server examples'))"
 ```
 
 #### mcp-rss
