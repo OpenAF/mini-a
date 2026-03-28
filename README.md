@@ -436,11 +436,17 @@ Mini-A ships with complementary components:
 | `workerreginterval` | Worker registration heartbeat interval in milliseconds | `30000` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |
+| `tpm` | Rate limit (tokens per minute across prompt + completion) | - |
+| `maxcontext` | Context budget in tokens before proactive summarization | `0` |
+| `maxcontent` | Alias for `maxcontext` | `0` |
+| `outfile` | Path to save final answer output | - |
+| `outfileall` | Deep-research-only path to save full cycle output (verdicts/learnings/history) | - |
 | `shellprefix` | Override the prefix appended to each shell command in stored plans | - |
 | `shelltimeout` | Maximum shell command runtime in milliseconds before timeout | - |
 | `shellmaxbytes` | Maximum shell output size (chars) before truncating to a head/tail excerpt with guidance | - |
 | `toollog` | JSSLON definition for a dedicated tool-log channel capturing MCP tool inputs/outputs | - |
 | `showthinking` | Surface XML-tagged thinking blocks from model responses as thought logs | `false` |
+| `secpass` | Password used to unlock OpenAF sBucket model secrets for stored model definitions | - |
 | `verbose` / `debug` | Enable detailed logging | `false` |
 
 For the complete list and detailed explanations, see the [Usage Guide](USAGE.md#configuration-options).
