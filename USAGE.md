@@ -780,6 +780,7 @@ The `start()` method accepts various configuration options:
 - **`lcescalatedefer`** (boolean, default: `true`): When enabled, if an escalation trigger fires but the current LC model response has a confidence score ≥ 0.7 (based on JSON validity, completeness, and action specificity), Mini-A defers the escalation by one additional step. If the next step also triggers escalation, it escalates immediately. Set to `false` to disable deferral and escalate as soon as the trigger fires.
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
+- **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
 
 #### Planning Controls
 - **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON/YAML plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
@@ -899,10 +900,12 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
+- **`maxcontent`** (number): Alias for `maxcontext`
 - **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt (can be text or file path)
 
 #### Visual Guidance
 - **`usediagrams`** (boolean, default: false): Ask the model to produce Mermaid diagrams when sketching workflows or structures
+- **`usemermaid`** (boolean, default: false): Alias for `usediagrams`
 - **`usecharts`** (boolean, default: false): Hint the model to provide Chart.js snippets for data visualization tasks. When combined with `usesvg=true` or `usevectors=true`, supported charts should still be emitted as chart configs instead of being drawn manually as SVG/vector art; SVG remains the fallback for unsupported chart forms or custom illustrations.
 - **`usesvg`** (boolean, default: false): Prime the model to emit raw `svg` fenced blocks for infographics, annotated summaries, custom artwork, and other self-contained illustrations. Standard structural diagrams should still prefer Mermaid when supported.
 - **`usevectors`** (boolean, default: false): Enable the combined vector bundle (`usesvg=true` + `usediagrams=true`). In practice this should prefer Mermaid for structural diagrams and SVG for infographics or custom visuals.
@@ -934,6 +937,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 - **`utilsallow`** (string, optional): Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true`
 - **`utilsdeny`** (string, optional): Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow`
 - **`mini-a-docs`** (boolean, default: false): When true (and `utilsroot` is not provided), automatically sets `utilsroot` to `getOPackPath("mini-a")` so the LLM can inspect Mini-A documentation files; the `markdownFiles` tool description will include the resolved documentation root path so the LLM can navigate docs directly
+- **`miniadocs`** (boolean, default: false): Alias for `mini-a-docs`
 
 #### Conversation Management
 - **`conversation`** (string): Path to file for loading/saving conversation history
@@ -959,6 +963,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 
 #### Output Configuration
 - **`outfile`** (string): Path to file where final answer will be written
+- **`outfileall`** (string): Deep-research-only path where Mini-A writes the full cycle output (verdicts, notes, and learnings). When omitted, full results are printed to console.
 - **`outputfile`** (string): When `convertplan=true`, path for the converted plan artifact (format inferred from extension)
 - **`__format`** (string): Output format (e.g. "json", "md", ...)
 
@@ -970,6 +975,8 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 - **`nosetmcpwd`** (boolean, default: false): By default, Mini-A sets `__flags.JSONRPC.cmd.defaultDir` to the mini-a oPack installation location, providing a consistent working directory for MCP commands. Set `nosetmcpwd=true` to prevent this automatic configuration and use the system's default working directory instead.
 
 #### Rate Limiting
+- **`rpm`** (number): Rate limit in calls per minute
+- **`tpm`** (number): Maximum tokens per minute across prompt and completion
 - **`rtm`** (number): Rate limit in calls per minute
 
 ## Chatbot Mode

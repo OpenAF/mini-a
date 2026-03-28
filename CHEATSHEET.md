@@ -146,7 +146,11 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: '...')"
 |-----------|------|---------|-------------|
 | `useshell` | boolean | `false` | Allow shell command execution |
 | `shell` | string | - | Prefix applied to every shell command (e.g., `docker exec container`) |
+| `usesandbox` | string | `off` | Built-in shell sandbox preset (`off`, `auto`, `linux`, `macos`, `windows`) |
+| `sandboxprofile` | string | - | Optional macOS `sandbox-exec` profile path used with `usesandbox=macos` |
+| `sandboxnonetwork` | boolean | `false` | Disable network inside built-in sandbox when supported (Windows is best-effort) |
 | `shellprefix` | string | - | Override shell prefix for stored plans |
+| `shelltimeout` | number | - | Maximum shell command runtime in milliseconds before timeout |
 | `readwrite` | boolean | `false` | Allow read-write operations without confirmation |
 | `checkall` | boolean | `false` | Ask for confirmation before executing any shell command |
 | `shellbatch` | boolean | `false` | Run in batch mode without prompting for command approval |
@@ -188,6 +192,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 |-----------|------|---------|-------------|
 | `mcp` | string | - | MCP connection object (single or array) in SLON/JSON format |
 | `usetools` | boolean | `false` | Register MCP tools directly on the model instead of in prompt |
+| `usejsontool` | boolean | `false` | Register compatibility `json` tool when `usetools=true` |
 | `mcpdynamic` | boolean | `false` | Analyze goal and only register relevant MCP tools |
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
@@ -203,6 +208,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
+| `miniadocs` | boolean | `false` | Alias for `mini-a-docs` |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
 
 **Single MCP:**
@@ -431,6 +437,7 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
 | `usesvg` | boolean | `false` | Encourage raw SVG blocks rendered securely as image data URIs in the web UI |
 | `usevectors` | boolean | `false` | Enable vector guidance bundle (`usesvg=true` + `usediagrams=true`), preferring Mermaid for structural diagrams and SVG for infographics/custom visuals |
 | `format` | string | `md` | Output format (`md` or `json`) |
+| `usemath` | boolean | `false` | Encourage LaTeX math output (`$...$` / `$$...$$`) for KaTeX rendering |
 | `outputfile` | string | - | Alternative key for `outfile`, used mainly during plan conversions |
 
 **Examples:**
@@ -472,7 +479,9 @@ mini-a goal="show meetup locations on a map" \
 | `state` | string/object | - | Initial state data as structured JSON/SLON |
 | `conversation` | string | - | Conversation history file to load/save |
 | `maxcontext` | number | `0` | Maximum context size in tokens (auto-summarize when exceeded) |
+| `maxcontent` | number | `0` | Alias for `maxcontext` |
 | `libs` | string | - | Comma-separated list of additional OJob libraries to load |
+| `secpass` | string | - | Password for opening OpenAF sBucket model secrets |
 
 **Examples:**
 
@@ -666,6 +675,8 @@ mini-a chatbotmode=true goal="draft a friendly release note"
 | Parameter | Description |
 |-----------|-------------|
 | `auditch` | SLON/JSON definition of audit channel to record agent activity |
+| `toollog` | SLON/JSON definition of tool-log channel to record MCP tool call arguments/results |
+| `showthinking` | Surface XML-tagged `<thinking>...</thinking>` blocks as thought logs |
 
 ```bash
 mini-a goal="perform audit" \
@@ -714,6 +725,15 @@ export OAF_MINI_A_LCNOJSONPROMPT=true  # Required for Gemini low-cost model
 | `rpm` | number | - | Maximum requests per minute |
 | `rtm` | number | - | Legacy alias for `rpm` |
 | `tpm` | number | - | Maximum tokens per minute (prompt + completion) |
+
+---
+
+## Deep Research Output Files
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `outfile` | string | - | Save final answer to file |
+| `outfileall` | string | - | Deep research mode: save complete cycle output (history, verdicts, learnings) |
 
 **Examples:**
 
