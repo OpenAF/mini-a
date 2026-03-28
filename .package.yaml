@@ -173,7 +173,7 @@ filesHash:
   mcps/mcp-oafp.yaml: 53b765ccf2ecd338d3a65ef3f65509bab63b1556
   mcps/mcp-office.yaml: e5c2b9aa612ec98f39c3126322922905d7306b02
   mcps/mcp-ollama-web-search.yaml: c1560dce42bf93908f1ada49ff59fc416362e397
-  mcps/mcp-pass.yaml: 26bee5bbf3ef30d820193b982744ea244faedcb7
+  mcps/mcp-pass.yaml: 1c2b55c2c386efad5a860d2e0d255eb4e671b8de
   mcps/mcp-proxy.yaml: 05450b1153b07aa22d4cd9aea2299bd620de7a22
   mcps/mcp-random.yaml: ac2ee99722a6ae2baeb14e19d4f881ce03e369c4
   mcps/mcp-rss.yaml: 42413cd8146ce049d9e8aeb82265be23ef17213e
