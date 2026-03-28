@@ -83,9 +83,43 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
+      search:
+        name       : search
+        description: "Search {{label}} list entries using a regular expression across all returned fields."
+        inputSchema:
+          type      : object
+          properties:
+            pattern:
+              type       : string
+              description: JavaScript regular expression pattern used to match entry values.
+            path:
+              type       : string
+              description: Relative path under {{browseUri}} where the browse traversal starts.
+            params:
+              type       : object
+              description: Optional query parameters merged into every list call.
+            caseSensitive:
+              type       : boolean
+              description: When true keeps regex case-sensitive; otherwise applies the "i" flag.
+            maxDepth:
+              type       : integer
+              description: Maximum browse depth (0 = only current path). Default 3.
+            maxPaths:
+              type       : integer
+              description: Maximum number of paths to browse while traversing. Default 250.
+            maxResults:
+              type       : integer
+              description: Maximum matches returned. Default 100.
+          required: [ pattern ]
+        annotations:
+          title         : search
+          readOnlyHint  : true
+          idempotentHint: true
+
     ((fns    )): &MCPFNS
       list: Browse list
       get : Browse get
+      search: Browse search
       
   ((else)):
   - (stdioMCP  ): *MCPSERVER
@@ -190,3 +224,129 @@ jobs:
       params: isMap.default({})
   exec : | #js
     return global.__browseApiCall__("obj", args.path, args.params)
+
+# --------------------
+- name : Browse search
+  from : Init
+  check:
+    in:
+      pattern      : isString
+      path         : isString.default("")
+      params       : isMap.default({})
+      caseSensitive: toBoolean.isBoolean.default(false)
+      maxDepth     : toNumber.isNumber.default(3)
+      maxPaths     : toNumber.isNumber.default(250)
+      maxResults   : toNumber.isNumber.default(100)
+  exec : | #js
+    var _flags = args.caseSensitive ? "g" : "gi"
+    var _rx = new RegExp(args.pattern, _flags)
+    var _startPath = String(args.path || "")
+    var _maxDepth = Math.max(0, Number(args.maxDepth || 0))
+    var _maxPaths = Math.max(1, Number(args.maxPaths || 0))
+    var _maxResults = Math.max(1, Number(args.maxResults || 0))
+    var _visited = {}
+    var _results = []
+
+    var _stringify = function(v) {
+      if (isUnDef(v) || isNull(v)) return __
+      if (isString(v) || isNumber(v) || isBoolean(v)) return String(v)
+      try {
+        return stringify(v, __, "")
+      } catch(__e) {
+        return __
+      }
+    }
+
+    var _matchesAnyField = function(entry) {
+      if (!isMap(entry)) return false
+      var _keys = Object.keys(entry)
+      var _match = $atomic(0, "long")
+      pForEach(_keys, function(k) {
+        if (_match.get() === 1) return
+        var _value = _stringify(entry[k])
+        if (isUnDef(_value)) return
+        _rx.lastIndex = 0
+        if (_rx.test(_value)) _match.set(1)
+      })
+      return _match.get() === 1
+    }
+
+    var _normalizePath = function(v) {
+      if (!isString(v)) return __
+      var _p = String(v).trim()
+      if (_p.length <= 0) return __
+      return _p
+    }
+
+    var _extractChildPaths = function(entry) {
+      if (!isMap(entry)) return []
+      var _candidates = []
+      ;["path", "filepath", "filePath", "relativePath", "canonicalPath"].forEach(function(k) {
+        var _p = _normalizePath(entry[k])
+        if (isDef(_p)) _candidates.push(_p)
+      })
+
+      var _kind = String(entry.type || entry.kind || entry.entryType || "").toLowerCase()
+      var _isDir = (
+        entry.isDirectory === true ||
+        entry.isDir === true ||
+        entry.directory === true ||
+        _kind.indexOf("dir") >= 0 ||
+        _kind.indexOf("folder") >= 0
+      )
+      if (!_isDir) return []
+      return _candidates
+    }
+
+    var _level = [ _startPath ]
+    var _depth = 0
+    while (_level.length > 0 && _depth <= _maxDepth && Object.keys(_visited).length < _maxPaths && _results.length < _maxResults) {
+      var _batchPaths = []
+      _level.forEach(function(_path) {
+        var _k = String(_path || "")
+        if (_visited[_k] === true || _batchPaths.length >= _maxPaths) return
+        _visited[_k] = true
+        _batchPaths.push(_path)
+      })
+
+      var _nextPaths = []
+      var _batchResults = pForEach(_batchPaths, function(_path) {
+        return $do(function() {
+          var _res = global.__browseApiCall__("list", _path, args.params)
+          var _entries = isMap(_res) && isArray(_res.list) ? _res.list : []
+          return {
+            path   : _path,
+            entries: _entries
+          }
+        }, function(_e) {
+          return {
+            path   : _path,
+            entries: [],
+            error  : String(_e.message || _e)
+          }
+        })
+      })
+
+      _batchResults.forEach(function(_r) {
+        if (!isMap(_r) || !isArray(_r.entries)) return
+        _r.entries.forEach(function(_entry) {
+          if (_results.length >= _maxResults) return
+          if (_matchesAnyField(_entry)) {
+            _results.push({
+              fromPath: _r.path,
+              entry   : _entry
+            })
+          }
+          _extractChildPaths(_entry).forEach(function(_childPath) {
+            if (_visited[_childPath] !== true && _nextPaths.indexOf(_childPath) < 0 && Object.keys(_visited).length + _nextPaths.length < _maxPaths) {
+              _nextPaths.push(_childPath)
+            }
+          })
+        })
+      })
+
+      _level = _nextPaths
+      _depth++
+    }
+
+    return _results
