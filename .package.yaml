@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260328'
+version: '20260329'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -185,27 +185,27 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: f1a2db263ff5ff8d40fc9c5b4c1b96d72eaf740a
+  mini-a-con.js: 941306f550bcc3fa6bb539ae81fa1212d8980128
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
-  mini-a-modes.yaml: 5e09b04973e34ddb2093099270cb5cecdb7aa2d7
+  mini-a-modes.yaml: 3e94509e2e416ac01e90551340c2cb7cf13db1b1
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
   mini-a-subtask.js: 9070832a702e01d236b004719e92b0f4721aa3ec
   mini-a-utils.js: 74929e106d866962ef08a6ff413f70b247e579c9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: eead0d9fac3d104c14ff46860a6fd93b0c3fa14b
+  mini-a-web.yaml: 1980a21f35f451b2fbd4b5666e10dc1919f25a9b
   mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
-  mini-a.js: a3e4a826ff3b4dbfe1f1d73880f0990ba4d4fc2a
+  mini-a.js: 641285519879e8aca3af817052317595636f19a1
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cd7c86b2489728dcd35c62c43c508fb11142b023
-  public/index.md: 86a1db6255f875dc2755bb0d5ee29a2a74e9e9e3
+  public/index.md: 53e7f470d8c336f54e22bdb700fe52ce836deef9
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 57f4ac338a45d4f3a76bc698356108643b4ff9a5
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
-  tests/coreFunctionality.js: 54c64586e72fd03757f0232587c27b857b181c21
-  tests/coreFunctionality.yaml: a9b642237273eba831944fca7d085c891e085879
+  tests/coreFunctionality.js: 7c1772f595cb10d4aa6c6255659a16566db6430f
+  tests/coreFunctionality.yaml: 36695b001c96ba33f8e750c0f0502c5cebf272a7
   tests/miniAUtils.js: e73053daa6bb6b14934f21fa221eaea9c35bd6b0
   tests/miniAUtils.yaml: 1d1515b208e55da5600906e355ddc1a0eb7f82d7
   tests/progToolCall.js: 83228632725f51069fc2a61490e31cdec340315c
