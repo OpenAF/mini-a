@@ -3406,6 +3406,40 @@
         let sanitized = rawSvg.trim();
         if (sanitized.length === 0) return '';
 
+        // DOMParser with image/svg+xml accepts only XML-safe entities, not HTML-only ones like &nbsp;.
+        const htmlEntityToXmlEntity = {
+            nbsp: '&#160;',
+            ndash: '&#8211;',
+            mdash: '&#8212;',
+            hellip: '&#8230;',
+            middot: '&#183;',
+            bull: '&#8226;',
+            copy: '&#169;',
+            reg: '&#174;',
+            trade: '&#8482;',
+            deg: '&#176;',
+            plusmn: '&#177;',
+            times: '&#215;',
+            divide: '&#247;',
+            euro: '&#8364;',
+            pound: '&#163;',
+            yen: '&#165;',
+            laquo: '&#171;',
+            raquo: '&#187;',
+            lsquo: '&#8216;',
+            rsquo: '&#8217;',
+            ldquo: '&#8220;',
+            rdquo: '&#8221;'
+        };
+
+        sanitized = sanitized.replace(/&([a-z][a-z0-9]+);/gim, (match, entityName) => {
+            const lowerEntity = String(entityName).toLowerCase();
+            if (lowerEntity === 'amp' || lowerEntity === 'lt' || lowerEntity === 'gt' || lowerEntity === 'quot' || lowerEntity === 'apos') {
+                return match;
+            }
+            return htmlEntityToXmlEntity[lowerEntity] || match;
+        });
+
         // Ensure XML entity validity (e.g. bare '&' in text nodes)
         sanitized = sanitized.replace(/&(?!(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);)/gim, '&amp;');
 

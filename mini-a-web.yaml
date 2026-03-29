@@ -487,6 +487,20 @@ todo:
           global.__conversations[ uuid ] = lma
         } else {
           lma = global.__conversations[ uuid ]
+          var _historyFile = global.__usehistory && isString(_hfile) ? global._mini_a_web_loadFile(_hfile) : __
+          if (isString(_historyFile) && io.fileExists(_historyFile)) {
+            try {
+              var _existingConversationPayload = io.readFileJSON(_historyFile)
+              if (isMap(_existingConversationPayload) && isArray(_existingConversationPayload.c) && isDef(lma.llm) && isFunction(lma.llm.getGPT)) {
+                lma.llm.getGPT().setConversation(_existingConversationPayload.c)
+                if (lma._use_lc && isDef(lma.lc_llm) && isFunction(lma._copyConversationBetweenLlms)) {
+                  lma._copyConversationBetweenLlms(lma.llm, lma.lc_llm)
+                }
+              }
+            } catch(loadConversationErr) {
+              logErr(loadConversationErr)
+            }
+          }
         }
 
         // Only load conversation from file/S3 if this is a new MiniA instance
@@ -495,7 +509,10 @@ todo:
           goal        : postData.prompt,
           raw         : true
         })
-        // Only pass conversation parameter for new conversations to avoid overwriting in-memory state
+        if (global.__usehistory && isString(_hfile)) {
+          startArgs.conversation = _hfile
+        }
+        // Only pass browser context for new conversations to avoid replacing in-memory session state
         if (isNewConversation) {
           if (isMap(postData.browserContext)) {
             startArgs.browsercontext = jsonParse(stringify(postData.browserContext, __, ""), __, __, true)
@@ -503,7 +520,6 @@ todo:
             var parsedPostBrowserContext = af.fromJSSLON(postData.browserContext)
             if (isMap(parsedPostBrowserContext)) startArgs.browsercontext = parsedPostBrowserContext
           }
-          startArgs.conversation = global._mini_a_web_loadFile(_hfile)
         }
         var _rma = lma.start(startArgs)
 

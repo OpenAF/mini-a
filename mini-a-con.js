@@ -5,6 +5,12 @@
 try {
   plugin("Console")
   var args = processExpr(" ")
+  var miniABasePath = (io.fileExists("mini-a.js") && io.fileExists("mini-a-modes.yaml"))
+    ? io.fileInfo(".").canonicalPath
+    : getOPackPath("mini-a")
+  if (typeof MiniA === "undefined") {
+    load(miniABasePath + "/mini-a.js")
+  }
   var explicitCLIArgKeys = {}
   if (isObject(args)) {
     Object.keys(args).forEach(function(key) {
@@ -73,7 +79,7 @@ try {
       var modeName = args.mode.trim()
       if (modeName.length === 0) return
 
-      var modesPath = getOPackPath("mini-a") + "/mini-a-modes.yaml"
+      var modesPath = miniABasePath + "/mini-a-modes.yaml"
       var presets = {}
       try {
         var loaded = io.readFileYAML(modesPath)
@@ -210,16 +216,16 @@ try {
       exit(0)
     } else if (toBoolean(args.workermode) === true) {
       // Start worker mode
-      oJobRunFile(getOPackPath("mini-a") + "/mini-a-worker.yaml", args, genUUID(), __, false)
+      oJobRunFile(miniABasePath + "/mini-a-worker.yaml", args, genUUID(), __, false)
       exit(0)
     } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
       // Start web mode
-      oJobRunFile(getOPackPath("mini-a") + "/mini-a-web.yaml", args, genUUID(), __, false)
+      oJobRunFile(miniABasePath + "/mini-a-web.yaml", args, genUUID(), __, false)
       exit(0)
     } else if (isDef(args.goal) && hasRunnableExecArg !== true) {
       // Start cli mode
       if (!isString(args.goal)) args.goal = String(args.goal)
-      oJobRunFile(getOPackPath("mini-a") + "/mini-a.yaml", args, genUUID(), __, false)
+      oJobRunFile(miniABasePath + "/mini-a.yaml", args, genUUID(), __, false)
       exit(0)
     }
   }
@@ -625,7 +631,7 @@ try {
   }
 
   function printCheatSheet() {
-    var cheatsheetPath = getOPackPath("mini-a") + "/CHEATSHEET.md"
+    var cheatsheetPath = miniABasePath + "/CHEATSHEET.md"
     if (!io.fileExists(cheatsheetPath)) cheatsheetPath = resolveCanonicalPath(".", "CHEATSHEET.md")
     if (!io.fileExists(cheatsheetPath)) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to locate CHEATSHEET.md.", errorColor))
@@ -4158,7 +4164,7 @@ try {
           global.__mini_a_con_model_result = __
 
           // Load the model manager (which will execute mainOAFModel and store result)
-          var modelManPath = getOPackPath("mini-a") + "/mini-a-modelman.js"
+          var modelManPath = miniABasePath + "/mini-a-modelman.js"
           load(modelManPath)
 
           // Get the captured result

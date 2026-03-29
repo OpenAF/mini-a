@@ -64,6 +64,9 @@ var MiniA = function() {
   this._defaultChatPersonaLine = "You are a helpful conversational AI assistant."
   this._origAnswer = __
   this._activeConversationModel = __
+  this._debugchConfig = __
+  this._debuglcchConfig = __
+  this._debugvalchConfig = __
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -624,6 +627,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._hasExternalPlan = false
   this._planningPhase = "none"  // Tracks planning phase: "none" | "planning" | "execution"
   this._debugFile = ""
+  this._debugChannelFiles = {}
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -731,6 +735,15 @@ MiniA._registerShutdownHook = function() {
   if (typeof addOnOpenAFShutdown !== "function") return
 
   addOnOpenAFShutdown(function() {
+    try {
+      if (isArray(MiniA._activeInstances)) {
+        MiniA._activeInstances.forEach(agent => {
+          if (isObject(agent) && isFunction(agent._flushAllDebugChannelsToFiles)) {
+            agent._flushAllDebugChannelsToFiles()
+          }
+        })
+      }
+    } catch(ignoreDebugFlushError) {}
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
     try { MiniA._cleanupSandboxTempFiles() } catch(ignoreSandboxTempCleanupError) {}
@@ -1201,6 +1214,7 @@ MiniA.prototype.fnI = function(event, message) {
       io.writeFileString(this._debugFile, rec + "\n", __, true)
     } catch(_e) {}
   }
+  this._flushAllDebugChannelsToFiles()
   return this._fnI(event, message)
 }
 
@@ -1473,6 +1487,154 @@ MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
 
   this._activeConversationModel = targetModelName
   return moved
+}
+
+MiniA.prototype._configureDebugChannel = function(llmInstance, debugConfig, defaultName, label) {
+  if (!isObject(llmInstance) || !isString(debugConfig) || debugConfig.length === 0) return
+
+  if (isUnDef(llmInstance.setDebugCh)) {
+    this.fnI("warn", `${label} debug channel specified but setDebugCh is not available.`)
+    return
+  }
+
+  try {
+    var debugMap = af.fromJSSLON(debugConfig)
+    if (!isMap(debugMap)) return
+    if (isUnDef(debugMap.name)) debugMap.name = defaultName
+    var channelType = isString(debugMap.type) ? debugMap.type : "simple"
+    var channelOptions = isMap(debugMap.options) ? debugMap.options : {}
+
+    if (channelType === "file" && isString(channelOptions.file) && channelOptions.file.length > 0 && !io.fileExists(channelOptions.file)) {
+      io.writeFileString(channelOptions.file, "{}")
+    }
+
+    var channelExists = false
+    try {
+      channelExists = $ch().list().indexOf(debugMap.name) >= 0
+    } catch(ignoreListDebugCh) {}
+    if (!channelExists) {
+      $ch(debugMap.name).create(channelType, channelOptions)
+    }
+    delete this._debugChannelFiles[debugMap.name]
+    llmInstance.setDebugCh(debugMap.name)
+    this.fnI("output", `${label} debug channel '${debugMap.name}' created and configured.`)
+  } catch (e) {
+    var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+    this.fnI("warn", `Failed to configure ${label} debug channel: ${errMsg}`)
+  }
+}
+
+MiniA.prototype._flushDebugChannelToFile = function(channelName) {
+  try {
+    if (!isString(channelName) || channelName.length === 0) return
+    if (!isMap(this._debugChannelFiles) || !isMap(this._debugChannelFiles[channelName])) return
+    if ($ch().list().indexOf(channelName) < 0) return
+
+    var fileConfig = this._debugChannelFiles[channelName]
+    var payload = {}
+    var keys = $ch(channelName).getKeys()
+    if (!isArray(keys)) keys = []
+
+    keys.forEach(key => {
+      var normalizedKey = stringify(sortMapKeys(key, true), __, "")
+      payload[normalizedKey] = $ch(channelName).get(key)
+    })
+
+    io.writeFileJSON(fileConfig.file, payload, fileConfig.compact ? "" : __)
+  } catch(ignoreFlushDebugChannel) {}
+}
+
+MiniA.prototype._flushAllDebugChannelsToFiles = function() {
+  if (!isMap(this._debugChannelFiles)) return
+  Object.keys(this._debugChannelFiles).forEach(channelName => {
+    this._flushDebugChannelToFile(channelName)
+  })
+}
+
+MiniA.prototype._createBareLlmInstance = function(modelConfig, debugConfig, defaultName, label) {
+  if (!isMap(modelConfig)) return __
+
+  try {
+    var llmInstance = $llm(modelConfig)
+    this._configureDebugChannel(llmInstance, debugConfig, defaultName, label)
+    return llmInstance
+  } catch (e) {
+    var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
+    this.fnI("warn", `Failed to create bare LLM instance: ${errMsg}`)
+    return __
+  }
+}
+
+MiniA.prototype._refreshConfiguredLlmChannels = function() {
+  this._configureDebugChannel(this.llm, this._debugchConfig, "__mini_a_llm_debug", "LLM")
+  if (this._use_lc) this._configureDebugChannel(this.lc_llm, this._debuglcchConfig, "__mini_a_lc_llm_debug", "Low-cost LLM")
+  if (this._use_val) this._configureDebugChannel(this.val_llm, this._debugvalchConfig, "__mini_a_val_llm_debug", "Validation LLM")
+}
+
+MiniA.prototype._rebuildLlmPair = function(currentLLM, modelConfig, debugConfig, defaultName, label) {
+  var bareLLM = this._createBareLlmInstance(modelConfig, debugConfig, defaultName, label)
+  if (isObject(currentLLM) && isObject(bareLLM)) {
+    this._copyConversationBetweenLlms(currentLLM, bareLLM)
+  } else if (isUnDef(bareLLM)) {
+    bareLLM = currentLLM
+  }
+
+  var workingLLM = this._createBareLlmInstance(modelConfig, debugConfig, defaultName, label)
+  if (isObject(bareLLM) && isObject(workingLLM)) {
+    this._copyConversationBetweenLlms(bareLLM, workingLLM)
+  } else if (isUnDef(workingLLM)) {
+    workingLLM = bareLLM
+  }
+
+  return {
+    bare   : bareLLM,
+    working: workingLLM
+  }
+}
+
+MiniA.prototype._restoreNoToolsModels = function(preserveConversation) {
+  if (isUnDef(preserveConversation)) preserveConversation = true
+
+  var rebuiltMain = preserveConversation
+    ? this._rebuildLlmPair(this.llm, this._oaf_model, this._debugchConfig, "__mini_a_llm_debug", "LLM")
+    : {
+        bare   : this._createBareLlmInstance(this._oaf_model, this._debugchConfig, "__mini_a_llm_debug", "LLM"),
+        working: this._createBareLlmInstance(this._oaf_model, this._debugchConfig, "__mini_a_llm_debug", "LLM")
+      }
+  if (isDef(rebuiltMain.bare)) this._llmNoTools = rebuiltMain.bare
+  if (isDef(rebuiltMain.working)) this.llm = rebuiltMain.working
+
+  if (this._use_lc && isMap(this._oaf_lc_model)) {
+    var rebuiltLowCost = preserveConversation
+      ? this._rebuildLlmPair(this.lc_llm, this._oaf_lc_model, this._debuglcchConfig, "__mini_a_lc_llm_debug", "Low-cost LLM")
+      : {
+          bare   : this._createBareLlmInstance(this._oaf_lc_model, this._debuglcchConfig, "__mini_a_lc_llm_debug", "Low-cost LLM"),
+          working: this._createBareLlmInstance(this._oaf_lc_model, this._debuglcchConfig, "__mini_a_lc_llm_debug", "Low-cost LLM")
+        }
+    if (isDef(rebuiltLowCost.bare)) this._lcLlmNoTools = rebuiltLowCost.bare
+    if (isDef(rebuiltLowCost.working)) this.lc_llm = rebuiltLowCost.working
+  }
+}
+
+MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jsonFlag, onDelta) {
+  if (!isObject(llmInstance)) throw new Error("Invalid LLM instance for streaming")
+
+  var gptInstance = isFunction(llmInstance.getGPT) ? llmInstance.getGPT() : __
+  if (isObject(gptInstance)) {
+    if (isObject(gptInstance.model) && isFunction(gptInstance.model.promptStream) && isFunction(gptInstance.getLastStats)) {
+      var response = gptInstance.model.promptStream(prompt, void 0, void 0, jsonFlag === true, void 0, onDelta)
+      return { response: response, stats: gptInstance.getLastStats() }
+    }
+  }
+
+  if (jsonFlag === true && isFunction(llmInstance.promptStreamJSONWithStats)) {
+    return llmInstance.promptStreamJSONWithStats(prompt, void 0, void 0, void 0, void 0, onDelta)
+  }
+  if (jsonFlag !== true && isFunction(llmInstance.promptStreamWithStats)) {
+    return llmInstance.promptStreamWithStats(prompt, void 0, void 0, void 0, void 0, void 0, onDelta)
+  }
+
+  throw new Error("Streaming with stats is not supported by this LLM instance")
 }
 
 MiniA.prototype._syncDelegationMetrics = function() {
@@ -8114,6 +8276,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
         var includeTools = params.includeTools !== false
         var includeSchema = params.includeInputSchema === true
         var includeAnnotations = params.includeAnnotations !== false
+        var callFormat = isString(params.format) ? params.format.trim().toLowerCase() : "compact"
+        var useCompact = callFormat !== "detail"
+        var useToon    = !useCompact
 
         var createProxyTempFile = function(prefix, payloadText, payloadFormat) {
           var resolvedPrefix = isString(prefix) && prefix.trim().length > 0 ? prefix.trim() : "mini-a-proxy"
@@ -8201,21 +8366,24 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
         var formatConnection = function(entry) {
           if (!isObject(entry)) return entry
+          var entryTools = isArray(entry.tools) ? entry.tools : []
+          if (useCompact) {
+            return {
+              alias: entry.alias,
+              tools: entryTools.map(function(t) { return { name: t.name, description: t.description } })
+            }
+          }
+          // detail mode: only MCP server-returned data, no connection config/URLs
           var response = {
-            id           : entry.id,
-            alias        : entry.alias,
-            serverInfo   : isDef(entry.serverInfo) ? (helpers.deepClone ? helpers.deepClone(entry.serverInfo) : entry.serverInfo) : __,
-            lastRefreshed: entry.lastRefreshed,
-            lastError    : entry.lastError,
-            descriptor   : isDef(entry.sanitizedDescriptor)
-              ? (helpers.deepClone ? helpers.deepClone(entry.sanitizedDescriptor) : entry.sanitizedDescriptor)
-              : __
+            alias    : entry.alias,
+            serverInfo: isDef(entry.serverInfo) ? (helpers.deepClone ? helpers.deepClone(entry.serverInfo) : entry.serverInfo) : __,
+            lastError: entry.lastError
           }
           if (includeTools) {
-            response.tools = (isArray(entry.tools) ? entry.tools : []).map(buildToolSummary)
+            response.tools = entryTools.map(buildToolSummary)
             response.toolCount = response.tools.length
           } else {
-            response.toolCount = isArray(entry.tools) ? entry.tools.length : 0
+            response.toolCount = entryTools.length
           }
           return response
         }
@@ -8236,11 +8404,44 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             return formatConnection(state.connections[id])
           })
 
+          var listPayload = useCompact
+            ? { action: "list", connections: connections }
+            : { action: "list", totalConnections: connections.length, connections: connections }
+          var listText
+          try {
+            listText = useToon ? af.toTOON(listPayload) : stringify(listPayload, __, "")
+          } catch(_toonErr) {
+            listText = stringify(listPayload, __, "")
+          }
           return {
             action         : "list",
             totalConnections: connections.length,
             connections    : connections,
-            content: [{ type: "text", text: stringify({ action: "list", totalConnections: connections.length, connections: connections }, __, "") }]
+            content: [{ type: "text", text: listText }]
+          }
+        }
+
+        if (action === "status") {
+          var statusNames = isMap(state.toolToConnections) ? Object.keys(state.toolToConnections).filter(function(n) { return n !== "proxy-dispatch" }) : []
+          var statusConns = Object.keys(state.connections || {}).map(function(id) {
+            var entry = state.connections[id]
+            return {
+              alias    : entry.alias,
+              toolCount: isArray(entry.tools) ? entry.tools.length : 0,
+              lastError: entry.lastError || __
+            }
+          })
+          var statusPayload = {
+            action          : "status",
+            totalConnections: statusConns.length,
+            totalTools      : statusNames.length,
+            catalogHash     : md5(statusNames.slice().sort().join(",")),
+            lastUpdated     : state.lastUpdated,
+            connections     : statusConns
+          }
+          return {
+            action: "status",
+            content: [{ type: "text", text: stringify(statusPayload, __, "") }]
           }
         }
 
@@ -8285,15 +8486,23 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 }
               }
               if (matchedFields.length === 0) return
-              results.push({
-                connection: {
-                  id    : entry.id,
-                  alias : entry.alias,
-                  serverInfo: isDef(entry.serverInfo) ? (helpers.deepClone ? helpers.deepClone(entry.serverInfo) : entry.serverInfo) : __
-                },
-                tool   : buildToolSummary(tool),
-                matchedFields: matchedFields
-              })
+              if (useCompact) {
+                results.push({
+                  alias        : entry.alias,
+                  name         : tool.name,
+                  description  : tool.description,
+                  matchedFields: matchedFields
+                })
+              } else {
+                results.push({
+                  connection: {
+                    alias     : entry.alias,
+                    serverInfo: isDef(entry.serverInfo) ? (helpers.deepClone ? helpers.deepClone(entry.serverInfo) : entry.serverInfo) : __
+                  },
+                  tool         : buildToolSummary(tool),
+                  matchedFields: matchedFields
+                })
+              }
             })
           })
 
@@ -8301,12 +8510,19 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             results = results.slice(0, limit)
           }
 
+          var searchPayload = { action: "search", query: query, totalMatches: results.length, results: results }
+          var searchText
+          try {
+            searchText = useToon ? af.toTOON(searchPayload) : stringify(searchPayload, __, "")
+          } catch(_toonErr) {
+            searchText = stringify(searchPayload, __, "")
+          }
           return {
             action      : "search",
             query       : query,
             totalMatches: results.length,
             results     : results,
-            content: [{ type: "text", text: stringify({ action: "search", query: query, totalMatches: results.length, results: results }, __, "") }]
+            content: [{ type: "text", text: searchText }]
           }
         }
 
@@ -8597,14 +8813,14 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     var fnsMeta = {
       "proxy-dispatch": {
         name       : "proxy-dispatch",
-        description: "Interact with downstream MCP connections aggregated by this proxy. Supports listing available tools (action='list'), searching metadata (action='search'), and calling specific tools (action='call' with tool name and arguments). Use this function to invoke any MCP tool.",
+        description: "Interact with downstream MCP connections aggregated by this proxy. Supports a lightweight catalog check (action='status'), listing available tools (action='list'), searching metadata (action='search'), and calling specific tools (action='call' with tool name and arguments). Use this function to invoke any MCP tool.",
         inputSchema: {
           type      : "object",
           properties: {
             action: {
               type       : "string",
-              description: "Operation to perform: list, search, call, or readresult. Use 'readresult' to retrieve the content of a previously spilled result file (from resultFile) without triggering further auto-spill.",
-              enum       : [ "list", "search", "call", "readresult" ]
+              description: "Operation to perform: status, list, search, call, or readresult. 'status' returns a lightweight catalog summary (totalTools, catalogHash) to check if tools have changed. Use 'readresult' to retrieve the content of a previously spilled result file (from resultFile) without triggering further auto-spill.",
+              enum       : [ "status", "list", "search", "call", "readresult" ]
             },
             connection: {
               type       : "string",
@@ -8697,6 +8913,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             refresh: {
               type       : "boolean",
               description: "Refresh tool metadata from downstream MCPs before executing the action."
+            },
+            format: {
+              type       : "string",
+              description: "Output format for 'list' and 'search' actions. 'compact' (default): minimal {alias, tools:[{name,description}]} — lowest token cost. 'detail': full server-returned data (serverInfo, annotations, inputSchema when requested) serialized as TOON.",
+              enum       : [ "compact", "detail" ]
             }
           },
           required: [ "action" ]
@@ -10397,14 +10618,16 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
     // When init() was skipped (agent reused across multiple run() calls, _isInitialized=true),
     // this.llm already has tools from the previous run. Restore the bare snapshot to avoid
     // accumulating duplicate proxy-dispatch entries on each subsequent call.
-    if (isDef(this._llmNoTools)) this.llm = this._llmNoTools
-    this._llmNoTools = this.llm  // save bare LLM before tool registration for fallback
+    var rebuiltMainLlmPair = this._rebuildLlmPair(this.llm, this._oaf_model)
+    if (isDef(rebuiltMainLlmPair.bare)) this._llmNoTools = rebuiltMainLlmPair.bare
+    if (isDef(rebuiltMainLlmPair.working)) this.llm = rebuiltMainLlmPair.working
     var updatedMainLLM = registerMcpTools(this.llm)
     if (isDef(updatedMainLLM)) this.llm = updatedMainLLM
 
     if (this._use_lc && isDef(this.lc_llm)) {
-      if (isDef(this._lcLlmNoTools)) this.lc_llm = this._lcLlmNoTools
-      this._lcLlmNoTools = this.lc_llm
+      var rebuiltLowCostPair = this._rebuildLlmPair(this.lc_llm, this._oaf_lc_model)
+      if (isDef(rebuiltLowCostPair.bare)) this._lcLlmNoTools = rebuiltLowCostPair.bare
+      if (isDef(rebuiltLowCostPair.working)) this.lc_llm = rebuiltLowCostPair.working
       var updatedLowCostLLM = registerMcpTools(this.lc_llm)
       if (isDef(updatedLowCostLLM)) this.lc_llm = updatedLowCostLLM
     }
@@ -10747,7 +10970,7 @@ MiniA.prototype.init = function(args) {
       var _auditchm = af.fromJSSLON(args.auditch)
       if (isMap(_auditchm)) {
         try {
-          $ch("_mini_a_audit_channel").create(isDef(_auditchm.type) ? _auditchm.type : "simple", isMap(_auditchm.options) ? _auditchm.options : {})
+          ow.ch.create("_mini_a_audit_channel", false, isDef(_auditchm.type) ? _auditchm.type : "simple", isMap(_auditchm.options) ? _auditchm.options : {})
           this._auditon = true
         } catch (e) {
           this.fnI("error", `Failed to create audit channel: ${e.message}`)
@@ -10760,7 +10983,7 @@ MiniA.prototype.init = function(args) {
       var _toollogm = af.fromJSSLON(args.toollog)
       if (isMap(_toollogm)) {
         try {
-          $ch("_mini_a_toollog_channel").create(isDef(_toollogm.type) ? _toollogm.type : "simple", isMap(_toollogm.options) ? _toollogm.options : {})
+          ow.ch.create("_mini_a_toollog_channel", false, isDef(_toollogm.type) ? _toollogm.type : "simple", isMap(_toollogm.options) ? _toollogm.options : {})
           this._toollogon = true
         } catch (e) {
           this.fnI("error", `Failed to create tool log channel: ${e.message}`)
@@ -10898,79 +11121,28 @@ MiniA.prototype.init = function(args) {
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
     if (this._use_val) this.val_llm = $llm(this._oaf_val_model)
     this._activeConversationModel = "main"
+    this._debugchConfig = args.debugch
+    this._debuglcchConfig = args.debuglcch
+    this._debugvalchConfig = args.debugvalch
     // Clear bare-LLM snapshots so _registerMcpToolsForGoal doesn't restore stale ones
     this._llmNoTools = __
     this._lcLlmNoTools = __
 
     // Check the need to init debugch for main LLM
-    if (isDef(args.debugch) && args.debugch.length > 0) {
-      if (isDef(this.llm) && isDef(this.llm.setDebugCh)) {
-        try {
-          var _debugchm = af.fromJSSLON(args.debugch)
-          if (isMap(_debugchm)) {
-            if (isUnDef(_debugchm.name)) {
-              _debugchm.name = "__mini_a_llm_debug"
-            }
-            $ch(_debugchm.name).create(_debugchm.type, _debugchm.options || {})
-            this.llm.setDebugCh(_debugchm.name)
-            this.fnI("output", `LLM debug channel '${_debugchm.name}' created and configured.`)
-          }
-        } catch (e) {
-          this.fnI("error", `Failed to create debug channel: ${e.message}`)
-        }
-      } else {
-        this.fnI("warn", "debugch specified but this.llm.setDebugCh is not available.")
-      }
-    }
+    this._configureDebugChannel(this.llm, args.debugch, "__mini_a_llm_debug", "LLM")
 
     // Check the need to init debuglcch for low-cost LLM
-    if (isDef(args.debuglcch) && args.debuglcch.length > 0) {
-      if (this._use_lc && isDef(this.lc_llm) && isDef(this.lc_llm.setDebugCh)) {
-        try {
-          var _debuglcchm = af.fromJSSLON(args.debuglcch)
-          if (isMap(_debuglcchm)) {
-            if (isUnDef(_debuglcchm.name)) {
-              _debuglcchm.name = "__mini_a_lc_llm_debug"
-            }
-            $ch(_debuglcchm.name).create(_debuglcchm.type, _debuglcchm.options || {})
-            this.lc_llm.setDebugCh(_debuglcchm.name)
-            this.fnI("output", `Low-cost LLM debug channel '${_debuglcchm.name}' created and configured.`)
-          }
-        } catch (e) {
-          this.fnI("error", `Failed to create low-cost debug channel: ${e.message}`)
-        }
-      } else {
-        if (!this._use_lc) {
-          this.fnI("warn", "debuglcch specified but low-cost LLM is not enabled.")
-        } else {
-          this.fnI("warn", "debuglcch specified but this.lc_llm.setDebugCh is not available.")
-        }
-      }
+    if (isDef(args.debuglcch) && args.debuglcch.length > 0 && !this._use_lc) {
+      this.fnI("warn", "debuglcch specified but low-cost LLM is not enabled.")
+    } else {
+      this._configureDebugChannel(this.lc_llm, args.debuglcch, "__mini_a_lc_llm_debug", "Low-cost LLM")
     }
 
     // Check the need to init debugvalch for validation LLM
-    if (isDef(args.debugvalch) && args.debugvalch.length > 0) {
-      if (this._use_val && isDef(this.val_llm) && isDef(this.val_llm.setDebugCh)) {
-        try {
-          var _debugvalchm = af.fromJSSLON(args.debugvalch)
-          if (isMap(_debugvalchm)) {
-            if (isUnDef(_debugvalchm.name)) {
-              _debugvalchm.name = "__mini_a_val_llm_debug"
-            }
-            $ch(_debugvalchm.name).create(_debugvalchm.type, _debugvalchm.options || {})
-            this.val_llm.setDebugCh(_debugvalchm.name)
-            this.fnI("output", `Validation LLM debug channel '${_debugvalchm.name}' created and configured.`)
-          }
-        } catch (e) {
-          this.fnI("error", `Failed to create validation debug channel: ${e.message}`)
-        }
-      } else {
-        if (!this._use_val) {
-          this.fnI("warn", "debugvalch specified but validation LLM is not enabled.")
-        } else {
-          this.fnI("warn", "debugvalch specified but this.val_llm.setDebugCh is not available.")
-        }
-      }
+    if (isDef(args.debugvalch) && args.debugvalch.length > 0 && !this._use_val) {
+      this.fnI("warn", "debugvalch specified but validation LLM is not enabled.")
+    } else {
+      this._configureDebugChannel(this.val_llm, args.debugvalch, "__mini_a_val_llm_debug", "Validation LLM")
     }
 
     // Load conversation history if provided
@@ -11248,7 +11420,8 @@ MiniA.prototype.init = function(args) {
 
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
-      baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Use {\"action\":\"list\"} to discover tools, then {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one.")
+      baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Available tools and their descriptions are listed above — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one directly. Only use {\"action\":\"list\"} if you need to discover tools not shown above.")
+      baseRules.push("'action=list' and 'action=search' default to format='compact' (name+description only, lowest token cost). Use format='detail' only when you need inputSchema, annotations, or serverInfo. Use action='status' to cheaply check if the tool catalog has changed (compare catalogHash) without re-listing.")
       var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
         ? args.mcpproxythreshold : 0
       var spillToon = toBoolean(args.mcpproxytoon) === true && spillThreshold > 0
@@ -11298,7 +11471,29 @@ MiniA.prototype.init = function(args) {
       proxyNames.sort()
       if (proxyNames.length > 0) {
         proxyToolCount = proxyNames.length
-        proxyToolsList = proxyNames.join(", ")
+        var proxyToolsWithDesc = []
+        if (isArray(proxyState.catalog)) {
+          proxyState.catalog.forEach(function(entry) {
+            if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name !== "proxy-dispatch") {
+              if (!shellViaActionPreferred || entry.tool.name !== "shell") {
+                proxyToolsWithDesc.push({ name: entry.tool.name, description: entry.tool.description || "" })
+              }
+            }
+          })
+          proxyToolsWithDesc.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
+        }
+        var MAX_PROMPT_TOOLS = 30
+        if (proxyToolsWithDesc.length > 0) {
+          var sliced = proxyToolsWithDesc.slice(0, MAX_PROMPT_TOOLS)
+          var overflow = proxyToolsWithDesc.length > MAX_PROMPT_TOOLS ? "\n... and " + (proxyToolsWithDesc.length - MAX_PROMPT_TOOLS) + " more (use action=list to see all)" : ""
+          try {
+            proxyToolsList = af.toTOON(sliced) + overflow
+          } catch(_) {
+            proxyToolsList = proxyNames.join(", ")
+          }
+        } else {
+          proxyToolsList = proxyNames.join(", ")
+        }
       } else {
         proxyToolCount = 0
       }
@@ -12287,6 +12482,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       pendingJsonToolPayload   : __,
       hasEscalated            : false,
       successfulStepsSinceEscalation: 0,
+      forceMainModel          : false,
+      forceNoStream           : false,
+      forceNoJson             : false,
       _escalationDeferred     : false,
       contextOverflowRecoveries: 0,
       earlyStopThreshold      : baseEarlyStopThreshold,
@@ -12702,7 +12900,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       // Issue 1: Determine model to use based on modellock
       var useLowCost
-      if (modelLock === "main") {
+      if (modelLock === "main" || runtime.forceMainModel === true) {
         useLowCost = false
       } else if (modelLock === "lc" && this._use_lc) {
         useLowCost = true
@@ -12711,6 +12909,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       this._syncConversationForModelSwitch(useLowCost ? "lc" : "main")
+      this._refreshConfiguredLlmChannels()
       var currentLLM = useLowCost ? this.lc_llm : this.llm
       var llmType = useLowCost ? "low-cost" : "main"
       
@@ -12748,14 +12947,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
 
-      var noJsonPromptFlag = useLowCost ? this._noJsonPromptLC : this._noJsonPrompt
+      var noJsonPromptFlag = runtime.forceNoJson === true || (useLowCost ? this._noJsonPromptLC : this._noJsonPrompt)
       var streamIntent = "answer"
       if (useLowCost) {
         var isLikelyDirectAnswerStep = step === 0 && goalComplexityLevel === "simple" && runtime.context.length === 0
         streamIntent = isLikelyDirectAnswerStep ? "answer" : "planner"
       }
       var plannerStreaming = streamIntent === "planner"
-      var canStream = args.usestream && isFunction(currentLLM.promptStreamWithStats)
+      var canStream = args.usestream && runtime.forceNoStream !== true && isFunction(currentLLM.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
@@ -12802,9 +13001,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           // in streaming mode, so pendingJsonToolPayload would never be set. Use non-streaming.
           var isJsonToolMode = toBoolean(args.usejsontool) === true
           if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode) {
-            return currentLLM.promptStreamJSONWithStats(prompt, __, __, __, __, onDelta)
+            return this._promptStreamWithStatsCompat(currentLLM, prompt, true, onDelta)
           } else if (canStream && !isJsonToolMode) {
-            return currentLLM.promptStreamWithStats(prompt, __, __, __, __, __, onDelta)
+            return this._promptStreamWithStatsCompat(currentLLM, prompt, false, onDelta)
           }
           if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
             return currentLLM.promptJSONWithStats(prompt)
@@ -12953,7 +13152,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           try {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
               addCall()
-              var jsonFlag = !this._noJsonPrompt
+              var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
               if (args.showthinking) {
                 if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
                   return this.llm.promptJSONWithStatsRaw(prompt)
@@ -12961,7 +13160,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                   return this.llm.rawPromptWithStats(prompt, __, __, jsonFlag)
                 }
               }
-              if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) {
+              if (jsonFlag && isDef(this.llm.promptJSONWithStats)) {
                 return this.llm.promptJSONWithStats(prompt)
               }
               return this.llm.promptWithStats(prompt)
@@ -13082,7 +13281,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // Retrying will loop forever — fall back to action-based mode instead.
             if (this._useToolsActual === true && _geminiModelType === "ollama" && isDef(this._llmNoTools)) {
               this._useToolsActual = false
-              this.llm = this._llmNoTools
+              runtime.forceMainModel = true
+              runtime.forceNoStream = true
+              runtime.forceNoJson = true
+              this._restoreNoToolsModels(false)
               runtime.context.push(`[OBS ${step + 1}] (recover) Gemini via Ollama returned empty response with tools active (tool call not executed by runtime). Disabling function calling and retrying in action-based mode.`)
               this.fnI("warn", `Step ${step + 1}: Gemini via Ollama returned empty response with tools active. Falling back to action-based mode.`)
               continue
@@ -13167,7 +13369,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           // doesn't support tool calling (e.g. Ollama thinking models). Fall back to the bare
           // LLM (no tools) and switch to action-based mode so the next step succeeds.
           this._useToolsActual = false
-          this.llm = this._llmNoTools
+          runtime.forceMainModel = true
+          runtime.forceNoStream = true
+          runtime.forceNoJson = true
+          this._restoreNoToolsModels(false)
           runtime.context.push(`[OBS ${step + 1}] (recover) model returned error payload with tools active: "${baseMsg.error}". Disabling function calling and retrying in action-based mode.`)
           this.fnI("warn", `Step ${step + 1}: model rejected tool-calling request ("${baseMsg.error}"). Falling back to action-based mode without tools.`)
           continue
@@ -13656,7 +13861,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     try {
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
-        var jsonFlag = !this._noJsonPrompt
+        var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
         if (args.showthinking) {
           if (jsonFlag && isDef(finalLLM.promptJSONWithStatsRaw)) {
             return finalLLM.promptJSONWithStatsRaw(finalPrompt)
@@ -13664,7 +13869,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             return finalLLM.rawPromptWithStats(finalPrompt, __, __, jsonFlag)
           }
         }
-        if (!this._noJsonPrompt && isDef(finalLLM.promptJSONWithStats)) {
+        if (jsonFlag && isDef(finalLLM.promptJSONWithStats)) {
           return finalLLM.promptJSONWithStats(finalPrompt)
         }
         return finalLLM.promptWithStats(finalPrompt)
@@ -13784,6 +13989,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var contextEstimate = conversationTokens + promptTokens
       this.fnI("input", `Interacting with main model (chatbot) (context ~${contextEstimate} tokens, step ${step + 1}/${maxSteps})...`)
 
+      this._refreshConfiguredLlmChannels()
       var chatbotDebugSnapshot = this._snapshotDebugChannel(args.debugch, "__mini_a_llm_debug")
 
       beforeCall()
@@ -13796,12 +14002,13 @@ MiniA.prototype._runChatbotMode = function(options) {
       }
 
       var responseWithStats
-      var canStream = args.usestream && isFunction(this.llm.promptStreamWithStats)
+      var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
+      var canStream = args.usestream && runtime.forceNoStream !== true && isFunction(this.llm.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(this.llm.promptStreamJSONWithStats)
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       if (args.usestream) {
-        onDelta = canStreamJson && !this._noJsonPrompt && args.format == "json" && this._useToolsActual !== true
+        onDelta = canStreamJson && !chatbotNoJsonPromptFlag && args.format == "json" && this._useToolsActual !== true
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
       }
@@ -13809,7 +14016,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Use new promptJSONWithStatsRaw if available for showthinking
       if (args.showthinking) {
         // Streaming not compatible with showthinking - use regular prompts
-        var jsonFlag = !this._noJsonPrompt && args.format == "json"
+        var jsonFlag = !chatbotNoJsonPromptFlag && args.format == "json"
         if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
           responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
         } else if (isDef(this.llm.rawPromptWithStats)) {
@@ -13817,11 +14024,11 @@ MiniA.prototype._runChatbotMode = function(options) {
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
-      } else if (canStreamJson && !this._noJsonPrompt && args.format == "json" && this._useToolsActual !== true) {
+      } else if (canStreamJson && !chatbotNoJsonPromptFlag && args.format == "json" && this._useToolsActual !== true) {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
       } else if (canStream) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
-      } else if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      } else if (!chatbotNoJsonPromptFlag && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
@@ -14031,7 +14238,10 @@ MiniA.prototype._runChatbotMode = function(options) {
       var emptyVisibleResponse = !isString(extractedResponseText) || extractedResponseText.trim().length === 0
       if (!handled && isUnDef(finalAnswer) && this._useToolsActual === true && isDef(this._llmNoTools) && toolCallsRequested === true && runtime.modelToolCallDetected !== true && emptyVisibleResponse) {
         this._useToolsActual = false
-        this.llm = this._llmNoTools
+        runtime.forceMainModel = true
+        runtime.forceNoStream = true
+        runtime.forceNoJson = true
+        this._restoreNoToolsModels(false)
         pendingPrompt = this._buildChatbotUserPrompt(args.goal, args.hookcontext)
         this.fnI("warn", `Step ${step + 1}: model requested tool calling but no tool execution completed. Falling back to action-based mode.`)
         handled = true
@@ -14071,7 +14281,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       beforeCall()
       var fallbackResponseWithStats
-      if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
         fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
       } else {
         fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)

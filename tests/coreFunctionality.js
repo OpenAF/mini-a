@@ -47,6 +47,7 @@
       assignedDebugChannel: __,
       setDebugCh: function(name) {
         this.assignedDebugChannel = name
+        $ch(name).create()
       }
     }
 
@@ -57,6 +58,53 @@
     llm.assignedDebugChannel = __
     agent._configureDebugChannel(llm, stringify({ name: channelName, type: "simple", options: { refreshed: true } }, __, ""), "__mini_a_llm_debug", "LLM")
     ow.test.assert(llm.assignedDebugChannel === channelName, true, "Should reconfigure existing debug channels without failing")
+
+    var debugFile = io.createTempFile("mini-a-debug-", ".json")
+    try { if (io.fileExists(debugFile)) io.rm(debugFile) } catch(ignoreDebugFileCleanup) {}
+    var fileChannelName = "__mini_a_test_debug_file"
+    llm.assignedDebugChannel = __
+    agent._configureDebugChannel(llm, stringify({ name: fileChannelName, type: "file", options: { file: debugFile } }, __, ""), "__mini_a_llm_debug", "LLM")
+    $ch(fileChannelName).set({ k: "probe" }, { value: "ok" })
+    sleep(150)
+    ow.test.assert(io.fileExists(debugFile), true, "Should create the configured debug file when using a file-backed channel")
+  }
+
+  exports.testRebuildLlmPairKeepsBareSnapshotClean = function() {
+    var agent = createAgent()
+
+    var makeFakeLlm = function(modelConfig) {
+      var conversation = []
+      return {
+        modelConfig: modelConfig,
+        aTools: [],
+        withMcpTools: function() {
+          this.aTools = { broken: true }
+          return this
+        },
+        getGPT: function() {
+          return {
+            getConversation: function() { return conversation },
+            setConversation: function(newConversation) { conversation = newConversation }
+          }
+        }
+      }
+    }
+
+    agent._createBareLlmInstance = function(modelConfig) {
+      return makeFakeLlm(modelConfig)
+    }
+
+    agent._oaf_model = { type: "fake", model: "main" }
+    agent.llm = makeFakeLlm(agent._oaf_model)
+    agent.llm.getGPT().setConversation([{ role: "user", content: "2+2" }])
+
+    var rebuilt = agent._rebuildLlmPair(agent.llm, agent._oaf_model)
+    rebuilt.working.withMcpTools({})
+
+    ow.test.assert(rebuilt.bare !== rebuilt.working, true, "Bare snapshot and working LLM should be different instances")
+    ow.test.assert(isArray(rebuilt.bare.aTools), true, "Bare snapshot should keep tools as an array")
+    ow.test.assert(isMap(rebuilt.working.aTools), true, "Working LLM should reflect in-place tool mutation")
+    ow.test.assert(rebuilt.bare.getGPT().getConversation()[0].content === "2+2", true, "Bare snapshot should preserve conversation state")
   }
 
   exports.testBuildToolCacheKeyRespectsKeyFields = function() {

@@ -77,6 +77,9 @@ modes:
       mcpproxytoon     : true
       mcpprogcall      : false
       llmcomplexity    : true
+      usehistory       : true
+      historykeep      : true
+      historykeepperiod: 10080
       mcp              : 
       - type   : ojob
         options:
