@@ -132,7 +132,7 @@ todo:
     }
     if (isArray(global.__worker_ipallow) && global.__worker_ipallow.length > 0) {
       var remoteAddr = request.header["x-forwarded-for"] || request.remoteAddress;
-      var allowed = global.__worker_ipallow.some(function(pattern) { return remoteAddr.indexOf(pattern) === 0; });
+      var allowed = global.__worker_ipallow.some(function(pattern) { return global.__worker_cidrMatch(remoteAddr, pattern); });
       if (!allowed) {
         return ow.server.httpd.reply(stringify({ error: "Forbidden" }, __, ""), 403, ow.server.httpd.mimes.JSON);
       }
@@ -143,67 +143,11 @@ todo:
       try { postData = jsonParse(request.files.postData); } catch(jsonErr) {
         return ow.server.httpd.reply(stringify({ error: "Invalid JSON in request body" }, __, ""), 400, ow.server.httpd.mimes.JSON);
       }
-      var wargs = global.__worker_args;
-      var goalTrimmed = isString(postData.goal) ? postData.goal.trim() : "";
-      if (goalTrimmed.length === 0) {
-        return ow.server.httpd.reply(stringify({ error: "Missing required field: goal" }, __, ""), 400, ow.server.httpd.mimes.JSON);
+      var result = global.__worker_submitTask(postData, global.__worker_args);
+      if (isMap(result.error)) {
+        return ow.server.httpd.reply(stringify(result.error, __, ""), result.code, ow.server.httpd.mimes.JSON);
       }
-      if (goalTrimmed.length > 10000) {
-        return ow.server.httpd.reply(stringify({ error: "Goal exceeds maximum length of 10000 characters" }, __, ""), 400, ow.server.httpd.mimes.JSON);
-      }
-      var taskArgs = postData.args || {};
-      var allowedRemoteKeys = {
-        goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
-        updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
-        planmode: true, planformat: true, convertplan: true, maxsteps: true
-      };
-      var mergedArgs = merge({}, wargs);
-      Object.keys(taskArgs).forEach(function(key) {
-        if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key]; }
-      });
-      mergedArgs.goal = goalTrimmed;
-      var timeout = wargs.defaulttimeout;
-      if (isDef(postData.timeout)) {
-        var parsedTimeout = Number(postData.timeout);
-        if (!isNaN(parsedTimeout) && parsedTimeout > 0) {
-          timeout = parsedTimeout * 1000;
-        }
-      }
-      if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout;
-      var taskId = genUUID();
-      var now = new Date().getTime();
-      if (isUnDef(global.__worker_taskManager)) {
-        global.__worker_taskManager = new SubtaskManager(mergedArgs, {
-          maxConcurrent: wargs.maxconcurrent,
-          defaultDeadlineMs: wargs.defaulttimeout,
-          defaultMaxAttempts: wargs.delegationmaxretries,
-          maxDepth: wargs.delegationmaxdepth,
-          interactionFn: function(event, message) {
-            var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message);
-            if (isString(resolvedTaskId) && resolvedTaskId.length > 0) {
-              global.__worker_appendTaskEvent(resolvedTaskId, event, message);
-            }
-            global.__worker_logTaskEvent(resolvedTaskId, event, message);
-          },
-          currentDepth: 0
-        });
-      }
-      var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
-        deadlineMs: timeout,
-        metadata: postData.metadata || {}
-      });
-      global.__worker_tasks[taskId] = {
-        taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
-        args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
-        events: [], metadata: postData.metadata || {}
-      };
-      global.__worker_subtaskToTaskId[subtaskId] = taskId;
-      global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId;
-      global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker");
-      global.__worker_taskManager.start(subtaskId);
-      global.__worker_tasks[taskId].status = "running";
-      global.__worker_tasks[taskId].startedAt = new Date().getTime();
-      return ow.server.httpd.reply(stringify({ taskId: taskId, status: "queued", createdAt: now }, __, ""), 202, ow.server.httpd.mimes.JSON);
+      return ow.server.httpd.reply(stringify({ taskId: result.taskId, status: global.__worker_tasks[result.taskId].status, createdAt: result.createdAt }, __, ""), 202, ow.server.httpd.mimes.JSON);
     } catch(e) {
       logErr(e);
       return ow.server.httpd.reply(stringify({ error: String(e) }, __, ""), 500, ow.server.httpd.mimes.JSON);
@@ -243,68 +187,9 @@ todo:
         }
       };
 
-      var requestBody = { files: { postData: stringify(taskPayload, __, "") } };
-      var _request = request;
-      request = requestBody;
-      var submission = __;
-      try {
-        submission = (function() {
-          var postData;
-          postData = jsonParse(request.files.postData);
-          var wargs = global.__worker_args;
-          var goalTrimmed = isString(postData.goal) ? postData.goal.trim() : "";
-          var taskArgs = postData.args || {};
-          var allowedRemoteKeys = {
-            goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
-            updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
-            planmode: true, planformat: true, convertplan: true, maxsteps: true
-          };
-          var mergedArgs = merge({}, wargs);
-          Object.keys(taskArgs).forEach(function(key) {
-            if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key]; }
-          });
-          mergedArgs.goal = goalTrimmed;
-          var timeout = wargs.defaulttimeout;
-          if (isDef(postData.timeout)) {
-            var parsedTimeout = Number(postData.timeout);
-            if (!isNaN(parsedTimeout) && parsedTimeout > 0) timeout = parsedTimeout * 1000;
-          }
-          if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout;
-          var taskId = genUUID();
-          var now = new Date().getTime();
-          if (isUnDef(global.__worker_taskManager)) {
-            global.__worker_taskManager = new SubtaskManager(mergedArgs, {
-              maxConcurrent: wargs.maxconcurrent,
-              defaultDeadlineMs: wargs.defaulttimeout,
-              defaultMaxAttempts: wargs.delegationmaxretries,
-              maxDepth: wargs.delegationmaxdepth,
-              interactionFn: function(event, message) {
-                var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message);
-                if (isString(resolvedTaskId) && resolvedTaskId.length > 0) global.__worker_appendTaskEvent(resolvedTaskId, event, message);
-                global.__worker_logTaskEvent(resolvedTaskId, event, message);
-              },
-              currentDepth: 0
-            });
-          }
-          var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
-            deadlineMs: timeout,
-            metadata: postData.metadata || {}
-          });
-          global.__worker_tasks[taskId] = {
-            taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
-            args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
-            events: [], metadata: postData.metadata || {}
-          };
-          global.__worker_subtaskToTaskId[subtaskId] = taskId;
-          global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId;
-          global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker");
-          global.__worker_taskManager.start(subtaskId);
-          global.__worker_tasks[taskId].status = "running";
-          global.__worker_tasks[taskId].startedAt = new Date().getTime();
-          return { taskId: taskId, createdAt: now };
-        })();
-      } finally {
-        request = _request;
+      var submission = global.__worker_submitTask(taskPayload, global.__worker_args);
+      if (isMap(submission.error)) {
+        return ow.server.httpd.reply(stringify(submission.error, __, ""), submission.code, ow.server.httpd.mimes.JSON);
       }
 
       var task = global.__worker_tasks[submission.taskId];
@@ -605,7 +490,6 @@ jobs:
     // Initialize global state
     global.__worker_args = args
     global.__worker_tasks = {}
-    global.__worker_taskManager = __
     global.__worker_startTime = java.lang.System.currentTimeMillis()
     global.__worker_subtaskToTaskId = {}
     global.__worker_subtaskShortToTaskId = {}
@@ -643,6 +527,90 @@ jobs:
       if (isString(global.__worker_subtaskShortToTaskId[shortId])) return global.__worker_subtaskShortToTaskId[shortId]
       return __
     }
+
+    global.__worker_cidrMatch = function(ip, cidr) {
+      if (cidr.indexOf("/") < 0) return ip === cidr
+      var parts = cidr.split("/")
+      var cidrIp = parts[0]
+      var prefixLen = parseInt(parts[1], 10)
+      if (isNaN(prefixLen) || prefixLen < 0 || prefixLen > 32) return false
+      var ipToInt = function(addr) {
+        var segs = addr.split(".")
+        if (segs.length !== 4) return NaN
+        var result = 0
+        for (var i = 0; i < 4; i++) {
+          var octet = parseInt(segs[i], 10)
+          if (isNaN(octet) || octet < 0 || octet > 255) return NaN
+          result = (result << 8) | octet
+        }
+        return result >>> 0
+      }
+      var ipNum = ipToInt(ip)
+      var cidrNum = ipToInt(cidrIp)
+      if (isNaN(ipNum) || isNaN(cidrNum)) return false
+      var mask = prefixLen === 0 ? 0 : (0xFFFFFFFF << (32 - prefixLen)) >>> 0
+      return (ipNum & mask) === (cidrNum & mask)
+    }
+
+    global.__worker_submitTask = function(postData, wargs) {
+      var goalTrimmed = isString(postData.goal) ? postData.goal.trim() : ""
+      if (goalTrimmed.length === 0) {
+        return { error: { error: "Missing required field: goal" }, code: 400 }
+      }
+      if (goalTrimmed.length > 10000) {
+        return { error: { error: "Goal exceeds maximum length of 10000 characters" }, code: 400 }
+      }
+      var taskArgs = postData.args || {}
+      var allowedRemoteKeys = {
+        goal: true, format: true, raw: true, chatbotmode: true, useplanning: true,
+        updatefreq: true, updateinterval: true, forceupdates: true, planlog: true,
+        planmode: true, planformat: true, convertplan: true, maxsteps: true
+      }
+      var mergedArgs = merge({}, wargs)
+      Object.keys(taskArgs).forEach(function(key) {
+        if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
+      })
+      mergedArgs.goal = goalTrimmed
+      var timeout = wargs.defaulttimeout
+      if (isDef(postData.timeout)) {
+        var parsedTimeout = Number(postData.timeout)
+        if (!isNaN(parsedTimeout) && parsedTimeout > 0) timeout = parsedTimeout * 1000
+      }
+      if (timeout > wargs.maxtimeout) timeout = wargs.maxtimeout
+      var taskId = genUUID()
+      var now = new Date().getTime()
+      var subtaskId = global.__worker_taskManager.submit(mergedArgs.goal, mergedArgs, {
+        deadlineMs: timeout,
+        metadata: postData.metadata || {}
+      })
+      global.__worker_tasks[taskId] = {
+        taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
+        args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
+        events: [], metadata: postData.metadata || {}
+      }
+      global.__worker_subtaskToTaskId[subtaskId] = taskId
+      global.__worker_subtaskShortToTaskId[subtaskId.substring(0, 8)] = taskId
+      global.__worker_logTaskEvent(taskId, "info", "[subtask:" + subtaskId.substring(0, 8) + "] Task accepted by worker")
+      global.__worker_taskManager.start(subtaskId)
+      global.__worker_tasks[taskId].status = "running"
+      global.__worker_tasks[taskId].startedAt = new Date().getTime()
+      return { taskId: taskId, createdAt: now }
+    }
+
+    global.__worker_taskManager = new SubtaskManager(args, {
+      maxConcurrent: args.maxconcurrent,
+      defaultDeadlineMs: args.defaulttimeout,
+      defaultMaxAttempts: args.delegationmaxretries,
+      maxDepth: args.delegationmaxdepth,
+      interactionFn: function(event, message) {
+        var resolvedTaskId = global.__worker_resolveTaskIdFromMessage(message)
+        if (isString(resolvedTaskId) && resolvedTaskId.length > 0) {
+          global.__worker_appendTaskEvent(resolvedTaskId, event, message)
+        }
+        global.__worker_logTaskEvent(resolvedTaskId, event, message)
+      },
+      currentDepth: 0
+    })
 
     log("Mini-A Worker API starting on port " + args.onport)
     log("Max concurrent tasks: " + args.maxconcurrent)

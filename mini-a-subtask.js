@@ -35,6 +35,7 @@ var SubtaskManager = function(parentArgs, opts) {
   this._workerFailures = {}
   this._workerLastHeartbeat = {}
   this._lastWorkerSelectionError = __
+  this.workerMaxFailures = _$(opts.workerMaxFailures, "opts.workerMaxFailures").isNumber().default(5)
   this.workerProbeRetries = _$(opts.workerProbeRetries, "opts.workerProbeRetries").isNumber().default(3)
   this.workerProbeRetryDelayMs = _$(opts.workerProbeRetryDelayMs, "opts.workerProbeRetryDelayMs").isNumber().default(250)
   this.workerReviveCooldownMs = _$(opts.workerReviveCooldownMs, "opts.workerReviveCooldownMs").isNumber().default(15000)
@@ -60,12 +61,25 @@ var SubtaskManager = function(parentArgs, opts) {
     maxDepthUsed: 0
   }
 
+  this._running = true
+
   if (this.remoteDelegation) {
     this._refreshWorkerProfiles()
   }
   
   // Start watchdog for deadlines
   this._startWatchdog()
+}
+
+/**
+ * <odoc>
+ * <key>SubtaskManager.destroy()</key>
+ * Signals the watchdog thread to stop running.
+ * Call this when the SubtaskManager is no longer needed to free the background thread.
+ * </odoc>
+ */
+SubtaskManager.prototype.destroy = function() {
+  this._running = false
 }
 
 SubtaskManager.prototype._normalizeWorkers = function(workers) {
@@ -111,14 +125,6 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   mergedArgs._delegationDepth = subtask.depth
   mergedArgs._parentSubtaskId = subtask.parentId
   return mergedArgs
-}
-
-SubtaskManager.prototype._nextWorker = function() {
-  var healthyWorkers = this._getHealthyWorkers()
-  if (healthyWorkers.length === 0) return __
-  var idx = this._workerCursor % healthyWorkers.length
-  this._workerCursor++
-  return healthyWorkers[idx]
 }
 
 SubtaskManager.prototype._refreshWorkerProfiles = function() {
@@ -370,7 +376,7 @@ SubtaskManager.prototype._recordWorkerFailure = function(workerUrl, error) {
   if (!isString(workerUrl) || workerUrl.length === 0) return
   var failures = _$(this._workerFailures[workerUrl], "this._workerFailures[workerUrl]").isNumber().default(0) + 1
   this._workerFailures[workerUrl] = failures
-  if (failures >= this.defaultMaxAttempts) {
+  if (failures >= this.workerMaxFailures) {
     var reason = "Repeated transport/runtime failures"
     if (isString(error) && error.length > 0) reason += ": " + error
     this._markWorkerDead(workerUrl, reason)
@@ -630,7 +636,7 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
   }
 
   if (this.remoteDelegation && isString(subtask.workerUrl) && subtask.workerUrl.length > 0) {
-    this._markWorkerDead(subtask.workerUrl, "Subtask exhausted max attempts (" + subtask.maxAttempts + ")")
+    this._recordWorkerFailure(subtask.workerUrl, "Subtask exhausted max attempts (" + subtask.maxAttempts + ")")
   }
 
   subtask.status = "failed"
@@ -1101,9 +1107,11 @@ SubtaskManager.prototype.waitForAll = function(subtaskIds, timeoutMs) {
   
   timeoutMs = _$(timeoutMs, "timeoutMs").isNumber().default(300000)
   var results = []
+  var startAll = new Date().getTime()
   
   for (var i = 0; i < subtaskIds.length; i++) {
-    var remainingTime = timeoutMs - (results.length > 0 ? 0 : 0)
+    var elapsed = new Date().getTime() - startAll
+    var remainingTime = Math.max(1, timeoutMs - elapsed)
     results.push(this.waitFor(subtaskIds[i], remainingTime))
   }
   
@@ -1199,13 +1207,12 @@ SubtaskManager.prototype.getMetrics = function() {
  */
 SubtaskManager.prototype._processQueue = function() {
   while (this.runningCount < this.maxConcurrent && this.pendingQueue.length > 0) {
-    var nextId = this.pendingQueue[0]
+    var nextId = this.pendingQueue.shift()
+    var subtask = this.subtasks[nextId]
+    if (!isDef(subtask) || subtask.status !== "pending") continue
     try {
       this.start(nextId)
     } catch(e) {
-      // If start fails, remove from queue and mark as failed
-      this.pendingQueue.shift()
-      var subtask = this.subtasks[nextId]
       if (isDef(subtask)) {
         subtask.status = "failed"
         subtask.error = "Failed to start: " + (isDef(e) && isString(e.message) ? e.message : stringify(e, __, ""))
@@ -1226,7 +1233,7 @@ SubtaskManager.prototype._startWatchdog = function() {
   var parent = this
   
   $doV(function() {
-    while (true) {
+    while (parent._running) {
       try {
         var now = new Date().getTime()
         var subtaskIds = Object.keys(parent.subtasks)
