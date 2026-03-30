@@ -56,7 +56,17 @@ version: '20260329'
 dependencies:
   openaf: '>=20250915'
 files:
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+- .github/mini-a-con-screenshot.png
+- .github/mini-a-web-screenshot1.jpg
+- .github/version.svg
+- .github/workflows/github-action.yml
 - .odoc.db
+- .openaf_precompiled/.t8-20260330
+- .openaf_precompiled/mini-a-common_js.class
+- .openaf_precompiled/mini-a-subtask_js.class
+- .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -134,16 +144,26 @@ files:
 - tests/progToolCall.js
 - tests/progToolCall.yaml
 filesHash:
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  .github/mini-a-con-screenshot.png: cb5fdf4b3013f482abbe9e4b358e6f0137a741e0
+  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
+  .github/version.svg: 57ec76c1bd9212b982c53eb45c61e477b4dc7bbe
+  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20260330: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a-common_js.class: 1e388163360eac422bf696f51b13746ddb495b2c
+  .openaf_precompiled/mini-a-subtask_js.class: 3b7f53407fcb1a22c4c85bf40b6e9d076514f2ec
+  .openaf_precompiled/mini-a-utils_js.class: eecd7087df3cab6b624d6a7d984f99dfa2fbe151
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
   CHEATSHEET.md: e4073d438fd2aa440f439b7c85bf9917545f73f3
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: bd8edeeed6015f42690cc1849af30b3c292af8b0
-  USAGE.md: 7a5bc8c06a70a026ffdf94e72420d5c4ceb413d3
+  README.md: b57fd2eb72c4c4e300bd2c9b530fe3e1564565b4
+  USAGE.md: 61840b840e2dd86e4a6ad5e3104bba942220c613
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
-  docs/DELEGATION.md: 59c81b7209ff4d3438a3ba11cf6a27ce92d8dd4e
+  docs/DELEGATION.md: bb6b51ac8e0a3350b5438d8f353861e9120d6443
   docs/LEARN.md: 5f2397d999322fd896be80ee2dddeec90bbf069c
   docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
@@ -185,16 +205,16 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: 941306f550bcc3fa6bb539ae81fa1212d8980128
+  mini-a-con.js: 9cdeb901cfd4ffa5ec78e7a6e05c81aaceaea671
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
   mini-a-modes.yaml: 3e94509e2e416ac01e90551340c2cb7cf13db1b1
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
-  mini-a-subtask.js: 9070832a702e01d236b004719e92b0f4721aa3ec
+  mini-a-subtask.js: 535561c9c1c8b22e513082b62d9383f40afdb51a
   mini-a-utils.js: 74929e106d866962ef08a6ff413f70b247e579c9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 1980a21f35f451b2fbd4b5666e10dc1919f25a9b
-  mini-a-worker.yaml: ee301eb7e9af6910780b350ee6a06e89ce47f75e
+  mini-a-worker.yaml: 1c9f0b6128515f1fdb9d80660bcce23f13ea0a78
   mini-a.js: 641285519879e8aca3af817052317595636f19a1
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cd7c86b2489728dcd35c62c43c508fb11142b023
@@ -204,8 +224,8 @@ filesHash:
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
-  tests/coreFunctionality.js: 7c1772f595cb10d4aa6c6255659a16566db6430f
-  tests/coreFunctionality.yaml: 36695b001c96ba33f8e750c0f0502c5cebf272a7
+  tests/coreFunctionality.js: 1a662f75f77f815266052f9fe2634648fff28501
+  tests/coreFunctionality.yaml: 6a260eb54d1fcc8f64744b20810f02bef975b6ef
   tests/miniAUtils.js: e73053daa6bb6b14934f21fa221eaea9c35bd6b0
   tests/miniAUtils.yaml: 1d1515b208e55da5600906e355ddc1a0eb7f82d7
   tests/progToolCall.js: 83228632725f51069fc2a61490e31cdec340315c

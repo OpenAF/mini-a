@@ -57,6 +57,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testUtilsMcpAllowAndDenyFilters
 
+- name: MiniA Core Tests::WorkerSkillNormalization
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerNormalizesWorkerSkills
+
+- name: MiniA Core Tests::WorkerSkillRouting
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerPrefersSpecializedWorkerSkills
+
+- name: MiniA Core Tests::WorkerFallbackRouting
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerFallsBackToCompatibleWorkerWhenNoSkillMatches
+
+- name: MiniA Core Tests::WorkerCompatibilityGates
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerRespectsHardCompatibilityGatesBeforeSkillRouting
+
 - name: MiniA Core Tests::LinuxSandboxWarnsWhenMissing
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -116,6 +136,10 @@ todo:
 - MiniA Core Tests::NormalizeToolResult
 - MiniA Core Tests::UtilsMcpSkillsToggle
 - MiniA Core Tests::UtilsMcpAllowAndDeny
+- MiniA Core Tests::WorkerSkillNormalization
+- MiniA Core Tests::WorkerSkillRouting
+- MiniA Core Tests::WorkerFallbackRouting
+- MiniA Core Tests::WorkerCompatibilityGates
 - MiniA Core Tests::LinuxSandboxWarnsWhenMissing
 - MiniA Core Tests::LinuxSandboxWritableBinds
 - MiniA Core Tests::LinuxSandboxNoNetwork

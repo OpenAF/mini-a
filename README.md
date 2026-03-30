@@ -337,7 +337,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets); set `OAF_MINI_A_MODE` to pick a default when `mode=` is omitted
 - **Sub-Goal Delegation** - Hierarchical task decomposition with concurrent child agents
   - **Local Delegation** - Spawn child Mini-A agents in the same process for parallel subtask execution (`usedelegation=true`)
-  - **Remote Worker Routing** - Route delegated subtasks by worker `/info` capabilities/limits plus name/description hints, with round-robin tie-breaks (set `workers=http://worker1:8080,http://worker2:8080`)
+  - **Remote Worker Routing** - Route delegated subtasks by worker `/info` capabilities/limits plus A2A-compatible `skills`, with round-robin tie-breaks for equivalent workers (set `workers=http://worker1:8080,http://worker2:8080`)
   - **Optional A2A Transport** - Use A2A HTTP+JSON/REST worker endpoints instead of the legacy `/task` protocol (`usea2a=true`)
   - **Dynamic Worker Registration** - Workers can self-register/heartbeat/deregister through a dedicated parent registration server (`workerreg`, `workerregurl`, `workerevictionttl`)
   - **Worker API** - Headless HTTP API for distributed agent workloads across processes/containers/hosts (`mini-a-worker.yaml`)
@@ -433,6 +433,8 @@ Mini-A ships with complementary components:
 | `workerregtoken` | Bearer token for dynamic worker registration endpoints | - |
 | `workerevictionttl` | Heartbeat TTL in milliseconds before dynamic worker eviction | `60000` |
 | `workerregurl` | Parent registration endpoint(s) for worker self-registration (`workermode=true`) | - |
+| `workerskills` | JSON/SLON array of A2A-style worker skills exposed by `workermode=true` | - |
+| `workertags` | Comma-separated tags appended to the default worker skill in `workermode=true` | - |
 | `workerreginterval` | Worker registration heartbeat interval in milliseconds | `30000` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |

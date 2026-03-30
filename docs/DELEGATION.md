@@ -50,7 +50,7 @@ mini-a
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 
-When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). Worker metadata (`name`, `description`) further influences routing to better align with sub-goal text. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If worker profiles are unavailable, it falls back to simple round-robin across all workers.
+When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). It then scores workers using A2A-compatible `skills` metadata mirrored from the worker agent card, with worker `name` and `description` kept as weaker fallback hints. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If there is no strong skill match, it still falls back to the best compatible worker rather than failing closed.
 
 Set `usea2a=true` to switch the parent-to-worker transport from the legacy `/task` + `/status` + `/result` endpoints to the A2A HTTP+JSON/REST flow (`POST /message:send`, `GET /tasks?id=...`, `POST /tasks:cancel`).
 
@@ -196,6 +196,8 @@ ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
 | `taskretention` | number | `3600` | Seconds to keep completed results |
 | `workername` | string | `"mini-a-worker"` | Worker name reported by `/info` |
 | `workerdesc` | string | `"Mini-A worker API"` | Worker description reported by `/info` |
+| `workerskills` | string | (none) | JSON/SLON array of A2A-style worker skills (`id`, `name`, `description`, `tags`, `examples`) |
+| `workertags` | string | (none) | Comma-separated tags appended to the default `run-goal` worker skill |
 | `workerregurl` | string | (none) | Comma-separated parent registration URL(s) to self-register with |
 | `workerregtoken` | string | (none) | Bearer token used for registration endpoint authentication |
 | `workerreginterval` | number | `30000` | Heartbeat interval (ms) used to refresh registration |
@@ -206,7 +208,7 @@ Plus all standard Mini-A parameters: `model`, `mcp`, `rules`, `knowledge`, `uses
 
 #### `GET /info`
 
-Returns server capabilities and configuration.
+Returns server capabilities and configuration. The `skills` payload is intentionally A2A-compatible and mirrors the worker agent card so Mini-A does not need a separate routing schema.
 
 ```bash
 curl http://localhost:8080/info
@@ -221,6 +223,15 @@ curl http://localhost:8080/info
   "description": "Mini-A worker API",
   "version": "1.0.0",
   "capabilities": ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
+  "skills": [
+    {
+      "id": "network-latency",
+      "name": "Network latency",
+      "description": "Measure TCP and TLS latency for remote hosts",
+      "tags": ["network", "latency", "tls", "port"],
+      "examples": ["Measure latency to yahoo.co.jp:443"]
+    }
+  ],
   "limits": {
     "maxConcurrent": 4,
     "defaultTimeoutMs": 300000,
@@ -230,6 +241,23 @@ curl http://localhost:8080/info
   "auth": "bearer"
 }
 ```
+
+### Specializing Workers
+
+Use A2A-style worker skills to make routing behave more like tool selection:
+
+```bash
+mini-a workermode=true onport=8081 apitoken=secret \
+  workername="network-east" workerdesc="Network diagnostics worker" \
+  workertags="network,latency,tls" \
+  workerskills='[{ "id": "network-latency", "name": "Network latency", "description": "Measure TCP and TLS latency for remote hosts", "tags": ["network","latency","tls","port"], "examples": ["Measure latency to yahoo.co.jp:443"] }]'
+
+mini-a workermode=true onport=8082 apitoken=secret \
+  workername="time-east" workerdesc="Timezone and current time worker" \
+  workerskills='[{ "id": "time-utilities", "name": "Time utilities", "description": "Get current time and convert timezones for named locations", "tags": ["time","timezone","clock"], "examples": ["Get current time in Tokyo and London"] }]'
+```
+
+Mini-A also performs lightweight skill inference from enabled worker features such as `mcp=...`, `useutils=true`, and `useskills=true`, but explicit `workerskills` remain the authoritative source.
 
 #### `POST /task`
 

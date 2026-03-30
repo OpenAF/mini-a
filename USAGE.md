@@ -1256,6 +1256,17 @@ Start a headless worker API for programmatic delegation:
 # Start worker with authentication
 mini-a workermode=true onport=8080 apitoken=your-secret-token workername="research-east" workerdesc="US-East research worker"
 
+# Start a network-specialized worker using A2A-compatible skills metadata
+mini-a workermode=true onport=8081 apitoken=your-secret-token \
+  workername="network-east" workerdesc="Network diagnostics worker" \
+  workertags="network,latency,tls" \
+  workerskills='[{ "id": "network-latency", "name": "Network latency", "description": "Measure TCP and TLS latency for remote hosts", "tags": ["network","latency","tls","port"], "examples": ["Measure latency to yahoo.co.jp:443"] }]'
+
+# Start a time-specialized worker
+mini-a workermode=true onport=8082 apitoken=your-secret-token \
+  workername="time-east" workerdesc="Timezone and current time worker" \
+  workerskills='[{ "id": "time-utilities", "name": "Time utilities", "description": "Get current time and convert timezones for named locations", "tags": ["time","timezone","clock"], "examples": ["Get current time in Tokyo and London"] }]'
+
 # Parent agent using remote workers for delegation
 mini-a usedelegation=true workers="http://localhost:8080" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
 
@@ -1286,7 +1297,7 @@ curl -X POST http://localhost:8080/result \
 ```
 
 **Worker API Endpoints:**
-- `GET /info` — Server capabilities
+- `GET /info` — Server capabilities plus A2A-compatible `skills` used by Mini-A routing
 - `POST /task` — Submit new task (Mini-A native API)
 - `POST /status` — Poll task status (Mini-A native API)
 - `POST /result` — Get final result (Mini-A native API)
@@ -1320,6 +1331,8 @@ curl -X POST http://localhost:8080/message:send \
 curl -H "Authorization: Bearer your-secret-token" \
   http://localhost:8080/tasks
 ```
+
+Worker specialization metadata stays A2A-compatible. `/.well-known/agent.json` is the canonical agent card, and `/info` mirrors the same `skills` payload so Mini-A can route delegated subtasks without inventing a second schema.
 
 For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELEGATION.md)**.
 

@@ -35,6 +35,7 @@ var SubtaskManager = function(parentArgs, opts) {
   this._workerFailures = {}
   this._workerLastHeartbeat = {}
   this._lastWorkerSelectionError = __
+  this._lastWorkerSelectionDetails = __
   this.workerMaxFailures = _$(opts.workerMaxFailures, "opts.workerMaxFailures").isNumber().default(5)
   this.workerProbeRetries = _$(opts.workerProbeRetries, "opts.workerProbeRetries").isNumber().default(3)
   this.workerProbeRetryDelayMs = _$(opts.workerProbeRetryDelayMs, "opts.workerProbeRetryDelayMs").isNumber().default(250)
@@ -251,6 +252,8 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
     headers.Authorization = "Bearer " + this.parentArgs.apitoken
   }
 
+  var parent = this
+
   try {
     var response = $rest({ requestHeaders: headers }).get(workerUrl + "/info")
     if (!isMap(response)) {
@@ -263,6 +266,14 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
         .filter(function(cap) { return isString(cap) && cap.trim().length > 0 })
         .map(function(cap) { return cap.trim().toLowerCase() })
         .sort()
+    }
+
+    var skills = this._normalizeWorkerSkills(response.skills)
+    if (skills.length === 0) {
+      try {
+        var agentCard = $rest({ requestHeaders: headers }).get(workerUrl + "/.well-known/agent.json")
+        if (isMap(agentCard)) skills = parent._normalizeWorkerSkills(agentCard.skills)
+      } catch(ignoreAgentCardErr) {}
     }
 
     var limits = isMap(response.limits) ? response.limits : {}
@@ -280,7 +291,8 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
       name: workerName,
       description: workerDesc,
       capabilities: capabilities,
-      limits: normalizedLimits
+      limits: normalizedLimits,
+      skills: skills
     }
 
     return {
@@ -288,13 +300,101 @@ SubtaskManager.prototype._fetchWorkerProfile = function(workerUrl) {
       name: workerName,
       description: workerDesc,
       capabilities: capabilities,
+      skills: skills,
       limits: normalizedLimits,
       signature: stringify(signatureObj, __, "")
     }
   } catch(ignoreInfoErr) {
     var errMsg = isDef(ignoreInfoErr) && isString(ignoreInfoErr.message) ? ignoreInfoErr.message : stringify(ignoreInfoErr, __, "")
-    return { status: "unknown", name: "", description: "", signature: "unknown", capabilities: [], limits: {}, error: errMsg }
+    return { status: "unknown", name: "", description: "", signature: "unknown", capabilities: [], skills: [], limits: {}, error: errMsg }
   }
+}
+
+SubtaskManager.prototype._tokenizeWorkerText = function(value) {
+  if (!isString(value) || value.trim().length === 0) return []
+  var normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+  if (normalized.length === 0) return []
+
+  var stop = {
+    "the": true, "and": true, "for": true, "with": true, "that": true, "this": true,
+    "from": true, "into": true, "your": true, "their": true, "then": true, "than": true,
+    "have": true, "will": true, "would": true, "should": true, "could": true, "about": true,
+    "goal": true, "goals": true, "task": true, "tasks": true, "agent": true, "agents": true,
+    "worker": true, "workers": true, "using": true, "uses": true, "used": true, "make": true,
+    "list": true, "show": true, "give": true, "gets": true, "get": true, "current": true,
+    "both": true, "into": true, "each": true
+  }
+
+  var seen = {}
+  return normalized.split(/\s+/)
+    .filter(function(token) {
+      if (!isString(token) || token.length < 2) return false
+      if (stop[token] === true) return false
+      if (seen[token] === true) return false
+      seen[token] = true
+      return true
+    })
+}
+
+SubtaskManager.prototype._normalizeWorkerSkills = function(skills) {
+  if (!isArray(skills)) return []
+  var parent = this
+  var normalized = []
+
+  skills.forEach(function(entry, idx) {
+    var skill = {}
+    if (isString(entry) && entry.trim().length > 0) {
+      skill.id = entry.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+      skill.name = entry.trim()
+      skill.description = ""
+      skill.tags = []
+      skill.examples = []
+    } else if (isMap(entry)) {
+      skill.id = isString(entry.id) ? entry.id.trim() : ""
+      skill.name = isString(entry.name) ? entry.name.trim() : ""
+      skill.description = isString(entry.description) ? entry.description.trim() : ""
+      skill.tags = isArray(entry.tags) ? entry.tags.filter(function(tag) { return isString(tag) && tag.trim().length > 0 }).map(function(tag) { return tag.trim().toLowerCase() }) : []
+      skill.examples = isArray(entry.examples) ? entry.examples.filter(function(example) { return isString(example) && example.trim().length > 0 }).map(function(example) { return example.trim() }) : []
+    } else {
+      return
+    }
+
+    if (!isString(skill.id) || skill.id.length === 0) {
+      if (isString(skill.name) && skill.name.length > 0) {
+        skill.id = skill.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+      } else {
+        skill.id = "skill-" + idx
+      }
+    }
+    if (!isString(skill.name) || skill.name.length === 0) skill.name = skill.id
+    if (!isString(skill.description)) skill.description = ""
+    if (!isArray(skill.tags)) skill.tags = []
+    if (!isArray(skill.examples)) skill.examples = []
+
+    var tokenBag = []
+    tokenBag = tokenBag.concat(parent._tokenizeWorkerText(skill.id))
+    tokenBag = tokenBag.concat(parent._tokenizeWorkerText(skill.name))
+    tokenBag = tokenBag.concat(parent._tokenizeWorkerText(skill.description))
+    skill.tags.forEach(function(tag) {
+      tokenBag = tokenBag.concat(parent._tokenizeWorkerText(tag))
+    })
+    skill.examples.forEach(function(example) {
+      tokenBag = tokenBag.concat(parent._tokenizeWorkerText(example))
+    })
+    var seenTokens = {}
+    skill.tokens = tokenBag.filter(function(token) {
+      if (seenTokens[token] === true) return false
+      seenTokens[token] = true
+      return true
+    })
+
+    normalized.push(skill)
+  })
+
+  return normalized
 }
 
 SubtaskManager.prototype._getHealthyWorkers = function() {
@@ -390,8 +490,10 @@ SubtaskManager.prototype._recordWorkerSuccess = function(workerUrl) {
 
 SubtaskManager.prototype._buildWorkerRequirements = function(subtask, mergedArgs) {
   var args = isMap(mergedArgs) ? mergedArgs : {}
+  var goalText = isDef(subtask) && isString(subtask.goal) ? subtask.goal.toLowerCase() : ""
   return {
-    goalText: isDef(subtask) && isString(subtask.goal) ? subtask.goal.toLowerCase() : "",
+    goalText: goalText,
+    goalTokens: this._tokenizeWorkerText(goalText),
     requiresRunGoal: true,
     requiresPlanning: toBoolean(args.useplanning) === true,
     requiresShell: toBoolean(args.useshell) === true,
@@ -429,12 +531,15 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
   var req = isMap(requirements) ? requirements : {}
   var p = isMap(profile) ? profile : {}
   var caps = isArray(p.capabilities) ? p.capabilities : []
+  var skills = isArray(p.skills) ? p.skills : []
   var limits = isMap(p.limits) ? p.limits : {}
   var goalText = isString(req.goalText) ? req.goalText : ""
+  var goalTokens = isArray(req.goalTokens) ? req.goalTokens : []
   var nameText = isString(p.name) ? p.name.toLowerCase() : ""
   var descText = isString(p.description) ? p.description.toLowerCase() : ""
 
   var score = 0
+  var skillScore = 0
   if (p.status === "ok") score += 1000
   if (caps.indexOf("run-goal") >= 0) score += 200
   if (req.requiresPlanning === true && caps.indexOf("planning") >= 0) score += 120
@@ -449,6 +554,53 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
   if (isNumber(limits.maxConcurrent) && limits.maxConcurrent > 0) {
     score += Math.min(50, limits.maxConcurrent)
   }
+
+  var bestSkill = __
+  skills.forEach(function(skill) {
+    if (!isMap(skill)) return
+    var current = 0
+    var matchedTokens = []
+    var nameValue = isString(skill.name) ? skill.name.toLowerCase() : ""
+    var idValue = isString(skill.id) ? skill.id.toLowerCase() : ""
+    var descValue = isString(skill.description) ? skill.description.toLowerCase() : ""
+    var tags = isArray(skill.tags) ? skill.tags : []
+    var examples = isArray(skill.examples) ? skill.examples : []
+    var tokens = isArray(skill.tokens) ? skill.tokens : []
+
+    if (goalText.length > 0 && nameValue.length > 0 && goalText.indexOf(nameValue) >= 0) current += 140
+    if (goalText.length > 0 && idValue.length > 0 && goalText.indexOf(idValue.replace(/-/g, " ")) >= 0) current += 120
+
+    tags.forEach(function(tag) {
+      if (!isString(tag)) return
+      var tagText = tag.toLowerCase()
+      if (goalText.indexOf(tagText) >= 0) current += 90
+    })
+
+    tokens.forEach(function(token) {
+      if (goalTokens.indexOf(token) < 0) return
+      matchedTokens.push(token)
+      current += 20
+    })
+
+    examples.forEach(function(example) {
+      var exampleText = isString(example) ? example.toLowerCase() : ""
+      if (exampleText.length > 0 && goalText.length > 0 && (goalText.indexOf(exampleText) >= 0 || exampleText.indexOf(goalText) >= 0)) {
+        current += 80
+      }
+    })
+
+    if (matchedTokens.length > 0 && descValue.length > 0) current += Math.min(60, matchedTokens.length * 10)
+    if (current > skillScore) {
+      skillScore = current
+      bestSkill = {
+        id: skill.id,
+        name: skill.name,
+        matchedTokens: matchedTokens
+      }
+    }
+  })
+
+  score += skillScore
   if (goalText.length > 0 && nameText.length > 0 && goalText.indexOf(nameText) >= 0) {
     score += 80
   }
@@ -461,11 +613,16 @@ SubtaskManager.prototype._scoreWorkerProfile = function(profile, requirements) {
     if (matched > 0) score += Math.min(60, matched * 10)
   }
 
-  return score
+  return {
+    score: score,
+    skillScore: skillScore,
+    bestSkill: bestSkill
+  }
 }
 
 SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
   this._lastWorkerSelectionError = __
+  this._lastWorkerSelectionDetails = __
   var healthyWorkers = this._getHealthyWorkers()
   if (healthyWorkers.length === 0) {
     var deadReasons = []
@@ -484,6 +641,7 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
 
   var req = this._buildWorkerRequirements(subtask, mergedArgs)
   var parent = this
+  var evaluations = {}
   var compatible = healthyWorkers.filter(function(workerUrl) {
     return parent._isWorkerProfileCompatible(parent._workerProfiles[workerUrl], req)
   })
@@ -526,6 +684,7 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
   var grouped = {}
   compatible.forEach(function(workerUrl) {
     var profile = parent._workerProfiles[workerUrl]
+    evaluations[workerUrl] = parent._scoreWorkerProfile(profile, req)
     var signature = isMap(profile) && isString(profile.signature) ? profile.signature : "unknown"
     if (!isArray(grouped[signature])) grouped[signature] = []
     grouped[signature].push(workerUrl)
@@ -537,10 +696,10 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
   }
 
   signatures.sort(function(a, b) {
-    var profileA = parent._workerProfiles[grouped[a][0]] || {}
-    var profileB = parent._workerProfiles[grouped[b][0]] || {}
-    var scoreA = parent._scoreWorkerProfile(profileA, req)
-    var scoreB = parent._scoreWorkerProfile(profileB, req)
+    var evalA = evaluations[grouped[a][0]] || { score: 0 }
+    var evalB = evaluations[grouped[b][0]] || { score: 0 }
+    var scoreA = evalA.score
+    var scoreB = evalB.score
     if (scoreA === scoreB) return a.localeCompare(b)
     return scoreB - scoreA
   })
@@ -554,7 +713,16 @@ SubtaskManager.prototype._nextWorkerForSubtask = function(subtask, mergedArgs) {
   var groupCursor = _$(this._workerGroupCursor[bestSignature], "this._workerGroupCursor[bestSignature]").isNumber().default(0)
   var idx = groupCursor % bestWorkers.length
   this._workerGroupCursor[bestSignature] = groupCursor + 1
-  return bestWorkers[idx]
+  var selectedWorker = bestWorkers[idx]
+  var selectedEval = evaluations[selectedWorker] || { score: 0, skillScore: 0 }
+  this._lastWorkerSelectionDetails = {
+    workerUrl: selectedWorker,
+    score: selectedEval.score,
+    skillScore: selectedEval.skillScore,
+    matchedSkill: selectedEval.bestSkill,
+    usedCompatibilityFallback: !(isNumber(selectedEval.skillScore) && selectedEval.skillScore > 0)
+  }
+  return selectedWorker
 }
 
 SubtaskManager.prototype._remoteCall = function(method, workerUrl, path, data) {
@@ -742,6 +910,13 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         subtask.remoteTaskId = taskResponse.taskId
       }
       parent.interactionFn("delegate", prefix + " Routed to worker: " + workerUrl)
+      if (isMap(parent._lastWorkerSelectionDetails) && parent._lastWorkerSelectionDetails.workerUrl === workerUrl) {
+        if (isMap(parent._lastWorkerSelectionDetails.matchedSkill) && isString(parent._lastWorkerSelectionDetails.matchedSkill.name) && parent._lastWorkerSelectionDetails.matchedSkill.name.length > 0) {
+          parent.interactionFn("delegate", prefix + " Worker skill match: " + parent._lastWorkerSelectionDetails.matchedSkill.name)
+        } else if (parent._lastWorkerSelectionDetails.usedCompatibilityFallback === true) {
+          parent.interactionFn("delegate", prefix + " Worker routing used compatibility fallback (no strong skill match)")
+        }
+      }
 
       while (subtask.status === "running") {
         sleep(parent.remotePollIntervalMs, true)

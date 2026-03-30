@@ -41,6 +41,14 @@ help:
     desc     : Worker description reported by /info
     example  : "US-East research worker"
     mandatory: false
+  - name     : workerskills
+    desc     : JSON/SLON array of A2A-style worker skill descriptors (id, name, description, tags, examples)
+    example  : '[{ "id": "network-latency", "name": "Network latency", "tags": ["network","latency"], "examples": ["Measure latency to yahoo.co.jp:443"] }]'
+    mandatory: false
+  - name     : workertags
+    desc     : Comma-separated tags appended to the default run-goal worker skill
+    example  : "network,latency,tls"
+    mandatory: false
   - name     : workerregurl
     desc     : Comma-separated list of main instance registration URLs
     example  : "http://main1:12345,http://main2:12345"
@@ -70,22 +78,7 @@ todo:
 - (httpdService): "${onport:-8888}"
   ((uri       )): /info
   ((execURI   )): | #js
-    var wargs = global.__worker_args;
-    var response = {
-      status: "ok",
-      name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
-      description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
-      version: "1.0.0",
-      capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
-      limits: {
-        maxConcurrent: wargs.maxconcurrent,
-        defaultTimeoutMs: wargs.defaulttimeout,
-        maxTimeoutMs: wargs.maxtimeout,
-        maxSteps: wargs.maxsteps || 15,
-        useshell: toBoolean(wargs.useshell) || false
-      },
-      auth: isDef(wargs.apitoken) ? "bearer" : "none"
-    };
+    var response = global.__worker_getInfoResponse();
     return ow.server.httpd.reply(stringify(response, __, ""), __, ow.server.httpd.mimes.JSON);
   ((error    )): true
 
@@ -93,30 +86,7 @@ todo:
 - (httpdService): "${onport:-8888}"
   ((uri       )): /.well-known/agent.json
   ((execURI   )): | #js
-    var wargs = global.__worker_args;
-    var baseUrl = "http://" + ow.net.getHostAddress() + ":" + wargs.onport;
-    var card = {
-      protocolVersion: "0.3.0",
-      name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
-      description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
-      url: baseUrl,
-      preferredTransport: "HTTP+JSON",
-      additionalInterfaces: ["mini-a-worker-v1"],
-      capabilities: {
-        streaming: false,
-        pushNotifications: false,
-        stateTransitionHistory: true
-      },
-      skills: [
-        {
-          id: "run-goal",
-          name: "Run goal",
-          description: "Executes Mini-A goals asynchronously and returns task results",
-          tags: ["planning", "delegation", "research"],
-          examples: ["Summarize this document", "Create a release checklist"]
-        }
-      ]
-    };
+    var card = global.__worker_getAgentCard(false);
     return ow.server.httpd.reply(stringify(card, __, ""), __, ow.server.httpd.mimes.JSON);
   ((error    )): true
 
@@ -296,25 +266,7 @@ todo:
   ((uri       )): /extendedAgentCard
   ((execPre   )): *authCheck
   ((execURI   )): | #js
-    var wargs = global.__worker_args;
-    var card = {
-      protocolVersion: "0.3.0",
-      name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
-      description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
-      version: "1.0.0",
-      capabilities: {
-        streaming: false,
-        pushNotifications: false,
-        stateTransitionHistory: true
-      },
-      interfaces: {
-        a2aHttpJsonRest: {
-          messageSend: "/message:send",
-          tasks: "/tasks",
-          cancel: "/tasks:cancel"
-        }
-      }
-    };
+    var card = global.__worker_getAgentCard(true);
     return ow.server.httpd.reply(stringify(card, __, ""), __, ow.server.httpd.mimes.JSON);
   ((error    )): true
 
@@ -469,6 +421,8 @@ jobs:
     args.taskretention = _$(args.taskretention, "args.taskretention").toNumber().isNumber().default(3600)
     args.workername = _$(args.workername, "args.workername").isString().default("mini-a-worker")
     args.workerdesc = _$(args.workerdesc, "args.workerdesc").isString().default("Mini-A worker API")
+    args.workerskills = _$(args.workerskills, "args.workerskills").default(__)
+    args.workertags = _$(args.workertags, "args.workertags").isString().default(__)
     args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").toNumber().isNumber().default(2)
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").toNumber().isNumber().default(3)
     args.workerregurl = _$(args.workerregurl, "args.workerregurl").isString().default(__)
@@ -496,6 +450,7 @@ jobs:
     global.__worker_regTargets = []
     global.__worker_selfUrl = __
     global.__worker_regInterval = __
+    global.__worker_skillCache = __
 
     global.__worker_appendTaskEvent = function(taskId, event, message) {
       if (!isString(taskId) || isUnDef(global.__worker_tasks[taskId])) return
@@ -550,6 +505,276 @@ jobs:
       if (isNaN(ipNum) || isNaN(cidrNum)) return false
       var mask = prefixLen === 0 ? 0 : (0xFFFFFFFF << (32 - prefixLen)) >>> 0
       return (ipNum & mask) === (cidrNum & mask)
+    }
+
+    global.__worker_splitTags = function(value) {
+      if (!isString(value) || value.trim().length === 0) return []
+      return value.split(",").map(function(entry) { return String(entry || "").trim().toLowerCase() }).filter(function(entry) { return entry.length > 0 })
+    }
+
+    global.__worker_parseSkillsInput = function(raw) {
+      if (isArray(raw)) return raw
+      if (isMap(raw)) return [raw]
+      if (!isString(raw) || raw.trim().length === 0) return []
+      var trimmed = raw.trim()
+      try {
+        var parsed = jsonParse(trimmed)
+        if (isArray(parsed)) return parsed
+        if (isMap(parsed)) return [parsed]
+      } catch(ignoreJsonParse) {}
+      try {
+        var slonParsed = af.fromJSSLON(trimmed)
+        if (isArray(slonParsed)) return slonParsed
+        if (isMap(slonParsed)) return [slonParsed]
+      } catch(ignoreSlonParse) {}
+      return []
+    }
+
+    global.__worker_normalizeSkills = function(rawSkills) {
+      if (!isArray(rawSkills)) return []
+      var normalized = []
+      var byId = {}
+
+      var _tokens = function(value) {
+        if (!isString(value) || value.trim().length === 0) return []
+        var seen = {}
+        return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(function(token) {
+          if (!isString(token) || token.length < 2) return false
+          if (seen[token] === true) return false
+          seen[token] = true
+          return true
+        })
+      }
+
+      var _mergeSkill = function(entry) {
+        var skill = {}
+        if (isString(entry) && entry.trim().length > 0) {
+          skill.id = entry.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+          skill.name = entry.trim()
+          skill.description = ""
+          skill.tags = []
+          skill.examples = []
+        } else if (isMap(entry)) {
+          skill.id = isString(entry.id) ? entry.id.trim() : ""
+          skill.name = isString(entry.name) ? entry.name.trim() : ""
+          skill.description = isString(entry.description) ? entry.description.trim() : ""
+          skill.tags = isArray(entry.tags) ? entry.tags.map(function(tag) { return String(tag || "").trim().toLowerCase() }).filter(function(tag) { return tag.length > 0 }) : []
+          skill.examples = isArray(entry.examples) ? entry.examples.map(function(example) { return String(example || "").trim() }).filter(function(example) { return example.length > 0 }) : []
+        } else {
+          return
+        }
+
+        if (!isString(skill.id) || skill.id.length === 0) {
+          skill.id = (isString(skill.name) && skill.name.length > 0 ? skill.name : "skill").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+        }
+        if (!isString(skill.name) || skill.name.length === 0) skill.name = skill.id
+        if (!isString(skill.description)) skill.description = ""
+        if (!isArray(skill.tags)) skill.tags = []
+        if (!isArray(skill.examples)) skill.examples = []
+
+        var target = byId[skill.id]
+        if (isUnDef(target)) {
+          target = {
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            tags: [],
+            examples: []
+          }
+          byId[skill.id] = target
+          normalized.push(target)
+        }
+
+        if ((!isString(target.name) || target.name.length === 0) && skill.name.length > 0) target.name = skill.name
+        if ((!isString(target.description) || target.description.length === 0) && skill.description.length > 0) target.description = skill.description
+        target.tags = target.tags.concat(skill.tags)
+        target.examples = target.examples.concat(skill.examples)
+      }
+
+      rawSkills.forEach(_mergeSkill)
+
+      normalized.forEach(function(skill) {
+        var seenTags = {}
+        var seenExamples = {}
+        skill.tags = skill.tags.filter(function(tag) {
+          if (seenTags[tag] === true) return false
+          seenTags[tag] = true
+          return true
+        })
+        skill.examples = skill.examples.filter(function(example) {
+          if (seenExamples[example] === true) return false
+          seenExamples[example] = true
+          return true
+        })
+        var tokens = []
+        tokens = tokens.concat(_tokens(skill.id))
+        tokens = tokens.concat(_tokens(skill.name))
+        tokens = tokens.concat(_tokens(skill.description))
+        skill.tags.forEach(function(tag) { tokens = tokens.concat(_tokens(tag)) })
+        skill.examples.forEach(function(example) { tokens = tokens.concat(_tokens(example)) })
+        var seenTokens = {}
+        skill.tokens = tokens.filter(function(token) {
+          if (seenTokens[token] === true) return false
+          seenTokens[token] = true
+          return true
+        })
+      })
+
+      return normalized
+    }
+
+    global.__worker_buildInferredSkills = function(wargs) {
+      var inferred = []
+      var addSkill = function(skill) { inferred.push(skill) }
+
+      var baseTags = global.__worker_splitTags(wargs.workertags)
+      addSkill({
+        id: "run-goal",
+        name: "Run goal",
+        description: "Executes Mini-A goals asynchronously and returns task results",
+        tags: ["planning", "delegation", "research"].concat(baseTags),
+        examples: ["Summarize this document", "Create a release checklist"]
+      })
+
+      var mcpEntries = []
+      if (isString(wargs.mcp) && wargs.mcp.trim().length > 0) {
+        mcpEntries = wargs.mcp.split(",").map(function(entry) { return String(entry || "").trim() }).filter(function(entry) { return entry.length > 0 })
+      }
+
+      mcpEntries.forEach(function(entry) {
+        var lower = entry.toLowerCase()
+        if (lower.indexOf("mcp-net") >= 0) {
+          addSkill({
+            id: "network-utilities",
+            name: "Network utilities",
+            description: "Measures TCP or TLS connectivity, latency, DNS, and certificate details.",
+            tags: ["network", "latency", "dns", "tls", "port"],
+            examples: ["Measure latency to yahoo.co.jp:443", "Check TLS certificates for api.example.com:443"]
+          })
+          return
+        }
+        if (lower.indexOf("mcp-time") >= 0) {
+          addSkill({
+            id: "time-utilities",
+            name: "Time utilities",
+            description: "Retrieves current time and performs timezone conversions for named locations and offsets.",
+            tags: ["time", "timezone", "clock", "current-time", "offset"],
+            examples: ["Get current time in Tokyo and London", "Convert 2026-03-30 12:00 Europe/Lisbon to Asia/Tokyo"]
+          })
+          return
+        }
+
+        var match = lower.match(/mcp-([a-z0-9-]+)\.ya?ml/)
+        if (!isArray(match) || match.length < 2) return
+        var slug = match[1]
+        if (slug === "mini-a") return
+        var words = slug.split("-").filter(function(word) { return word.length > 0 })
+        var display = words.map(function(word) { return word.charAt(0).toUpperCase() + word.substring(1) }).join(" ")
+        addSkill({
+          id: slug + "-capabilities",
+          name: display + " capabilities",
+          description: "Handles tasks related to " + words.join(" ") + ".",
+          tags: words,
+          examples: []
+        })
+      })
+
+      if (toBoolean(wargs.useutils) === true) {
+        addSkill({
+          id: "mini-a-utils",
+          name: "Mini-A utility tools",
+          description: "Uses built-in Mini-A utility operations when they are enabled for this worker.",
+          tags: ["utils", "utility"],
+          examples: []
+        })
+      }
+      if (toBoolean(wargs.useskills) === true) {
+        addSkill({
+          id: "mini-a-skills",
+          name: "Mini-A skills",
+          description: "Uses local Mini-A skill templates exposed through the utility skills interface.",
+          tags: ["skills", "templates"],
+          examples: []
+        })
+      }
+
+      return inferred
+    }
+
+    global.__worker_getSkills = function() {
+      if (isArray(global.__worker_skillCache)) return global.__worker_skillCache
+      var explicitSkills = global.__worker_parseSkillsInput(global.__worker_args.workerskills)
+      var inferredSkills = global.__worker_buildInferredSkills(global.__worker_args)
+      global.__worker_skillCache = global.__worker_normalizeSkills(explicitSkills.concat(inferredSkills))
+      return global.__worker_skillCache
+    }
+
+    global.__worker_getAgentCard = function(includeExtendedData) {
+      var wargs = global.__worker_args
+      var baseUrl = "http://" + ow.net.getHostAddress() + ":" + wargs.onport
+      var card = {
+        protocolVersion: "0.3.0",
+        name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
+        description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
+        url: baseUrl,
+        preferredTransport: "HTTP+JSON",
+        additionalInterfaces: ["mini-a-worker-v1"],
+        capabilities: {
+          streaming: false,
+          pushNotifications: false,
+          stateTransitionHistory: true
+        },
+        skills: global.__worker_getSkills().map(function(skill) {
+          return {
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            tags: skill.tags,
+            examples: skill.examples
+          }
+        })
+      }
+
+      if (toBoolean(includeExtendedData) === true) {
+        card.version = "1.0.0"
+        card.interfaces = {
+          a2aHttpJsonRest: {
+            messageSend: "/message:send",
+            tasks: "/tasks",
+            cancel: "/tasks:cancel"
+          }
+        }
+      }
+
+      return card
+    }
+
+    global.__worker_getInfoResponse = function() {
+      var wargs = global.__worker_args
+      return {
+        status: "ok",
+        name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
+        description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
+        version: "1.0.0",
+        capabilities: ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
+        skills: global.__worker_getSkills().map(function(skill) {
+          return {
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            tags: skill.tags,
+            examples: skill.examples
+          }
+        }),
+        limits: {
+          maxConcurrent: wargs.maxconcurrent,
+          defaultTimeoutMs: wargs.defaulttimeout,
+          maxTimeoutMs: wargs.maxtimeout,
+          maxSteps: wargs.maxsteps || 15,
+          useshell: toBoolean(wargs.useshell) || false
+        },
+        auth: isDef(wargs.apitoken) ? "bearer" : "none"
+      }
     }
 
     global.__worker_submitTask = function(postData, wargs) {
