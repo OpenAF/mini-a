@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260329'
+version: '20260331'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -91,6 +91,7 @@ files:
 - mcps/CREATING.md
 - mcps/EXTERNAL-MCPS.md
 - mcps/README.md
+- mcps/mcp-a2a.yaml
 - mcps/mcp-ch.yaml
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
@@ -178,6 +179,7 @@ filesHash:
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
   mcps/README.md: fd918e10f097cb36543b0bdedd786e0ac06dcc12
+  mcps/mcp-a2a.yaml: f8090fc9626e99b0792372eaca47abad52c924c6
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: be679552b6250f0055f207184ac7b1e178e1b348
@@ -186,7 +188,7 @@ filesHash:
   mcps/mcp-fin.yaml: 919e509a174ba2fec50a1f6066ce57654d179244
   mcps/mcp-kube.yaml: 431dde2e8a85f813f8c42e7d32d6c6582b719057
   mcps/mcp-math.yaml: 60944a11b129d9eca27888ef0ef189b33023a432
-  mcps/mcp-mini-a.yaml: 208cd53acbda9973934bc1cac32e848d1376ad92
+  mcps/mcp-mini-a.yaml: b8d27e917e35966f75ccfc27a74447aa94c6e138
   mcps/mcp-net.yaml: dff5115d164807f71c61f9ff153e96553144e6a9
   mcps/mcp-oaf-browse.yaml: 79bf1ca192fe3c371af9f2b16d098e6c8425273d
   mcps/mcp-oaf.yaml: 5495533600957931871ef9549e3a9cf16609c959
