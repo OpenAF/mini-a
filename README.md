@@ -326,7 +326,8 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Proxy Aggregation** - Collapse all MCP connections (including Mini Utils Tool) into a single `proxy-dispatch` tool to minimize context usage (`mcpproxy=true`)
   - **Programmatic Tool Calling** - Optional per-session localhost HTTP bridge for calling MCP tools from scripts executed by the agent (`mcpprogcall=true`, requires `useshell=true`)
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, office documents, and more
-- **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
+- **MCP Self-Hosting** - Expose Mini-A itself as a templatable MCP server via `mcps/mcp-mini-a.yaml`; customize server name, title, tool description, and tool prefix at launch time (`servername=`, `servertitle=`, `tooldesc=`, `toolprefix=`) so a single YAML serves multiple personas without duplication
+- **A2A Agent Bridge** - Consume any Google A2A-protocol agent (LangGraph, Vertex AI ADK, CrewAI, …) as MCP tools via `mcps/mcp-a2a.yaml`; discovers skills from `/.well-known/agent.json` Agent Cards and routes tasks via JSON-RPC 2.0
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
 - **Web UI** - Lightweight embedded chat interface for interactive use with clipboard controls for Markdown and static HTML exports
 - **Planning Mode** - Generate and execute structured task plans for complex goals
@@ -337,7 +338,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Mode Presets** - Quick configuration bundles (shell, chatbot, web, etc.) - see [USAGE.md](USAGE.md#mode-presets); set `OAF_MINI_A_MODE` to pick a default when `mode=` is omitted
 - **Sub-Goal Delegation** - Hierarchical task decomposition with concurrent child agents
   - **Local Delegation** - Spawn child Mini-A agents in the same process for parallel subtask execution (`usedelegation=true`)
-  - **Remote Worker Routing** - Route delegated subtasks by worker `/info` capabilities/limits plus name/description hints, with round-robin tie-breaks (set `workers=http://worker1:8080,http://worker2:8080`)
+  - **Remote Worker Routing** - Route delegated subtasks by worker `/info` capabilities/limits plus A2A-compatible `skills`, with round-robin tie-breaks for equivalent workers (set `workers=http://worker1:8080,http://worker2:8080`)
   - **Optional A2A Transport** - Use A2A HTTP+JSON/REST worker endpoints instead of the legacy `/task` protocol (`usea2a=true`)
   - **Dynamic Worker Registration** - Workers can self-register/heartbeat/deregister through a dedicated parent registration server (`workerreg`, `workerregurl`, `workerevictionttl`)
   - **Worker API** - Headless HTTP API for distributed agent workloads across processes/containers/hosts (`mini-a-worker.yaml`)
@@ -433,6 +434,8 @@ Mini-A ships with complementary components:
 | `workerregtoken` | Bearer token for dynamic worker registration endpoints | - |
 | `workerevictionttl` | Heartbeat TTL in milliseconds before dynamic worker eviction | `60000` |
 | `workerregurl` | Parent registration endpoint(s) for worker self-registration (`workermode=true`) | - |
+| `workerskills` | JSON/SLON array of A2A-style worker skills exposed by `workermode=true` | - |
+| `workertags` | Comma-separated tags appended to the default worker skill in `workermode=true` | - |
 | `workerreginterval` | Worker registration heartbeat interval in milliseconds | `30000` |
 | `maxsteps` | Maximum steps before forcing final answer | `15` |
 | `rpm` | Rate limit (requests per minute) | - |

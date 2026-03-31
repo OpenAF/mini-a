@@ -38,6 +38,7 @@ var MiniA = function() {
   this._ensureCache(this._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
   this._planCacheName = "mini-a.plans"
   this._ensureCache(this._planCacheName, { ttl: 900000, maxSize: 128, popularity: true })
+  this._delegationDescCache = { description: __, builtAt: 0, workerKey: __ }
   this._mcpCircuitState = {}
   this._lastCheckpoint = null
   this._errorHistory = []
@@ -123,6 +124,10 @@ var MiniA = function() {
     context_summarizations: $atomic(0, "long"),
     total_session_time: $atomic(0, "long"),
     avg_step_time: $atomic(0, "long"),
+    step_prompt_build_ms: $atomic(0, "long"),
+    step_llm_wait_ms: $atomic(0, "long"),
+    step_tool_exec_ms: $atomic(0, "long"),
+    step_context_maintenance_ms: $atomic(0, "long"),
     max_context_tokens: $atomic(0, "long"),
     shell_commands_approved: $atomic(0, "long"),
     shell_commands_denied: $atomic(0, "long"),
@@ -151,6 +156,9 @@ var MiniA = function() {
     delegation_cancelled: $atomic(0, "long"),
     delegation_timedout: $atomic(0, "long"),
     delegation_retried: $atomic(0, "long"),
+    delegation_worker_hint_used: $atomic(0, "long"),
+    delegation_worker_hint_matched: $atomic(0, "long"),
+    delegation_worker_hint_fallthrough: $atomic(0, "long"),
     mcp_circuit_breaker_trips: $atomic(0, "long"),
     mcp_circuit_breaker_resets: $atomic(0, "long"),
     escalation_consecutive_errors: $atomic(0, "long"),
@@ -176,6 +184,13 @@ var MiniA = function() {
     user_input_requested: $atomic(0, "long"),
     user_input_completed: $atomic(0, "long"),
     user_input_failed: $atomic(0, "long"),
+    prompt_context_selections: $atomic(0, "long"),
+    prompt_context_compressed: $atomic(0, "long"),
+    prompt_context_tokens_saved: $atomic(0, "long"),
+    goal_block_compressed: $atomic(0, "long"),
+    goal_block_tokens_saved: $atomic(0, "long"),
+    hook_context_compressed: $atomic(0, "long"),
+    hook_context_tokens_saved: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -499,7 +514,7 @@ Arguments: {
 3. Use "think" action ONLY when you need to plan or reason about alternatives
 4. Use tools and shell commands directly when the task is clear
 5. Work incrementally - execute first, refine later
-6. Respond with valid JSON only - no extra text{{#if markdown}}
+6. Provide a valid JSON object in your response. You may include brief explanations before or after, but the JSON itself must be syntactically valid and contain no markdown code fences.{{#if markdown}}
 7. The JSON response "answer" property should always be in markdown format{{/if}}{{#each rules}}
 {{{this}}}
 {{/each}}
@@ -1290,11 +1305,26 @@ MiniA.prototype.getMetrics = function() {
             steps_taken: global.__mini_a_metrics.steps_taken.get(),
             total_session_time_ms: global.__mini_a_metrics.total_session_time.get(),
             avg_step_time_ms: global.__mini_a_metrics.avg_step_time.get(),
+          step_prompt_build_ms_total: global.__mini_a_metrics.step_prompt_build_ms.get(),
+          step_prompt_build_ms_avg: global.__mini_a_metrics.steps_taken.get() > 0 ? Math.round(global.__mini_a_metrics.step_prompt_build_ms.get() / global.__mini_a_metrics.steps_taken.get()) : 0,
+          step_llm_wait_ms_total: global.__mini_a_metrics.step_llm_wait_ms.get(),
+          step_llm_wait_ms_avg: global.__mini_a_metrics.steps_taken.get() > 0 ? Math.round(global.__mini_a_metrics.step_llm_wait_ms.get() / global.__mini_a_metrics.steps_taken.get()) : 0,
+          step_tool_exec_ms_total: global.__mini_a_metrics.step_tool_exec_ms.get(),
+          step_tool_exec_ms_avg: global.__mini_a_metrics.steps_taken.get() > 0 ? Math.round(global.__mini_a_metrics.step_tool_exec_ms.get() / global.__mini_a_metrics.steps_taken.get()) : 0,
+          step_context_maintenance_ms_total: global.__mini_a_metrics.step_context_maintenance_ms.get(),
+          step_context_maintenance_ms_avg: global.__mini_a_metrics.steps_taken.get() > 0 ? Math.round(global.__mini_a_metrics.step_context_maintenance_ms.get() / global.__mini_a_metrics.steps_taken.get()) : 0,
             max_context_tokens: global.__mini_a_metrics.max_context_tokens.get(),
             llm_estimated_tokens: global.__mini_a_metrics.llm_estimated_tokens.get(),
             llm_actual_tokens: global.__mini_a_metrics.llm_actual_tokens.get(),
             llm_normal_tokens: global.__mini_a_metrics.llm_normal_tokens.get(),
-            llm_lc_tokens: global.__mini_a_metrics.llm_lc_tokens.get()
+            llm_lc_tokens: global.__mini_a_metrics.llm_lc_tokens.get(),
+            prompt_context_selections: global.__mini_a_metrics.prompt_context_selections.get(),
+            prompt_context_compressed: global.__mini_a_metrics.prompt_context_compressed.get(),
+            prompt_context_tokens_saved: global.__mini_a_metrics.prompt_context_tokens_saved.get(),
+            goal_block_compressed: global.__mini_a_metrics.goal_block_compressed.get(),
+            goal_block_tokens_saved: global.__mini_a_metrics.goal_block_tokens_saved.get(),
+            hook_context_compressed: global.__mini_a_metrics.hook_context_compressed.get(),
+            hook_context_tokens_saved: global.__mini_a_metrics.hook_context_tokens_saved.get()
         },
         behavior_patterns: {
             escalations: global.__mini_a_metrics.escalations.get(),
@@ -1369,6 +1399,9 @@ MiniA.prototype.getMetrics = function() {
             cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
             timedout: global.__mini_a_metrics.delegation_timedout.get(),
             retried: global.__mini_a_metrics.delegation_retried.get(),
+            worker_hint_used: global.__mini_a_metrics.delegation_worker_hint_used.get(),
+            worker_hint_matched: global.__mini_a_metrics.delegation_worker_hint_matched.get(),
+            worker_hint_fallthrough: global.__mini_a_metrics.delegation_worker_hint_fallthrough.get(),
             workers_total: (function(parent) {
               try { return parent._subtaskManager.getMetrics().workers.total } catch(ignore) { return 0 }
             })(this),
@@ -1743,7 +1776,8 @@ MiniA.prototype._startWorkerRegistrationServer = function(args) {
         if (workerUrl.length === 0) return _replyJSON(400, { error: "Missing required field: workerUrl" })
         var normalizedUrl = workerUrl.replace(/\/+$/, "")
         var knownBefore = subtaskMgr.workers.indexOf(normalizedUrl) >= 0
-        var added = subtaskMgr.addWorker(workerUrl)
+        var inlineCard = isMap(body.agentCard) ? body.agentCard : __
+        var added = subtaskMgr.addWorker(workerUrl, inlineCard)
         if (added) {
           if (knownBefore) parent._workerRegMetrics.heartbeats++
           else parent._workerRegMetrics.registrations++
@@ -5918,6 +5952,29 @@ MiniA.prototype._cleanCodeBlocks = function(text) {
 }
 
 /**
+ * Attempt to repair common JSON syntax errors without changing semantic meaning.
+ * Common issues: trailing commas, unquoted keys (JavaScript-style), etc.
+ */
+MiniA.prototype._repairJsonString = function(jsonString) {
+  if (!isString(jsonString)) return jsonString
+
+  var repaired = jsonString
+    // Fix trailing commas before closing braces/brackets
+    .replace(/,(\s*[}\]])/g, "$1")
+    // Fix unquoted keys (simple pattern: word followed by colon) - only if not already quoted
+    .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*:)/g, '$1"$2"$3')
+
+  // Try to parse the repaired version
+  var parsed = jsonParse(repaired, __, __, true)
+  if (isMap(parsed) || isArray(parsed)) {
+    return repaired
+  }
+
+  // If repair didn't help, return original
+  return jsonString
+}
+
+/**
  * Parse JSON payloads returned by models, including fenced or embedded JSON.
  */
 MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
@@ -5944,6 +6001,13 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
         if (!isString(candidate)) return __
         if (!candidate.startsWith("{") && !candidate.startsWith("[")) return __
         var parsed = jsonParse(candidate, __, __, true)
+        // If parsing failed, try repair
+        if (!(isMap(parsed) || isArray(parsed))) {
+          var repaired = this._repairJsonString(candidate)
+          if (repaired !== candidate) {
+            parsed = jsonParse(repaired, __, __, true)
+          }
+        }
         if (!(isMap(parsed) || isArray(parsed))) return parsed
         var recovered = this._extractJsonActionFromPseudoToolCall(parsed)
         if (isMap(recovered) || isArray(recovered)) return recovered
@@ -5968,9 +6032,16 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
         var parsed = parseCandidate(candidates[i])
         if (isMap(parsed) || isArray(parsed)) return parsed
     }
+      // Debug: Log failed parse attempt
+      if (isString(rawResponse) && rawResponse.length > 0) {
+        var debugMsg = "JSON parsing failed after repair attempts. Raw: " + (rawResponse.length > 300 ? rawResponse.substring(0, 300) + "..." : rawResponse)
+        if (isFunction(this._debugOut)) {
+          this._debugOut("JSON_PARSE_FAILURE", debugMsg)
+        }
+      }
 
-    return __
-}
+      return __
+  }
 
 MiniA.prototype._extractJsonActionFromPseudoToolCall = function(payload) {
     var parseArguments = args => {
@@ -7856,6 +7927,47 @@ MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasD
   }
 }
 
+MiniA.prototype._buildDelegationToolDescription = function() {
+  var base = "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget."
+  if (!isObject(this._subtaskManager) || !isArray(this._subtaskManager.workers) || this._subtaskManager.workers.length === 0) {
+    return base + " No remote workers registered; child agent runs locally."
+  }
+  var parent = this
+  var workerLines = []
+  this._subtaskManager.workers.forEach(function(url) {
+    var profile = parent._subtaskManager._workerProfiles[url]
+    if (!isMap(profile) || profile.status !== "ok") return
+    var line = "  - " + (isString(profile.name) && profile.name.length > 0 ? profile.name : url)
+    if (isString(profile.description) && profile.description.length > 0) line += ": " + profile.description
+    if (isArray(profile.skills) && profile.skills.length > 0) {
+      var skillNames = profile.skills.slice(0, 6).map(function(s) { return isString(s.id) ? s.id : "" }).filter(function(s) { return s.length > 0 }).join(", ")
+      if (skillNames.length > 0) line += " [skills: " + skillNames + "]"
+    }
+    workerLines.push(line)
+  })
+  if (workerLines.length === 0) return base + " Workers registered but profiles not yet available."
+  return base + "\n\nAvailable remote workers:\n" + workerLines.join("\n") +
+    "\n\nUse 'worker' to prefer a specific worker by name (partial match). Use 'skills' to require specific skill IDs/tags (e.g. [\"shell\"], [\"time\"], [\"network\"]). For shell tasks, use skills=[\"shell\"]."
+}
+
+MiniA.prototype._getDelegationToolDescription = function() {
+  var TTL_MS = 30000
+  var now = new Date().getTime()
+  var mgr = this._subtaskManager
+  var workers = isObject(mgr) && isArray(mgr.workers) ? mgr.workers : []
+  var workerKey = workers.map(function(url) {
+    var sig = isObject(mgr._workerProfiles[url]) ? (mgr._workerProfiles[url].signature || "?") : "?"
+    return url + ":" + sig
+  }).sort().join("|")
+  var cache = this._delegationDescCache
+  if (isString(cache.description) && cache.description.length > 0 && (now - cache.builtAt) < TTL_MS && cache.workerKey === workerKey) {
+    return cache.description
+  }
+  var desc = this._buildDelegationToolDescription()
+  this._delegationDescCache = { description: desc, builtAt: now, workerKey: workerKey }
+  return desc
+}
+
 MiniA.prototype._createDelegationMcpConfig = function(args) {
   try {
     if (isUnDef(this._subtaskManager)) {
@@ -7879,7 +7991,8 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
         try {
           var childArgs = {}
           if (isDef(p.maxsteps)) childArgs.maxsteps = Number(p.maxsteps)
-          if (isDef(p.useshell)) childArgs.useshell = toBoolean(p.useshell)
+          if (isString(p.worker) && p.worker.trim().length > 0) childArgs._workerHint = p.worker.trim()
+          if (isArray(p.skills) && p.skills.length > 0) childArgs._requiredSkills = p.skills
           
           var opts = {}
           if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
@@ -7975,18 +8088,27 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
       }
     }
 
+    // Wire profile-change hook so the TTL cache is immediately invalidated when a worker profile changes
+    var _parent = this
+    if (isObject(this._subtaskManager)) {
+      this._subtaskManager._onProfileChanged = function(url) {
+        _parent._delegationDescCache = { description: __, builtAt: 0, workerKey: __ }
+      }
+    }
+
     var fnsMeta = {
       "delegate-subtask": {
         name       : "delegate-subtask",
-        description: "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget.",
+        description: this._getDelegationToolDescription(),
         inputSchema: {
           type      : "object",
           properties: {
             goal          : { type: "string", description: "The sub-goal for the child agent." },
             maxsteps      : { type: "integer", description: "Maximum steps for the child (default 10)." },
-            useshell      : { type: "boolean", description: "Allow the child to use shell commands." },
             timeout       : { type: "integer", description: "Deadline in seconds (default 300)." },
-            waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." }
+            waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." },
+            worker        : { type: "string", description: "Optional worker name hint (partial match on name/description/URL) to prefer a specific remote worker." },
+            skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." }
           },
           required: ["goal"]
         }
@@ -12201,64 +12323,77 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Helper function to check and summarize context during execution
     var checkAndSummarizeContext = () => {
+      var contextMaintenanceStart = now()
       // maxcontext=0 disables proactive context management; rely on provider overflow recovery
       var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 0
-      if (effectiveMaxContext <= 0) return
+      if (effectiveMaxContext <= 0) {
+        var noContextBudgetMs = now() - contextMaintenanceStart
+        if (noContextBudgetMs > 0) global.__mini_a_metrics.step_context_maintenance_ms.getAdd(noContextBudgetMs)
+        return
+      }
 
-      var contextTokens = this._estimateTokens(runtime.context.join(""))
+      var contextTokens = getCachedContextTokens()
 
-      // Early compression at 60% threshold
-      if (contextTokens > effectiveMaxContext * 0.6) {
+      // Keep context lean with bounded cadence so we don't wait for expensive late cleanup.
+      var dedupeInterval = isNumber(runtime.contextDedupeInterval) && runtime.contextDedupeInterval > 0
+        ? runtime.contextDedupeInterval
+        : 10
+      if (runtime.context.length > 0 && (runtime.context.length - runtime.lastDedupContextLength) >= dedupeInterval) {
+        var beforeLength = runtime.context.length
+        var dedupedAtCadence = this._deduplicateContext(runtime.context)
+        runtime.lastDedupContextLength = beforeLength
+        if (dedupedAtCadence.length < beforeLength) {
+          runtime.context = dedupedAtCadence
+          this.fnI("compress", `Removed ${beforeLength - dedupedAtCadence.length} redundant context entries`)
+          markContextDirty()
+          contextTokens = getCachedContextTokens()
+        }
+      }
+
+      // Defer heavy summarization until context is close to exhaustion.
+      if (contextTokens > effectiveMaxContext * 0.9) {
         var compressionRatio = contextTokens > effectiveMaxContext ? 0.3 : 0.5
         var recentLimit = Math.floor(effectiveMaxContext * compressionRatio)
 
-        // Deduplicate similar observations
-        var originalLength = runtime.context.length
-        var deduped = this._deduplicateContext(runtime.context)
-        if (deduped.length < originalLength) {
-          runtime.context = deduped
-          this.fnI("compress", `Removed ${originalLength - deduped.length} redundant context entries`)
-          contextTokens = this._estimateTokens(runtime.context.join(""))
+        this.fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
+        var recentContext = []
+        var oldContext = []
+        var currentSize = 0
+
+        for (var i = runtime.context.length - 1; i >= 0; i--) {
+          var entrySize = this._estimateTokens(runtime.context[i])
+          if (currentSize + entrySize <= recentLimit) {
+            recentContext.unshift(runtime.context[i])
+            currentSize += entrySize
+          } else {
+            oldContext = runtime.context.slice(0, i + 1)
+            break
+          }
         }
 
-        // Summarize if still over threshold (80%)
-        if (contextTokens > effectiveMaxContext * 0.8) {
-          this.fnI("size", `Context too large (~${contextTokens} tokens), summarizing...`)
-          var recentContext = []
-          var oldContext = []
-          var currentSize = 0
-
-          for (var i = runtime.context.length - 1; i >= 0; i--) {
-            var entrySize = this._estimateTokens(runtime.context[i])
-            if (currentSize + entrySize <= recentLimit) {
-              recentContext.unshift(runtime.context[i])
-              currentSize += entrySize
+        if (oldContext.length > 0) {
+          this.fnI("summarize", `Summarizing conversation history...`)
+          global.__mini_a_metrics.context_summarizations.inc()
+          var summarizedOld = summarize(oldContext.join("\n"))
+          runtime.context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
+          var errorSummaryEntry = this._renderErrorHistory(runtime)
+          if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
+            if (runtime.context.length === 0 || runtime.context[0].indexOf("[ERROR HISTORY]") !== 0) {
+              runtime.context.unshift(errorSummaryEntry)
             } else {
-              oldContext = runtime.context.slice(0, i + 1)
-              break
+              runtime.context[0] = errorSummaryEntry
             }
           }
-
-          if (oldContext.length > 0) {
-            this.fnI("summarize", `Summarizing conversation history...`)
-            global.__mini_a_metrics.context_summarizations.inc()
-            var summarizedOld = summarize(oldContext.join("\n"))
-            runtime.context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
-            var errorSummaryEntry = this._renderErrorHistory(runtime)
-            if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
-              if (runtime.context.length === 0 || runtime.context[0].indexOf("[ERROR HISTORY]") !== 0) {
-                runtime.context.unshift(errorSummaryEntry)
-              } else {
-                runtime.context[0] = errorSummaryEntry
-              }
-            }
-            var newTokens = this._estimateTokens(runtime.context.join(""))
-            this.fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
-          } else {
-            global.__mini_a_metrics.summaries_skipped.inc()
-          }
+          markContextDirty()
+          var newTokens = getCachedContextTokens()
+          this.fnI("size", `Context summarized from ~${contextTokens} to ~${newTokens} tokens.`)
+        } else {
+          global.__mini_a_metrics.summaries_skipped.inc()
         }
       }
+
+      var contextMaintenanceMs = now() - contextMaintenanceStart
+      if (contextMaintenanceMs > 0) global.__mini_a_metrics.step_context_maintenance_ms.getAdd(contextMaintenanceMs)
     }
 
     var recoverContextAfterProviderOverflow = function(stepNumber, llmType, errorInfo) {
@@ -12266,10 +12401,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (!isObject(errorInfo) || errorInfo.contextOverflow !== true) return false
       if ((runtime.contextOverflowRecoveries || 0) >= 3) return false
 
-      var combinedContext = runtime.context.join("\n")
+      var combinedContext = getCachedContextText("\n")
       if (!isString(combinedContext) || combinedContext.length === 0) return false
 
-      var beforeTokens = this._estimateTokens(combinedContext)
+      var beforeTokens = getCachedContextTokens()
       this.fnI("summarize", `Detected provider context-window error (${llmType}, maxcontext=0). Auto-compressing context...`)
       global.__mini_a_metrics.context_summarizations.inc()
 
@@ -12283,13 +12418,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       runtime.context = [`[SUMMARY] Auto-recovery after provider context-window error: ${summarized}`]
       runtime.contextOverflowRecoveries = (runtime.contextOverflowRecoveries || 0) + 1
+      markContextDirty()
 
       var errorSummaryEntry = this._renderErrorHistory(runtime)
       if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
         runtime.context.unshift(errorSummaryEntry)
+        markContextDirty()
       }
 
-      var afterTokens = this._estimateTokens(runtime.context.join("\n"))
+      var afterTokens = getCachedContextTokens()
       runtime.context.push(`[OBS ${stepNumber}] (recover) Provider context-window error detected; context compressed from ~${beforeTokens} to ~${afterTokens} tokens.`)
       this.fnI("size", `Context auto-recovery complete: ~${beforeTokens} -> ~${afterTokens} tokens (attempt ${runtime.contextOverflowRecoveries}/3).`)
       return true
@@ -12492,7 +12629,177 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       earlyStopReason         : "",
       earlyStopHandled        : false,
       earlyStopContextRecorded: false,
-      earlyStopSignature      : ""
+      earlyStopSignature      : "",
+      stateSnapshotDirty      : true,
+      lastStateSnapshot       : "",
+      contextTextDirty        : true,
+      lastContextText         : "",
+      lastContextTokens       : 0,
+      contextDedupeInterval   : 10,
+      lastDedupContextLength  : 0
+    }
+
+    var optimizeGoalBlock = () => {
+      // Strategy: summarize long goals to reduce prompt size while preserving intent
+      var goalText = isString(args.goal) ? args.goal : ""
+      var goalTokens = this._estimateTokens(goalText)
+      
+      // Threshold: if goal is > 250 tokens, attempt to compress it
+      if (goalTokens > 250 && goalText.length > 1000) {
+        try {
+          var compressedGoal = this.summarizeText(goalText, {
+            instructionText: "You are condensing a user goal. KEEP the core objective, constraints, and success criteria. REMOVE fluff, examples, and explanations. Be terse.",
+            verbose: false
+          })
+          var compressedTokens = this._estimateTokens(compressedGoal)
+          if (compressedTokens < goalTokens * 0.7) {
+            // Compression was effective (> 30% reduction)
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goal_block_compressed)) {
+              global.__mini_a_metrics.goal_block_compressed.inc()
+            }
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goal_block_tokens_saved)) {
+              global.__mini_a_metrics.goal_block_tokens_saved.getAdd(goalTokens - compressedTokens)
+            }
+            return this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", compressedGoal)
+          }
+        } catch (e) {
+          // Fall back to original goal if compression fails
+          this.fnI("warn", "Goal compression failed, using original: " + __miniAErrMsg(e))
+        }
+      }
+      return this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", goalText)
+    }
+
+    var optimizeHookContextBlock = () => {
+      // Strategy: compress verbose hook context while preserving critical instructions
+      var hookText = isString(args.hookcontext) ? args.hookcontext.trim() : ""
+      if (hookText.length === 0) return ""
+
+      var hookTokens = this._estimateTokens(hookText)
+      
+      // Threshold: if hook context is > 300 tokens, attempt compression
+      if (hookTokens > 300 && hookText.length > 1200) {
+        try {
+          var compressedHook = this.summarizeText(hookText, {
+            instructionText: "You are condensing context/instructions. KEEP critical constraints, important context, and required behaviors. REMOVE examples, background, and verbose explanations. Be concise and clear.",
+            verbose: false
+          })
+          var compressedTokens = this._estimateTokens(compressedHook)
+          if (compressedTokens < hookTokens * 0.7) {
+            // Compression was effective
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.hook_context_compressed)) {
+              global.__mini_a_metrics.hook_context_compressed.inc()
+            }
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.hook_context_tokens_saved)) {
+              global.__mini_a_metrics.hook_context_tokens_saved.getAdd(hookTokens - compressedTokens)
+            }
+            return this._buildUntrustedPromptBlock("UNTRUSTED_HOOK_CONTEXT", compressedHook)
+          }
+        } catch (e) {
+          // Fall back to original hook if compression fails
+          this.fnI("warn", "Hook context compression failed, using original: " + __miniAErrMsg(e))
+        }
+      }
+      return this._buildUntrustedPromptBlock("UNTRUSTED_HOOK_CONTEXT", hookText)
+    }
+
+    var cachedGoalBlock = optimizeGoalBlock()
+    var cachedHookContextBlock = optimizeHookContextBlock()
+    var getStateSnapshot = () => {
+      if (runtime.stateSnapshotDirty !== true && isString(runtime.lastStateSnapshot) && runtime.lastStateSnapshot.length > 0) {
+        return runtime.lastStateSnapshot
+      }
+      runtime.lastStateSnapshot = stringify(this._agentState, __, "")
+      runtime.stateSnapshotDirty = false
+      return runtime.lastStateSnapshot
+    }
+
+    var markContextDirty = () => {
+      runtime.contextTextDirty = true
+    }
+
+    var getCachedContextText = (separator) => {
+      separator = isString(separator) ? separator : ""
+      if (runtime.contextTextDirty !== true && isString(runtime.lastContextText) && runtime.lastContextText.length > 0) {
+        return runtime.lastContextText
+      }
+      runtime.lastContextText = runtime.context.join(separator)
+      runtime.contextTextDirty = false
+      return runtime.lastContextText
+    }
+
+    var getCachedContextTokens = () => {
+      if (runtime.contextTextDirty !== true && runtime.lastContextTokens > 0) {
+        return runtime.lastContextTokens
+      }
+      runtime.lastContextTokens = this._estimateTokens(getCachedContextText(""))
+      runtime.contextTextDirty = false
+      return runtime.lastContextTokens
+    }
+
+    var selectPromptContext = (availableTokenBudget) => {
+      // Strategy: include recent entries + key early entries, compress verbose output, stay within token budget
+      availableTokenBudget = isNumber(availableTokenBudget) && availableTokenBudget > 0 ? availableTokenBudget : 2000
+      var allEntries = runtime.context.slice()
+      if (allEntries.length === 0) return []
+
+      // Track selection metrics
+      if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.prompt_context_selections)) {
+        global.__mini_a_metrics.prompt_context_selections.inc()
+      }
+
+      var fullContextTokens = getCachedContextTokens()
+      var keepRecent = Math.max(3, Math.floor(availableTokenBudget / 200))
+      var selectedEntries = []
+      var usedTokens = 0
+      var compressionApplied = false
+
+      // Include first entry if it frames the goal/summary
+      if (allEntries.length > 0 && (allEntries[0].indexOf("[SUMMARY]") === 0 || allEntries[0].indexOf("[ERROR HISTORY]") === 0)) {
+        selectedEntries.push(allEntries[0])
+        usedTokens += this._estimateTokens(allEntries[0])
+      }
+
+      // Work backwards from end to include recent progress
+      var recentStart = Math.max(1, allEntries.length - keepRecent)
+      for (var i = allEntries.length - 1; i >= recentStart; i--) {
+        var entry = allEntries[i]
+        var entryTokens = this._estimateTokens(entry)
+        if (usedTokens + entryTokens <= availableTokenBudget) {
+          selectedEntries.unshift(entry)
+          usedTokens += entryTokens
+        } else if (entryTokens > availableTokenBudget * 0.5) {
+          // Entry is large; attempt compression
+          var compressed = entry
+          // Compress verbose tool outputs
+          compressed = compressed.replace(/Output: [\s\S]{500,}/g, (match) => {
+            return "Output: " + match.substring(0, 150) + "... [truncated]"
+          })
+          // Compress long tool responses
+          compressed = compressed.replace(/\[OBS [^\]]+\] ([\s\S]{400,})/g, (match) => {
+            return match.substring(0, 200) + "... [output truncated]"
+          })
+          var compressedTokens = this._estimateTokens(compressed)
+          if (usedTokens + compressedTokens <= availableTokenBudget) {
+            selectedEntries.unshift(compressed)
+            usedTokens += compressedTokens
+            compressionApplied = true
+          }
+        }
+      }
+
+      // Track compression metrics
+      if (compressionApplied && isObject(global.__mini_a_metrics)) {
+        if (isObject(global.__mini_a_metrics.prompt_context_compressed)) {
+          global.__mini_a_metrics.prompt_context_compressed.inc()
+        }
+        if (isObject(global.__mini_a_metrics.prompt_context_tokens_saved)) {
+          var tokensSaved = Math.max(0, fullContextTokens - usedTokens)
+          global.__mini_a_metrics.prompt_context_tokens_saved.getAdd(tokensSaved)
+        }
+      }
+
+      return selectedEntries
     }
 
     // Reset counters between .start() calls
@@ -12683,6 +12990,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           } else {
             runtime.context.push(`[OBS ${stepLabel}] (no output)`)
           }
+          markContextDirty()
           checkAndSummarizeContext()
         }
       }
@@ -12747,27 +13055,38 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       runtime.providerToolUseFailedDetected = false
       runtime.pendingJsonToolPayload = __
 
+      // Avoid spending more full LLM/tool cycles after repeated hard failures.
+      var hardConsecutiveErrorLimit = Math.max((runtime.earlyStopThreshold || 3) + 2, (escalationLimits.errors || 2) + 2)
+      if (runtime.consecutiveErrors >= hardConsecutiveErrorLimit) {
+        runtime.earlyStopTriggered = true
+        runtime.earlyStopReason = `too many consecutive errors (${runtime.consecutiveErrors} >= ${hardConsecutiveErrorLimit})`
+        continue
+      }
+
       var stepStartTime = now()
       global.__mini_a_metrics.steps_taken.inc()
-      var stateSnapshot = stringify(this._agentState, __, "")
+      var promptBuildStart = now()
+      var stateSnapshot = getStateSnapshot()
       if (args.debug || args.verbose) {
         this.fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
       }
-      // TODO: Improve by summarizing context to fit in prompt if needed
-      var progressEntries = runtime.context.slice()
+      // Use selective context to reduce prompt size while preserving key information
+      var contextMaxTokens = isNumber(args.maxcontext) && args.maxcontext > 0 ? args.maxcontext : 4000
+      var promptContextBudget = Math.max(2000, contextMaxTokens - Math.max(this._estimateTokens(stateSnapshot) + 500, 1000))
+      var progressEntries = selectPromptContext(promptContextBudget)
       progressEntries.unshift(`[STATE] ${stateSnapshot}`)
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
-        goalBlock      : this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", args.goal),
-        hookContextBlock: (isString(args.hookcontext) && args.hookcontext.trim().length > 0)
-          ? this._buildUntrustedPromptBlock("UNTRUSTED_HOOK_CONTEXT", args.hookcontext)
-          : "",
+        goalBlock      : cachedGoalBlock,
+        hookContextBlock: cachedHookContextBlock,
         progress       : progressEntries.join("\n"),
         state          : stateSnapshot
       })
       prompt = this._maybeInjectPlanReminder(prompt, runtime.currentStepNumber, maxSteps)
       prompt = this._injectSimplePlanStepContext(prompt)
+      var promptBuildMs = now() - promptBuildStart
+      if (promptBuildMs > 0) global.__mini_a_metrics.step_prompt_build_ms.getAdd(promptBuildMs)
 
-      var contextTokens = this._estimateTokens(runtime.context.join(""))
+      var contextTokens = getCachedContextTokens()
       global.__mini_a_metrics.max_context_tokens.set(Math.max(global.__mini_a_metrics.max_context_tokens.get(), contextTokens))
       
       // Smart escalation logic - use main LLM for complex scenarios
@@ -12973,6 +13292,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       var responseWithStats
+      var llmWaitStart = now()
       try {
         responseWithStats = this._withExponentialBackoff(() => {
           addCall()
@@ -13057,6 +13377,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
           continue
         }
+      } finally {
+        var llmWaitMs = now() - llmWaitStart
+        if (llmWaitMs > 0) global.__mini_a_metrics.step_llm_wait_ms.getAdd(llmWaitMs)
       }
 
       var recoveredMsgFromEnvelope = __
@@ -13143,11 +13466,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
-          this.fnI("warn", `Low-cost model produced invalid JSON, retrying with main model...`)
+           var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
+           this.fnI("warn", `Low-cost model produced invalid JSON. Response started with: ${responseSample}. Retrying with main model...`)
           global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.json_parse_failures.inc()
           global.__mini_a_metrics.retries.inc()
           this._syncConversationForModelSwitch("main")
+            // Add explicit retry context about JSON formatting
+            runtime.context.push(`[RETRY ${step + 1}] (note) The low-cost model produced invalid JSON. Ensure your response is VALID JSON that can be parsed: single { or [ at start, matching braces/brackets, no trailing commas, quoted keys. Keep JSON concise and avoid extra text.`)
           var fallbackResponseWithStats
           try {
             fallbackResponseWithStats = this._withExponentialBackoff(() => {
@@ -13280,6 +13606,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // the model made a tool call but the OpenAF Ollama integration doesn't auto-execute it.
             // Retrying will loop forever — fall back to action-based mode instead.
             if (this._useToolsActual === true && _geminiModelType === "ollama" && isDef(this._llmNoTools)) {
+              try {
+                var _gemFbConvGPT = isDef(this.llm) && isFunction(this.llm.getGPT) ? this.llm.getGPT() : __
+                if (isDef(_gemFbConvGPT) && isFunction(_gemFbConvGPT.getConversation)) {
+                  var _gemFbConv = _gemFbConvGPT.getConversation()
+                  if (isArray(_gemFbConv)) {
+                    var _gemFbTexts = []
+                    _gemFbConv.forEach(function(m) {
+                      if (isMap(m) && m.role === "assistant" && isString(m.content) && m.content.trim().length > 0) {
+                        var _ct = m.content.trim()
+                        try {
+                          var _mp = jsonParse(_ct, __, __, true)
+                          if (isMap(_mp) && isString(_mp.answer) && _mp.answer.trim().length > 0) _ct = _mp.answer.trim()
+                        } catch(ignoreCtParse) {}
+                        _gemFbTexts.push(_ct)
+                      }
+                    })
+                    if (_gemFbTexts.length > 0) {
+                      runtime.context.push("[PREVIOUS CONVERSATION CONTEXT]\n" + _gemFbTexts.slice(-3).join("\n---\n"))
+                    }
+                  }
+                }
+              } catch(eGemFbConv) {}
               this._useToolsActual = false
               runtime.forceMainModel = true
               runtime.forceNoStream = true
@@ -13303,10 +13651,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
 
           var truncatedResponse = isString(rmsg) && rmsg.length > 500 ? rmsg.substring(0, 500) + "..." : rmsg
-          runtime.context.push(`[OBS ${step + 1}] (error) invalid JSON from model. The model's response was not valid JSON or was not an object/array. Response received: ${stringify(truncatedResponse, __, "")}`)
+            var modelLabel = useLowCost ? "low-cost" : "main"
+            var responsePreview = isString(rmsg) ? (rmsg.length > 100 ? rmsg.substring(0, 100) + "..." : rmsg) : stringify(rmsg)
+            runtime.context.push(`[OBS ${step + 1}] (error) invalid JSON from ${modelLabel} model. Response was not valid JSON or object/array. Preview: ${responsePreview}`)
           this._registerRuntimeError(runtime, {
             category: "permanent",
-            message : "invalid JSON from model",
+              message : `invalid JSON from ${modelLabel} model`,
             context : { step: step + 1, llmType: llmType }
           })
           global.__mini_a_metrics.json_parse_failures.inc()
@@ -13368,6 +13718,30 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           // Model returned a bare {"error":"..."} with tools active — likely the model/runtime
           // doesn't support tool calling (e.g. Ollama thinking models). Fall back to the bare
           // LLM (no tools) and switch to action-based mode so the next step succeeds.
+          // Before discarding the conversation, salvage the last assistant answers so the
+          // retry retains context about prior work done in this session.
+          try {
+            var _fbConvGPT = isDef(this.llm) && isFunction(this.llm.getGPT) ? this.llm.getGPT() : __
+            if (isDef(_fbConvGPT) && isFunction(_fbConvGPT.getConversation)) {
+              var _fbConv = _fbConvGPT.getConversation()
+              if (isArray(_fbConv)) {
+                var _fbTexts = []
+                _fbConv.forEach(function(m) {
+                  if (isMap(m) && m.role === "assistant" && isString(m.content) && m.content.trim().length > 0) {
+                    var _ct = m.content.trim()
+                    try {
+                      var _mp = jsonParse(_ct, __, __, true)
+                      if (isMap(_mp) && isString(_mp.answer) && _mp.answer.trim().length > 0) _ct = _mp.answer.trim()
+                    } catch(ignoreCtParse) {}
+                    _fbTexts.push(_ct)
+                  }
+                })
+                if (_fbTexts.length > 0) {
+                  runtime.context.push("[PREVIOUS CONVERSATION CONTEXT]\n" + _fbTexts.slice(-3).join("\n---\n"))
+                }
+              }
+            }
+          } catch(eFbConv) {}
           this._useToolsActual = false
           runtime.forceMainModel = true
           runtime.forceNoStream = true
@@ -13394,7 +13768,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           } else {
             this._agentState = extractedState
           }
-          updatedStateSnapshot = stringify(this._agentState, __, "")
+          runtime.stateSnapshotDirty = true
+          updatedStateSnapshot = getStateSnapshot()
           stateUpdatedThisStep = true
           if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
           if (this._enablePlanning) this._handlePlanUpdate()
@@ -13443,7 +13818,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             stateRecordedInContext = true
           }
           if (args.debug || args.verbose) {
-            this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+            this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
           }
           continue
         }
@@ -13469,7 +13844,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           stateRecordedInContext = true
         }
         if (args.debug || args.verbose) {
-          this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+          this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
         }
         continue
       }
@@ -13497,7 +13872,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           pendingToolActions = []
           return
         }
+        var toolExecStart = now()
         var batchResults = this._executeParallelToolBatch(pendingToolActions)
+        var toolExecMs = now() - toolExecStart
+        if (toolExecMs > 0) global.__mini_a_metrics.step_tool_exec_ms.getAdd(toolExecMs)
         if (isArray(batchResults) && batchResults.some(r => isObject(r) && r.error === true)) {
           runtime.hadErrorThisStep = true
         }
@@ -13635,6 +14013,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (action == "shell") {
+          if (!args.useshell) {
+            runtime.context.push(`[OBS ${stepLabel}] (shell) Shell commands are not enabled in this session. Use other actions or provide a final answer.`)
+            flushToolActions()
+            break
+          }
           if (!commandValue) {
             runtime.context.push(`[OBS ${stepLabel}] (shell) missing 'command' from model.`)
             this._registerRuntimeError(runtime, {
@@ -13763,7 +14146,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             stateRecordedInContext = true
           }
           if (args.debug || args.verbose) {
-            this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+            this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
           }
 
           return this._processFinalAnswer(answerValue, args)
@@ -13788,7 +14171,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         stateRecordedInContext = true
       }
       if (args.debug || args.verbose) {
-        this.fnI("info", `[STATE after step ${step + 1}] ${stringify(this._agentState, __, "")}`)
+        this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
       }
 
       if (runtime.hadErrorThisStep) {
@@ -13809,12 +14192,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // If max steps hit without final action
     var finalPrompt = $t(this._FINAL_PROMPT.trim(), {
-      goalBlock      : this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", args.goal),
-      hookContextBlock: (isString(args.hookcontext) && args.hookcontext.trim().length > 0)
-        ? this._buildUntrustedPromptBlock("UNTRUSTED_HOOK_CONTEXT", args.hookcontext)
-        : "",
+      goalBlock      : cachedGoalBlock,
+      hookContextBlock: cachedHookContextBlock,
       context        : runtime.context.join("\n"),
-      state          : stringify(this._agentState, __, "")
+      state          : getStateSnapshot()
     })
 
     // If already in stop state, just exit

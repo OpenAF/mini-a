@@ -1,5 +1,6 @@
 (function() {
   load("mini-a.js")
+  load("mini-a-subtask.js")
 
   var createAgent = function() {
     return new MiniA()
@@ -195,6 +196,170 @@
     ow.test.assert(isMap(denyWins) && isMap(denyWins.options), true, "Should build utils MCP config when both filters are present")
     ow.test.assert(isDef(denyWins.options.fns.filesystemQuery), true, "Should keep tool present only in allowlist")
     ow.test.assert(isUnDef(denyWins.options.fns.timeUtilities), true, "Denylist should override allowlist")
+  }
+
+  exports.testSubtaskManagerNormalizesWorkerSkills = function() {
+    var manager = new SubtaskManager({}, {})
+    var normalized = manager._normalizeWorkerSkills([
+      {
+        id: "network-latency",
+        name: "Network latency",
+        description: "Measure TCP and TLS latency",
+        tags: ["network", "latency", "tls"],
+        examples: ["Measure latency to yahoo.co.jp:443"]
+      },
+      "Time utilities"
+    ])
+
+    ow.test.assert(normalized.length === 2, true, "Should normalize skill arrays")
+    ow.test.assert(normalized[0].id === "network-latency", true, "Should keep explicit skill id")
+    ow.test.assert(normalized[0].tokens.indexOf("network") >= 0, true, "Should derive tokens from tags and descriptions")
+    ow.test.assert(normalized[1].id === "time-utilities", true, "Should derive ids from string skills")
+    ow.test.assert(normalized[1].name === "Time utilities", true, "Should keep string skill names")
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerPrefersSpecializedWorkerSkills = function() {
+    var manager = new SubtaskManager({}, {})
+    manager.workers = ["http://network", "http://time"]
+    manager.remoteDelegation = true
+    manager._getHealthyWorkers = function() { return this.workers.slice() }
+    manager._workerProfiles = {
+      "http://network": {
+        status: "ok",
+        name: "network-worker",
+        description: "Network worker",
+        capabilities: ["run-goal", "planning"],
+        skills: manager._normalizeWorkerSkills([
+          {
+            id: "network-latency",
+            name: "Network latency",
+            description: "Measure TCP and TLS latency for remote hosts",
+            tags: ["network", "latency", "tls", "port"],
+            examples: ["Measure latency to yahoo.co.jp:443"]
+          }
+        ]),
+        limits: { useshell: false, maxSteps: 10, maxTimeoutMs: 300000, maxConcurrent: 2 },
+        signature: "network"
+      },
+      "http://time": {
+        status: "ok",
+        name: "time-worker",
+        description: "Time worker",
+        capabilities: ["run-goal", "planning"],
+        skills: manager._normalizeWorkerSkills([
+          {
+            id: "time-utilities",
+            name: "Time utilities",
+            description: "Current time and timezone conversions",
+            tags: ["time", "timezone", "clock"],
+            examples: ["Get current time in Tokyo and London"]
+          }
+        ]),
+        limits: { useshell: false, maxSteps: 10, maxTimeoutMs: 300000, maxConcurrent: 2 },
+        signature: "time"
+      }
+    }
+
+    var selected = manager._nextWorkerForSubtask({
+      goal: "Measure network latency to yahoo.co.jp:443 and yahoo.co.uk:443",
+      deadlineMs: 120000
+    }, {})
+
+    ow.test.assert(selected === "http://network", true, "Should route network goals to the network worker")
+    ow.test.assert(manager._lastWorkerSelectionDetails.matchedSkill.id === "network-latency", true, "Should record the matched skill")
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerFallsBackToCompatibleWorkerWhenNoSkillMatches = function() {
+    var manager = new SubtaskManager({}, {})
+    manager.workers = ["http://generic"]
+    manager.remoteDelegation = true
+    manager._getHealthyWorkers = function() { return this.workers.slice() }
+    manager._workerProfiles = {
+      "http://generic": {
+        status: "ok",
+        name: "generic-worker",
+        description: "General purpose worker",
+        capabilities: ["run-goal", "planning"],
+        skills: manager._normalizeWorkerSkills([
+          {
+            id: "run-goal",
+            name: "Run goal",
+            description: "Executes Mini-A goals asynchronously",
+            tags: ["planning", "delegation"],
+            examples: []
+          }
+        ]),
+        limits: { useshell: false, maxSteps: 10, maxTimeoutMs: 300000, maxConcurrent: 2 },
+        signature: "generic"
+      }
+    }
+
+    var selected = manager._nextWorkerForSubtask({
+      goal: "Explain the release tradeoffs for this week",
+      deadlineMs: 120000
+    }, {})
+
+    ow.test.assert(selected === "http://generic", true, "Should still choose a compatible worker when no skill strongly matches")
+    ow.test.assert(manager._lastWorkerSelectionDetails.usedCompatibilityFallback, true, "Should flag compatibility fallback routing")
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerRespectsHardCompatibilityGatesBeforeSkillRouting = function() {
+    var manager = new SubtaskManager({}, {})
+    manager.workers = ["http://network-no-shell", "http://generic-shell"]
+    manager.remoteDelegation = true
+    manager._getHealthyWorkers = function() { return this.workers.slice() }
+    manager._workerProfiles = {
+      "http://network-no-shell": {
+        status: "ok",
+        name: "network-worker",
+        description: "Network worker without shell access",
+        capabilities: ["run-goal", "planning"],
+        skills: manager._normalizeWorkerSkills([
+          {
+            id: "network-latency",
+            name: "Network latency",
+            description: "Measure TCP and TLS latency",
+            tags: ["network", "latency"],
+            examples: []
+          }
+        ]),
+        limits: { useshell: false, maxSteps: 10, maxTimeoutMs: 300000, maxConcurrent: 2 },
+        signature: "network-no-shell"
+      },
+      "http://generic-shell": {
+        status: "ok",
+        name: "generic-shell",
+        description: "Shell-capable worker",
+        capabilities: ["run-goal", "planning"],
+        skills: manager._normalizeWorkerSkills([
+          {
+            id: "run-goal",
+            name: "Run goal",
+            description: "Executes Mini-A goals asynchronously",
+            tags: ["general"],
+            examples: []
+          }
+        ]),
+        limits: { useshell: true, maxSteps: 10, maxTimeoutMs: 300000, maxConcurrent: 2 },
+        signature: "generic-shell"
+      }
+    }
+
+    var selected = manager._nextWorkerForSubtask({
+      goal: "Measure network latency to yahoo.co.jp:443",
+      deadlineMs: 120000
+    }, { useshell: true })
+
+    ow.test.assert(selected === "http://generic-shell", true, "Should prefer compatibility gates over skill match when shell access is required")
+    ow.test.assert(manager._lastWorkerSelectionDetails.usedCompatibilityFallback, true, "Should identify fallback when the specialized worker is incompatible")
+
+    manager.destroy()
   }
 
   exports.testLinuxSandboxWarnsWhenBwrapMissing = function() {

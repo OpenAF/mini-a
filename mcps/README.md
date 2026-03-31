@@ -18,6 +18,7 @@
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-shell  | Local shell execution MCP       | STDIO/HTTP       | (included) | [mcp-shell.yaml](mcp-shell.yaml)   |
 | mcp-mini-a | Mini-A agent runner MCP         | STDIO/HTTP       | (included) | [mcp-mini-a.yaml](mcp-mini-a.yaml) |
+| mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oaf-browse | Generic browse MCP backed by the oJob-common HTTP Browse API | STDIO/HTTP | (included) | [mcp-oaf-browse.yaml](mcp-oaf-browse.yaml) |
@@ -38,10 +39,73 @@ See [CREATING.md](CREATING.md) for instructions on creating new MCPs and contrib
 
 #### mcp-mini-a
 
-`mcp-mini-a` exposes the Mini-A agent as a MCP server. Use the `run-goal` tool to execute goals and retrieve the final answer plus runtime metrics. Launch-time arguments control sensitive capabilities (for example `useshell`, `mcp`, or model overrides); remote callers can only adjust the goal alongside formatting and planning flags. Provide shared knowledge or default rules at startup via `knowledge=` or `rules=` arguments when launching `ojob`.
+`mcp-mini-a` exposes the Mini-A agent as an MCP server. Use the `run-goal` tool to execute goals and retrieve the final answer plus runtime metrics. Launch-time arguments control sensitive capabilities (for example `useshell`, `mcp`, or model overrides); remote callers can only adjust the goal alongside formatting and planning flags. Provide shared knowledge or default rules at startup via `knowledge=` or `rules=` arguments when launching `ojob`.
+
+The server identity and tool description are **templatable** at launch time using Handlebars `{{varname}}` substitution (powered by `tplDesc`):
+
+| Parameter | What it controls | Default |
+|---|---|---|
+| `servername` | `serverInfo.name` advertised to MCP clients | `mini-a-agent` |
+| `servertitle` | Human-readable server title | `OpenAF mini-a MCP agent runner server` |
+| `tooldesc` | Description of the `run-goal` tool shown to the model | *(built-in description)* |
+| `toolprefix` | Prefix prepended to every exposed tool name | *(none)* |
 
 ```bash
+# Default launch — single run-goal tool, no customization
 oafp in=mcp data="(cmd: 'ojob mcps/mcp-mini-a.yaml', tool: run-goal, params: (goal: 'summarize README.md', format: 'md', useplanning: true))"
+
+# Persona: coding assistant with a renamed tool and scoped knowledge
+ojob mcps/mcp-mini-a.yaml \
+  servername="coder-agent" \
+  servertitle="Mini-A Coding Assistant" \
+  tooldesc="Ask the coding agent to write, review, or fix code" \
+  knowledge="You are an expert software engineer. Prefer concise idiomatic code." \
+  mode=code \
+  onport=9000
+
+# Add a prefix so the tool appears as devops-run-goal to the client
+ojob mcps/mcp-mini-a.yaml toolprefix="devops-" rules="[no-shell]" onport=9001
+
+# STDIO persona — used as mcp= inside another Mini-A instance
+mini-a goal="..." \
+  mcp="(cmd: 'ojob mcps/mcp-mini-a.yaml servername=reviewer tooldesc=Review this code for quality issues')" \
+  usetools=true
+```
+
+#### mcp-a2a
+
+`mcp-a2a` bridges any external **Google A2A-protocol** agent into Mini-A as MCP tools. At startup it fetches each agent's `/.well-known/agent.json` Agent Card, registers its skills, and exposes two tools:
+
+- **`a2a-agents`** — lists all registered agents and their declared skills; pass `refresh=true` to re-fetch cards live.
+- **`a2a-task`** — sends a task to a named agent via JSON-RPC 2.0 (`tasks/send`) and polls (`tasks/get`) until the task reaches a terminal state, then returns the text artifacts.
+
+Key launch parameters:
+
+| Parameter | Description | Default |
+|---|---|---|
+| `agents` | Comma-separated base URLs of A2A agents to connect to | *(required)* |
+| `apitoken` | Bearer token sent with every A2A HTTP request | *(none)* |
+| `pollinterval` | Polling interval in ms while awaiting task completion | `1000` |
+| `timeout` | Default task timeout in seconds | `120` |
+
+```bash
+# Start as an HTTP MCP server bridging two A2A agents
+ojob mcps/mcp-a2a.yaml \
+  agents="http://agent1:9000,http://agent2:9000" \
+  onport=8888
+
+# Use as mcp= inside Mini-A to give it access to external A2A agents
+mini-a goal="use the data-analyst agent to summarize last quarter sales" \
+  mcp="(cmd: 'ojob mcps/mcp-a2a.yaml agents=http://analyst:9000')" \
+  usetools=true
+
+# With authentication and a shorter poll interval
+ojob mcps/mcp-a2a.yaml \
+  agents="https://secure-agent.example.com" \
+  apitoken="my-bearer-token" \
+  pollinterval=500 \
+  timeout=60 \
+  onport=8888
 ```
 
 #### mcp-proxy

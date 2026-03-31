@@ -1201,7 +1201,7 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
-| `workers` | string | (none) | Comma-separated list of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
+| `workers` | string | (none) | Comma-separated list of worker URLs; delegation runs remotely and prefers workers whose A2A skills match the subtask |
 | `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST transport (`/message:send`, `/tasks`, `/tasks:cancel`) when delegating to remote workers |
 | `workerreg` | number | (none) | Port for dynamic worker registration server on the parent |
 | `workerregtoken` | string | (none) | Bearer token for registration endpoints |
@@ -1212,6 +1212,15 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+
+**Worker startup parameters** (used when starting a worker with `workermode=true`):
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `workerskills` | string | (none) | JSON/SLON array of A2A skill objects, or comma-delimited skill IDs (e.g. `"shell,python"`). Comma form auto-expands each ID to a minimal `{ id, name, tags }` skill entry |
+| `workertags` | string | (none) | Comma-delimited tags added to the default `run-goal` skill for routing |
+| `workerspecialties` | string | (none) | Comma-delimited specialty tags also injected into `run-goal`. Shorthand when you don't need full skill descriptors (e.g. `"finance,python"`) |
+| `shellworker` | boolean | `false` | Convenience alias: sets `useshell=true` and automatically emits a `shell` A2A skill so the parent can route shell tasks here via `skills=["shell"]` |
 
 ### Enabling Local Delegation
 
@@ -1226,8 +1235,10 @@ mini-a
 ```
 
 When enabled, two MCP tools become available:
-- **`delegate-subtask`** — Spawn a child agent for a sub-goal
+- **`delegate-subtask`** — Spawn a child agent for a sub-goal. Parameters: `goal` (required), `maxsteps`, `timeout`, `waitForResult`, `worker` (optional name hint), `skills` (optional required skill IDs, e.g. `["shell"]`, `["time"]`, `["network"]`)
 - **`subtask-status`** — Check status/result of a delegated subtask
+
+The tool description is dynamic — when remote workers are registered, it lists available workers and their advertised A2A skills so the LLM can route intelligently. Use `worker` to prefer a worker by name and `skills` to require specific capabilities. Shell tasks should use `skills=["shell"]` rather than a flag — the parent will route to a worker that declared the `shell` skill.
 
 ### Console Commands
 
@@ -1253,8 +1264,25 @@ When enabled, two MCP tools become available:
 Start a headless worker API for programmatic delegation:
 
 ```bash
-# Start worker with authentication
+# Start a general worker
 mini-a workermode=true onport=8080 apitoken=your-secret-token workername="research-east" workerdesc="US-East research worker"
+
+# Start a shell-capable worker using the shellworker convenience arg
+# (sets useshell=true and emits a 'shell' A2A skill automatically)
+mini-a workermode=true onport=8081 apitoken=your-secret-token \
+  workername="shell-worker" workerdesc="Shell execution worker" \
+  shellworker=true
+
+# Start a network-specialized worker using A2A skills and specialty tags
+mini-a workermode=true onport=8082 apitoken=your-secret-token \
+  workername="network-east" workerdesc="Network diagnostics worker" \
+  workerspecialties="network,latency,tls" \
+  workerskills='[{ "id": "network-latency", "name": "Network latency", "description": "Measure TCP and TLS latency for remote hosts", "tags": ["network","latency","tls","port"], "examples": ["Measure latency to yahoo.co.jp:443"] }]'
+
+# Start a time worker — comma-delimited shorthand for workerskills
+mini-a workermode=true onport=8083 apitoken=your-secret-token \
+  workername="time-worker" workerdesc="Timezone and current time worker" \
+  workerspecialties="time,timezone,clock"
 
 # Parent agent using remote workers for delegation
 mini-a usedelegation=true workers="http://localhost:8080" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
@@ -1286,7 +1314,8 @@ curl -X POST http://localhost:8080/result \
 ```
 
 **Worker API Endpoints:**
-- `GET /info` — Server capabilities
+- `GET /.well-known/agent.json` — **Canonical A2A AgentCard** (protocol 0.4.0+). Primary profile source used by parent agents for worker discovery and skill-based routing
+- `GET /info` — Server capabilities and skills (mirrors the AgentCard; retained for compatibility)
 - `POST /task` — Submit new task (Mini-A native API)
 - `POST /status` — Poll task status (Mini-A native API)
 - `POST /result` — Get final result (Mini-A native API)
@@ -1320,6 +1349,8 @@ curl -X POST http://localhost:8080/message:send \
 curl -H "Authorization: Bearer your-secret-token" \
   http://localhost:8080/tasks
 ```
+
+Worker specialization metadata stays A2A-compatible. `/.well-known/agent.json` is the canonical agent card, and `/info` mirrors the same `skills` payload so Mini-A can route delegated subtasks without inventing a second schema.
 
 For comprehensive delegation documentation, see **[docs/DELEGATION.md](docs/DELEGATION.md)**.
 
@@ -1744,6 +1775,41 @@ oafp in=mcp data="(cmd: 'ojob mcps/mcp-mini-a.yaml', tool: run-goal, params: (go
 ```
 
 This MCP lets other automations trigger Mini-A itself. Provide the `goal` alongside optional formatting or planning flags (`format`, `raw`, `chatbotmode`, `useplanning`, `planmode`, `planformat`, `convertplan`). Sensitive toggles—including knowledge packs or custom rules—must be set when you launch the server and are not exposed to remote callers. Pass them as `knowledge=` or `rules=` arguments when starting `ojob mcps/mcp-mini-a.yaml`. The response includes the final answer, execution status, and metric counters.
+
+The server identity and the `run-goal` tool description are **templatable** at launch time, making it easy to run purpose-specific instances without duplicating the YAML:
+
+| Parameter | What it controls | Default |
+|---|---|---|
+| `servername` | `serverInfo.name` advertised to MCP clients | `mini-a-agent` |
+| `servertitle` | Human-readable server title | `OpenAF mini-a MCP agent runner server` |
+| `tooldesc` | Description of the `run-goal` tool shown to the model | *(built-in)* |
+| `toolprefix` | Prefix prepended to every exposed tool name | *(none)* |
+
+```bash
+# Coding assistant persona on port 9000
+ojob mcps/mcp-mini-a.yaml \
+  servername="coder-agent" \
+  servertitle="Mini-A Coding Assistant" \
+  tooldesc="Ask the coding agent to write, review, or fix code" \
+  knowledge="You are an expert software engineer." \
+  mode=code onport=9000
+
+# Tool appears as devops-run-goal to the caller
+ojob mcps/mcp-mini-a.yaml toolprefix="devops-" rules="[no-shell]" onport=9001
+```
+
+#### A2A Agent Bridge (mcp-a2a)
+```bash
+# Expose two external A2A-compliant agents as MCP tools
+ojob mcps/mcp-a2a.yaml agents="http://agent1:9000,http://agent2:9000" onport=8888
+
+# Use inside Mini-A to delegate tasks to an external A2A agent
+mini-a goal="summarize last quarter's sales using the analyst agent" \
+  mcp="(cmd: 'ojob mcps/mcp-a2a.yaml agents=http://analyst:9000')" \
+  usetools=true
+```
+
+`mcp-a2a` bridges any **Google A2A-protocol** agent into Mini-A as MCP tools. At startup it fetches each agent's `/.well-known/agent.json` Agent Card, registers its skills, and exposes two tools: `a2a-agents` (list/discover agents and skills) and `a2a-task` (send a task via JSON-RPC 2.0 and wait for the result). This enables Mini-A to interoperate with agents built on LangGraph, Vertex AI ADK, CrewAI, or any other A2A-compatible framework.
 
 #### Database Operations (mcp-db)
 ```bash

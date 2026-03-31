@@ -2,6 +2,29 @@
 
 ## Recent Updates
 
+### Worker Routing v0.4.0 — Skills-Based Delegation, Dynamic Tool Description, A2A AgentCard
+
+**Protocol version bumped to `0.4.0`** (breaking for `limits.useshell`; backwards-compatible at the transport level).
+
+**What's New**:
+- **`useshell` removed from `delegate-subtask`** — shell capability is now declared by the worker as an A2A `shell` skill. Use `skills: ["shell"]` on the tool call to route to a shell-capable worker. Workers started with `useshell=true` (or the new `shellworker=true` convenience arg) automatically emit the `shell` skill.
+- **`worker` and `skills` parameters on `delegate-subtask`** — `worker` is a partial name hint to prefer a specific remote worker; `skills` is an array of required skill IDs/tags (all must be present on the selected worker). Example: `{ "goal": "...", "skills": ["shell", "time"] }`.
+- **Dynamic `delegate-subtask` description** — when remote workers are registered, the tool description lists available workers and their A2A skill IDs so the LLM can route intelligently without guessing. Description is rebuilt per-turn with a 30 s TTL cache; invalidated immediately when a worker profile changes.
+- **`/.well-known/agent.json` is now the canonical profile source** — parent agents probe this endpoint first (A2A standard). `/info` is retained as a fallback for 0.3.x workers.
+- **AgentCard sent on registration** — workers include their full AgentCard in the `/worker-register` POST body so the parent doesn't need a separate `/info` round-trip.
+- **`workerspecialties` arg wired** — comma-delimited specialty tags injected into the `run-goal` skill. Previously silently ignored.
+- **`shellworker=true` convenience arg** — sets `useshell=true` and emits the `shell` A2A skill automatically.
+- **`workerskills` comma shorthand (Option H)** — if `workerskills` value can't be parsed as JSON/SLON, it's treated as a comma-delimited list of skill IDs and auto-expanded to minimal `{ id, name, tags }` objects.
+- **Profile signature change detection** — parent agents detect when a worker's profile changes mid-session and invalidate the tool description cache immediately.
+- **New metrics**: `delegation_worker_hint_used`, `delegation_worker_hint_matched`, `delegation_worker_hint_fallthrough` — tracks routing hint effectiveness.
+
+**Migration**:
+- Remove `useshell: true` from any `delegate-subtask` tool calls; replace with `skills: ["shell"]`.
+- Workers started with `useshell=true` now advertise the `shell` skill automatically — no `workerskills` config needed.
+- `limits.useshell` is removed from `/info` on 0.4.0 workers. External consumers reading that field should migrate to checking for the `shell` skill in the AgentCard.
+
+---
+
 ### Prompt Safety and Untrusted Data Handling
 
 **Change**: Added explicit labeling of untrusted user data in all prompt templates, introduced policy-lane probe detection, and added prompt normalization/length enforcement.

@@ -513,6 +513,8 @@ try {
     workerregtoken : { type: "string", description: "Bearer token for worker registration endpoints" },
     workerevictionttl: { type: "number", default: 60000, description: "Heartbeat TTL in ms before dynamic worker eviction" },
     workerregurl   : { type: "string", description: "Comma-separated registration URL(s) used by workers in workermode" },
+    workerskills   : { type: "string", description: "JSON/SLON array of A2A-style worker skills exposed by workermode" },
+    workertags     : { type: "string", description: "Comma-separated tags appended to the default workermode skill" },
     workerreginterval: { type: "number", default: 30000, description: "Worker heartbeat interval in ms for self-registration" },
     maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
     delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
