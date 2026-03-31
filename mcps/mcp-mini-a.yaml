@@ -14,6 +14,22 @@ help:
     desc     : Custom rules to enforce on every run (string or JSON, server launch only)
     example  : "[ 'avoid-shell' ]"
     mandatory: false
+  - name     : servername
+    desc     : Override the MCP server name advertised to clients (default is mini-a-agent)
+    example  : "my-coder-agent"
+    mandatory: false
+  - name     : servertitle
+    desc     : Override the human-readable MCP server title advertised to clients
+    example  : "My Coding Agent"
+    mandatory: false
+  - name     : tooldesc
+    desc     : Override the description of the run-goal tool shown to the model
+    example  : "Ask the coding assistant to accomplish a goal"
+    mandatory: false
+  - name     : toolprefix
+    desc     : Prefix added to every exposed tool name without changing internal job routing
+    example  : "myagent-"
+    mandatory: false
 
 todo:
 - Init
@@ -23,15 +39,17 @@ todo:
   - (httpdHealthz ): "${onport:-8080}"
   - (httpdMetrics ): "${onport:-8080}"
   - (httpdMCP     ): "${onport:-8080}"
+    ((tplDesc    )): true
+    ((toolPrefix )): "${toolprefix}"
     ((description)): &MCPSERVER
       serverInfo:
-        name   : mini-a-agent
-        title  : OpenAF mini-a MCP agent runner server
+        name   : "{{servername}}"
+        title  : "{{servertitle}}"
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
       run-goal:
         name       : run-goal
-        description: Execute the Mini-A autonomous agent for a goal with optional settings.
+        description: "{{tooldesc}}"
         inputSchema:
           type      : object
           properties:
@@ -79,9 +97,11 @@ todo:
     ((fns    )): &MCPFNS
       run-goal: Run Mini-A goal
   ((else)):
-  - (stdioMCP ): *MCPSERVER
-    ((fnsMeta)): *MCPFNSMETA
-    ((fns    )): *MCPFNS
+  - (stdioMCP  ): *MCPSERVER
+    ((tplDesc  )): true
+    ((toolPrefix)): "${toolprefix}"
+    ((fnsMeta  )): *MCPFNSMETA
+    ((fns      )): *MCPFNS
 
 ojob:
   opacks      :
@@ -104,6 +124,12 @@ include:
 jobs:
 # -----------
 - name : Init
+  check:
+    in:
+      servername : isString.default("mini-a-agent")
+      servertitle: isString.default("OpenAF mini-a MCP agent runner server")
+      tooldesc   : isString.default("Execute the Mini-A autonomous agent for a goal with optional settings.")
+      toolprefix : isString.default("")
   exec : | #js
     if (isUnDef(global.__mini_a_serverDefaults)) {
       global.__mini_a_serverDefaults = merge({}, args)

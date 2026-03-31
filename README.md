@@ -326,7 +326,8 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
   - **Proxy Aggregation** - Collapse all MCP connections (including Mini Utils Tool) into a single `proxy-dispatch` tool to minimize context usage (`mcpproxy=true`)
   - **Programmatic Tool Calling** - Optional per-session localhost HTTP bridge for calling MCP tools from scripts executed by the agent (`mcpprogcall=true`, requires `useshell=true`)
 - **Built-in MCP Servers** - Database, file system, network, time/timezone, email, S3, RSS, Yahoo Finance, SSH, office documents, and more
-- **MCP Self-Hosting** - Expose Mini-A itself as a MCP server via `mcps/mcp-mini-a.yaml` (remote callers can run goals with limited formatting/planning overrides while privileged flags stay server-side)
+- **MCP Self-Hosting** - Expose Mini-A itself as a templatable MCP server via `mcps/mcp-mini-a.yaml`; customize server name, title, tool description, and tool prefix at launch time (`servername=`, `servertitle=`, `tooldesc=`, `toolprefix=`) so a single YAML serves multiple personas without duplication
+- **A2A Agent Bridge** - Consume any Google A2A-protocol agent (LangGraph, Vertex AI ADK, CrewAI, …) as MCP tools via `mcps/mcp-a2a.yaml`; discovers skills from `/.well-known/agent.json` Agent Cards and routes tasks via JSON-RPC 2.0
 - **Optional Shell Access** - Execute shell commands with safety controls and sandboxing
 - **Web UI** - Lightweight embedded chat interface for interactive use with clipboard controls for Markdown and static HTML exports
 - **Planning Mode** - Generate and execute structured task plans for complex goals

@@ -753,17 +753,19 @@ Check `maxconcurrent=` setting and ensure parent has available slots.
 
 ---
 
-## Relationship to `mcp-mini-a.yaml`
+## Relationship to `mcp-mini-a.yaml` and `mcp-a2a.yaml`
 
-- **`mcp-mini-a.yaml`**: Exposes Mini-A as an MCP server (STDIO/HTTP) for integration with other MCP clients
-- **`mini-a-worker.yaml`**: Headless REST API for programmatic goal execution
+- **`mcp-mini-a.yaml`**: Exposes Mini-A as an MCP server (STDIO/HTTP) for integration with other MCP clients. Supports templating (`servername=`, `servertitle=`, `tooldesc=`, `toolprefix=`) to run purpose-specific agent personas from a single YAML.
+- **`mcp-a2a.yaml`**: Bridges external Google A2A-protocol agents into Mini-A as MCP tools. Discovers skills via `/.well-known/agent.json` Agent Cards and routes tasks via JSON-RPC 2.0 — enabling interoperability with LangGraph, Vertex AI ADK, CrewAI, and other A2A frameworks.
+- **`mini-a-worker.yaml`**: Headless REST API for programmatic goal execution.
 
 They are **complementary**:
 
-- Use `mcp-mini-a.yaml` when you want Mini-A to be discoverable as an MCP tool
+- Use `mcp-mini-a.yaml` when you want Mini-A to be discoverable as an MCP tool by other agents or clients
+- Use `mcp-a2a.yaml` when you want Mini-A to call out to external A2A-compatible agents as tools
 - Use `mini-a-worker.yaml` when you want a pure HTTP API for task submission
 
-Both can run simultaneously if needed.
+All three can run simultaneously if needed.
 
 ---
 
