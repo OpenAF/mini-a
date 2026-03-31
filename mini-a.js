@@ -38,6 +38,7 @@ var MiniA = function() {
   this._ensureCache(this._toolResultCacheName, { ttl: 3600000, maxSize: 2048 })
   this._planCacheName = "mini-a.plans"
   this._ensureCache(this._planCacheName, { ttl: 900000, maxSize: 128, popularity: true })
+  this._delegationDescCache = { description: __, builtAt: 0, workerKey: __ }
   this._mcpCircuitState = {}
   this._lastCheckpoint = null
   this._errorHistory = []
@@ -151,6 +152,9 @@ var MiniA = function() {
     delegation_cancelled: $atomic(0, "long"),
     delegation_timedout: $atomic(0, "long"),
     delegation_retried: $atomic(0, "long"),
+    delegation_worker_hint_used: $atomic(0, "long"),
+    delegation_worker_hint_matched: $atomic(0, "long"),
+    delegation_worker_hint_fallthrough: $atomic(0, "long"),
     mcp_circuit_breaker_trips: $atomic(0, "long"),
     mcp_circuit_breaker_resets: $atomic(0, "long"),
     escalation_consecutive_errors: $atomic(0, "long"),
@@ -1369,6 +1373,9 @@ MiniA.prototype.getMetrics = function() {
             cancelled: global.__mini_a_metrics.delegation_cancelled.get(),
             timedout: global.__mini_a_metrics.delegation_timedout.get(),
             retried: global.__mini_a_metrics.delegation_retried.get(),
+            worker_hint_used: global.__mini_a_metrics.delegation_worker_hint_used.get(),
+            worker_hint_matched: global.__mini_a_metrics.delegation_worker_hint_matched.get(),
+            worker_hint_fallthrough: global.__mini_a_metrics.delegation_worker_hint_fallthrough.get(),
             workers_total: (function(parent) {
               try { return parent._subtaskManager.getMetrics().workers.total } catch(ignore) { return 0 }
             })(this),
@@ -1743,7 +1750,8 @@ MiniA.prototype._startWorkerRegistrationServer = function(args) {
         if (workerUrl.length === 0) return _replyJSON(400, { error: "Missing required field: workerUrl" })
         var normalizedUrl = workerUrl.replace(/\/+$/, "")
         var knownBefore = subtaskMgr.workers.indexOf(normalizedUrl) >= 0
-        var added = subtaskMgr.addWorker(workerUrl)
+        var inlineCard = isMap(body.agentCard) ? body.agentCard : __
+        var added = subtaskMgr.addWorker(workerUrl, inlineCard)
         if (added) {
           if (knownBefore) parent._workerRegMetrics.heartbeats++
           else parent._workerRegMetrics.registrations++
@@ -7856,6 +7864,47 @@ MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasD
   }
 }
 
+MiniA.prototype._buildDelegationToolDescription = function() {
+  var base = "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget."
+  if (!isObject(this._subtaskManager) || !isArray(this._subtaskManager.workers) || this._subtaskManager.workers.length === 0) {
+    return base + " No remote workers registered; child agent runs locally."
+  }
+  var parent = this
+  var workerLines = []
+  this._subtaskManager.workers.forEach(function(url) {
+    var profile = parent._subtaskManager._workerProfiles[url]
+    if (!isMap(profile) || profile.status !== "ok") return
+    var line = "  - " + (isString(profile.name) && profile.name.length > 0 ? profile.name : url)
+    if (isString(profile.description) && profile.description.length > 0) line += ": " + profile.description
+    if (isArray(profile.skills) && profile.skills.length > 0) {
+      var skillNames = profile.skills.slice(0, 6).map(function(s) { return isString(s.id) ? s.id : "" }).filter(function(s) { return s.length > 0 }).join(", ")
+      if (skillNames.length > 0) line += " [skills: " + skillNames + "]"
+    }
+    workerLines.push(line)
+  })
+  if (workerLines.length === 0) return base + " Workers registered but profiles not yet available."
+  return base + "\n\nAvailable remote workers:\n" + workerLines.join("\n") +
+    "\n\nUse 'worker' to prefer a specific worker by name (partial match). Use 'skills' to require specific skill IDs/tags (e.g. [\"shell\"], [\"time\"], [\"network\"]). For shell tasks, use skills=[\"shell\"]."
+}
+
+MiniA.prototype._getDelegationToolDescription = function() {
+  var TTL_MS = 30000
+  var now = new Date().getTime()
+  var mgr = this._subtaskManager
+  var workers = isObject(mgr) && isArray(mgr.workers) ? mgr.workers : []
+  var workerKey = workers.map(function(url) {
+    var sig = isObject(mgr._workerProfiles[url]) ? (mgr._workerProfiles[url].signature || "?") : "?"
+    return url + ":" + sig
+  }).sort().join("|")
+  var cache = this._delegationDescCache
+  if (isString(cache.description) && cache.description.length > 0 && (now - cache.builtAt) < TTL_MS && cache.workerKey === workerKey) {
+    return cache.description
+  }
+  var desc = this._buildDelegationToolDescription()
+  this._delegationDescCache = { description: desc, builtAt: now, workerKey: workerKey }
+  return desc
+}
+
 MiniA.prototype._createDelegationMcpConfig = function(args) {
   try {
     if (isUnDef(this._subtaskManager)) {
@@ -7879,7 +7928,8 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
         try {
           var childArgs = {}
           if (isDef(p.maxsteps)) childArgs.maxsteps = Number(p.maxsteps)
-          if (isDef(p.useshell)) childArgs.useshell = toBoolean(p.useshell)
+          if (isString(p.worker) && p.worker.trim().length > 0) childArgs._workerHint = p.worker.trim()
+          if (isArray(p.skills) && p.skills.length > 0) childArgs._requiredSkills = p.skills
           
           var opts = {}
           if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
@@ -7975,18 +8025,27 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
       }
     }
 
+    // Wire profile-change hook so the TTL cache is immediately invalidated when a worker profile changes
+    var _parent = this
+    if (isObject(this._subtaskManager)) {
+      this._subtaskManager._onProfileChanged = function(url) {
+        _parent._delegationDescCache = { description: __, builtAt: 0, workerKey: __ }
+      }
+    }
+
     var fnsMeta = {
       "delegate-subtask": {
         name       : "delegate-subtask",
-        description: "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget.",
+        description: this._getDelegationToolDescription(),
         inputSchema: {
           type      : "object",
           properties: {
             goal          : { type: "string", description: "The sub-goal for the child agent." },
             maxsteps      : { type: "integer", description: "Maximum steps for the child (default 10)." },
-            useshell      : { type: "boolean", description: "Allow the child to use shell commands." },
             timeout       : { type: "integer", description: "Deadline in seconds (default 300)." },
-            waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." }
+            waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." },
+            worker        : { type: "string", description: "Optional worker name hint (partial match on name/description/URL) to prefer a specific remote worker." },
+            skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." }
           },
           required: ["goal"]
         }
@@ -13280,6 +13339,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // the model made a tool call but the OpenAF Ollama integration doesn't auto-execute it.
             // Retrying will loop forever — fall back to action-based mode instead.
             if (this._useToolsActual === true && _geminiModelType === "ollama" && isDef(this._llmNoTools)) {
+              try {
+                var _gemFbConvGPT = isDef(this.llm) && isFunction(this.llm.getGPT) ? this.llm.getGPT() : __
+                if (isDef(_gemFbConvGPT) && isFunction(_gemFbConvGPT.getConversation)) {
+                  var _gemFbConv = _gemFbConvGPT.getConversation()
+                  if (isArray(_gemFbConv)) {
+                    var _gemFbTexts = []
+                    _gemFbConv.forEach(function(m) {
+                      if (isMap(m) && m.role === "assistant" && isString(m.content) && m.content.trim().length > 0) {
+                        var _ct = m.content.trim()
+                        try {
+                          var _mp = jsonParse(_ct, __, __, true)
+                          if (isMap(_mp) && isString(_mp.answer) && _mp.answer.trim().length > 0) _ct = _mp.answer.trim()
+                        } catch(ignoreCtParse) {}
+                        _gemFbTexts.push(_ct)
+                      }
+                    })
+                    if (_gemFbTexts.length > 0) {
+                      runtime.context.push("[PREVIOUS CONVERSATION CONTEXT]\n" + _gemFbTexts.slice(-3).join("\n---\n"))
+                    }
+                  }
+                }
+              } catch(eGemFbConv) {}
               this._useToolsActual = false
               runtime.forceMainModel = true
               runtime.forceNoStream = true
@@ -13368,6 +13449,30 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           // Model returned a bare {"error":"..."} with tools active — likely the model/runtime
           // doesn't support tool calling (e.g. Ollama thinking models). Fall back to the bare
           // LLM (no tools) and switch to action-based mode so the next step succeeds.
+          // Before discarding the conversation, salvage the last assistant answers so the
+          // retry retains context about prior work done in this session.
+          try {
+            var _fbConvGPT = isDef(this.llm) && isFunction(this.llm.getGPT) ? this.llm.getGPT() : __
+            if (isDef(_fbConvGPT) && isFunction(_fbConvGPT.getConversation)) {
+              var _fbConv = _fbConvGPT.getConversation()
+              if (isArray(_fbConv)) {
+                var _fbTexts = []
+                _fbConv.forEach(function(m) {
+                  if (isMap(m) && m.role === "assistant" && isString(m.content) && m.content.trim().length > 0) {
+                    var _ct = m.content.trim()
+                    try {
+                      var _mp = jsonParse(_ct, __, __, true)
+                      if (isMap(_mp) && isString(_mp.answer) && _mp.answer.trim().length > 0) _ct = _mp.answer.trim()
+                    } catch(ignoreCtParse) {}
+                    _fbTexts.push(_ct)
+                  }
+                })
+                if (_fbTexts.length > 0) {
+                  runtime.context.push("[PREVIOUS CONVERSATION CONTEXT]\n" + _fbTexts.slice(-3).join("\n---\n"))
+                }
+              }
+            }
+          } catch(eFbConv) {}
           this._useToolsActual = false
           runtime.forceMainModel = true
           runtime.forceNoStream = true
@@ -13635,6 +13740,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (action == "shell") {
+          if (!args.useshell) {
+            runtime.context.push(`[OBS ${stepLabel}] (shell) Shell commands are not enabled in this session. Use other actions or provide a final answer.`)
+            flushToolActions()
+            break
+          }
           if (!commandValue) {
             runtime.context.push(`[OBS ${stepLabel}] (shell) missing 'command' from model.`)
             this._registerRuntimeError(runtime, {

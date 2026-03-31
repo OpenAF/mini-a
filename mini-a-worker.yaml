@@ -423,6 +423,10 @@ jobs:
     args.workerdesc = _$(args.workerdesc, "args.workerdesc").isString().default("Mini-A worker API")
     args.workerskills = _$(args.workerskills, "args.workerskills").default(__)
     args.workertags = _$(args.workertags, "args.workertags").isString().default(__)
+    args.workerspecialties = _$(args.workerspecialties, "args.workerspecialties").isString().default(__)
+    args.shellworker = _$(args.shellworker, "args.shellworker").toBoolean().isBoolean().default(false)
+    // shellworker=true implies useshell=true
+    if (toBoolean(args.shellworker) === true) args.useshell = true
     args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").toNumber().isNumber().default(2)
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").toNumber().isNumber().default(3)
     args.workerregurl = _$(args.workerregurl, "args.workerregurl").isString().default(__)
@@ -527,6 +531,14 @@ jobs:
         if (isArray(slonParsed)) return slonParsed
         if (isMap(slonParsed)) return [slonParsed]
       } catch(ignoreSlonParse) {}
+      // Option H: comma-delimited plain IDs fallback (e.g. "shell,python,data")
+      var parts = trimmed.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
+      if (parts.length > 0) {
+        return parts.map(function(id) {
+          var norm = id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+          return { id: norm, name: id, description: "", tags: [norm], examples: [] }
+        })
+      }
       return []
     }
 
@@ -628,11 +640,12 @@ jobs:
       var addSkill = function(skill) { inferred.push(skill) }
 
       var baseTags = global.__worker_splitTags(wargs.workertags)
+      var specialtyTags = global.__worker_splitTags(wargs.workerspecialties)
       addSkill({
         id: "run-goal",
         name: "Run goal",
         description: "Executes Mini-A goals asynchronously and returns task results",
-        tags: ["planning", "delegation", "research"].concat(baseTags),
+        tags: ["planning", "delegation", "research"].concat(baseTags).concat(specialtyTags),
         examples: ["Summarize this document", "Create a release checklist"]
       })
 
@@ -698,6 +711,17 @@ jobs:
         })
       }
 
+      // Emit A2A 'shell' skill when shell execution is enabled (useshell=true or shellworker=true)
+      if (toBoolean(wargs.useshell) === true) {
+        addSkill({
+          id: "shell",
+          name: "Shell execution",
+          description: "Executes POSIX shell commands on the worker host.",
+          tags: ["shell", "bash", "cli", "command", "exec"],
+          examples: ["Run a bash script", "Get current time via date command", "List directory contents", "Execute system commands"]
+        })
+      }
+
       return inferred
     }
 
@@ -713,7 +737,7 @@ jobs:
       var wargs = global.__worker_args
       var baseUrl = "http://" + ow.net.getHostAddress() + ":" + wargs.onport
       var card = {
-        protocolVersion: "0.3.0",
+        protocolVersion: "0.4.0",
         name: isString(wargs.workername) ? wargs.workername : "mini-a-worker",
         description: isString(wargs.workerdesc) ? wargs.workerdesc : "Mini-A worker API",
         url: baseUrl,
@@ -770,8 +794,8 @@ jobs:
           maxConcurrent: wargs.maxconcurrent,
           defaultTimeoutMs: wargs.defaulttimeout,
           maxTimeoutMs: wargs.maxtimeout,
-          maxSteps: wargs.maxsteps || 15,
-          useshell: toBoolean(wargs.useshell) || false
+          maxSteps: wargs.maxsteps || 15
+          // useshell removed in protocol 0.4.0 — shell capability is declared via the 'shell' A2A skill
         },
         auth: isDef(wargs.apitoken) ? "bearer" : "none"
       }
@@ -902,7 +926,10 @@ jobs:
     var _register = function(targetUrl) {
       var baseUrl = String(targetUrl || "").replace(/\/+$/, "")
       try {
-        var resp = $rest({ requestHeaders: headers }).post(baseUrl + "/worker-register", { workerUrl: myUrl })
+        var resp = $rest({ requestHeaders: headers }).post(baseUrl + "/worker-register", {
+          workerUrl: myUrl,
+          agentCard: global.__worker_getAgentCard(false)
+        })
         if (isMap(resp) && resp.status === "ok") {
           log("[worker-reg] Registered with " + baseUrl + " as " + myUrl)
           return true

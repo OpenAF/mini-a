@@ -1201,7 +1201,7 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `usedelegation` | boolean | `false` | Enable subtask delegation |
-| `workers` | string | (none) | Comma-separated list of worker URLs; when provided, delegation runs remotely and prefers workers whose `/info` capabilities/limits match the subtask |
+| `workers` | string | (none) | Comma-separated list of worker URLs; delegation runs remotely and prefers workers whose A2A skills match the subtask |
 | `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST transport (`/message:send`, `/tasks`, `/tasks:cancel`) when delegating to remote workers |
 | `workerreg` | number | (none) | Port for dynamic worker registration server on the parent |
 | `workerregtoken` | string | (none) | Bearer token for registration endpoints |
@@ -1212,6 +1212,15 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
+
+**Worker startup parameters** (used when starting a worker with `workermode=true`):
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `workerskills` | string | (none) | JSON/SLON array of A2A skill objects, or comma-delimited skill IDs (e.g. `"shell,python"`). Comma form auto-expands each ID to a minimal `{ id, name, tags }` skill entry |
+| `workertags` | string | (none) | Comma-delimited tags added to the default `run-goal` skill for routing |
+| `workerspecialties` | string | (none) | Comma-delimited specialty tags also injected into `run-goal`. Shorthand when you don't need full skill descriptors (e.g. `"finance,python"`) |
+| `shellworker` | boolean | `false` | Convenience alias: sets `useshell=true` and automatically emits a `shell` A2A skill so the parent can route shell tasks here via `skills=["shell"]` |
 
 ### Enabling Local Delegation
 
@@ -1226,8 +1235,10 @@ mini-a
 ```
 
 When enabled, two MCP tools become available:
-- **`delegate-subtask`** — Spawn a child agent for a sub-goal
+- **`delegate-subtask`** — Spawn a child agent for a sub-goal. Parameters: `goal` (required), `maxsteps`, `timeout`, `waitForResult`, `worker` (optional name hint), `skills` (optional required skill IDs, e.g. `["shell"]`, `["time"]`, `["network"]`)
 - **`subtask-status`** — Check status/result of a delegated subtask
+
+The tool description is dynamic — when remote workers are registered, it lists available workers and their advertised A2A skills so the LLM can route intelligently. Use `worker` to prefer a worker by name and `skills` to require specific capabilities. Shell tasks should use `skills=["shell"]` rather than a flag — the parent will route to a worker that declared the `shell` skill.
 
 ### Console Commands
 
@@ -1253,19 +1264,25 @@ When enabled, two MCP tools become available:
 Start a headless worker API for programmatic delegation:
 
 ```bash
-# Start worker with authentication
+# Start a general worker
 mini-a workermode=true onport=8080 apitoken=your-secret-token workername="research-east" workerdesc="US-East research worker"
 
-# Start a network-specialized worker using A2A-compatible skills metadata
+# Start a shell-capable worker using the shellworker convenience arg
+# (sets useshell=true and emits a 'shell' A2A skill automatically)
 mini-a workermode=true onport=8081 apitoken=your-secret-token \
+  workername="shell-worker" workerdesc="Shell execution worker" \
+  shellworker=true
+
+# Start a network-specialized worker using A2A skills and specialty tags
+mini-a workermode=true onport=8082 apitoken=your-secret-token \
   workername="network-east" workerdesc="Network diagnostics worker" \
-  workertags="network,latency,tls" \
+  workerspecialties="network,latency,tls" \
   workerskills='[{ "id": "network-latency", "name": "Network latency", "description": "Measure TCP and TLS latency for remote hosts", "tags": ["network","latency","tls","port"], "examples": ["Measure latency to yahoo.co.jp:443"] }]'
 
-# Start a time-specialized worker
-mini-a workermode=true onport=8082 apitoken=your-secret-token \
-  workername="time-east" workerdesc="Timezone and current time worker" \
-  workerskills='[{ "id": "time-utilities", "name": "Time utilities", "description": "Get current time and convert timezones for named locations", "tags": ["time","timezone","clock"], "examples": ["Get current time in Tokyo and London"] }]'
+# Start a time worker — comma-delimited shorthand for workerskills
+mini-a workermode=true onport=8083 apitoken=your-secret-token \
+  workername="time-worker" workerdesc="Timezone and current time worker" \
+  workerspecialties="time,timezone,clock"
 
 # Parent agent using remote workers for delegation
 mini-a usedelegation=true workers="http://localhost:8080" apitoken=your-secret-token usetools=true goal="Coordinate parallel subtasks"
@@ -1297,7 +1314,8 @@ curl -X POST http://localhost:8080/result \
 ```
 
 **Worker API Endpoints:**
-- `GET /info` — Server capabilities plus A2A-compatible `skills` used by Mini-A routing
+- `GET /.well-known/agent.json` — **Canonical A2A AgentCard** (protocol 0.4.0+). Primary profile source used by parent agents for worker discovery and skill-based routing
+- `GET /info` — Server capabilities and skills (mirrors the AgentCard; retained for compatibility)
 - `POST /task` — Submit new task (Mini-A native API)
 - `POST /status` — Poll task status (Mini-A native API)
 - `POST /result` — Get final result (Mini-A native API)

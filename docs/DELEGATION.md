@@ -50,7 +50,7 @@ mini-a
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 
-When `workers` is set, Mini-A fetches each worker's `/info` at startup and routes delegated subtasks by matching required capabilities/limits first (for example `planning`, `useshell`, `maxSteps`, `maxTimeoutMs`). It then scores workers using A2A-compatible `skills` metadata mirrored from the worker agent card, with worker `name` and `description` kept as weaker fallback hints. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. If there is no strong skill match, it still falls back to the best compatible worker rather than failing closed.
+When `workers` is set, Mini-A fetches each worker's `/.well-known/agent.json` (canonical A2A AgentCard, protocol 0.4.0+) at startup and routes delegated subtasks by matching A2A skills first. It scores workers using skill IDs, tags, names, and examples against the subtask goal. Worker `name` and `description` are secondary signals. If multiple workers share the same effective profile, Mini-A uses round-robin within that group. It falls back to the best compatible worker when no strong skill match exists.
 
 Set `usea2a=true` to switch the parent-to-worker transport from the legacy `/task` + `/status` + `/result` endpoints to the A2A HTTP+JSON/REST flow (`POST /message:send`, `GET /tasks?id=...`, `POST /tasks:cancel`).
 
@@ -69,17 +69,23 @@ When `usedelegation=true` and `usetools=true`:
 {
   "goal": "Analyze the sales data for Q4",
   "maxsteps": 10,
-  "useshell": false,
   "timeout": 300,
-  "waitForResult": true
+  "waitForResult": true,
+  "worker": "data-east",
+  "skills": ["data-analysis"]
 }
 ```
 
 - `goal` (required): The sub-goal for the child agent
 - `maxsteps` (optional): Maximum steps for the child (default: 10)
-- `useshell` (optional): Allow shell commands in the child
 - `timeout` (optional): Deadline in seconds (default: 300)
 - `waitForResult` (optional): Block until child completes (default: true)
+- `worker` (optional): Partial name hint to prefer a specific remote worker (matched against name, description, URL)
+- `skills` (optional): Array of required skill IDs or tags — only workers with **all** listed skills are considered (e.g. `["shell"]`, `["time"]`, `["network","tls"]`)
+
+> **Shell tasks**: use `skills: ["shell"]` to route to a shell-capable worker. Shell capability is declared by the worker via the `shell` A2A skill (set `shellworker=true` when starting the worker).
+
+The tool description is dynamic — when remote workers are registered their names and skill IDs are listed so the LLM can make informed routing decisions.
 
 **Returns:**
 
@@ -196,8 +202,10 @@ ojob mini-a-worker.yaml onport=8080 apitoken=your-secret-token
 | `taskretention` | number | `3600` | Seconds to keep completed results |
 | `workername` | string | `"mini-a-worker"` | Worker name reported by `/info` |
 | `workerdesc` | string | `"Mini-A worker API"` | Worker description reported by `/info` |
-| `workerskills` | string | (none) | JSON/SLON array of A2A-style worker skills (`id`, `name`, `description`, `tags`, `examples`) |
+| `workerskills` | string | (none) | JSON/SLON array of A2A skill objects, or comma-delimited skill IDs (auto-expanded to minimal `{ id, name, tags }` objects) |
 | `workertags` | string | (none) | Comma-separated tags appended to the default `run-goal` worker skill |
+| `workerspecialties` | string | (none) | Comma-separated specialty tags also injected into `run-goal`. Shorthand alternative to full `workerskills` JSON |
+| `shellworker` | boolean | `false` | Sets `useshell=true` and emits a `shell` A2A skill, enabling parent routing via `skills=["shell"]` |
 | `workerregurl` | string | (none) | Comma-separated parent registration URL(s) to self-register with |
 | `workerregtoken` | string | (none) | Bearer token used for registration endpoint authentication |
 | `workerreginterval` | number | `30000` | Heartbeat interval (ms) used to refresh registration |
@@ -206,23 +214,24 @@ Plus all standard Mini-A parameters: `model`, `mcp`, `rules`, `knowledge`, `uses
 
 ### API Endpoints
 
-#### `GET /info`
+#### `GET /.well-known/agent.json`
 
-Returns server capabilities and configuration. The `skills` payload is intentionally A2A-compatible and mirrors the worker agent card so Mini-A does not need a separate routing schema.
+The **canonical** A2A AgentCard (protocol 0.4.0+). Parent agents probe this endpoint first for worker discovery and skill-based routing.
 
 ```bash
-curl http://localhost:8080/info
+curl http://localhost:8080/.well-known/agent.json
 ```
 
 **Response:**
 
 ```json
 {
-  "status": "ok",
-  "name": "mini-a-worker",
-  "description": "Mini-A worker API",
-  "version": "1.0.0",
-  "capabilities": ["run-goal", "delegation", "planning", "a2a-http-json-rest"],
+  "protocolVersion": "0.4.0",
+  "name": "network-east",
+  "description": "Network diagnostics worker",
+  "url": "http://10.0.0.2:8081",
+  "preferredTransport": "HTTP+JSON",
+  "capabilities": { "streaming": false, "pushNotifications": false, "stateTransitionHistory": true },
   "skills": [
     {
       "id": "network-latency",
@@ -231,33 +240,46 @@ curl http://localhost:8080/info
       "tags": ["network", "latency", "tls", "port"],
       "examples": ["Measure latency to yahoo.co.jp:443"]
     }
-  ],
-  "limits": {
-    "maxConcurrent": 4,
-    "defaultTimeoutMs": 300000,
-    "maxSteps": 15,
-    "useshell": false
-  },
-  "auth": "bearer"
+  ]
 }
 ```
 
+#### `GET /info`
+
+Legacy endpoint (protocol 0.3.x compatibility). Returns capabilities and skills. `limits.useshell` was removed in protocol 0.4.0 — shell capability is now declared via the `shell` A2A skill.
+
 ### Specializing Workers
 
-Use A2A-style worker skills to make routing behave more like tool selection:
+Use A2A skills to make routing behave like tool selection. Workers advertise their skills; the parent's `delegate-subtask` tool lists them in its description so the LLM can route intelligently.
 
 ```bash
+# Shell worker — use shellworker=true for automatic shell skill emission
 mini-a workermode=true onport=8081 apitoken=secret \
+  workername="shell-worker" workerdesc="Shell execution worker" \
+  shellworker=true
+
+# Network worker — comma shorthand for workerskills
+mini-a workermode=true onport=8082 apitoken=secret \
   workername="network-east" workerdesc="Network diagnostics worker" \
-  workertags="network,latency,tls" \
+  workerspecialties="network,latency,tls" \
   workerskills='[{ "id": "network-latency", "name": "Network latency", "description": "Measure TCP and TLS latency for remote hosts", "tags": ["network","latency","tls","port"], "examples": ["Measure latency to yahoo.co.jp:443"] }]'
 
-mini-a workermode=true onport=8082 apitoken=secret \
-  workername="time-east" workerdesc="Timezone and current time worker" \
-  workerskills='[{ "id": "time-utilities", "name": "Time utilities", "description": "Get current time and convert timezones for named locations", "tags": ["time","timezone","clock"], "examples": ["Get current time in Tokyo and London"] }]'
+# Time worker — plain comma shorthand (auto-expands to minimal skill objects)
+mini-a workermode=true onport=8083 apitoken=secret \
+  workername="time-worker" workerdesc="Timezone and current time worker" \
+  workerspecialties="time,timezone,clock"
 ```
 
-Mini-A also performs lightweight skill inference from enabled worker features such as `mcp=...`, `useutils=true`, and `useskills=true`, but explicit `workerskills` remain the authoritative source.
+Mini-A also infers skills from enabled features: `mcp=...` entries, `useutils=true`, `useskills=true`, and `useshell=true` (emits `shell` skill). Explicit `workerskills` take precedence.
+
+#### Protocol Version Compatibility
+
+| Version | Profile endpoint | `limits.useshell` | Shell routing |
+|---------|-----------------|-------------------|---------------|
+| 0.3.x | `GET /info` (primary) | Present | `requiresShell` flag on caller |
+| 0.4.0 | `GET /.well-known/agent.json` (primary, `/info` fallback) | Removed | `shell` A2A skill on worker |
+
+Parents on 0.4.x probe `/.well-known/agent.json` first; if unavailable, fall back to `/info`. Workers on 0.3.x still interoperate — their `limits.useshell` field arrives but is ignored. The `shell` skill (absent on 0.3.x workers) will simply not match `skills=["shell"]` filter, which is correct: those workers haven't declared shell capability via the new protocol.
 
 #### `POST /task`
 
