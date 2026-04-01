@@ -47,6 +47,56 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testNormalizeToolResultVariants
 
+- name: MiniA Core Tests::PromptProfileHelpers
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptProfileHelpers
+
+- name: MiniA Core Tests::ToolSchemaSummaryCompaction
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolSchemaSummaryCompaction
+
+- name: MiniA Core Tests::SystemPromptBudget
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSystemPromptBudgetDropsLowPrioritySections
+
+- name: MiniA Core Tests::SkillRankingByGoal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSkillPromptEntriesRankByGoalRelevance
+
+- name: MiniA Core Tests::SkillRankingByHookContext
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSkillPromptEntriesUseHookContextForRanking
+
+- name: MiniA Core Tests::PromptSnapshotAgentMinimal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotAgentMinimal
+
+- name: MiniA Core Tests::PromptSnapshotAgentVerbose
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotAgentVerbose
+
+- name: MiniA Core Tests::PromptSnapshotChatbotBalanced
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotChatbotBalanced
+
+- name: MiniA Core Tests::PromptSnapshotPlanningExecution
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotPlanningExecution
+
+- name: MiniA Core Tests::PromptSnapshotBudgetedPrompt
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotBudgetedPromptDropsSections
+
 - name: MiniA Core Tests::UtilsMcpSkillsToggle
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -134,6 +184,16 @@ todo:
 - MiniA Core Tests::CategorizeError
 - MiniA Core Tests::ErrorHistory
 - MiniA Core Tests::NormalizeToolResult
+- MiniA Core Tests::PromptProfileHelpers
+- MiniA Core Tests::ToolSchemaSummaryCompaction
+- MiniA Core Tests::SystemPromptBudget
+- MiniA Core Tests::SkillRankingByGoal
+- MiniA Core Tests::SkillRankingByHookContext
+- MiniA Core Tests::PromptSnapshotAgentMinimal
+- MiniA Core Tests::PromptSnapshotAgentVerbose
+- MiniA Core Tests::PromptSnapshotChatbotBalanced
+- MiniA Core Tests::PromptSnapshotPlanningExecution
+- MiniA Core Tests::PromptSnapshotBudgetedPrompt
 - MiniA Core Tests::UtilsMcpSkillsToggle
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization

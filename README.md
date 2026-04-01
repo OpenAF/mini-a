@@ -419,6 +419,8 @@ Mini-A ships with complementary components:
 | `mcpprogcalltools` | Optional comma-separated allowlist of tool names exposed through the bridge | `""` |
 | `mcpprogcallbatchmax` | Max calls accepted per `/call-tools-batch` request | `10` |
 | `chatbotmode` | Conversational assistant mode | `false` |
+| `promptprofile` | System prompt verbosity profile (`minimal`, `balanced`, `verbose`) | `balanced` |
+| `systempromptbudget` | Maximum estimated system-prompt token budget before low-priority sections are dropped | - |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |

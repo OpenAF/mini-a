@@ -191,6 +191,16 @@ var MiniA = function() {
     goal_block_tokens_saved: $atomic(0, "long"),
     hook_context_compressed: $atomic(0, "long"),
     hook_context_tokens_saved: $atomic(0, "long"),
+    system_prompt_builds: $atomic(0, "long"),
+    system_prompt_tokens_total: $atomic(0, "long"),
+    system_prompt_tokens_last: $atomic(0, "long"),
+    system_prompt_budget_applied: $atomic(0, "long"),
+    system_prompt_budget_tokens_saved: $atomic(0, "long"),
+    system_prompt_examples_dropped: $atomic(0, "long"),
+    system_prompt_skill_descriptions_dropped: $atomic(0, "long"),
+    system_prompt_tool_details_dropped: $atomic(0, "long"),
+    system_prompt_planning_details_dropped: $atomic(0, "long"),
+    system_prompt_skills_trimmed: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -212,7 +222,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 {{#if actionsList}}
 ## AVAILABLE ACTIONS:
 {{#each actionsdesc}}
-• {{name}}: {{{description}}}{{#if inputSchema.properties}}(parameters: {{{$stringifyInLine inputSchema.properties}}}){{/if}}
+• {{name}}: {{{description}}}{{#if compactParamsText}} (params: {{compactParamsText}}){{/if}}
 {{/each}}
 
 {{/if~}}
@@ -380,11 +390,17 @@ REMAINING (do not work on these yet):
 {{/if}}
 {{else}}
 {{#if planningExecution}}
+{{#if includePlanningDetails}}
 • The execution plan has already been generated. Focus on executing tasks and updating progress.
 • Update step 'status' (pending -> in_progress -> done -> blocked) and 'progress' (0-100) as you work.
 • Mark 'state.plan.meta.needsReplan=true' if obstacles require plan adjustment.
 • Set 'state.plan.meta.overallProgress' to reflect completion percentage.
 {{else}}
+• Execute the current plan step and keep status/progress aligned with reality.
+• If blocked, mark the step blocked and set 'state.plan.meta.needsReplan=true'.
+{{/if}}
+{{else}}
+{{#if includePlanningDetails}}
 • Maintain 'state.plan' as an object with at least: { "strategy": "simple|tree", "steps": [ ... ], "checkpoints": [...] , "meta": {...} }.
 • Each step entry must include a 'title', 'status' (pending | in_progress | done | blocked), optional 'progress' percentage (0-100) and an optional 'children' array for sub-steps.
 • For simple goals keep strategy="simple" and a short linear task list (no nested children).
@@ -393,13 +409,20 @@ REMAINING (do not work on these yet):
 • Update 'status', 'progress', and checkpoints as work advances; set 'state.plan.meta.overallProgress' to the completion percentage you compute.
 • When obstacles occur set 'state.plan.meta.needsReplan=true', adjust affected steps (e.g., mark as blocked or add alternatives), and rebuild the subtree if required.
 • Keep the plan synchronized with reality - revise titles, ordering, or decomposition whenever you learn new information or the goal changes.
+{{else}}
+• Keep 'state.plan' short, realistic, and synchronized with what you learn.
+• Use clear step statuses and set 'state.plan.meta.needsReplan=true' when blocked or when the plan becomes wrong.
 {{/if}}
 {{/if}}
+{{/if}}
+{{#if includePlanningDetails}}
 • When a plan file is provided (useplanning=true with planfile=...), append progress updates after meaningful actions. Document what completed, the status, and the result, and add key learnings under "## Knowledge Base" so future runs can resume quickly.
 • Do not allow more than a few steps to pass without updating the plan file. If several steps elapse without an update—or if you approach the max step limit—summarize progress and next actions in the plan immediately.
 • Use clear sections when updating the plan file: start with "---" followed by "## Progress Update - <timestamp>", a "### Completed Task" bullet list, and "### Knowledge for Next Execution" entries.
 {{/if}}
+{{/if}}
 
+{{#if includeExamples}}
 ## EXAMPLES:
 
 ### Example 1: Direct Knowledge (GOOD - minimal thought)
@@ -507,6 +530,7 @@ Arguments: {
 \`\`\`
 {{/if}}{{/if}}
 {{/if}}
+{{/if}}
 
 ## RULES:
 1. Keep "thought" to 1 short sentence; omit details when action is obvious
@@ -522,7 +546,7 @@ Arguments: {
 {{#if availableSkills}}
 ## AVAILABLE SKILLS:
 {{#each availableSkillsList}}
-• {{name}}{{#if description}}: {{description}}{{/if}}
+• {{name}}{{#if includeDescription}}: {{description}}{{/if}}
 {{/each}}
 Use the \`skills\` tool (operation="render" or "invoke") to use them.
 {{/if}}
@@ -1324,7 +1348,19 @@ MiniA.prototype.getMetrics = function() {
             goal_block_compressed: global.__mini_a_metrics.goal_block_compressed.get(),
             goal_block_tokens_saved: global.__mini_a_metrics.goal_block_tokens_saved.get(),
             hook_context_compressed: global.__mini_a_metrics.hook_context_compressed.get(),
-            hook_context_tokens_saved: global.__mini_a_metrics.hook_context_tokens_saved.get()
+            hook_context_tokens_saved: global.__mini_a_metrics.hook_context_tokens_saved.get(),
+            system_prompt_builds: global.__mini_a_metrics.system_prompt_builds.get(),
+            system_prompt_tokens_total: global.__mini_a_metrics.system_prompt_tokens_total.get(),
+            system_prompt_tokens_last: global.__mini_a_metrics.system_prompt_tokens_last.get(),
+            system_prompt_tokens_avg: global.__mini_a_metrics.system_prompt_builds.get() > 0 ? Math.round(global.__mini_a_metrics.system_prompt_tokens_total.get() / global.__mini_a_metrics.system_prompt_builds.get()) : 0,
+            system_prompt_budget_applied: global.__mini_a_metrics.system_prompt_budget_applied.get(),
+            system_prompt_budget_tokens_saved: global.__mini_a_metrics.system_prompt_budget_tokens_saved.get(),
+            system_prompt_examples_dropped: global.__mini_a_metrics.system_prompt_examples_dropped.get(),
+            system_prompt_skill_descriptions_dropped: global.__mini_a_metrics.system_prompt_skill_descriptions_dropped.get(),
+            system_prompt_tool_details_dropped: global.__mini_a_metrics.system_prompt_tool_details_dropped.get(),
+            system_prompt_planning_details_dropped: global.__mini_a_metrics.system_prompt_planning_details_dropped.get(),
+            system_prompt_skills_trimmed: global.__mini_a_metrics.system_prompt_skills_trimmed.get(),
+            system_prompt_last_meta: this._systemPromptMeta || {}
         },
         behavior_patterns: {
             escalations: global.__mini_a_metrics.escalations.get(),
@@ -9410,18 +9446,316 @@ MiniA.prototype._ensureConnectionInitialized = function(connectionId) {
   }
 }
 
-MiniA.prototype._getToolSchemaSummary = function(tool) {
+MiniA.prototype._normalizePromptProfile = function(profile, fallbackProfile) {
+  var normalized = isString(profile) ? profile.trim().toLowerCase() : ""
+  if (normalized === "minimal" || normalized === "balanced" || normalized === "verbose") return normalized
+  return isString(fallbackProfile) && fallbackProfile.length > 0 ? fallbackProfile : "balanced"
+}
+
+MiniA.prototype._getPromptProfile = function(args) {
+  var requested = isMap(args) ? args.promptprofile : __
+  var fallback = toBoolean(isMap(args) && args.debug) ? "verbose" : "balanced"
+  return this._normalizePromptProfile(requested, fallback)
+}
+
+MiniA.prototype._getSystemPromptBudget = function(args) {
+  if (!isMap(args)) return 0
+  var budget = isDef(args.systempromptbudget) ? Number(args.systempromptbudget) : 0
+  return isNumber(budget) && budget > 0 ? Math.round(budget) : 0
+}
+
+MiniA.prototype._shouldIncludePromptExamples = function(profile) {
+  return this._normalizePromptProfile(profile) === "verbose"
+}
+
+MiniA.prototype._shouldIncludeToolDetails = function(profile, toolCount) {
+  var normalized = this._normalizePromptProfile(profile)
+  var count = isNumber(toolCount) ? toolCount : 0
+  if (normalized === "verbose") return count > 0
+  if (normalized === "balanced") return count > 0 && count <= 5
+  return false
+}
+
+MiniA.prototype._getToolSummaryMode = function(profile, toolCount) {
+  var normalized = this._normalizePromptProfile(profile)
+  var count = isNumber(toolCount) ? toolCount : 0
+  if (normalized === "verbose") return "full"
+  if (normalized === "minimal") return "compact"
+  if (count > 8) return "compact"
+  return "standard"
+}
+
+MiniA.prototype._tokenizePromptRankingText = function(text) {
+  if (!isString(text) || text.trim().length === 0) return []
+  var stopwords = {
+    "the": true, "a": true, "an": true, "and": true, "or": true, "but": true, "for": true, "with": true, "from": true,
+    "into": true, "onto": true, "about": true, "your": true, "their": true, "this": true, "that": true, "these": true,
+    "those": true, "have": true, "has": true, "had": true, "will": true, "would": true, "should": true, "could": true,
+    "can": true, "may": true, "might": true, "must": true, "need": true, "want": true, "like": true, "just": true,
+    "also": true, "than": true, "then": true, "when": true, "where": true, "what": true, "which": true, "while": true,
+    "using": true, "used": true, "user": true, "users": true, "help": true, "please": true, "make": true, "show": true,
+    "tell": true, "give": true, "very": true, "more": true, "most": true, "some": true, "each": true, "only": true
+  }
+  var seen = {}
+  return text.toLowerCase()
+    .replace(/[^a-z0-9\s._-]/g, " ")
+    .split(/[\s/_-]+/)
+    .map(word => this._stemWord(word))
+    .filter(word => word.length > 2 && !stopwords[word])
+    .filter(word => {
+      if (seen[word]) return false
+      seen[word] = true
+      return true
+    })
+}
+
+MiniA.prototype._scoreSkillForPrompt = function(skill, goalText, hookContextText) {
+  if (!isMap(skill)) return 0
+  var promptTokens = this._tokenizePromptRankingText((goalText || "") + " " + (hookContextText || ""))
+  if (promptTokens.length === 0) return 0
+
+  var name = isString(skill.name) ? skill.name.toLowerCase() : ""
+  var description = isString(skill.description) ? skill.description.toLowerCase() : ""
+  var relativePath = isString(skill.relativePath) ? skill.relativePath.toLowerCase() : ""
+  var sourceText = [name, description, relativePath].join(" ")
+  var stemmedNameTokens = this._tokenizePromptRankingText(name)
+  var stemmedDescTokens = this._tokenizePromptRankingText(description)
+  var score = 0
+  var matched = 0
+
+  promptTokens.forEach(token => {
+    var tokenMatched = false
+    if (name.indexOf(token) >= 0 || stemmedNameTokens.indexOf(token) >= 0) {
+      score += 12
+      tokenMatched = true
+    } else if (description.indexOf(token) >= 0 || stemmedDescTokens.indexOf(token) >= 0) {
+      score += 6
+      tokenMatched = true
+    } else if (relativePath.indexOf(token) >= 0) {
+      score += 4
+      tokenMatched = true
+    } else if (sourceText.indexOf(token) >= 0) {
+      score += 3
+      tokenMatched = true
+    }
+
+    if (tokenMatched) matched++
+  })
+
+  if (matched > 1) score += matched * 2
+  if (name.indexOf("skill") < 0 && name.length > 0) score += 1
+  return score
+}
+
+MiniA.prototype._rankSkillsForPrompt = function(goalText, hookContextText) {
+  if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
+  var self = this
+  return this._availableSkills
+    .map(function(skill, index) {
+      return {
+        skill : skill,
+        score : self._scoreSkillForPrompt(skill, goalText, hookContextText),
+        index : index
+      }
+    })
+    .sort(function(a, b) {
+      if (b.score !== a.score) return b.score - a.score
+      var aName = isString(a.skill && a.skill.name) ? a.skill.name : ""
+      var bName = isString(b.skill && b.skill.name) ? b.skill.name : ""
+      var nameCmp = aName.localeCompare(bName)
+      if (nameCmp !== 0) return nameCmp
+      return a.index - b.index
+    })
+}
+
+MiniA.prototype._buildSkillPromptEntries = function(profile, goalText, hookContextText) {
+  if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
+  var normalized = this._normalizePromptProfile(profile)
+  var includeDescription = normalized === "verbose"
+  var maxSkills = normalized === "minimal" ? 8 : normalized === "balanced" ? 12 : this._availableSkills.length
+  var rankedSkills = this._rankSkillsForPrompt(goalText, hookContextText)
+  var selected = rankedSkills.slice(0, maxSkills).map(function(entry) { return entry.skill })
+  if (selected.length === 0) selected = this._availableSkills.slice(0, maxSkills)
+  return selected.map(function(s) {
+    return {
+      name              : s.name,
+      description       : s.description,
+      includeDescription: includeDescription
+    }
+  })
+}
+
+MiniA.prototype._clonePromptPayload = function(payload) {
+  if (!isMap(payload)) return {}
+  return jsonParse(stringify(payload, __, ""), __, __, true) || {}
+}
+
+MiniA.prototype._describePromptSections = function(payload) {
+  var data = isMap(payload) ? payload : {}
+  return {
+    examples          : data.includeExamples === true,
+    toolDetails       : data.hasToolDetails === true,
+    planningDetails   : data.includePlanningDetails !== false && data.planning === true,
+    skillDescriptions : isArray(data.availableSkillsList) && data.availableSkillsList.some(function(entry) { return isMap(entry) && entry.includeDescription === true }),
+    skillCount        : isArray(data.availableSkillsList) ? data.availableSkillsList.length : 0
+  }
+}
+
+MiniA.prototype._recordSystemPromptTelemetry = function(meta) {
+  if (!isMap(meta)) return
+  this._systemPromptMeta = merge(meta, {}, true)
+  if (!isObject(global.__mini_a_metrics)) return
+
+  if (isObject(global.__mini_a_metrics.system_prompt_builds)) global.__mini_a_metrics.system_prompt_builds.inc()
+  if (isObject(global.__mini_a_metrics.system_prompt_tokens_total) && isNumber(meta.finalTokens)) global.__mini_a_metrics.system_prompt_tokens_total.getAdd(meta.finalTokens)
+  if (isObject(global.__mini_a_metrics.system_prompt_tokens_last) && isNumber(meta.finalTokens)) global.__mini_a_metrics.system_prompt_tokens_last.set(meta.finalTokens)
+  if (meta.budgetApplied === true) {
+    if (isObject(global.__mini_a_metrics.system_prompt_budget_applied)) global.__mini_a_metrics.system_prompt_budget_applied.inc()
+    if (isObject(global.__mini_a_metrics.system_prompt_budget_tokens_saved) && isNumber(meta.initialTokens) && isNumber(meta.finalTokens)) {
+      global.__mini_a_metrics.system_prompt_budget_tokens_saved.getAdd(Math.max(0, meta.initialTokens - meta.finalTokens))
+    }
+  }
+  if (isArray(meta.droppedSections)) {
+    if (meta.droppedSections.indexOf("examples") >= 0 && isObject(global.__mini_a_metrics.system_prompt_examples_dropped)) global.__mini_a_metrics.system_prompt_examples_dropped.inc()
+    if (meta.droppedSections.indexOf("skill_descriptions") >= 0 && isObject(global.__mini_a_metrics.system_prompt_skill_descriptions_dropped)) global.__mini_a_metrics.system_prompt_skill_descriptions_dropped.inc()
+    if (meta.droppedSections.indexOf("tool_details") >= 0 && isObject(global.__mini_a_metrics.system_prompt_tool_details_dropped)) global.__mini_a_metrics.system_prompt_tool_details_dropped.inc()
+    if (meta.droppedSections.indexOf("planning_details") >= 0 && isObject(global.__mini_a_metrics.system_prompt_planning_details_dropped)) global.__mini_a_metrics.system_prompt_planning_details_dropped.inc()
+    if ((meta.droppedSections.indexOf("skills_trimmed") >= 0 || meta.droppedSections.indexOf("skills_removed") >= 0) && isObject(global.__mini_a_metrics.system_prompt_skills_trimmed)) {
+      global.__mini_a_metrics.system_prompt_skills_trimmed.inc()
+    }
+  }
+}
+
+MiniA.prototype._buildSystemPromptWithBudget = function(templateKey, payload, template, options) {
+  var opts = isMap(options) ? options : {}
+  var args = isMap(opts.args) ? opts.args : {}
+  var budget = this._getSystemPromptBudget(args)
+  var workingPayload = this._clonePromptPayload(payload)
+  if (isUnDef(workingPayload.includePlanningDetails)) workingPayload.includePlanningDetails = true
+
+  var initialPrompt = this._getCachedSystemPrompt(templateKey, workingPayload, template)
+  var initialTokens = this._estimateTokens(initialPrompt)
+  var droppedSections = []
+  var budgetApplied = false
+  var changed = false
+
+  var applyFallback = (label, updater) => {
+    if (!isFunction(updater)) return false
+    var updated = updater(workingPayload)
+    if (updated === true) {
+      droppedSections.push(label)
+      changed = true
+      return true
+    }
+    return false
+  }
+
+  if (budget > 0 && initialTokens > budget) {
+    budgetApplied = true
+    var fallbacks = [
+      { label: "examples", fn: function(p) {
+        if (p.includeExamples === true) {
+          p.includeExamples = false
+          return true
+        }
+        return false
+      }},
+      { label: "skill_descriptions", fn: function(p) {
+        if (!isArray(p.availableSkillsList)) return false
+        var changedDescriptions = false
+        p.availableSkillsList.forEach(function(entry) {
+          if (isMap(entry) && entry.includeDescription === true) {
+            entry.includeDescription = false
+            changedDescriptions = true
+          }
+        })
+        return changedDescriptions
+      }},
+      { label: "tool_details", fn: function(p) {
+        if (p.hasToolDetails === true) {
+          p.hasToolDetails = false
+          p.toolDetails = []
+          return true
+        }
+        return false
+      }},
+      { label: "planning_details", fn: function(p) {
+        if (p.includePlanningDetails !== false && p.planning === true) {
+          p.includePlanningDetails = false
+          return true
+        }
+        return false
+      }},
+      { label: "skills_trimmed", fn: function(p) {
+        if (isArray(p.availableSkillsList) && p.availableSkillsList.length > 5) {
+          p.availableSkillsList = p.availableSkillsList.slice(0, 5)
+          p.availableSkills = p.availableSkillsList.length > 0
+          return true
+        }
+        return false
+      }},
+      { label: "skills_removed", fn: function(p) {
+        if (isArray(p.availableSkillsList) && p.availableSkillsList.length > 0) {
+          p.availableSkillsList = []
+          p.availableSkills = false
+          return true
+        }
+        return false
+      }}
+    ]
+
+    for (var i = 0; i < fallbacks.length; i++) {
+      if (this._estimateTokens(this._getCachedSystemPrompt(templateKey, workingPayload, template)) <= budget) break
+      applyFallback(fallbacks[i].label, fallbacks[i].fn)
+    }
+  }
+
+  var finalPrompt = changed ? this._getCachedSystemPrompt(templateKey, workingPayload, template) : initialPrompt
+  var finalTokens = changed ? this._estimateTokens(finalPrompt) : initialTokens
+  var sections = this._describePromptSections(workingPayload)
+  var meta = {
+    templateKey    : templateKey,
+    mode           : opts.mode || templateKey,
+    profile        : workingPayload.promptProfile || this._getPromptProfile(args),
+    budget         : budget,
+    budgetApplied  : budgetApplied,
+    initialTokens  : initialTokens,
+    finalTokens    : finalTokens,
+    droppedSections: droppedSections,
+    toolCount      : isNumber(workingPayload.toolCount) ? workingPayload.toolCount : 0,
+    skillCount     : sections.skillCount,
+    includedSections: {
+      examples        : sections.examples,
+      toolDetails     : sections.toolDetails,
+      planningDetails : sections.planningDetails,
+      skillDescriptions: sections.skillDescriptions
+    }
+  }
+  this._recordSystemPromptTelemetry(meta)
+
+  return {
+    prompt : finalPrompt,
+    meta   : meta,
+    payload: workingPayload
+  }
+}
+
+MiniA.prototype._getToolSchemaSummary = function(tool, options) {
   var info = isString(tool) ? this._resolveToolInfo(tool) : tool
   if (!isObject(info)) {
     return {
       description: "No description provided.",
       params     : [],
-      hasParams  : false
+      hasParams  : false,
+      compactParamsText: ""
     }
   }
 
   var schema = isObject(info.inputSchema) ? info.inputSchema : {}
-  var cacheKey = md5(`${info.name || "unknown"}::${this._stableStringify(schema)}::${info.description || ""}`)
+  var opts = isMap(options) ? options : {}
+  var summaryMode = this._getToolSummaryMode(opts.profile, isDef(opts.toolCount) ? opts.toolCount : __)
+  if (isString(opts.summaryMode) && opts.summaryMode.length > 0) summaryMode = opts.summaryMode
+  var cacheKey = md5(`${info.name || "unknown"}::${summaryMode}::${this._stableStringify(schema)}::${info.description || ""}`)
   var cached = $cache(this._toolSchemaCacheName).get(cacheKey)
   if (isObject(cached) && isObject(cached.value)) {
     return cached.value
@@ -9433,8 +9767,10 @@ MiniA.prototype._getToolSchemaSummary = function(tool) {
   var properties = isObject(schema.properties) ? schema.properties : {}
   var requiredList = isArray(schema.required) ? schema.required : []
   var params = []
+  var paramNames = Object.keys(properties).sort()
+  var paramLimit = summaryMode === "full" ? paramNames.length : summaryMode === "standard" ? 3 : 2
 
-  Object.keys(properties).sort().forEach(paramName => {
+  paramNames.slice(0, paramLimit).forEach(paramName => {
     var paramInfo = properties[paramName] || {}
     var paramDescription = isString(paramInfo.description) && paramInfo.description.length > 0
       ? paramInfo.description
@@ -9448,11 +9784,17 @@ MiniA.prototype._getToolSchemaSummary = function(tool) {
     })
   })
 
+  var compactParamsText = params.map(param => param.name + (param.required ? "*" : "")).join(", ")
+  if (summaryMode !== "full" && paramNames.length > params.length) {
+    compactParamsText += (compactParamsText.length > 0 ? ", " : "") + "..."
+  }
+
   var summary = {
     name       : info.name,
     description: description,
     params     : params,
-    hasParams  : params.length > 0
+    hasParams  : params.length > 0,
+    compactParamsText: compactParamsText
   }
 
   if (summary.name === "proxy-dispatch") {
@@ -10799,6 +11141,13 @@ MiniA.prototype._applySystemInstructions = function(args) {
 
   var systemTokens = this._estimateTokens(this._systemInst)
   this.fnI("size", `System prompt ~${systemTokens} tokens`)
+  if (isMap(this._systemPromptMeta)) {
+    var promptMeta = this._systemPromptMeta
+    this.fnI("size", `System prompt profile=${promptMeta.profile || this._currentMode} budget=${promptMeta.budget || 0} examples=${promptMeta.includedSections && promptMeta.includedSections.examples ? "on" : "off"} toolDetails=${promptMeta.includedSections && promptMeta.includedSections.toolDetails ? "on" : "off"} planningDetails=${promptMeta.includedSections && promptMeta.includedSections.planningDetails ? "on" : "off"} skills=${isDef(promptMeta.skillCount) ? promptMeta.skillCount : 0}`)
+    if (promptMeta.budgetApplied === true) {
+      this.fnI("size", `System prompt budget applied: ${promptMeta.initialTokens} -> ${promptMeta.finalTokens} tokens; dropped=${isArray(promptMeta.droppedSections) && promptMeta.droppedSections.length > 0 ? promptMeta.droppedSections.join(",") : "none"}`)
+    }
+  }
   if (toBoolean(args.debug)) {
     if (this._debugFile) {
       this._debugOut("SYSTEM_INSTRUCTION", this._systemInst)
@@ -10973,6 +11322,8 @@ MiniA.prototype.init = function(args) {
         { name: "knowledge", type: "string", default: "" },
         { name: "chatyouare", type: "string", default: "" },
         { name: "youare", type: "string", default: "" },
+        { name: "promptprofile", type: "string", default: __ },
+        { name: "systempromptbudget", type: "number", default: __ },
         { name: "outfile", type: "string", default: __ },
         { name: "outfileall", type: "string", default: __ },
       { name: "libs", type: "string", default: "" },
@@ -11784,15 +12135,21 @@ MiniA.prototype.init = function(args) {
       }
     }
 
+    var promptProfile = this._getPromptProfile(args)
+
     if (args.chatbotmode) {
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
       var chatbotVisibleToolNames = this.mcpToolNames.filter(name => !(shellViaActionPreferred && name === "shell"))
       var chatToolsList = chatbotVisibleToolNames.join(", ")
       var chatbotToolDetails = []
-      if (this.mcpTools.length > 0 && !this._useTools) {
+      var includeChatToolDetails = this._shouldIncludeToolDetails(promptProfile, chatbotVisibleToolNames.length)
+      if (this.mcpTools.length > 0 && !this._useTools && includeChatToolDetails) {
         chatbotToolDetails = this.mcpTools.filter(tool => !(shellViaActionPreferred && tool.name === "shell")).map(tool => {
-          var summary = this._getToolSchemaSummary(tool)
+          var summary = this._getToolSchemaSummary(tool, {
+            profile  : promptProfile,
+            toolCount: chatbotVisibleToolNames.length
+          })
           return {
             name       : summary.name,
             description: summary.description,
@@ -11814,20 +12171,28 @@ MiniA.prototype.init = function(args) {
         hasRules      : baseRules.length > 0,
         rules         : baseRules,
         hasTools      : chatbotVisibleToolNames.length > 0,
+        promptProfile : promptProfile,
         toolCount     : chatbotVisibleToolNames.length,
         toolsPlural   : chatbotVisibleToolNames.length !== 1,
         toolsList     : chatToolsList,
-        hasToolDetails: chatbotToolDetails.length > 0,
+        hasToolDetails: includeChatToolDetails && chatbotToolDetails.length > 0,
         toolDetails   : chatbotToolDetails,
         markdown      : args.format == "md",
         useshell      : args.useshell,
         shellViaActionPreferred: shellViaActionPreferred
       }
-      this._systemInst = this._getCachedSystemPrompt("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT)
+      this._systemInst = this._buildSystemPromptWithBudget("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT, {
+        args: args,
+        mode: "chatbot"
+      }).prompt
     } else {
-      var promptActionsDesc = this._useTools ? [] : this.mcpTools.map(tool => this._getToolSchemaSummary(tool))
+      var promptActionsDesc = this._useTools ? [] : this.mcpTools.map(tool => this._getToolSchemaSummary(tool, {
+        profile  : promptProfile,
+        toolCount: this.mcpTools.length
+      }))
       var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
       var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
+      var skillPromptEntries = this._buildSkillPromptEntries(promptProfile, args.goal, args.hookcontext)
 
       this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
         actionsList: promptActionsList,
@@ -11848,6 +12213,8 @@ MiniA.prototype.init = function(args) {
       var agentPayload = {
         agentPersonaLine: agentPersonaLine,
         agentDirectiveLine: agentDirectiveLine,
+        promptProfile   : promptProfile,
+        includeExamples : this._shouldIncludePromptExamples(promptProfile),
         actionsWordNumber: actionsWordNumber,
         actionsList      : promptActionsList,
         useshell         : args.useshell,
@@ -11864,6 +12231,7 @@ MiniA.prototype.init = function(args) {
         proxyToolCount   : proxyToolCount,
         proxyToolsList   : proxyToolsList,
         planning         : this._enablePlanning,
+        includePlanningDetails: true,
         planningExecution: this._enablePlanning && this._planningPhase === "execution",
         // Simple plan style variables
         simplePlanStyle  : simplePlanStyle,
@@ -11874,12 +12242,13 @@ MiniA.prototype.init = function(args) {
         nextStep         : stepContext ? stepContext.nextStep : 1,
         completedSteps   : stepContext ? stepContext.completedSteps : "",
         remainingSteps   : stepContext ? stepContext.remainingSteps : "",
-        availableSkills    : isArray(this._availableSkills) && this._availableSkills.length > 0,
-        availableSkillsList: isArray(this._availableSkills)
-          ? this._availableSkills.map(function(s) { return { name: s.name, description: s.description } })
-          : []
+        availableSkills    : skillPromptEntries.length > 0,
+        availableSkillsList: skillPromptEntries
       }
-      this._systemInst = this._getCachedSystemPrompt("agent", agentPayload, this._SYSTEM_PROMPT)
+      this._systemInst = this._buildSystemPromptWithBudget("agent", agentPayload, this._SYSTEM_PROMPT, {
+        args: args,
+        mode: "agent"
+      }).prompt
     }
 
     this._isInitialized = true
@@ -11945,6 +12314,8 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * - maxcontext (number, optional): Maximum context size in tokens. If the conversation exceeds this size, it will be summarized.
  * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
  * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
+ * - promptprofile (string, optional): System prompt verbosity profile ("minimal", "balanced", "verbose"). Defaults to "balanced" and switches to "verbose" when debug=true.
+ * - systempromptbudget (number, optional): Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority prompt sections such as examples and detailed tool/skill guidance.
  * - format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * - usemath (boolean, default=false): Encourage LaTeX math output (`$...$` and `$$...$$`) for KaTeX rendering in the web UI.
  * 

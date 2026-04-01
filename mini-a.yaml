@@ -329,6 +329,15 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : promptprofile
+    desc     : Prompt verbosity profile for system instructions (minimal, balanced, verbose)
+    example  : "balanced"
+    mandatory: false
+    options  : ["minimal", "balanced", "verbose"]
+  - name     : systempromptbudget
+    desc     : Maximum system prompt size in estimated tokens before Mini-A drops low-priority sections
+    example  : "1800"
+    mandatory: false
   - name     : rules
     desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
@@ -587,6 +596,8 @@ jobs:
         convertplan    : convertplan
         resumefailed   : resumefailed
         chatbotmode    : chatbotmode
+        promptprofile  : promptprofile
+        systempromptbudget: systempromptbudget
         planfile       : planfile
         planformat     : planformat
         plancontent    : plancontent
@@ -695,6 +706,8 @@ jobs:
       convertplan    : toBoolean.isBoolean.default(false)
       resumefailed   : toBoolean.isBoolean.default(false)
       chatbotmode    : toBoolean.isBoolean.default(false)
+      promptprofile  : isString.default(__)
+      systempromptbudget: toNumber.isNumber.default(__)
       planfile       : isString.default(__)
       planformat     : isString.default(__)
       plancontent    : isString.default(__)

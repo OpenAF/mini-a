@@ -159,6 +159,15 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : promptprofile
+    desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose)"
+    example  : "balanced"
+    mandatory: false
+    options  : ["minimal", "balanced", "verbose"]
+  - name     : systempromptbudget
+    desc     : "Maximum system prompt size in estimated tokens before Mini-A drops low-priority sections"
+    example  : "1800"
+    mandatory: false
   - name     : format
     desc     : "Preferred Mini-A response format (md or json)"
     example  : "json"
@@ -909,6 +918,8 @@ jobs:
       utilsallow     : isString().default(__)
       utilsdeny      : isString().default(__)
       chatbotmode    : toBoolean().isBoolean().default(false)
+      promptprofile  : isString().default(__)
+      systempromptbudget: toNumber().isNumber().default(__)
       format         : isString().default(__)
       auditch        : isString().default(__)
       toollog        : isString().default(__)

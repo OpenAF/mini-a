@@ -769,6 +769,8 @@ The `start()` method accepts various configuration options:
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
+- **`promptprofile`** (string, default: `balanced`): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the default reduced prompt, or `verbose` to keep richer guidance and examples. When `debug=true`, Mini-A defaults to `verbose` unless you override it.
+- **`systempromptbudget`** (number, optional): Maximum estimated system-prompt token budget. When the rendered prompt exceeds it, Mini-A automatically drops lower-priority sections in this order: examples, skill descriptions, detailed tool reference, extended planning guidance, then excess skill entries.
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 

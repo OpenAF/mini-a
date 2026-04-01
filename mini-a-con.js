@@ -452,6 +452,8 @@ try {
     resumefailed   : { type: "boolean", default: false, description: "Attempt to resume the last failed goal on startup" },
     forceplanning  : { type: "boolean", default: false, description: "Force planning even when heuristics would skip it" },
     chatbotmode    : { type: "boolean", default: false, description: "Run Mini-A in chatbot mode" },
+    promptprofile  : { type: "string", description: "Prompt verbosity profile (minimal|balanced|verbose)" },
+    systempromptbudget: { type: "number", description: "Maximum system prompt size in estimated tokens before low-priority sections are dropped" },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
