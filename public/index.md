@@ -1886,6 +1886,8 @@
     let immediatePollTimer = null;
     let pollInFlight = false;
     let pollQueued = false;
+    let pollErrorCount = 0;
+    let streamErrorCount = 0;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -4656,7 +4658,7 @@
         if (!entry) return;
 
         if (isProcessing) {
-            stopProcessing();
+            stopProcessing(true);
         }
 
         stopStream();
@@ -5054,6 +5056,8 @@
     function startProcessing() {
         isProcessing = true;
         conversationFinished = false;
+        pollErrorCount = 0;
+        streamErrorCount = 0;
         autoScrollEnabled = true;
         promptInput.disabled = true;
         promptInput.value = '';
@@ -5071,8 +5075,10 @@
         updateCopyActionsVisibility();
     }
 
-    function stopProcessing() {
+    function stopProcessing(sendStopRequest = false) {
         isProcessing = false;
+        pollErrorCount = 0;
+        streamErrorCount = 0;
         promptInput.disabled = false;
         setSubmitIcon('send');
         submitBtn.classList.remove('stop');
@@ -5087,7 +5093,7 @@
 
         stopStream();
         
-        if (currentSessionUuid) {
+        if (sendStopRequest && currentSessionUuid) {
             fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -5177,7 +5183,7 @@
 
     async function handleSubmit() {
         if (isProcessing) {
-            await stopProcessing();
+            await stopProcessing(true);
             return;
         }
 
@@ -5230,12 +5236,26 @@
             return;
         }
         pollInFlight = true;
+        let pollTimeout = null;
+        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
         try {
+            if (controller) {
+                pollTimeout = setTimeout(() => {
+                    try { controller.abort(); } catch (_) { /* ignore */ }
+                }, 12000);
+            }
+
             const response = await fetch(resolveAppUrl('result'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json; charset=utf-8' },
-                body: JSON.stringify({ uuid: pollUuid })
+                body: JSON.stringify({ uuid: pollUuid }),
+                signal: controller ? controller.signal : undefined
             });
+
+            if (pollTimeout) {
+                clearTimeout(pollTimeout);
+                pollTimeout = null;
+            }
 
             if (!response.ok) throw new Error('Failed to fetch results');
 
@@ -5243,6 +5263,8 @@
             if (pollUuid !== currentSessionUuid) {
                 return;
             }
+
+                pollErrorCount = 0;
 
                 if (Array.isArray(data.history)) {
                     lastKnownHistory = sanitizeHistoryEvents(data.history);
@@ -5293,17 +5315,33 @@
                         planPanel.setAttribute('hidden', 'hidden');
                         planPanel.removeAttribute('open');
                     }
-                    stopProcessing();
+                    stopProcessing(false);
                 } else {
                     addPreview();
                 }
                 
         } catch (error) {
+            if (pollTimeout) {
+                clearTimeout(pollTimeout);
+                pollTimeout = null;
+            }
             console.error('Error fetching results:', error);
+
+            // Keep the request alive on transient poll failures while work is still running.
+            if (isProcessing && !conversationFinished) {
+                pollErrorCount += 1;
+                const retryDelay = Math.min(3000, 200 * pollErrorCount);
+                scheduleImmediatePoll(retryDelay);
+                return;
+            }
+
             await updateResultsContent('<p style="color: red;">Error fetching results. Please try again.</p>');
             forceRenderChartBlocks();
-            stopProcessing();
+            stopProcessing(false);
         } finally {
+            if (pollTimeout) {
+                clearTimeout(pollTimeout);
+            }
             pollInFlight = false;
             if (pollQueued) {
                 pollQueued = false;
@@ -5423,6 +5461,7 @@
         streamActive = true;
         streamBuffer = '';
         plannerStreamBuffer = '';
+        streamErrorCount = 0;
         syncPreviewText();
 
         const streamUrl = resolveAppUrl('stream') + '?uuid=' + encodeURIComponent(uuid);
@@ -5464,6 +5503,28 @@
             scheduleImmediatePoll(0);
         });
         streamSource.addEventListener('error', (event) => {
+            const sourceReadyState = streamSource ? streamSource.readyState : -1;
+            const closed = (typeof EventSource !== 'undefined') && sourceReadyState === EventSource.CLOSED;
+            streamErrorCount += 1;
+
+            // EventSource can emit transient errors while automatically reconnecting.
+            // Do not stop processing immediately; polling remains the source of truth.
+            if (isProcessing && !conversationFinished) {
+                scheduleImmediatePoll(50);
+
+                if (closed) {
+                    closeStreamConnectionKeepBuffers();
+                    const restartDelay = Math.min(2500, 250 * streamErrorCount);
+                    setTimeout(() => {
+                        if (isProcessing && !conversationFinished && currentSessionUuid) {
+                            startStream(currentSessionUuid);
+                        }
+                    }, restartDelay);
+                }
+
+                return;
+            }
+
             console.error('SSE error:', event);
             streamActive = false;
             stopStream();
@@ -5511,7 +5572,7 @@
             (typeof window !== 'undefined' ? window.mini_a_session_uuid : null);
 
         if (isProcessing) {
-            stopProcessing();
+            stopProcessing(true);
         }
 
         if (uuidToClear) {
