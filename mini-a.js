@@ -1927,6 +1927,23 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     // Match markdown table separator rows with or without outer pipes.
     var TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
 
+    // Thinking-tag streaming filter state (disabled when showthinking is active)
+    var tfEnabled = !toBoolean(isObject(args) ? args.showthinking : false)
+    var tfAllowedTags = {
+        think: true, thinking: true, thought: true, thoughts: true,
+        analysis: true, reasoning: true, rationale: true, plan: true,
+        scratchpad: true, chainofthought: true, thinkingprocess: true,
+        innerthought: true, innermonologue: true, assistantthoughts: true,
+        reflection: true, selfreflection: true, deliberation: true
+    }
+    var tfNorm = tag => String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+    var tfState = "idle"    // idle | tag_opening | in_content | tag_closing
+    var tfTagBuf = ""       // accumulates tag name chars during tag_opening
+    var tfPreBuf = ""       // accumulates "<" + tag chars before decision
+    var tfContentBuf = ""   // accumulates content inside confirmed thinking tag
+    var tfCloseBuf = ""     // accumulates "</tagname>" chars during tag_closing
+    var tfActiveTag = ""    // normalized name of the currently open thinking tag
+
     function isTableSeparatorLine(lineText) {
         if (!isString(lineText)) return false
         return TABLE_SEPARATOR_REGEX.test(lineText.trim())
@@ -2122,6 +2139,81 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
         if (tableHeaderCandidate.length > 0) flushContent(tableHeaderCandidate)
         if (contentBuffer.length > 0) flushContent(contentBuffer)
         flushContent("\n\n")
+        // Flush any partial thinking-tag state on stream end
+        if (tfEnabled) {
+            if (tfState === "in_content" && tfContentBuf.length > 0) {
+                var _tfPartial = tfContentBuf.trim()
+                if (_tfPartial.length > 0) {
+                    self._logMessageWithCounter("thought", _tfPartial)
+                    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made))
+                        global.__mini_a_metrics.thoughts_made.inc()
+                }
+                tfContentBuf = ""; tfState = "idle"
+            } else if (tfState === "tag_opening" && tfPreBuf.length > 0) {
+                processContent(tfPreBuf)
+                tfPreBuf = ""; tfState = "idle"
+            } else if (tfState === "tag_closing") {
+                tfContentBuf += tfCloseBuf
+                var _tfRemain = tfContentBuf.trim()
+                if (_tfRemain.length > 0) {
+                    self._logMessageWithCounter("thought", _tfRemain)
+                    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made))
+                        global.__mini_a_metrics.thoughts_made.inc()
+                }
+                tfContentBuf = ""; tfCloseBuf = ""; tfState = "idle"
+            }
+        }
+    }
+
+    // Feed a single decoded character through the thinking-tag state machine.
+    // When inside a confirmed thinking tag, characters are buffered; when the
+    // closing tag is detected the buffer is logged as a "thought" event.
+    // Falls through to processContent when tfEnabled is false.
+    function filterChar(ch) {
+        if (!tfEnabled) { processContent(ch); return }
+        switch (tfState) {
+        case "idle":
+            if (ch === "<") { tfState = "tag_opening"; tfPreBuf = "<"; tfTagBuf = "" }
+            else processContent(ch)
+            break
+        case "tag_opening":
+            if (/[a-zA-Z]/.test(ch) && tfTagBuf.length === 0) {
+                tfTagBuf = ch; tfPreBuf += ch
+            } else if (/[a-zA-Z0-9_-]/.test(ch) && tfTagBuf.length > 0) {
+                tfTagBuf += ch; tfPreBuf += ch
+            } else if (ch === ">" && tfTagBuf.length > 0) {
+                var _tfNorm = tfNorm(tfTagBuf)
+                if (tfAllowedTags[_tfNorm]) {
+                    tfState = "in_content"; tfActiveTag = _tfNorm
+                    tfContentBuf = ""; tfPreBuf = ""; tfTagBuf = ""
+                } else {
+                    processContent(tfPreBuf + ">"); tfPreBuf = ""; tfTagBuf = ""; tfState = "idle"
+                }
+            } else {
+                processContent(tfPreBuf + ch); tfPreBuf = ""; tfTagBuf = ""; tfState = "idle"
+            }
+            break
+        case "in_content":
+            if (ch === "<") { tfState = "tag_closing"; tfCloseBuf = "<" }
+            else tfContentBuf += ch
+            break
+        case "tag_closing":
+            tfCloseBuf += ch
+            var _tfExpected = "</" + tfActiveTag + ">"
+            if (tfCloseBuf === _tfExpected) {
+                var _tfTrimmed = tfContentBuf.trim()
+                if (_tfTrimmed.length > 0) {
+                    self._logMessageWithCounter("thought", _tfTrimmed)
+                    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made))
+                        global.__mini_a_metrics.thoughts_made.inc()
+                }
+                tfContentBuf = ""; tfCloseBuf = ""; tfActiveTag = ""; tfState = "idle"
+            } else if (_tfExpected.indexOf(tfCloseBuf) !== 0) {
+                // No longer a valid prefix of the expected closing tag — treat as content
+                tfContentBuf += tfCloseBuf; tfCloseBuf = ""; tfState = "in_content"
+            }
+            break
+        }
     }
 
     // Process raw JSON chunk to extract answer content
@@ -2151,7 +2243,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
                             }
                             var decoded = decodeChar(ch)
                             if (decoded !== null) {
-                                processContent(decoded)
+                                filterChar(decoded)
                             }
                         }
                     }
@@ -2166,7 +2258,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
                 }
                 var decoded = decodeChar(c)
                 if (decoded !== null) {
-                    processContent(decoded)
+                    filterChar(decoded)
                 }
             }
         }
@@ -5970,6 +6062,42 @@ MiniA.prototype._repairJsonString = function(jsonString) {
     return repaired
   }
 
+  // Step 2: Try to fix unescaped internal quotes inside string values.
+  // Uses a character scanner: a " inside a string not followed by a JSON structural char
+  // (, } ] : newline end) is treated as an unescaped internal quote and gets escaped.
+  var _fixed = (function(s) {
+    var out = []
+    var inStr = false
+    var esc = false
+    for (var _i = 0; _i < s.length; _i++) {
+      var ch = s[_i]
+      if (esc) { out.push(ch); esc = false; continue }
+      if (ch === "\\") { out.push(ch); esc = true; continue }
+      if (ch === '"') {
+        if (!inStr) {
+          inStr = true; out.push(ch)
+        } else {
+          // Peek past whitespace to see what follows
+          var pk = _i + 1
+          while (pk < s.length && (s[pk] === " " || s[pk] === "\t")) pk++
+          var nc = pk < s.length ? s[pk] : ""
+          if (nc === "" || nc === "," || nc === "}" || nc === "]" || nc === ":" || nc === "\n" || nc === "\r") {
+            inStr = false; out.push(ch)
+          } else {
+            out.push("\\"); out.push('"')
+          }
+        }
+      } else {
+        out.push(ch)
+      }
+    }
+    return out.join("")
+  })(repaired)
+  if (_fixed !== repaired) {
+    var _fixedParsed = jsonParse(_fixed, __, __, true)
+    if (isMap(_fixedParsed) || isArray(_fixedParsed)) return _fixed
+  }
+
   // If repair didn't help, return original
   return jsonString
 }
@@ -6016,6 +6144,15 @@ MiniA.prototype._parseModelJsonResponse = function(rawResponse) {
 
     addCandidate(rawResponse)
     addCandidate(this._cleanCodeBlocks(rawResponse))
+
+    // Extract JSON from fenced code blocks appearing anywhere in the text (e.g. prose + ```json ... ```)
+    if (rawResponse.indexOf("```") >= 0) {
+        var _fencedRe = /```(?:json|js|javascript)?\s*\n([\s\S]*?)\n```/g
+        var _fencedMatch
+        while ((_fencedMatch = _fencedRe.exec(rawResponse)) !== null) {
+            addCandidate(_fencedMatch[1].trim())
+        }
+    }
 
     candidates.forEach(candidate => {
         if (candidate.indexOf("\n{") >= 0) {
@@ -6476,6 +6613,32 @@ MiniA.prototype._logThinkingBlocks = function(rawResponse) {
             global.__mini_a_metrics.thoughts_made.inc()
         }
     })
+}
+
+/**
+ * Strip thinking/reasoning tags from a raw string response, returning both the
+ * cleaned string and the extracted thought blocks for logging. Non-allowed tags
+ * are preserved unchanged.
+ */
+MiniA.prototype._stripThinkingTagsFromString = function(text) {
+    if (!isString(text)) return { cleaned: text, blocks: [] }
+    var allowedTags = {
+        think: true, thinking: true, thought: true, thoughts: true,
+        analysis: true, reasoning: true, rationale: true, plan: true,
+        scratchpad: true, chainofthought: true, thinkingprocess: true,
+        innerthought: true, innermonologue: true, assistantthoughts: true,
+        reflection: true, selfreflection: true, deliberation: true
+    }
+    var normalizeTag = tag => String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+    var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
+    var blocks = [], seen = {}
+    var cleaned = text.replace(tagPattern, (match, tag, content) => {
+        if (!allowedTags[normalizeTag(tag)]) return match
+        var trimmed = (content || "").toString().trim()
+        if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; blocks.push(trimmed) }
+        return ""
+    }).trim()
+    return { cleaned: cleaned, blocks: blocks }
 }
 
 /**
@@ -13277,8 +13440,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
+      var _streamThinkingBuf = []
       if (args.usestream) {
-        onDelta = plannerStreaming && !noJsonPromptFlag
+        var _baseOnDelta = plannerStreaming && !noJsonPromptFlag
           ? this._createStreamDeltaHandler(args, {
               fieldName: "thought",
               eventName: "planner_stream"
@@ -13289,6 +13453,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               eventName: streamIntent === "planner" ? "planner_stream" : "stream"
             })
             : this._createPlainStreamDeltaHandler(streamIntent === "planner" ? "planner_stream" : "stream")
+        onDelta = function(chunk, payload) {
+          _baseOnDelta(chunk, payload)
+          // Collect thinking tokens from Ollama reasoning models (message.thinking field)
+          if (isMap(payload) && isMap(payload.message) && isString(payload.message.thinking) && payload.message.thinking.length > 0) {
+            _streamThinkingBuf.push(payload.message.thinking)
+          }
+        }
       }
 
       var responseWithStats
@@ -13438,6 +13609,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       var rmsg = responseWithStats.response
+      // Ollama reasoning models emit JSON in message.thinking instead of message.content.
+      // When streaming produced an empty response but thinking tokens were collected, use
+      // the accumulated thinking as the response text so JSON parsing can succeed.
+      if (isString(rmsg) && rmsg.trim().length === 0 && _streamThinkingBuf.length > 0) {
+        rmsg = _streamThinkingBuf.join("")
+      }
       if (args.showthinking) {
         // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
         var rawForThinking = isDef(responseWithStats.raw) ? responseWithStats.raw : responseWithStats.response
@@ -13462,8 +13639,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var msg
       var recoveredFromEnvelopeApplied = false
       if (isString(rmsg)) {
+        var _mainThinkStrip = this._stripThinkingTagsFromString(rmsg)
+        if (_mainThinkStrip.blocks.length > 0) {
+          if (!args.showthinking) {
+            _mainThinkStrip.blocks.forEach(b => {
+              this._logMessageWithCounter("thought", b)
+              global.__mini_a_metrics.thoughts_made.inc()
+            })
+          }
+          rmsg = _mainThinkStrip.cleaned
+        }
         msg = this._parseModelJsonResponse(rmsg)
-        
+
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
            var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
@@ -13579,7 +13766,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           stats = fallbackStats
           tokenStatsMsg = this._formatTokenStats(stats)
           this.fnI("output", `main fallback model responded. ${tokenStatsMsg}`)
-          
+
+          if (isString(rmsg)) {
+            var _fallbackThinkStrip = this._stripThinkingTagsFromString(rmsg)
+            if (_fallbackThinkStrip.blocks.length > 0) {
+              if (!args.showthinking) {
+                _fallbackThinkStrip.blocks.forEach(b => {
+                  this._logMessageWithCounter("thought", b)
+                  global.__mini_a_metrics.thoughts_made.inc()
+                })
+              }
+              rmsg = _fallbackThinkStrip.cleaned
+            }
+          }
           if (isString(rmsg)) {
             msg = this._parseModelJsonResponse(rmsg)
           } else {
@@ -14450,6 +14649,18 @@ MiniA.prototype._runChatbotMode = function(options) {
         var extractedChatbotText = this._extractPrimaryResponseText(responseWithStats.response)
         if (isString(extractedChatbotText)) {
           rawResponse = extractedChatbotText
+        }
+      }
+      if (isString(rawResponse)) {
+        var _chatbotThinkStrip = this._stripThinkingTagsFromString(rawResponse)
+        if (_chatbotThinkStrip.blocks.length > 0) {
+          if (!args.showthinking) {
+            _chatbotThinkStrip.blocks.forEach(b => {
+              this._logMessageWithCounter("thought", b)
+              global.__mini_a_metrics.thoughts_made.inc()
+            })
+          }
+          rawResponse = _chatbotThinkStrip.cleaned
         }
       }
       var handled = false
