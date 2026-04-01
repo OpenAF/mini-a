@@ -1888,6 +1888,8 @@
     let pollQueued = false;
     let pollErrorCount = 0;
     let streamErrorCount = 0;
+    let activeSubmissionStartedAt = 0;
+    let sawNonFinishedForActiveSubmission = false;
 
     // Store session uuid in global in-memory variable (no localStorage persistence)
     if (typeof window !== 'undefined') {
@@ -3065,7 +3067,9 @@
 
     function sanitizeLanguageToken(lang) {
         if (!lang) return 'text';
-        return lang.replace(/[^a-z0-9\-+]+/gi, '').toLowerCase() || 'text';
+        const normalized = lang.replace(/[^a-z0-9\-+]+/gi, '').toLowerCase();
+        if (!normalized || normalized === 'undefined' || normalized === 'null') return 'text';
+        return normalized;
     }
 
     function decodeAttachmentContent(encoded) {
@@ -5215,6 +5219,8 @@
 
             await response.json();
             lastRenderedRaw = '';
+            activeSubmissionStartedAt = Date.now();
+            sawNonFinishedForActiveSubmission = false;
             startProcessing();
             if (streamEnabled) startStream(currentSessionUuid);
             startPolling();
@@ -5274,6 +5280,10 @@
 
                 const promptAcknowledged = hasServerAcknowledgedPrompt(lastKnownHistory, lastSubmittedPrompt);
 
+                if (data && data.status !== 'finished') {
+                    sawNonFinishedForActiveSubmission = true;
+                }
+
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
@@ -5293,6 +5303,21 @@
                     }
                 }
 
+                const hasActivePrompt = !!normalizePromptForComparison(lastSubmittedPrompt);
+                const isStaleFinished = !!(
+                    data &&
+                    data.status === 'finished' &&
+                    hasActivePrompt &&
+                    !promptAcknowledged &&
+                    !sawNonFinishedForActiveSubmission
+                );
+
+                if (isStaleFinished) {
+                    addPreview();
+                    scheduleImmediatePoll(120);
+                    return;
+                }
+
                 if (data.status === 'finished') {
                     const finalStreamChunk = streamBuffer || '';
                     const finalContent = mergeFinalContentWithStream(contentForDisplay, finalStreamChunk);
@@ -5309,6 +5334,8 @@
                     }
                     lastFinishedPrompt = lastSubmittedPrompt || lastFinishedPrompt;
                     lastSubmittedPrompt = '';
+                    activeSubmissionStartedAt = 0;
+                    sawNonFinishedForActiveSubmission = false;
                     removePreview();
                     // Force close and hide plan panel when final answer is provided
                     if (planPanel) {

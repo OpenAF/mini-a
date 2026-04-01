@@ -56,7 +56,16 @@ version: '20260401'
 dependencies:
   openaf: '>=20250915'
 files:
+- .github/ISSUE_TEMPLATE/bug_report.md
+- .github/ISSUE_TEMPLATE/feature_request.md
+- .github/mini-a-con-screenshot.png
+- .github/mini-a-web-screenshot1.jpg
+- .github/version.svg
+- .github/workflows/github-action.yml
 - .odoc.db
+- .openaf_precompiled/.t8-20260331
+- .openaf_precompiled/mini-a-common_js.class
+- .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -135,7 +144,16 @@ files:
 - tests/progToolCall.js
 - tests/progToolCall.yaml
 filesHash:
+  .github/ISSUE_TEMPLATE/bug_report.md: 83d211c67c12e8c1f6e9f796cfd0cecbf5160e15
+  .github/ISSUE_TEMPLATE/feature_request.md: f6867a2f0417fe89a0f2008730ee19dd38422021
+  .github/mini-a-con-screenshot.png: cb5fdf4b3013f482abbe9e4b358e6f0137a741e0
+  .github/mini-a-web-screenshot1.jpg: 20c5f09008868f9da2a982302426c243a6008ccc
+  .github/version.svg: c0e77c1ace9ebd1436690702a33d635e7869e55a
+  .github/workflows/github-action.yml: 7e46f9c08b1107f59c7183400275197f7272e7af
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20260331: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a-common_js.class: 1e388163360eac422bf696f51b13746ddb495b2c
+  .openaf_precompiled/mini-a-utils_js.class: eecd7087df3cab6b624d6a7d984f99dfa2fbe151
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
   CHEATSHEET.md: e4073d438fd2aa440f439b7c85bf9917545f73f3
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
@@ -200,7 +218,7 @@ filesHash:
   mini-a.js: d85bcba7b2ccf18a4719246febe31ecf71c1c5f4
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cd7c86b2489728dcd35c62c43c508fb11142b023
-  public/index.md: c79e91d6346bb1661daad4992d95275a0922b2d4
+  public/index.md: b0c89abc3ced5a687c2bdfe8436aa58d65111016
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 57f4ac338a45d4f3a76bc698356108643b4ff9a5
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
