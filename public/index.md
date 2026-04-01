@@ -1946,6 +1946,38 @@
         return resultsDiv.scrollTop + resultsDiv.clientHeight >= resultsDiv.scrollHeight - threshold;
     }
 
+    function canScrollResultsDown() {
+        if (!resultsDiv) return false;
+        return (resultsDiv.scrollHeight - resultsDiv.clientHeight) > 4;
+    }
+
+    function normalizePromptForComparison(prompt) {
+        return String(prompt || '').replace(/\r\n/g, '\n').trim();
+    }
+
+    function hasServerAcknowledgedPrompt(historyEvents, expectedPrompt) {
+        const expected = normalizePromptForComparison(expectedPrompt);
+        if (!expected) return true;
+        const lastPrompt = normalizePromptForComparison(extractLastUserPromptFromEvents(historyEvents));
+        return lastPrompt.length > 0 && lastPrompt === expected;
+    }
+
+    function buildOptimisticUserPromptBlock(prompt) {
+        const userPromptHtml = formatUserPromptHtml(prompt || '');
+        return `<div style="text-align: right;"><i><div style="display: inline-block; text-align: left;">${userPromptHtml}</div> 👤</i>\n<br><br></div>`;
+    }
+
+    function ensurePromptVisibleUntilAcknowledged(rawContent, expectedPrompt, acknowledgedByServer) {
+        const content = rawContent || '';
+        if (acknowledgedByServer) return content;
+        const normalizedExpected = normalizePromptForComparison(expectedPrompt);
+        if (!normalizedExpected) return content;
+
+        const optimisticBlock = buildOptimisticUserPromptBlock(expectedPrompt);
+        if (content.indexOf(optimisticBlock) !== -1) return content;
+        return content + optimisticBlock;
+    }
+
     function getOrCreateSessionUuid() {
         try {
             let uuid = (typeof window !== 'undefined') ? window.mini_a_session_uuid : null;
@@ -2768,7 +2800,7 @@
                 hideScrollToBottomButton();
             });
 
-            if (wasScrollBtnVisible && !wasAtBottom) {
+            if (wasScrollBtnVisible && !wasAtBottom && canScrollResultsDown()) {
                 newScrollBtn.classList.add('show');
             }
         }
@@ -2805,8 +2837,12 @@
                 const previewEl = document.createElement('div');
                 previewEl.id = PREVIEW_ID;
                 previewEl.className = 'preview';
+                const previewTextEl = document.createElement('div');
+                previewTextEl.className = 'preview-text';
+                previewEl.appendChild(previewTextEl);
                 resultsDiv.appendChild(previewEl);
             }
+            syncPreviewText();
         }
 
         bindUserAttachmentPreviews();
@@ -2828,6 +2864,11 @@
         if (wasAtBottom) {
             autoScrollEnabled = true;
             scrollResultsToBottom();
+        }
+
+        if (!canScrollResultsDown()) {
+            autoScrollEnabled = true;
+            hideScrollToBottomButton();
         }
     }
 
@@ -5154,8 +5195,7 @@
             const browserContext = shouldSendBrowserContext ? collectBrowserContext() : null;
 
             // Add user prompt to display immediately
-            const userPromptHtml = formatUserPromptHtml(finalPrompt);
-            const userPromptDiv = `<div style="text-align: right;"><i><div style="display: inline-block; text-align: left;">${userPromptHtml}</div> 👤</i>\n<br><br></div>`;
+            const userPromptDiv = buildOptimisticUserPromptBlock(finalPrompt);
             lastRawContent += userPromptDiv;
             await renderRawContent(lastRawContent);
 
@@ -5210,6 +5250,8 @@
                     if (historyPrompt) lastFinishedPrompt = historyPrompt;
                 }
 
+                const promptAcknowledged = hasServerAcknowledgedPrompt(lastKnownHistory, lastSubmittedPrompt);
+
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
@@ -5217,20 +5259,21 @@
 
                 // Only update content if it has actually changed to prevent chart flickering
                 const rawContent = data.content || '';
-                if (rawContent !== lastRawContent) {
-                    lastRawContent = rawContent;
+                const contentForDisplay = ensurePromptVisibleUntilAcknowledged(rawContent, lastSubmittedPrompt, promptAcknowledged);
+                if (contentForDisplay !== lastRawContent) {
+                    lastRawContent = contentForDisplay;
                     if (streamActive) {
                         // During streaming, re-render with the latest polled event log plus any
                         // streamed answer tokens so think/thought/status lines appear immediately.
-                        await renderRawContent(mergeFinalContentWithStream(rawContent, streamBuffer));
+                        await renderRawContent(mergeFinalContentWithStream(contentForDisplay, streamBuffer));
                     } else {
-                        await renderRawContent(rawContent);
+                        await renderRawContent(contentForDisplay);
                     }
                 }
 
                 if (data.status === 'finished') {
                     const finalStreamChunk = streamBuffer || '';
-                    const finalContent = mergeFinalContentWithStream(rawContent, finalStreamChunk);
+                    const finalContent = mergeFinalContentWithStream(contentForDisplay, finalStreamChunk);
                     conversationFinished = true;
                     stopStream();
                     lastRawContent = finalContent;
@@ -5338,6 +5381,18 @@
         }
     }
 
+    function closeStreamConnectionKeepBuffers() {
+        if (streamSource) {
+            try { streamSource.close(); } catch (e) { /* ignore */ }
+            streamSource = null;
+        }
+        streamActive = false;
+        if (streamRenderTimer) {
+            clearTimeout(streamRenderTimer);
+            streamRenderTimer = null;
+        }
+    }
+
     function scheduleStreamRender() {
         if (!streamActive) return;
         if (streamRenderTimer) return;
@@ -5403,8 +5458,9 @@
             scheduleImmediatePoll(10);
         });
         streamSource.addEventListener('done', () => {
-            streamActive = false;
-            stopStream();
+            const combined = mergeFinalContentWithStream(lastRawContent, streamBuffer);
+            renderRawContent(combined).catch(() => { /* ignore */ });
+            closeStreamConnectionKeepBuffers();
             scheduleImmediatePoll(0);
         });
         streamSource.addEventListener('error', (event) => {
@@ -5507,6 +5563,12 @@
 
     function handleScroll() {
         if (isScrollingProgrammatically) return;
+
+        if (!canScrollResultsDown()) {
+            autoScrollEnabled = true;
+            hideScrollToBottomButton();
+            return;
+        }
         
         if (isAtBottom()) {
             autoScrollEnabled = true;
