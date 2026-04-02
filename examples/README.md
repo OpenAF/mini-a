@@ -74,6 +74,39 @@ ojob examples/summary.yaml
 
 ---
 
+## Markdown Report by Email (email-report.yaml)
+
+Uses Mini-A to generate a concise markdown report and then sends that markdown as the body of an email via SMTP.
+
+### Required opacks
+- mini-a
+
+### How to run
+
+```sh
+ojob examples/email-report.yaml \
+  topic="weekly project status for the current folder" \
+  subject="Weekly Mini-A report" \
+  smtpserver=smtp.example.com \
+  from=bot@example.com \
+  to=team@example.com \
+  user=bot@example.com \
+  pass='app-password' \
+  tls=true \
+  port=587
+```
+
+### Output
+- `email-report.md` — Markdown report generated locally before being emailed
+
+### Notes
+- `OAF_MODEL` must be configured before running the example
+- SMTP settings can also be passed through environment variables because `argsFromEnvs` is enabled
+- The `to` argument accepts a comma-separated recipient list
+- The email is sent as plain text markdown so it works without any extra HTML conversion step
+
+---
+
 ## Documentation Updater (document.yaml)
 
 Updates markdown documentation files in the repository to ensure they accurately reflect the current implementation and any significant changes.

@@ -1,0 +1,155 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    OpenAF oJob example of using Mini-A to generate a markdown report and then
+    send that report by email through SMTP.
+
+    Runtime notes:
+    - Requires OAF_MODEL to be configured.
+    - SMTP settings can be provided either as job arguments or environment variables
+      because argsFromEnvs is enabled.
+    - The generated markdown is saved locally first and then used as the email body.
+  expects:
+  - name     : topic
+    desc     : What the report should be about
+    example  : weekly project status for the current folder
+    mandatory: false
+  - name     : outfile
+    desc     : Markdown file to generate before sending
+    example  : report.md
+    mandatory: false
+  - name     : subject
+    desc     : Email subject
+    example  : Mini-A report
+    mandatory: false
+  - name     : smtpserver
+    desc     : SMTP server hostname
+    example  : smtp.gmail.com
+    mandatory: true
+  - name     : from
+    desc     : Sender email address
+    example  : bot@example.com
+    mandatory: true
+  - name     : to
+    desc     : Comma-separated list of email recipients
+    example  : ops@example.com,team@example.com
+    mandatory: true
+  - name     : user
+    desc     : SMTP authentication user
+    example  : bot@example.com
+    mandatory: false
+  - name     : pass
+    desc     : SMTP authentication password or app token
+    example  : app-password
+    mandatory: false
+  - name     : tls
+    desc     : Use STARTTLS
+    example  : "true"
+    mandatory: false
+  - name     : ssl
+    desc     : Use SSL
+    example  : "false"
+    mandatory: false
+  - name     : port
+    desc     : SMTP port
+    example  : "587"
+    mandatory: false
+
+ojob:
+  logToConsole: true
+  argsFromEnvs: true
+  opacks      :
+  - mini-a
+
+jobsInclude:
+- mini-a.yaml
+
+todo:
+- Build markdown report
+- Send markdown report
+
+jobs:
+# ----------------------------
+- name : Build markdown report
+  check:
+    in:
+      topic  : toString.default("a concise status report about the current folder")
+      outfile: toString.default("email-report.md")
+
+  args:
+    useutils    : true
+    usetools    : true
+    useskills   : true
+    useshell    : false
+    readwrite   : true
+    debug       : false
+    format      : md
+    outfile     : "{{outfile}}"
+    youare      : | #markdown
+      You are a reporting agent.
+      Write compact, factual, readable markdown reports for email delivery.
+    knowledge   : | #markdown
+      Context:
+      - Working directory: current folder
+      - Target output file: {{outfile}}
+      - Requested report topic: {{topic}}
+    goal        : | #markdown
+      Generate a markdown report about: {{topic}}.
+
+      Requirements:
+      - Use markdown headings and short bullet lists.
+      - Keep the report concise enough to work well as an email body.
+      - If specific facts are missing, state assumptions clearly instead of inventing details.
+      - Include a short "Summary" section and a short "Details" section.
+      - Do not include code fences unless they are necessary for readability.
+    rules       : | #markdown
+      - Output markdown only.
+      - Keep the tone professional and direct.
+      - Avoid unnecessary verbosity.
+    valgoal     : | #markdown
+      Validate that the final output is a valid markdown report with at least:
+      - one title,
+      - a Summary section,
+      - a Details section.
+  to  :
+  - MiniAgent
+
+# ---------------------------
+- name : Send markdown report
+  check:
+    in:
+      outfile   : toString.default("email-report.md")
+      subject   : toString.default("Mini-A report")
+      smtpserver: isString
+      from      : isString
+      to        : isString
+      user      : isString.default(__)
+      pass      : isString.default(__)
+      tls       : toBoolean.isBoolean.default(true)
+      ssl       : toBoolean.isBoolean.default(false)
+      port      : toNumber.isNumber.default(__)
+  exec : | #js
+    plugin("Email")
+
+    var body = io.readFileString(args.outfile)
+    var recipients = String(args.to)
+      .split(",")
+      .map(r => r.trim())
+      .filter(r => r.length > 0)
+
+    if (recipients.length === 0) {
+      throw "At least one recipient must be provided in 'to'."
+    }
+
+    var email = new Email(args.smtpserver, args.from, args.ssl, args.tls, false)
+
+    if (isDef(args.port)) {
+      email.setPort(args.port)
+    }
+
+    if (isDef(args.user) && isDef(args.pass)) {
+      email.login(args.user, args.pass)
+    }
+
+    email.send(args.subject, body, recipients, [], [], args.from)
+    print("Email sent to: " + recipients.join(", "))

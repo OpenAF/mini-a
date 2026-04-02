@@ -160,6 +160,10 @@ help:
     desc     : Validation verdict label expected to pass deep research validation
     example  : "PASS"
     mandatory: false
+  - name     : modelval
+    desc     : Override OAF_VAL_MODEL configuration for this run
+    example  : "(type: openai, model: gpt-4o-mini, key: '...')"
+    mandatory: false
   - name     : persistlearnings
     desc     : Persist deep research learnings between cycles
     example  : "true"
@@ -329,6 +333,15 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : promptprofile
+    desc     : Prompt verbosity profile for system instructions (minimal, balanced, verbose)
+    example  : "balanced"
+    mandatory: false
+    options  : ["minimal", "balanced", "verbose"]
+  - name     : systempromptbudget
+    desc     : Maximum system prompt size in estimated tokens before Mini-A drops low-priority sections
+    example  : "1800"
+    mandatory: false
   - name     : rules
     desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
@@ -542,6 +555,7 @@ jobs:
         libs           : libs
         model          : model
         modellc        : modellc
+        modelval       : modelval
         conversation   : conversation
         format         : format
         raw            : raw
@@ -587,6 +601,8 @@ jobs:
         convertplan    : convertplan
         resumefailed   : resumefailed
         chatbotmode    : chatbotmode
+        promptprofile  : promptprofile
+        systempromptbudget: systempromptbudget
         planfile       : planfile
         planformat     : planformat
         plancontent    : plancontent
@@ -650,6 +666,7 @@ jobs:
       libs           : isString.default(__)
       model          : default(__)
       modellc        : default(__)
+      modelval       : default(__)
       conversation   : isString.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
@@ -695,6 +712,8 @@ jobs:
       convertplan    : toBoolean.isBoolean.default(false)
       resumefailed   : toBoolean.isBoolean.default(false)
       chatbotmode    : toBoolean.isBoolean.default(false)
+      promptprofile  : isString.default(__)
+      systempromptbudget: toNumber.isNumber.default(__)
       planfile       : isString.default(__)
       planformat     : isString.default(__)
       plancontent    : isString.default(__)

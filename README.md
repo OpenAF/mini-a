@@ -35,7 +35,7 @@ Two steps to use:
    ```bash
    export OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000, temperature: 1)"
    ```
-   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode.
+   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode. You can also override them per run with `modellc=...` and `modelval=...`.
 
    Use the built-in model manager when you prefer to store encrypted
    definitions instead of exporting raw environment variables:
@@ -419,6 +419,8 @@ Mini-A ships with complementary components:
 | `mcpprogcalltools` | Optional comma-separated allowlist of tool names exposed through the bridge | `""` |
 | `mcpprogcallbatchmax` | Max calls accepted per `/call-tools-batch` request | `10` |
 | `chatbotmode` | Conversational assistant mode | `false` |
+| `promptprofile` | System prompt verbosity profile (`minimal`, `balanced`, `verbose`) | `balanced` |
+| `systempromptbudget` | Maximum estimated system-prompt token budget before low-priority sections are dropped | - |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |

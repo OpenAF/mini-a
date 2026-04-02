@@ -1,0 +1,134 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    Generic OpenAF oJob template for creating a specialized Mini-A agent.
+
+    Use this template when you want to build a new agent similar to the examples in this
+    folder, but with a different mission, persona, constraints, inputs, or output format.
+
+    Customize:
+    - help.text and help.expects
+    - todo and job name
+    - goal, youare, knowledge, and rules
+    - execution flags such as useshell, useutils, usediagrams, usecharts, readwrite
+    - outfile / format defaults
+  expects:
+  - name     : input
+    desc     : Optional input file or target resource the specialized agent should analyze
+    example  : "input.md"
+    mandatory: false
+  - name     : outfile
+    desc     : Optional output file to write the final result to
+    example  : "result.md"
+    mandatory: false
+
+ojob:
+  logToConsole: true
+  opacks      :
+  - mini-a
+  # Add other opacks here if your agent needs them.
+  # - Mermaid
+
+jobsInclude:
+- mini-a.yaml
+
+todo:
+- Run custom Mini-A agent
+
+jobs:
+# ------------------------------
+- name : Run custom Mini-A agent
+  check:
+    in:
+      input  : toString.default(__)
+      outfile: toString.default("agent-output.md")
+  ((templateArgs)): true
+
+  args:
+    # Core execution behavior
+    useutils       : true
+    usetools       : true
+    useshell       : false
+    shellbatch     : false
+    shellallowpipes: false
+    readwrite      : false
+    debug          : false
+    #usesandbox     : auto
+
+    # Optional output guidance
+    format         : md
+    outfile        : "{{outfile}}"
+
+    # Optional feature bundles
+    usediagrams    : false
+    usecharts      : false
+    useascii       : false
+    usemath        : false
+    usesvg         : false
+
+    # MCP integration
+    #mcpproxy       : true
+    #mcpproxytoon   : true
+    #mcp            :
+    #- type   : ojob
+    #  options:
+    #    job: mcps/mcp-net.yaml
+
+    # Model configuration
+    #model          : ""
+    #modellc        : ""
+
+    # Agent persona
+    youare: | #markdown
+      You are a specialized AI agent focused on <describe the domain clearly>.
+      You produce practical, accurate results and follow the provided constraints strictly.
+
+    # Additional context for the agent
+    knowledge: | #markdown
+      Context:
+      - Input resource: {{input}}
+      - Working directory: current folder
+
+      Domain notes:
+      - Add domain-specific terminology, assumptions, formatting conventions, or reference material here.
+      - If needed, replace this block with @some-context-file.md or another file path.
+
+    # Main task definition
+    goal: | #markdown
+      Complete the following task:
+
+      1. Inspect the provided input and any other relevant local files.
+      2. Extract the information needed to fulfill the mission.
+      3. Produce the final output in the requested format.
+
+      Mission:
+      - <describe the concrete objective>
+
+      Required output structure:
+      - <section or artifact 1>
+      - <section or artifact 2>
+
+      Quality requirements:
+      - Preserve important facts and do not invent missing details.
+      - Keep the output concise and readable.
+      - If information is missing, state that explicitly.
+
+    # Operational rules and constraints
+    rules: | #markdown
+      - Prefer using available tools instead of guessing.
+      - Only modify files when the task explicitly requires it.
+      - Preserve the existing style of any file you update.
+      - Keep the final output deterministic and easy to review.
+      - If shell access is enabled, use portable commands whenever possible.
+
+    # Validate the output
+    #persistlearnings: true
+    #maxcycles       : 3
+    valgoal         : | #markdown
+      The output must meet the following criteria:
+      - Contains the required sections/artifacts with accurate information.
+      - Follows the specified format and style guidelines.
+      - Does not include irrelevant or speculative content.
+
+  to  :
+  - MiniAgent

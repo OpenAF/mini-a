@@ -452,6 +452,8 @@ try {
     resumefailed   : { type: "boolean", default: false, description: "Attempt to resume the last failed goal on startup" },
     forceplanning  : { type: "boolean", default: false, description: "Force planning even when heuristics would skip it" },
     chatbotmode    : { type: "boolean", default: false, description: "Run Mini-A in chatbot mode" },
+    promptprofile  : { type: "string", description: "Prompt verbosity profile (minimal|balanced|verbose)" },
+    systempromptbudget: { type: "number", description: "Maximum system prompt size in estimated tokens before low-priority sections are dropped" },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
@@ -498,6 +500,7 @@ try {
     format         : { type: "string", description: "Final answer format (md|json)" },
     model          : { type: "string", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
+    modelval       : { type: "string", description: "Override OAF_VAL_MODEL configuration" },
     auditch        : { type: "string", description: "Audit channel definition" },
     toollog        : { type: "string", description: "Tool usage log channel definition" },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
@@ -1246,7 +1249,7 @@ try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
       var statsCompletions = ["detailed", "tools", "out=", "file=", "save=", "json="]
       var lastCompletions = ["md"]
-      var modelCompletions = ["model", "modellc"]
+      var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
@@ -3795,7 +3798,7 @@ try {
       "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n user goals (one per line)", hintColor),
-      "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model or modellc)", hintColor),
+      "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model, modellc or modelval)", hintColor),
       "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools)", hintColor),
       "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
@@ -4149,10 +4152,12 @@ try {
           var targetArg = command.substring(6).trim().toLowerCase()
           if (targetArg === "modellc" || targetArg === "lc") {
             target = "modellc"
+          } else if (targetArg === "modelval" || targetArg === "val") {
+            target = "modelval"
           } else if (targetArg === "model") {
             target = "model"
           } else {
-            print(colorifyText("Invalid target. Use 'model' or 'modellc'.", errorColor))
+            print(colorifyText("Invalid target. Use 'model', 'modellc' or 'modelval'.", errorColor))
             continue
           }
         }

@@ -6,6 +6,73 @@
     return new MiniA()
   }
 
+  var renderAgentPrompt = function(agent, overrides, args) {
+    var basePayload = {
+      agentPersonaLine: "You are a decisive, action-oriented agent that executes efficiently.",
+      agentDirectiveLine: "Work step-by-step toward your goal.",
+      promptProfile: "balanced",
+      includeExamples: false,
+      actionsWordNumber: "three",
+      actionsList: "read_file | write_file",
+      useshell: false,
+      markdown: true,
+      rules: ["7. Custom rule"],
+      knowledge: "",
+      actionsdesc: [
+        { name: "read_file", description: "Read a file", compactParamsText: "path*" },
+        { name: "write_file", description: "Write a file", compactParamsText: "path*, content*" }
+      ],
+      isMachine: false,
+      usetools: false,
+      usetoolsActual: false,
+      useMcpProxy: false,
+      shellViaActionPreferred: false,
+      toolCount: 2,
+      proxyToolCount: 0,
+      proxyToolsList: "",
+      planning: false,
+      includePlanningDetails: true,
+      planningExecution: false,
+      simplePlanStyle: false,
+      currentStepContext: false,
+      currentStep: 1,
+      totalSteps: 0,
+      currentTask: "",
+      nextStep: 1,
+      completedSteps: "",
+      remainingSteps: "",
+      availableSkills: true,
+      availableSkillsList: [
+        { name: "pdf", description: "Read and generate PDF files", includeDescription: false },
+        { name: "transcribe", description: "Transcribe audio files to text", includeDescription: false }
+      ]
+    }
+    var payload = merge(basePayload, overrides || {}, true)
+    return agent._buildSystemPromptWithBudget("agent-test", payload, agent._SYSTEM_PROMPT, { args: args || {}, mode: "agent" })
+  }
+
+  var renderChatbotPrompt = function(agent, overrides, args) {
+    var basePayload = {
+      chatPersonaLine: "You are a helpful conversational AI assistant.",
+      knowledge: "",
+      hasKnowledge: false,
+      hasRules: true,
+      rules: ["Use concise language."],
+      hasTools: true,
+      promptProfile: "balanced",
+      toolCount: 2,
+      toolsPlural: true,
+      toolsList: "search, read",
+      hasToolDetails: false,
+      toolDetails: [],
+      markdown: true,
+      useshell: false,
+      shellViaActionPreferred: false
+    }
+    var payload = merge(basePayload, overrides || {}, true)
+    return agent._buildSystemPromptWithBudget("chatbot-test", payload, agent._CHATBOT_SYSTEM_PROMPT, { args: args || {}, mode: "chatbot" })
+  }
+
   exports.testCleanCodeBlocks = function() {
     var agent = createAgent()
     var fenced = "```json\n{\"action\":\"final\"}\n```"
@@ -160,6 +227,200 @@
     ow.test.assert(emptyResult.processed === "(no output)", true, "Undefined results should produce placeholder text")
     ow.test.assert(emptyResult.display === "(no output)", true, "Display should indicate missing output")
     ow.test.assert(emptyResult.hasError === false, true, "Missing error field should not flag hasError")
+  }
+
+  exports.testPromptProfileHelpers = function() {
+    var agent = createAgent()
+
+    ow.test.assert(agent._getPromptProfile({}) === "balanced", true, "Should default prompt profile to balanced")
+    ow.test.assert(agent._getPromptProfile({ debug: true }) === "verbose", true, "Debug mode should default prompt profile to verbose")
+    ow.test.assert(agent._getPromptProfile({ promptprofile: "minimal" }) === "minimal", true, "Should honor explicit prompt profile")
+    ow.test.assert(agent._shouldIncludePromptExamples("balanced") === false, true, "Balanced profile should omit examples")
+    ow.test.assert(agent._shouldIncludePromptExamples("verbose") === true, true, "Verbose profile should include examples")
+    ow.test.assert(agent._shouldIncludeToolDetails("minimal", 3) === false, true, "Minimal profile should omit tool details")
+    ow.test.assert(agent._shouldIncludeToolDetails("balanced", 3) === true, true, "Balanced profile should include tool details for small toolsets")
+    ow.test.assert(agent._shouldIncludeToolDetails("balanced", 9) === false, true, "Balanced profile should omit tool details for large toolsets")
+  }
+
+  exports.testToolSchemaSummaryCompaction = function() {
+    var agent = createAgent()
+    var tool = {
+      name: "sample-tool",
+      description: "Sample description",
+      inputSchema: {
+        type: "object",
+        required: ["alpha", "gamma"],
+        properties: {
+          alpha: { type: "string", description: "Alpha value" },
+          beta: { type: "number", description: "Beta value" },
+          gamma: { type: "boolean", description: "Gamma flag" },
+          delta: { type: "string", description: "Delta text" }
+        }
+      }
+    }
+
+    var compact = agent._getToolSchemaSummary(tool, { summaryMode: "compact" })
+    ow.test.assert(compact.params.length === 2, true, "Compact summaries should limit exposed params")
+    ow.test.assert(compact.compactParamsText.indexOf("...") >= 0, true, "Compact summaries should indicate hidden params")
+
+    var full = agent._getToolSchemaSummary(tool, { summaryMode: "full" })
+    ow.test.assert(full.params.length === 4, true, "Full summaries should keep all params")
+    ow.test.assert(full.compactParamsText.indexOf("alpha*") >= 0, true, "Compact param text should mark required params")
+  }
+
+  exports.testSystemPromptBudgetDropsLowPrioritySections = function() {
+    var agent = createAgent()
+    var template = "{{#if includeExamples}}EXAMPLES {{/if}}{{#if hasToolDetails}}TOOLS {{/if}}{{#if includePlanningDetails}}PLAN {{/if}}{{#each availableSkillsList}}{{#if includeDescription}}DESC {{/if}}{{/each}}BODY"
+    var payload = {
+      promptProfile: "verbose",
+      includeExamples: true,
+      hasToolDetails: true,
+      toolDetails: [{ name: "t" }],
+      planning: true,
+      includePlanningDetails: true,
+      availableSkills: true,
+      availableSkillsList: [
+        { name: "skill1", includeDescription: true, description: "desc1" },
+        { name: "skill2", includeDescription: true, description: "desc2" },
+        { name: "skill3", includeDescription: true, description: "desc3" },
+        { name: "skill4", includeDescription: true, description: "desc4" },
+        { name: "skill5", includeDescription: true, description: "desc5" },
+        { name: "skill6", includeDescription: true, description: "desc6" }
+      ]
+    }
+
+    var result = agent._buildSystemPromptWithBudget("test-budget", payload, template, {
+      args: { systempromptbudget: 1 },
+      mode: "agent"
+    })
+
+    ow.test.assert(isMap(result) && isMap(result.meta), true, "Budgeted prompt builder should return prompt metadata")
+    ow.test.assert(result.meta.budgetApplied === true, true, "Budget should be applied when prompt exceeds the limit")
+    ow.test.assert(result.meta.droppedSections.indexOf("examples") >= 0, true, "Budgeting should drop examples first")
+    ow.test.assert(result.meta.droppedSections.indexOf("tool_details") >= 0, true, "Budgeting should drop tool details")
+    ow.test.assert(result.meta.droppedSections.indexOf("planning_details") >= 0, true, "Budgeting should drop planning details")
+    ow.test.assert(result.meta.initialTokens >= result.meta.finalTokens, true, "Budgeting should not increase prompt size")
+  }
+
+  exports.testSkillPromptEntriesRankByGoalRelevance = function() {
+    var agent = createAgent()
+    agent._availableSkills = [
+      { name: "doc", description: "Read and edit docx documents" },
+      { name: "transcribe", description: "Transcribe audio files to text with speaker hints" },
+      { name: "spreadsheet", description: "Create and edit xlsx spreadsheets" }
+    ]
+
+    var ranked = agent._buildSkillPromptEntries("balanced", "transcribe this interview audio and label speakers", "")
+    ow.test.assert(isArray(ranked) && ranked.length === 3, true, "Should build ranked skill prompt entries")
+    ow.test.assert(ranked[0].name === "transcribe", true, "Most relevant skill should be ranked first")
+  }
+
+  exports.testSkillPromptEntriesUseHookContextForRanking = function() {
+    var agent = createAgent()
+    agent._availableSkills = [
+      { name: "doc", description: "Read and edit docx documents" },
+      { name: "pdf", description: "Read and generate PDF files" },
+      { name: "spreadsheet", description: "Create and edit xlsx spreadsheets" }
+    ]
+
+    var ranked = agent._buildSkillPromptEntries("balanced", "summarize this file", "attached pdf contract for review")
+    ow.test.assert(ranked[0].name === "pdf", true, "Hook context should influence skill ranking")
+  }
+
+  exports.testPromptSnapshotAgentMinimal = function() {
+    var agent = createAgent()
+    var result = renderAgentPrompt(agent, {
+      promptProfile: "minimal",
+      includeExamples: false,
+      availableSkillsList: [
+        { name: "pdf", description: "Read and generate PDF files", includeDescription: false }
+      ]
+    }, {})
+
+    ow.test.assert(result.prompt.indexOf("## RESPONSE FORMAT") >= 0, true, "Minimal agent prompt should keep response format section")
+    ow.test.assert(result.prompt.indexOf("## AVAILABLE ACTIONS:") >= 0, true, "Minimal agent prompt should keep available actions")
+    ow.test.assert(result.prompt.indexOf("## EXAMPLES:") < 0, true, "Minimal agent prompt should omit examples")
+    ow.test.assert(result.prompt.indexOf("Read and generate PDF files") < 0, true, "Minimal agent prompt should omit skill descriptions")
+  }
+
+  exports.testPromptSnapshotAgentVerbose = function() {
+    var agent = createAgent()
+    var result = renderAgentPrompt(agent, {
+      promptProfile: "verbose",
+      includeExamples: true,
+      availableSkillsList: [
+        { name: "pdf", description: "Read and generate PDF files", includeDescription: true }
+      ]
+    }, {})
+
+    ow.test.assert(result.prompt.indexOf("## EXAMPLES:") >= 0, true, "Verbose agent prompt should include examples")
+    ow.test.assert(result.prompt.indexOf("Read and generate PDF files") >= 0, true, "Verbose agent prompt should include skill descriptions")
+    ow.test.assert(result.prompt.indexOf("### Example 1: Direct Knowledge") >= 0, true, "Verbose agent prompt should include example content")
+  }
+
+  exports.testPromptSnapshotChatbotBalanced = function() {
+    var agent = createAgent()
+    var result = renderChatbotPrompt(agent, {
+      promptProfile: "balanced",
+      hasToolDetails: false
+    }, {})
+
+    ow.test.assert(result.prompt.indexOf("Engage in natural dialogue") >= 0, true, "Chatbot prompt should keep conversational directive")
+    ow.test.assert(result.prompt.indexOf("## TOOL ACCESS") >= 0, true, "Chatbot prompt should include tool access section")
+    ow.test.assert(result.prompt.indexOf("### TOOL REFERENCE") < 0, true, "Balanced chatbot prompt should omit detailed tool reference when disabled")
+  }
+
+  exports.testPromptSnapshotPlanningExecution = function() {
+    var agent = createAgent()
+    var result = renderAgentPrompt(agent, {
+      promptProfile: "balanced",
+      planning: true,
+      planningExecution: true,
+      includePlanningDetails: true
+    }, {})
+
+    ow.test.assert(result.prompt.indexOf("## PLANNING:") >= 0, true, "Planning prompt should include planning section")
+    ow.test.assert(result.prompt.indexOf("The execution plan has already been generated.") >= 0, true, "Planning execution prompt should include execution guidance")
+  }
+
+  exports.testPromptSnapshotBudgetedPromptDropsSections = function() {
+    var agent = createAgent()
+    var verbose = renderAgentPrompt(agent, {
+      promptProfile: "verbose",
+      includeExamples: true,
+      planning: true,
+      planningExecution: true,
+      includePlanningDetails: true,
+      availableSkillsList: [
+        { name: "pdf", description: "Read and generate PDF files", includeDescription: true },
+        { name: "transcribe", description: "Transcribe audio files to text", includeDescription: true },
+        { name: "doc", description: "Read and edit docx documents", includeDescription: true },
+        { name: "spreadsheet", description: "Create and edit xlsx spreadsheets", includeDescription: true },
+        { name: "imagegen", description: "Generate bitmap images", includeDescription: true },
+        { name: "sora", description: "Generate videos", includeDescription: true }
+      ]
+    }, {})
+    var budgeted = renderAgentPrompt(agent, {
+      promptProfile: "verbose",
+      includeExamples: true,
+      planning: true,
+      planningExecution: true,
+      includePlanningDetails: true,
+      availableSkillsList: [
+        { name: "pdf", description: "Read and generate PDF files", includeDescription: true },
+        { name: "transcribe", description: "Transcribe audio files to text", includeDescription: true },
+        { name: "doc", description: "Read and edit docx documents", includeDescription: true },
+        { name: "spreadsheet", description: "Create and edit xlsx spreadsheets", includeDescription: true },
+        { name: "imagegen", description: "Generate bitmap images", includeDescription: true },
+        { name: "sora", description: "Generate videos", includeDescription: true }
+      ]
+    }, { systempromptbudget: 1 })
+
+    ow.test.assert(budgeted.meta.budgetApplied === true, true, "Budgeted snapshot should apply prompt budget")
+    ow.test.assert(budgeted.prompt.indexOf("## EXAMPLES:") < 0, true, "Budgeted snapshot should drop examples")
+    ow.test.assert(budgeted.prompt.indexOf("Read and generate PDF files") < 0, true, "Budgeted snapshot should drop skill descriptions")
+    ow.test.assert(budgeted.meta.initialTokens > budgeted.meta.finalTokens, true, "Budgeted snapshot should reduce prompt tokens")
+    ow.test.assert(verbose.meta.finalTokens > budgeted.meta.finalTokens, true, "Budgeted prompt should be smaller than verbose prompt")
   }
 
   exports.testUtilsMcpSkillsToggle = function() {
