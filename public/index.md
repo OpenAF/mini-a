@@ -2057,7 +2057,7 @@
         }
     }
 
-    const EVENT_MARKERS = ['⚙️','🖥️','💡','💭','🧠','🌀','🛑','⏳','🏁','✅','❌','📚','ℹ️','📂','⚠️'];
+    const EVENT_MARKERS = ['⚙️','🖥️','💡','💭','💡','🌀','🛑','⏳','🏁','✅','❌','📚','ℹ️','📂','⚠️'];
 
     function isShowthinkingEnabled() {
         if (typeof window !== 'undefined') {
@@ -2080,8 +2080,8 @@
         if (typeof line !== 'string' || line.length === 0) return line;
 
         const showThought = isShowthinkingEnabled();
-        const thoughtReplacement = showThought ? '💭 thought ' : '🧠 think ';
-        const thinkReplacement = '🧠 think ';
+        const thoughtReplacement = showThought ? '💭 thought ' : '💡 think ';
+        const thinkReplacement = '💡 think ';
 
         if (/^\s*💭\s+/.test(line)) return line.replace(/^(\s*)💭\s+/, '$1' + thoughtReplacement);
         if (/^\s*💡\s+/.test(line)) return line.replace(/^(\s*)💡\s+/, '$1' + thinkReplacement);

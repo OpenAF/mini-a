@@ -94,7 +94,30 @@ modes:
   web    :
     description: "Web mode with tools"
     params     :
-      usetools: true
+      usetools   : true
+      usediagrams: true
+      usecharts  : true
+      usemaps    : true
+      usevectors : true
+      usemath    : true
+      usehistory : true
+      useattach  : true
+      mcpproxy   : true
+      mcpproxythreshold: 51200
+      mcpproxytoon     : true
+      mcp              :
+      - type   : ojob
+        options:
+          job: mcps/mcp-web.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-weather.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-time.yaml
+      - type   : ojob
+        options:
+          job: mcps/mcp-net.yaml
 
   webfull:
     description: "Web full mode"
