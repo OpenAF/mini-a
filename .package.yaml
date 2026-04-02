@@ -191,27 +191,27 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: e20282edb6b63eb62ec0a6a74fd8e86b8094837d
+  mini-a-con.js: 9f5390985f51778156d3ba5baf49abe00e71303a
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
-  mini-a-modes.yaml: 3e94509e2e416ac01e90551340c2cb7cf13db1b1
+  mini-a-modes.yaml: 7b809917b4c9bc828b326ed5d05042f637d615ff
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
   mini-a-subtask.js: 41bd610dd4629d65984cbe081f6f260dace41ae0
   mini-a-utils.js: 74929e106d866962ef08a6ff413f70b247e579c9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: f4f8dedb7d693a30f5d5d96faab3f514ed26f885
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: b3706b73342d298cf696263d28b3ee97847e6e97
+  mini-a.js: 2d0ab80faaada91971248e7cffed76a2200bbb5e
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cc2f059425458db3d7e72ec02cf4076e8f305c1b
-  public/index.md: b0c89abc3ced5a687c2bdfe8436aa58d65111016
+  public/index.md: a61e6711b75825bd1800df7e7f5b4b7489685d2a
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 57f4ac338a45d4f3a76bc698356108643b4ff9a5
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
-  tests/coreFunctionality.js: c230cbb7e9b6176fe21dd03bb9a5037cfb0fbd07
-  tests/coreFunctionality.yaml: 8b706d13929dd9b282fe827472db7a48cb2e0b97
+  tests/coreFunctionality.js: 7f51acfe160f82f4c52535b264e81141ffc5f5a2
+  tests/coreFunctionality.yaml: 1c236cadebcad0ac91d33daca18590f5bc6a7096
   tests/miniAUtils.js: e73053daa6bb6b14934f21fa221eaea9c35bd6b0
   tests/miniAUtils.yaml: 1d1515b208e55da5600906e355ddc1a0eb7f82d7
   tests/progToolCall.js: 83228632725f51069fc2a61490e31cdec340315c
