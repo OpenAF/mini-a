@@ -88,6 +88,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 |-----------|-------------|---------|
 | `model` | Override OAF_MODEL for this session | `model="(type: openai, model: gpt-4, key: '...')"` |
 | `modellc` | Override OAF_LC_MODEL for this session | `modellc="(type: openai, model: gpt-3.5-turbo, key: '...')"` |
+| `modelval` | Override OAF_VAL_MODEL for this session | `modelval="(type: openai, model: gpt-4o-mini, key: '...')"` |
 | `modelman` | Launch interactive model manager | `modelman=true` |
 | `modellock` | Lock model tier: `"main"`, `"lc"`, or `"auto"` (default) | `modellock=lc` |
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
@@ -362,7 +363,7 @@ mini-a goal="complex multi-phase project" \
 
 ## Deep Research Mode
 
-Set `OAF_VAL_MODEL` to use a dedicated validation model; otherwise the main model is used.
+Set `OAF_VAL_MODEL` or `modelval=...` to use a dedicated validation model; otherwise the main model is used.
 
 ### Deep Research Parameters
 

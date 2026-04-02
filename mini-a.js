@@ -11329,6 +11329,7 @@ MiniA.prototype.init = function(args) {
       { name: "libs", type: "string", default: "" },
       { name: "model", type: "string", default: __ },
       { name: "modellc", type: "string", default: __ },
+      { name: "modelval", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
@@ -11730,6 +11731,17 @@ MiniA.prototype.init = function(args) {
       }
     } else {
       this._use_lc = false
+    }
+
+    // Re-evaluate validation model config on every init() call so reused MiniA
+    // instances do not keep a stale validation model when the current run omits it.
+    this._oaf_val_model = __
+    this.val_llm = __
+    this._use_val = false
+
+    if (isUnDef(this._oaf_val_model) || isDef(args.modelval)) {
+      var overrideValModel = parseModelConfig(args.modelval, "modelval parameter", true)
+      if (isDef(overrideValModel)) this._oaf_val_model = overrideValModel
     }
 
     if (isUnDef(this._oaf_val_model)) {

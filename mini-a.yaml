@@ -160,6 +160,10 @@ help:
     desc     : Validation verdict label expected to pass deep research validation
     example  : "PASS"
     mandatory: false
+  - name     : modelval
+    desc     : Override OAF_VAL_MODEL configuration for this run
+    example  : "(type: openai, model: gpt-4o-mini, key: '...')"
+    mandatory: false
   - name     : persistlearnings
     desc     : Persist deep research learnings between cycles
     example  : "true"
@@ -551,6 +555,7 @@ jobs:
         libs           : libs
         model          : model
         modellc        : modellc
+        modelval       : modelval
         conversation   : conversation
         format         : format
         raw            : raw
@@ -661,6 +666,7 @@ jobs:
       libs           : isString.default(__)
       model          : default(__)
       modellc        : default(__)
+      modelval       : default(__)
       conversation   : isString.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)

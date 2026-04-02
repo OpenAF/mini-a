@@ -35,7 +35,7 @@ Two steps to use:
    ```bash
    export OAF_MODEL="(type: openai, model: gpt-5-mini, key: '...', timeout: 900000, temperature: 1)"
    ```
-   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode.
+   Optional: add `OAF_LC_MODEL` for a low-cost helper model and `OAF_VAL_MODEL` to use a dedicated validation model in deep research mode. You can also override them per run with `modellc=...` and `modelval=...`.
 
    Use the built-in model manager when you prefer to store encrypted
    definitions instead of exporting raw environment variables:

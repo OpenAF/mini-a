@@ -44,6 +44,7 @@ flowchart TD
    ```bash
    export OAF_VAL_MODEL="(type: openai, model: gpt-5.1-mini, key: 'sk-...', temperature: 0)"
    ```
+   Or override it for a single run with `modelval="(...)"`.
 6. Confirm the configuration:
    ```bash
    echo $OAF_MODEL
