@@ -2057,7 +2057,38 @@
         }
     }
 
-    const EVENT_MARKERS = ['⚙️','🖥️','💡','💭','🌀','🛑','⏳','🏁','✅','❌','📚','ℹ️','📂','⚠️'];
+    const EVENT_MARKERS = ['⚙️','🖥️','💡','💭','🧠','🌀','🛑','⏳','🏁','✅','❌','📚','ℹ️','📂','⚠️'];
+
+    function isShowthinkingEnabled() {
+        if (typeof window !== 'undefined') {
+            if (typeof window.__mini_a_showthinking === 'boolean') {
+                return window.__mini_a_showthinking;
+            }
+            if (window.location && window.location.search) {
+                const params = new URLSearchParams(window.location.search);
+                const raw = params.get('showthinking');
+                if (raw !== null) {
+                    const normalized = String(raw).trim().toLowerCase();
+                    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on';
+                }
+            }
+        }
+        return false;
+    }
+
+    function normalizeReasoningDisplayLine(line) {
+        if (typeof line !== 'string' || line.length === 0) return line;
+
+        const showThought = isShowthinkingEnabled();
+        const thoughtReplacement = showThought ? '💭 thought ' : '🧠 think ';
+        const thinkReplacement = '🧠 think ';
+
+        if (/^\s*💭\s+/.test(line)) return line.replace(/^(\s*)💭\s+/, '$1' + thoughtReplacement);
+        if (/^\s*💡\s+/.test(line)) return line.replace(/^(\s*)💡\s+/, '$1' + thinkReplacement);
+        if (/^\s*🧠\s+/.test(line)) return line.replace(/^(\s*)🧠\s+(?:think|thought)?\s*/, '$1' + thinkReplacement);
+
+        return line;
+    }
 
     function isEventMarkerLine(line) {
         if (!line) return false;
@@ -2172,7 +2203,7 @@
     function normalizeRenderedConversationText(text) {
         if (!text) return '';
         const input = String(text);
-        const lines = input.split('\n');
+        const lines = input.split('\n').map(normalizeReasoningDisplayLine);
         const normalized = [];
 
         for (let i = 0; i < lines.length; i++) {

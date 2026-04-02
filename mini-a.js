@@ -1097,6 +1097,13 @@ MiniA.buildVisualKnowledge = function(options) {
 }
 
 /**
+ * Normalize thought-like messages so they are single-line and trimmed.
+ */
+MiniA.prototype._normalizeThoughtMessage = function(message) {
+  return (message || "").toString().replace(/[\r\n]+/g, " ").trim()
+}
+
+/**
  * Helper function to log thought or think messages with counter for repeated messages
  */
 MiniA.prototype._logMessageWithCounter = function(type, message) {
@@ -1105,7 +1112,9 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
     return
   }
 
-  var cleanMessage = (message || "").toString().trim()
+  var cleanMessage = type === "thought" || type === "think"
+    ? this._normalizeThoughtMessage(message)
+    : (message || "").toString().trim()
   var lastMessageProp
   var counterProp
 
@@ -1150,8 +1159,11 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   })
 
   // Handle streaming output directly without formatting
-  if (e === "stream" || e === "planner_stream") {
+  if (e === "stream") {
     cFn("", m, this._id)
+    return
+  } else if (e === "planner_stream") {
+    // Ignore
     return
   }
 
@@ -1179,6 +1191,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
   case "progcall" : _e = "📟"; break
+  case "planner_stream": _e = "💡"; break
   default         : _e = e
   }
   cFn(_e, m, this._id)
@@ -1235,6 +1248,9 @@ MiniA.prototype._runHook = function(event, contextVars) {
  * </odoc>
  */
 MiniA.prototype.fnI = function(event, message) {
+  if (event === "thought" || event === "think") {
+    message = this._normalizeThoughtMessage(message)
+  }
   if (this._auditon) {
     var _t = nowUTC()
     $ch("_mini_a_audit_channel").set({

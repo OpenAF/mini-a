@@ -12,6 +12,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testExtractEmbeddedFinalAction
 
+- name: MiniA Core Tests::ThoughtMessagesNormalized
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testThoughtMessagesAreSingleLineAndTrimmed
+
 - name: MiniA Core Tests::TaskLanePolicyProbeDetection
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -177,6 +182,7 @@ ojob:
 todo:
 - MiniA Core Tests::CleanCodeBlocks
 - MiniA Core Tests::ExtractFinalAction
+- MiniA Core Tests::ThoughtMessagesNormalized
 - MiniA Core Tests::TaskLanePolicyProbeDetection
 - MiniA Core Tests::ConfigureDebugChannel
 - MiniA Core Tests::RebuildLlmPair

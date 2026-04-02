@@ -3044,7 +3044,7 @@ try {
 
   function printEvent(type, icon, message, id) {
     // Handle streaming output
-    if (type == "stream" || type == "planner_stream") {
+    if (type == "stream") {
       // Clear inline-event erase state before rendering stream chunks so
       // future event logs don't wipe already streamed answer text.
       if (isDef(_prevEventLength)) {
@@ -3057,7 +3057,8 @@ try {
         _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
         _renderStreamChunk(streamText)
       } else {
-        printnl(colorifyText(streamText, eventPalette.planner_stream))
+        //this.fnI("planner_stream", streamText)
+        //printnl(colorifyText(streamText, eventPalette.planner_stream))
       }
       return
     }
@@ -3071,7 +3072,7 @@ try {
     }
 
     var iconText
-    if (( (!sessionOptions.showexecs && icon != "⚙️" && icon != "🖥️") || sessionOptions.showexecs) && icon != "📚" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
+    if (( (!sessionOptions.showexecs && icon != "⚙️" && icon != "🖥️") || sessionOptions.showexecs) && icon != "💡" && icon != "📚" && icon != "✅" && icon != "📂" && icon != "ℹ️" && icon != "➡️" && icon != "⬅️" && icon != "📏" && icon != "⏳" && icon != "🏁" && icon != "🤖") {
       iconText = colorifyText(icon, "RESET," + (eventPalette[type] || accentColor)) + (icon.length > 1 ? " " : "  ")
       inline = false
     } else {

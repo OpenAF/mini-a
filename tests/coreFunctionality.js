@@ -95,6 +95,21 @@
     ow.test.assert(missing === null, true, "Should ignore non-final embedded payloads")
   }
 
+  exports.testThoughtMessagesAreSingleLineAndTrimmed = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    agent.fnI("thought", "\n  first line\nsecond line  \n")
+    agent._logMessageWithCounter("think", "\n  plan this\nnext  \n")
+
+    ow.test.assert(events.length === 2, true, "Should capture normalized thought-like events")
+    ow.test.assert(events[0].message === "first line second line", true, "Direct thought events should be single-line and trimmed")
+    ow.test.assert(events[1].message === "plan this next", true, "Counter-logged think events should be single-line and trimmed")
+  }
+
   exports.testTaskLanePolicyProbeDetection = function() {
     var agent = createAgent()
 
