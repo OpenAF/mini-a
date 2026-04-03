@@ -1,8 +1,8 @@
 # Author: Nuno Aguiar
 help:
   text: |
-    This job will update the markdown documentation files in the repository to ensure they accurately reflect
-    the current implementation and any significant changes that have been made.
+    This job updates markdown documentation files so they reflect meaningful implementation
+    changes, while preserving existing style and avoiding unnecessary rewrites.
 
 ojob:
   logToConsole: true
@@ -21,20 +21,60 @@ jobs:
 - name: Update the md documentation
   to  :
   - (mini-a     ): | #markdown
-      Go through all markdown documentation files in the current folder and sub-folders (excluding the .git folder if it exists).
-      For each markdown file found, analyze all other non-markdown files in the repository to identify any relevant and significant changes that should be reflected in the documentation.
-      Update each markdown file with accurate information about:
-      - New features, functions, or APIs that have been added
-      - Changed behavior, parameters, or configuration options
-      - Deprecated or removed functionality
-      - Updated examples or usage patterns
-      - New dependencies or requirements
-      
-      Only make changes when they are relevant and significant. Preserve the existing documentation structure and style.
-      Ensure all code examples in the documentation remain accurate and reflect the current implementation.
-    ((useshell )): true
-    ((useutils )): true
-    ((readwrite)): true
-    ((usetools )): true
-    ((debug    )): false
+      Update repository markdown documentation with an evidence-first workflow.
 
+      Required workflow:
+      1. Inventory markdown docs first (respect state.exclusions).
+      2. Inspect implementation evidence second (source/config/scripts) only where needed.
+      3. Update only docs with meaningful, evidence-backed changes.
+      4. Preserve structure, tone, and formatting style of each document.
+      5. Keep examples and configuration references aligned with current implementation.
+
+      Editing constraints:
+      - Do not rewrite unchanged docs just for wording preferences.
+      - Do not add speculative behavior or undocumented assumptions.
+      - If no meaningful doc changes are needed, leave files unchanged.
+    ((youare    )): | #markdown
+      You are a documentation maintenance AI agent.
+      You are precise, conservative, and evidence-driven.
+    ((rules     )): | #markdown
+      - Always inventory markdown files before proposing edits.
+      - Ground each documentation change in implementation evidence from the repository.
+      - Keep edits minimal and focused on correctness.
+      - Never document removed/deprecated behavior as current.
+    ((state     )):
+      exclusions:
+      - .git
+      - node_modules
+      - dist
+      - build
+      - coverage
+      docScope:
+        includeExtensions:
+        - .md
+        evidenceExtensions:
+        - .js
+        - .yaml
+        - .yml
+        - .sh
+        - .json
+      acceptanceCriteria:
+      - Change docs only when implementation evidence shows meaningful differences.
+      - Preserve each document's existing structure and style.
+      - Keep config flags, examples, and behavior descriptions aligned with implementation.
+    ((useplanning )): true
+    ((forceplanning)): true
+    ((planstyle   )): simple
+    ((useshell    )): false
+    ((useutils    )): true
+    ((utilsallow  )): "markdownFiles,filesystemQuery,filesystemModify"
+    ((readwrite   )): true
+    ((usetools    )): true
+    ((valgoal     )): | #markdown
+      PASS only if:
+      - Every changed doc section is backed by current implementation evidence.
+      - Unchanged docs were not gratuitously rewritten.
+      - Examples/config references remain consistent with current behavior.
+      - Removed/deprecated behavior is not presented as current.
+      - Final documentation is accurate, relevant, and non-speculative.
+    ((debug       )): false

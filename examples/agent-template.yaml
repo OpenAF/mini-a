@@ -6,6 +6,10 @@ help:
     Use this template when you want to build a new agent similar to the examples in this
     folder, but with a different mission, persona, constraints, inputs, or output format.
 
+    This is the basic starter template. For a stricter, hardened pattern with stronger
+    defaults (planning, constrained tools, structured state, and tighter validation),
+    see examples/agent-template-v2.yaml.
+
     Customize:
     - help.text and help.expects
     - todo and job name
@@ -66,6 +70,17 @@ jobs:
     usemath        : false
     usesvg         : false
 
+    # Optional safety/determinism upgrades (recommended for non-trivial agents)
+    #useplanning    : true
+    #forceplanning  : true
+    #planstyle      : simple
+    #utilsallow     : "filesystemQuery,markdownFiles"
+    #state          : (exclusions: [".git", "node_modules", "dist", "build"], outputSections: ["Summary", "Details"])
+    #valgoal        : "PASS only if output matches required structure, claims are evidence-backed, and unknowns are explicit."
+    #deepresearch   : true
+    #maxcycles      : 3
+    #persistlearnings: true
+
     # MCP integration
     #mcpproxy       : true
     #mcpproxytoon   : true
@@ -81,7 +96,7 @@ jobs:
     # Agent persona
     youare: | #markdown
       You are a specialized AI agent focused on <describe the domain clearly>.
-      You produce practical, accurate results and follow the provided constraints strictly.
+      Be practical and accurate. Use available evidence before making claims.
 
     # Additional context for the agent
     knowledge: | #markdown
@@ -90,15 +105,16 @@ jobs:
       - Working directory: current folder
 
       Domain notes:
-      - Add domain-specific terminology, assumptions, formatting conventions, or reference material here.
-      - If needed, replace this block with @some-context-file.md or another file path.
+      - Add terminology, assumptions, formatting conventions, or reference material here.
+      - Keep this concise and task-relevant.
+      - For stronger constraints, see examples/agent-template-v2.yaml.
 
     # Main task definition
     goal: | #markdown
       Complete the following task:
 
       1. Inspect the provided input and any other relevant local files.
-      2. Extract the information needed to fulfill the mission.
+      2. Extract only the information needed to fulfill the mission.
       3. Produce the final output in the requested format.
 
       Mission:
@@ -112,18 +128,17 @@ jobs:
       - Preserve important facts and do not invent missing details.
       - Keep the output concise and readable.
       - If information is missing, state that explicitly.
+      - Prefer deterministic wording and stable section order.
 
     # Operational rules and constraints
     rules: | #markdown
       - Prefer using available tools instead of guessing.
-      - Only modify files when the task explicitly requires it.
+      - Only modify files when the task explicitly requires it and readwrite=true.
       - Preserve the existing style of any file you update.
       - Keep the final output deterministic and easy to review.
-      - If shell access is enabled, use portable commands whenever possible.
+      - If shell access is enabled, use portable and minimal commands.
 
-    # Validate the output
-    #persistlearnings: true
-    #maxcycles       : 3
+    # Baseline output validation (replace with stricter criteria as needed)
     valgoal         : | #markdown
       The output must meet the following criteria:
       - Contains the required sections/artifacts with accurate information.

@@ -21,54 +21,73 @@ jobs:
 - name: Generate CHANGELOG.md
   to:
   - (mini-a           ): | #markdown
-      Your task is to CREATE a changelog markdown content by analyzing git commit history.
+      Your task is to CREATE and WRITE a changelog by analyzing git commit history.
 
-      IMPORTANT: You must EXECUTE commands and WRITE files using the available tools. Do NOT just output code or scripts as text.
+      IMPORTANT: You must EXECUTE commands and WRITE files using the available tools. Do NOT only describe steps.
 
-      Steps to complete:
-      1. USE the shell tool to run git commands to retrieve commits from the last 50 commits or 6 months (whichever is more recent)
-      2. PROCESS and classify commits by type using conventional commit prefixes:
-         * Breaking Changes (BREAKING:, breaking:, major:)
-         * Features (feat:, feature:, add:, new:)
-         * Fixes (fix:, bugfix:, bug:, patch:, hotfix:)
-         * Documentation (docs:, doc:, documentation:)
-         * Chores (chore:, build:, ci:, refactor:, style:, test:)
-         * Other (commits without recognized prefixes)
-      3. Format each entry as: "- **[short-hash]**: [message] ([date], by [author])"
-      4. Group commits by type in the order listed above
-      5. Sort commits within each group by date (newest first)
-      6. Clean up commit messages by removing type prefixes and truncate messages longer than 100 characters
-      7. OUTPUT the exact contents a CHANGELOG.md should have.
+      Required workflow:
+      1. Gather commit data first for the intended window:
+         - Use commits from the last 50 commits and from the last 6 months.
+         - Keep the more recent scope (the smaller resulting set).
+      2. Classify commits consistently using these rules:
+         - Breaking Changes: BREAKING:, breaking:, major:
+         - Features: feat:, feature:, add:, new:
+         - Fixes: fix:, bugfix:, bug:, patch:, hotfix:
+         - Documentation: docs:, doc:, documentation:
+         - Chores: chore:, build:, ci:, refactor:, style:, test:
+         - Other: commits without recognized prefixes
+      3. Normalize commit messages by removing recognized prefixes and truncating messages over state.output.maxMessageChars characters.
+      4. Format each entry exactly as:
+         - **[short-hash]**: [message] ([date], by [author])
+      5. Group sections in the exact order from state.classification.sectionOrder.
+      6. Sort commits within each section by date (newest first).
+      7. Write final markdown content to state.output.file.
 
-      Example output format:
-      ```markdown
-      # Changelog
-
-      All notable changes to this project will be documented in this file.
-
-      ## Features
-      - **abc123**: Add new user authentication module (2024-01-15, by John Doe)
-
-      ## Fixes
-      - **def456**: Fix memory leak in data processing (2024-01-14, by Jane Smith)
-
-      ---
-      *Generated automatically from git history*
-      ```
+      Constraints:
+      - Do not invent commits, dates, authors, or metadata.
+      - If metadata is missing in git history, keep only what is available.
+      - Output must be deterministic and valid markdown.
     ((youare         )): | #markdown
-      You are a technical writer AI agent specialized in generating CHANGELOG.md files from git commit history.
-      You have access to shell tools and file writing tools. You must USE these tools to perform actions, not just describe or output what should be done.
+      You are a technical writer AI agent specialized in generating deterministic CHANGELOG.md files from git history.
+      You must use shell and file-writing tools to perform real actions.
     ((rules          )): | #markdown
-      - ALWAYS use the shell tool to execute git commands - never just output commands as text
-      - Use portable git commands that work across all platforms
-      - Ensure the output is valid markdown that renders well in GitHub
-      - Prioritize accuracy in commit classification
-      - If you need to process data or create a script, write it to a temporary file, execute it, then clean up
+      - ALWAYS use shell commands to retrieve git history.
+      - Use portable git commands and deterministic ordering.
+      - Ensure the final output is valid markdown and written to file.
+      - Never fabricate missing metadata.
+    ((state          )):
+      classification:
+        sectionOrder:
+        - Breaking Changes
+        - Features
+        - Fixes
+        - Documentation
+        - Chores
+        - Other
+      output:
+        file: CHANGELOG.md
+        maxMessageChars: 100
+      window:
+        maxCommits: 50
+        maxMonths: 6
+    ((useplanning    )): true
+    ((forceplanning  )): true
+    ((planstyle      )): simple
     ((useshell       )): true
+    ((usesandbox     )): auto
+    ((shelltimeout   )): 120000
+    ((shellmaxbytes  )): 16000
     ((shellbatch     )): true
     ((shellallowpipes)): true
     ((readwrite      )): true
     ((usetools       )): true
     ((outfile        )): CHANGELOG.md
     ((format         )): md
+    ((valgoal        )): | #markdown
+      PASS only if:
+      - All commits in scope are included exactly once.
+      - Section grouping follows state.classification rules and order.
+      - Commit message cleanup is applied consistently.
+      - Output is valid markdown and written to CHANGELOG.md.
+      - No commits, dates, authors, or metadata were invented.
     ((debug          )): false
