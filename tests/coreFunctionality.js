@@ -110,6 +110,47 @@
     ow.test.assert(events[1].message === "plan this next", true, "Counter-logged think events should be single-line and trimmed")
   }
 
+  exports.testCanonicalThoughtEmitterSeparatesThoughtAndThink = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var finalThought = agent._emitCanonicalThoughtEvent("final", "answer directly", "(no thought)")
+    var thinkThought = agent._emitCanonicalThoughtEvent("think", "plan next step", "(no thought)")
+    agent._logMessageWithCounter("think", thinkThought)
+
+    ow.test.assert(finalThought === "answer directly", true, "Should return canonical thought text for non-think actions")
+    ow.test.assert(thinkThought === "plan next step", true, "Should return canonical thought text for think actions")
+    ow.test.assert(events.length === 2, true, "Should emit exactly one thought and one think event")
+    ow.test.assert(events[0].event === "thought", true, "Should emit thought for non-think actions")
+    ow.test.assert(events[0].message === "answer directly", true, "Should log the non-think thought text")
+    ow.test.assert(events[1].event === "think", true, "Should only emit think when explicitly requested")
+    ow.test.assert(events[1].message === "plan next step", true, "Should log the think message separately")
+  }
+
+  exports.testStreamThinkingTagsDoNotEmitCanonicalThoughtEvents = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var onDelta = agent._createStreamDeltaHandler({ showthinking: false, useascii: false }, { fieldName: "answer", eventName: "stream" })
+    onDelta("{\"answer\":\"Hello <think>hidden reasoning</think>world\"}")
+
+    var streamOutput = events
+      .filter(function(evt) { return evt.event === "stream" })
+      .map(function(evt) { return evt.message })
+      .join("")
+    var thoughtEvents = events.filter(function(evt) { return evt.event === "thought" || evt.event === "think" })
+
+    ow.test.assert(thoughtEvents.length === 0, true, "Streaming thinking tags should not emit canonical thought or think events")
+    ow.test.assert(streamOutput.indexOf("Hello world") >= 0, true, "Visible streamed output should still be rendered")
+    ow.test.assert(streamOutput.indexOf("hidden reasoning") < 0, true, "Hidden thinking content should not leak into streamed answer output")
+  }
+
   exports.testTaskLanePolicyProbeDetection = function() {
     var agent = createAgent()
 

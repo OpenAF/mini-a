@@ -1141,6 +1141,31 @@ MiniA.prototype._logMessageWithCounter = function(type, message) {
 }
 
 /**
+ * Emit the canonical thought/think events for a normalized action entry.
+ * This keeps streamed and non-streamed execution paths equivalent by making
+ * semantic thought logging depend on parsed actions rather than stream deltas.
+ */
+MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, fallbackValue) {
+  var action = ((actionName || "") + "").trim().toLowerCase()
+  var thoughtMessage = isDef(thoughtValue) ? thoughtValue : fallbackValue
+
+  if (isObject(thoughtMessage)) {
+    thoughtMessage = stringify(thoughtMessage, __, "") || af.toSLON(thoughtMessage)
+  }
+
+  thoughtMessage = ((isDef(thoughtMessage) ? thoughtMessage : "") + "").trim()
+  if (thoughtMessage.length === 0) thoughtMessage = "(no thought)"
+
+  global.__mini_a_metrics.thoughts_made.inc()
+
+  if (action !== "think" && thoughtMessage !== "(no thought)") {
+    this._logMessageWithCounter("thought", thoughtMessage)
+  }
+
+  return thoughtMessage
+}
+
+/**
  * <odoc>
  * <key>MinA.defaultInteractionFn(event, message, cFn)</key>
  * Default interaction function that logs events to the console with emojis.
@@ -2194,24 +2219,12 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
         // Flush any partial thinking-tag state on stream end
         if (tfEnabled) {
             if (tfState === "in_content" && tfContentBuf.length > 0) {
-                var _tfPartial = tfContentBuf.trim()
-                if (_tfPartial.length > 0) {
-                    self._logMessageWithCounter("thought", _tfPartial)
-                    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made))
-                        global.__mini_a_metrics.thoughts_made.inc()
-                }
                 tfContentBuf = ""; tfState = "idle"
             } else if (tfState === "tag_opening" && tfPreBuf.length > 0) {
                 processContent(tfPreBuf)
                 tfPreBuf = ""; tfState = "idle"
             } else if (tfState === "tag_closing") {
                 tfContentBuf += tfCloseBuf
-                var _tfRemain = tfContentBuf.trim()
-                if (_tfRemain.length > 0) {
-                    self._logMessageWithCounter("thought", _tfRemain)
-                    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made))
-                        global.__mini_a_metrics.thoughts_made.inc()
-                }
                 tfContentBuf = ""; tfCloseBuf = ""; tfState = "idle"
             }
         }
@@ -2253,12 +2266,6 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
             tfCloseBuf += ch
             var _tfExpected = "</" + tfActiveTag + ">"
             if (tfCloseBuf === _tfExpected) {
-                var _tfTrimmed = tfContentBuf.trim()
-                if (_tfTrimmed.length > 0) {
-                    self._logMessageWithCounter("thought", _tfTrimmed)
-                    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made))
-                        global.__mini_a_metrics.thoughts_made.inc()
-                }
                 tfContentBuf = ""; tfCloseBuf = ""; tfActiveTag = ""; tfState = "idle"
             } else if (_tfExpected.indexOf(tfCloseBuf) !== 0) {
                 // No longer a valid prefix of the expected closing tag — treat as content
@@ -14544,18 +14551,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         var isKnownTool = this.mcpToolToConnection && isDef(this.mcpToolToConnection[origActionRaw])
 
-        global.__mini_a_metrics.thoughts_made.inc()
-
-        if (action != "think") {
-          var logMsg = thoughtValue || currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
-          if (isObject(logMsg)) {
-            logMsg = af.toSLON(logMsg)
-            if (logMsg == "()") logMsg = "(no thought)"
-          }
-          if (logMsg != "(no thought)") this._logMessageWithCounter("thought", `${logMsg}`)
-        }
-
-        var thoughtStr = (isObject(thoughtValue) ? stringify(thoughtValue, __, "") : thoughtValue) || "(no thought)"
+        var thoughtStr = this._emitCanonicalThoughtEvent(
+          action,
+          thoughtValue,
+          currentMsg.think || af.toSLON(currentMsg) || "(no thought)"
+        )
 
         if (action != "final") {
           var embeddedFinalAction = this._extractEmbeddedFinalAction(currentMsg.answer)
@@ -15124,16 +15124,13 @@ MiniA.prototype._runChatbotMode = function(options) {
           var lowerAction = actionName.toLowerCase()
           var thoughtValue = currentMsg.thought || currentMsg.think
 
-          if (isString(thoughtValue) && thoughtValue.length > 0) {
-            this._logMessageWithCounter("thought", thoughtValue)
-            global.__mini_a_metrics.thoughts_made.inc()
-          }
-
           if (actionName.length === 0) {
             pendingPrompt = `Missing 'action' entry in the JSON object. Use one of: ${this._actionsList || (toolNames.join(" | ") || "think | final")}.`
             handled = true
             break
           }
+
+          var thoughtMessage = this._emitCanonicalThoughtEvent(lowerAction, thoughtValue, "(no thought)")
 
           if (toolNames.indexOf(actionName) >= 0) {
             var paramsValue = currentMsg.params
@@ -15193,8 +15190,7 @@ MiniA.prototype._runChatbotMode = function(options) {
 
           if (lowerAction === "think") {
             global.__mini_a_metrics.thinks_made.inc()
-            var thinkMsg = isString(thoughtValue) && thoughtValue.length > 0 ? thoughtValue : "(no thought)"
-            this._logMessageWithCounter("think", thinkMsg)
+            this._logMessageWithCounter("think", thoughtMessage)
             continue
           }
 
