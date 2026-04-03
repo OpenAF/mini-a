@@ -814,4 +814,57 @@
 
     ow.test.assert(agent._shouldLogSandboxWarning("usesandbox=macos requested but 'sandbox-exec' is not available; running without OS sandbox.") === true, true, "Real sandbox failures should still be shown")
   }
+
+  exports.testAdaptiveRouterSelectionAndFallback = function() {
+    var router = new MiniAToolRouter({
+      enabled: true,
+      preferredOrder: [
+        MiniAToolRouter.ROUTES.MCP_DIRECT_CALL,
+        MiniAToolRouter.ROUTES.MCP_PROXY_PATH,
+        MiniAToolRouter.ROUTES.SHELL_EXECUTION
+      ],
+      allow: [],
+      deny: []
+    })
+    var plan = router.select({
+      toolName: "proxy-dispatch",
+      intentType: "tool_action",
+      routeHints: { proxy: true }
+    }, {
+      history: {
+        mcp_proxy_path: { successes: 0, failures: 2 }
+      }
+    })
+
+    ow.test.assert(plan.selectedRoute === "mcp_direct_call", true, "Should fallback from proxy to direct MCP based on history")
+    ow.test.assert(isArray(plan.fallbackChain), true, "Should expose fallback chain")
+  }
+
+  exports.testAdaptiveRouterAllowDenyCompatibility = function() {
+    var router = new MiniAToolRouter({
+      enabled: true,
+      allow: [MiniAToolRouter.ROUTES.MCP_DIRECT_CALL],
+      deny: [MiniAToolRouter.ROUTES.MCP_PROXY_PATH]
+    })
+    var plan = router.select({
+      toolName: "proxy-dispatch",
+      routeHints: { proxy: true }
+    }, {})
+    ow.test.assert(plan.selectedRoute === MiniAToolRouter.ROUTES.MCP_DIRECT_CALL, true, "Allow/deny rules should keep only allowed direct route")
+    ow.test.assert(plan.fallbackChain.length === 0, true, "No extra routes should remain after allow/deny filtering")
+  }
+
+  exports.testAdaptiveRouterEnvelopeNormalization = function() {
+    var router = new MiniAToolRouter({ enabled: true })
+    var envelope = router.normalizeResultEnvelope({
+      routeUsed: MiniAToolRouter.ROUTES.UTILITY_WRAPPER,
+      rawResult: { ok: true },
+      normalizedContent: "ok",
+      durationMs: 12,
+      evidence: [{ source: "tool://filesystemQuery" }]
+    })
+    ow.test.assert(envelope.routeUsed === MiniAToolRouter.ROUTES.UTILITY_WRAPPER, true, "Envelope should preserve route metadata")
+    ow.test.assert(envelope.timing.durationMs === 12, true, "Envelope should preserve timing metadata")
+    ow.test.assert(isArray(envelope.evidence) && envelope.evidence.length === 1, true, "Envelope should preserve evidence references")
+  }
 })()

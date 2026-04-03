@@ -4,6 +4,7 @@
 
 ow.loadMetrics()
 loadLib("mini-a-common.js")
+loadLib("mini-a-router.js")
 
 /**
  * <odoc>
@@ -68,6 +69,9 @@ var MiniA = function() {
   this._debugchConfig = __
   this._debuglcchConfig = __
   this._debugvalchConfig = __
+  this._adaptiveRouting = false
+  this._toolRouter = new MiniAToolRouter({ enabled: false })
+  this._routeHistory = {}
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -7119,6 +7123,88 @@ MiniA.prototype._normalizeToolResult = function(original) {
     }
 }
 
+MiniA.prototype._buildRoutingIntent = function(entry) {
+  var e = isMap(entry) ? entry : {}
+  var toolName = isString(e.toolName) ? e.toolName : ""
+  var params = isMap(e.params) ? e.params : {}
+  var serializedParams = stringify(params, __, "")
+  var payloadSize = isString(serializedParams) ? serializedParams.length : 0
+  var accessMode = "read"
+  if (toolName === "shell" && isString(params.command)) {
+    var cmd = params.command.toLowerCase()
+    if (cmd.indexOf(" rm ") >= 0 || cmd.indexOf(" mv ") >= 0 || cmd.indexOf(" >") >= 0 || cmd.indexOf(" tee ") >= 0) accessMode = "write"
+  }
+  if (toolName.indexOf("modify") >= 0 || toolName.indexOf("write") >= 0 || toolName.indexOf("delete") >= 0) accessMode = "write"
+
+  var routeHints = {
+    proxy      : toolName === "proxy-dispatch" || this._useMcpProxy === true,
+    utility    : toolName.indexOf("filesystem") >= 0 || toolName.indexOf("markdown") >= 0 || toolName.indexOf("memory") >= 0 || toolName.indexOf("time") >= 0,
+    delegation : toolName.indexOf("delegate") >= 0 || toolName.indexOf("subtask") >= 0,
+    directLocal: false
+  }
+
+  return {
+    intentType               : "tool_action",
+    toolName                 : toolName,
+    params                   : params,
+    accessMode               : accessMode,
+    payloadSize              : payloadSize,
+    latencySensitivity       : payloadSize > 20000 ? "high" : "normal",
+    deterministic            : toolName !== "shell",
+    reliability              : "normal",
+    riskLevel                : accessMode === "write" ? "high" : "low",
+    structuredOutputPreferred: true,
+    routeHints               : routeHints
+  }
+}
+
+MiniA.prototype._recordRouteOutcome = function(routeName, success) {
+  if (!isString(routeName) || routeName.length === 0) return
+  if (!isMap(this._routeHistory[routeName])) this._routeHistory[routeName] = { successes: 0, failures: 0 }
+  if (success === true) this._routeHistory[routeName].successes++
+  else this._routeHistory[routeName].failures++
+}
+
+MiniA.prototype._executeRouteAttempt = function(routeName, toolName, params, connectionId, context, args) {
+  var route = isString(routeName) ? routeName : ""
+  var startedAt = now()
+  var rawResult, errorInfo
+  try {
+    if (route === MiniAToolRouter.ROUTES.SHELL_EXECUTION && toolName === "shell" && isString(params.command)) {
+      rawResult = this._runCommand({
+        command        : params.command,
+        readwrite      : params.readwrite,
+        checkall       : params.checkall,
+        shellallow     : params.shellallow,
+        shellbanextra  : params.shellbanextra,
+        shellallowpipes: params.shellallowpipes,
+        shelltimeout   : params.shelltimeout,
+        usesandbox     : params.usesandbox,
+        sandboxprofile : params.sandboxprofile,
+        sandboxnonetwork: params.sandboxnonetwork
+      }).output
+    } else {
+      rawResult = this._executeToolWithCache(connectionId, toolName, params, context)
+    }
+  } catch (e) {
+    errorInfo = { message: e.message || String(e) }
+    rawResult = { error: errorInfo.message }
+  }
+  var normalized = this._normalizeToolResult(rawResult)
+  var hasError = isMap(errorInfo) || normalized.hasError === true
+  return this._toolRouter.normalizeResultEnvelope({
+    routeUsed         : route,
+    rawResult         : rawResult,
+    normalizedContent : normalized.display,
+    durationMs        : now() - startedAt,
+    startTs           : startedAt,
+    endTs             : now(),
+    errorInfo         : hasError ? (errorInfo || rawResult.error || "route failed") : __,
+    errorTrail        : isArray(args.errorTrail) ? args.errorTrail : [],
+    evidence          : isArray(args.evidence) ? args.evidence : []
+  })
+}
+
 MiniA.prototype._ensureCache = function(name, options) {
   if (!isString(name) || name.length === 0) return $cache("mini-a.fallback")
 
@@ -9903,32 +9989,52 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
       })
     }
 
-    var rawToolResult
-    var toolCallError = false
-    try {
-      rawToolResult = parent._executeToolWithCache(connectionId, toolName, params, context)
-    } catch (e) {
-      rawToolResult = { error: e.message }
-      toolCallError = true
+    var routeTrace = __
+    var envelope = __
+    var errorTrail = []
+    if (parent._adaptiveRouting === true) {
+      var intent = parent._buildRoutingIntent({ toolName: toolName, params: params })
+      routeTrace = parent._toolRouter.select(intent, { history: parent._routeHistory })
+      var plannedRoutes = [routeTrace.selectedRoute].concat(routeTrace.fallbackChain || []).filter(function(r) { return isString(r) && r.length > 0 })
+      var attempted = {}
+      for (var ri = 0; ri < plannedRoutes.length; ri++) {
+        var attemptRoute = plannedRoutes[ri]
+        if (attempted[attemptRoute] === true) continue
+        attempted[attemptRoute] = true
+        envelope = parent._executeRouteAttempt(attemptRoute, toolName, params, connectionId, context, { errorTrail: errorTrail })
+        if (isDef(envelope.error)) {
+          errorTrail.push({ route: attemptRoute, error: envelope.error })
+          parent._recordRouteOutcome(attemptRoute, false)
+        } else {
+          parent._recordRouteOutcome(attemptRoute, true)
+          break
+        }
+      }
+      if (isMap(envelope) && isArray(errorTrail) && errorTrail.length > 0) envelope.errorTrail = errorTrail
+      var shouldTraceRoute = isObject(parent._sessionArgs) && (parent._sessionArgs.debug === true || parent._sessionArgs.audit === true || parent._sessionArgs.verbose === true)
+      if (isMap(routeTrace) && isArray(routeTrace.trace) && isObject(parent._runtime) && shouldTraceRoute) {
+        parent._runtime.context.push("[ROUTE " + stepLabel + "] " + routeTrace.trace.join(" | "))
+      }
+    } else {
+      envelope = parent._executeRouteAttempt(MiniAToolRouter.ROUTES.MCP_DIRECT_CALL, toolName, params, connectionId, context, { errorTrail: [] })
+      parent._recordRouteOutcome(MiniAToolRouter.ROUTES.MCP_DIRECT_CALL, isUnDef(envelope.error))
     }
 
-    var normalized = parent._normalizeToolResult(rawToolResult)
-    var resultDisplay = normalized.display || "(no output)"
+    var rawToolResult = isMap(envelope) ? envelope.rawResult : __
+    var resultDisplay = isMap(envelope) ? (envelope.normalizedContent || "(no output)") : "(no output)"
+    var toolCallError = isMap(envelope) && isDef(envelope.error)
     var cacheNote = context.fromCache === true ? " (cached)" : ""
-    if (parent.state == "stop") {
-      parent.fnI("stop", `Action '${toolName}' interrupted by stop request.`)
-    } else {
-      parent.fnI("done", `Action '${toolName}' completed${cacheNote} (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
-    }
+    if (parent.state == "stop") parent.fnI("stop", `Action '${toolName}' interrupted by stop request.`)
+    else parent.fnI("done", `Action '${toolName}' completed${cacheNote} (${ow.format.toBytesAbbreviation(resultDisplay.length)}).`)
 
     parent._finalizeToolExecution({
       toolName     : toolName,
       params       : params,
-      result       : rawToolResult,
+      result       : envelope,
       observation  : resultDisplay,
       stepLabel    : stepLabel,
       updateContext: context.updateContext,
-      error        : toolCallError || normalized.hasError,
+      error        : toolCallError,
       context      : context,
       contextId    : context.contextId
     })
@@ -9940,10 +10046,11 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
 
     return {
       toolName : toolName,
-      result   : rawToolResult,
-      error    : toolCallError || normalized.hasError,
+      result   : envelope,
+      error    : toolCallError,
       fromCache: context.fromCache === true,
-      contextId: context.contextId
+      contextId: context.contextId,
+      route    : isMap(envelope) ? envelope.routeUsed : __
     }
   }
 
@@ -12525,7 +12632,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
       { name: "mcpproxythreshold", type: "number", default: 0 },
-      { name: "mcpproxytoon", type: "boolean", default: false }
+      { name: "mcpproxytoon", type: "boolean", default: false },
+      { name: "adaptiverouting", type: "boolean", default: false },
+      { name: "routerorder", type: "string", default: __ },
+      { name: "routerallow", type: "string", default: __ },
+      { name: "routerdeny", type: "string", default: __ },
+      { name: "routerproxythreshold", type: "number", default: __ }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -12580,6 +12692,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
+    args.adaptiverouting = _$(toBoolean(args.adaptiverouting), "args.adaptiverouting").isBoolean().default(false)
+    args.routerorder = _$(args.routerorder, "args.routerorder").isString().default(__)
+    args.routerallow = _$(args.routerallow, "args.routerallow").isString().default(__)
+    args.routerdeny = _$(args.routerdeny, "args.routerdeny").isString().default(__)
+    args.routerproxythreshold = _$(args.routerproxythreshold, "args.routerproxythreshold").isNumber().default(__)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -12624,6 +12741,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellMaxBytes = args.shellmaxbytes
     this._useTools = args.usetools
     this._useUtils = args.useutils
+    this._adaptiveRouting = args.adaptiverouting === true
+    var routeOrder = this._parseListOption(args.routerorder)
+    var routeAllow = this._parseListOption(args.routerallow)
+    var routeDeny = this._parseListOption(args.routerdeny)
+    this._toolRouter = new MiniAToolRouter({
+      enabled       : this._adaptiveRouting,
+      preferredOrder: routeOrder.length > 0 ? routeOrder : MiniAToolRouter.DEFAULT_ORDER,
+      allow         : routeAllow,
+      deny          : routeDeny,
+      proxyThreshold: isNumber(args.routerproxythreshold) ? args.routerproxythreshold : args.mcpproxythreshold
+    })
+    this._routeHistory = {}
     this._configurePlanUpdates(args)
     this._sessionArgs = args
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
@@ -13498,6 +13627,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var updateContext = isBoolean(details.updateContext) ? details.updateContext : toolCtx.updateContext
       var observation = details.observation
       var rawResult = isDef(details.result) ? details.result : details.rawResult
+      var resultEnvelope = isMap(rawResult) && isDef(rawResult.routeUsed) && isDef(rawResult.timing) ? rawResult : __
+      if (isMap(resultEnvelope) && isUnDef(observation) && isDef(resultEnvelope.normalizedContent)) {
+        observation = resultEnvelope.normalizedContent
+      }
 
       // Normalize observation for context entries when not provided
       if (isUnDef(observation) && isDef(rawResult)) {
@@ -13518,7 +13651,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           : isObject(rawResult) && isString(rawResult.error)
             ? rawResult.error
             : `Tool '${toolName}' reported an error`
-        var categorized = this._categorizeError(rawResult, { source: "tool", toolName: toolName })
+        var categorized = this._categorizeError(isMap(resultEnvelope) ? resultEnvelope.error : rawResult, { source: "tool", toolName: toolName })
         this._registerRuntimeError(runtime, {
           category: categorized.type,
           message : errorMessage,
@@ -13554,6 +13687,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         if (updateContext && isDef(stepLabel)) {
           runtime.context.push(`[ACT ${stepLabel}] ${actionEntry} with 'params': ${af.toSLON(params)}`)
+          if (isMap(resultEnvelope) && isString(resultEnvelope.routeUsed) && resultEnvelope.routeUsed.length > 0) {
+            runtime.context.push(`[ROUTE ${stepLabel}] ${resultEnvelope.routeUsed} (${resultEnvelope.timing.durationMs}ms)`)
+            if (isArray(resultEnvelope.errorTrail) && resultEnvelope.errorTrail.length > 0) {
+              runtime.context.push(`[ROUTE ${stepLabel}] fallback errors: ${af.toSLON(resultEnvelope.errorTrail)}`)
+            }
+          }
           if (isDef(observation) && observation.length > 0) {
             runtime.context.push(`[OBS ${stepLabel}] ${observation}`)
           } else {
@@ -14626,8 +14765,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             flushToolActions()
             break
           }
-          // When tools mode is enabled, route shell through the MCP tool to unify execution and tracing
+          // When tools mode is enabled, default to MCP shell route unless adaptive router picks direct shell.
           if (this._useTools === true && this.mcpToolToConnection && isDef(this.mcpToolToConnection["shell"])) {
+            var routeToDirectShell = false
+            if (this._adaptiveRouting === true) {
+              var shellPlan = this._toolRouter.select(this._buildRoutingIntent({
+                toolName: "shell",
+                params  : { command: commandValue }
+              }), { history: this._routeHistory })
+              routeToDirectShell = shellPlan.selectedRoute === MiniAToolRouter.ROUTES.SHELL_EXECUTION
+              if ((args.debug || args.audit || args.verbose) && isArray(shellPlan.trace)) {
+                runtime.context.push(`[ROUTE ${stepLabel}] ${shellPlan.trace.join(" | ")}`)
+              }
+            }
+            if (!routeToDirectShell) {
             pendingToolActions.push({
               toolName     : "shell",
               params       : {
@@ -14647,6 +14798,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               updateContext: !this._useTools
             })
             continue
+            }
           }
           // Legacy path (no tools integration)
           flushToolActions()
