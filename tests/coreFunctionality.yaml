@@ -172,6 +172,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMacSandboxReuseWarningIsDebugOnly
 
+- name: MiniA Core Tests::WorkingMemoryInitialization
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWorkingMemoryInitializationFromState
+
+- name: MiniA Core Tests::WorkingMemoryDeduplicateAndMutationApis
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWorkingMemoryDeduplicateAndMutationApis
+
+- name: MiniA Core Tests::WorkingMemoryPersistenceAndReload
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWorkingMemoryPersistenceAndReload
+
+- name: MiniA Core Tests::WorkingMemoryCompactionBounds
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWorkingMemoryCompactionBounds
+
 include:
 - oJobTest.yaml
 
@@ -214,3 +234,7 @@ todo:
 - MiniA Core Tests::WindowsSandboxBestEffort
 - MiniA Core Tests::WindowsSandboxNoNetwork
 - MiniA Core Tests::MacSandboxReuseWarning
+- MiniA Core Tests::WorkingMemoryInitialization
+- MiniA Core Tests::WorkingMemoryDeduplicateAndMutationApis
+- MiniA Core Tests::WorkingMemoryPersistenceAndReload
+- MiniA Core Tests::WorkingMemoryCompactionBounds

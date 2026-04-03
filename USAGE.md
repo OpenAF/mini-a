@@ -772,6 +772,13 @@ The `start()` method accepts various configuration options:
 - **`promptprofile`** (string, default: `balanced`): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the default reduced prompt, or `verbose` to keep richer guidance and examples. When `debug=true`, Mini-A defaults to `verbose` unless you override it.
 - **`systempromptbudget`** (number, optional): Maximum estimated system-prompt token budget. When the rendered prompt exceeds it, Mini-A automatically drops lower-priority sections in this order: examples, skill descriptions, detailed tool reference, extended planning guidance, then excess skill entries.
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
+- **`usememory`** (boolean, default: true): Enable Mini-A structured working memory during execution. Memory schema sections are: `facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, and `summaries`.
+- **`memorypersist`** (boolean, default: false): Persist working memory to disk and reload it on resumed runs.
+- **`memoryfile`** (string, optional): JSON file path used when `memorypersist=true`.
+- **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
+- **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
+- **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
+- **`memorydedup`** (boolean, default: true): Deduplicate near-identical entries during append.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 
 #### Dual-Model Controls
@@ -2603,3 +2610,48 @@ The `estimatedUSD` field is reserved for future cost estimation integration and 
 - **[Creating MCPs](mcps/CREATING.md)** - Build custom MCP integrations
 - **[External MCPs](mcps/EXTERNAL-MCPS.md)** - Community MCP servers
 - **[Contributing Guide](CONTRIBUTING.md)** - Join the project
+
+## Working Memory (Structured Runtime State)
+
+Mini-A now maintains a first-class **working memory** object under `state.workingMemory` (and internally via `MiniAMemoryManager`).
+
+### Schema
+
+```json
+{
+  "schemaVersion": 1,
+  "sections": {
+    "facts": [],
+    "evidence": [],
+    "openQuestions": [],
+    "hypotheses": [],
+    "decisions": [],
+    "artifacts": [],
+    "risks": [],
+    "summaries": []
+  }
+}
+```
+
+Each entry carries metadata (`id`, `value`, timestamps, `status`, optional `provenance`, optional `evidenceRefs`, and stale/unresolved flags).
+
+### Lifecycle Hooks
+
+When `usememory=true`, Mini-A initializes memory at run start (from `state.workingMemory` and/or `memoryfile` when persistence is enabled), then updates it incrementally after:
+- planning generation/critique,
+- tool calls,
+- shell execution,
+- validation cycles,
+- delegated subtask completion,
+- final answer synthesis.
+
+### Extension Points
+
+Runtime helpers available in code:
+- `_memoryAppend(section, value, meta)`
+- `_memoryUpdate(section, id, patch)`
+- `_memoryRemove(section, id)`
+- `_memoryAttachEvidence(section, id, evidenceId)`
+- `_memoryMarkStatus(section, id, status, supersededBy)`
+
+These wrappers keep state sync/persistence centralized (instead of ad-hoc direct writes).

@@ -814,4 +814,74 @@
 
     ow.test.assert(agent._shouldLogSandboxWarning("usesandbox=macos requested but 'sandbox-exec' is not available; running without OS sandbox.") === true, true, "Real sandbox failures should still be shown")
   }
+
+  exports.testWorkingMemoryInitializationFromState = function() {
+    var agent = createAgent()
+    agent._agentState = {
+      workingMemory: {
+        sections: {
+          facts: [{ id: "f1", value: "seed fact" }],
+          evidence: [], openQuestions: [], hypotheses: [], decisions: [], artifacts: [], risks: [], summaries: []
+        }
+      }
+    }
+    agent._initWorkingMemory({ usememory: true, memorypersist: false, debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(isMap(agent._agentState.workingMemory), true, "Working memory should be initialized on agent state")
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.length >= 1, true, "Seeded facts should be loaded")
+  }
+
+  exports.testWorkingMemoryDeduplicateAndMutationApis = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memorypersist: false, memorydedup: true, debug: false, verbose: false }, agent._agentState)
+    var e1 = agent._memoryAppend("facts", "The API endpoint is /v1/tasks", { provenance: { source: "test" } })
+    var e2 = agent._memoryAppend("facts", "the api endpoint is /v1/tasks.", { provenance: { source: "test" } })
+    ow.test.assert(e1.id === e2.id, true, "Near-identical facts should deduplicate")
+    ow.test.assert(agent._memoryUpdate("facts", e1.id, { stale: true }) === true, true, "Should update memory entries")
+    ow.test.assert(agent._memoryMarkStatus("facts", e1.id, "superseded", "new-id") === true, true, "Should mark status/superseded entries")
+    ow.test.assert(agent._memoryRemove("facts", e1.id) === true, true, "Should remove entries")
+  }
+
+  exports.testWorkingMemoryPersistenceAndReload = function() {
+    var agent = createAgent()
+    var memFile = io.createTempFile("mini-a-memory-", ".json")
+    try {
+      if (io.fileExists(memFile)) io.rm(memFile)
+    } catch(ignoreRm) {}
+
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memorypersist: true, memoryfile: memFile, debug: false, verbose: false }, agent._agentState)
+    agent._memoryAppend("decisions", "Persist this decision", { provenance: { source: "test" } })
+    agent._persistWorkingMemory("test")
+    ow.test.assert(io.fileExists(memFile), true, "Memory persistence should create file")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memorypersist: true, memoryfile: memFile, debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.decisions.length >= 1, true, "Reload should restore persisted entries")
+  }
+
+  exports.testWorkingMemoryCompactionBounds = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true,
+      memorypersist: false,
+      memorymaxpersection: 5,
+      memorymaxentries: 20,
+      memorycompactevery: 1,
+      debug: false,
+      verbose: false
+    }, agent._agentState)
+
+    for (var i = 0; i < 15; i++) {
+      agent._memoryAppend("facts", "Fact " + i, { provenance: { source: "test" } })
+      agent._memoryAppend("evidence", "Evidence " + i, { provenance: { source: "test" } })
+    }
+    var mem = agent._agentState.workingMemory
+    var total = 0
+    Object.keys(mem.sections).forEach(function(k) { total += mem.sections[k].length })
+    ow.test.assert(mem.sections.facts.length <= 5, true, "Per-section bounds should be respected after compaction")
+    ow.test.assert(total <= 20, true, "Total bound should be respected after compaction")
+  }
 })()

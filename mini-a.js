@@ -4,6 +4,7 @@
 
 ow.loadMetrics()
 loadLib("mini-a-common.js")
+loadLib("mini-a-memory.js")
 
 /**
  * <odoc>
@@ -68,6 +69,8 @@ var MiniA = function() {
   this._debugchConfig = __
   this._debuglcchConfig = __
   this._debugvalchConfig = __
+  this._memoryManager = __
+  this._memoryConfig = { enabled: true, persist: false, file: __, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -5001,6 +5004,13 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
     if (missing.length > 0) headline += ` | Missing: ${missing.slice(0, 2).join("; ")}`
     this.fnI("plan", headline)
     if (summary.length > 0) this.fnI("plan", `Critique summary: ${summary}`)
+    this._memoryAppend("decisions", `Plan critique verdict: ${verdict}`, {
+      provenance: { source: "planning", event: "plan-critique" },
+      meta: { issues: issues, missingWork: missing, qualityRisks: risks }
+    })
+    if (summary.length > 0) {
+      this._memoryAppend("summaries", summary, { provenance: { source: "planning", event: "plan-critique-summary" } })
+    }
   } catch (critiqueErr) {
     this.fnI("warn", `Plan critique failed: ${critiqueErr}`)
   }
@@ -5396,6 +5406,10 @@ MiniA.prototype._runValidationMode = function(planPayload, args, controls) {
   // Overall status
   var overallPass = validation.valid && (!isObject(critique) || critique.verdict === "PASS")
   this.fnI("plan", "\n=== Overall Status: " + (overallPass ? "PASS" : "NEEDS REVISION") + " ===\n")
+  this._memoryAppend("summaries", `Plan validation ${overallPass ? "passed" : "needs revision"}.`, {
+    provenance: { source: "validation", event: "plan-validation" },
+    meta: { structureValid: validation.valid, critiqueVerdict: isObject(critique) ? critique.verdict : __ }
+  })
 
   return {
     validation: validation,
@@ -6761,6 +6775,87 @@ MiniA.prototype._validateArgs = function(args, validations) {
     return args
 }
 
+MiniA.prototype._initWorkingMemory = function(args, seedState) {
+  var cfg = {
+    enabled        : toBoolean(args.usememory) !== false,
+    persist        : toBoolean(args.memorypersist) === true,
+    file           : isString(args.memoryfile) ? args.memoryfile : __,
+    maxPerSection  : isNumber(args.memorymaxpersection) ? args.memorymaxpersection : 80,
+    maxTotalEntries: isNumber(args.memorymaxentries) ? args.memorymaxentries : 500,
+    compactEvery   : isNumber(args.memorycompactevery) ? args.memorycompactevery : 8,
+    dedup          : toBoolean(isDef(args.memorydedup) ? args.memorydedup : true),
+    debug          : toBoolean(args.debug) || toBoolean(args.verbose)
+  }
+  this._memoryConfig = cfg
+  this._memoryManager = new MiniAMemoryManager(cfg, function(level, msg) {
+    if (cfg.debug) this.fnI(level || "info", "[memory] " + msg)
+  }.bind(this))
+
+  var seeded = isObject(seedState) && isObject(seedState.workingMemory) ? seedState.workingMemory : __
+  if (this._memoryManager.loadFromFile(cfg.file) !== true) this._memoryManager.init(seeded)
+  this._syncWorkingMemoryState()
+}
+
+MiniA.prototype._syncWorkingMemoryState = function() {
+  if (!isObject(this._memoryManager)) return
+  if (!isObject(this._agentState)) this._agentState = {}
+  this._agentState.workingMemory = this._memoryManager.snapshot()
+}
+
+MiniA.prototype._persistWorkingMemory = function(reason) {
+  if (!isObject(this._memoryManager)) return
+  this._syncWorkingMemoryState()
+  try {
+    this._memoryManager.saveToFile(this._memoryConfig.file)
+    if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted (${reason || "update"})`)
+  } catch(e) {
+    this.fnI("warn", `[memory] persistence failed: ${__miniAErrMsg(e)}`)
+  }
+}
+
+MiniA.prototype._memoryAppend = function(section, value, meta) {
+  if (!isObject(this._memoryManager)) return __
+  var entry = isObject(meta) ? merge({ value: value }, meta) : { value: value }
+  var appended = this._memoryManager.append(section, entry)
+  if (isObject(this._memoryConfig) && this._memoryConfig.debug && isObject(appended)) {
+    this.fnI("info", `[memory] ${section} += ${appended.value}`)
+  }
+  this._syncWorkingMemoryState()
+  if (isObject(this._memoryConfig) && this._memoryConfig.persist === true) this._persistWorkingMemory("append")
+  return appended
+}
+
+MiniA.prototype._memoryUpdate = function(section, id, patch) {
+  if (!isObject(this._memoryManager)) return false
+  var ok = this._memoryManager.update(section, id, patch)
+  if (ok) this._syncWorkingMemoryState()
+  return ok
+}
+
+MiniA.prototype._memoryRemove = function(section, id) {
+  if (!isObject(this._memoryManager)) return false
+  var ok = this._memoryManager.remove(section, id)
+  if (ok) this._syncWorkingMemoryState()
+  return ok
+}
+
+MiniA.prototype._memoryAttachEvidence = function(section, id, evidenceId) {
+  if (!isObject(this._memoryManager)) return false
+  var ok = this._memoryManager.attachEvidenceRef(section, id, evidenceId)
+  if (ok) this._syncWorkingMemoryState()
+  return ok
+}
+
+MiniA.prototype._memoryMarkStatus = function(section, id, status, supersededBy) {
+  if (!isObject(this._memoryManager)) return false
+  var ok = this._memoryManager.mark(section, id, "status", status)
+  if (ok && isString(supersededBy) && supersededBy.length > 0) {
+    this._memoryManager.mark(section, id, "supersededBy", supersededBy)
+  }
+  if (ok) this._syncWorkingMemoryState()
+  return ok
+}
+
 /**
  * Create a rate limiter that enforces requests-per-minute (rpm) and tokens-per-minute (tpm) caps.
  */
@@ -6990,6 +7085,11 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
+  this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" } })
+  this._memoryAppend("summaries", isString(answer) ? answer.substring(0, 500) : stringify(answer, __, "").substring(0, 500), {
+    provenance: { source: "synthesis", event: "final-answer-text" }
+  })
+  this._persistWorkingMemory("process-final-answer")
 
   this._recordPlanActivity("final", {
     step       : this._runtime && this._runtime.currentStepNumber,
@@ -7444,6 +7544,7 @@ MiniA.prototype._restoreCheckpoint = function(runtime, reason) {
   if (!isObject(snapshot.runtime)) return false
 
   this._agentState = snapshot.agentState || {}
+  this._syncWorkingMemoryState()
   runtime.context = isArray(snapshot.runtime.context) ? snapshot.runtime.context.slice() : []
   runtime.consecutiveErrors = snapshot.runtime.consecutiveErrors || 0
   runtime.consecutiveThoughts = snapshot.runtime.consecutiveThoughts || 0
@@ -8245,6 +8346,21 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
                 answer: result.answer,
                 error: result.error
               }
+              if (isDef(result.error)) {
+                parent._memoryAppend("risks", `Delegated subtask ${subtaskId} failed: ${result.error}`, {
+                  unresolved: true,
+                  provenance: { source: "delegation", event: "subtask-completed", subtaskId: subtaskId }
+                })
+              } else {
+                parent._memoryAppend("evidence", `Delegated subtask ${subtaskId} completed successfully.`, {
+                  provenance: { source: "delegation", event: "subtask-completed", subtaskId: subtaskId }
+                })
+                if (isString(result.answer) && result.answer.length > 0) {
+                  parent._memoryAppend("artifacts", result.answer.substring(0, 500), {
+                    provenance: { source: "delegation", event: "subtask-answer", subtaskId: subtaskId }
+                  })
+                }
+              }
               return { content: [{ type: "text", text: stringify(output, __, "") }] }
             } catch(waitErr) {
               global.__mini_a_metrics.delegation_failed.inc()
@@ -8260,6 +8376,10 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
               status: "started",
               message: "Subtask started asynchronously. Use subtask-status to check progress."
             }
+            parent._memoryAppend("openQuestions", `Subtask ${subtaskId} is running asynchronously and requires follow-up.`, {
+              unresolved: true,
+              provenance: { source: "delegation", event: "subtask-started", subtaskId: subtaskId }
+            })
             return { content: [{ type: "text", text: stringify(output, __, "") }] }
           }
         } catch(err) {
@@ -12525,7 +12645,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
       { name: "mcpproxythreshold", type: "number", default: 0 },
-      { name: "mcpproxytoon", type: "boolean", default: false }
+      { name: "mcpproxytoon", type: "boolean", default: false },
+      { name: "usememory", type: "boolean", default: true },
+      { name: "memorypersist", type: "boolean", default: false },
+      { name: "memoryfile", type: "string", default: __ },
+      { name: "memorymaxpersection", type: "number", default: 80 },
+      { name: "memorymaxentries", type: "number", default: 500 },
+      { name: "memorycompactevery", type: "number", default: 8 },
+      { name: "memorydedup", type: "boolean", default: true }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -12580,6 +12707,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
+    args.usememory = _$(toBoolean(args.usememory), "args.usememory").isBoolean().default(true)
+    args.memorypersist = _$(toBoolean(args.memorypersist), "args.memorypersist").isBoolean().default(false)
+    args.memoryfile = _$(args.memoryfile, "args.memoryfile").isString().default(__)
+    args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
+    args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
+    args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)
+    args.memorydedup = _$(toBoolean(args.memorydedup), "args.memorydedup").isBoolean().default(true)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -12735,6 +12869,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
       this._prepareExternalPlanExecution(preloadedPlan, args)
       this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
+      this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: preloadedPlan.path || "" } })
       // Mark that external plan is loaded to skip auto-generation later
       this._hasExternalPlan = true
     } else {
@@ -13078,6 +13213,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
     this._agentState = isObject(initialState) ? initialState : {}
+    this._initWorkingMemory(args, this._agentState)
+    this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
     if (this._enablePlanning) {
       // PHASE 1: Generate plan upfront (separate call)
       this._planningPhase = "planning"
@@ -13090,8 +13227,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var planResponse = this._generateInitialPlan(args.goal, strategy, args)
         if (isObject(planResponse) && isObject(planResponse.plan)) {
           this._agentState.plan = planResponse.plan
+          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" } })
         } else if (isObject(planResponse)) {
           this._agentState.plan = planResponse
+          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" } })
         } else if (isObject(this._agentState) && isUnDef(this._agentState.plan)) {
           this._agentState.plan = []
         }
@@ -13524,6 +13663,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           message : errorMessage,
           context : { toolName: toolName, stepLabel: stepLabel }
         })
+        this._memoryAppend("risks", `Tool '${toolName}' failed: ${errorMessage}`, {
+          status    : "unresolved",
+          unresolved: true,
+          provenance: { source: "tool", event: "tool-error", step: stepLabel, tool: toolName }
+        })
+      } else if (isString(toolName) && toolName.length > 0) {
+        var evidenceEntry = this._memoryAppend("evidence", `Tool '${toolName}' completed at step ${stepLabel}.`, {
+          provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
+        })
+        if (isObject(evidenceEntry) && isString(evidenceEntry.id) && isString(observation) && observation.length > 0) {
+          this._memoryAppend("artifacts", observation.substring(0, 500), {
+            evidenceRefs: [evidenceEntry.id],
+            provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName }
+          })
+        }
       }
 
       runtime.consecutiveThoughts = 0
@@ -14378,6 +14532,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           stateUpdatedThisStep = true
           if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
           if (this._enablePlanning) this._handlePlanUpdate()
+          this._memoryAppend("facts", "Model updated runtime state.", { provenance: { source: "model", event: "state-update", step: step + 1 } })
         }
       }
       var actionMessages = []
@@ -14664,6 +14819,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }).output
           runtime.context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
           runtime.context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
+          var shellEvidence = this._memoryAppend("evidence", `Shell command executed: ${commandValue}`, {
+            provenance: { source: "shell", event: "shell-exec", step: stepLabel, command: commandValue }
+          })
+          this._memoryAppend("artifacts", (shellOutput || "(no output)").trim().substring(0, 500), {
+            evidenceRefs: isObject(shellEvidence) && isString(shellEvidence.id) ? [shellEvidence.id] : [],
+            provenance  : { source: "shell", event: "shell-output", step: stepLabel }
+          })
 
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
@@ -14746,7 +14908,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (args.debug || args.verbose) {
             this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
           }
-
+          this._memoryAppend("decisions", "Final answer emitted by agent.", { provenance: { source: "synthesis", event: "final-answer", step: stepLabel } })
+          this._memoryAppend("summaries", String(answerValue).substring(0, 500), { provenance: { source: "synthesis", event: "final-answer-preview" } })
+          this._persistWorkingMemory("final-answer")
           return this._processFinalAnswer(answerValue, args)
         }
 
@@ -14905,7 +15069,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var totalTime = now() - sessionStartTime
     global.__mini_a_metrics.total_session_time.set(totalTime)
     global.__mini_a_metrics.goals_stopped.inc()
-
+    this._memoryAppend("decisions", "Fallback final answer requested due to execution limits.", { provenance: { source: "synthesis", event: "fallback-final" } })
+    this._memoryAppend("summaries", String(res.answer || "(no final answer)").substring(0, 500), { provenance: { source: "synthesis", event: "fallback-final-preview" } })
+    this._persistWorkingMemory("fallback-final")
     return this._processFinalAnswer(res.answer || "(no final answer)", args)
 }
 
@@ -15411,6 +15577,21 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     var score = isNumber(validation.score) ? validation.score : 0
     var specificIssues = isArray(validation.specificIssues) ? validation.specificIssues.filter(isString) : []
     var suggestions = isArray(validation.suggestions) ? validation.suggestions.filter(isString) : []
+    this._memoryAppend("summaries", `Validation verdict: ${verdict}${feedback.length > 0 ? " - " + feedback : ""}`, {
+      provenance: { source: "validation", event: "deep-research-validation" }
+    })
+    if (specificIssues.length > 0) {
+      this._memoryAppend("risks", specificIssues.join("; "), {
+        unresolved: verdict !== "PASS",
+        provenance: { source: "validation", event: "validation-issues" }
+      })
+    }
+    if (suggestions.length > 0) {
+      this._memoryAppend("openQuestions", suggestions.join("; "), {
+        unresolved: true,
+        provenance: { source: "validation", event: "validation-suggestions" }
+      })
+    }
 
     return {
       verdict: verdict,

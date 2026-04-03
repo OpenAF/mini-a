@@ -423,6 +423,13 @@ Mini-A ships with complementary components:
 | `systempromptbudget` | Maximum estimated system-prompt token budget before low-priority sections are dropped | - |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
+| `usememory` | Enable structured working memory (`facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, `summaries`) maintained across the run | `true` |
+| `memorypersist` | Persist working memory to disk and reload it on future/resumed runs | `false` |
+| `memoryfile` | Path to the memory JSON file used when `memorypersist=true` | - |
+| `memorymaxpersection` | Per-section memory cap before compaction | `80` |
+| `memorymaxentries` | Total memory-entry cap across all sections | `500` |
+| `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |
+| `memorydedup` | Deduplicate near-identical memory entries before append | `true` |
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
