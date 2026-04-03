@@ -1,0 +1,117 @@
+# Author: Nuno Aguiar
+help:
+  text: |
+    Hardened template for specialized Mini-A agents with explicit planning,
+    constrained tools, validation, and deterministic outputs.
+  expects:
+  - name     : input
+    desc     : Optional input file or target resource
+    example  : "input.md"
+    mandatory: false
+  - name     : outfile
+    desc     : Output file path
+    example  : "result.md"
+    mandatory: false
+
+ojob:
+  logToConsole: true
+  opacks:
+  - mini-a
+
+jobsInclude:
+- mini-a.yaml
+
+todo:
+- Run hardened Mini-A agent
+
+jobs:
+- name : Run hardened Mini-A agent
+  check:
+    in:
+      input  : toString.default(__)
+      outfile: toString.default("agent-output.md")
+  ((templateArgs)): true
+
+  args:
+    format         : md
+    outfile        : "{{outfile}}"
+
+    # Safer, narrower execution defaults
+    useshell       : false
+    readwrite      : false
+    useutils       : true
+    usetools       : true
+    utilsallow     : "filesystemQuery,markdownFiles"
+    promptprofile  : balanced
+    useplanning    : true
+    planstyle      : simple
+    forceplanning  : true
+
+    # Better quality control
+    deepresearch      : true
+    maxcycles         : 2
+    persistlearnings  : true
+    validationthreshold: PASS
+
+    # Good observability
+    #toollog         : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
+
+    youare: | #markdown
+      You are a specialized AI agent for <domain>.
+      You are precise, skeptical, and execution-oriented.
+      You must prefer tool-grounded evidence over assumptions.
+
+    knowledge: | #markdown
+      Context:
+      - Input: {{input}}
+      - Working directory: current folder
+
+      Domain conventions:
+      - <put domain rules here>
+
+    state:
+      mission       : "<replace with mission>"
+      allowedWrites : false
+      exclusions    : [".git", "node_modules", "dist", "build"]
+      outputSchema  :
+        sections    : ["Summary", "Findings", "Recommendations"]
+      qualityBar    :
+        noGuessing      : true
+        citeEvidence    : true
+        mentionUnknowns : true
+
+    goal: | #markdown
+      Execute this workflow strictly:
+
+      Phase 1 — Inspect
+      - Read the input and discover only relevant local files.
+      - Ignore excluded paths from state.exclusions.
+
+      Phase 2 — Plan
+      - Build a short execution plan before making conclusions.
+      - Prefer the minimum number of files/tools needed.
+
+      Phase 3 — Execute
+      - Collect evidence.
+      - Do not invent facts.
+      - If a required fact is missing, mark it explicitly as unknown.
+
+      Phase 4 — Produce
+      - Write the final output using the exact section structure in state.outputSchema.sections.
+
+    rules: | #markdown
+      - Prefer tools over assumptions.
+      - Keep reasoning grounded in inspected files and tool results.
+      - Do not modify files unless readwrite=true and the task explicitly requires it.
+      - Preserve existing style when editing files.
+      - Keep outputs concise, reviewable, and deterministic.
+
+    valgoal: | #markdown
+      PASS only if:
+      - The output follows the required section structure exactly.
+      - Every key claim is grounded in inspected evidence.
+      - Unknowns or ambiguities are explicitly called out.
+      - No irrelevant sections or speculative statements are included.
+
+  to:
+  - MiniAgent
