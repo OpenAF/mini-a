@@ -1108,6 +1108,18 @@ MiniA.prototype._normalizeThoughtMessage = function(message) {
 }
 
 /**
+ * Treat placeholder thought payloads as missing so they do not leak as "{}".
+ */
+MiniA.prototype._isEmptyThoughtValue = function(message) {
+  if (isUnDef(message) || isNull(message)) return true
+  if (isMap(message)) return Object.keys(message).length === 0
+  if (isArray(message)) return message.length === 0
+
+  var normalized = this._normalizeThoughtMessage(message)
+  return normalized.length === 0 || normalized === "{}" || normalized === "[]"
+}
+
+/**
  * Helper function to log thought or think messages with counter for repeated messages
  */
 MiniA.prototype._logMessageWithCounter = function(type, message) {
@@ -1158,7 +1170,7 @@ MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, 
   }
 
   thoughtMessage = ((isDef(thoughtMessage) ? thoughtMessage : "") + "").trim()
-  if (thoughtMessage.length === 0) thoughtMessage = "(no thought)"
+  if (this._isEmptyThoughtValue(thoughtMessage)) thoughtMessage = "(no thought)"
 
   global.__mini_a_metrics.thoughts_made.inc()
 
@@ -14705,7 +14717,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           })
           break
         }
-        if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
+        if (this._isEmptyThoughtValue(thoughtValue)) {
           var currentMsgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
           var thoughtInfo = isUnDef(currentMsg.thought) && isUnDef(currentMsg.think) ? "no 'thought' or 'think' field" : `'thought'/'think' field is empty or invalid`
           runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)

@@ -130,6 +130,21 @@
     ow.test.assert(events[1].message === "plan next step", true, "Should log the think message separately")
   }
 
+  exports.testCanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var finalThought = agent._emitCanonicalThoughtEvent("final", {}, "(no thought)")
+    var thinkThought = agent._emitCanonicalThoughtEvent("think", "{}", "(no thought)")
+
+    ow.test.assert(finalThought === "(no thought)", true, "Should normalize empty object thought placeholders")
+    ow.test.assert(thinkThought === "(no thought)", true, "Should normalize stringified empty object placeholders")
+    ow.test.assert(events.length === 0, true, "Should not emit a visible thought event for empty placeholders")
+  }
+
   exports.testStreamThinkingTagsDoNotEmitCanonicalThoughtEvents = function() {
     var agent = createAgent()
     var events = []
