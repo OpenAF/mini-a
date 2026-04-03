@@ -424,8 +424,7 @@ Mini-A ships with complementary components:
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
 | `usememory` | Enable structured working memory (`facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, `summaries`) maintained across the run | `true` |
-| `memorypersist` | Persist working memory to disk and reload it on future/resumed runs | `false` |
-| `memoryfile` | Path to the memory JSON file used when `memorypersist=true` | - |
+| `memorych` | JSSLON definition for an OpenAF channel used to persist and reload working memory across runs (e.g. `{type:'file',options:{file:'/tmp/memory.json'}}`) | - |
 | `memorymaxpersection` | Per-section memory cap before compaction | `80` |
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
 | `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |

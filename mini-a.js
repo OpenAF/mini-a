@@ -70,7 +70,8 @@ var MiniA = function() {
   this._debuglcchConfig = __
   this._debugvalchConfig = __
   this._memoryManager = __
-  this._memoryConfig = { enabled: true, persist: false, file: __, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
+  this._memoryConfig = { enabled: true, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
+  this._memorychName = __
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -6778,8 +6779,6 @@ MiniA.prototype._validateArgs = function(args, validations) {
 MiniA.prototype._initWorkingMemory = function(args, seedState) {
   var cfg = {
     enabled        : toBoolean(args.usememory) !== false,
-    persist        : toBoolean(args.memorypersist) === true,
-    file           : isString(args.memoryfile) ? args.memoryfile : __,
     maxPerSection  : isNumber(args.memorymaxpersection) ? args.memorymaxpersection : 80,
     maxTotalEntries: isNumber(args.memorymaxentries) ? args.memorymaxentries : 500,
     compactEvery   : isNumber(args.memorycompactevery) ? args.memorycompactevery : 8,
@@ -6791,8 +6790,32 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
     if (cfg.debug) this.fnI(level || "info", "[memory] " + msg)
   }.bind(this))
 
+  // Initialize OpenAF channel for memory persistence when memorych is provided
+  this._memorychName = __
+  if (isString(args.memorych) && args.memorych.trim().length > 0) {
+    try {
+      var _memorychm = af.fromJSSLON(args.memorych)
+      if (isMap(_memorychm)) {
+        var _memorychName = isString(_memorychm.name) && _memorychm.name.trim().length > 0 ? _memorychm.name.trim() : "_mini_a_memory_channel"
+        var _memorychType = isString(_memorychm.type) ? _memorychm.type : "simple"
+        var _memorychOpts = isMap(_memorychm.options) ? _memorychm.options : {}
+        var _memorychExists = false
+        try { _memorychExists = $ch().list().indexOf(_memorychName) >= 0 } catch(ignoreList) {}
+        if (!_memorychExists) {
+          $ch(_memorychName).create(_memorychType, _memorychOpts)
+          if (cfg.debug) this.fnI("info", `[memory] channel '${_memorychName}' created.`)
+        } else {
+          if (cfg.debug) this.fnI("info", `[memory] channel '${_memorychName}' reused.`)
+        }
+        this._memorychName = _memorychName
+      }
+    } catch(e) {
+      this.fnI("warn", `[memory] failed to initialize memorych channel: ${__miniAErrMsg(e)}`)
+    }
+  }
+
   var seeded = isObject(seedState) && isObject(seedState.workingMemory) ? seedState.workingMemory : __
-  if (this._memoryManager.loadFromFile(cfg.file) !== true) this._memoryManager.init(seeded)
+  if (this._memoryManager.loadFromChannel(this._memorychName) !== true) this._memoryManager.init(seeded)
   this._syncWorkingMemoryState()
 }
 
@@ -6805,9 +6828,10 @@ MiniA.prototype._syncWorkingMemoryState = function() {
 MiniA.prototype._persistWorkingMemory = function(reason) {
   if (!isObject(this._memoryManager)) return
   this._syncWorkingMemoryState()
+  if (!isString(this._memorychName) || this._memorychName.length === 0) return
   try {
-    this._memoryManager.saveToFile(this._memoryConfig.file)
-    if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted (${reason || "update"})`)
+    this._memoryManager.saveToChannel(this._memorychName)
+    if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted to channel '${this._memorychName}' (${reason || "update"})`)
   } catch(e) {
     this.fnI("warn", `[memory] persistence failed: ${__miniAErrMsg(e)}`)
   }
@@ -6821,7 +6845,7 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
     this.fnI("info", `[memory] ${section} += ${appended.value}`)
   }
   this._syncWorkingMemoryState()
-  if (isObject(this._memoryConfig) && this._memoryConfig.persist === true) this._persistWorkingMemory("append")
+  if (isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
   return appended
 }
 
@@ -12647,8 +12671,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "usememory", type: "boolean", default: true },
-      { name: "memorypersist", type: "boolean", default: false },
-      { name: "memoryfile", type: "string", default: __ },
+      { name: "memorych", type: "string", default: __ },
       { name: "memorymaxpersection", type: "number", default: 80 },
       { name: "memorymaxentries", type: "number", default: 500 },
       { name: "memorycompactevery", type: "number", default: 8 },
@@ -12708,8 +12731,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.usememory = _$(toBoolean(args.usememory), "args.usememory").isBoolean().default(true)
-    args.memorypersist = _$(toBoolean(args.memorypersist), "args.memorypersist").isBoolean().default(false)
-    args.memoryfile = _$(args.memoryfile, "args.memoryfile").isString().default(__)
+    args.memorych = _$(args.memorych, "args.memorych").isString().default(__)
     args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
     args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
     args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)

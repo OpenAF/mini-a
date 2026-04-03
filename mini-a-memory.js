@@ -12,8 +12,6 @@ MiniAMemoryManager.prototype.configure = function(config) {
   var cfg = isObject(config) ? config : {}
   this._config = {
     enabled          : toBoolean(cfg.enabled) !== false,
-    persist          : toBoolean(cfg.persist) === true,
-    file             : isString(cfg.file) ? cfg.file : __,
     maxPerSection    : isNumber(cfg.maxPerSection) ? Math.max(5, Math.round(cfg.maxPerSection)) : 80,
     maxTotalEntries  : isNumber(cfg.maxTotalEntries) ? Math.max(20, Math.round(cfg.maxTotalEntries)) : 500,
     compactEvery     : isNumber(cfg.compactEvery) ? Math.max(1, Math.round(cfg.compactEvery)) : 8,
@@ -284,19 +282,25 @@ MiniAMemoryManager.prototype.compact = function() {
   return this.snapshot()
 }
 
-MiniAMemoryManager.prototype.saveToFile = function(path) {
-  if (this._config.enabled !== true || this._config.persist !== true) return false
-  var target = isString(path) && path.length > 0 ? path : this._config.file
-  if (!isString(target) || target.length === 0) return false
-  io.writeFileString(target, stringify(this._memory, __, "  "))
-  return true
+MiniAMemoryManager.prototype.saveToChannel = function(channelName) {
+  if (this._config.enabled !== true) return false
+  if (!isString(channelName) || channelName.length === 0) return false
+  try {
+    $ch(channelName).set({ key: "snapshot" }, this.snapshot())
+    return true
+  } catch(e) {
+    return false
+  }
 }
 
-MiniAMemoryManager.prototype.loadFromFile = function(path) {
-  var source = isString(path) && path.length > 0 ? path : this._config.file
-  if (!isString(source) || source.length === 0 || !io.fileExists(source)) return false
-  var parsed = jsonParse(io.readFileString(source), __, __, true)
-  if (!isObject(parsed)) return false
-  this.init(parsed)
-  return true
+MiniAMemoryManager.prototype.loadFromChannel = function(channelName) {
+  if (!isString(channelName) || channelName.length === 0) return false
+  try {
+    var data = $ch(channelName).get({ key: "snapshot" })
+    if (!isObject(data)) return false
+    this.init(data)
+    return true
+  } catch(e) {
+    return false
+  }
 }

@@ -825,7 +825,7 @@
         }
       }
     }
-    agent._initWorkingMemory({ usememory: true, memorypersist: false, debug: false, verbose: false }, agent._agentState)
+    agent._initWorkingMemory({ usememory: true, debug: false, verbose: false }, agent._agentState)
     ow.test.assert(isMap(agent._agentState.workingMemory), true, "Working memory should be initialized on agent state")
     ow.test.assert(agent._agentState.workingMemory.sections.facts.length >= 1, true, "Seeded facts should be loaded")
   }
@@ -833,7 +833,7 @@
   exports.testWorkingMemoryDeduplicateAndMutationApis = function() {
     var agent = createAgent()
     agent._agentState = {}
-    agent._initWorkingMemory({ usememory: true, memorypersist: false, memorydedup: true, debug: false, verbose: false }, agent._agentState)
+    agent._initWorkingMemory({ usememory: true, memorydedup: true, debug: false, verbose: false }, agent._agentState)
     var e1 = agent._memoryAppend("facts", "The API endpoint is /v1/tasks", { provenance: { source: "test" } })
     var e2 = agent._memoryAppend("facts", "the api endpoint is /v1/tasks.", { provenance: { source: "test" } })
     ow.test.assert(e1.id === e2.id, true, "Near-identical facts should deduplicate")
@@ -843,22 +843,29 @@
   }
 
   exports.testWorkingMemoryPersistenceAndReload = function() {
-    var agent = createAgent()
-    var memFile = io.createTempFile("mini-a-memory-", ".json")
+    var channelName = "__mini_a_test_memory_" + nowNano()
     try {
-      if (io.fileExists(memFile)) io.rm(memFile)
-    } catch(ignoreRm) {}
+      $ch(channelName).create("simple")
+    } catch(ignoreCreate) {}
 
+    var agent = createAgent()
     agent._agentState = {}
-    agent._initWorkingMemory({ usememory: true, memorypersist: true, memoryfile: memFile, debug: false, verbose: false }, agent._agentState)
+    agent._initWorkingMemory({ usememory: true, memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
     agent._memoryAppend("decisions", "Persist this decision", { provenance: { source: "test" } })
     agent._persistWorkingMemory("test")
-    ow.test.assert(io.fileExists(memFile), true, "Memory persistence should create file")
+
+    var snapshotEntry = $ch(channelName).get({ key: "snapshot" })
+    ow.test.assert(isMap(snapshotEntry), true, "Memory persistence should write snapshot to channel")
+    ow.test.assert(isMap(snapshotEntry.sections), true, "Snapshot should contain sections")
+    ow.test.assert(isArray(snapshotEntry.sections.decisions) && snapshotEntry.sections.decisions.length >= 1, true, "Snapshot should include persisted decision")
+    ow.test.assert(snapshotEntry.sections.decisions.some(function(d) { return d.value === "Persist this decision" }), true, "Persisted decision value should be present in snapshot")
 
     var second = createAgent()
     second._agentState = {}
-    second._initWorkingMemory({ usememory: true, memorypersist: true, memoryfile: memFile, debug: false, verbose: false }, second._agentState)
+    second._initWorkingMemory({ usememory: true, memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
     ow.test.assert(second._agentState.workingMemory.sections.decisions.length >= 1, true, "Reload should restore persisted entries")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }
 
   exports.testWorkingMemoryCompactionBounds = function() {
@@ -866,7 +873,6 @@
     agent._agentState = {}
     agent._initWorkingMemory({
       usememory: true,
-      memorypersist: false,
       memorymaxpersection: 5,
       memorymaxentries: 20,
       memorycompactevery: 1,
