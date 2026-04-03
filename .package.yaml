@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260402'
+version: '20260403'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -199,9 +199,9 @@ filesHash:
   mini-a-subtask.js: 41bd610dd4629d65984cbe081f6f260dace41ae0
   mini-a-utils.js: 74929e106d866962ef08a6ff413f70b247e579c9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: f4f8dedb7d693a30f5d5d96faab3f514ed26f885
+  mini-a-web.yaml: 41ad8c2c72f113b4536bb657be1a8703ebb9f75b
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: 2d0ab80faaada91971248e7cffed76a2200bbb5e
+  mini-a.js: 89c95b56f1e294223f1ccb3dcd05d81544aa6516
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cc2f059425458db3d7e72ec02cf4076e8f305c1b
   public/index.md: a61e6711b75825bd1800df7e7f5b4b7489685d2a
@@ -210,7 +210,7 @@ filesHash:
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
-  tests/coreFunctionality.js: 7f51acfe160f82f4c52535b264e81141ffc5f5a2
+  tests/coreFunctionality.js: af92a7a3faf16bc9e1ac1dba5d8cffa6394ccc98
   tests/coreFunctionality.yaml: 1c236cadebcad0ac91d33daca18590f5bc6a7096
   tests/miniAUtils.js: e73053daa6bb6b14934f21fa221eaea9c35bd6b0
   tests/miniAUtils.yaml: 1d1515b208e55da5600906e355ddc1a0eb7f82d7
