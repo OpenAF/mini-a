@@ -73,6 +73,7 @@ files:
 - docs/TESTS_MODELS.md
 - docs/WHATS-NEW.md
 - examples/README.md
+- examples/agent-template-v2.yaml
 - examples/agent-template.yaml
 - examples/changelog-gen.yaml
 - examples/document.yaml
@@ -153,6 +154,7 @@ filesHash:
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
   docs/WHATS-NEW.md: f0c4e27d9f13ab0b23995ecff21807b14886e7c4
   examples/README.md: 02b78b16f5e36428e89e74bf3b35a014c7ac49fd
+  examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
   examples/agent-template.yaml: 7e2997da5c5bc2b96e40635b29a6e650e67528c1
   examples/changelog-gen.yaml: f00b72ae92cd5da9800bf99c1c963e26d1cd08b5
   examples/document.yaml: 1bdc9956d5b46c751a338770a50d2476d6e33858
