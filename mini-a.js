@@ -6842,6 +6842,33 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
     }
   }
 
+  // Initialize session memory channel (memorysessionch = dedicated; otherwise fall back to memorych)
+  this._memorysessionchName = __
+  if (isString(args.memorysessionch) && args.memorysessionch.trim().length > 0) {
+    try {
+      var _memorysessionchm = af.fromJSSLON(args.memorysessionch)
+      if (isMap(_memorysessionchm)) {
+        var _memorysessionchName = isString(_memorysessionchm.name) && _memorysessionchm.name.trim().length > 0 ? _memorysessionchm.name.trim() : "_mini_a_session_memory_channel"
+        var _memorysessionchType = isString(_memorysessionchm.type) ? _memorysessionchm.type : "simple"
+        var _memorysessionchOpts = isMap(_memorysessionchm.options) ? _memorysessionchm.options : {}
+        var _memorysessionchExists = false
+        try { _memorysessionchExists = $ch().list().indexOf(_memorysessionchName) >= 0 } catch(ignoreList) {}
+        if (!_memorysessionchExists) {
+          $ch(_memorysessionchName).create(_memorysessionchType, _memorysessionchOpts)
+          if (cfg.debug) this.fnI("info", `[memory] session channel '${_memorysessionchName}' created.`)
+        } else {
+          if (cfg.debug) this.fnI("info", `[memory] session channel '${_memorysessionchName}' reused.`)
+        }
+        this._memorysessionchName = _memorysessionchName
+      }
+    } catch(e) {
+      this.fnI("warn", `[memory] failed to initialize memorysessionch channel: ${__miniAErrMsg(e)}`)
+    }
+  }
+  // Effective session channel: dedicated if provided, otherwise same as global memorych
+  this._memorysessionChEffective = isString(this._memorysessionchName) && this._memorysessionchName.length > 0 ? this._memorysessionchName : this._memorychName
+  this._memorysessionChKey = "session::" + sessionId
+
   if (cfg.enabled !== true) {
     this._syncWorkingMemoryState()
     return
@@ -6857,7 +6884,14 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
       if (isUnDef(seededSession) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "session")) {
         seededSession = seedState.workingMemory
       }
-      this._sessionMemoryManagers[sessionId].init(seededSession)
+      if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) {
+        if (this._sessionMemoryManagers[sessionId].loadFromChannel(this._memorysessionChEffective, this._memorysessionChKey) !== true) this._sessionMemoryManagers[sessionId].init(seededSession)
+      } else {
+        this._sessionMemoryManagers[sessionId].init(seededSession)
+      }
+    } else {
+      this._sessionMemoryManagers[sessionId].configure(cfg)
+      if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._sessionMemoryManagers[sessionId].loadFromChannel(this._memorysessionChEffective, this._memorysessionChKey)
     }
     this._sessionMemoryManager = this._sessionMemoryManagers[sessionId]
   }
@@ -6868,6 +6902,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
         if (cfg.debug) this.fnI(level || "info", "[memory][global] " + msg)
       }.bind(this))
       var seededGlobal = isObject(seedState) && isObject(seedState.workingMemoryGlobal) ? seedState.workingMemoryGlobal : __
+      if (isUnDef(seededGlobal) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "global" || (scope === "both" && !isObject(seedState.workingMemorySession)))) {
+        seededGlobal = seedState.workingMemory
+      }
       if (this._globalMemoryManager.loadFromChannel(this._memorychName) !== true) this._globalMemoryManager.init(seededGlobal)
     } else {
       this._globalMemoryManager.configure(cfg)
@@ -6875,8 +6912,16 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
     }
   }
 
-  this._memoryManager = isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
+  this._memoryManager = this._getDefaultMemoryWriteManager()
   this._syncWorkingMemoryState()
+}
+
+MiniA.prototype._getDefaultMemoryWriteManager = function() {
+  if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
+  if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
+  if (isString(this._memorychName) && this._memorychName.length > 0 && isObject(this._globalMemoryManager)) return this._globalMemoryManager
+  if (isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
+  return this._globalMemoryManager
 }
 
 MiniA.prototype._getMemoryReadManagers = function(scope) {
@@ -6951,14 +6996,26 @@ MiniA.prototype._persistWorkingMemory = function(reason) {
   }
 }
 
+MiniA.prototype._persistSessionMemory = function(reason) {
+  if (this._memoryConfig.enabled !== true) return
+  if (!isObject(this._sessionMemoryManager)) return
+  this._syncWorkingMemoryState()
+  if (!isString(this._memorysessionChEffective) || this._memorysessionChEffective.length === 0) return
+  try {
+    this._sessionMemoryManager.saveToChannel(this._memorysessionChEffective, this._memorysessionChKey)
+    if (this._memoryConfig.debug) this.fnI("info", `[memory] session persisted to channel '${this._memorysessionChEffective}' key '${this._memorysessionChKey}' (${reason || "update"})`)
+  } catch(e) {
+    this.fnI("warn", `[memory] session persistence failed: ${__miniAErrMsg(e)}`)
+  }
+}
+
 MiniA.prototype._memoryAppend = function(section, value, meta) {
   if (this._memoryConfig.enabled !== true) return __
   var targetScope = isObject(meta) && isString(meta.memoryScope) ? String(meta.memoryScope).toLowerCase().trim() : __
   var targetManager = __
   if (targetScope === "global") targetManager = this._globalMemoryManager
   else if (targetScope === "session") targetManager = this._sessionMemoryManager
-  else if (this._memoryScope === "global") targetManager = this._globalMemoryManager
-  else targetManager = this._sessionMemoryManager
+  else targetManager = this._getDefaultMemoryWriteManager()
   if (!isObject(targetManager)) return __
   var baseEntry = isObject(value) && (isDef(value.value) || isDef(value.id) || isDef(value.provenance) || isDef(value.status))
     ? merge({}, value)
@@ -6971,6 +7028,7 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
   }
   this._syncWorkingMemoryState()
   if (targetManager === this._globalMemoryManager && isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
+  if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
   return appended
 }
 
@@ -6978,7 +7036,11 @@ MiniA.prototype._memoryUpdate = function(section, id, patch) {
   if (this._memoryConfig.enabled !== true) return false
   var ok = false
   var usedGlobal = false
-  if (isObject(this._sessionMemoryManager)) ok = this._sessionMemoryManager.update(section, id, patch)
+  var usedSession = false
+  if (isObject(this._sessionMemoryManager)) {
+    ok = this._sessionMemoryManager.update(section, id, patch)
+    usedSession = ok
+  }
   if (!ok && isObject(this._globalMemoryManager)) {
     ok = this._globalMemoryManager.update(section, id, patch)
     usedGlobal = ok
@@ -6986,6 +7048,7 @@ MiniA.prototype._memoryUpdate = function(section, id, patch) {
   if (ok) {
     this._syncWorkingMemoryState()
     if (usedGlobal) this._persistWorkingMemory("update")
+    if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("update")
   }
   return ok
 }
@@ -6994,7 +7057,11 @@ MiniA.prototype._memoryRemove = function(section, id) {
   if (this._memoryConfig.enabled !== true) return false
   var ok = false
   var usedGlobal = false
-  if (isObject(this._sessionMemoryManager)) ok = this._sessionMemoryManager.remove(section, id)
+  var usedSession = false
+  if (isObject(this._sessionMemoryManager)) {
+    ok = this._sessionMemoryManager.remove(section, id)
+    usedSession = ok
+  }
   if (!ok && isObject(this._globalMemoryManager)) {
     ok = this._globalMemoryManager.remove(section, id)
     usedGlobal = ok
@@ -7002,6 +7069,7 @@ MiniA.prototype._memoryRemove = function(section, id) {
   if (ok) {
     this._syncWorkingMemoryState()
     if (usedGlobal) this._persistWorkingMemory("remove")
+    if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("remove")
   }
   return ok
 }
@@ -7010,7 +7078,11 @@ MiniA.prototype._memoryAttachEvidence = function(section, id, evidenceId) {
   if (this._memoryConfig.enabled !== true) return false
   var ok = false
   var usedGlobal = false
-  if (isObject(this._sessionMemoryManager)) ok = this._sessionMemoryManager.attachEvidenceRef(section, id, evidenceId)
+  var usedSession = false
+  if (isObject(this._sessionMemoryManager)) {
+    ok = this._sessionMemoryManager.attachEvidenceRef(section, id, evidenceId)
+    usedSession = ok
+  }
   if (!ok && isObject(this._globalMemoryManager)) {
     ok = this._globalMemoryManager.attachEvidenceRef(section, id, evidenceId)
     usedGlobal = ok
@@ -7018,6 +7090,7 @@ MiniA.prototype._memoryAttachEvidence = function(section, id, evidenceId) {
   if (ok) {
     this._syncWorkingMemoryState()
     if (usedGlobal) this._persistWorkingMemory("attach-evidence")
+    if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("attach-evidence")
   }
   return ok
 }
@@ -7034,6 +7107,7 @@ MiniA.prototype._memoryMarkStatus = function(section, id, status, supersededBy) 
   if (ok) {
     this._syncWorkingMemoryState()
     if (target === this._globalMemoryManager) this._persistWorkingMemory("mark")
+    if (target === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("mark")
   }
   return ok
 }
@@ -7067,7 +7141,7 @@ MiniA.prototype.clearSessionMemory = function(sessionId) {
   }
   if (this._sessionMemoryId === sid) {
     this._sessionMemoryManager = __
-    this._memoryManager = isObject(this._globalMemoryManager) ? this._globalMemoryManager : __
+    this._memoryManager = this._getDefaultMemoryWriteManager()
     this._syncWorkingMemoryState()
   }
   return true
@@ -12826,6 +12900,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isUnDef(args.usememory) && isDef(args.useMemory)) args.usememory = args.useMemory
     if (isUnDef(args.memoryscope) && isDef(args.memoryScope)) args.memoryscope = args.memoryScope
     if (isUnDef(args.memorysessionid) && isDef(args.memorySessionId)) args.memorysessionid = args.memorySessionId
+    if (isUnDef(args.memorysessionch) && isDef(args.memorySessionCh)) args.memorysessionch = args.memorySessionCh
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -12870,6 +12945,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memoryscope", type: "string", default: "both" },
       { name: "memorysessionid", type: "string", default: __ },
       { name: "memorych", type: "string", default: __ },
+      { name: "memorysessionch", type: "string", default: __ },
       { name: "memorymaxpersection", type: "number", default: 80 },
       { name: "memorymaxentries", type: "number", default: 500 },
       { name: "memorycompactevery", type: "number", default: 8 },
@@ -12934,6 +13010,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     else args.memoryscope = args.memoryscope.toLowerCase().trim()
     args.memorysessionid = _$(args.memorysessionid, "args.memorysessionid").isString().default(__)
     args.memorych = _$(args.memorych, "args.memorych").isString().default(__)
+    args.memorysessionch = _$(args.memorysessionch, "args.memorysessionch").isString().default(__)
     args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
     args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
     args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)

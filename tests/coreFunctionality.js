@@ -883,6 +883,30 @@
     try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }
 
+  exports.testWorkingMemorySessionWritesDoNotPersistWithoutPromotion = function() {
+    var channelName = "__mini_a_test_memory_session_only_" + nowNano()
+    try {
+      $ch(channelName).create("simple")
+    } catch(ignoreCreate) {}
+
+    var first = createAgent()
+    first._agentState = {}
+    first._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "session-a", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
+    first._memoryAppend("facts", "session-only fact", { provenance: { source: "test" }, memoryScope: "session" })
+    first._persistWorkingMemory("test")
+
+    var snapshotEntry = $ch(channelName).get({ key: "snapshot" })
+    ow.test.assert(isMap(snapshotEntry), true, "Memory persistence should still write a snapshot object")
+    ow.test.assert(snapshotEntry.sections.facts.some(function(f) { return f.value === "session-only fact" }), false, "Session-scoped writes should not be persisted to the global channel snapshot")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "session-b", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.facts.some(function(f) { return f.value === "session-only fact" }), false, "A different session should not reload session-scoped writes from memorych without promotion")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
   exports.testWorkingMemoryCompactionBounds = function() {
     var agent = createAgent()
     agent._agentState = {}
@@ -987,5 +1011,22 @@
     var entry = agent._memoryAppend("facts", "default-memory-write")
     ow.test.assert(isMap(entry), true, "Legacy memory calls should continue to append without specifying scope")
     ow.test.assert(agent._memoryScope === "both", true, "Default memory scope should be both")
+  }
+
+  exports.testManagedMemoryDefaultBothWithChannelWritesGlobal = function() {
+    var channelName = "__mini_a_test_default_both_channel_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var first = createAgent()
+    first._agentState = {}
+    first._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
+    first._memoryAppend("decisions", "default both persisted decision")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-2", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(e) { return e.value === "default both persisted decision" }), true, "Default writes should persist globally when memorych is configured under both scope")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }
 })()

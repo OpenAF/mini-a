@@ -294,21 +294,23 @@ MiniAMemoryManager.prototype.compact = function() {
   return this.snapshot()
 }
 
-MiniAMemoryManager.prototype.saveToChannel = function(channelName) {
+MiniAMemoryManager.prototype.saveToChannel = function(channelName, key) {
   if (this._config.enabled !== true) return false
   if (!isString(channelName) || channelName.length === 0) return false
+  var chKey = isString(key) && key.length > 0 ? key : "snapshot"
   try {
-    $ch(channelName).set({ key: "snapshot" }, this.snapshot())
+    $ch(channelName).set({ key: chKey }, this.snapshot())
     return true
   } catch(e) {
     return false
   }
 }
 
-MiniAMemoryManager.prototype.loadFromChannel = function(channelName) {
+MiniAMemoryManager.prototype.loadFromChannel = function(channelName, key) {
   if (!isString(channelName) || channelName.length === 0) return false
+  var chKey = isString(key) && key.length > 0 ? key : "snapshot"
   try {
-    var data = $ch(channelName).get({ key: "snapshot" })
+    var data = $ch(channelName).get({ key: chKey })
     if (!isObject(data)) return false
     this.init(data)
     return true
