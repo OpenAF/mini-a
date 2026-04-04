@@ -223,6 +223,9 @@ todo:
           delete global.__res[ postData.uuid ]
         }
         if (isDef(global.__conversations[ postData.uuid ])) {
+          if (isFunction(global.__conversations[ postData.uuid ].clearSessionMemory)) {
+            try { global.__conversations[ postData.uuid ].clearSessionMemory(postData.uuid) } catch(ignoreClearMemory) {}
+          }
           delete global.__conversations[ postData.uuid ]
         }
         if (isDef(global.__lastActivity[ postData.uuid ])) {

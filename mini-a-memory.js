@@ -132,6 +132,12 @@ MiniAMemoryManager.prototype._getSection = function(name) {
   return this._memory.sections[name]
 }
 
+MiniAMemoryManager.prototype.getSectionEntries = function(name) {
+  var list = this._getSection(name)
+  if (!isArray(list)) return []
+  return jsonParse(stringify(list, __, ""), __, __, true)
+}
+
 MiniAMemoryManager.prototype.append = function(section, entry, options) {
   if (this._config.enabled !== true) return __
   var list = this._getSection(section)
@@ -207,6 +213,12 @@ MiniAMemoryManager.prototype.attachEvidenceRef = function(section, id, evidenceI
     return true
   }
   return false
+}
+
+MiniAMemoryManager.prototype.clear = function() {
+  this._memory = this._createEmptyMemory()
+  this._touch()
+  return true
 }
 
 MiniAMemoryManager.prototype._boundedMaintenance = function(options) {

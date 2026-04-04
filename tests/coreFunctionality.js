@@ -905,4 +905,87 @@
     ow.test.assert(mem.sections.facts.length <= 5, true, "Per-section bounds should be respected after compaction")
     ow.test.assert(total <= 20, true, "Total bound should be respected after compaction")
   }
+
+  exports.testManagedMemoryDisabledSkipsReadsAndWrites = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: false, debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(isUnDef(agent._agentState.workingMemory), true, "Disabled memory should not expose resolved memory state")
+    ow.test.assert(isUnDef(agent._memoryAppend("facts", "nope")), true, "Disabled memory should ignore writes")
+  }
+
+  exports.testManagedMemorySessionIsolation = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "s1", debug: false, verbose: false }, agent._agentState)
+    agent._memoryAppend("facts", "session-1 fact")
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "session-1 fact" }), true, "Session should read its own writes")
+
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "s2", debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "session-1 fact" }), false, "Different sessions should not share ephemeral memory")
+  }
+
+  exports.testManagedMemoryGlobalReadWriteAcrossSessions = function() {
+    var channelName = "__mini_a_test_global_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var first = createAgent()
+    first._agentState = {}
+    first._initWorkingMemory({ usememory: true, memoryscope: "global", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
+    first._memoryAppend("decisions", "global decision", { memoryScope: "global" })
+    first._persistWorkingMemory("test")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memoryscope: "global", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(e) { return e.value === "global decision" }), true, "Global memory should be visible across sessions")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemorySessionFirstResolutionAndOverride = function() {
+    var channelName = "__mini_a_test_both_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    agent._memoryAppend("facts", { id: "shared-id", value: "global value" }, { memoryScope: "global" })
+    agent._memoryAppend("facts", { id: "shared-id", value: "session value" })
+
+    var facts = agent._agentState.workingMemory.sections.facts
+    ow.test.assert(facts.some(function(e) { return e.id === "shared-id" && e.value === "session value" }), true, "Session entries should win conflicts in resolved memory")
+
+    agent.clearSessionMemory("both-1")
+    agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.id === "shared-id" && e.value === "global value" }), true, "Global memory should be used as fallback when session lacks key")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemoryPromotionAndCleanup = function() {
+    var channelName = "__mini_a_test_promotion_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "promote-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    var entry = agent._memoryAppend("facts", "candidate for promotion")
+    var promoted = agent.promoteSessionMemory("facts", [entry.id])
+    ow.test.assert(promoted.promoted === 1, true, "Promotion should copy selected session entries to global memory")
+    agent.clearSessionMemory("promote-1")
+    agent._initWorkingMemory({ usememory: true, memoryscope: "global", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "candidate for promotion" }), true, "Promoted entries should persist globally")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemoryBackwardCompatibilityDefaultBoth = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, debug: false, verbose: false }, agent._agentState)
+    var entry = agent._memoryAppend("facts", "default-memory-write")
+    ow.test.assert(isMap(entry), true, "Legacy memory calls should continue to append without specifying scope")
+    ow.test.assert(agent._memoryScope === "both", true, "Default memory scope should be both")
+  }
 })()

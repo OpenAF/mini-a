@@ -773,6 +773,8 @@ The `start()` method accepts various configuration options:
 - **`systempromptbudget`** (number, optional): Maximum estimated system-prompt token budget. When the rendered prompt exceeds it, Mini-A automatically drops lower-priority sections in this order: examples, skill descriptions, detailed tool reference, extended planning guidance, then excess skill entries.
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`usememory`** (boolean, default: true): Enable Mini-A structured working memory during execution. Memory schema sections are: `facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, and `summaries`.
+- **`memoryscope`** (string, default: `both`): Select memory lookup scope: `session`, `global`, or `both` (session first, global fallback).
+- **`memorysessionid`** (string, optional): Session id for ephemeral memory isolation. Defaults to `conversation` when provided, otherwise the current runtime id.
 - **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When omitted, memory is in-process only and not persisted between runs.
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
@@ -2612,7 +2614,10 @@ The `estimatedUSD` field is reserved for future cost estimation integration and 
 
 ## Working Memory (Structured Runtime State)
 
-Mini-A now maintains a first-class **working memory** object under `state.workingMemory` (and internally via `MiniAMemoryManager`).
+Mini-A now maintains a managed memory model backed by `MiniAMemoryManager`:
+- `state.workingMemorySession` (ephemeral session-local memory),
+- `state.workingMemoryGlobal` (durable memory loaded/saved via `memorych`),
+- `state.workingMemory` (resolved view used by runtime prompts).
 
 ### Schema
 
@@ -2636,7 +2641,14 @@ Each entry carries metadata (`id`, `value`, timestamps, `status`, optional `prov
 
 ### Lifecycle Hooks
 
-When `usememory=true`, Mini-A initializes memory at run start (from `state.workingMemory` and/or the `memorych` channel when persistence is configured), then updates it incrementally after:
+When `usememory=true`, Mini-A initializes memory stores at run start and resolves reads using:
+- `memoryscope=session`: read session memory only,
+- `memoryscope=global`: read global memory only,
+- `memoryscope=both`: read session first, then global fallback (session entries win on conflicts).
+
+Default runtime writes stay session-scoped unless explicitly requested otherwise (for example `_memoryAppend(..., { memoryScope: "global" })`) or promoted later.
+
+Mini-A then updates memory incrementally after:
 - planning generation/critique,
 - tool calls,
 - shell execution,
@@ -2652,5 +2664,7 @@ Runtime helpers available in code:
 - `_memoryRemove(section, id)`
 - `_memoryAttachEvidence(section, id, evidenceId)`
 - `_memoryMarkStatus(section, id, status, supersededBy)`
+- `promoteSessionMemory(section, ids)` (explicit session → global promotion)
+- `clearSessionMemory(sessionId)` (session cleanup hook)
 
 These wrappers keep state sync/persistence centralized (instead of ad-hoc direct writes).
