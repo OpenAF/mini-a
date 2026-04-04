@@ -294,25 +294,43 @@ MiniAMemoryManager.prototype.compact = function() {
   return this.snapshot()
 }
 
-MiniAMemoryManager.prototype.saveToChannel = function(channelName, key) {
+MiniAMemoryManager.prototype.saveToChannel = function(channelName, namespace) {
   if (this._config.enabled !== true) return false
   if (!isString(channelName) || channelName.length === 0) return false
-  var chKey = isString(key) && key.length > 0 ? key : "snapshot"
+  var ns = isString(namespace) && namespace.length > 0 ? namespace : ""
   try {
-    $ch(channelName).set({ key: chKey }, this.snapshot())
+    var snap = this.snapshot()
+    $ch(channelName).set({ section: "_meta", ns: ns }, {
+      schemaVersion: snap.schemaVersion,
+      revision     : snap.revision,
+      createdAt    : snap.createdAt,
+      updatedAt    : snap.updatedAt
+    })
+    var sections = this._sections()
+    for (var i = 0; i < sections.length; i++) {
+      $ch(channelName).set({ section: sections[i], ns: ns }, snap.sections[sections[i]] || [])
+    }
     return true
   } catch(e) {
     return false
   }
 }
 
-MiniAMemoryManager.prototype.loadFromChannel = function(channelName, key) {
+MiniAMemoryManager.prototype.loadFromChannel = function(channelName, namespace) {
   if (!isString(channelName) || channelName.length === 0) return false
-  var chKey = isString(key) && key.length > 0 ? key : "snapshot"
+  var ns = isString(namespace) && namespace.length > 0 ? namespace : ""
   try {
-    var data = $ch(channelName).get({ key: chKey })
-    if (!isObject(data)) return false
-    this.init(data)
+    var meta = $ch(channelName).get({ section: "_meta", ns: ns })
+    if (!isObject(meta)) return false
+    var sections = this._sections()
+    var seedData = { sections: {} }
+    for (var i = 0; i < sections.length; i++) {
+      var entries = $ch(channelName).get({ section: sections[i], ns: ns })
+      seedData.sections[sections[i]] = isArray(entries) ? entries : []
+    }
+    this.init(seedData)
+    if (isString(meta.createdAt)) this._memory.createdAt = meta.createdAt
+    if (isNumber(meta.revision)) this._memory.revision = meta.revision
     return true
   } catch(e) {
     return false
