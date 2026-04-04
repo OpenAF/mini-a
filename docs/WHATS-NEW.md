@@ -22,7 +22,7 @@
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `usememory` | `true` | Enable/disable the working memory subsystem |
+| `usememory` | `false` | Enable/disable the working memory subsystem |
 | `memoryscope` | `both` | Scope: `session`, `global`, or `both` |
 | `memorych` | - | SLON/JSON channel definition for global memory persistence |
 | `memorysessionch` | - | SLON/JSON channel definition for session memory persistence (falls back to `memorych`) |

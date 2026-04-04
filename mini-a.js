@@ -6970,6 +6970,33 @@ MiniA.prototype._buildResolvedWorkingMemory = function(scope) {
   return merged
 }
 
+// Returns a merged compact view (flat short-key entries) across all active memory managers,
+// intended for LLM consumption with af.toTOON serialization.
+MiniA.prototype._buildCompactMemoryForLLM = function() {
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  if (!isArray(managers) || managers.length === 0) return {}
+  if (managers.length === 1) return managers[0].snapshotCompact()
+
+  var sectionNames = managers[0]._sections()
+  var merged = {}
+  sectionNames.forEach(function(section) {
+    var seen = {}
+    var output = []
+    managers.forEach(function(manager) {
+      var compact = manager.snapshotCompact()
+      var entries = isArray(compact[section]) ? compact[section] : []
+      entries.forEach(function(entry) {
+        var fingerprint = (isString(entry.id) ? entry.id : "") + "::" + String(entry.v || "").toLowerCase().trim()
+        if (seen[fingerprint]) return
+        seen[fingerprint] = true
+        output.push(entry)
+      })
+    })
+    if (output.length > 0) merged[section] = output
+  })
+  return merged
+}
+
 MiniA.prototype._syncWorkingMemoryState = function() {
   if (!isObject(this._agentState)) this._agentState = {}
   if (this._memoryConfig.enabled !== true) {
@@ -12972,7 +12999,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usejsontool", type: "boolean", default: __ },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
-      { name: "usememory", type: "boolean", default: true },
+      { name: "usememory", type: "boolean", default: false },
       { name: "memoryscope", type: "string", default: "both" },
       { name: "memorysessionid", type: "string", default: __ },
       { name: "memorych", type: "string", default: __ },
@@ -13035,7 +13062,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
-    args.usememory = _$(toBoolean(args.usememory), "args.usememory").isBoolean().default(true)
+    args.usememory = _$(toBoolean(args.usememory), "args.usememory").isBoolean().default(false)
     args.memoryscope = _$(args.memoryscope, "args.memoryscope").isString().default("both")
     if (["session", "global", "both"].indexOf(args.memoryscope.toLowerCase().trim()) < 0) args.memoryscope = "both"
     else args.memoryscope = args.memoryscope.toLowerCase().trim()
@@ -13749,7 +13776,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (runtime.stateSnapshotDirty !== true && isString(runtime.lastStateSnapshot) && runtime.lastStateSnapshot.length > 0) {
         return runtime.lastStateSnapshot
       }
-      runtime.lastStateSnapshot = stringify(this._agentState, __, "")
+      if (args.usememory && isObject(this._agentState) && isObject(this._agentState.workingMemory)) {
+        // Build a compact LLM-facing state: strip internal bookkeeping keys, use flat short-key memory
+        var stateForLLM = {}
+        Object.keys(this._agentState).forEach(function(k) {
+          if (k !== "workingMemorySession" && k !== "workingMemoryGlobal") stateForLLM[k] = this._agentState[k]
+        }.bind(this))
+        stateForLLM.workingMemory = this._buildCompactMemoryForLLM()
+        runtime.lastStateSnapshot = af.toTOON(stateForLLM)
+      } else {
+        runtime.lastStateSnapshot = stringify(this._agentState, __, "")
+      }
       runtime.stateSnapshotDirty = false
       return runtime.lastStateSnapshot
     }

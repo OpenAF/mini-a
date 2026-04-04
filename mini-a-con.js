@@ -446,6 +446,7 @@ try {
     usevectors     : { type: "boolean", default: false, description: "Enable infographic-focused vector bundle (usesvg + usediagrams)" },
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
+    usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },

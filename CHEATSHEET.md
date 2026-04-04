@@ -554,7 +554,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `usememory` | boolean | `true` | Enable the working memory subsystem. Set `false` to disable all memory tracking. |
+| `usememory` | boolean | `false` | Enable the working memory subsystem. Set `false` to disable all memory tracking. |
 | `memoryscope` | string | `both` | Which store the agent reads from and defaults writes to: `session`, `global`, or `both` (reads both; writes default to session when no channel, or global when `memorych` is set). |
 | `memorych` | string | - | SLON/JSON definition of an OpenAF channel used to **persist the global memory** store. Reloaded at startup and flushed on every significant event. |
 | `memorysessionch` | string | - | SLON/JSON definition of a dedicated OpenAF channel for the **session memory** store. Falls back to `memorych` when omitted. |
@@ -580,7 +580,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 ### Examples
 
 ```bash
-# Default: working memory on, scoped to both session and global (in-memory only)
+# Default: working memory off
 mini-a goal="analyze repo and suggest improvements" useshell=true
 
 # Disable working memory entirely

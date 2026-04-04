@@ -126,6 +126,31 @@ MiniAMemoryManager.prototype.snapshot = function() {
   return jsonParse(stringify(this._memory, __, ""), __, __, true)
 }
 
+// Returns a compact representation for LLM consumption: only non-empty sections,
+// entries with short field names, defaults omitted. Pairs with af.toTOON for max token savings.
+MiniAMemoryManager.prototype.snapshotCompact = function() {
+  var self = this
+  var result = {}
+  this._sections().forEach(function(section) {
+    var list = self._getSection(section) || []
+    if (list.length === 0) return
+    result[section] = list.map(function(e) {
+      var c = { id: e.id, v: e.value }
+      if (isString(e.status) && e.status !== "active")   c.st   = e.status
+      if (isObject(e.provenance)) {
+        if (e.provenance.source) c.src = e.provenance.source
+        if (e.provenance.event)  c.ev  = e.provenance.event
+      }
+      if (isArray(e.evidenceRefs) && e.evidenceRefs.length > 0) c.refs = e.evidenceRefs
+      if (e.unresolved === true) c.u    = true
+      if (e.stale      === true) c.stale = true
+      if (isString(e.supersededBy))                             c.sup  = e.supersededBy
+      return c
+    })
+  })
+  return result
+}
+
 MiniAMemoryManager.prototype._getSection = function(name) {
   if (!isString(name)) return __
   if (!isArray(this._memory.sections[name])) return __
