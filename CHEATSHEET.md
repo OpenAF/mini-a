@@ -12,6 +12,7 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Planning Features](#planning-features)
 - [Visual & Output](#visual--output)
 - [Knowledge & Context](#knowledge--context)
+- [Working Memory](#working-memory)
 - [Mode Presets](#mode-presets)
 - [Advanced Features](#advanced-features)
 - [Rate Limiting & Performance](#rate-limiting--performance)
@@ -545,6 +546,83 @@ mini-a goal="process AWS data" \
 
 ---
 
+## Working Memory
+
+Mini-A maintains a structured **working memory** during each run — a scoped, deduplicated store that the agent appends facts, evidence, decisions, risks, open questions, hypotheses, artifacts, and summaries to automatically as it executes.  Memory is organized into two independent managers: a **session** store (scoped to the current conversation/session ID) and a **global** store (shared across sessions). Both can optionally persist to an OpenAF channel between runs.
+
+### Working Memory Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usememory` | boolean | `true` | Enable the working memory subsystem. Set `false` to disable all memory tracking. |
+| `memoryscope` | string | `both` | Which store the agent reads from and defaults writes to: `session`, `global`, or `both` (reads both; writes default to session when no channel, or global when `memorych` is set). |
+| `memorych` | string | - | SLON/JSON definition of an OpenAF channel used to **persist the global memory** store. Reloaded at startup and flushed on every significant event. |
+| `memorysessionch` | string | - | SLON/JSON definition of a dedicated OpenAF channel for the **session memory** store. Falls back to `memorych` when omitted. |
+| `memorysessionid` | string | `<agent-id>` | Session key used to namespace session memory in the channel (defaults to `conversation` arg if set, otherwise the internal agent ID). |
+| `memorymaxpersection` | number | `80` | Maximum entries kept per section before compaction drops stale/old ones. |
+| `memorymaxentries` | number | `500` | Hard cap on total entries across all sections (priority-ordered: decisions > evidence > risks > facts > summaries > hypotheses > openQuestions > artifacts). |
+| `memorycompactevery` | number | `8` | How many `append` calls trigger an automatic compaction pass. |
+| `memorydedup` | boolean | `true` | Suppress near-duplicate entries (85% word-overlap fingerprint). |
+
+### Memory Sections
+
+| Section | What the agent stores |
+|---------|-----------------------|
+| `facts` | Stable, confirmed pieces of information |
+| `evidence` | Tool outputs and observations |
+| `decisions` | Choices made (plan verdict, final answer, etc.) |
+| `risks` | Tool failures, subtask errors, validation issues |
+| `openQuestions` | Unresolved questions or pending follow-ups |
+| `hypotheses` | Candidate explanations or approaches under consideration |
+| `artifacts` | Short excerpts of generated content (first 500 chars) |
+| `summaries` | Narrative overviews of completed phases |
+
+### Examples
+
+```bash
+# Default: working memory on, scoped to both session and global (in-memory only)
+mini-a goal="analyze repo and suggest improvements" useshell=true
+
+# Disable working memory entirely
+mini-a goal="quick lookup" usememory=false
+
+# Persist global memory to a file channel across runs
+mini-a goal="iterative research task" \
+  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+
+# Separate channels for session vs global memory
+mini-a goal="long research" \
+  memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionid="research-2024"
+
+# Session-only scope (no global writes)
+mini-a goal="short task" memoryscope=session
+
+# Tune compaction limits for large tasks
+mini-a goal="analyze all source files" useshell=true \
+  memorymaxpersection=200 memorymaxentries=1000 memorycompactevery=20
+
+# Reuse persisted global memory from a previous run (automatic on restart)
+mini-a goal="continue from where we left off" \
+  memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+```
+
+### Programmatic API (embedding use)
+
+```javascript
+var agent = new MiniA()
+agent.start({ goal: "...", usememory: true })
+
+// Promote specific session entries to the global store
+agent.promoteSessionMemory("decisions", ["entry-id-1"])
+
+// Clear the session memory for a given session
+agent.clearSessionMemory("my-session-id")
+```
+
+---
+
 ## Mode Presets
 
 Quick configuration bundles for common use cases.
@@ -604,6 +682,9 @@ mini-a mode=mypreset goal="your goal here"
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 | `showdelegate` | boolean | `false` | Show delegate events as separate console lines |
 | `workermode` | boolean | `false` | Launch the Worker API server instead of the console |
+| `shellworker` | boolean | `false` | Convenience flag: sets `useshell=true` and advertises the `shell` A2A skill automatically |
+| `workerskills` | string | - | Comma-separated skill IDs (or JSON array) advertised by this worker in its AgentCard |
+| `workerspecialties` | string | - | Comma-separated specialty tags injected into the `run-goal` A2A skill |
 | `extracommands` | string | | Comma-separated extra directories for custom slash commands |
 | `extraskills` | string | | Comma-separated extra directories for custom skills |
 | `extrahooks` | string | | Comma-separated extra directories for custom hooks |
@@ -628,6 +709,16 @@ mini-a usedelegation=true usetools=true workerreg=12345 workerregtoken=secret
 # Start worker that self-registers
 mini-a workermode=true onport=8080 apitoken=secret \
   workerregurl="http://main-host:12345" workerregtoken=secret
+
+# Shell-capable worker (auto-advertises "shell" A2A skill)
+mini-a workermode=true onport=8081 apitoken=secret shellworker=true
+
+# Route subtask only to shell-capable workers (LLM uses skills: ["shell"])
+# When the delegate-subtask tool call includes useshell=true, the routing
+# enforces that the selected worker must have declared shell capability.
+mini-a usedelegation=true usetools=true \
+  workers="http://worker1:8080,http://worker2:8081" \
+  apitoken=secret goal="Run shell commands and analyze output"
 ```
 
 ### Console Commands

@@ -773,7 +773,10 @@ The `start()` method accepts various configuration options:
 - **`systempromptbudget`** (number, optional): Maximum estimated system-prompt token budget. When the rendered prompt exceeds it, Mini-A automatically drops lower-priority sections in this order: examples, skill descriptions, detailed tool reference, extended planning guidance, then excess skill entries.
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`usememory`** (boolean, default: true): Enable Mini-A structured working memory during execution. Memory schema sections are: `facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, and `summaries`.
-- **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When omitted, memory is in-process only and not persisted between runs.
+- **`memoryscope`** (string, default: `both`): Select memory lookup scope: `session`, `global`, or `both` (session first, global fallback).
+- **`memorysessionid`** (string, optional): Session id for ephemeral memory isolation. Defaults to `conversation` when provided, otherwise the current runtime id.
+- **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When combined with `memoryscope=both`, Mini-A now defaults runtime writes to the global store so they survive reloads; use `memoryScope: "session"` for ephemeral per-session entries. When omitted, memory is in-process only and not persisted between runs.
+- **`memorysessionch`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload session-scoped working memory. Uses `session::<sessionId>` as the channel key so multiple sessions can coexist in the same channel. When omitted but `memorych` is set, session memory is persisted to `memorych` under the same namespaced key (option B). When both are set, session memory goes to `memorysessionch` and global memory to `memorych` independently (option A). Same format as `memorych`.
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
 - **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
@@ -2612,7 +2615,10 @@ The `estimatedUSD` field is reserved for future cost estimation integration and 
 
 ## Working Memory (Structured Runtime State)
 
-Mini-A now maintains a first-class **working memory** object under `state.workingMemory` (and internally via `MiniAMemoryManager`).
+Mini-A now maintains a managed memory model backed by `MiniAMemoryManager`:
+- `state.workingMemorySession` (session-local memory; persisted via `memorysessionch` or namespaced key in `memorych`),
+- `state.workingMemoryGlobal` (durable memory loaded/saved via `memorych`),
+- `state.workingMemory` (resolved view used by runtime prompts).
 
 ### Schema
 
@@ -2636,7 +2642,16 @@ Each entry carries metadata (`id`, `value`, timestamps, `status`, optional `prov
 
 ### Lifecycle Hooks
 
-When `usememory=true`, Mini-A initializes memory at run start (from `state.workingMemory` and/or the `memorych` channel when persistence is configured), then updates it incrementally after:
+When `usememory=true`, Mini-A initializes memory stores at run start and resolves reads using:
+- `memoryscope=session`: read session memory only,
+- `memoryscope=global`: read global memory only,
+- `memoryscope=both`: read session first, then global fallback (session entries win on conflicts).
+
+When `memorych` is configured, default runtime writes under `memoryscope=both` go to the global store so they persist across runs. Use `_memoryAppend(..., { memoryScope: "session" })` for ephemeral session-only entries, or `_memoryAppend(..., { memoryScope: "global" })` to force global writes explicitly.
+
+Session memory persistence follows this priority: if `memorysessionch` is set it is used as a dedicated channel (option A); otherwise, if `memorych` is set, session memory is persisted to the same channel under key `session::<sessionId>` (option B). This allows resuming an interrupted session without polluting global memory.
+
+Mini-A then updates memory incrementally after:
 - planning generation/critique,
 - tool calls,
 - shell execution,
@@ -2652,5 +2667,7 @@ Runtime helpers available in code:
 - `_memoryRemove(section, id)`
 - `_memoryAttachEvidence(section, id, evidenceId)`
 - `_memoryMarkStatus(section, id, status, supersededBy)`
+- `promoteSessionMemory(section, ids)` (explicit session → global promotion)
+- `clearSessionMemory(sessionId)` (session cleanup hook)
 
 These wrappers keep state sync/persistence centralized (instead of ad-hoc direct writes).

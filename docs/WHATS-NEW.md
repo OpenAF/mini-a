@@ -2,6 +2,58 @@
 
 ## Recent Updates
 
+### Managed Runtime Working Memory (`usememory`)
+
+**Change**: Introduced a structured, scoped working memory subsystem (`MiniAMemoryManager`) that the agent maintains automatically throughout every run.
+
+**What's New**:
+- **8-section schema**: `facts`, `evidence`, `decisions`, `risks`, `openQuestions`, `hypotheses`, `artifacts`, `summaries` — the agent appends entries automatically at every significant event (tool call, plan critique, final answer, subtask result, validation, etc.).
+- **Dual-scope architecture**: a **session** store (scoped to the current conversation/session ID) and a **global** store (shared across sessions). Controlled by `memoryscope=session|global|both` (default `both`).
+- **OpenAF channel persistence**: pass `memorych=<channel-def>` to persist the global store across runs. Pass `memorysessionch=<channel-def>` for a dedicated session channel (falls back to `memorych` if omitted). Memory is reloaded from the channel at startup and flushed on every significant agent event.
+- **Near-duplicate deduplication**: an 85%-word-overlap fingerprint suppresses redundant appends (configurable via `memorydedup`).
+- **Priority-based compaction**: automatic trimming every `memorycompactevery` appends keeps totals under `memorymaxpersection` per section and `memorymaxentries` total. Eviction order: decisions > evidence > risks > facts > summaries > hypotheses > openQuestions > artifacts.
+- **`promoteSessionMemory(section, ids)`**: promotes selected session entries to the global store.
+- **`clearSessionMemory(sessionId)`**: purges a session's local store.
+- **`_isEmptyThoughtValue` fix**: placeholder thought payloads (`{}`, `"[]"`) are now treated as missing and suppressed from thought logs rather than leaking as `"{}"`.
+
+**Shell routing enforcement**: the delegation worker router now enforces that subtasks dispatched with `useshell=true` are only routed to workers that have declared shell capability (`limits.useshell=true`), preventing silent routing to shell-incapable workers.
+
+**Configuration**:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `usememory` | `true` | Enable/disable the working memory subsystem |
+| `memoryscope` | `both` | Scope: `session`, `global`, or `both` |
+| `memorych` | - | SLON/JSON channel definition for global memory persistence |
+| `memorysessionch` | - | SLON/JSON channel definition for session memory persistence (falls back to `memorych`) |
+| `memorysessionid` | `<agent-id>` | Key namespace for session memory in the channel |
+| `memorymaxpersection` | `80` | Max entries per section before compaction |
+| `memorymaxentries` | `500` | Hard cap across all sections |
+| `memorycompactevery` | `8` | Append interval between automatic compaction passes |
+| `memorydedup` | `true` | Suppress near-duplicate entries |
+
+**Examples**:
+
+```bash
+# Persist memory across runs (file channel)
+mini-a goal="iterative research" \
+  memorych="(name: my_mem, type: file, options: (file: '/tmp/mini-a-mem.json'))"
+
+# Session-only scope
+mini-a goal="one-shot task" memoryscope=session
+
+# Disable memory
+mini-a goal="quick query" usememory=false
+
+# Tune limits for a large task
+mini-a goal="deep code analysis" useshell=true \
+  memorymaxpersection=200 memorymaxentries=1000
+```
+
+**Impact**: Agents can now carry typed, searchable working knowledge across tool calls and across runs, improving coherence on long multi-step tasks without bloating the LLM context.
+
+---
+
 ### Worker Routing v0.4.0 — Skills-Based Delegation, Dynamic Tool Description, A2A AgentCard
 
 **Protocol version bumped to `0.4.0`** (breaking for `limits.useshell`; backwards-compatible at the transport level).

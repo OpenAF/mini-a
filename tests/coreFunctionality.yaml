@@ -187,10 +187,20 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWorkingMemoryPersistenceAndReload
 
+- name: MiniA Core Tests::WorkingMemorySessionWritesDoNotPersistWithoutPromotion
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWorkingMemorySessionWritesDoNotPersistWithoutPromotion
+
 - name: MiniA Core Tests::WorkingMemoryCompactionBounds
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testWorkingMemoryCompactionBounds
+
+- name: MiniA Core Tests::ManagedMemoryDefaultBothWithChannelWritesGlobal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryDefaultBothWithChannelWritesGlobal
 
 include:
 - oJobTest.yaml
@@ -237,4 +247,6 @@ todo:
 - MiniA Core Tests::WorkingMemoryInitialization
 - MiniA Core Tests::WorkingMemoryDeduplicateAndMutationApis
 - MiniA Core Tests::WorkingMemoryPersistenceAndReload
+- MiniA Core Tests::WorkingMemorySessionWritesDoNotPersistWithoutPromotion
 - MiniA Core Tests::WorkingMemoryCompactionBounds
+- MiniA Core Tests::ManagedMemoryDefaultBothWithChannelWritesGlobal

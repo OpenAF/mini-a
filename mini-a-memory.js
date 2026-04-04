@@ -132,6 +132,12 @@ MiniAMemoryManager.prototype._getSection = function(name) {
   return this._memory.sections[name]
 }
 
+MiniAMemoryManager.prototype.getSectionEntries = function(name) {
+  var list = this._getSection(name)
+  if (!isArray(list)) return []
+  return jsonParse(stringify(list, __, ""), __, __, true)
+}
+
 MiniAMemoryManager.prototype.append = function(section, entry, options) {
   if (this._config.enabled !== true) return __
   var list = this._getSection(section)
@@ -209,6 +215,12 @@ MiniAMemoryManager.prototype.attachEvidenceRef = function(section, id, evidenceI
   return false
 }
 
+MiniAMemoryManager.prototype.clear = function() {
+  this._memory = this._createEmptyMemory()
+  this._touch()
+  return true
+}
+
 MiniAMemoryManager.prototype._boundedMaintenance = function(options) {
   var opts = isObject(options) ? options : {}
   var rev = this._memory.revision || 0
@@ -282,23 +294,43 @@ MiniAMemoryManager.prototype.compact = function() {
   return this.snapshot()
 }
 
-MiniAMemoryManager.prototype.saveToChannel = function(channelName) {
+MiniAMemoryManager.prototype.saveToChannel = function(channelName, namespace) {
   if (this._config.enabled !== true) return false
   if (!isString(channelName) || channelName.length === 0) return false
+  var ns = isString(namespace) && namespace.length > 0 ? namespace : ""
   try {
-    $ch(channelName).set({ key: "snapshot" }, this.snapshot())
+    var snap = this.snapshot()
+    $ch(channelName).set({ section: "_meta", ns: ns }, {
+      schemaVersion: snap.schemaVersion,
+      revision     : snap.revision,
+      createdAt    : snap.createdAt,
+      updatedAt    : snap.updatedAt
+    })
+    var sections = this._sections()
+    for (var i = 0; i < sections.length; i++) {
+      $ch(channelName).set({ section: sections[i], ns: ns }, snap.sections[sections[i]] || [])
+    }
     return true
   } catch(e) {
     return false
   }
 }
 
-MiniAMemoryManager.prototype.loadFromChannel = function(channelName) {
+MiniAMemoryManager.prototype.loadFromChannel = function(channelName, namespace) {
   if (!isString(channelName) || channelName.length === 0) return false
+  var ns = isString(namespace) && namespace.length > 0 ? namespace : ""
   try {
-    var data = $ch(channelName).get({ key: "snapshot" })
-    if (!isObject(data)) return false
-    this.init(data)
+    var meta = $ch(channelName).get({ section: "_meta", ns: ns })
+    if (!isObject(meta)) return false
+    var sections = this._sections()
+    var seedData = { sections: {} }
+    for (var i = 0; i < sections.length; i++) {
+      var entries = $ch(channelName).get({ section: sections[i], ns: ns })
+      seedData.sections[sections[i]] = isArray(entries) ? entries : []
+    }
+    this.init(seedData)
+    if (isString(meta.createdAt)) this._memory.createdAt = meta.createdAt
+    if (isNumber(meta.revision)) this._memory.revision = meta.revision
     return true
   } catch(e) {
     return false
