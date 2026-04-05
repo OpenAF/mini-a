@@ -563,7 +563,8 @@ SubtaskManager.prototype._buildWorkerRequirements = function(subtask, mergedArgs
     requestedMaxSteps: isDef(args.maxsteps) ? Number(args.maxsteps) : __,
     requestedTimeoutMs: isDef(subtask) && isDef(subtask.deadlineMs) ? Number(subtask.deadlineMs) : __,
     workerHint: isString(args._workerHint) && args._workerHint.trim().length > 0 ? args._workerHint.trim().toLowerCase() : __,
-    requiredSkills: isArray(args._requiredSkills) ? args._requiredSkills.map(function(s) { return String(s).trim().toLowerCase() }).filter(function(s) { return s.length > 0 }) : []
+    requiredSkills: isArray(args._requiredSkills) ? args._requiredSkills.map(function(s) { return String(s).trim().toLowerCase() }).filter(function(s) { return s.length > 0 }) : [],
+    requiresShell: toBoolean(args.useshell) === true
   }
 }
 
@@ -579,9 +580,11 @@ SubtaskManager.prototype._isWorkerProfileCompatible = function(profile, requirem
     // Enforce capability flags only when capabilities are actually present.
     if (req.requiresRunGoal === true && hasCapsInfo && caps.indexOf("run-goal") < 0) return false
     if (req.requiresPlanning === true && hasCapsInfo && caps.indexOf("planning") < 0) return false
+    if (req.requiresShell === true && toBoolean(limits.useshell) !== true) return false
 
     // Required skills: ALL listed skill IDs/tags must be present on the worker
     if (isArray(req.requiredSkills) && req.requiredSkills.length > 0) {
+      var skills = isArray(p.skills) ? p.skills : []
       var skillIds  = skills.map(function(s) { return isString(s.id) ? s.id.toLowerCase() : "" })
       var skillTags = []
       skills.forEach(function(s) { if (isArray(s.tags)) s.tags.forEach(function(t) { skillTags.push(t.toLowerCase()) }) })

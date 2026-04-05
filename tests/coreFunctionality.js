@@ -130,6 +130,21 @@
     ow.test.assert(events[1].message === "plan next step", true, "Should log the think message separately")
   }
 
+  exports.testCanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var finalThought = agent._emitCanonicalThoughtEvent("final", {}, "(no thought)")
+    var thinkThought = agent._emitCanonicalThoughtEvent("think", "{}", "(no thought)")
+
+    ow.test.assert(finalThought === "(no thought)", true, "Should normalize empty object thought placeholders")
+    ow.test.assert(thinkThought === "(no thought)", true, "Should normalize stringified empty object placeholders")
+    ow.test.assert(events.length === 0, true, "Should not emit a visible thought event for empty placeholders")
+  }
+
   exports.testStreamThinkingTagsDoNotEmitCanonicalThoughtEvents = function() {
     var agent = createAgent()
     var events = []
@@ -813,5 +828,256 @@
     ow.test.assert(agent._shouldLogSandboxWarning(firstUseWarning) === true, true, "Generated profile warning should be shown in verbose mode")
 
     ow.test.assert(agent._shouldLogSandboxWarning("usesandbox=macos requested but 'sandbox-exec' is not available; running without OS sandbox.") === true, true, "Real sandbox failures should still be shown")
+  }
+
+  exports.testAdaptiveRouterSelectionAndFallback = function() {
+    var router = new MiniAToolRouter({
+      enabled: true,
+      preferredOrder: [
+        MiniAToolRouter.ROUTES.MCP_DIRECT_CALL,
+        MiniAToolRouter.ROUTES.MCP_PROXY_PATH,
+        MiniAToolRouter.ROUTES.SHELL_EXECUTION
+      ],
+      allow: [],
+      deny: []
+    })
+    var plan = router.select({
+      toolName: "proxy-dispatch",
+      intentType: "tool_action",
+      routeHints: { proxy: true }
+    }, {
+      history: {
+        mcp_proxy_path: { successes: 0, failures: 2 }
+      }
+    })
+
+    ow.test.assert(plan.selectedRoute === "mcp_direct_call", true, "Should fallback from proxy to direct MCP based on history")
+    ow.test.assert(isArray(plan.fallbackChain), true, "Should expose fallback chain")
+  }
+
+  exports.testAdaptiveRouterAllowDenyCompatibility = function() {
+    var router = new MiniAToolRouter({
+      enabled: true,
+      allow: [MiniAToolRouter.ROUTES.MCP_DIRECT_CALL],
+      deny: [MiniAToolRouter.ROUTES.MCP_PROXY_PATH]
+    })
+    var plan = router.select({
+      toolName: "proxy-dispatch",
+      routeHints: { proxy: true }
+    }, {})
+    ow.test.assert(plan.selectedRoute === MiniAToolRouter.ROUTES.MCP_DIRECT_CALL, true, "Allow/deny rules should keep only allowed direct route")
+    ow.test.assert(plan.fallbackChain.length === 0, true, "No extra routes should remain after allow/deny filtering")
+  }
+
+  exports.testAdaptiveRouterEnvelopeNormalization = function() {
+    var router = new MiniAToolRouter({ enabled: true })
+    var envelope = router.normalizeResultEnvelope({
+      routeUsed: MiniAToolRouter.ROUTES.UTILITY_WRAPPER,
+      rawResult: { ok: true },
+      normalizedContent: "ok",
+      durationMs: 12,
+      evidence: [{ source: "tool://filesystemQuery" }]
+    })
+    ow.test.assert(envelope.routeUsed === MiniAToolRouter.ROUTES.UTILITY_WRAPPER, true, "Envelope should preserve route metadata")
+    ow.test.assert(envelope.timing.durationMs === 12, true, "Envelope should preserve timing metadata")
+    ow.test.assert(isArray(envelope.evidence) && envelope.evidence.length === 1, true, "Envelope should preserve evidence references")
+  exports.testWorkingMemoryInitializationFromState = function() {
+    var agent = createAgent()
+    agent._agentState = {
+      workingMemory: {
+        sections: {
+          facts: [{ id: "f1", value: "seed fact" }],
+          evidence: [], openQuestions: [], hypotheses: [], decisions: [], artifacts: [], risks: [], summaries: []
+        }
+      }
+    }
+    agent._initWorkingMemory({ usememory: true, debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(isMap(agent._agentState.workingMemory), true, "Working memory should be initialized on agent state")
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.length >= 1, true, "Seeded facts should be loaded")
+  }
+
+  exports.testWorkingMemoryDeduplicateAndMutationApis = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memorydedup: true, debug: false, verbose: false }, agent._agentState)
+    var e1 = agent._memoryAppend("facts", "The API endpoint is /v1/tasks", { provenance: { source: "test" } })
+    var e2 = agent._memoryAppend("facts", "the api endpoint is /v1/tasks.", { provenance: { source: "test" } })
+    ow.test.assert(e1.id === e2.id, true, "Near-identical facts should deduplicate")
+    ow.test.assert(agent._memoryUpdate("facts", e1.id, { stale: true }) === true, true, "Should update memory entries")
+    ow.test.assert(agent._memoryMarkStatus("facts", e1.id, "superseded", "new-id") === true, true, "Should mark status/superseded entries")
+    ow.test.assert(agent._memoryRemove("facts", e1.id) === true, true, "Should remove entries")
+  }
+
+  exports.testWorkingMemoryPersistenceAndReload = function() {
+    var channelName = "__mini_a_test_memory_" + nowNano()
+    try {
+      $ch(channelName).create("simple")
+    } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    agent._memoryAppend("decisions", "Persist this decision", { provenance: { source: "test" } })
+    agent._persistWorkingMemory("test")
+
+    var snapshotEntry = $ch(channelName).get({ key: "snapshot" })
+    ow.test.assert(isMap(snapshotEntry), true, "Memory persistence should write snapshot to channel")
+    ow.test.assert(isMap(snapshotEntry.sections), true, "Snapshot should contain sections")
+    ow.test.assert(isArray(snapshotEntry.sections.decisions) && snapshotEntry.sections.decisions.length >= 1, true, "Snapshot should include persisted decision")
+    ow.test.assert(snapshotEntry.sections.decisions.some(function(d) { return d.value === "Persist this decision" }), true, "Persisted decision value should be present in snapshot")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.decisions.length >= 1, true, "Reload should restore persisted entries")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testWorkingMemorySessionWritesDoNotPersistWithoutPromotion = function() {
+    var channelName = "__mini_a_test_memory_session_only_" + nowNano()
+    try {
+      $ch(channelName).create("simple")
+    } catch(ignoreCreate) {}
+
+    var first = createAgent()
+    first._agentState = {}
+    first._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "session-a", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
+    first._memoryAppend("facts", "session-only fact", { provenance: { source: "test" }, memoryScope: "session" })
+    first._persistWorkingMemory("test")
+
+    var snapshotEntry = $ch(channelName).get({ key: "snapshot" })
+    ow.test.assert(isMap(snapshotEntry), true, "Memory persistence should still write a snapshot object")
+    ow.test.assert(snapshotEntry.sections.facts.some(function(f) { return f.value === "session-only fact" }), false, "Session-scoped writes should not be persisted to the global channel snapshot")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "session-b", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.facts.some(function(f) { return f.value === "session-only fact" }), false, "A different session should not reload session-scoped writes from memorych without promotion")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testWorkingMemoryCompactionBounds = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true,
+      memorymaxpersection: 5,
+      memorymaxentries: 20,
+      memorycompactevery: 1,
+      debug: false,
+      verbose: false
+    }, agent._agentState)
+
+    for (var i = 0; i < 15; i++) {
+      agent._memoryAppend("facts", "Fact " + i, { provenance: { source: "test" } })
+      agent._memoryAppend("evidence", "Evidence " + i, { provenance: { source: "test" } })
+    }
+    var mem = agent._agentState.workingMemory
+    var total = 0
+    Object.keys(mem.sections).forEach(function(k) { total += mem.sections[k].length })
+    ow.test.assert(mem.sections.facts.length <= 5, true, "Per-section bounds should be respected after compaction")
+    ow.test.assert(total <= 20, true, "Total bound should be respected after compaction")
+  }
+
+  exports.testManagedMemoryDisabledSkipsReadsAndWrites = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: false, debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(isUnDef(agent._agentState.workingMemory), true, "Disabled memory should not expose resolved memory state")
+    ow.test.assert(isUnDef(agent._memoryAppend("facts", "nope")), true, "Disabled memory should ignore writes")
+  }
+
+  exports.testManagedMemorySessionIsolation = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "s1", debug: false, verbose: false }, agent._agentState)
+    agent._memoryAppend("facts", "session-1 fact")
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "session-1 fact" }), true, "Session should read its own writes")
+
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", memorysessionid: "s2", debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "session-1 fact" }), false, "Different sessions should not share ephemeral memory")
+  }
+
+  exports.testManagedMemoryGlobalReadWriteAcrossSessions = function() {
+    var channelName = "__mini_a_test_global_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var first = createAgent()
+    first._agentState = {}
+    first._initWorkingMemory({ usememory: true, memoryscope: "global", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
+    first._memoryAppend("decisions", "global decision", { memoryScope: "global" })
+    first._persistWorkingMemory("test")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memoryscope: "global", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(e) { return e.value === "global decision" }), true, "Global memory should be visible across sessions")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemorySessionFirstResolutionAndOverride = function() {
+    var channelName = "__mini_a_test_both_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    agent._memoryAppend("facts", { id: "shared-id", value: "global value" }, { memoryScope: "global" })
+    agent._memoryAppend("facts", { id: "shared-id", value: "session value" })
+
+    var facts = agent._agentState.workingMemory.sections.facts
+    ow.test.assert(facts.some(function(e) { return e.id === "shared-id" && e.value === "session value" }), true, "Session entries should win conflicts in resolved memory")
+
+    agent.clearSessionMemory("both-1")
+    agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.id === "shared-id" && e.value === "global value" }), true, "Global memory should be used as fallback when session lacks key")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemoryPromotionAndCleanup = function() {
+    var channelName = "__mini_a_test_promotion_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "promote-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    var entry = agent._memoryAppend("facts", "candidate for promotion")
+    var promoted = agent.promoteSessionMemory("facts", [entry.id])
+    ow.test.assert(promoted.promoted === 1, true, "Promotion should copy selected session entries to global memory")
+    agent.clearSessionMemory("promote-1")
+    agent._initWorkingMemory({ usememory: true, memoryscope: "global", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
+    ow.test.assert(agent._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "candidate for promotion" }), true, "Promoted entries should persist globally")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemoryBackwardCompatibilityDefaultBoth = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, debug: false, verbose: false }, agent._agentState)
+    var entry = agent._memoryAppend("facts", "default-memory-write")
+    ow.test.assert(isMap(entry), true, "Legacy memory calls should continue to append without specifying scope")
+    ow.test.assert(agent._memoryScope === "both", true, "Default memory scope should be both")
+  }
+
+  exports.testManagedMemoryDefaultBothWithChannelWritesGlobal = function() {
+    var channelName = "__mini_a_test_default_both_channel_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var first = createAgent()
+    first._agentState = {}
+    first._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
+    first._memoryAppend("decisions", "default both persisted decision")
+
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-2", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(e) { return e.value === "default both persisted decision" }), true, "Default writes should persist globally when memorych is configured under both scope")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }
 })()
