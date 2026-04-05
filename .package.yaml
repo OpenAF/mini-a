@@ -56,6 +56,7 @@ version: '20260405'
 dependencies:
   openaf: '>=20250915'
 files:
+- .gitignore
 - .odoc.db
 - .openaf_precompiled/.t8-20260403
 - .openaf_precompiled/mini-a-common_js.class
@@ -145,6 +146,7 @@ files:
 - tests/progToolCall.js
 - tests/progToolCall.yaml
 filesHash:
+  .gitignore: 341ba158ffc0e0c413934985c5cdcf5685c5687a
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   .openaf_precompiled/.t8-20260403: da39a3ee5e6b4b0d3255bfef95601890afd80709
   .openaf_precompiled/mini-a-common_js.class: 1e388163360eac422bf696f51b13746ddb495b2c
