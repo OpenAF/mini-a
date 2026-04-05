@@ -20,6 +20,10 @@ help:
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
     mandatory: false
+  - name     : memorysessionheader
+    desc     : Optional HTTP header name to derive memorysessionid when usememory=true
+    example  : "x-session-id"
+    mandatory: false
   - name     : usehistory
     desc     : "Boolean to enable/disable history (default: false)"
     example  : "true"
@@ -518,6 +522,13 @@ todo:
           goal        : postData.prompt,
           raw         : true
         })
+        if (toBoolean(startArgs.usememory) && isString(global.__memorysessionheader) && global.__memorysessionheader.length > 0 && isMap(request.header)) {
+          var headerMemorySessionId = request.header[global.__memorysessionheader]
+          if (isDef(headerMemorySessionId)) {
+            var normalizedMemorySessionId = String(headerMemorySessionId).trim()
+            if (normalizedMemorySessionId.length > 0) startArgs.memorysessionid = normalizedMemorySessionId
+          }
+        }
         if (global.__usehistory && isString(_hfile)) {
           startArgs.conversation = _hfile
         }
@@ -887,6 +898,7 @@ jobs:
       showexecs       : toBoolean().isBoolean().default(false)
       usestream       : toBoolean().isBoolean().default(false)
       logpromptheaders: isString().default("")
+      memorysessionheader: isString().default("")
       maxcontext      : toNumber().isNumber().default(200000)
       maxpromptchars  : toNumber().isNumber().default(120000)
       usehistory      : toBoolean().isBoolean().default(false)
@@ -939,6 +951,7 @@ jobs:
     global.__usestream = args.usestream
     global.__maxpromptchars = args.maxpromptchars
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
+    global.__memorysessionheader = isString(args.memorysessionheader) ? args.memorysessionheader.trim().toLowerCase() : ""
     global.__useattach = args.useattach
     global.__usevectors = args.usevectors
     global.__usemath = args.usemath
