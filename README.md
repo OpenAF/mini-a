@@ -411,6 +411,11 @@ Mini-A ships with complementary components:
 | `utilsdeny` | Comma-separated denylist of Mini Utils Tool names to hide; applied after `utilsallow` (only when `useutils=true`) | unset |
 | `mini-a-docs` | When `true` (and `utilsroot` is unset), sets `utilsroot` to `getOPackPath("mini-a")`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate Mini-A documentation directly | `false` |
 | `mcpproxy` | Aggregate all MCP connections (and Mini Utils Tool) under a single `proxy-dispatch` tool to save context; supports `argumentsFile` + `resultToFile` for large payload handoff | `false` |
+| `adaptiverouting` | Enable adaptive rule-based route selection (direct/MCP/proxy/shell/utility/delegation) with fallback chains and trace output | `false` |
+| `routerorder` | Comma-separated preferred route order (e.g. `mcp_direct_call,mcp_proxy_path,shell_execution`) | built-in default |
+| `routerallow` | Comma-separated route allowlist applied by the adaptive router | unset |
+| `routerdeny` | Comma-separated route denylist applied by the adaptive router | unset |
+| `routerproxythreshold` | Payload-size threshold (bytes) where proxy routes are preferred for large requests | falls back to `mcpproxythreshold` |
 | `mcpproxytoon` | When `mcpproxythreshold>0`, serialize proxy-spilled results as TOON text (`af.toTOON`) to improve search/read efficiency on large payloads | `false` |
 | `mcpprogcall` | Start a per-session localhost HTTP bridge so generated scripts can list/search/call MCP tools programmatically; requires `useshell=true` for script execution | `false` |
 | `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
