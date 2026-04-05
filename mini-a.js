@@ -5,6 +5,7 @@
 ow.loadMetrics()
 loadLib("mini-a-common.js")
 loadLib("mini-a-router.js")
+loadLib("mini-a-memory.js")
 
 /**
  * <odoc>
@@ -72,6 +73,14 @@ var MiniA = function() {
   this._adaptiveRouting = false
   this._toolRouter = new MiniAToolRouter({ enabled: false })
   this._routeHistory = {}
+  this._memoryManager = __
+  this._sessionMemoryManagers = {}
+  this._sessionMemoryId = __
+  this._sessionMemoryManager = __
+  this._globalMemoryManager = __
+  this._memoryScope = "both"
+  this._memoryConfig = { enabled: true, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
+  this._memorychName = __
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -1108,6 +1117,18 @@ MiniA.prototype._normalizeThoughtMessage = function(message) {
 }
 
 /**
+ * Treat placeholder thought payloads as missing so they do not leak as "{}".
+ */
+MiniA.prototype._isEmptyThoughtValue = function(message) {
+  if (isUnDef(message) || isNull(message)) return true
+  if (isMap(message)) return Object.keys(message).length === 0
+  if (isArray(message)) return message.length === 0
+
+  var normalized = this._normalizeThoughtMessage(message)
+  return normalized.length === 0 || normalized === "{}" || normalized === "[]"
+}
+
+/**
  * Helper function to log thought or think messages with counter for repeated messages
  */
 MiniA.prototype._logMessageWithCounter = function(type, message) {
@@ -1158,7 +1179,7 @@ MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, 
   }
 
   thoughtMessage = ((isDef(thoughtMessage) ? thoughtMessage : "") + "").trim()
-  if (thoughtMessage.length === 0) thoughtMessage = "(no thought)"
+  if (this._isEmptyThoughtValue(thoughtMessage)) thoughtMessage = "(no thought)"
 
   global.__mini_a_metrics.thoughts_made.inc()
 
@@ -5005,6 +5026,13 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
     if (missing.length > 0) headline += ` | Missing: ${missing.slice(0, 2).join("; ")}`
     this.fnI("plan", headline)
     if (summary.length > 0) this.fnI("plan", `Critique summary: ${summary}`)
+    this._memoryAppend("decisions", `Plan critique verdict: ${verdict}`, {
+      provenance: { source: "planning", event: "plan-critique" },
+      meta: { issues: issues, missingWork: missing, qualityRisks: risks }
+    })
+    if (summary.length > 0) {
+      this._memoryAppend("summaries", summary, { provenance: { source: "planning", event: "plan-critique-summary" } })
+    }
   } catch (critiqueErr) {
     this.fnI("warn", `Plan critique failed: ${critiqueErr}`)
   }
@@ -5400,6 +5428,10 @@ MiniA.prototype._runValidationMode = function(planPayload, args, controls) {
   // Overall status
   var overallPass = validation.valid && (!isObject(critique) || critique.verdict === "PASS")
   this.fnI("plan", "\n=== Overall Status: " + (overallPass ? "PASS" : "NEEDS REVISION") + " ===\n")
+  this._memoryAppend("summaries", `Plan validation ${overallPass ? "passed" : "needs revision"}.`, {
+    provenance: { source: "validation", event: "plan-validation" },
+    meta: { structureValid: validation.valid, critiqueVerdict: isObject(critique) ? critique.verdict : __ }
+  })
 
   return {
     validation: validation,
@@ -6765,6 +6797,418 @@ MiniA.prototype._validateArgs = function(args, validations) {
     return args
 }
 
+MiniA.prototype._initWorkingMemory = function(args, seedState) {
+  var rawScope = isString(args.memoryscope) ? args.memoryscope : (isString(args.memoryScope) ? args.memoryScope : "both")
+  var scope = String(rawScope || "both").toLowerCase().trim()
+  if (["session", "global", "both"].indexOf(scope) < 0) scope = "both"
+  var sessionId = isString(args.memorysessionid) && args.memorysessionid.trim().length > 0
+    ? args.memorysessionid.trim()
+    : (isString(args.conversation) && args.conversation.trim().length > 0 ? args.conversation.trim() : this._id)
+  var cfg = {
+    enabled        : toBoolean(args.usememory) !== false,
+    maxPerSection  : isNumber(args.memorymaxpersection) ? args.memorymaxpersection : 80,
+    maxTotalEntries: isNumber(args.memorymaxentries) ? args.memorymaxentries : 500,
+    compactEvery   : isNumber(args.memorycompactevery) ? args.memorycompactevery : 8,
+    dedup          : toBoolean(isDef(args.memorydedup) ? args.memorydedup : true),
+    debug          : toBoolean(args.debug) || toBoolean(args.verbose),
+    scope          : scope,
+    sessionId      : sessionId
+  }
+  this._memoryConfig = cfg
+  this._memoryScope = scope
+  this._sessionMemoryId = sessionId
+  this._memoryManager = __
+  this._sessionMemoryManager = __
+  this._globalMemoryManager = __
+  if (!isObject(this._sessionMemoryManagers)) this._sessionMemoryManagers = {}
+
+  // Initialize OpenAF channel for memory persistence when memorych is provided
+  this._memorychName = __
+  if (isString(args.memorych) && args.memorych.trim().length > 0) {
+    try {
+      var _memorychm = af.fromJSSLON(args.memorych)
+      if (isMap(_memorychm)) {
+        var _memorychName = isString(_memorychm.name) && _memorychm.name.trim().length > 0 ? _memorychm.name.trim() : "_mini_a_memory_channel"
+        var _memorychType = isString(_memorychm.type) ? _memorychm.type : "simple"
+        var _memorychOpts = isMap(_memorychm.options) ? _memorychm.options : {}
+        var _memorychExists = false
+        try { _memorychExists = $ch().list().indexOf(_memorychName) >= 0 } catch(ignoreList) {}
+        if (!_memorychExists) {
+          $ch(_memorychName).create(_memorychType, _memorychOpts)
+          if (cfg.debug) this.fnI("info", `[memory] channel '${_memorychName}' created.`)
+        } else {
+          if (cfg.debug) this.fnI("info", `[memory] channel '${_memorychName}' reused.`)
+        }
+        this._memorychName = _memorychName
+      }
+    } catch(e) {
+      this.fnI("warn", `[memory] failed to initialize memorych channel: ${__miniAErrMsg(e)}`)
+    }
+  }
+
+  // Initialize session memory channel (memorysessionch = dedicated; otherwise fall back to memorych)
+  this._memorysessionchName = __
+  if (isString(args.memorysessionch) && args.memorysessionch.trim().length > 0) {
+    try {
+      var _memorysessionchm = af.fromJSSLON(args.memorysessionch)
+      if (isMap(_memorysessionchm)) {
+        var _memorysessionchName = isString(_memorysessionchm.name) && _memorysessionchm.name.trim().length > 0 ? _memorysessionchm.name.trim() : "_mini_a_session_memory_channel"
+        var _memorysessionchType = isString(_memorysessionchm.type) ? _memorysessionchm.type : "simple"
+        var _memorysessionchOpts = isMap(_memorysessionchm.options) ? _memorysessionchm.options : {}
+        var _memorysessionchExists = false
+        try { _memorysessionchExists = $ch().list().indexOf(_memorysessionchName) >= 0 } catch(ignoreList) {}
+        if (!_memorysessionchExists) {
+          $ch(_memorysessionchName).create(_memorysessionchType, _memorysessionchOpts)
+          if (cfg.debug) this.fnI("info", `[memory] session channel '${_memorysessionchName}' created.`)
+        } else {
+          if (cfg.debug) this.fnI("info", `[memory] session channel '${_memorysessionchName}' reused.`)
+        }
+        this._memorysessionchName = _memorysessionchName
+      }
+    } catch(e) {
+      this.fnI("warn", `[memory] failed to initialize memorysessionch channel: ${__miniAErrMsg(e)}`)
+    }
+  }
+  // Effective session channel: dedicated if provided, otherwise same as global memorych
+  this._memorysessionChEffective = isString(this._memorysessionchName) && this._memorysessionchName.length > 0 ? this._memorysessionchName : this._memorychName
+  this._memorysessionChNamespace = sessionId
+
+  if (cfg.enabled !== true) {
+    this._syncWorkingMemoryState()
+    return
+  }
+
+  if (scope === "session" || scope === "both") {
+    if (!isObject(this._sessionMemoryManagers[sessionId])) {
+      this._sessionMemoryManagers[sessionId] = new MiniAMemoryManager(cfg, function(level, msg) {
+        if (cfg.debug) this.fnI(level || "info", "[memory][session] " + msg)
+      }.bind(this))
+      var seededSession = __
+      if (isObject(seedState) && isObject(seedState.workingMemorySession)) seededSession = seedState.workingMemorySession
+      if (isUnDef(seededSession) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "session")) {
+        seededSession = seedState.workingMemory
+      }
+      if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) {
+        var _loadedSession = this._sessionMemoryManagers[sessionId].loadFromChannel(this._memorysessionChEffective, this._memorysessionChNamespace)
+        if (_loadedSession !== true) this._sessionMemoryManagers[sessionId].init(seededSession)
+        else this.fnI("info", `📼 [mem:read] session loaded from channel '${this._memorysessionChEffective}'`)
+      } else {
+        this._sessionMemoryManagers[sessionId].init(seededSession)
+      }
+    } else {
+      this._sessionMemoryManagers[sessionId].configure(cfg)
+      if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._sessionMemoryManagers[sessionId].loadFromChannel(this._memorysessionChEffective, this._memorysessionChNamespace)
+    }
+    this._sessionMemoryManager = this._sessionMemoryManagers[sessionId]
+  }
+
+  if (scope === "global" || scope === "both") {
+    if (!isObject(this._globalMemoryManager)) {
+      this._globalMemoryManager = new MiniAMemoryManager(cfg, function(level, msg) {
+        if (cfg.debug) this.fnI(level || "info", "[memory][global] " + msg)
+      }.bind(this))
+      var seededGlobal = isObject(seedState) && isObject(seedState.workingMemoryGlobal) ? seedState.workingMemoryGlobal : __
+      if (isUnDef(seededGlobal) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "global" || (scope === "both" && !isObject(seedState.workingMemorySession)))) {
+        seededGlobal = seedState.workingMemory
+      }
+      var _loadedGlobal = this._globalMemoryManager.loadFromChannel(this._memorychName)
+      if (_loadedGlobal !== true) this._globalMemoryManager.init(seededGlobal)
+      else if (isString(this._memorychName) && this._memorychName.length > 0) this.fnI("info", `📼 [mem:read] global loaded from channel '${this._memorychName}'`)
+    } else {
+      this._globalMemoryManager.configure(cfg)
+      if (isString(this._memorychName) && this._memorychName.length > 0) this._globalMemoryManager.loadFromChannel(this._memorychName)
+    }
+  }
+
+  this._memoryManager = this._getDefaultMemoryWriteManager()
+  this._syncWorkingMemoryState()
+}
+
+MiniA.prototype._getDefaultMemoryWriteManager = function() {
+  if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
+  if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
+  if (isString(this._memorychName) && this._memorychName.length > 0 && isObject(this._globalMemoryManager)) return this._globalMemoryManager
+  if (isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
+  return this._globalMemoryManager
+}
+
+MiniA.prototype._getMemoryReadManagers = function(scope) {
+  var effectiveScope = isString(scope) ? scope : this._memoryScope
+  if (!isString(effectiveScope) || effectiveScope.length === 0) effectiveScope = "both"
+  effectiveScope = effectiveScope.toLowerCase()
+  var managers = []
+  if ((effectiveScope === "session" || effectiveScope === "both") && isObject(this._sessionMemoryManager)) managers.push(this._sessionMemoryManager)
+  if ((effectiveScope === "global" || effectiveScope === "both") && isObject(this._globalMemoryManager)) managers.push(this._globalMemoryManager)
+  return managers
+}
+
+MiniA.prototype._buildResolvedWorkingMemory = function(scope) {
+  var managers = this._getMemoryReadManagers(scope)
+  if (!isArray(managers) || managers.length === 0) return __
+  if (managers.length === 1) return managers[0].snapshot()
+
+  var sectionNames = managers[0]._sections()
+  var merged = {
+    schemaVersion: 1,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    revision: 0,
+    sections: {}
+  }
+
+  sectionNames.forEach(function(section) {
+    var seen = {}
+    var output = []
+    managers.forEach(function(manager) {
+      var entries = manager.getSectionEntries(section)
+      entries.forEach(function(entry) {
+        var fingerprint = (isString(entry.id) ? entry.id : "") + "::" + String(entry.value || "").toLowerCase().trim()
+        if (seen[fingerprint]) return
+        seen[fingerprint] = true
+        output.push(entry)
+      })
+    })
+    merged.sections[section] = output
+  })
+
+  return merged
+}
+
+// Returns a merged compact view (flat short-key entries) across all active memory managers,
+// intended for LLM consumption with af.toTOON serialization.
+MiniA.prototype._buildCompactMemoryForLLM = function() {
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  if (!isArray(managers) || managers.length === 0) return {}
+  if (managers.length === 1) return managers[0].snapshotCompact()
+
+  var sectionNames = managers[0]._sections()
+  var merged = {}
+  sectionNames.forEach(function(section) {
+    var seen = {}
+    var output = []
+    managers.forEach(function(manager) {
+      var compact = manager.snapshotCompact()
+      var entries = isArray(compact[section]) ? compact[section] : []
+      entries.forEach(function(entry) {
+        var fingerprint = (isString(entry.id) ? entry.id : "") + "::" + String(entry.v || "").toLowerCase().trim()
+        if (seen[fingerprint]) return
+        seen[fingerprint] = true
+        output.push(entry)
+      })
+    })
+    if (output.length > 0) merged[section] = output
+  })
+  return merged
+}
+
+MiniA.prototype._syncWorkingMemoryState = function() {
+  if (!isObject(this._agentState)) this._agentState = {}
+  if (this._memoryConfig.enabled !== true) {
+    delete this._agentState.workingMemory
+    delete this._agentState.workingMemorySession
+    delete this._agentState.workingMemoryGlobal
+    return
+  }
+  if (isObject(this._sessionMemoryManager)) this._agentState.workingMemorySession = this._sessionMemoryManager.snapshot()
+  else delete this._agentState.workingMemorySession
+  if (isObject(this._globalMemoryManager)) this._agentState.workingMemoryGlobal = this._globalMemoryManager.snapshot()
+  else delete this._agentState.workingMemoryGlobal
+  var resolved = this._buildResolvedWorkingMemory(this._memoryScope)
+  if (isObject(resolved)) {
+    this._agentState.workingMemory = resolved
+    var _nonEmpty = Object.keys(resolved.sections || {}).filter(function(k) { return resolved.sections[k].length > 0 })
+    if (_nonEmpty.length > 0) {
+      var _counts = _nonEmpty.map(function(k) { return k + "=" + resolved.sections[k].length }).join(", ")
+      this.fnI("info", `📋 [mem:list] ${_counts}`)
+    }
+  } else delete this._agentState.workingMemory
+}
+
+MiniA.prototype._persistWorkingMemory = function(reason) {
+  if (this._memoryConfig.enabled !== true) return
+  if (!isObject(this._globalMemoryManager)) return
+  this._syncWorkingMemoryState()
+  if (!isString(this._memorychName) || this._memorychName.length === 0) return
+  try {
+    this._globalMemoryManager.saveToChannel(this._memorychName)
+    if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted to channel '${this._memorychName}' (${reason || "update"})`)
+  } catch(e) {
+    this.fnI("warn", `[memory] persistence failed: ${__miniAErrMsg(e)}`)
+  }
+}
+
+MiniA.prototype._persistSessionMemory = function(reason) {
+  if (this._memoryConfig.enabled !== true) return
+  if (!isObject(this._sessionMemoryManager)) return
+  this._syncWorkingMemoryState()
+  if (!isString(this._memorysessionChEffective) || this._memorysessionChEffective.length === 0) return
+  try {
+    this._sessionMemoryManager.saveToChannel(this._memorysessionChEffective, this._memorysessionChNamespace)
+    if (this._memoryConfig.debug) this.fnI("info", `[memory] session persisted to channel '${this._memorysessionChEffective}' key '${this._memorysessionChNamespace}' (${reason || "update"})`)
+  } catch(e) {
+    this.fnI("warn", `[memory] session persistence failed: ${__miniAErrMsg(e)}`)
+  }
+}
+
+MiniA.prototype._memoryAppend = function(section, value, meta) {
+  if (this._memoryConfig.enabled !== true) return __
+  var targetScope = isObject(meta) && isString(meta.memoryScope) ? String(meta.memoryScope).toLowerCase().trim() : __
+  var baseEntry = isObject(value) && (isDef(value.value) || isDef(value.id) || isDef(value.provenance) || isDef(value.status))
+    ? merge({}, value)
+    : { value: value }
+  var entry = isObject(meta) ? merge(baseEntry, meta) : baseEntry
+  if (isObject(entry)) delete entry.memoryScope
+
+  // When scope="both" with no explicit target, mirror writes to both managers
+  if (!isDef(targetScope) && this._memoryScope === "both" && isObject(this._sessionMemoryManager) && isObject(this._globalMemoryManager)) {
+    var appended = __
+    var sessionAppended = this._sessionMemoryManager.append(section, entry)
+    var globalAppended = this._globalMemoryManager.append(section, entry)
+    appended = isObject(sessionAppended) ? sessionAppended : globalAppended
+    if (isObject(appended)) this.fnI("info", `📝 [mem:write] both/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
+    this._syncWorkingMemoryState()
+    if (isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
+    if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
+    return appended
+  }
+
+  var targetManager = __
+  if (targetScope === "global") targetManager = this._globalMemoryManager
+  else if (targetScope === "session") targetManager = this._sessionMemoryManager
+  else targetManager = this._getDefaultMemoryWriteManager()
+  if (!isObject(targetManager)) return __
+  var appended = targetManager.append(section, entry)
+  if (isObject(appended)) {
+    var _wscope = targetManager === this._globalMemoryManager ? "global" : "session"
+    this.fnI("info", `📝 [mem:write] ${_wscope}/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
+  }
+  this._syncWorkingMemoryState()
+  if (targetManager === this._globalMemoryManager && isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
+  if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
+  return appended
+}
+
+MiniA.prototype._memoryUpdate = function(section, id, patch) {
+  if (this._memoryConfig.enabled !== true) return false
+  var ok = false
+  var usedGlobal = false
+  var usedSession = false
+  if (isObject(this._sessionMemoryManager)) {
+    ok = this._sessionMemoryManager.update(section, id, patch)
+    usedSession = ok
+  }
+  if (!ok && isObject(this._globalMemoryManager)) {
+    ok = this._globalMemoryManager.update(section, id, patch)
+    usedGlobal = ok
+  }
+  if (ok) {
+    var _uscope = usedGlobal ? "global" : "session"
+    var _patchKeys = isObject(patch) ? Object.keys(patch).join(", ") : ""
+    this.fnI("info", `📝 [mem:write] update ${_uscope}/${section}/${id}${_patchKeys.length > 0 ? " (" + _patchKeys + ")" : ""}`)
+    this._syncWorkingMemoryState()
+    if (usedGlobal) this._persistWorkingMemory("update")
+    if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("update")
+  }
+  return ok
+}
+
+MiniA.prototype._memoryRemove = function(section, id) {
+  if (this._memoryConfig.enabled !== true) return false
+  var ok = false
+  var usedGlobal = false
+  var usedSession = false
+  if (isObject(this._sessionMemoryManager)) {
+    ok = this._sessionMemoryManager.remove(section, id)
+    usedSession = ok
+  }
+  if (!ok && isObject(this._globalMemoryManager)) {
+    ok = this._globalMemoryManager.remove(section, id)
+    usedGlobal = ok
+  }
+  var _rscope = usedGlobal ? "global" : (usedSession ? "session" : "")
+  this.fnI("info", `🗑️ [mem:delete] ${_rscope ? _rscope + "/" : ""}${section}/${id}: ${ok ? "removed" : "not found"}`)
+  if (ok) {
+    this._syncWorkingMemoryState()
+    if (usedGlobal) this._persistWorkingMemory("remove")
+    if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("remove")
+  }
+  return ok
+}
+
+MiniA.prototype._memoryAttachEvidence = function(section, id, evidenceId) {
+  if (this._memoryConfig.enabled !== true) return false
+  var ok = false
+  var usedGlobal = false
+  var usedSession = false
+  if (isObject(this._sessionMemoryManager)) {
+    ok = this._sessionMemoryManager.attachEvidenceRef(section, id, evidenceId)
+    usedSession = ok
+  }
+  if (!ok && isObject(this._globalMemoryManager)) {
+    ok = this._globalMemoryManager.attachEvidenceRef(section, id, evidenceId)
+    usedGlobal = ok
+  }
+  if (ok) {
+    this._syncWorkingMemoryState()
+    if (usedGlobal) this._persistWorkingMemory("attach-evidence")
+    if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("attach-evidence")
+  }
+  return ok
+}
+
+MiniA.prototype._memoryMarkStatus = function(section, id, status, supersededBy) {
+  if (this._memoryConfig.enabled !== true) return false
+  var target = __
+  if (isObject(this._sessionMemoryManager) && this._sessionMemoryManager.mark(section, id, "status", status)) target = this._sessionMemoryManager
+  else if (isObject(this._globalMemoryManager) && this._globalMemoryManager.mark(section, id, "status", status)) target = this._globalMemoryManager
+  var ok = isObject(target)
+  if (ok && isString(supersededBy) && supersededBy.length > 0) {
+    target.mark(section, id, "supersededBy", supersededBy)
+  }
+  if (ok) {
+    this._syncWorkingMemoryState()
+    if (target === this._globalMemoryManager) this._persistWorkingMemory("mark")
+    if (target === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("mark")
+  }
+  return ok
+}
+
+MiniA.prototype.promoteSessionMemory = function(section, ids) {
+  if (this._memoryConfig.enabled !== true) return { promoted: 0, reason: "memory-disabled" }
+  if (!isObject(this._sessionMemoryManager) || !isObject(this._globalMemoryManager)) return { promoted: 0, reason: "scope-unavailable" }
+  if (!isString(section) || section.length === 0) return { promoted: 0, reason: "invalid-section" }
+  var entries = this._sessionMemoryManager.getSectionEntries(section)
+  var idMap = {}
+  if (isArray(ids) && ids.length > 0) ids.forEach(function(id) { if (isString(id)) idMap[id] = true })
+  var promoted = 0
+  entries.forEach(function(entry) {
+    if (Object.keys(idMap).length > 0 && idMap[entry.id] !== true) return
+    if (!isObject(entry)) return
+    this._globalMemoryManager.append(section, entry, { silent: true })
+    promoted++
+  }.bind(this))
+  if (promoted > 0) {
+    this._syncWorkingMemoryState()
+    this._persistWorkingMemory("promotion")
+  }
+  return { promoted: promoted }
+}
+
+MiniA.prototype.clearSessionMemory = function(sessionId) {
+  var sid = isString(sessionId) && sessionId.trim().length > 0 ? sessionId.trim() : this._sessionMemoryId
+  if (!isString(sid) || sid.length === 0) return false
+  if (isObject(this._sessionMemoryManagers) && isObject(this._sessionMemoryManagers[sid])) {
+    delete this._sessionMemoryManagers[sid]
+  }
+  if (this._sessionMemoryId === sid) {
+    this._sessionMemoryManager = __
+    this._memoryManager = this._getDefaultMemoryWriteManager()
+    this._syncWorkingMemoryState()
+  }
+  if (this._memoryConfig.enabled === true) this.fnI("info", `🧹 [mem:clear] session ${sid}`)
+  return true
+}
+
 /**
  * Create a rate limiter that enforces requests-per-minute (rpm) and tokens-per-minute (tpm) caps.
  */
@@ -6994,6 +7438,11 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
+  this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" } })
+  this._memoryAppend("summaries", isString(answer) ? answer.substring(0, 500) : stringify(answer, __, "").substring(0, 500), {
+    provenance: { source: "synthesis", event: "final-answer-text" }
+  })
+  this._persistWorkingMemory("process-final-answer")
 
   this._recordPlanActivity("final", {
     step       : this._runtime && this._runtime.currentStepNumber,
@@ -7530,6 +7979,7 @@ MiniA.prototype._restoreCheckpoint = function(runtime, reason) {
   if (!isObject(snapshot.runtime)) return false
 
   this._agentState = snapshot.agentState || {}
+  this._syncWorkingMemoryState()
   runtime.context = isArray(snapshot.runtime.context) ? snapshot.runtime.context.slice() : []
   runtime.consecutiveErrors = snapshot.runtime.consecutiveErrors || 0
   runtime.consecutiveThoughts = snapshot.runtime.consecutiveThoughts || 0
@@ -8331,6 +8781,21 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
                 answer: result.answer,
                 error: result.error
               }
+              if (isDef(result.error)) {
+                parent._memoryAppend("risks", `Delegated subtask ${subtaskId} failed: ${result.error}`, {
+                  unresolved: true,
+                  provenance: { source: "delegation", event: "subtask-completed", subtaskId: subtaskId }
+                })
+              } else {
+                parent._memoryAppend("evidence", `Delegated subtask ${subtaskId} completed successfully.`, {
+                  provenance: { source: "delegation", event: "subtask-completed", subtaskId: subtaskId }
+                })
+                if (isString(result.answer) && result.answer.length > 0) {
+                  parent._memoryAppend("artifacts", result.answer.substring(0, 500), {
+                    provenance: { source: "delegation", event: "subtask-answer", subtaskId: subtaskId }
+                  })
+                }
+              }
               return { content: [{ type: "text", text: stringify(output, __, "") }] }
             } catch(waitErr) {
               global.__mini_a_metrics.delegation_failed.inc()
@@ -8346,6 +8811,10 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
               status: "started",
               message: "Subtask started asynchronously. Use subtask-status to check progress."
             }
+            parent._memoryAppend("openQuestions", `Subtask ${subtaskId} is running asynchronously and requires follow-up.`, {
+              unresolved: true,
+              provenance: { source: "delegation", event: "subtask-started", subtaskId: subtaskId }
+            })
             return { content: [{ type: "text", text: stringify(output, __, "") }] }
           }
         } catch(err) {
@@ -12593,6 +13062,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     if (isUnDef(args.youare) && isDef(args.youAre)) args.youare = args.youAre
     if (isUnDef(args.chatyouare) && isDef(args.chatYouAre)) args.chatyouare = args.chatYouAre
+    if (isUnDef(args.usememory) && isDef(args.useMemory)) args.usememory = args.useMemory
+    if (isUnDef(args.memoryscope) && isDef(args.memoryScope)) args.memoryscope = args.memoryScope
+    if (isUnDef(args.memorysessionid) && isDef(args.memorySessionId)) args.memorysessionid = args.memorySessionId
+    if (isUnDef(args.memorysessionch) && isDef(args.memorySessionCh)) args.memorysessionch = args.memorySessionCh
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -12638,6 +13111,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "routerallow", type: "string", default: __ },
       { name: "routerdeny", type: "string", default: __ },
       { name: "routerproxythreshold", type: "number", default: __ }
+      { name: "usememory", type: "boolean", default: false },
+      { name: "memoryscope", type: "string", default: "both" },
+      { name: "memorysessionid", type: "string", default: __ },
+      { name: "memorych", type: "string", default: __ },
+      { name: "memorysessionch", type: "string", default: __ },
+      { name: "memorymaxpersection", type: "number", default: 80 },
+      { name: "memorymaxentries", type: "number", default: 500 },
+      { name: "memorycompactevery", type: "number", default: 8 },
+      { name: "memorydedup", type: "boolean", default: true }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -12697,6 +13179,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.routerallow = _$(args.routerallow, "args.routerallow").isString().default(__)
     args.routerdeny = _$(args.routerdeny, "args.routerdeny").isString().default(__)
     args.routerproxythreshold = _$(args.routerproxythreshold, "args.routerproxythreshold").isNumber().default(__)
+    args.usememory = _$(toBoolean(args.usememory), "args.usememory").isBoolean().default(false)
+    args.memoryscope = _$(args.memoryscope, "args.memoryscope").isString().default("both")
+    if (["session", "global", "both"].indexOf(args.memoryscope.toLowerCase().trim()) < 0) args.memoryscope = "both"
+    else args.memoryscope = args.memoryscope.toLowerCase().trim()
+    args.memorysessionid = _$(args.memorysessionid, "args.memorysessionid").isString().default(__)
+    args.memorych = _$(args.memorych, "args.memorych").isString().default(__)
+    args.memorysessionch = _$(args.memorysessionch, "args.memorysessionch").isString().default(__)
+    args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
+    args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
+    args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)
+    args.memorydedup = _$(toBoolean(args.memorydedup), "args.memorydedup").isBoolean().default(true)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -12864,6 +13357,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
       this._prepareExternalPlanExecution(preloadedPlan, args)
       this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
+      this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: preloadedPlan.path || "" } })
       // Mark that external plan is loaded to skip auto-generation later
       this._hasExternalPlan = true
     } else {
@@ -13207,6 +13701,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
     this._agentState = isObject(initialState) ? initialState : {}
+    this._initWorkingMemory(args, this._agentState)
+    this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
     if (this._enablePlanning) {
       // PHASE 1: Generate plan upfront (separate call)
       this._planningPhase = "planning"
@@ -13219,8 +13715,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var planResponse = this._generateInitialPlan(args.goal, strategy, args)
         if (isObject(planResponse) && isObject(planResponse.plan)) {
           this._agentState.plan = planResponse.plan
+          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" } })
         } else if (isObject(planResponse)) {
           this._agentState.plan = planResponse
+          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" } })
         } else if (isObject(this._agentState) && isUnDef(this._agentState.plan)) {
           this._agentState.plan = []
         }
@@ -13407,7 +13905,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (runtime.stateSnapshotDirty !== true && isString(runtime.lastStateSnapshot) && runtime.lastStateSnapshot.length > 0) {
         return runtime.lastStateSnapshot
       }
-      runtime.lastStateSnapshot = stringify(this._agentState, __, "")
+      if (args.usememory && isObject(this._agentState) && isObject(this._agentState.workingMemory)) {
+        // Build a compact LLM-facing state: strip internal bookkeeping keys, use flat short-key memory
+        var stateForLLM = {}
+        Object.keys(this._agentState).forEach(function(k) {
+          if (k !== "workingMemorySession" && k !== "workingMemoryGlobal") stateForLLM[k] = this._agentState[k]
+        }.bind(this))
+        stateForLLM.workingMemory = this._buildCompactMemoryForLLM()
+        runtime.lastStateSnapshot = af.toTOON(stateForLLM)
+      } else {
+        runtime.lastStateSnapshot = stringify(this._agentState, __, "")
+      }
       runtime.stateSnapshotDirty = false
       return runtime.lastStateSnapshot
     }
@@ -13657,6 +14165,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           message : errorMessage,
           context : { toolName: toolName, stepLabel: stepLabel }
         })
+        this._memoryAppend("risks", `Tool '${toolName}' failed: ${errorMessage}`, {
+          status    : "unresolved",
+          unresolved: true,
+          provenance: { source: "tool", event: "tool-error", step: stepLabel, tool: toolName }
+        })
+      } else if (isString(toolName) && toolName.length > 0) {
+        var evidenceEntry = this._memoryAppend("evidence", `Tool '${toolName}' completed at step ${stepLabel}.`, {
+          provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
+        })
+        if (isObject(evidenceEntry) && isString(evidenceEntry.id) && isString(observation) && observation.length > 0) {
+          this._memoryAppend("artifacts", observation.substring(0, 500), {
+            evidenceRefs: [evidenceEntry.id],
+            provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName }
+          })
+        }
       }
 
       runtime.consecutiveThoughts = 0
@@ -14517,6 +15040,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           stateUpdatedThisStep = true
           if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
           if (this._enablePlanning) this._handlePlanUpdate()
+          this._memoryAppend("facts", "Model updated runtime state.", { provenance: { source: "model", event: "state-update", step: step + 1 } })
         }
       }
       var actionMessages = []
@@ -14667,7 +15191,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           })
           break
         }
-        if (isUnDef(thoughtValue) || (isString(thoughtValue) && thoughtValue.length == 0)) {
+        if (this._isEmptyThoughtValue(thoughtValue)) {
           var currentMsgKeys = isMap(currentMsg) ? Object.keys(currentMsg).join(", ") : "none"
           var thoughtInfo = isUnDef(currentMsg.thought) && isUnDef(currentMsg.think) ? "no 'thought' or 'think' field" : `'thought'/'think' field is empty or invalid`
           runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'thought' from model. ${thoughtInfo}. Available keys in response: ${currentMsgKeys}`)
@@ -14816,6 +15340,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }).output
           runtime.context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
           runtime.context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
+          var shellEvidence = this._memoryAppend("evidence", `Shell command executed: ${commandValue}`, {
+            provenance: { source: "shell", event: "shell-exec", step: stepLabel, command: commandValue }
+          })
+          this._memoryAppend("artifacts", (shellOutput || "(no output)").trim().substring(0, 500), {
+            evidenceRefs: isObject(shellEvidence) && isString(shellEvidence.id) ? [shellEvidence.id] : [],
+            provenance  : { source: "shell", event: "shell-output", step: stepLabel }
+          })
 
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
@@ -14898,7 +15429,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (args.debug || args.verbose) {
             this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
           }
-
+          this._memoryAppend("decisions", "Final answer emitted by agent.", { provenance: { source: "synthesis", event: "final-answer", step: stepLabel } })
+          this._memoryAppend("summaries", String(answerValue).substring(0, 500), { provenance: { source: "synthesis", event: "final-answer-preview" } })
+          this._persistWorkingMemory("final-answer")
           return this._processFinalAnswer(answerValue, args)
         }
 
@@ -15057,7 +15590,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var totalTime = now() - sessionStartTime
     global.__mini_a_metrics.total_session_time.set(totalTime)
     global.__mini_a_metrics.goals_stopped.inc()
-
+    this._memoryAppend("decisions", "Fallback final answer requested due to execution limits.", { provenance: { source: "synthesis", event: "fallback-final" } })
+    this._memoryAppend("summaries", String(res.answer || "(no final answer)").substring(0, 500), { provenance: { source: "synthesis", event: "fallback-final-preview" } })
+    this._persistWorkingMemory("fallback-final")
     return this._processFinalAnswer(res.answer || "(no final answer)", args)
 }
 
@@ -15563,6 +16098,21 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     var score = isNumber(validation.score) ? validation.score : 0
     var specificIssues = isArray(validation.specificIssues) ? validation.specificIssues.filter(isString) : []
     var suggestions = isArray(validation.suggestions) ? validation.suggestions.filter(isString) : []
+    this._memoryAppend("summaries", `Validation verdict: ${verdict}${feedback.length > 0 ? " - " + feedback : ""}`, {
+      provenance: { source: "validation", event: "deep-research-validation" }
+    })
+    if (specificIssues.length > 0) {
+      this._memoryAppend("risks", specificIssues.join("; "), {
+        unresolved: verdict !== "PASS",
+        provenance: { source: "validation", event: "validation-issues" }
+      })
+    }
+    if (suggestions.length > 0) {
+      this._memoryAppend("openQuestions", suggestions.join("; "), {
+        unresolved: true,
+        provenance: { source: "validation", event: "validation-suggestions" }
+      })
+    }
 
     return {
       verdict: verdict,
