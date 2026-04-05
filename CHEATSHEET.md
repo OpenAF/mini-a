@@ -786,6 +786,34 @@ mini-a goal="perform audit" \
 mini-a goal="run command" nosetmcpwd=true
 ```
 
+### Adaptive Tool Routing
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `adaptiverouting` | boolean | `false` | Enable rule-based route selection (`mini-a-router.js`) — chooses between direct/proxy/shell/utility/delegation based on intent, payload size, latency, and route history |
+| `routerorder` | string | - | Comma-separated preferred route order (e.g. `mcp_direct_call,mcp_proxy_path,shell_execution`) |
+| `routerallow` | string | - | Comma-separated allowlist of route types the router may use |
+| `routerdeny` | string | - | Comma-separated denylist of route types the router must not use |
+| `routerproxythreshold` | number | - | Payload size in bytes where proxy-style handling is preferred (falls back to `mcpproxythreshold` when unset) |
+
+Supported route types: `direct_local_tool`, `mcp_direct_call`, `mcp_proxy_path`, `shell_execution`, `utility_wrapper`, `delegated_subtask`.
+
+Route decisions are logged as `[ROUTE ...]` records in context when `debug=true`.
+
+```bash
+# Enable adaptive routing
+mini-a goal="query remote API" adaptiverouting=true mcp="..." usetools=true
+
+# Prefer direct MCP calls, fall back to proxy
+mini-a goal="fetch data" adaptiverouting=true routerorder="mcp_direct_call,mcp_proxy_path"
+
+# Allow only safe non-shell routes
+mini-a goal="read data" adaptiverouting=true routerdeny="shell_execution"
+
+# Debug route decisions
+mini-a goal="investigate" adaptiverouting=true debug=true
+```
+
 ### Environment Variables
 
 | Variable | Description |
