@@ -52,11 +52,15 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260403'
+version: '20260405'
 dependencies:
   openaf: '>=20250915'
 files:
 - .odoc.db
+- .openaf_precompiled/.t8-20260403
+- .openaf_precompiled/mini-a-common_js.class
+- .openaf_precompiled/mini-a-memory_js.class
+- .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
 - AGENTS.md
 - CHEATSHEET.md
@@ -65,6 +69,7 @@ files:
 - LICENSE
 - README.md
 - USAGE.md
+- docs/ADAPTIVE-ROUTER.md
 - docs/BACKEND-ENDPOINTS.md
 - docs/DELEGATION.md
 - docs/LEARN.md
@@ -114,9 +119,11 @@ files:
 - mini-a-common.js
 - mini-a-con.js
 - mini-a-mcptest.js
+- mini-a-memory.js
 - mini-a-modelman.js
 - mini-a-modes.yaml
 - mini-a-progcall.js
+- mini-a-router.js
 - mini-a-subtask.js
 - mini-a-utils.js
 - mini-a-web.sh
@@ -139,20 +146,25 @@ files:
 - tests/progToolCall.yaml
 filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
+  .openaf_precompiled/.t8-20260403: da39a3ee5e6b4b0d3255bfef95601890afd80709
+  .openaf_precompiled/mini-a-common_js.class: 1e388163360eac422bf696f51b13746ddb495b2c
+  .openaf_precompiled/mini-a-memory_js.class: 064b4d7bd8d1a119f3e8b1cb0be7c3c985988b46
+  .openaf_precompiled/mini-a-utils_js.class: eecd7087df3cab6b624d6a7d984f99dfa2fbe151
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 28dfbf4a80f4936696585f799a99736d8a485356
+  CHEATSHEET.md: 8a6af0663189887a2e3992b4503a2e6622d5521d
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: bbd48d4391b81fc1afb02422b3d86e70f5d894bd
-  USAGE.md: 48ab92b3243e6df51cf1fd604c896e5de4a50898
+  README.md: 55c640950a0c0be01bf9e3c9a3576319364899b5
+  USAGE.md: bb3bfe50f63fc2922a07ca3e11d9e35b7d55ca1b
+  docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: f61deadd3ac871db27ee292b840d72b95df2de7a
   docs/LEARN.md: bbd387393104fb9cff10f72a6cb42307a3a259f1
   docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
   docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: f0c4e27d9f13ab0b23995ecff21807b14886e7c4
+  docs/WHATS-NEW.md: ade217ca36d90ce02eb1595b8b713e357da4e6d3
   examples/README.md: 02b78b16f5e36428e89e74bf3b35a014c7ac49fd
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
   examples/agent-template.yaml: 6265fd20ff130a8df81e421297e4beda06cf89e3
@@ -193,17 +205,19 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: 9f5390985f51778156d3ba5baf49abe00e71303a
+  mini-a-con.js: ae63d7053a473a9f035fca3c6ebe4d37d9a8aef7
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
+  mini-a-memory.js: 2dd101b0e891e4e60c5c61a9f98ee76b3dc227ee
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
   mini-a-modes.yaml: 7b809917b4c9bc828b326ed5d05042f637d615ff
   mini-a-progcall.js: 3857a0ea5f0cb29b72e235ac0f24a107fcdd0ff6
-  mini-a-subtask.js: 41bd610dd4629d65984cbe081f6f260dace41ae0
+  mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
+  mini-a-subtask.js: 28800a5144d944979b832c70c99788393ecae3a3
   mini-a-utils.js: 74929e106d866962ef08a6ff413f70b247e579c9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 41ad8c2c72f113b4536bb657be1a8703ebb9f75b
+  mini-a-web.yaml: 2a8fc68e770fbf16aa013ce20b5150096a824f2e
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: 89c95b56f1e294223f1ccb3dcd05d81544aa6516
+  mini-a.js: 91cd343c4e1604935c995986e6e1e3c19ea0524a
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cc2f059425458db3d7e72ec02cf4076e8f305c1b
   public/index.md: a61e6711b75825bd1800df7e7f5b4b7489685d2a
@@ -212,8 +226,8 @@ filesHash:
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
-  tests/coreFunctionality.js: af92a7a3faf16bc9e1ac1dba5d8cffa6394ccc98
-  tests/coreFunctionality.yaml: 1c236cadebcad0ac91d33daca18590f5bc6a7096
+  tests/coreFunctionality.js: d60b8e8223245bdde0e3fed0f9d32eed33a1be3e
+  tests/coreFunctionality.yaml: 34bef9f09795d509250a53e7bd49dc79e831eade
   tests/miniAUtils.js: e73053daa6bb6b14934f21fa221eaea9c35bd6b0
   tests/miniAUtils.yaml: 1d1515b208e55da5600906e355ddc1a0eb7f82d7
   tests/progToolCall.js: 83228632725f51069fc2a61490e31cdec340315c
