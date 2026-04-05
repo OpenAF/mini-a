@@ -7443,6 +7443,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     provenance: { source: "synthesis", event: "final-answer-text" }
   })
   this._persistWorkingMemory("process-final-answer")
+  if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("process-final-answer")
 
   this._recordPlanActivity("final", {
     step       : this._runtime && this._runtime.currentStepNumber,
@@ -13110,7 +13111,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "routerorder", type: "string", default: __ },
       { name: "routerallow", type: "string", default: __ },
       { name: "routerdeny", type: "string", default: __ },
-      { name: "routerproxythreshold", type: "number", default: __ }
+      { name: "routerproxythreshold", type: "number", default: __ },
       { name: "usememory", type: "boolean", default: false },
       { name: "memoryscope", type: "string", default: "both" },
       { name: "memorysessionid", type: "string", default: __ },
@@ -13357,7 +13358,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
       this._prepareExternalPlanExecution(preloadedPlan, args)
       this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
-      this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: preloadedPlan.path || "" } })
       // Mark that external plan is loaded to skip auto-generation later
       this._hasExternalPlan = true
     } else {
@@ -13703,6 +13703,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._agentState = isObject(initialState) ? initialState : {}
     this._initWorkingMemory(args, this._agentState)
     this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
+    if (this._hasExternalPlan) {
+      this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: isObject(preloadedPlan) ? (preloadedPlan.path || "") : "" } })
+    }
     if (this._enablePlanning) {
       // PHASE 1: Generate plan upfront (separate call)
       this._planningPhase = "planning"
@@ -15432,6 +15435,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._memoryAppend("decisions", "Final answer emitted by agent.", { provenance: { source: "synthesis", event: "final-answer", step: stepLabel } })
           this._memoryAppend("summaries", String(answerValue).substring(0, 500), { provenance: { source: "synthesis", event: "final-answer-preview" } })
           this._persistWorkingMemory("final-answer")
+          if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("final-answer")
           return this._processFinalAnswer(answerValue, args)
         }
 
@@ -15593,6 +15597,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._memoryAppend("decisions", "Fallback final answer requested due to execution limits.", { provenance: { source: "synthesis", event: "fallback-final" } })
     this._memoryAppend("summaries", String(res.answer || "(no final answer)").substring(0, 500), { provenance: { source: "synthesis", event: "fallback-final-preview" } })
     this._persistWorkingMemory("fallback-final")
+    if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("fallback-final")
     return this._processFinalAnswer(res.answer || "(no final answer)", args)
 }
 
