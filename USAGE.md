@@ -1513,14 +1513,18 @@ Deep research results include:
 
 ### Metrics
 
-Deep research mode tracks several metrics accessible via `getMetrics()`:
+Deep research mode tracks several metrics accessible via `getMetrics().deep_research`:
 
-- `deep_research_sessions`: Total deep research sessions started
-- `deep_research_cycles`: Total cycles executed across all sessions
-- `deep_research_validations_passed`: Cycles that passed validation
-- `deep_research_validations_failed`: Cycles that failed validation
-- `deep_research_early_success`: Sessions that passed before reaching max cycles
-- `deep_research_max_cycles_reached`: Sessions that hit the cycle limit
+| Counter | Description |
+|---------|-------------|
+| `sessions` | Total deep research sessions started |
+| `cycles` | Total research-and-validate cycles run across all sessions |
+| `validations_passed` | Cycles whose LLM validation returned a passing verdict |
+| `validations_failed` | Cycles whose LLM validation returned a failing verdict |
+| `early_success` | Sessions that passed validation before exhausting the cycle limit |
+| `max_cycles_reached` | Sessions that hit the cycle limit without a passing verdict |
+
+See the [Metric breakdown](#metric-breakdown) table for the full counter reference.
 
 ### Best Practices
 
@@ -2553,7 +2557,7 @@ This will show:
 
 Mini-A records extensive counters that help track behaviour and costs:
 
-- Call `agent.getMetrics()` to obtain a snapshot grouped by LLM usage, outcomes, shell approvals/denials, context management, and summarization activity.
+- Call `agent.getMetrics()` to obtain a snapshot grouped by LLM usage, outcomes, shell approvals/denials, context management, summarization activity, system prompt budgeting, context compression, and per-tool call statistics.
 - Console history flows also update `history` metrics so you can track started/resumed sessions plus kept/deleted conversation files when using `mini-a-con`, including separate counters for age-based and count-based pruning.
 - OpenAF automatically registers these counters under the `mini-a` namespace via `ow.metrics.add('mini-a', ...)`, so collectors that understand OpenAF metrics can scrape them.
 - Metrics are updated live as the agent progresses, making them ideal for dashboards or alerting when an agent gets stuck.
@@ -2575,7 +2579,11 @@ Mini-A records extensive counters that help track behaviour and costs:
 | `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Dynamic tool selection metrics tracking how tools are selected when `mcpdynamic=true`. Shows usage of keyword matching, LLM-based selection (low-cost and main models), connection-level chooser fallbacks, and full catalog fallback. Includes stemming, synonym matching, n-grams, and fuzzy matching capabilities. |
 | `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Tool result caching metrics for deterministic and read-only MCP tools. Tracks cache effectiveness and provides hit rate percentage. |
 | `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP resilience and optimization metrics. Circuit breaker trips/resets track connection health management. Lazy initialization metrics show deferred MCP connection establishment when `mcplazy=true`. |
-| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy`, `avgDurationMs`, `maxDepthUsed` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle, retries, worker pool composition/health, average duration, and deepest nesting level reached. |
+| `context_compression` | `prompt_context_selections`, `prompt_context_compressed`, `prompt_context_tokens_saved`, `goal_block_compressed`, `goal_block_tokens_saved`, `hook_context_compressed`, `hook_context_tokens_saved` | Automatic context compression activity. `prompt_context_selections` counts how many times compressed context was offered to the model; `*_compressed` counters increment when compression achieved >30% token reduction on the respective block; `*_tokens_saved` accumulate the tokens removed by compression across the session. |
+| `system_prompt` | `system_prompt_builds`, `system_prompt_tokens_total`, `system_prompt_tokens_last`, `system_prompt_tokens_avg`, `system_prompt_budget_applied`, `system_prompt_budget_tokens_saved`, `system_prompt_examples_dropped`, `system_prompt_skill_descriptions_dropped`, `system_prompt_tool_details_dropped`, `system_prompt_planning_details_dropped`, `system_prompt_skills_trimmed`, `system_prompt_last_meta` | System prompt construction and budget trimming. `system_prompt_builds` counts total builds; `*_tokens_*` track token cost (total, last, computed average). When the prompt exceeds `systempromptbudget`, `system_prompt_budget_applied` increments and `system_prompt_budget_tokens_saved` records savings. Each `*_dropped` counter records how many times that section was omitted (priority order: examples → skill descriptions → tool details → planning details). `system_prompt_skills_trimmed` counts trims of individual skill bodies. `system_prompt_last_meta` is the raw metadata object from the most recent build (useful for debugging budget decisions). |
+| `per_tool_usage` | `<toolName>.calls`, `<toolName>.successes`, `<toolName>.failures` | Per-tool call statistics. Keys are tool names; each entry tracks total invocations, successful completions, and failures. Useful for identifying flaky or heavily-used tools. Only tools that have been invoked at least once appear in this map. |
+| `delegation` | `total`, `running`, `completed`, `failed`, `cancelled`, `timedout`, `retried`, `worker_hint_used`, `worker_hint_matched`, `worker_hint_fallthrough`, `workers_total`, `workers_static`, `workers_dynamic`, `workers_healthy` | Subtask delegation metrics (when `usedelegation=true`). Tracks child agent lifecycle and retries. `worker_hint_used` counts subtasks where a `workerHint` was specified; `worker_hint_matched` counts those where the hint resolved to a specific worker; `worker_hint_fallthrough` counts hints that found no match and fell back to default selection. Worker pool counters reflect current composition and health. For per-subtask average duration and max nesting depth, call `agent._subtaskManager.getMetrics()` directly. |
+| `deep_research` | `sessions`, `cycles`, `validations_passed`, `validations_failed`, `early_success`, `max_cycles_reached` | Deep research mode metrics (when `deepresearch=true`). `sessions` counts research sessions started; `cycles` accumulates all research-and-validate cycles run across sessions. `validations_passed`/`validations_failed` split LLM validation verdicts. `early_success` counts sessions that passed validation before exhausting cycles; `max_cycles_reached` counts those that hit the cycle limit without passing. |
 | `history` | `sessions_started`, `sessions_resumed`, `files_kept`, `files_deleted`, `files_deleted_by_period`, `files_deleted_by_count` | Console conversation history metrics. Tracks new vs resumed console sessions, how many history files were kept, and how many were pruned overall, by age rule, or by count rule. |
 
 These counters mirror what is exported via `ow.metrics.add('mini-a', ...)`, so the same structure appears in Prometheus/Grafana when scraped through OpenAF.
