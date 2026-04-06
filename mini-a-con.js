@@ -208,10 +208,12 @@ try {
     // Choose
     if (toBoolean(args.modelman) === true) {
       // Start model management mode
+      global._args = args
       load("mini-a-modelman.js")
       exit(0)
     } else if (toBoolean(args.mcptest) === true) {
       // Start MCP test mode
+      global._args = args
       load("mini-a-mcptest.js")
       exit(0)
     } else if (toBoolean(args.workermode) === true) {
