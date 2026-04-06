@@ -163,6 +163,16 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : chatbotlight
+    desc     : "Enable lightweight chatbot behavior tuned for small/very small models (requires chatbotmode=true)"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : chatbotprofile
+    desc     : "Chatbot runtime profile (default, small, tiny) for constrained action formatting and repair loops"
+    example  : "small"
+    mandatory: false
+    options  : ["default", "small", "tiny"]
   - name     : promptprofile
     desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose)"
     example  : "balanced"
@@ -930,6 +940,8 @@ jobs:
       utilsallow     : isString().default(__)
       utilsdeny      : isString().default(__)
       chatbotmode    : toBoolean().isBoolean().default(false)
+      chatbotlight   : toBoolean().isBoolean().default(false)
+      chatbotprofile : isString().default(__)
       promptprofile  : isString().default(__)
       systempromptbudget: toNumber().isNumber().default(__)
       format         : isString().default(__)

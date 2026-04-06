@@ -455,6 +455,8 @@ try {
     resumefailed   : { type: "boolean", default: false, description: "Attempt to resume the last failed goal on startup" },
     forceplanning  : { type: "boolean", default: false, description: "Force planning even when heuristics would skip it" },
     chatbotmode    : { type: "boolean", default: false, description: "Run Mini-A in chatbot mode" },
+    chatbotlight   : { type: "boolean", default: false, description: "Enable lightweight chatbot behavior tuned for small/very small models (requires chatbotmode=true)" },
+    chatbotprofile : { type: "string", description: "Chatbot runtime profile (default|small|tiny)" },
     promptprofile  : { type: "string", description: "Prompt verbosity profile (minimal|balanced|verbose)" },
     systempromptbudget: { type: "number", description: "Maximum system prompt size in estimated tokens before low-priority sections are dropped" },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
