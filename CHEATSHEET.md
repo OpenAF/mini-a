@@ -18,6 +18,7 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Rate Limiting & Performance](#rate-limiting--performance)
 - [Security & Safety](#security--safety)
 - [Common Examples](#common-examples)
+- [Agent Files](#agent-files)
 
 ---
 
@@ -38,7 +39,14 @@ mini-a goal="list files in current directory" useshell=true
 ```bash
 export OAF_MODEL="(type: openai, model: gpt-4, key: 'your-key')"
 export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-key')"
+mini-a goal="summarize this repository"
 ```
+
+## Agent Files
+
+- Use `agent=<path-or-inline-markdown>` to preload Mini-A parameters from YAML frontmatter metadata.
+- Use `--agent` to print a starter agent markdown template.
+- See [AGENT-CHEATSHEET.md](AGENT-CHEATSHEET.md) for the full key mapping and examples.
 
 ---
 

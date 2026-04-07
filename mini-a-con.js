@@ -54,8 +54,23 @@ try {
     return found
   }
 
+  function hasAgentTemplateFlag(map) {
+    if (!isObject(map)) return false
+    var found = false
+    Object.keys(map).some(function(key) {
+      var normalized = String(key || "").toLowerCase()
+      if (normalized === "--agent" || (normalized === "agent" && toBoolean(map[key]) === true)) {
+        found = true
+        return true
+      }
+      return false
+    })
+    return found
+  }
+
   var helpRequested = hasHelpFlag(args)
   var cheatsheetRequested = hasCheatsheetFlag(args)
+  var agentTemplateRequested = hasAgentTemplateFlag(args)
 
   // Init
   if (!(isString(args.libs) && args.libs.trim().length > 0)) {
@@ -72,7 +87,7 @@ try {
     if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
   }
 
-  if (!helpRequested && !cheatsheetRequested) {
+  if (!helpRequested && !cheatsheetRequested && !agentTemplateRequested) {
     (function(args, explicitKeys) {
       if (args.__modeApplied === true) return
       if (!isString(args.mode)) return
@@ -481,6 +496,8 @@ try {
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
+    agent          : { type: "string", description: "Markdown agent profile path or inline content with YAML metadata to prefill args" },
+    agentfile      : { type: "string", description: "Legacy alias for agent" },
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
@@ -598,7 +615,8 @@ try {
       { option: "resume=true", description: "Resume a previous conversation (interactive picker when usehistory=true)." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." },
-      { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." }
+      { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." },
+      { option: "--agent", description: "Print a starter agent markdown template and exit." }
     ]
 
     var maxOptionLength = options.reduce(function(max, opt) {
@@ -635,6 +653,47 @@ try {
 
   if (helpRequested) {
     printCliHelp()
+    exit(0)
+  }
+
+  function printAgentTemplate() {
+    var lines = [
+      "---",
+      "name: my-agent",
+      "description: What this agent does",
+      "model: \"(type: openai, model: gpt-5-mini, key: '...')\"",
+      "capabilities:",
+      "  - useutils",
+      "  - usetools",
+      "  # - useshell",
+      "  # - readwrite",
+      "mini-a:",
+      "  useplanning: true",
+      "  usestream: false",
+      "tools:",
+      "  - type: ojob",
+      "    options:",
+      "      job: mcps/mcp-time.yaml",
+      "  # - type: remote",
+      "  #   url: http://localhost:9090/mcp",
+      "constraints:",
+      "  - Prefer tool-grounded answers.",
+      "  - Be explicit when information is missing.",
+      "knowledge: |",
+      "  Add domain-specific context here.",
+      "youare: |",
+      "  You are a specialized AI agent focused on <domain>.",
+      "---",
+      "",
+      "# Optional goal notes",
+      "- Put reusable mission guidance here."
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
+  if (agentTemplateRequested) {
+    printAgentTemplate()
     exit(0)
   }
 

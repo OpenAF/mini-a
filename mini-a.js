@@ -11880,12 +11880,165 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
   this._applySystemInstructions(args)
 }
 
+MiniA.prototype._toAgentList = function(value) {
+  if (isArray(value)) return value
+  if (isString(value) && value.trim().length > 0) return [ value ]
+  return []
+}
+
+MiniA.prototype._parseAgentMetadata = function(content) {
+  if (!isString(content)) return __
+  var text = content.replace(/\r\n/g, "\n")
+  var frontmatterMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/)
+  if (isArray(frontmatterMatch) && frontmatterMatch.length > 1) {
+    var parsedMeta = af.fromYAML(frontmatterMatch[1])
+    return isMap(parsedMeta) ? parsedMeta : __
+  }
+  var parsedWhole = af.fromYAML(text)
+  return isMap(parsedWhole) ? parsedWhole : __
+}
+
+MiniA.prototype._appendRulesFromConstraints = function(existingRules, constraints) {
+  var entries = []
+  if (isArray(constraints)) {
+    entries = constraints
+  } else if (isString(constraints) && constraints.trim().length > 0) {
+    entries = [ constraints ]
+  }
+  entries = entries
+    .map(function(item) { return isDef(item) ? String(item).trim() : "" })
+    .filter(function(item) { return item.length > 0 })
+  if (entries.length === 0) return existingRules
+
+  var formatted = entries.map(function(item) { return "- " + item }).join("\n")
+  if (!isString(existingRules) || existingRules.trim().length === 0) return formatted
+  return existingRules + "\n" + formatted
+}
+
+MiniA.prototype._mergeAgentToolsIntoMcp = function(existingMcp, tools, sourceLabel) {
+  var normalizedTools = []
+  this._toAgentList(tools).forEach(tool => {
+    if (!isMap(tool)) return
+    var kind = isString(tool.type) ? tool.type.trim().toLowerCase() : ""
+    if (kind === "ojob") {
+      var entry = { type: "ojob", options: {} }
+      if (isMap(tool.options)) entry.options = merge(entry.options, tool.options)
+      if (isString(tool.job) && tool.job.trim().length > 0 && isUnDef(entry.options.job)) entry.options.job = tool.job.trim()
+      if (!isString(entry.options.job) || entry.options.job.trim().length === 0) {
+        this.fnI("warn", "Ignoring agent ojob tool without options.job.")
+        return
+      }
+      normalizedTools.push(entry)
+      return
+    }
+    if (kind === "remote" || kind === "sse") {
+      if (!isString(tool.url) || tool.url.trim().length === 0) {
+        this.fnI("warn", "Ignoring agent " + kind + " tool without url.")
+        return
+      }
+      normalizedTools.push({ type: kind, url: tool.url.trim() })
+      return
+    }
+    this.fnI("warn", "Ignoring unsupported agent tool type '" + kind + "'.")
+  })
+
+  if (normalizedTools.length === 0) return existingMcp
+
+  var current = existingMcp
+  if (isString(current) && current.trim().length > 0) {
+    try {
+      current = af.fromJSSLON(current)
+    } catch(e) {
+      this.fnI("warn", "Couldn't parse existing mcp value while applying " + sourceLabel + ". Appending tools only.")
+      current = __
+    }
+  }
+
+  var merged = []
+  if (isArray(current)) merged = current.slice(0)
+  else if (isMap(current)) merged = [ current ]
+  merged = merged.concat(normalizedTools)
+  return merged
+}
+
+MiniA.prototype._applyAgentMetadata = function(args) {
+  if (!isMap(args)) return
+  if (!isString(args.agent) && isString(args.agentfile)) args.agent = args.agentfile
+  if (!isString(args.agent) || args.agent.trim().length === 0) return
+
+  var rawAgent = args.agent.trim()
+  var sourceLabel = "inline agent"
+  if (rawAgent.indexOf("\n") < 0 && io.fileExists(rawAgent) && io.fileInfo(rawAgent).isFile) {
+    sourceLabel = "agent: " + rawAgent
+    rawAgent = io.readFileString(rawAgent)
+  }
+
+  var metadata = __
+  try {
+    metadata = this._parseAgentMetadata(rawAgent)
+  } catch(e) {
+    this.fnI("warn", "Couldn't parse " + sourceLabel + " metadata: " + e.message)
+    return
+  }
+  if (!isMap(metadata)) {
+    this.fnI("warn", "No valid YAML metadata found in " + sourceLabel + ".")
+    return
+  }
+
+  if (isUnDef(args.model) && isDef(metadata.model)) {
+    args.model = isMap(metadata.model) ? af.toSLON(metadata.model) : String(metadata.model)
+  }
+  if ((isUnDef(args.youare) || !isString(args.youare) || args.youare.trim().length === 0) && isDef(metadata.youare)) {
+    args.youare = isArray(metadata.youare) ? metadata.youare.join("\n") : String(metadata.youare)
+  }
+  if ((isUnDef(args.knowledge) || !isString(args.knowledge) || args.knowledge.trim().length === 0) && isDef(metadata.knowledge)) {
+    args.knowledge = isArray(metadata.knowledge) ? metadata.knowledge.join("\n") : String(metadata.knowledge)
+  }
+  if (isDef(metadata.constraints)) {
+    args.rules = this._appendRulesFromConstraints(args.rules, metadata.constraints)
+  }
+  if (isDef(metadata.rules) && (!isString(args.rules) || args.rules.trim().length === 0)) {
+    args.rules = isArray(metadata.rules) ? metadata.rules.join("\n") : String(metadata.rules)
+  }
+  if (isDef(metadata.capabilities)) {
+    this._toAgentList(metadata.capabilities).forEach(capability => {
+      var name = isDef(capability) ? String(capability).trim().toLowerCase() : ""
+      if (name === "useshell" && isUnDef(args.useshell)) args.useshell = true
+      if (name === "readwrite" && isUnDef(args.readwrite)) args.readwrite = true
+      if (name === "useutils" && isUnDef(args.useutils)) args.useutils = true
+      if (name === "usetools" && isUnDef(args.usetools)) args.usetools = true
+    })
+  }
+  if (isDef(metadata.tools)) {
+    args.mcp = this._mergeAgentToolsIntoMcp(args.mcp, metadata.tools, sourceLabel)
+    if (isUnDef(args.usetools) && isArray(args.mcp) && args.mcp.length > 0) args.usetools = true
+  }
+
+  var miniAOverrides = metadata["mini-a"]
+  if (isMap(miniAOverrides)) {
+    Object.keys(miniAOverrides).forEach(key => {
+      if (!isString(key) || key.length === 0) return
+      if (key.toLowerCase() === "agent" || key.toLowerCase() === "agentfile") return
+      args[key] = miniAOverrides[key]
+    })
+  }
+}
+
 // ============================================================================
 // MAIN METHODS
 // ============================================================================
 
 MiniA.prototype.init = function(args) {
   args = _$(args, "args").isMap().default({})
+  var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
+  this._applyAgentMetadata(args)
+  if (isMap(explicitExternalArgs)) {
+    Object.keys(explicitExternalArgs).forEach(key => {
+      var normalized = isString(key) ? key.toLowerCase() : ""
+      if (normalized === "agent" || normalized === "agentfile") return
+      args[key] = explicitExternalArgs[key]
+    })
+  }
   // Set default format before any other logic
   if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
   if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
@@ -11978,7 +12131,9 @@ MiniA.prototype.init = function(args) {
       { name: "mcpprogcallmaxbytes", type: "number", default: 4096 },
       { name: "mcpprogcallresultttl", type: "number", default: 600 },
       { name: "mcpprogcalltools", type: "string", default: "" },
-      { name: "mcpprogcallbatchmax", type: "number", default: 10 }
+      { name: "mcpprogcallbatchmax", type: "number", default: 10 },
+      { name: "agent", type: "string", default: __ },
+      { name: "agentfile", type: "string", default: __ }
     ])
 
     // Convert and validate boolean arguments

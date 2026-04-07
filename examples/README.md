@@ -2,6 +2,12 @@
 
 This folder contains runnable examples that showcase how to use the mini-a (Mini Agent) with OpenAF oJob workflows.
 
+Each `*.yaml` example now has a parallel `*.agent.md` file with YAML frontmatter so you can run equivalent setups via:
+
+```sh
+mini-a agent=examples/<name>.agent.md goal="..."
+```
+
 ## Prerequisites
 
 All examples require:
