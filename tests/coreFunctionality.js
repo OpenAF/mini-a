@@ -881,6 +881,8 @@
     ow.test.assert(envelope.routeUsed === MiniAToolRouter.ROUTES.UTILITY_WRAPPER, true, "Envelope should preserve route metadata")
     ow.test.assert(envelope.timing.durationMs === 12, true, "Envelope should preserve timing metadata")
     ow.test.assert(isArray(envelope.evidence) && envelope.evidence.length === 1, true, "Envelope should preserve evidence references")
+  }
+
   exports.testWorkingMemoryInitializationFromState = function() {
     var agent = createAgent()
     agent._agentState = {
@@ -920,11 +922,11 @@
     agent._memoryAppend("decisions", "Persist this decision", { provenance: { source: "test" } })
     agent._persistWorkingMemory("test")
 
-    var snapshotEntry = $ch(channelName).get({ key: "snapshot" })
-    ow.test.assert(isMap(snapshotEntry), true, "Memory persistence should write snapshot to channel")
-    ow.test.assert(isMap(snapshotEntry.sections), true, "Snapshot should contain sections")
-    ow.test.assert(isArray(snapshotEntry.sections.decisions) && snapshotEntry.sections.decisions.length >= 1, true, "Snapshot should include persisted decision")
-    ow.test.assert(snapshotEntry.sections.decisions.some(function(d) { return d.value === "Persist this decision" }), true, "Persisted decision value should be present in snapshot")
+    var metaEntry = $ch(channelName).get({ section: "_meta", ns: "" })
+    var decisionsEntry = $ch(channelName).get({ section: "decisions", ns: "" })
+    ow.test.assert(isMap(metaEntry), true, "Memory persistence should write metadata to channel")
+    ow.test.assert(isArray(decisionsEntry) && decisionsEntry.length >= 1, true, "Channel should include persisted decisions")
+    ow.test.assert(decisionsEntry.some(function(d) { return d.value === "Persist this decision" }), true, "Persisted decision value should be present in channel data")
 
     var second = createAgent()
     second._agentState = {}
@@ -946,9 +948,13 @@
     first._memoryAppend("facts", "session-only fact", { provenance: { source: "test" }, memoryScope: "session" })
     first._persistWorkingMemory("test")
 
-    var snapshotEntry = $ch(channelName).get({ key: "snapshot" })
-    ow.test.assert(isMap(snapshotEntry), true, "Memory persistence should still write a snapshot object")
-    ow.test.assert(snapshotEntry.sections.facts.some(function(f) { return f.value === "session-only fact" }), false, "Session-scoped writes should not be persisted to the global channel snapshot")
+    var globalMetaEntry = $ch(channelName).get({ section: "_meta", ns: "" })
+    var globalFactsEntry = $ch(channelName).get({ section: "facts", ns: "" })
+    var sessionFactsEntry = $ch(channelName).get({ section: "facts", ns: "session-a" })
+    ow.test.assert(isMap(globalMetaEntry), true, "Memory persistence should still write global metadata to channel")
+    ow.test.assert(isArray(globalFactsEntry), true, "Global channel facts section should exist")
+    ow.test.assert(globalFactsEntry.some(function(f) { return f.value === "session-only fact" }), false, "Session-scoped writes should not be persisted to the global channel data")
+    ow.test.assert(isArray(sessionFactsEntry) && sessionFactsEntry.some(function(f) { return f.value === "session-only fact" }), true, "Session-scoped writes should persist under the session namespace")
 
     var second = createAgent()
     second._agentState = {}

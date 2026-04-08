@@ -54,8 +54,23 @@ try {
     return found
   }
 
+  function hasAgentTemplateFlag(map) {
+    if (!isObject(map)) return false
+    var found = false
+    Object.keys(map).some(function(key) {
+      var normalized = String(key || "").toLowerCase()
+      if (normalized === "--agent" || (normalized === "agent" && toBoolean(map[key]) === true)) {
+        found = true
+        return true
+      }
+      return false
+    })
+    return found
+  }
+
   var helpRequested = hasHelpFlag(args)
   var cheatsheetRequested = hasCheatsheetFlag(args)
+  var agentTemplateRequested = hasAgentTemplateFlag(args)
 
   // Init
   if (!(isString(args.libs) && args.libs.trim().length > 0)) {
@@ -72,7 +87,7 @@ try {
     if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
   }
 
-  if (!helpRequested && !cheatsheetRequested) {
+  if (!helpRequested && !cheatsheetRequested && !agentTemplateRequested) {
     (function(args, explicitKeys) {
       if (args.__modeApplied === true) return
       if (!isString(args.mode)) return
@@ -224,9 +239,10 @@ try {
       // Start web mode
       oJobRunFile(miniABasePath + "/mini-a-web.yaml", args, genUUID(), __, false)
       exit(0)
-    } else if (isDef(args.goal) && hasRunnableExecArg !== true) {
+    } else if ((isDef(args.goal) || isDef(args.agent) || isDef(args.agentfile)) && hasRunnableExecArg !== true) {
       // Start cli mode
       if (!isString(args.goal)) args.goal = String(args.goal)
+      if (!isDef(args.goal) || args.goal === "undefined" || args.goal === "null") args.goal = ""
       oJobRunFile(miniABasePath + "/mini-a.yaml", args, genUUID(), __, false)
       exit(0)
     }
@@ -481,6 +497,8 @@ try {
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
+    agent          : { type: "string", description: "Markdown agent profile path or inline content with YAML metadata to prefill args" },
+    agentfile      : { type: "string", description: "Legacy alias for agent" },
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
@@ -590,6 +608,7 @@ try {
       { option: "mode=<name>", description: "Apply one of the presets defined in mini-a-modes." },
       { option: "libs=<list>", description: "Comma-separated libs to load before launching." },
       { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
+      { option: "agent=<path|markdown>", description: "Run with an agent profile in CLI mode and exit instead of opening the console." },
       { option: "exec=\"/<cmd> ...args\"", description: "Execute one custom command/skill template and exit (use /cmd or $skill)." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
@@ -598,7 +617,8 @@ try {
       { option: "resume=true", description: "Resume a previous conversation (interactive picker when usehistory=true)." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." },
-      { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." }
+      { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." },
+      { option: "--agent", description: "Print a starter agent markdown template and exit." }
     ]
 
     var maxOptionLength = options.reduce(function(max, opt) {
@@ -635,6 +655,140 @@ try {
 
   if (helpRequested) {
     printCliHelp()
+    exit(0)
+  }
+
+  function printAgentTemplate() {
+    var lines = [
+      "---",
+      "# Mini-A Agent File Template",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "# This file defines a reusable Mini-A agent profile using YAML front-matter.",
+      "# Run it with:  mini-a agent=<this-file>.md  goal=\"your goal here\"",
+      "# Or inline:    mini-a agent=\"---\\nname: quick\\n...\\n---\" goal=\"...\"",
+      "#",
+      "# Reference docs:",
+      "#   Full parameter catalog      → USAGE.md",
+      "#   Quick parameter reference   → CHEATSHEET.md  (or: mini-a --cheatsheet)",
+      "#   Agent file key mapping      → AGENT-CHEATSHEET.md",
+      "#   Performance optimizations   → docs/OPTIMIZATIONS.md",
+      "#   Multi-agent delegation      → docs/DELEGATION.md",
+      "#   Available built-in MCPs     → mcps/README.md",
+      "#   Feature overview & examples → README.md",
+      "#   What's new / changelog      → docs/WHATS-NEW.md",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "",
+      "# ── Identity ────────────────────────────────────────────────────────────────",
+      "# Metadata-only; used for display and logging.",
+      "name        : my-agent",
+      "description : What this agent does",
+      "",
+      "# ── Model ───────────────────────────────────────────────────────────────────",
+      "# Override the OAF_MODEL env-var for this agent.",
+      "# Leave commented to inherit from the environment.",
+      "# See USAGE.md § 'Model Configuration' for all model type options.",
+      "#model       : \"(type: openai, model: gpt-4o, key: 'sk-...')\"",
+      "",
+      "# ── Capabilities ────────────────────────────────────────────────────────────",
+      "# Enable/disable built-in capability bundles.",
+      "# See USAGE.md § 'Capabilities' for what each flag enables.",
+      "#   useutils  → file ops, math, time, user-input tool (mini-a-utils.js)",
+      "#   usetools  → registers tools/MCPs listed in the 'tools' section below",
+      "#   useshell  → allow POSIX shell commands (disabled by default for safety)",
+      "#   readwrite → grant file read+write permissions when useshell=true",
+      "capabilities:",
+      "  - useutils",
+      "  - usetools",
+      "  # - useshell    # uncomment to allow shell execution",
+      "  # - readwrite   # uncomment to allow file reads and writes via shell",
+      "",
+      "# ── MCP Tools ───────────────────────────────────────────────────────────────",
+      "# List MCP connections to expose to the agent.",
+      "# See mcps/README.md for the full built-in catalog.",
+      "# See USAGE.md § 'MCP Integration' for all connection types and options.",
+      "tools:",
+      "  # Built-in MCP launched as a local ojob process:",
+      "  - type   : ojob",
+      "    options:",
+      "      job  : mcps/mcp-time.yaml",
+      "  # Remote SSE MCP server (e.g. another mini-a instance or external service):",
+      "  # - type : sse",
+      "  #   url  : http://localhost:9090/mcp",
+      "  # Streamable HTTP MCP server:",
+      "  # - type : remote",
+      "  #   url  : http://localhost:9090/mcp",
+      "  # Inline stdio MCP process:",
+      "  # - type : stdio",
+      "  #   cmd  : npx -y @modelcontextprotocol/server-filesystem /tmp",
+      "",
+      "# ── Constraints ─────────────────────────────────────────────────────────────",
+      "# Behavioural rules appended to the agent's system prompt.",
+      "# See USAGE.md § 'Knowledge and Context' for rules vs knowledge vs youare.",
+      "constraints:",
+      "  - Prefer tool-grounded answers over assumptions.",
+      "  - Be explicit when information is missing or uncertain.",
+      "  # - Answer in JSON without any markdown code blocks.",
+      "  # - Never reveal internal reasoning or tool call details.",
+      "",
+      "# ── Domain Knowledge ────────────────────────────────────────────────────────",
+      "# Static context injected into the system prompt at session start.",
+      "# Can be a literal string, a multiline block, or a filename to load.",
+      "# See USAGE.md § 'Knowledge and Context' for details.",
+      "#knowledge   : |",
+      "#  Add domain-specific background here.",
+      "#  Can also point to a file: knowledge: @docs/context.md",
+      "",
+      "# ── Persona ──────────────────────────────────────────────────────────────────",
+      "# Replaces the default 'You are a helpful assistant' opening in the system prompt.",
+      "#youare      : |",
+      "#  You are a specialized AI agent focused on <domain>.",
+      "#  You have deep expertise in <topic> and always cite sources.",
+      "",
+      "# ── Mini-A Overrides ────────────────────────────────────────────────────────",
+      "# Any Mini-A CLI parameter can go here as a key-value map.",
+      "# These override environment defaults but are overridden by CLI args.",
+      "# Run 'mini-a --cheatsheet' or see CHEATSHEET.md for the full parameter list.",
+      "# Run 'mini-a -h' for a live parameter table with current defaults.",
+      "#mini-a:",
+      "#  # ── Output ───────────────────────────────────────────────────────────",
+      "#  format       : json        # output format: text (default), json, yaml",
+      "#  outfile      : result.json # write final answer to this file",
+      "#  valgoal      : \"Answer must be a valid JSON object with key 'time'.\"",
+      "#                             # post-run assertion checked against the output",
+      "#  maxcycles    : 3           # hard limit on agent steps",
+      "#",
+      "#  # ── Cost Control ─────────────────────────────────────────────────────",
+      "#  lcbudget          : 100000 # token budget for the low-cost model",
+      "#  systempromptbudget: 4000   # max tokens for the system prompt",
+      "#",
+      "#  # ── Context & Memory ─────────────────────────────────────────────────",
+      "#  maxcontext   : 60000       # trim context when it exceeds this token count",
+      "#  usehistory   : true        # persist conversation history between sessions",
+      "#  usememory    : true        # enable structured working memory",
+      "#",
+      "#  # ── Streaming ─────────────────────────────────────────────────────────",
+      "#  usestream    : true        # stream tokens as they arrive",
+      "#",
+      "#  # ── Deep Research ─────────────────────────────────────────────────────",
+      "#  deepresearch : true        # iterative research-validate loop",
+      "#  maxresearch  : 3           # max validation cycles",
+      "#",
+      "#  # ── Delegation (see docs/DELEGATION.md) ──────────────────────────────",
+      "#  usedelegation: true        # enable parallel sub-agent delegation",
+      "#",
+      "# ── Goal ─────────────────────────────────────────────────────────────────────",
+      "# The body below the front-matter is the default goal when none is given on",
+      "# the command line.  Replace with your actual task.",
+      "---",
+      "",
+      "What is the current time?"
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
+  if (agentTemplateRequested) {
+    printAgentTemplate()
     exit(0)
   }
 

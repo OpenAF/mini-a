@@ -5638,10 +5638,10 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
     if (!isArray(nodes)) return
     nodes.forEach(node => {
       if (!isObject(node)) return
-      var title = isString(node.title) ? node.title : stringify(node, __, "")
+      var title = isString(node.title) ? node.title : (isString(node.task) ? node.task : stringify(node, __, ""))
       var requires = []
       if (isArray(node.requires)) requires = node.requires.slice()
-      var text = isString(node.title) ? node.title.toLowerCase() : ""
+      var text = isString(node.title) ? node.title.toLowerCase() : (isString(node.task) ? node.task.toLowerCase() : "")
       if (text.indexOf("tool") >= 0 && availableTools.length === 0) requires.push("mcp_tool")
       if ((/shell|command|script|terminal|cli/.test(text)) && requires.indexOf("shell") < 0) requires.push("shell")
 
@@ -11880,12 +11880,378 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
   this._applySystemInstructions(args)
 }
 
+MiniA.prototype._toAgentList = function(value) {
+  if (isArray(value)) return value
+  if (isMap(value)) return [ value ]
+  if (isString(value) && value.trim().length > 0) return [ value ]
+  return []
+}
+
+MiniA.prototype._parseAgentMetadata = function(content) {
+  if (!isString(content)) return __
+  var text = content.replace(/\r\n/g, "\n")
+  var frontmatterMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/)
+  if (isArray(frontmatterMatch) && frontmatterMatch.length > 1) {
+    var parsedMeta = af.fromYAML(frontmatterMatch[1])
+    return isMap(parsedMeta) ? parsedMeta : __
+  }
+  var parsedWhole = af.fromYAML(text)
+  return isMap(parsedWhole) ? parsedWhole : __
+}
+
+MiniA.prototype._parseAgentProfileContent = function(content) {
+  if (!isString(content)) return { metadata: __, goal: "" }
+  var text = content.replace(/\r\n/g, "\n")
+  var frontmatterMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/)
+  if (isArray(frontmatterMatch) && frontmatterMatch.length > 1) {
+    var parsedMeta = af.fromYAML(frontmatterMatch[1])
+    var goalText = text.substring(frontmatterMatch[0].length).trim()
+    return {
+      metadata: isMap(parsedMeta) ? parsedMeta : __,
+      goal    : goalText
+    }
+  }
+  return {
+    metadata: this._parseAgentMetadata(text),
+    goal    : ""
+  }
+}
+
+MiniA.prototype._appendRulesFromConstraints = function(existingRules, constraints) {
+  var entries = []
+  if (isArray(constraints)) {
+    entries = constraints
+  } else if (isString(constraints) && constraints.trim().length > 0) {
+    entries = [ constraints ]
+  }
+  entries = entries
+    .map(function(item) { return isDef(item) ? String(item).trim() : "" })
+    .filter(function(item) { return item.length > 0 })
+  if (entries.length === 0) return existingRules
+
+  var formatted = entries.map(function(item) { return "- " + item }).join("\n")
+  if (!isString(existingRules) || existingRules.trim().length === 0) return formatted
+  return existingRules + "\n" + formatted
+}
+
+MiniA.prototype._resolveAgentRelativeFile = function(baseDir, value) {
+  if (!isString(baseDir) || baseDir.trim().length === 0) return value
+  if (!isString(value)) return value
+
+  var original = value
+  var prefix = ""
+  var candidateValue = value.trim()
+  if (candidateValue.length === 0 || candidateValue.indexOf("\n") >= 0) return original
+  if (candidateValue.charAt(0) === "@") {
+    prefix = "@"
+    candidateValue = candidateValue.substring(1).trim()
+    if (candidateValue.length === 0) return original
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidateValue)) return original
+
+  var fileCandidate = new java.io.File(candidateValue)
+  if (fileCandidate.isAbsolute()) return original
+
+  try {
+    var resolved = String(new java.io.File(baseDir, candidateValue).getCanonicalPath())
+    if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) return prefix + resolved
+  } catch(ignoreResolveError) { }
+
+  return original
+}
+
+MiniA.prototype._inspectMcpJobPath = function(jobPath, searchDirs) {
+  var result = { jobPath: jobPath, defaultDir: __ }
+  if (!isString(jobPath)) return result
+
+  var candidate = jobPath.trim()
+  if (candidate.length === 0 || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) return result
+
+  var normalizedDirs = []
+  if (isArray(searchDirs)) {
+    searchDirs.forEach(function(dir) {
+      if (!isString(dir) || dir.trim().length === 0) return
+      try {
+        normalizedDirs.push(String(new java.io.File(dir.trim()).getCanonicalPath()))
+      } catch(ignoreDirError) { }
+    })
+  }
+
+  var fileCandidate = new java.io.File(candidate)
+  if (fileCandidate.isAbsolute()) {
+    try {
+      var canonicalCandidate = String(fileCandidate.getCanonicalPath())
+      for (var ai = 0; ai < normalizedDirs.length; ai++) {
+        var baseDir = normalizedDirs[ai]
+        var prefix = baseDir.endsWith(String(java.io.File.separator)) ? baseDir : baseDir + String(java.io.File.separator)
+        if (canonicalCandidate.indexOf(prefix) === 0) {
+          result.jobPath = canonicalCandidate.substring(prefix.length)
+          result.defaultDir = baseDir
+          return result
+        }
+      }
+    } catch(ignoreAbsoluteError) { }
+    return result
+  }
+
+  for (var i = 0; i < normalizedDirs.length; i++) {
+    try {
+      var resolved = String(new java.io.File(normalizedDirs[i], candidate).getCanonicalPath())
+      if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
+        result.jobPath = candidate
+        result.defaultDir = normalizedDirs[i]
+        return result
+      }
+    } catch(ignoreResolveError) { }
+  }
+
+  return result
+}
+
+MiniA.prototype._normalizeMcpJobPaths = function(mcp, searchDirs) {
+  var current = mcp
+  var wasString = false
+  var preferredDefaultDir = __
+
+  if (isString(current) && current.trim().length > 0) {
+    try {
+      current = af.fromJSSLON(current)
+      wasString = true
+    } catch(ignoreParseError) {
+      return {
+        mcp       : mcp,
+        defaultDir: preferredDefaultDir
+      }
+    }
+  }
+
+  var normalizeEntry = function(entry) {
+    if (!isMap(entry)) return entry
+    if (isString(entry.type) && entry.type.trim().toLowerCase() === "ojob") {
+      if (isMap(entry.options) && isString(entry.options.job)) {
+        var inspectedOptionsJob = this._inspectMcpJobPath(entry.options.job, searchDirs)
+        entry.options.job = inspectedOptionsJob.jobPath
+        if (isUnDef(preferredDefaultDir) && isString(inspectedOptionsJob.defaultDir) && inspectedOptionsJob.defaultDir.length > 0) {
+          preferredDefaultDir = inspectedOptionsJob.defaultDir
+        }
+      }
+      if (isString(entry.job)) {
+        var inspectedJob = this._inspectMcpJobPath(entry.job, searchDirs)
+        entry.job = inspectedJob.jobPath
+        if (isUnDef(preferredDefaultDir) && isString(inspectedJob.defaultDir) && inspectedJob.defaultDir.length > 0) {
+          preferredDefaultDir = inspectedJob.defaultDir
+        }
+      }
+    }
+    return entry
+  }.bind(this)
+
+  if (isArray(current)) current = current.map(normalizeEntry)
+  else if (isMap(current)) current = normalizeEntry(current)
+
+  return {
+    mcp       : wasString ? af.toSLON(current) : current,
+    defaultDir: preferredDefaultDir
+  }
+}
+
+MiniA.prototype._rebaseAgentMetadataPaths = function(metadata, baseDir) {
+  if (!isMap(metadata) || !isString(baseDir) || baseDir.trim().length === 0) return metadata
+
+  ;[ "knowledge", "youare", "chatyouare", "rules" ].forEach(function(key) {
+    if (isString(metadata[key])) metadata[key] = this._resolveAgentRelativeFile(baseDir, metadata[key])
+  }.bind(this))
+
+  this._toAgentList(metadata.tools).forEach(function(tool) {
+    if (!isMap(tool)) return
+    var kind = isString(tool.type) ? tool.type.trim().toLowerCase() : ""
+    if (kind !== "ojob") return
+  }.bind(this))
+
+  var miniAOverrides = metadata["mini-a"]
+  if (isMap(miniAOverrides)) {
+    ;[ "goal", "knowledge", "youare", "chatyouare", "rules", "validationgoal", "valgoal" ].forEach(function(key) {
+      if (isString(miniAOverrides[key])) miniAOverrides[key] = this._resolveAgentRelativeFile(baseDir, miniAOverrides[key])
+    }.bind(this))
+  }
+
+  return metadata
+}
+
+MiniA.prototype._mergeAgentToolsIntoMcp = function(existingMcp, tools, sourceLabel) {
+  var normalizedTools = []
+  this._toAgentList(tools).forEach(tool => {
+    if (!isMap(tool)) return
+    var kind = isString(tool.type) ? tool.type.trim().toLowerCase() : ""
+    if (kind === "stdio") {
+      if (!isString(tool.cmd) || tool.cmd.trim().length === 0) {
+        this.fnI("warn", "Ignoring agent stdio tool without cmd.")
+        return
+      }
+      var stdioEntry = { cmd: tool.cmd.trim() }
+      if (isDef(tool.timeout)) stdioEntry.timeout = tool.timeout
+      if (isDef(tool.name)) stdioEntry.name = tool.name
+      if (isDef(tool.shared)) stdioEntry.shared = tool.shared
+      if (isDef(tool.clientinfo)) stdioEntry.clientInfo = tool.clientinfo
+      if (isDef(tool.clientInfo)) stdioEntry.clientInfo = tool.clientInfo
+      if (isDef(tool.auth)) stdioEntry.auth = tool.auth
+      if (isDef(tool.strict)) stdioEntry.strict = tool.strict
+      if (isDef(tool.blacklist)) stdioEntry.blacklist = tool.blacklist
+      normalizedTools.push(stdioEntry)
+      return
+    }
+    if (kind === "ojob") {
+      var entry = { type: "ojob", options: {} }
+      if (isMap(tool.options)) entry.options = merge(entry.options, tool.options)
+      if (isString(tool.job) && tool.job.trim().length > 0 && isUnDef(entry.options.job)) entry.options.job = tool.job.trim()
+      if (!isString(entry.options.job) || entry.options.job.trim().length === 0) {
+        this.fnI("warn", "Ignoring agent ojob tool without options.job.")
+        return
+      }
+      normalizedTools.push(entry)
+      return
+    }
+    if (kind === "remote" || kind === "sse") {
+      if (!isString(tool.url) || tool.url.trim().length === 0) {
+        this.fnI("warn", "Ignoring agent " + kind + " tool without url.")
+        return
+      }
+      normalizedTools.push({ type: kind, url: tool.url.trim() })
+      return
+    }
+    this.fnI("warn", "Ignoring unsupported agent tool type '" + kind + "'.")
+  })
+
+  if (normalizedTools.length === 0) return existingMcp
+
+  var current = existingMcp
+  if (isString(current) && current.trim().length > 0) {
+    try {
+      current = af.fromJSSLON(current)
+    } catch(e) {
+      this.fnI("warn", "Couldn't parse existing mcp value while applying " + sourceLabel + ". Appending tools only.")
+      current = __
+    }
+  }
+
+  var merged = []
+  if (isArray(current)) merged = current.slice(0)
+  else if (isMap(current)) merged = [ current ]
+  merged = merged.concat(normalizedTools)
+  return merged
+}
+
+MiniA.prototype._applyAgentMetadata = function(args) {
+  if (!isMap(args)) return
+  if (!isString(args.agent) && isString(args.agentfile)) args.agent = args.agentfile
+  if (!isString(args.agent) || args.agent.trim().length === 0) return
+
+  var rawAgent = args.agent.trim()
+  var sourceLabel = "inline agent"
+  var agentBaseDir = __
+  if (rawAgent.indexOf("\n") < 0 && io.fileExists(rawAgent) && io.fileInfo(rawAgent).isFile) {
+    sourceLabel = "agent: " + rawAgent
+    try {
+      agentBaseDir = String(new java.io.File(rawAgent).getCanonicalFile().getParent())
+      if (isString(agentBaseDir) && agentBaseDir.trim().length > 0 && isUnDef(args._agentBaseDir)) {
+        args._agentBaseDir = agentBaseDir
+      }
+    } catch(ignoreAgentBaseDirError) { }
+    rawAgent = io.readFileString(rawAgent)
+  }
+
+  var parsedAgent = __
+  var metadata = __
+  try {
+    parsedAgent = this._parseAgentProfileContent(rawAgent)
+    metadata = isMap(parsedAgent) ? parsedAgent.metadata : __
+    if (isMap(metadata)) metadata = this._rebaseAgentMetadataPaths(metadata, agentBaseDir)
+    if (isMap(parsedAgent) && isString(parsedAgent.goal)) parsedAgent.goal = this._resolveAgentRelativeFile(agentBaseDir, parsedAgent.goal)
+  } catch(e) {
+    this.fnI("warn", "Couldn't parse " + sourceLabel + " metadata: " + e.message)
+    return
+  }
+  if (!isMap(metadata)) {
+    this.fnI("warn", "No valid YAML metadata found in " + sourceLabel + ".")
+    return
+  }
+
+  if ((!isString(args.goal) || args.goal.trim().length === 0) && isMap(parsedAgent) && isString(parsedAgent.goal) && parsedAgent.goal.length > 0) {
+    args.goal = parsedAgent.goal
+  }
+
+  if (isUnDef(args.model) && isDef(metadata.model)) {
+    args.model = isMap(metadata.model) ? af.toSLON(metadata.model) : String(metadata.model)
+  }
+  if ((isUnDef(args.youare) || !isString(args.youare) || args.youare.trim().length === 0) && isDef(metadata.youare)) {
+    args.youare = isArray(metadata.youare) ? metadata.youare.join("\n") : String(metadata.youare)
+  }
+  if ((isUnDef(args.knowledge) || !isString(args.knowledge) || args.knowledge.trim().length === 0) && isDef(metadata.knowledge)) {
+    args.knowledge = isArray(metadata.knowledge) ? metadata.knowledge.join("\n") : String(metadata.knowledge)
+  }
+  if (isDef(metadata.rules) && (!isString(args.rules) || args.rules.trim().length === 0)) {
+    args.rules = isArray(metadata.rules) ? metadata.rules.join("\n") : String(metadata.rules)
+  }
+  if (isDef(metadata.constraints)) {
+    args.rules = this._appendRulesFromConstraints(args.rules, metadata.constraints)
+  }
+  if (isDef(metadata.capabilities)) {
+    this._toAgentList(metadata.capabilities).forEach(capability => {
+      var name = isDef(capability) ? String(capability).trim().toLowerCase() : ""
+      if (name === "useshell" && isUnDef(args.useshell)) args.useshell = true
+      if (name === "readwrite" && isUnDef(args.readwrite)) args.readwrite = true
+      if (name === "useutils" && isUnDef(args.useutils)) args.useutils = true
+      if (name === "usetools" && isUnDef(args.usetools)) args.usetools = true
+    })
+  }
+  if (isDef(metadata.tools)) {
+    args.mcp = this._mergeAgentToolsIntoMcp(args.mcp, metadata.tools, sourceLabel)
+    if (isUnDef(args.usetools) && isArray(args.mcp) && args.mcp.length > 0) args.usetools = true
+  }
+
+  var miniAOverrides = metadata["mini-a"]
+  if (isMap(miniAOverrides)) {
+    Object.keys(miniAOverrides).forEach(key => {
+      if (!isString(key) || key.length === 0) return
+      if (key.toLowerCase() === "agent" || key.toLowerCase() === "agentfile") return
+      args[key] = miniAOverrides[key]
+    })
+  }
+}
+
 // ============================================================================
 // MAIN METHODS
 // ============================================================================
 
 MiniA.prototype.init = function(args) {
   args = _$(args, "args").isMap().default({})
+  var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
+  this._applyAgentMetadata(args)
+  if (isMap(explicitExternalArgs)) {
+    Object.keys(explicitExternalArgs).forEach(key => {
+      var normalized = isString(key) ? key.toLowerCase() : ""
+      if (normalized === "agent" || normalized === "agentfile") return
+      if (normalized === "goal") {
+        var explicitGoal = explicitExternalArgs[key]
+        var explicitGoalText = isDef(explicitGoal) && explicitGoal !== null ? String(explicitGoal).trim() : ""
+        if (explicitGoalText.length === 0 && isString(args.goal) && args.goal.trim().length > 0) return
+      }
+      args[key] = explicitExternalArgs[key]
+    })
+  }
+  var currentWorkingDir = __
+  try {
+    currentWorkingDir = String((new java.io.File(".")).getCanonicalPath())
+  } catch(ignoreCurrentDirError) { }
+  var normalizedMcp = this._normalizeMcpJobPaths(args.mcp, [
+    currentWorkingDir,
+    isString(args._agentBaseDir) ? args._agentBaseDir : __,
+    getOPackPath("mini-a")
+  ])
+  args.mcp = normalizedMcp.mcp
+  if (isString(normalizedMcp.defaultDir) && normalizedMcp.defaultDir.trim().length > 0) {
+    args._mcpDefaultDir = normalizedMcp.defaultDir.trim()
+  }
   // Set default format before any other logic
   if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
   if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
@@ -11978,7 +12344,9 @@ MiniA.prototype.init = function(args) {
       { name: "mcpprogcallmaxbytes", type: "number", default: 4096 },
       { name: "mcpprogcallresultttl", type: "number", default: 600 },
       { name: "mcpprogcalltools", type: "string", default: "" },
-      { name: "mcpprogcallbatchmax", type: "number", default: 10 }
+      { name: "mcpprogcallbatchmax", type: "number", default: 10 },
+      { name: "agent", type: "string", default: __ },
+      { name: "agentfile", type: "string", default: __ }
     ])
 
     // Convert and validate boolean arguments
@@ -12150,7 +12518,10 @@ MiniA.prototype.init = function(args) {
     if (!args.nosetmcpwd) {
       if (isUnDef(__flags.JSONRPC)) __flags.JSONRPC = {}
       if (isUnDef(__flags.JSONRPC.cmd)) __flags.JSONRPC.cmd = {}
-      __flags.JSONRPC.cmd.defaultDir = getOPackPath("mini-a")
+      var mcpDefaultDir = getOPackPath("mini-a")
+      if (isString(args._mcpDefaultDir) && args._mcpDefaultDir.trim().length > 0) mcpDefaultDir = args._mcpDefaultDir.trim()
+      else if (isString(args._agentBaseDir) && args._agentBaseDir.trim().length > 0) mcpDefaultDir = args._agentBaseDir.trim()
+      __flags.JSONRPC.cmd.defaultDir = mcpDefaultDir
     }
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""

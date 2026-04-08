@@ -50,8 +50,10 @@
     var goal = "Summarize repository README"
     agent._planningAssessment = agent._assessGoalComplexity(goal)
     var plan = agent._generateInitialPlan(goal, "simple", { useshell: false })
-    ow.test.assert(plan.strategy === "simple", true, "Should build simple strategy plan")
-    ow.test.assert(isArray(plan.steps) && plan.steps.length >= 3, true, "Simple plan should have steps")
+    ow.test.assert(plan.version === 3, true, "Default plan style should build version 3 plans")
+    ow.test.assert(plan.meta.style === "simple", true, "Default plan style should mark simple metadata")
+    ow.test.assert(isArray(plan.steps) && plan.steps.length >= 1, true, "Simple plan should have at least one step")
+    ow.test.assert(plan.steps[0].task === goal, true, "Single-part goals should remain a single task")
     var hasChildren = plan.steps.some(s => isArray(s.children) && s.children.length > 0)
     ow.test.assert(hasChildren === false, true, "Simple plan should not have nested children")
   }
@@ -60,7 +62,7 @@
     var agent = createAgent()
     var goal = "Implement feature toggle and write integration tests, then document rollout procedure"
     agent._planningAssessment = agent._assessGoalComplexity(goal)
-    var plan = agent._generateInitialPlan(goal, "tree", { useshell: false })
+    var plan = agent._generateInitialPlan(goal, "tree", { useshell: false, planstyle: "legacy" })
     ow.test.assert(plan.strategy === "tree", true, "Should build decomposed plan")
     ow.test.assert(isArray(plan.steps) && plan.steps.length > 0, true, "Tree plan should have steps")
     var first = plan.steps[0]

@@ -782,6 +782,7 @@ The `start()` method accepts various configuration options:
 - **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
 - **`memorydedup`** (boolean, default: true): Deduplicate near-identical entries during append.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
+- **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
 #### Dual-Model Controls
 - **`modellc`** (string): Override the low-cost model configuration at runtime (same format as `OAF_LC_MODEL`). Useful for quick per-run model selection without changing environment variables.
