@@ -543,24 +543,36 @@ Respond with JSON...
 
 ## Metrics and Observability
 
-All optimizations are tracked in Mini-A metrics:
+All optimizations expose counters through `MiniA.getMetrics()` and are registered under the `mini-a` namespace in the OpenAF metrics registry, making them available to Prometheus/Grafana scrapers.
 
 ```javascript
-// Context management
-context_summarizations: Number of times context was compressed
-summaries_tokens_reduced: Total tokens saved
+var agent = new MiniA()
+agent.start({ goal: "...", useshell: true })
+log(agent.getMetrics())
 
-// Escalation
-escalations: Times escalated from low-cost to main model
-llm_lc_calls: Low-cost model usage
-llm_normal_calls: Main model usage
-
-// Tool execution
-tool_cache_hits: Cached tool results
-tool_cache_misses: Fresh tool calls
+// Poll OpenAF registry from another job:
+// ow.metrics.get("mini-a")
 ```
 
-Access metrics programmatically or through verbose logging.
+The table below lists the metric groups most relevant to performance and optimization. For the **complete metric reference** (all groups and all counters) see [USAGE.md § Metric breakdown](../USAGE.md#metric-breakdown).
+
+| Group | Key counters | What it tells you |
+|-------|-------------|-------------------|
+| `llm_calls` | `normal`, `low_cost`, `total`, `fallback_to_main` | How often the main vs low-cost model was used, and how many escalations occurred |
+| `performance` | `steps_taken`, `total_session_time_ms`, `avg_step_time_ms`, `max_context_tokens`, `llm_estimated_tokens`, `llm_actual_tokens`, `step_prompt_build_ms`, `step_llm_wait_ms`, `step_tool_exec_ms`, `step_context_maintenance_ms` | End-to-end timing broken down by phase so you can identify where time is spent |
+| `summarization` | `summaries_made`, `summaries_skipped`, `context_summarizations`, `summaries_tokens_reduced`, `summaries_original_tokens`, `summaries_final_tokens` | Auto-summarization activity and tokens reclaimed |
+| `context_compression` | `prompt_context_compressed`, `prompt_context_tokens_saved`, `goal_block_compressed`, `goal_block_tokens_saved`, `hook_context_compressed`, `hook_context_tokens_saved` | Per-block compression savings (prompt, goal, hook context) |
+| `system_prompt` | `system_prompt_builds`, `system_prompt_tokens_last`, `system_prompt_budget_applied`, `system_prompt_budget_tokens_saved`, `system_prompt_examples_dropped`, `system_prompt_skill_descriptions_dropped`, `system_prompt_tool_details_dropped`, `system_prompt_planning_details_dropped`, `system_prompt_skills_trimmed` | System prompt construction cost and budget trimming decisions |
+| `tool_cache` | `hits`, `misses`, `total_requests`, `hit_rate` | Cache effectiveness for deterministic/read-only MCP tools |
+| `tool_selection` | `dynamic_used`, `keyword`, `llm_lc`, `llm_main`, `connection_chooser_lc`, `connection_chooser_main`, `fallback_all` | Which dynamic tool-selection strategy fired (`mcpdynamic=true`) |
+| `mcp_resilience` | `circuit_breaker_trips`, `circuit_breaker_resets`, `lazy_init_success`, `lazy_init_failed` | MCP connection health: circuit breaker activity and lazy-init outcomes |
+| `behavior_patterns` | `escalations`, `escalation_consecutive_errors`, `escalation_consecutive_thoughts`, `escalation_thought_loop`, `escalation_steps_without_action`, `escalation_similar_thoughts`, `escalation_context_window` | Escalation reasons—helps diagnose why the agent switched to the main model |
+| `planning` | `plans_generated`, `plans_validated`, `plans_validation_failed`, `plans_replanned`, `planning_disabled_simple_goal` | Planning engine activity and validation pass/fail rates |
+| `deep_research` | `sessions`, `cycles`, `validations_passed`, `validations_failed`, `early_success`, `max_cycles_reached` | Research-and-validate loop outcomes when `deepresearch=true` |
+| `delegation` | `total`, `completed`, `failed`, `timedout`, `retried`, `worker_hint_matched`, `workers_healthy` | Sub-agent delegation lifecycle and worker pool health |
+| `history` | `sessions_started`, `sessions_resumed`, `files_kept`, `files_deleted_by_period`, `files_deleted_by_count` | Console history session tracking and pruning activity |
+
+> **Tip:** `behavior_patterns.escalation_*` counters identify *why* the agent escalated. If `escalation_context_window` is high, lower `maxcontext` or enable `useplanning`. If `escalation_consecutive_thoughts` is high, the agent is looping—review the goal phrasing or add constraints.
 
 ---
 
