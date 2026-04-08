@@ -11898,6 +11898,24 @@ MiniA.prototype._parseAgentMetadata = function(content) {
   return isMap(parsedWhole) ? parsedWhole : __
 }
 
+MiniA.prototype._parseAgentProfileContent = function(content) {
+  if (!isString(content)) return { metadata: __, goal: "" }
+  var text = content.replace(/\r\n/g, "\n")
+  var frontmatterMatch = text.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/)
+  if (isArray(frontmatterMatch) && frontmatterMatch.length > 1) {
+    var parsedMeta = af.fromYAML(frontmatterMatch[1])
+    var goalText = text.substring(frontmatterMatch[0].length).trim()
+    return {
+      metadata: isMap(parsedMeta) ? parsedMeta : __,
+      goal    : goalText
+    }
+  }
+  return {
+    metadata: this._parseAgentMetadata(text),
+    goal    : ""
+  }
+}
+
 MiniA.prototype._appendRulesFromConstraints = function(existingRules, constraints) {
   var entries = []
   if (isArray(constraints)) {
@@ -11973,9 +11991,11 @@ MiniA.prototype._applyAgentMetadata = function(args) {
     rawAgent = io.readFileString(rawAgent)
   }
 
+  var parsedAgent = __
   var metadata = __
   try {
-    metadata = this._parseAgentMetadata(rawAgent)
+    parsedAgent = this._parseAgentProfileContent(rawAgent)
+    metadata = isMap(parsedAgent) ? parsedAgent.metadata : __
   } catch(e) {
     this.fnI("warn", "Couldn't parse " + sourceLabel + " metadata: " + e.message)
     return
@@ -11983,6 +12003,10 @@ MiniA.prototype._applyAgentMetadata = function(args) {
   if (!isMap(metadata)) {
     this.fnI("warn", "No valid YAML metadata found in " + sourceLabel + ".")
     return
+  }
+
+  if ((!isString(args.goal) || args.goal.trim().length === 0) && isMap(parsedAgent) && isString(parsedAgent.goal) && parsedAgent.goal.length > 0) {
+    args.goal = parsedAgent.goal
   }
 
   if (isUnDef(args.model) && isDef(metadata.model)) {
@@ -12036,6 +12060,11 @@ MiniA.prototype.init = function(args) {
     Object.keys(explicitExternalArgs).forEach(key => {
       var normalized = isString(key) ? key.toLowerCase() : ""
       if (normalized === "agent" || normalized === "agentfile") return
+      if (normalized === "goal") {
+        var explicitGoal = explicitExternalArgs[key]
+        var explicitGoalText = isDef(explicitGoal) && explicitGoal !== null ? String(explicitGoal).trim() : ""
+        if (explicitGoalText.length === 0 && isString(args.goal) && args.goal.trim().length > 0) return
+      }
       args[key] = explicitExternalArgs[key]
     })
   }

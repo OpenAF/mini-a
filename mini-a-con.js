@@ -239,9 +239,10 @@ try {
       // Start web mode
       oJobRunFile(miniABasePath + "/mini-a-web.yaml", args, genUUID(), __, false)
       exit(0)
-    } else if (isDef(args.goal) && hasRunnableExecArg !== true) {
+    } else if ((isDef(args.goal) || isDef(args.agent) || isDef(args.agentfile)) && hasRunnableExecArg !== true) {
       // Start cli mode
       if (!isString(args.goal)) args.goal = String(args.goal)
+      if (!isDef(args.goal) || args.goal === "undefined" || args.goal === "null") args.goal = ""
       oJobRunFile(miniABasePath + "/mini-a.yaml", args, genUUID(), __, false)
       exit(0)
     }
@@ -607,6 +608,7 @@ try {
       { option: "mode=<name>", description: "Apply one of the presets defined in mini-a-modes." },
       { option: "libs=<list>", description: "Comma-separated libs to load before launching." },
       { option: "goal=<text>", description: "Execute a single goal in CLI mode and exit when done." },
+      { option: "agent=<path|markdown>", description: "Run with an agent profile in CLI mode and exit instead of opening the console." },
       { option: "exec=\"/<cmd> ...args\"", description: "Execute one custom command/skill template and exit (use /cmd or $skill)." },
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
@@ -659,34 +661,36 @@ try {
   function printAgentTemplate() {
     var lines = [
       "---",
-      "name: my-agent",
-      "description: What this agent does",
-      "model: \"(type: openai, model: gpt-5-mini, key: '...')\"",
+      "name        : my-agent",
+      "description : What this agent does",
+      "model       : \"(type: openai, model: gpt-5-mini, key: '...')\"",
       "capabilities:",
-      "  - useutils",
-      "  - usetools",
-      "  # - useshell",
-      "  # - readwrite",
-      "mini-a:",
-      "  useplanning: true",
-      "  usestream: false",
-      "tools:",
-      "  - type: ojob",
-      "    options:",
-      "      job: mcps/mcp-time.yaml",
-      "  # - type: remote",
-      "  #   url: http://localhost:9090/mcp",
-      "constraints:",
-      "  - Prefer tool-grounded answers.",
-      "  - Be explicit when information is missing.",
-      "knowledge: |",
-      "  Add domain-specific context here.",
-      "youare: |",
-      "  You are a specialized AI agent focused on <domain>.",
+      "- useutils",
+      "- usetools",
+      "# - useshell",
+      "# - readwrite",
+      "#mini-a      :",
+      "#  valgoal  : Answer the question with the current time in json format.",
+      "#  maxcycles: 3",
+      "#  format   : json",
+      "#  outfile  : result.json",
+      "tools       :",
+      "- type   : ojob",
+      "  options:",
+      "    job : mcps/mcp-time.yaml",
+      "#- type: remote",
+      "#  url : http://localhost:9090/mcp",
+      "constraints :",
+      "#- Answer in JSON without any markdown code blocks.",
+      "- Prefer tool-grounded answers.",
+      "- Be explicit when information is missing.",
+      "#knowledge   : |",
+      "#  Add domain-specific context here (or an external filename).",
+      "#youare      : |",
+      "#  You are a specialized AI agent focused on <domain>.",
       "---",
       "",
-      "# Optional goal notes",
-      "- Put reusable mission guidance here."
+      "What is the current time?"
     ]
     print(lines.join("\n"))
     return true
