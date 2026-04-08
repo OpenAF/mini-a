@@ -5638,10 +5638,10 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
     if (!isArray(nodes)) return
     nodes.forEach(node => {
       if (!isObject(node)) return
-      var title = isString(node.title) ? node.title : stringify(node, __, "")
+      var title = isString(node.title) ? node.title : (isString(node.task) ? node.task : stringify(node, __, ""))
       var requires = []
       if (isArray(node.requires)) requires = node.requires.slice()
-      var text = isString(node.title) ? node.title.toLowerCase() : ""
+      var text = isString(node.title) ? node.title.toLowerCase() : (isString(node.task) ? node.task.toLowerCase() : "")
       if (text.indexOf("tool") >= 0 && availableTools.length === 0) requires.push("mcp_tool")
       if ((/shell|command|script|terminal|cli/.test(text)) && requires.indexOf("shell") < 0) requires.push("shell")
 
