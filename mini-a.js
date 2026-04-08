@@ -11933,11 +11933,79 @@ MiniA.prototype._appendRulesFromConstraints = function(existingRules, constraint
   return existingRules + "\n" + formatted
 }
 
+MiniA.prototype._resolveAgentRelativeFile = function(baseDir, value) {
+  if (!isString(baseDir) || baseDir.trim().length === 0) return value
+  if (!isString(value)) return value
+
+  var original = value
+  var prefix = ""
+  var candidateValue = value.trim()
+  if (candidateValue.length === 0 || candidateValue.indexOf("\n") >= 0) return original
+  if (candidateValue.charAt(0) === "@") {
+    prefix = "@"
+    candidateValue = candidateValue.substring(1).trim()
+    if (candidateValue.length === 0) return original
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidateValue)) return original
+
+  var fileCandidate = new java.io.File(candidateValue)
+  if (fileCandidate.isAbsolute()) return original
+
+  try {
+    var resolved = String(new java.io.File(baseDir, candidateValue).getCanonicalPath())
+    if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) return prefix + resolved
+  } catch(ignoreResolveError) { }
+
+  return original
+}
+
+MiniA.prototype._rebaseAgentMetadataPaths = function(metadata, baseDir) {
+  if (!isMap(metadata) || !isString(baseDir) || baseDir.trim().length === 0) return metadata
+
+  ;[ "knowledge", "youare", "chatyouare", "rules" ].forEach(function(key) {
+    if (isString(metadata[key])) metadata[key] = this._resolveAgentRelativeFile(baseDir, metadata[key])
+  }.bind(this))
+
+  this._toAgentList(metadata.tools).forEach(function(tool) {
+    if (!isMap(tool)) return
+    var kind = isString(tool.type) ? tool.type.trim().toLowerCase() : ""
+    if (kind !== "ojob") return
+    if (isMap(tool.options) && isString(tool.options.job)) tool.options.job = this._resolveAgentRelativeFile(baseDir, tool.options.job)
+    if (isString(tool.job)) tool.job = this._resolveAgentRelativeFile(baseDir, tool.job)
+  }.bind(this))
+
+  var miniAOverrides = metadata["mini-a"]
+  if (isMap(miniAOverrides)) {
+    ;[ "goal", "knowledge", "youare", "chatyouare", "rules", "validationgoal", "valgoal" ].forEach(function(key) {
+      if (isString(miniAOverrides[key])) miniAOverrides[key] = this._resolveAgentRelativeFile(baseDir, miniAOverrides[key])
+    }.bind(this))
+  }
+
+  return metadata
+}
+
 MiniA.prototype._mergeAgentToolsIntoMcp = function(existingMcp, tools, sourceLabel) {
   var normalizedTools = []
   this._toAgentList(tools).forEach(tool => {
     if (!isMap(tool)) return
     var kind = isString(tool.type) ? tool.type.trim().toLowerCase() : ""
+    if (kind === "stdio") {
+      if (!isString(tool.cmd) || tool.cmd.trim().length === 0) {
+        this.fnI("warn", "Ignoring agent stdio tool without cmd.")
+        return
+      }
+      var stdioEntry = { cmd: tool.cmd.trim() }
+      if (isDef(tool.timeout)) stdioEntry.timeout = tool.timeout
+      if (isDef(tool.name)) stdioEntry.name = tool.name
+      if (isDef(tool.shared)) stdioEntry.shared = tool.shared
+      if (isDef(tool.clientinfo)) stdioEntry.clientInfo = tool.clientinfo
+      if (isDef(tool.clientInfo)) stdioEntry.clientInfo = tool.clientInfo
+      if (isDef(tool.auth)) stdioEntry.auth = tool.auth
+      if (isDef(tool.strict)) stdioEntry.strict = tool.strict
+      if (isDef(tool.blacklist)) stdioEntry.blacklist = tool.blacklist
+      normalizedTools.push(stdioEntry)
+      return
+    }
     if (kind === "ojob") {
       var entry = { type: "ojob", options: {} }
       if (isMap(tool.options)) entry.options = merge(entry.options, tool.options)
@@ -11986,8 +12054,12 @@ MiniA.prototype._applyAgentMetadata = function(args) {
 
   var rawAgent = args.agent.trim()
   var sourceLabel = "inline agent"
+  var agentBaseDir = __
   if (rawAgent.indexOf("\n") < 0 && io.fileExists(rawAgent) && io.fileInfo(rawAgent).isFile) {
     sourceLabel = "agent: " + rawAgent
+    try {
+      agentBaseDir = String(new java.io.File(rawAgent).getCanonicalFile().getParent())
+    } catch(ignoreAgentBaseDirError) { }
     rawAgent = io.readFileString(rawAgent)
   }
 
@@ -11996,6 +12068,8 @@ MiniA.prototype._applyAgentMetadata = function(args) {
   try {
     parsedAgent = this._parseAgentProfileContent(rawAgent)
     metadata = isMap(parsedAgent) ? parsedAgent.metadata : __
+    if (isMap(metadata)) metadata = this._rebaseAgentMetadataPaths(metadata, agentBaseDir)
+    if (isMap(parsedAgent) && isString(parsedAgent.goal)) parsedAgent.goal = this._resolveAgentRelativeFile(agentBaseDir, parsedAgent.goal)
   } catch(e) {
     this.fnI("warn", "Couldn't parse " + sourceLabel + " metadata: " + e.message)
     return
@@ -12018,11 +12092,11 @@ MiniA.prototype._applyAgentMetadata = function(args) {
   if ((isUnDef(args.knowledge) || !isString(args.knowledge) || args.knowledge.trim().length === 0) && isDef(metadata.knowledge)) {
     args.knowledge = isArray(metadata.knowledge) ? metadata.knowledge.join("\n") : String(metadata.knowledge)
   }
-  if (isDef(metadata.constraints)) {
-    args.rules = this._appendRulesFromConstraints(args.rules, metadata.constraints)
-  }
   if (isDef(metadata.rules) && (!isString(args.rules) || args.rules.trim().length === 0)) {
     args.rules = isArray(metadata.rules) ? metadata.rules.join("\n") : String(metadata.rules)
+  }
+  if (isDef(metadata.constraints)) {
+    args.rules = this._appendRulesFromConstraints(args.rules, metadata.constraints)
   }
   if (isDef(metadata.capabilities)) {
     this._toAgentList(metadata.capabilities).forEach(capability => {

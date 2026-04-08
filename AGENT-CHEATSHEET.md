@@ -29,6 +29,8 @@ tools:
   - type: ojob
     options:
       job: mcps/mcp-time.yaml
+  - type: stdio
+    cmd: npx -y @modelcontextprotocol/server-filesystem /tmp
   - type: remote
     url: http://localhost:9090/mcp
   - type: sse
@@ -62,3 +64,4 @@ youare: |
 - `agentfile=` still works as a backward-compatible alias.
 - `mini-a:` overrides values set before agent parsing (for example mode defaults).
 - Explicit CLI flags still take precedence over agent file values.
+- Relative file references inside file-backed agent profiles are resolved from the profile's own directory.
