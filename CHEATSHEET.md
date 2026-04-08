@@ -446,7 +446,7 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
 | `usemaps` | boolean | `false` | Encourage Leaflet JSON blocks for interactive maps (renders in console transcript and web UI) |
 | `usesvg` | boolean | `false` | Encourage raw SVG blocks rendered securely as image data URIs in the web UI |
 | `usevectors` | boolean | `false` | Enable vector guidance bundle (`usesvg=true` + `usediagrams=true`), preferring Mermaid for structural diagrams and SVG for infographics/custom visuals |
-| `format` | string | `md` | Output format (`md` or `json`) |
+| `format` | string | `md` | Output format (`md`, `json`, `yaml`, `toon` or `slon`) |
 | `usemath` | boolean | `false` | Encourage LaTeX math output (`$...$` / `$$...$$`) for KaTeX rendering |
 | `outputfile` | string | - | Alternative key for `outfile`, used mainly during plan conversions |
 

@@ -12,6 +12,31 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testExtractEmbeddedFinalAction
 
+- name: MiniA Core Tests::ProcessFinalAnswerJson
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProcessFinalAnswerUnwrapsFencedJson
+
+- name: MiniA Core Tests::ProcessFinalAnswerOutfileJson
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProcessFinalAnswerWritesNormalizedJsonToOutfile
+
+- name: MiniA Core Tests::ProcessFinalAnswerYaml
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProcessFinalAnswerSerializesYaml
+
+- name: MiniA Core Tests::ProcessFinalAnswerToonOutfile
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProcessFinalAnswerSerializesToonToOutfile
+
+- name: MiniA Core Tests::ProcessFinalAnswerSlonOutfile
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProcessFinalAnswerSerializesSlonToOutfile
+
 - name: MiniA Core Tests::ThoughtMessagesNormalized
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -212,6 +237,11 @@ ojob:
 todo:
 - MiniA Core Tests::CleanCodeBlocks
 - MiniA Core Tests::ExtractFinalAction
+- MiniA Core Tests::ProcessFinalAnswerJson
+- MiniA Core Tests::ProcessFinalAnswerOutfileJson
+- MiniA Core Tests::ProcessFinalAnswerYaml
+- MiniA Core Tests::ProcessFinalAnswerToonOutfile
+- MiniA Core Tests::ProcessFinalAnswerSlonOutfile
 - MiniA Core Tests::ThoughtMessagesNormalized
 - MiniA Core Tests::TaskLanePolicyProbeDetection
 - MiniA Core Tests::ConfigureDebugChannel

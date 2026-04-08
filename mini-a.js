@@ -7409,16 +7409,12 @@ MiniA.prototype._appendExecutionNotesToPlan = function(args) {
  * Process and return final answer based on format requirements
  */
 MiniA.prototype._processFinalAnswer = function(answer, args) {
-  if (isDef(args.outfile)) {
-    io.writeFileString(args.outfile, answer || "(no answer)")
-    this.fnI("done", `Final answer written to ${args.outfile}`)
-    return answer
-  }
+  var structuredOutput = this._isStructuredOutputFormat(args.format)
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
 
-  // Remove markdown code block markers if format=md and answer is just a code block
-  if ((args.format == "md" && args.format != "raw") && isString(answer)) {
+  // Remove outer code block markers when the answer is just a single fenced block.
+  if ((args.format == "md" || structuredOutput) && args.format != "raw" && isString(answer)) {
     var trimmed = answer.trim()
     // Match code block: starts with ```[language]\n, ends with ``` and nothing else
     // Capture the language and the inner body in separate groups
@@ -7426,12 +7422,12 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     if (codeBlockMatch) {
       var lang = (codeBlockMatch[1] || "").toLowerCase()
       var body = codeBlockMatch[2]
-      // Preserve fences for visual languages like chart/chartjs, mermaid, and leaflet so the UI can render them
-      if (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet") {
+      // Preserve fences for visual languages in markdown mode so the UI can render them.
+      if (args.format == "md" && (lang === "chart" || lang === "chartjs" || lang === "chart.js" || lang === "mermaid" || lang === "leaflet")) {
         // keep original fenced block
         answer = trimmed
       } else {
-        // Strip fences for plain markdown code blocks
+        // Strip fences for ordinary code blocks, including fenced JSON payloads.
         answer = body
       }
     }
@@ -7504,13 +7500,38 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 
   // Handle JSON parsing for markdown format
-  if ((args.format == "json" && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
+  if ((structuredOutput && args.format != "raw") && isString(answer) && answer.match(/^(\{|\[).+(\}|\])$/m)) {
     this.state = "stop"
-    return jsonParse(answer, __, __, true)
+    var parsedAnswer = jsonParse(answer, __, __, true)
+    if (args.format === "json") {
+      if (isDef(args.outfile)) {
+        io.writeFileString(args.outfile, this._serializeStructuredAnswer(parsedAnswer, "json"))
+        this.fnI("done", `Final answer written to ${args.outfile}`)
+      }
+      return parsedAnswer
+    }
+    answer = this._serializeStructuredAnswer(parsedAnswer, args.format)
+    if (isDef(args.outfile)) {
+      io.writeFileString(args.outfile, answer)
+      this.fnI("done", `Final answer written to ${args.outfile}`)
+      return answer
+    }
   }
 
-  if ((args.format == "json" && args.format != "raw") && isObject(answer)) {
-    return answer
+  if ((structuredOutput && args.format != "raw") && isObject(answer)) {
+    if (args.format === "json") {
+      if (isDef(args.outfile)) {
+        io.writeFileString(args.outfile, this._serializeStructuredAnswer(answer, "json"))
+        this.fnI("done", `Final answer written to ${args.outfile}`)
+      }
+      return answer
+    }
+    answer = this._serializeStructuredAnswer(answer, args.format)
+    if (isDef(args.outfile)) {
+      io.writeFileString(args.outfile, answer)
+      this.fnI("done", `Final answer written to ${args.outfile}`)
+      return answer
+    }
   }
 
   this.state = "stop"
@@ -7530,10 +7551,23 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   }
 
   if (args.raw) {
+    if (isDef(args.outfile)) {
+      io.writeFileString(args.outfile, answer || "(no answer)")
+      this.fnI("done", `Final answer written to ${args.outfile}`)
+    }
     return answer || "(no answer)"
   } else {
-    if (args.format != "md" && args.format != "raw" && isString(answer)) {
+    if (args.format == "json" && isString(answer)) {
       answer = jsonParse(answer)
+    }
+    if (isDef(args.outfile)) {
+      io.writeFileString(args.outfile, isString(answer) ? (answer || "(no answer)") : this._serializeStructuredAnswer(answer, "json"))
+      this.fnI("done", `Final answer written to ${args.outfile}`)
+      return answer || "(no answer)"
+    }
+    if ((args.format == "yaml" || args.format == "toon" || args.format == "slon") && isString(answer)) {
+      this._origAnswer = answer
+      return answer || "(no answer)"
     }
     if (isUnDef(args.__format) && isDef(args.format)) args.__format = args.format
     if (isString(answer)) answer = "\n" + answer
@@ -11917,6 +11951,17 @@ MiniA.prototype._parseAgentProfileContent = function(content) {
   }
 }
 
+MiniA.prototype._isStructuredOutputFormat = function(format) {
+  return format === "json" || format === "yaml" || format === "toon" || format === "slon"
+}
+
+MiniA.prototype._serializeStructuredAnswer = function(value, format) {
+  if (format === "yaml") return af.toYAML(value)
+  if (format === "toon") return af.toTOON(value)
+  if (format === "slon") return af.toSLON(value)
+  return stringify(value, __, "")
+}
+
 MiniA.prototype._appendRulesFromConstraints = function(existingRules, constraints) {
   var entries = []
   if (isArray(constraints)) {
@@ -12998,7 +13043,7 @@ MiniA.prototype.init = function(args) {
     var rules = af.fromJSSLON(args.rules)
     if (!isArray(rules)) rules = [rules]
 
-    if (args.format == "json") rules.push("When you provide the final answer, it must be a valid JSON object or array.")
+    if (this._isStructuredOutputFormat(args.format)) rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
     // Programmatic tool calling — start HTTP bridge server when mcpprogcall=true
     if (args.mcpprogcall === true && isUnDef(this._progCallServer)) {
@@ -13299,11 +13344,11 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
  * - promptprofile (string, optional): System prompt verbosity profile ("minimal", "balanced", "verbose"). Defaults to "balanced" and switches to "verbose" when debug=true.
  * - systempromptbudget (number, optional): Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority prompt sections such as examples and detailed tool/skill guidance.
- * - format (string, optional): Output format, either "json" or "md". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
+ * - format (string, optional): Output format: "md", "json", "yaml", "toon", or "slon". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * - usemath (boolean, default=false): Encourage LaTeX math output (`$...$` and `$$...$$`) for KaTeX rendering in the web UI.
  * 
  * Returns:
- * - The final answer as a string or parsed JSON object if format is "json" and the answer is valid JSON.
+ * - The final answer as a string, or a parsed JSON object if format is "json" and the answer is valid JSON.
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
@@ -16050,7 +16095,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       if (args.usestream) {
-        onDelta = canStreamJson && !chatbotNoJsonPromptFlag && args.format == "json" && this._useToolsActual !== true
+        onDelta = canStreamJson && !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format) && this._useToolsActual !== true
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
       }
@@ -16058,7 +16103,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Use new promptJSONWithStatsRaw if available for showthinking
       if (args.showthinking) {
         // Streaming not compatible with showthinking - use regular prompts
-        var jsonFlag = !chatbotNoJsonPromptFlag && args.format == "json"
+        var jsonFlag = !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format)
         if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
           responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
         } else if (isDef(this.llm.rawPromptWithStats)) {
@@ -16066,11 +16111,11 @@ MiniA.prototype._runChatbotMode = function(options) {
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
-      } else if (canStreamJson && !chatbotNoJsonPromptFlag && args.format == "json" && this._useToolsActual !== true) {
+      } else if (canStreamJson && !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format) && this._useToolsActual !== true) {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
       } else if (canStream) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
-      } else if (!chatbotNoJsonPromptFlag && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      } else if (!chatbotNoJsonPromptFlag && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
@@ -16331,7 +16376,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       beforeCall()
       var fallbackResponseWithStats
-      if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && args.format == "json") {
+      if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
         fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
       } else {
         fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)

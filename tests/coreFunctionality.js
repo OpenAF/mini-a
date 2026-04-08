@@ -95,6 +95,139 @@
     ow.test.assert(missing === null, true, "Should ignore non-final embedded payloads")
   }
 
+  exports.testProcessFinalAnswerUnwrapsFencedJson = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._memoryAppend = function() {}
+    agent._persistWorkingMemory = function() {}
+    agent._persistSessionMemory = function() {}
+    agent._recordPlanActivity = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._logLcCostSummary = function() {}
+    agent._memorysessionChEffective = __
+
+    var result = agent._processFinalAnswer("```json\n{\"status\":\"ok\"}\n```", { format: "json" })
+    ow.test.assert(isMap(result), true, "JSON mode should parse fenced JSON answers")
+    ow.test.assert(result.status === "ok", true, "JSON mode should unwrap code fences before parsing")
+  }
+
+  exports.testProcessFinalAnswerWritesNormalizedJsonToOutfile = function() {
+    var agent = createAgent()
+    var writes = []
+    var originalWrite = io.writeFileString
+
+    agent.fnI = function() {}
+    agent._memoryAppend = function() {}
+    agent._persistWorkingMemory = function() {}
+    agent._persistSessionMemory = function() {}
+    agent._recordPlanActivity = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._logLcCostSummary = function() {}
+    agent._memorysessionChEffective = __
+
+    io.writeFileString = function(path, content) {
+      writes.push({ path: path, content: content })
+    }
+
+    try {
+      var result = agent._processFinalAnswer("```json\n{\"status\":\"ok\"}\n```", {
+        format : "json",
+        outfile: "/tmp/final.json"
+      })
+      ow.test.assert(isMap(result), true, "Outfile flow should still return parsed JSON in json mode")
+      ow.test.assert(result.status === "ok", true, "Outfile flow should preserve parsed JSON content")
+      ow.test.assert(writes.length === 1, true, "Outfile flow should write exactly once")
+      ow.test.assert(writes[0].path === "/tmp/final.json", true, "Outfile flow should write to the requested path")
+      ow.test.assert(writes[0].content === "{\"status\":\"ok\"}", true, "Outfile flow should write normalized JSON without code fences")
+    } finally {
+      io.writeFileString = originalWrite
+    }
+  }
+
+  exports.testProcessFinalAnswerSerializesYaml = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._memoryAppend = function() {}
+    agent._persistWorkingMemory = function() {}
+    agent._persistSessionMemory = function() {}
+    agent._recordPlanActivity = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._logLcCostSummary = function() {}
+    agent._memorysessionChEffective = __
+
+    var result = agent._processFinalAnswer("```json\n{\"status\":\"ok\"}\n```", { format: "yaml" })
+    ow.test.assert(isString(result), true, "YAML mode should return a serialized string")
+    ow.test.assert(result.trim() === af.toYAML({ status: "ok" }).trim(), true, "YAML mode should serialize parsed JSON with af.toYAML")
+  }
+
+  exports.testProcessFinalAnswerSerializesToonToOutfile = function() {
+    var agent = createAgent()
+    var writes = []
+    var originalWrite = io.writeFileString
+
+    agent.fnI = function() {}
+    agent._memoryAppend = function() {}
+    agent._persistWorkingMemory = function() {}
+    agent._persistSessionMemory = function() {}
+    agent._recordPlanActivity = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._logLcCostSummary = function() {}
+    agent._memorysessionChEffective = __
+
+    io.writeFileString = function(path, content) {
+      writes.push({ path: path, content: content })
+    }
+
+    try {
+      var result = agent._processFinalAnswer("```json\n{\"status\":\"ok\"}\n```", {
+        format : "toon",
+        outfile: "/tmp/final.toon"
+      })
+      var expected = af.toTOON({ status: "ok" })
+      ow.test.assert(isString(result), true, "TOON mode should return a serialized string")
+      ow.test.assert(result === expected, true, "TOON mode should serialize parsed JSON with af.toTOON")
+      ow.test.assert(writes.length === 1, true, "TOON outfile flow should write exactly once")
+      ow.test.assert(writes[0].path === "/tmp/final.toon", true, "TOON outfile flow should write to the requested path")
+      ow.test.assert(writes[0].content === expected, true, "TOON outfile flow should write normalized TOON output")
+    } finally {
+      io.writeFileString = originalWrite
+    }
+  }
+
+  exports.testProcessFinalAnswerSerializesSlonToOutfile = function() {
+    var agent = createAgent()
+    var writes = []
+    var originalWrite = io.writeFileString
+
+    agent.fnI = function() {}
+    agent._memoryAppend = function() {}
+    agent._persistWorkingMemory = function() {}
+    agent._persistSessionMemory = function() {}
+    agent._recordPlanActivity = function() {}
+    agent._collectSessionKnowledgeForPlan = function() { return [] }
+    agent._logLcCostSummary = function() {}
+    agent._memorysessionChEffective = __
+
+    io.writeFileString = function(path, content) {
+      writes.push({ path: path, content: content })
+    }
+
+    try {
+      var result = agent._processFinalAnswer("```json\n{\"status\":\"ok\"}\n```", {
+        format : "slon",
+        outfile: "/tmp/final.slon"
+      })
+      var expected = af.toSLON({ status: "ok" })
+      ow.test.assert(isString(result), true, "SLON mode should return a serialized string")
+      ow.test.assert(result === expected, true, "SLON mode should serialize parsed JSON with af.toSLON")
+      ow.test.assert(writes.length === 1, true, "SLON outfile flow should write exactly once")
+      ow.test.assert(writes[0].path === "/tmp/final.slon", true, "SLON outfile flow should write to the requested path")
+      ow.test.assert(writes[0].content === expected, true, "SLON outfile flow should write normalized SLON output")
+    } finally {
+      io.writeFileString = originalWrite
+    }
+  }
+
   exports.testThoughtMessagesAreSingleLineAndTrimmed = function() {
     var agent = createAgent()
     var events = []

@@ -173,7 +173,7 @@ help:
     example  : "1800"
     mandatory: false
   - name     : format
-    desc     : "Preferred Mini-A response format (md or json)"
+    desc     : "Preferred Mini-A response format (md, json, yaml, toon or slon)"
     example  : "json"
     mandatory: false
   - name     : auditch

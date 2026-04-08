@@ -438,7 +438,7 @@ help:
     example  : "docker exec -it container sh -lc"
     mandatory: false
   - name     : format
-    desc     : Output format for the final answer (md or json)
+    desc     : Output format for the final answer (md, json, yaml, toon or slon)
     example  : "json"
     mandatory: false
   - name     : auditch
