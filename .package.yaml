@@ -58,9 +58,6 @@ dependencies:
 files:
 - .gitignore
 - .odoc.db
-- .openaf_precompiled/mini-a-common_js.class
-- .openaf_precompiled/mini-a-memory_js.class
-- .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
 - AGENT-CHEATSHEET.md
 - AGENTS.md
@@ -155,9 +152,6 @@ files:
 filesHash:
   .gitignore: 341ba158ffc0e0c413934985c5cdcf5685c5687a
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/mini-a-common_js.class: 1e388163360eac422bf696f51b13746ddb495b2c
-  .openaf_precompiled/mini-a-memory_js.class: 064b4d7bd8d1a119f3e8b1cb0be7c3c985988b46
-  .openaf_precompiled/mini-a-utils_js.class: eecd7087df3cab6b624d6a7d984f99dfa2fbe151
   AGENT-CHEATSHEET.md: a2d5f12f23b6370f704ee3bc922931faf04ad659
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
   CHEATSHEET.md: 4c1bd83b150394c382c72c19bb36471ae801f913
