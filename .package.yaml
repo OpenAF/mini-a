@@ -52,17 +52,17 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260406'
+version: '20260408'
 dependencies:
   openaf: '>=20250915'
 files:
 - .gitignore
 - .odoc.db
-- .openaf_precompiled/.t8-20260403
 - .openaf_precompiled/mini-a-common_js.class
 - .openaf_precompiled/mini-a-memory_js.class
 - .openaf_precompiled/mini-a-utils_js.class
 - .package.yaml
+- AGENT-CHEATSHEET.md
 - AGENTS.md
 - CHEATSHEET.md
 - CODE_OF_CONDUCT.md
@@ -79,13 +79,20 @@ files:
 - docs/TESTS_MODELS.md
 - docs/WHATS-NEW.md
 - examples/README.md
+- examples/agent-template-v2.agent.md
 - examples/agent-template-v2.yaml
+- examples/agent-template.agent.md
 - examples/agent-template.yaml
+- examples/changelog-gen.agent.md
 - examples/changelog-gen.yaml
+- examples/document.agent.md
 - examples/document.yaml
+- examples/email-report.agent.md
 - examples/email-report.yaml
+- examples/learn-from-chat.agent.md
 - examples/learn-from-chat.yaml
 - examples/planning-demo.sh
+- examples/summary.agent.md
 - examples/summary.yaml
 - mcps/CREATING.md
 - mcps/EXTERNAL-MCPS.md
@@ -148,33 +155,40 @@ files:
 filesHash:
   .gitignore: 341ba158ffc0e0c413934985c5cdcf5685c5687a
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/.t8-20260403: da39a3ee5e6b4b0d3255bfef95601890afd80709
   .openaf_precompiled/mini-a-common_js.class: 1e388163360eac422bf696f51b13746ddb495b2c
   .openaf_precompiled/mini-a-memory_js.class: 064b4d7bd8d1a119f3e8b1cb0be7c3c985988b46
   .openaf_precompiled/mini-a-utils_js.class: eecd7087df3cab6b624d6a7d984f99dfa2fbe151
+  AGENT-CHEATSHEET.md: a2d5f12f23b6370f704ee3bc922931faf04ad659
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 00135d47bba241456b398b3ce2b313393e606f4b
+  CHEATSHEET.md: 4c1bd83b150394c382c72c19bb36471ae801f913
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 55c640950a0c0be01bf9e3c9a3576319364899b5
-  USAGE.md: f646a18b39a62289f9bb7a91e415d800ffa2ca14
+  README.md: 0a5b7b5375c7cb57f4af06b3c1c73d45dadb76cb
+  USAGE.md: 436841949c463c0269b3e03b4fd3451205e0c101
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: f61deadd3ac871db27ee292b840d72b95df2de7a
   docs/LEARN.md: bbd387393104fb9cff10f72a6cb42307a3a259f1
   docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
-  docs/OPTIMIZATIONS.md: 824fc6755b7572c99ec200b82a423c66d8245fcc
+  docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
   docs/WHATS-NEW.md: ade217ca36d90ce02eb1595b8b713e357da4e6d3
-  examples/README.md: 02b78b16f5e36428e89e74bf3b35a014c7ac49fd
+  examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
+  examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
+  examples/agent-template.agent.md: 2115a27261ae3706c7ac8fd634c14d45562b80d9
   examples/agent-template.yaml: 6265fd20ff130a8df81e421297e4beda06cf89e3
+  examples/changelog-gen.agent.md: 3ef6e70f83b7c19626b99e94453163b530ecb8f3
   examples/changelog-gen.yaml: b480c56337e98e177fc898cfae408603c93e295d
+  examples/document.agent.md: 833c961dedf1088662d2ee818c5ca443063b7fc7
   examples/document.yaml: 02d0280c971cbbc8d16b09efdf20a019042c89a5
+  examples/email-report.agent.md: 236593e3de7f13dd1d19cc36c0b5e29cdf8bfe16
   examples/email-report.yaml: 87b17db1782367ef2f0579f4e7af69ad11b5321b
+  examples/learn-from-chat.agent.md: a028399761c291c9525e778b23136d9947243503
   examples/learn-from-chat.yaml: 37d0b1e07559c4853d0ea6c144d462269068a20d
   examples/planning-demo.sh: 05c0ef0a5f2452466a01e80158434de0ed29a9a3
+  examples/summary.agent.md: 0b905903b83399d995f54f81d139dbc82ac9f6ff
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
@@ -207,7 +221,7 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: 40b9d3645edafcfd6995c518d79acbea3dde5548
+  mini-a-con.js: 03f2c13683702d9051cc257b6ba7e27ebc5948f4
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-memory.js: 2dd101b0e891e4e60c5c61a9f98ee76b3dc227ee
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
@@ -219,16 +233,16 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 2a8fc68e770fbf16aa013ce20b5150096a824f2e
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: 91cd343c4e1604935c995986e6e1e3c19ea0524a
+  mini-a.js: 81abafd669cec52c979bc1e5d6ff9443f80dc4fe
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: cc2f059425458db3d7e72ec02cf4076e8f305c1b
   public/index.md: a61e6711b75825bd1800df7e7f5b4b7489685d2a
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
-  tests/advancedPlanning.js: 57f4ac338a45d4f3a76bc698356108643b4ff9a5
+  tests/advancedPlanning.js: 4180192f50eb807274184becf8a3f0b65470ae71
   tests/advancedPlanning.yaml: b88b00fc28ac77a6300015e9d25459be08335be4
   tests/autoTestAll.allJobs.yaml: ed7cd0ae939b0973bdca9a0a9adaa0b8e2bc9797
   tests/autoTestAll.yaml: f4d909c00e8dbbf507bb6341bf46dd2ceb6ea93d
-  tests/coreFunctionality.js: d60b8e8223245bdde0e3fed0f9d32eed33a1be3e
+  tests/coreFunctionality.js: f69cbdcc6b63612992483508b1e3a78aa1f6651e
   tests/coreFunctionality.yaml: 34bef9f09795d509250a53e7bd49dc79e831eade
   tests/miniAUtils.js: e73053daa6bb6b14934f21fa221eaea9c35bd6b0
   tests/miniAUtils.yaml: 1d1515b208e55da5600906e355ddc1a0eb7f82d7
