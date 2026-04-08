@@ -11882,6 +11882,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
 
 MiniA.prototype._toAgentList = function(value) {
   if (isArray(value)) return value
+  if (isMap(value)) return [ value ]
   if (isString(value) && value.trim().length > 0) return [ value ]
   return []
 }
