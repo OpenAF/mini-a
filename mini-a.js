@@ -11960,6 +11960,101 @@ MiniA.prototype._resolveAgentRelativeFile = function(baseDir, value) {
   return original
 }
 
+MiniA.prototype._inspectMcpJobPath = function(jobPath, searchDirs) {
+  var result = { jobPath: jobPath, defaultDir: __ }
+  if (!isString(jobPath)) return result
+
+  var candidate = jobPath.trim()
+  if (candidate.length === 0 || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate)) return result
+
+  var normalizedDirs = []
+  if (isArray(searchDirs)) {
+    searchDirs.forEach(function(dir) {
+      if (!isString(dir) || dir.trim().length === 0) return
+      try {
+        normalizedDirs.push(String(new java.io.File(dir.trim()).getCanonicalPath()))
+      } catch(ignoreDirError) { }
+    })
+  }
+
+  var fileCandidate = new java.io.File(candidate)
+  if (fileCandidate.isAbsolute()) {
+    try {
+      var canonicalCandidate = String(fileCandidate.getCanonicalPath())
+      for (var ai = 0; ai < normalizedDirs.length; ai++) {
+        var baseDir = normalizedDirs[ai]
+        var prefix = baseDir.endsWith(String(java.io.File.separator)) ? baseDir : baseDir + String(java.io.File.separator)
+        if (canonicalCandidate.indexOf(prefix) === 0) {
+          result.jobPath = canonicalCandidate.substring(prefix.length)
+          result.defaultDir = baseDir
+          return result
+        }
+      }
+    } catch(ignoreAbsoluteError) { }
+    return result
+  }
+
+  for (var i = 0; i < normalizedDirs.length; i++) {
+    try {
+      var resolved = String(new java.io.File(normalizedDirs[i], candidate).getCanonicalPath())
+      if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
+        result.jobPath = candidate
+        result.defaultDir = normalizedDirs[i]
+        return result
+      }
+    } catch(ignoreResolveError) { }
+  }
+
+  return result
+}
+
+MiniA.prototype._normalizeMcpJobPaths = function(mcp, searchDirs) {
+  var current = mcp
+  var wasString = false
+  var preferredDefaultDir = __
+
+  if (isString(current) && current.trim().length > 0) {
+    try {
+      current = af.fromJSSLON(current)
+      wasString = true
+    } catch(ignoreParseError) {
+      return {
+        mcp       : mcp,
+        defaultDir: preferredDefaultDir
+      }
+    }
+  }
+
+  var normalizeEntry = function(entry) {
+    if (!isMap(entry)) return entry
+    if (isString(entry.type) && entry.type.trim().toLowerCase() === "ojob") {
+      if (isMap(entry.options) && isString(entry.options.job)) {
+        var inspectedOptionsJob = this._inspectMcpJobPath(entry.options.job, searchDirs)
+        entry.options.job = inspectedOptionsJob.jobPath
+        if (isUnDef(preferredDefaultDir) && isString(inspectedOptionsJob.defaultDir) && inspectedOptionsJob.defaultDir.length > 0) {
+          preferredDefaultDir = inspectedOptionsJob.defaultDir
+        }
+      }
+      if (isString(entry.job)) {
+        var inspectedJob = this._inspectMcpJobPath(entry.job, searchDirs)
+        entry.job = inspectedJob.jobPath
+        if (isUnDef(preferredDefaultDir) && isString(inspectedJob.defaultDir) && inspectedJob.defaultDir.length > 0) {
+          preferredDefaultDir = inspectedJob.defaultDir
+        }
+      }
+    }
+    return entry
+  }.bind(this)
+
+  if (isArray(current)) current = current.map(normalizeEntry)
+  else if (isMap(current)) current = normalizeEntry(current)
+
+  return {
+    mcp       : wasString ? af.toSLON(current) : current,
+    defaultDir: preferredDefaultDir
+  }
+}
+
 MiniA.prototype._rebaseAgentMetadataPaths = function(metadata, baseDir) {
   if (!isMap(metadata) || !isString(baseDir) || baseDir.trim().length === 0) return metadata
 
@@ -11971,8 +12066,6 @@ MiniA.prototype._rebaseAgentMetadataPaths = function(metadata, baseDir) {
     if (!isMap(tool)) return
     var kind = isString(tool.type) ? tool.type.trim().toLowerCase() : ""
     if (kind !== "ojob") return
-    if (isMap(tool.options) && isString(tool.options.job)) tool.options.job = this._resolveAgentRelativeFile(baseDir, tool.options.job)
-    if (isString(tool.job)) tool.job = this._resolveAgentRelativeFile(baseDir, tool.job)
   }.bind(this))
 
   var miniAOverrides = metadata["mini-a"]
@@ -12060,6 +12153,9 @@ MiniA.prototype._applyAgentMetadata = function(args) {
     sourceLabel = "agent: " + rawAgent
     try {
       agentBaseDir = String(new java.io.File(rawAgent).getCanonicalFile().getParent())
+      if (isString(agentBaseDir) && agentBaseDir.trim().length > 0 && isUnDef(args._agentBaseDir)) {
+        args._agentBaseDir = agentBaseDir
+      }
     } catch(ignoreAgentBaseDirError) { }
     rawAgent = io.readFileString(rawAgent)
   }
@@ -12142,6 +12238,19 @@ MiniA.prototype.init = function(args) {
       }
       args[key] = explicitExternalArgs[key]
     })
+  }
+  var currentWorkingDir = __
+  try {
+    currentWorkingDir = String((new java.io.File(".")).getCanonicalPath())
+  } catch(ignoreCurrentDirError) { }
+  var normalizedMcp = this._normalizeMcpJobPaths(args.mcp, [
+    currentWorkingDir,
+    isString(args._agentBaseDir) ? args._agentBaseDir : __,
+    getOPackPath("mini-a")
+  ])
+  args.mcp = normalizedMcp.mcp
+  if (isString(normalizedMcp.defaultDir) && normalizedMcp.defaultDir.trim().length > 0) {
+    args._mcpDefaultDir = normalizedMcp.defaultDir.trim()
   }
   // Set default format before any other logic
   if (isUnDef(args.format) && isDef(args.__format)) args.format = args.__format
@@ -12409,7 +12518,10 @@ MiniA.prototype.init = function(args) {
     if (!args.nosetmcpwd) {
       if (isUnDef(__flags.JSONRPC)) __flags.JSONRPC = {}
       if (isUnDef(__flags.JSONRPC.cmd)) __flags.JSONRPC.cmd = {}
-      __flags.JSONRPC.cmd.defaultDir = getOPackPath("mini-a")
+      var mcpDefaultDir = getOPackPath("mini-a")
+      if (isString(args._mcpDefaultDir) && args._mcpDefaultDir.trim().length > 0) mcpDefaultDir = args._mcpDefaultDir.trim()
+      else if (isString(args._agentBaseDir) && args._agentBaseDir.trim().length > 0) mcpDefaultDir = args._agentBaseDir.trim()
+      __flags.JSONRPC.cmd.defaultDir = mcpDefaultDir
     }
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
