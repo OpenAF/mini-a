@@ -292,6 +292,7 @@ try {
   ow.loadFormat()
   var con          = new Console()
   var format       = ow.format
+  var sideLineTheme = format.withSideLineThemes().simpleLine
   var colorSupport = (typeof colorify === "function")
   var basePrompt   = "mini-a"
   var promptSymbol = "➤"
@@ -2945,7 +2946,14 @@ try {
     planner_stream: "FG(223)"
   }
 
-  var _prevEventLength = __
+  var _prevEventRenderLines = __
+  var _prevEventLastUpdate = 0
+  var _prevEventSpinnerHoldMs = 500
+  var _prevEventAnimatedRenderer = __
+  var _activityCueFrames = ["•", "◦", "·", "◦"]
+  var _activityCueFrameIdx = 0
+  var _activityCueActive = false
+  var _activityCueThread = __
   var _streamOutputStats = {
     totalChars: 0,
     contentChars: 0
@@ -3102,6 +3110,7 @@ try {
 
   function _renderStreamChunk(streamText) {
     if (!isString(streamText) || streamText.length === 0) return
+    _clearWorkingIndicator()
     _streamMdState.pending += streamText
 
     while (true) {
@@ -3199,14 +3208,123 @@ try {
     return logs.slice()
   }
 
+  function _getConsoleRenderWidth() {
+    return (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
+  }
+
+  function _getRenderedLineCount(rendered) {
+    var normalized = String(rendered || "").replace(/\r/g, "")
+    if (normalized.length === 0) return 1
+    return normalized.split("\n").length
+  }
+
+  function _eraseRenderedLines(lineCount) {
+    if (!isNumber(lineCount) || lineCount <= 0) return
+    var termWidth = _getConsoleRenderWidth()
+    for (var i = 0; i < lineCount; i++) {
+      printnl("\r" + repeat(termWidth, " "))
+      if (i < lineCount - 1) printnl("\u001b[1A")
+    }
+    printnl("\r")
+  }
+
+  function _clearWorkingIndicator() {}
+
+  function _nextActivityCueSymbol() {
+    var symbol = _activityCueFrames[_activityCueFrameIdx % _activityCueFrames.length]
+    _activityCueFrameIdx = (_activityCueFrameIdx + 1) % _activityCueFrames.length
+    return symbol
+  }
+
+  function _resetActivityCueSymbol() {
+    _activityCueFrameIdx = 0
+    return _activityCueFrames[0]
+  }
+
+  function _renderAnimatedActivityCue() {
+    if (_activityCueActive !== true) return
+    if (!isDef(_prevEventRenderLines)) return
+    if (!isFunction(_prevEventAnimatedRenderer)) return
+    if ((now() - _prevEventLastUpdate) < _prevEventSpinnerHoldMs) return
+    var animated = _prevEventAnimatedRenderer()
+    _eraseRenderedLines(_prevEventRenderLines)
+    printnl(animated)
+    _prevEventRenderLines = _getRenderedLineCount(animated)
+  }
+
+  function _stopActivityCueLoop() {
+    _activityCueActive = false
+    if (isDef(_activityCueThread)) {
+      try { _activityCueThread.interrupt() } catch(ignoreCueInterrupt) {}
+      _activityCueThread = __
+    }
+    if (isDef(_prevEventRenderLines) && isFunction(_prevEventAnimatedRenderer)) {
+      var restored = _prevEventAnimatedRenderer(true)
+      _eraseRenderedLines(_prevEventRenderLines)
+      printnl(restored)
+      _prevEventRenderLines = _getRenderedLineCount(restored)
+    }
+  }
+
+  function _startActivityCueLoop() {
+    _stopActivityCueLoop()
+    _activityCueActive = true
+    _activityCueFrameIdx = 0
+    _activityCueThread = new java.lang.Thread(new JavaAdapter(java.lang.Runnable, {
+      run: function() {
+        while (_activityCueActive === true) {
+          try {
+            _renderAnimatedActivityCue()
+            java.lang.Thread.sleep(140)
+          } catch (cueErr) {
+            if (_activityCueActive !== true) break
+          }
+        }
+      }
+    }))
+    try { _activityCueThread.setDaemon(true) } catch(ignoreCueDaemon) {}
+    _activityCueThread.start()
+  }
+
+  function _renderEventMessage(iconPart, messageText, extraPrefix) {
+    var termWidth = _getConsoleRenderWidth()
+    var contentWidth = Math.max(8, termWidth - 3)
+    var safeMessage = isString(messageText) ? messageText : String(messageText || "")
+    var extra = isString(extraPrefix) ? extraPrefix : ""
+    safeMessage = safeMessage.replace(/\n/g, "↵").trim()
+    var textStyle = hintColor + ",ITALIC"
+    var iconIndent = repeat(Math.max(0, visibleLength(format.string._stripAnsi(iconPart))), " ")
+    var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + format.string._stripAnsi(iconPart)))
+    var continuationWidth = Math.max(8, contentWidth - visibleLength(extra + iconIndent))
+    var wrappedLines = format.string.wordWrap(safeMessage, firstLineWidth).split("\n")
+    var renderedLines = []
+
+    if (wrappedLines.length > 0) {
+      renderedLines.push(extra + iconPart + colorifyText(wrappedLines[0], textStyle))
+    } else {
+      renderedLines.push(extra + iconPart)
+    }
+
+    for (var wi = 1; wi < wrappedLines.length; wi++) {
+      var continuationText = format.string.wordWrap(wrappedLines[wi], continuationWidth)
+      continuationText.split("\n").forEach(function(line) {
+        renderedLines.push(extra + iconIndent + line)
+      })
+    }
+
+    return format.withSideLine(renderedLines.join("\n"), termWidth, promptColor, textStyle, sideLineTheme)
+  }
+
   function printEvent(type, icon, message, id) {
     // Handle streaming output
     if (type == "stream") {
       // Clear inline-event erase state before rendering stream chunks so
       // future event logs don't wipe already streamed answer text.
-      if (isDef(_prevEventLength)) {
+      if (isDef(_prevEventRenderLines)) {
         print()
-        _prevEventLength = __
+        _prevEventRenderLines = __
+        _prevEventLastUpdate = 0
+        _prevEventAnimatedRenderer = __
       }
       var streamText = isString(message) ? message : String(message || "")
       if (type == "stream") {
@@ -3238,34 +3356,42 @@ try {
       } else if (type == "error") {
         iconText = colorifyText("✖", "RESET," + (eventPalette[type] || accentColor)) + " "
       } else {
-        iconText = colorifyText("•", "RESET," + (eventPalette[type] || accentColor)) + " "
+        iconText = colorifyText(_nextActivityCueSymbol(), "RESET," + (eventPalette[type] || accentColor)) + " "
       }
       inline = true
     }
     if (type == "delegate") inline = true
-    //var prefix = colorifyText("[" + id + "]", hintColor)
-    var _msg = colorifyText("│ ", promptColor) + extra + iconText + colorifyText(message.replace(/\n/g, "↵").trim(), hintColor + ",ITALIC")
+
+    var _msg = _renderEventMessage(iconText, message, extra)
     // Optimized: extract previous line erase logic
     function _erasePrev() {
-      if (!isDef(_prevEventLength)) return
-      var termWidth = (__conAnsi && isDef(__con)) ? __con.getTerminal().getWidth() : 80
-      var prevLines = Math.ceil(_prevEventLength / termWidth)
-      for (var i = 0; i < prevLines; i++) {
-        printnl("\r" + repeat(termWidth, " "))
-        if (i < prevLines - 1) printnl("\u001b[1A")
-      }
-      printnl("\r")
+      if (!isDef(_prevEventRenderLines)) return
+      _eraseRenderedLines(_prevEventRenderLines)
+      _prevEventLastUpdate = 0
+      _prevEventAnimatedRenderer = __
     }
 
     if (args.verbose != true && !inline) {
+      _clearWorkingIndicator()
       _erasePrev()
       print(_msg)
-      _prevEventLength = __
+      _prevEventRenderLines = __
+      _prevEventLastUpdate = 0
+      _prevEventAnimatedRenderer = __
     } else {
+      _clearWorkingIndicator()
       _erasePrev()
-      printnl("\r" + _msg)
-      // Store visual length (without ANSI codes) for proper line calculation
-      _prevEventLength = (typeof ansiLength === "function") ? ansiLength(_msg) : _msg.length
+      printnl(_msg)
+      _prevEventRenderLines = _getRenderedLineCount(_msg)
+      _prevEventLastUpdate = now()
+      if (type != "final" && type != "error") {
+        _prevEventAnimatedRenderer = function(resetToDefault) {
+          var cueSymbol = resetToDefault === true ? _resetActivityCueSymbol() : _nextActivityCueSymbol()
+          return _renderEventMessage(colorifyText(cueSymbol, "RESET," + (eventPalette[type] || accentColor)) + " ", message, extra)
+        }
+      } else {
+        _prevEventAnimatedRenderer = __
+      }
     }
     //print(prefix + " " + iconText + " " + message)
   }
@@ -3311,6 +3437,9 @@ try {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
     _resetStreamRenderState()
+    _prevEventRenderLines = __
+    _prevEventLastUpdate = 0
+    _prevEventAnimatedRenderer = __
     var beforeGoalResult = runHooks("before_goal", { MINI_A_GOAL: isString(goalText) ? goalText : "" })
     if (beforeGoalResult.blocked) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Goal blocked by a before_goal hook.", errorColor))
@@ -3341,6 +3470,7 @@ try {
     var stopRequested = false
     try {
       agent.init(_args)
+      _startActivityCueLoop()
       $tb(function() {
         agentResult = agent.start(_args)
         agentOrigResult = agent.getOrigAnswer()
@@ -3374,7 +3504,11 @@ try {
         sleep(75)
         return false
       }).exec()
+      _stopActivityCueLoop()
       if (stopRequested) {
+        _prevEventRenderLines = __
+        _prevEventLastUpdate = 0
+        _prevEventAnimatedRenderer = __
         print(colorifyText("Mini-A stopped by user (Esc).", hintColor))
         return false
       }
@@ -3411,17 +3545,26 @@ try {
           }
           // Add newline after streaming output before prompt
           // Also ensure newline if there was an inline event pending
-          if (isDef(_prevEventLength)) {
+          if (isDef(_prevEventRenderLines)) {
             print()  // Move to new line after inline event
-            _prevEventLength = __
+            _prevEventRenderLines = __
+            _prevEventLastUpdate = 0
+            _prevEventAnimatedRenderer = __
           }
           //print()
         }
       } else {
         print(colorifyText("Final answer written to " + _args.outfile, successColor))
       }
+      _prevEventRenderLines = __
+      _prevEventLastUpdate = 0
+      _prevEventAnimatedRenderer = __
       return true
     } catch (e) {
+      _stopActivityCueLoop()
+      _prevEventRenderLines = __
+      _prevEventLastUpdate = 0
+      _prevEventAnimatedRenderer = __
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
       printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
       return false
