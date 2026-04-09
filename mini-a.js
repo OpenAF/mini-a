@@ -7059,19 +7059,6 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
   var entry = isObject(meta) ? merge(baseEntry, meta) : baseEntry
   if (isObject(entry)) delete entry.memoryScope
 
-  // When scope="both" with no explicit target, mirror writes to both managers
-  if (!isDef(targetScope) && this._memoryScope === "both" && isObject(this._sessionMemoryManager) && isObject(this._globalMemoryManager)) {
-    var appended = __
-    var sessionAppended = this._sessionMemoryManager.append(section, entry)
-    var globalAppended = this._globalMemoryManager.append(section, entry)
-    appended = isObject(sessionAppended) ? sessionAppended : globalAppended
-    if (isObject(appended)) this.fnI("info", `📝 [mem:write] both/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
-    this._syncWorkingMemoryState()
-    if (isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
-    if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
-    return appended
-  }
-
   var targetManager = __
   if (targetScope === "global") targetManager = this._globalMemoryManager
   else if (targetScope === "session") targetManager = this._sessionMemoryManager
