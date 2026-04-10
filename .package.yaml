@@ -225,9 +225,9 @@ filesHash:
   mini-a-subtask.js: 28800a5144d944979b832c70c99788393ecae3a3
   mini-a-utils.js: 74929e106d866962ef08a6ff413f70b247e579c9
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: bd889f4a147478adec5058f60d77ec36b5f956b1
+  mini-a-web.yaml: baf04d803847e01f737868192f18518a1759de68
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: 11af1f09b419d397a95b53f4490f2227e1857b39
+  mini-a.js: 93edb926b517cb76db26a104fa38e252cec9f8ed
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 51d799fb9d1e87bc787ed2948d0ec43c1925b03d
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
