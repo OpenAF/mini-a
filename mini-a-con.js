@@ -2908,7 +2908,7 @@ try {
       if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
       delete args.usemermaid
     }
-    if (isDef(args.usevectors)) {
+    if (args.usevectors === true) {
       if (isUnDef(args.usesvg) || !args.usesvg) args.usesvg = args.usevectors
       if (isUnDef(args.usediagrams) || !args.usediagrams) args.usediagrams = args.usevectors
       delete args.usevectors

@@ -855,7 +855,7 @@ jobs:
       return { outputs: outputs, blocked: blocked }
     }
     if (isDef(args.usemermaid) && isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
-    if (isDef(args.usevectors)) {
+    if (args.usevectors === true) {
       if (isUnDef(args.usesvg) || !args.usesvg) args.usesvg = true
       if (isUnDef(args.usediagrams) || !args.usediagrams) args.usediagrams = true
     }
