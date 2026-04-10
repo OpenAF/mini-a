@@ -488,10 +488,53 @@ help:
     desc     : Maximum number of advisor consultations per run when modelstrategy=advisor
     example  : "2"
     mandatory: false
+  - name     : advisorenable
+    desc     : Enable advisor consultations when modelstrategy=advisor
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisoronrisk
+    desc     : Allow advisor consults on risk signals
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisoronambiguity
+    desc     : Allow advisor consults on ambiguity signals
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisoronharddecision
+    desc     : Allow advisor consults on hard-decision checkpoints
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : advisorcooldownsteps
     desc     : Minimum number of steps between advisor consultations when modelstrategy=advisor
     example  : "2"
     mandatory: false
+  - name     : advisorbudgetratio
+    desc     : Max advisor share of token budget (0-1) before low-value consults are declined
+    example  : "0.20"
+    mandatory: false
+  - name     : emergencyreserve
+    desc     : Reserve fraction inside advisor budget kept for high-value consults
+    example  : "0.10"
+    mandatory: false
+  - name     : harddecision
+    desc     : Hard-decision checkpoint mode (require, warn, off)
+    example  : "warn"
+    mandatory: false
+    options  : ["require", "warn", "off"]
+  - name     : evidencegate
+    desc     : Enable lightweight evidence gate for non-trivial steps/final answers
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : evidencegatestrictness
+    desc     : Evidence gate strictness (low, medium, high)
+    example  : "medium"
+    mandatory: false
+    options  : ["low", "medium", "high"]
   - name     : lcescalatedefer
     desc     : When true (default), defer escalation by one step if the LC response confidence is >= 0.7
     example  : "true"
@@ -650,7 +693,16 @@ jobs:
         modellock      : modellock
         modelstrategy  : modelstrategy
         advisormaxuses : advisormaxuses
+        advisorenable  : advisorenable
+        advisoronrisk  : advisoronrisk
+        advisoronambiguity: advisoronambiguity
+        advisoronharddecision: advisoronharddecision
         advisorcooldownsteps: advisorcooldownsteps
+        advisorbudgetratio: advisorbudgetratio
+        emergencyreserve: emergencyreserve
+        harddecision   : harddecision
+        evidencegate   : evidencegate
+        evidencegatestrictness: evidencegatestrictness
         lcescalatedefer: lcescalatedefer
         lcbudget       : lcbudget
         llmcomplexity  : llmcomplexity
@@ -764,7 +816,16 @@ jobs:
       modellock      : isString.default(__)
       modelstrategy  : isString.default(__)
       advisormaxuses : toNumber.isNumber.default(__)
+      advisorenable  : toBoolean.isBoolean.default(true)
+      advisoronrisk  : toBoolean.isBoolean.default(true)
+      advisoronambiguity: toBoolean.isBoolean.default(true)
+      advisoronharddecision: toBoolean.isBoolean.default(true)
       advisorcooldownsteps: toNumber.isNumber.default(__)
+      advisorbudgetratio: toNumber.isNumber.default(0.20)
+      emergencyreserve: toNumber.isNumber.default(0.10)
+      harddecision   : isString.default("warn")
+      evidencegate   : toBoolean.isBoolean.default(false)
+      evidencegatestrictness: isString.default("medium")
       lcescalatedefer: toBoolean.isBoolean.default(true)
       lcbudget       : toNumber.isNumber.default(0)
       llmcomplexity  : toBoolean.isBoolean.default(false)

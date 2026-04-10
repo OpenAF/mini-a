@@ -316,7 +316,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 
 - **Multi-Model Support** - Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
-- **Advisor Strategy Mode** - Optional `modelstrategy=advisor` keeps LC as executor while consulting the main model for difficult steps with configurable consultation limits
+- **Advisor Strategy Mode** - Optional `modelstrategy=advisor` keeps LC as executor while consulting the main model for difficult steps with centralized gating, strict advisor JSON validation, lightweight no-tool enforcement, and budget-aware consult limits (default mode remains unchanged)
 - **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md))
 - **Real-Time Streaming** - Display LLM tokens as they arrive with markdown-aware buffering for smooth rendering (`usestream=true`)
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)

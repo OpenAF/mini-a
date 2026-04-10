@@ -792,11 +792,28 @@ The `start()` method accepts various configuration options:
 - **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Force Mini-A to always use a specific model tier for every step, bypassing all dynamic escalation and de-escalation logic. Use `modellock=main` to always use the main model (`OAF_MODEL`), `modellock=lc` to always use the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
 - **`modelstrategy`** (string, one of `"default"` or `"advisor"`, default: `"default"`): Select the model orchestration profile. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
 - **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
+- **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
+- **`advisoronrisk`** (boolean, default: `true`): Allow advisor consults on risk signals.
+- **`advisoronambiguity`** (boolean, default: `true`): Allow advisor consults on ambiguity signals.
+- **`advisoronharddecision`** (boolean, default: `true`): Allow advisor consults for hard-decision checkpoints.
 - **`advisorcooldownsteps`** (number, default: `2`): Minimum step distance between advisor consultations when `modelstrategy=advisor`.
+- **`advisorbudgetratio`** (number, default: `0.20`): Fraction of session token budget that advisor calls can consume before low-value consults are declined.
+- **`emergencyreserve`** (number, default: `0.10`): Portion of advisor budget reserved for higher-value/high-risk consults.
+- **`harddecision`** (string, one of `"require"`, `"warn"`, `"off"`, default: `"warn"`): Controls hard-decision checkpoints for high-impact actions. `require` blocks hard actions unless advisor consultation succeeds.
+- **`evidencegate`** (boolean, default: `false`): Enable lightweight evidence gating for non-trivial actions and final claims.
+- **`evidencegatestrictness`** (string, one of `"low"`, `"medium"`, `"high"`, default: `"medium"`): Tuning level for evidence gate heuristics.
 - **`lcescalatedefer`** (boolean, default: `true`): When enabled, if an escalation trigger fires but the current LC model response has a confidence score ≥ 0.7 (based on JSON validity, completeness, and action specificity), Mini-A defers the escalation by one additional step. If the next step also triggers escalation, it escalates immediately. Set to `false` to disable deferral and escalate as soon as the trigger fires.
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
+
+Advisor mode contract (internal-only, never user-facing):
+- Advisor responses must be strict JSON with exactly: `assessment` (string), `recommended_next_step` (string), `risk_flags` (array), `escalate_to_main` (boolean), `confidence` (number), `stop_or_continue` (`"stop"` or `"continue"`).
+- Responses that include execution intent (`tool`, `tool_calls`, `function_call`, or textual "run tool"/"invoke tool") are rejected.
+- Invalid advisor payloads are ignored safely, counted in telemetry, and executor flow continues with stricter guardrails.
+
+Default behavior note:
+- If you keep `modelstrategy=default` (the default), runtime behavior remains unchanged. New advisor/evidence/hard-decision controls only apply when explicitly enabled or when advisor strategy is selected.
 
 #### Planning Controls
 - **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON/YAML plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
