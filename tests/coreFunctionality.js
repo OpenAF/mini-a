@@ -299,6 +299,19 @@
     ow.test.assert(streamOutput.indexOf("hidden reasoning") < 0, true, "Hidden thinking content should not leak into streamed answer output")
   }
 
+  exports.testExtractThinkingBlocksReadsProviderThinkingFields = function() {
+    var agent = createAgent()
+    var blocks = agent._extractThinkingBlocksFromResponse({
+      message: {
+        thinking: "<thinking>hidden reasoning</thinking>"
+      }
+    })
+
+    ow.test.assert(isArray(blocks), true, "Should return a list of extracted thinking blocks")
+    ow.test.assert(blocks.length, 1, "Should extract thinking from provider-specific thinking fields")
+    ow.test.assert(blocks[0], "hidden reasoning", "Should preserve the thinking block content")
+  }
+
   exports.testTaskLanePolicyProbeDetection = function() {
     var agent = createAgent()
 

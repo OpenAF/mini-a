@@ -6500,9 +6500,13 @@ MiniA.prototype._extractResponseTextCandidates = function(rawResponse) {
         addText(rawResponse.text)
         addText(rawResponse.output)
         addText(rawResponse.output_text)
+        addText(rawResponse.reasoning)
+        addText(rawResponse.thinking)
 
         if (isMap(rawResponse.message)) {
             addText(rawResponse.message.content)
+            addText(rawResponse.message.thinking)
+            addText(rawResponse.message.reasoning)
             addFromParts(rawResponse.message.content)
         }
         addFromParts(rawResponse.content)
@@ -6511,12 +6515,18 @@ MiniA.prototype._extractResponseTextCandidates = function(rawResponse) {
             rawResponse.choices.forEach(choice => {
                 if (isUnDef(choice)) return
                 addText(choice.text)
+                addText(choice.thinking)
+                addText(choice.reasoning)
                 if (isMap(choice.message)) {
                     addText(choice.message.content)
+                    addText(choice.message.thinking)
+                    addText(choice.message.reasoning)
                     addFromParts(choice.message.content)
                 }
                 if (isMap(choice.delta)) {
                     addText(choice.delta.content)
+                    addText(choice.delta.thinking)
+                    addText(choice.delta.reasoning)
                 }
                 addFromParts(choice.content)
             })

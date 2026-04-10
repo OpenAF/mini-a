@@ -4479,6 +4479,9 @@
             if (typeof data.usestream === 'boolean') {
                 shouldEnableStream = data.usestream;
             }
+            if (typeof data.showthinking === 'boolean') {
+                window.__mini_a_showthinking = data.showthinking;
+            }
             if (typeof data.usemath === 'boolean') {
                 shouldEnableMath = data.usemath;
             }

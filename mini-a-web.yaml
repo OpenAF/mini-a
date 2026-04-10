@@ -16,6 +16,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : showthinking
+    desc     : Surface XML-tagged thinking blocks as thought logs
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : logpromptheaders
     desc     : Log prompt headers to console (for debugging)
     example  : "origin,referer"
@@ -206,7 +211,7 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
-      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, usemath: global.__usemath }
+      var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, showthinking: global.__showthinking, usemath: global.__usemath }
       return ow.server.httpd.reply(_res)
     } catch(e) {
       printErr(e)
@@ -897,6 +902,7 @@ jobs:
     in:
       showexecs       : toBoolean().isBoolean().default(false)
       usestream       : toBoolean().isBoolean().default(false)
+      showthinking    : toBoolean().isBoolean().default(false)
       logpromptheaders: isString().default("")
       memorysessionheader: isString().default("")
       maxcontext      : toNumber().isNumber().default(200000)
@@ -949,6 +955,7 @@ jobs:
     global.__lastActivity = { }
     global.__showexecs = args.showexecs
     global.__usestream = args.usestream
+    global.__showthinking = args.showthinking
     global.__maxpromptchars = args.maxpromptchars
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__memorysessionheader = isString(args.memorysessionheader) ? args.memorysessionheader.trim().toLowerCase() : ""
