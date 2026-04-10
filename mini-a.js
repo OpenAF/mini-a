@@ -7,6 +7,17 @@ loadLib("mini-a-common.js")
 loadLib("mini-a-router.js")
 loadLib("mini-a-memory.js")
 
+// Shared thinking-tag list and normalizer used across streaming filter,
+// block extraction, and tag stripping.
+var _MINI_A_THINKING_TAGS = {
+    think: true, thinking: true, thought: true, thoughts: true,
+    analysis: true, reasoning: true, rationale: true, plan: true,
+    scratchpad: true, chainofthought: true, thinkingprocess: true,
+    innerthought: true, innermonologue: true, assistantthoughts: true,
+    reflection: true, selfreflection: true, deliberation: true
+}
+var _MINI_A_TAG_NORM = function(tag) { return String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "") }
+
 /**
  * <odoc>
  * <key>MinA</key>
@@ -2029,16 +2040,11 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     // Match markdown table separator rows with or without outer pipes.
     var TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
 
-    // Thinking-tag streaming filter state (disabled when showthinking is active)
+    // Thinking-tag streaming filter state
     var tfEnabled = !toBoolean(isObject(args) ? args.showthinking : false)
-    var tfAllowedTags = {
-        think: true, thinking: true, thought: true, thoughts: true,
-        analysis: true, reasoning: true, rationale: true, plan: true,
-        scratchpad: true, chainofthought: true, thinkingprocess: true,
-        innerthought: true, innermonologue: true, assistantthoughts: true,
-        reflection: true, selfreflection: true, deliberation: true
-    }
-    var tfNorm = tag => String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+    var tfShowThinking = !tfEnabled   // true when showthinking=true — emit blocks as thought events
+    var tfAllowedTags = _MINI_A_THINKING_TAGS
+    var tfNorm = _MINI_A_TAG_NORM
     var tfState = "idle"    // idle | tag_opening | in_content | tag_closing
     var tfTagBuf = ""       // accumulates tag name chars during tag_opening
     var tfPreBuf = ""       // accumulates "<" + tag chars before decision
@@ -2242,25 +2248,23 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
         if (contentBuffer.length > 0) flushContent(contentBuffer)
         flushContent("\n\n")
         // Flush any partial thinking-tag state on stream end
-        if (tfEnabled) {
-            if (tfState === "in_content" && tfContentBuf.length > 0) {
-                tfContentBuf = ""; tfState = "idle"
-            } else if (tfState === "tag_opening" && tfPreBuf.length > 0) {
-                processContent(tfPreBuf)
-                tfPreBuf = ""; tfState = "idle"
-            } else if (tfState === "tag_closing") {
-                tfContentBuf += tfCloseBuf
-                tfContentBuf = ""; tfCloseBuf = ""; tfState = "idle"
-            }
+        if (tfState === "in_content" && tfContentBuf.length > 0) {
+            // Incomplete thinking block: discard silently in both modes
+            tfContentBuf = ""; tfState = "idle"
+        } else if (tfState === "tag_opening" && tfPreBuf.length > 0) {
+            // Ambiguous opening tag that never resolved: pass through as content
+            processContent(tfPreBuf)
+            tfPreBuf = ""; tfState = "idle"
+        } else if (tfState === "tag_closing") {
+            // Incomplete closing tag: discard in both modes
+            tfContentBuf = ""; tfCloseBuf = ""; tfState = "idle"
         }
     }
 
     // Feed a single decoded character through the thinking-tag state machine.
-    // When inside a confirmed thinking tag, characters are buffered; when the
-    // closing tag is detected the buffer is logged as a "thought" event.
-    // Falls through to processContent when tfEnabled is false.
+    // When filtering (showthinking=false): buffered thinking content is discarded.
+    // When showthinking=true: buffered content is emitted as a "thought" event on close.
     function filterChar(ch) {
-        if (!tfEnabled) { processContent(ch); return }
         switch (tfState) {
         case "idle":
             if (ch === "<") { tfState = "tag_opening"; tfPreBuf = "<"; tfTagBuf = "" }
@@ -2291,6 +2295,16 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
             tfCloseBuf += ch
             var _tfExpected = "</" + tfActiveTag + ">"
             if (tfCloseBuf === _tfExpected) {
+                if (tfShowThinking) {
+                    // Emit the collected block as a distinct thought event
+                    var _tfTrimmed = tfContentBuf.trim()
+                    if (_tfTrimmed.length > 0) {
+                        self._logMessageWithCounter("thought", _tfTrimmed)
+                        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.thoughts_made)) {
+                            global.__mini_a_metrics.thoughts_made.inc()
+                        }
+                    }
+                }
                 tfContentBuf = ""; tfCloseBuf = ""; tfActiveTag = ""; tfState = "idle"
             } else if (_tfExpected.indexOf(tfCloseBuf) !== 0) {
                 // No longer a valid prefix of the expected closing tag — treat as content
@@ -6566,6 +6580,65 @@ MiniA.prototype._extractPrimaryResponseText = function(rawResponse) {
     return rawResponse
 }
 
+/**
+ * Extract thinking/reasoning content from structured LLM response blocks, e.g.
+ * Claude API content blocks with type "thinking" or "reasoning".
+ * Returns an array of thinking text strings (already isolated, no XML tags needed).
+ */
+MiniA.prototype._extractStructuredThinkingTexts = function(rawResponse) {
+    var texts = []
+    var addText = function(value) {
+        if (isString(value) && value.trim().length > 0) texts.push(value)
+    }
+    var scanParts = function(parts) {
+        if (!isArray(parts)) return
+        parts.forEach(function(part) {
+            if (!isMap(part)) return
+            var t = String(part.type || "").toLowerCase()
+            if (t === "thinking" || t === "reasoning") {
+                addText(part.thinking)
+                addText(part.text)
+            }
+        })
+    }
+
+    if (!isMap(rawResponse)) return texts
+
+    // Top-level reasoning/thinking fields (e.g. some Ollama/OpenAI-compat models)
+    addText(rawResponse.reasoning)
+    addText(rawResponse.thinking)
+
+    // message.content blocks and direct fields
+    if (isMap(rawResponse.message)) {
+        addText(rawResponse.message.thinking)
+        addText(rawResponse.message.reasoning)
+        scanParts(rawResponse.message.content)
+    }
+
+    // Top-level content array (Claude API native format)
+    scanParts(rawResponse.content)
+
+    // OpenAI-style choices array
+    if (isArray(rawResponse.choices)) {
+        rawResponse.choices.forEach(function(choice) {
+            if (isUnDef(choice)) return
+            addText(choice.thinking)
+            addText(choice.reasoning)
+            if (isMap(choice.message)) {
+                addText(choice.message.thinking)
+                addText(choice.message.reasoning)
+                scanParts(choice.message.content)
+            }
+            if (isMap(choice.delta)) {
+                addText(choice.delta.thinking)
+                addText(choice.delta.reasoning)
+            }
+        })
+    }
+
+    return texts
+}
+
 MiniA.prototype._parseJsonCandidate = function(rawText) {
     if (!isString(rawText)) return __
     var text = rawText.trim()
@@ -6667,44 +6740,26 @@ MiniA.prototype._recoverMessageFromProviderError = function(rawPayload) {
 
 MiniA.prototype._extractThinkingBlocksFromResponse = function(rawResponse) {
     var candidates = this._extractResponseTextCandidates(rawResponse)
-    if (!isArray(candidates) || candidates.length === 0) return []
-
-    var allowedTags = {
-        think: true,
-        thinking: true,
-        thought: true,
-        thoughts: true,
-        analysis: true,
-        reasoning: true,
-        rationale: true,
-        plan: true,
-        scratchpad: true,
-        chainofthought: true,
-        thinkingprocess: true,
-        innerthought: true,
-        innermonologue: true,
-        assistantthoughts: true,
-        reflection: true,
-        selfreflection: true,
-        deliberation: true
-    }
-
-    var normalizeTag = tag => String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "")
     var contentMatches = []
     var seen = {}
-    var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
 
-    candidates.join("\n").replace(tagPattern, (match, tag, content) => {
-        var normalized = normalizeTag(tag)
-        if (!allowedTags[normalized]) return match
-        var trimmed = (content || "").toString().trim()
-        if (trimmed.length === 0) return match
-        if (!seen[trimmed]) {
-            seen[trimmed] = true
-            contentMatches.push(trimmed)
-        }
-        return match
+    // Collect structured thinking blocks first (e.g. Claude {type:"thinking"} content blocks)
+    var structured = this._extractStructuredThinkingTexts(rawResponse)
+    structured.forEach(function(block) {
+        var trimmed = (block || "").toString().trim()
+        if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; contentMatches.push(trimmed) }
     })
+
+    // Also regex-scan text candidates for XML-tagged thinking
+    if (isArray(candidates) && candidates.length > 0) {
+        var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
+        candidates.join("\n").replace(tagPattern, function(match, tag, content) {
+            if (!_MINI_A_THINKING_TAGS[_MINI_A_TAG_NORM(tag)]) return match
+            var trimmed = (content || "").toString().trim()
+            if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; contentMatches.push(trimmed) }
+            return match
+        })
+    }
 
     return contentMatches
 }
@@ -6727,18 +6782,10 @@ MiniA.prototype._logThinkingBlocks = function(rawResponse) {
  */
 MiniA.prototype._stripThinkingTagsFromString = function(text) {
     if (!isString(text)) return { cleaned: text, blocks: [] }
-    var allowedTags = {
-        think: true, thinking: true, thought: true, thoughts: true,
-        analysis: true, reasoning: true, rationale: true, plan: true,
-        scratchpad: true, chainofthought: true, thinkingprocess: true,
-        innerthought: true, innermonologue: true, assistantthoughts: true,
-        reflection: true, selfreflection: true, deliberation: true
-    }
-    var normalizeTag = tag => String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "")
     var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
     var blocks = [], seen = {}
-    var cleaned = text.replace(tagPattern, (match, tag, content) => {
-        if (!allowedTags[normalizeTag(tag)]) return match
+    var cleaned = text.replace(tagPattern, function(match, tag, content) {
+        if (!_MINI_A_THINKING_TAGS[_MINI_A_TAG_NORM(tag)]) return match
         var trimmed = (content || "").toString().trim()
         if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; blocks.push(trimmed) }
         return ""
