@@ -92,6 +92,16 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usemaps
+    desc     : "Boolean to enable/disable Leaflet interactive map guidance (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usesvg
+    desc     : "Boolean to enable/disable secure raw SVG visual guidance (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usevectors
     desc     : "Boolean to enable/disable infographic-focused vector guidance bundle (default: false)"
     example  : "true"
@@ -790,7 +800,7 @@ todo:
         return ow.server.httpd.reply({ error: "markdown is required" })
       }
 
-      if (global.__usevectors) {
+      if (global.__usesvg || global.__usevectors) {
         markdown = inlineSvgCodeBlocks(markdown)
       }
 
@@ -918,6 +928,8 @@ jobs:
       planlog         : isString().default(__)
       usediagrams     : toBoolean().isBoolean().default(false)
       usecharts       : toBoolean().isBoolean().default(false)
+      usemaps         : toBoolean().isBoolean().default(false)
+      usesvg          : toBoolean().isBoolean().default(false)
       usevectors      : toBoolean().isBoolean().default(false)
       browsercontext  : isString().default(__)
       useascii        : toBoolean().isBoolean().default(false)
@@ -960,6 +972,7 @@ jobs:
     global.__logpromptheaders = args.logpromptheaders.split(",").map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
     global.__memorysessionheader = isString(args.memorysessionheader) ? args.memorysessionheader.trim().toLowerCase() : ""
     global.__useattach = args.useattach
+    global.__usesvg = args.usesvg
     global.__usevectors = args.usevectors
     global.__usemath = args.usemath
     global.__planState = {}

@@ -1120,6 +1120,15 @@ MiniA.buildVisualKnowledge = function(options) {
   return visualParts.join("\n\n")
 }
 
+MiniA.stripVisualKnowledge = function(knowledge) {
+  if (!isString(knowledge) || knowledge.length === 0) return ""
+  var marker = "\n\nVisual output guidance (concise):"
+  var markerIndex = knowledge.indexOf(marker)
+  if (markerIndex < 0 && knowledge.indexOf("Visual output guidance (concise):") === 0) markerIndex = 0
+  if (markerIndex < 0) return knowledge
+  return knowledge.substring(0, markerIndex).replace(/\s+$/, "")
+}
+
 /**
  * Normalize thought-like messages so they are single-line and trimmed.
  */
@@ -12614,6 +12623,7 @@ MiniA.prototype.init = function(args) {
     }
 
     var baseKnowledge = isString(args.knowledge) ? args.knowledge : ""
+    var strippedKnowledge = MiniA.stripVisualKnowledge(baseKnowledge)
     var visualKnowledge = MiniA.buildVisualKnowledge({
       useDiagrams: args.usediagrams,
       useCharts: args.usecharts,
@@ -12625,11 +12635,11 @@ MiniA.prototype.init = function(args) {
       existingKnowledge: baseKnowledge
     })
     if (visualKnowledge.length > 0) {
-      args.knowledge = baseKnowledge.length > 0
-        ? baseKnowledge + "\n\n" + visualKnowledge
+      args.knowledge = strippedKnowledge.length > 0
+        ? strippedKnowledge + "\n\n" + visualKnowledge
         : visualKnowledge
     } else {
-      args.knowledge = baseKnowledge
+      args.knowledge = strippedKnowledge
     }
 
     this._shellAllowlist = this._parseListOption(args.shellallow)
