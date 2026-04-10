@@ -89,8 +89,10 @@ var MiniA = function() {
   // Per-step cost tracker (Issue 5)
   this._costTracker = {
     lc:   { calls: 0, totalTokens: 0, estimatedUSD: 0 },
-    main: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
+    main: { calls: 0, totalTokens: 0, estimatedUSD: 0 },
+    advisor: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
   }
+  this._modelStrategy = "default"
 
   // Check OAF_MINI_A_NOJSONPROMPT environment variable to disable promptJSONWithStats
   // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
@@ -180,6 +182,9 @@ var MiniA = function() {
     escalation_steps_without_action: $atomic(0, "long"),
     escalation_similar_thoughts: $atomic(0, "long"),
     escalation_context_window: $atomic(0, "long"),
+    advisor_calls: $atomic(0, "long"),
+    advisor_tokens: $atomic(0, "long"),
+    advisor_consultations_skipped: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
     mcp_lazy_init_failed: $atomic(0, "long"),
     deep_research_sessions: $atomic(0, "long"),
@@ -1992,11 +1997,31 @@ MiniA.prototype.getEscalationStats = function() {
  * { lc: { calls, totalTokens, estimatedUSD }, main: { calls, totalTokens, estimatedUSD } }
  */
 MiniA.prototype.getCostStats = function() {
-  var ct = this._costTracker || { lc: {}, main: {} }
+  var ct = this._costTracker || { lc: {}, main: {}, advisor: {} }
   return {
     lc  : Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.lc),
-    main: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.main)
+    main: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.main),
+    advisor: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.advisor)
   }
+}
+
+MiniA.prototype._normalizeModelStrategy = function(v) {
+  var s = isString(v) ? v.trim().toLowerCase() : "default"
+  if (s !== "advisor") return "default"
+  return s
+}
+
+MiniA.prototype._safeParseAdvisorJson = function(raw) {
+  if (isMap(raw)) return raw
+  if (!isString(raw)) return __
+  var parsed = jsonParse(raw, __, __, true)
+  if (isMap(parsed)) return parsed
+  var m = raw.match(/\{[\s\S]*\}/)
+  if (isArray(m) && isString(m[0])) {
+    parsed = jsonParse(m[0], __, __, true)
+    if (isMap(parsed)) return parsed
+  }
+  return __
 }
 
 /**
@@ -14248,7 +14273,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       lastContextText         : "",
       lastContextTokens       : 0,
       contextDedupeInterval   : 10,
-      lastDedupContextLength  : 0
+      lastDedupContextLength  : 0,
+      advisorUses             : 0,
+      advisorLastStep         : -999,
+      advisorLastReason       : ""
     }
 
     var optimizeGoalBlock = () => {
@@ -14490,11 +14518,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Issue 5: LC token budget
     var lcBudget = isDef(args.lcbudget) ? parseInt(args.lcbudget) : 0
     var lcBudgetExceeded = false
+    var modelStrategy = this._normalizeModelStrategy(args.modelstrategy)
+    this._modelStrategy = modelStrategy
+    var advisorEnabled = modelStrategy === "advisor" && this._use_lc && modelLock !== "main"
+    var advisorMaxUses = isDef(args.advisormaxuses) ? parseInt(args.advisormaxuses) : 2
+    if (!isNumber(advisorMaxUses) || isNaN(advisorMaxUses)) advisorMaxUses = 2
+    advisorMaxUses = Math.max(0, advisorMaxUses)
+    var advisorCooldownSteps = isDef(args.advisorcooldownsteps) ? parseInt(args.advisorcooldownsteps) : 2
+    if (!isNumber(advisorCooldownSteps) || isNaN(advisorCooldownSteps)) advisorCooldownSteps = 2
+    advisorCooldownSteps = Math.max(0, advisorCooldownSteps)
 
     // Reset per-run cost tracker
     this._costTracker = {
       lc:   { calls: 0, totalTokens: 0, estimatedUSD: 0 },
-      main: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
+      main: { calls: 0, totalTokens: 0, estimatedUSD: 0 },
+      advisor: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
     }
     // Reset escalation history for fresh run
     this._escalationHistory = []
@@ -14513,6 +14551,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       this.fnI("info", "Model lock active: always using main model")
     } else if (modelLock === "lc") {
       this.fnI("info", "Model lock active: always using lc model")
+    }
+    if (advisorEnabled) {
+      this.fnI("info", `Model strategy active: advisor (max uses=${advisorMaxUses}, cooldown=${advisorCooldownSteps} step(s))`)
     }
 
     var currentToolContext = {}
@@ -14861,6 +14902,80 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // Deferred step also triggered escalation — escalate immediately regardless of score
             runtime._escalationDeferred = false
           }
+        }
+      }
+
+      var advisorOutcome = __
+      if (advisorEnabled && step > 0 && this._use_lc && !runtime.forceMainModel) {
+        var advisorReasons = []
+        if (shouldEscalate) advisorReasons.push("pre-escalation")
+        if (runtime.stepsWithoutAction >= Math.max(2, escalationLimits.stepsWithoutAction - 1)) advisorReasons.push("low_progress")
+        if (runtime.recentSimilarThoughts.length >= 2) advisorReasons.push("repeated_reasoning")
+        if (runtime.hadErrorThisStep === true) advisorReasons.push("error_recovery")
+        var cooldownSatisfied = (step - runtime.advisorLastStep) >= advisorCooldownSteps
+        if (advisorReasons.length === 0) {
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_consultations_skipped)) {
+            global.__mini_a_metrics.advisor_consultations_skipped.inc()
+          }
+        } else if (runtime.advisorUses >= advisorMaxUses) {
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_consultations_skipped)) {
+            global.__mini_a_metrics.advisor_consultations_skipped.inc()
+          }
+        } else if (!cooldownSatisfied) {
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_consultations_skipped)) {
+            global.__mini_a_metrics.advisor_consultations_skipped.inc()
+          }
+        } else {
+          this._syncConversationForModelSwitch("main")
+          var advisorContextWindow = runtime.context.slice(Math.max(0, runtime.context.length - 12)).join("\n")
+          var advisorPrompt = [
+            "You are the advisor model. Do not execute actions. Do not propose tool calls.",
+            "Return JSON only with keys: assessment, recommended_next_step, risk_flags, escalate_to_main (boolean), confidence (0..1).",
+            "Keep assessment and recommendation concise.",
+            "Goal:",
+            args.goal || "",
+            "",
+            "Recent context:",
+            advisorContextWindow
+          ].join("\n")
+          var advisorResp = __
+          try {
+            advisorResp = this._withExponentialBackoff(() => {
+              addCall()
+              if (isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
+              return this.llm.promptWithStats(advisorPrompt)
+            }, this._llmRetryOptions("Advisor model", { llmType: "advisor", step: step + 1 }, { maxDelay: 4000 }))
+          } catch (advisorErr) {
+            if (args.debug || args.verbose) {
+              this.fnI("warn", `Advisor call failed: ${advisorErr && advisorErr.message ? advisorErr.message : advisorErr}`)
+            }
+          }
+          if (isObject(advisorResp)) {
+            var advisorStats = advisorResp.stats || {}
+            var advisorTokenTotal = this._getTotalTokens(advisorStats)
+            registerCallUsage(advisorTokenTotal)
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_calls)) global.__mini_a_metrics.advisor_calls.inc()
+            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_tokens)) global.__mini_a_metrics.advisor_tokens.getAdd(advisorTokenTotal)
+            if (isMap(this._costTracker) && isMap(this._costTracker.advisor)) {
+              this._costTracker.advisor.calls++
+              this._costTracker.advisor.totalTokens += advisorTokenTotal
+            }
+            runtime.advisorUses++
+            runtime.advisorLastStep = step
+            runtime.advisorLastReason = advisorReasons.join(",")
+            advisorOutcome = this._safeParseAdvisorJson(advisorResp.response)
+            if (isMap(advisorOutcome)) {
+              var advisorSummary = isString(advisorOutcome.recommended_next_step) ? advisorOutcome.recommended_next_step : ""
+              if (advisorSummary.length > 0) {
+                runtime.context.push(`[ADVISOR ${step + 1}] (recommendation) ${advisorSummary}`)
+              }
+              if (toBoolean(advisorOutcome.escalate_to_main) === true) {
+                shouldEscalate = true
+                escalationReason = escalationReason.length > 0 ? escalationReason : "advisor_recommended_escalation"
+              }
+            }
+          }
+          this._syncConversationForModelSwitch("lc")
         }
       }
 
