@@ -215,7 +215,7 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: 066ee6730d74c31a6bbdde6386e12fd127b058d6
+  mini-a-con.js: 9edf33404af5c91f7c4718de64366dae9d262826
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-memory.js: 2dd101b0e891e4e60c5c61a9f98ee76b3dc227ee
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
@@ -229,7 +229,7 @@ filesHash:
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
   mini-a.js: 93edb926b517cb76db26a104fa38e252cec9f8ed
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 51d799fb9d1e87bc787ed2948d0ec43c1925b03d
+  mini-a.yaml: 6cedf9f3e83a691a618d3d1d81e861e18c6d2414
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   tests/advancedPlanning.js: 4180192f50eb807274184becf8a3f0b65470ae71
