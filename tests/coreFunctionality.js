@@ -1232,4 +1232,56 @@
 
     try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }
+
+  exports.testAgentCapabilitiesEnableUndefinedFlags = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var args = {
+      agent: [
+        "---",
+        "capabilities:",
+        "  - useshell",
+        "  - readwrite",
+        "  - useutils",
+        "  - usetools",
+        "---"
+      ].join("\n")
+    }
+
+    agent._applyAgentMetadata(args)
+
+    ow.test.assert(args.useshell === true, true, "Agent capabilities should enable useshell when omitted")
+    ow.test.assert(args.readwrite === true, true, "Agent capabilities should enable readwrite when omitted")
+    ow.test.assert(args.useutils === true, true, "Agent capabilities should enable useutils when omitted")
+    ow.test.assert(args.usetools === true, true, "Agent capabilities should enable usetools when omitted")
+  }
+
+  exports.testAgentCapabilitiesRespectExplicitFalseFlags = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var args = {
+      agent: [
+        "---",
+        "capabilities:",
+        "  - useshell",
+        "  - readwrite",
+        "  - useutils",
+        "  - usetools",
+        "---"
+      ].join("\n"),
+      useshell: false,
+      readwrite: false,
+      useutils: false,
+      usetools: false
+    }
+
+    agent._applyAgentMetadata(args)
+
+    ow.test.assert(args.useshell === false, true, "Explicit useshell=false should override agent capabilities")
+    ow.test.assert(args.readwrite === false, true, "Explicit readwrite=false should override agent capabilities")
+    ow.test.assert(args.useutils === false, true, "Explicit useutils=false should override agent capabilities")
+    ow.test.assert(args.usetools === false, true, "Explicit usetools=false should override agent capabilities")
+  }
 })()
