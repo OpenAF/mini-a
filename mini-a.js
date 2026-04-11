@@ -8451,7 +8451,6 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     if (methodNames.length === 0) return __
 
-    var parent = this
     var formatResponse = function(result) {
       if (isString(result) && result.indexOf("[ERROR]") === 0) {
         return {
