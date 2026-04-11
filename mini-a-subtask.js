@@ -580,7 +580,12 @@ SubtaskManager.prototype._isWorkerProfileCompatible = function(profile, requirem
     // Enforce capability flags only when capabilities are actually present.
     if (req.requiresRunGoal === true && hasCapsInfo && caps.indexOf("run-goal") < 0) return false
     if (req.requiresPlanning === true && hasCapsInfo && caps.indexOf("planning") < 0) return false
-    if (req.requiresShell === true && toBoolean(limits.useshell) !== true) return false
+    if (req.requiresShell === true) {
+      // Protocol 0.4.0 dropped limits.useshell; shell is now declared as the 'shell' A2A skill.
+      // Accept the worker if it has either the legacy flag or the 'shell' skill.
+      var hasShellSkill = isArray(p.skills) && p.skills.some(function(s) { return isMap(s) && s.id === "shell" })
+      if (!hasShellSkill && toBoolean(limits.useshell) !== true) return false
+    }
 
     // Required skills: ALL listed skill IDs/tags must be present on the worker
     if (isArray(req.requiredSkills) && req.requiredSkills.length > 0) {
@@ -851,16 +856,17 @@ SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
 }
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
+  if (subtask.status !== "running") return false  // guard against watchdog race
+  subtask.status = "completed"
+  subtask.completedAt = new Date().getTime()
   subtask.result = {
     answer: answer,
     metrics: metrics,
     state: state
   }
-  subtask.status = "completed"
-  subtask.completedAt = new Date().getTime()
   subtask.error = __
 
-  var duration = subtask.completedAt - subtask.startedAt
+  var duration = isDef(subtask.startedAt) ? subtask.completedAt - subtask.startedAt : 0
   this.metrics.totalDurationMs += duration
   this.metrics.completed++
   this.metrics.running--
@@ -870,6 +876,7 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
 }
 
 SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) {
+  if (subtask.status !== "running") return "skipped"  // guard against watchdog race
   subtask.error = error
 
   if (subtask.attempt < subtask.maxAttempts) {
@@ -1029,10 +1036,10 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
 
         if (remoteStatus === "queued" || remoteStatus === "running") continue
 
-        if (remoteStatus === "completed") {
-          var resultPayload = __
-          var resultErrMsg = __
+        var resultPayload = __
+        var resultErrMsg = __
 
+        if (remoteStatus === "completed") {
           // /status can flip to completed slightly before /result is available.
           for (var attempt = 0; attempt < 5; attempt++) {
             try {
@@ -1066,7 +1073,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           return
         }
 
-        var resultPayload = __
+        resultPayload = __
         try {
           resultPayload = parent._remoteRequest(workerUrl, "/result", { taskId: subtask.remoteTaskId })
         } catch(ignoreResultErr) {}
@@ -1189,7 +1196,7 @@ SubtaskManager.prototype.start = function(subtaskId) {
   
   // Emit delegation start event
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
-  this.interactionFn("delegate", prefix + " Starting sub-goal: " + subtask.goal)
+  try { this.interactionFn("delegate", prefix + " Starting sub-goal: " + subtask.goal) } catch(ignoreInteractionErr) {}
 
   if (this.remoteDelegation) {
     this._startRemoteSubtask(subtask, prefix)
@@ -1469,6 +1476,11 @@ SubtaskManager.prototype._processQueue = function() {
       this.start(nextId)
     } catch(e) {
       if (isDef(subtask)) {
+        // Restore counters if start() already incremented them before throwing
+        if (subtask.status === "running") {
+          this.runningCount--
+          this.metrics.running--
+        }
         subtask.status = "failed"
         subtask.error = "Failed to start: " + (isDef(e) && isString(e.message) ? e.message : stringify(e, __, ""))
         subtask.completedAt = new Date().getTime()
@@ -1500,6 +1512,16 @@ SubtaskManager.prototype._startWatchdog = function() {
           if (subtask.status === "running" && isDef(subtask.startedAt)) {
             var elapsed = now - subtask.startedAt
             if (elapsed >= subtask.deadlineMs) {
+              // Claim the status transition first so worker threads see it immediately
+              // and bail out of their own completion paths.
+              subtask.status = "timeout"
+              subtask.completedAt = now
+              subtask.error = "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+              parent.metrics.timedout++
+              parent.metrics.running--
+              parent.runningCount--
+
+              // Best-effort remote cancel after claiming the transition
               if (parent.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
                 try {
                   if (parent.useA2A) {
@@ -1515,14 +1537,6 @@ SubtaskManager.prototype._startWatchdog = function() {
                   }
                 } catch(ignoreRemoteCancel) {}
               }
-
-              // Mark as timeout
-              subtask.status = "timeout"
-              subtask.completedAt = now
-              subtask.error = "Deadline exceeded (" + subtask.deadlineMs + "ms)"
-              parent.metrics.timedout++
-              parent.metrics.running--
-              parent.runningCount--
               
               var prefix = "[subtask:" + id.substring(0, 8) + "]"
               parent.interactionFn("delegate", prefix + " ⏱️ Timeout after " + Math.round(elapsed / 1000) + "s")

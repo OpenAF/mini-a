@@ -211,7 +211,7 @@ MiniAProgCallServer.prototype._setupRoutes = function(hs) {
     try {
       var callResult = self._agent._callMcpTool(toolName, params)
       if (callResult.error) {
-        return _replyJSON(200, { ok: false, error: callResult.normalized.display || "tool error" })
+        return _replyJSON(200, { ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" })
       }
       return _replyJSON(200, self._makeResultResponse(self._toJsonResult(callResult.normalized)))
     } catch(e) {
@@ -238,7 +238,7 @@ MiniAProgCallServer.prototype._setupRoutes = function(hs) {
       if (!self._isToolAllowed(toolName)) return { id: callId, ok: false, error: "Tool not in allowlist: " + toolName }
       try {
         var callResult = self._agent._callMcpTool(toolName, params)
-        if (callResult.error) return { id: callId, ok: false, error: callResult.normalized.display || "tool error" }
+        if (callResult.error) return { id: callId, ok: false, error: (callResult.normalized && callResult.normalized.display) || "tool error" }
         var envelope = self._makeResultResponse(self._toJsonResult(callResult.normalized))
         return merge({ id: callId }, envelope)
       } catch(e) {
