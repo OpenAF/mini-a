@@ -690,6 +690,9 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._planningPhase = "none"  // Tracks planning phase: "none" | "planning" | "execution"
   this._debugFile = ""
   this._debugChannelFiles = {}
+  this._stopRequested = false
+  this._stopReason = ""
+  this._stopRequestedAt = __
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -700,6 +703,72 @@ MiniA._shutdownHookRegistered = false
 MiniA._registeredWorkers = []
 MiniA._registeredWorkerLastHeartbeat = {}
 MiniA._proxyTempFiles = []
+MiniA._terminalSubtaskStates = {
+  completed: true,
+  failed   : true,
+  cancelled: true,
+  canceled : true,
+  timeout  : true
+}
+
+MiniA.prototype._stopAgentResources = function() {
+  if (isObject(this._subtaskManager)) {
+    try {
+      var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
+      if (isArray(subtasks)) {
+        subtasks.forEach(function(subtask) {
+          if (!isMap(subtask) || !isString(subtask.id) || !isString(subtask.status)) return
+          if (MiniA._terminalSubtaskStates[subtask.status] === true) return
+          try {
+            this._subtaskManager.cancel(subtask.id, this._stopReason || "Stop requested")
+          } catch(ignoreCancelErr) {}
+        }.bind(this))
+      }
+    } catch(ignoreSubtaskStop) {}
+  }
+
+  if (isDef(this._regHttpServer) && isDef(ow) && isDef(ow.server) && isDef(ow.server.httpd) && typeof ow.server.httpd.stop === "function") {
+    try { ow.server.httpd.stop(this._regHttpServer) } catch(ignoreRegStopErr) {}
+    this._regHttpServer = __
+  }
+
+  if (isDef(this._progCallServer) && isFunction(this._progCallServer.stop)) {
+    try { this._progCallServer.stop() } catch(ignoreProgCallStopErr) {}
+    this._progCallServer = __
+    this._progCallEnv    = __
+    this._progCallTmpDir = __
+  }
+
+  if (isObject(this._mcpConnections)) {
+    Object.keys(this._mcpConnections).forEach(function(connectionId) {
+      var client = this._mcpConnections[connectionId]
+      if (isObject(client) && typeof client.destroy === "function") {
+        try { client.destroy() } catch(ignoreMcpDestroyErr) {}
+      }
+    }.bind(this))
+  }
+}
+
+MiniA.prototype.requestStop = function(reason, options) {
+  var opts = isObject(options) ? options : {}
+  var stopReason = isString(reason) && reason.trim().length > 0 ? reason.trim() : "Stop requested"
+  var firstRequest = this._stopRequested !== true
+
+  this._stopRequested = true
+  this._stopReason = stopReason
+  if (isUnDef(this._stopRequestedAt)) this._stopRequestedAt = now()
+  this.state = "stop"
+
+  if (firstRequest && opts.quiet !== true) {
+    this.fnI("stop", stopReason)
+  }
+
+  if (opts.releaseResources !== false) {
+    this._stopAgentResources()
+  }
+
+  return firstRequest
+}
 
 MiniA.prototype._normalizePromptDataText = function(inputText) {
   if (isUnDef(inputText) || inputText === null) return ""
@@ -16742,6 +16811,11 @@ MiniA.prototype._runChatbotMode = function(options) {
         }
       }
       break
+    }
+
+    if (this.state == "stop") {
+      this.fnI("stop", `Chatbot agent already in 'stop' state. Exiting...`)
+      return "(no answer)"
     }
 
     if (isUnDef(finalAnswer)) {

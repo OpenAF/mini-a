@@ -3579,7 +3579,11 @@ try {
             }
             if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
               stopRequested = true
-              agent.state = "stop"
+              if (isFunction(agent.requestStop)) {
+                agent.requestStop("Esc pressed. Requesting Mini-A to stop...", { quiet: true })
+              } else {
+                agent.state = "stop"
+              }
               if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
                 try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
               }
