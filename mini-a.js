@@ -2071,13 +2071,8 @@ MiniA.prototype._validateAdvisorResponse = function(obj) {
   var expected = ["assessment", "recommended_next_step", "risk_flags", "escalate_to_main", "confidence", "stop_or_continue"]
   if (!isMap(obj)) return { ok: false, reason: "not_object" }
   if (this._containsAdvisorExecution(obj)) return { ok: false, reason: "execution_content_detected" }
-  var keys = Object.keys(obj)
-  if (keys.length !== expected.length) return { ok: false, reason: "field_count_mismatch" }
   for (var i = 0; i < expected.length; i++) {
     if (!Object.prototype.hasOwnProperty.call(obj, expected[i])) return { ok: false, reason: "missing_field_" + expected[i] }
-  }
-  for (var k = 0; k < keys.length; k++) {
-    if (expected.indexOf(keys[k]) < 0) return { ok: false, reason: "unexpected_field_" + keys[k] }
   }
   if (!isString(obj.assessment) || obj.assessment.trim().length === 0) return { ok: false, reason: "invalid_assessment" }
   if (!isString(obj.recommended_next_step) || obj.recommended_next_step.trim().length === 0) return { ok: false, reason: "invalid_recommended_next_step" }
@@ -14892,16 +14887,22 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       this._syncConversationForModelSwitch("main")
       var advisorContextWindow = runtime.context.slice(Math.max(0, runtime.context.length - 12)).join("\n")
-      var advisorPrompt = [
+      var advisorPromptParts = [
         "You are the advisor model. Do not execute actions. Do not propose tool calls.",
         "Return JSON only with keys: assessment, recommended_next_step, risk_flags, escalate_to_main (boolean), confidence (0..1), stop_or_continue ('stop'|'continue').",
         "Keep assessment and recommendation concise and evidence-focused.",
+        "Step: " + runtime.currentStepNumber + ", advisor uses remaining: " + Math.max(0, (isObject(runtime.advisorPolicy) ? runtime.advisorPolicy.maxUses : 0) - runtime.advisorUses),
         "Goal:",
         args.goal || "",
-        "",
-        "Recent context:",
-        advisorContextWindow
-      ].join("\n")
+        ""
+      ]
+      var priorAdvisorEntry = isArray(runtime.advisorTrace) ? runtime.advisorTrace.slice().reverse().find(function(e) { return e && e.consulted }) : __
+      if (isObject(priorAdvisorEntry)) {
+        advisorPromptParts.push("Prior advisor recommendation (step " + priorAdvisorEntry.step + "): escalated=" + priorAdvisorEntry.escalated + ", confidence=" + priorAdvisorEntry.confidence)
+      }
+      advisorPromptParts.push("Recent context:")
+      advisorPromptParts.push(advisorContextWindow)
+      var advisorPrompt = advisorPromptParts.join("\n")
       var advisorResp = __
       try {
         advisorResp = this._withExponentialBackoff(() => {
@@ -14944,6 +14945,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         runtime.advisorTrace.push(entry)
         var advisorSummary = advisorOutcome.recommended_next_step
         if (advisorSummary.length > 0) runtime.context.push(`[ADVISOR ${runtime.currentStepNumber}] (recommendation) ${advisorSummary}`)
+        if (isArray(advisorOutcome.risk_flags) && advisorOutcome.risk_flags.length > 0) {
+          runtime.context.push(`[ADVISOR ${runtime.currentStepNumber}] (risk-flags) ${advisorOutcome.risk_flags.join(", ")}`)
+        }
         if (toBoolean(advisorOutcome.escalate_to_main) === true && isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_helpful_escalations)) {
           global.__mini_a_metrics.advisor_helpful_escalations.inc()
         }
