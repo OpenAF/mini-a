@@ -127,7 +127,6 @@ files:
 - mcps/mcp-time.yaml
 - mcps/mcp-weather.yaml
 - mcps/mcp-web.yaml
-- metrics.json
 - mini-a-common.js
 - mini-a-con.js
 - mini-a-mcptest.js
