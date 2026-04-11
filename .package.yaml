@@ -56,7 +56,6 @@ version: '20260410'
 dependencies:
   openaf: '>=20250915'
 files:
-- .claude/settings.local.json
 - .github/ISSUE_TEMPLATE/bug_report.md
 - .github/ISSUE_TEMPLATE/feature_request.md
 - .github/mini-a-con-screenshot.png
