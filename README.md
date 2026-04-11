@@ -434,6 +434,7 @@ Mini-A ships with complementary components:
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |
 | `memorych` | JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs (e.g. `{type:'file',options:{file:'/tmp/memory.json'}}`). With `memoryscope=both`, default writes go to global when a channel is configured; use explicit session scope for ephemeral entries. | - |
+| `metricsch` | JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots (for example `{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}`). By default Mini-A stores only the `mini-a` metric; optional `period`, `some`, and `noDate` fields mirror `ow.metrics.startCollecting`. | - |
 | `memorymaxpersection` | Per-section memory cap before compaction | `80` |
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
 | `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |

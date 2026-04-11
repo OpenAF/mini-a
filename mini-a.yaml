@@ -449,6 +449,10 @@ help:
     desc     : SLON/JSON definition of a channel that records every tool call, arguments and result
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
+  - name     : metricsch
+    desc     : SLON/JSON definition of an OpenAF channel where Mini-A metrics snapshots are recorded
+    example  : "(name: 'mini-a-metrics', type: 'mvs', options: (file: '/tmp/mini-a-metrics.db'))"
+    mandatory: false
   - name     : debugch
     desc     : SLON/JSON definition of a debug channel for LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"
@@ -679,6 +683,7 @@ jobs:
         delegationmaxretries: delegationmaxretries
         auditch        : auditch
         toollog        : toollog
+        metricsch      : metricsch
         debugch        : debugch
         debuglcch      : debuglcch
         debugvalch     : debugvalch
@@ -802,6 +807,7 @@ jobs:
       delegationmaxretries: toNumber.isNumber.default(__)
       auditch        : default(__)
       toollog        : default(__)
+      metricsch      : default(__)
       debugch        : default(__)
       debuglcch      : default(__)
       debugvalch     : default(__)

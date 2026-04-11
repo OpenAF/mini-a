@@ -81,6 +81,8 @@ var MiniA = function() {
   this._memoryScope = "both"
   this._memoryConfig = { enabled: true, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
   this._memorychName = __
+  this._metricschName = __
+  this._metricschCollecting = false
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -712,6 +714,11 @@ MiniA._terminalSubtaskStates = {
 }
 
 MiniA.prototype._stopAgentResources = function() {
+  if (this._metricschCollecting === true && isString(this._metricschName) && this._metricschName.length > 0) {
+    try { ow.metrics.stopCollecting(this._metricschName) } catch(ignoreMetricsStopErr) {}
+    this._metricschCollecting = false
+  }
+
   if (isObject(this._subtaskManager)) {
     try {
       var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
@@ -12588,6 +12595,7 @@ MiniA.prototype.init = function(args) {
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
       { name: "toollog", type: "string", default: __ },
+      { name: "metricsch", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
       { name: "debugvalch", type: "string", default: __ },
@@ -12873,6 +12881,40 @@ MiniA.prototype.init = function(args) {
         } catch (e) {
           this.fnI("error", `Failed to create tool log channel: ${e.message}`)
         }
+      }
+    }
+
+    // Check the need to init metricsch
+    if (isDef(args.metricsch) && args.metricsch.length > 0) {
+      try {
+        var _metricschm = af.fromJSSLON(args.metricsch)
+        if (isMap(_metricschm)) {
+          var _metricschName = isString(_metricschm.name) && _metricschm.name.trim().length > 0 ? _metricschm.name.trim() : "_mini_a_metrics_channel"
+          var _metricschType = isString(_metricschm.type) ? _metricschm.type : "simple"
+          var _metricschOpts = isMap(_metricschm.options) ? _metricschm.options : {}
+          var _metricschExists = false
+          try { _metricschExists = $ch().list().indexOf(_metricschName) >= 0 } catch(ignoreListMetrics) {}
+          if (!_metricschExists) {
+            $ch(_metricschName).create(_metricschType, _metricschOpts)
+            if (args.debug) this.fnI("info", `[metrics] channel '${_metricschName}' created.`)
+          } else {
+            if (args.debug) this.fnI("info", `[metrics] channel '${_metricschName}' reused.`)
+          }
+          this._metricschName = _metricschName
+
+          var _metricschPeriod = isNumber(_metricschm.period) && _metricschm.period > 0 ? _metricschm.period : 1000
+          var _metricschSome = isArray(_metricschm.some) && _metricschm.some.length > 0 ? _metricschm.some : ["mini-a"]
+          var _metricschNoDate = isBoolean(_metricschm.noDate) ? _metricschm.noDate : false
+          try {
+            ow.metrics.startCollecting(this._metricschName, _metricschPeriod, _metricschSome, _metricschNoDate)
+            this._metricschCollecting = true
+            if (args.debug) this.fnI("info", `[metrics] collecting '${_metricschSome.join(",")}' into '${this._metricschName}' every ${_metricschPeriod}ms.`)
+          } catch(metricsCollectErr) {
+            this.fnI("warn", `[metrics] failed to start metrics collection on '${this._metricschName}': ${__miniAErrMsg(metricsCollectErr)}`)
+          }
+        }
+      } catch(e) {
+        this.fnI("warn", `[metrics] failed to initialize metricsch channel: ${__miniAErrMsg(e)}`)
       }
     }
 
