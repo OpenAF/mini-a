@@ -2773,11 +2773,9 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
     var summaryTokenTotal = this._getTotalTokens(summaryStats)
 
-    if (isObject(global.__mini_a_metrics)) {
-        if (isObject(global.__mini_a_metrics.llm_actual_tokens)) global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
-        if (isObject(global.__mini_a_metrics.llm_normal_tokens)) global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
-        if (isObject(global.__mini_a_metrics.llm_normal_calls)) global.__mini_a_metrics.llm_normal_calls.inc()
-        if (isObject(global.__mini_a_metrics.summaries_made)) global.__mini_a_metrics.summaries_made.inc()
+    this._recordLlmStatsMetrics(summaryStats, "main")
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.summaries_made)) {
+        global.__mini_a_metrics.summaries_made.inc()
     }
 
     var finalTokens = this._estimateTokens(summaryResponseWithStats.response)
@@ -2807,6 +2805,35 @@ MiniA.prototype._getTotalTokens = function(stats) {
     var completion = isNumber(stats.completion_tokens) ? stats.completion_tokens : 0
     var derived = prompt + completion
     return derived > 0 ? derived : 0
+}
+
+MiniA.prototype._recordLlmStatsMetrics = function(stats, tier) {
+    if (!isObject(global.__mini_a_metrics)) return 0
+
+    var normalizedTier = isString(tier) && tier.toLowerCase() === "lc" ? "lc" : "main"
+    var totalTokens = this._getTotalTokens(stats)
+
+    if (isObject(global.__mini_a_metrics.llm_actual_tokens)) {
+        global.__mini_a_metrics.llm_actual_tokens.getAdd(totalTokens)
+    }
+
+    if (normalizedTier === "lc") {
+        if (isObject(global.__mini_a_metrics.llm_lc_tokens)) {
+            global.__mini_a_metrics.llm_lc_tokens.getAdd(totalTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_lc_calls)) {
+            global.__mini_a_metrics.llm_lc_calls.inc()
+        }
+    } else {
+        if (isObject(global.__mini_a_metrics.llm_normal_tokens)) {
+            global.__mini_a_metrics.llm_normal_tokens.getAdd(totalTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_normal_calls)) {
+            global.__mini_a_metrics.llm_normal_calls.inc()
+        }
+    }
+
+    return totalTokens
 }
 
 /**
@@ -14048,28 +14075,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var normalizedTokens = isNumber(tokens) ? tokens : 0
         if (normalizedTokens > 0) {
           registerCallUsage(normalizedTokens)
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_actual_tokens)) {
-            global.__mini_a_metrics.llm_actual_tokens.getAdd(normalizedTokens)
-          }
-          if (tier === "lc") {
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_lc_tokens)) {
-              global.__mini_a_metrics.llm_lc_tokens.getAdd(normalizedTokens)
-            }
-          } else {
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_normal_tokens)) {
-              global.__mini_a_metrics.llm_normal_tokens.getAdd(normalizedTokens)
-            }
-          }
         }
-        if (tier === "lc") {
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_lc_calls)) {
-            global.__mini_a_metrics.llm_lc_calls.inc()
-          }
-        } else {
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_normal_calls)) {
-            global.__mini_a_metrics.llm_normal_calls.inc()
-          }
-        }
+        this._recordLlmStatsMetrics({
+          total_tokens: normalizedTokens
+        }, tier)
       }
     }
 
@@ -14192,14 +14201,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
         var summaryTokenTotal = self._getTotalTokens(summaryStats)
         registerCallUsage(summaryTokenTotal)
-        global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
-        if (summarizeLLM === self.lc_llm) {
-          global.__mini_a_metrics.llm_lc_tokens.getAdd(summaryTokenTotal)
-          global.__mini_a_metrics.llm_lc_calls.inc()
-        } else {
-          global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
-          global.__mini_a_metrics.llm_normal_calls.inc()
-        }
+        self._recordLlmStatsMetrics(summaryStats, summarizeLLM === self.lc_llm ? "lc" : "main")
         global.__mini_a_metrics.summaries_made.inc()
 
         var responseText = isObject(summaryResponseWithStats) && isString(summaryResponseWithStats.response)
@@ -14823,6 +14825,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var lcComplexityResp = isFunction(this.lc_llm.promptJSONWithStats)
           ? this.lc_llm.promptJSONWithStats(lcComplexityPrompt)
           : this.lc_llm.promptWithStats(lcComplexityPrompt)
+        this._recordLlmStatsMetrics(isObject(lcComplexityResp) ? lcComplexityResp.stats : {}, "lc")
         var lcComplexityParsed = isObject(lcComplexityResp) ? lcComplexityResp.response : lcComplexityResp
         if (isString(lcComplexityParsed)) {
           try { lcComplexityParsed = jsonParse(lcComplexityParsed, __, __, true) } catch(e) {}
@@ -15114,6 +15117,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var advisorStats = advisorResp.stats || {}
         var advisorTokenTotal = this._getTotalTokens(advisorStats)
         registerCallUsage(advisorTokenTotal)
+        this._recordLlmStatsMetrics(advisorStats, "main")
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_calls)) global.__mini_a_metrics.advisor_calls.inc()
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_tokens)) global.__mini_a_metrics.advisor_tokens.getAdd(advisorTokenTotal)
         if (isMap(this._costTracker) && isMap(this._costTracker.advisor)) {
@@ -15586,15 +15590,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var responseTokenTotal = this._getTotalTokens(stats)
       registerCallUsage(responseTokenTotal)
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(responseTokenTotal)
+      this._recordLlmStatsMetrics(stats, useLowCost ? "lc" : "main")
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(prompt))
 
       // Attach actual token stats to conversation message for later accurate analysis
       this._attachTokenStatsToConversation(stats, currentLLM)
 
       if (useLowCost) {
-        global.__mini_a_metrics.llm_lc_calls.inc()
-        global.__mini_a_metrics.llm_lc_tokens.getAdd(responseTokenTotal)
         // Issue 5: Update per-session cost tracker for LC
         if (isMap(this._costTracker)) {
           this._costTracker.lc.calls++
@@ -15606,8 +15608,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this.fnI("warn", `LC token budget (${lcBudget}) exceeded — switching to main model for remainder of session`)
         }
       } else {
-        global.__mini_a_metrics.llm_normal_calls.inc()
-        global.__mini_a_metrics.llm_normal_tokens.getAdd(responseTokenTotal)
         // Issue 5: Update per-session cost tracker for main
         if (isMap(this._costTracker)) {
           this._costTracker.main.calls++
@@ -15750,9 +15750,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
           registerCallUsage(fallbackTokenTotal)
-          global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
-          global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
-          global.__mini_a_metrics.llm_normal_calls.inc()
+          this._recordLlmStatsMetrics(fallbackStats, "main")
 
           // Attach actual token stats to conversation message for later accurate analysis
           this._attachTokenStatsToConversation(fallbackStats, this.llm)
@@ -16549,9 +16547,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var finalStats = isObject(finalResponseWithStats) ? finalResponseWithStats.stats : {}
     var finalTokenTotal = this._getTotalTokens(finalStats)
     registerCallUsage(finalTokenTotal)
-    global.__mini_a_metrics.llm_actual_tokens.getAdd(finalTokenTotal)
-    global.__mini_a_metrics.llm_normal_tokens.getAdd(finalTokenTotal)
-    global.__mini_a_metrics.llm_normal_calls.inc()
+    this._recordLlmStatsMetrics(finalStats, "main")
     
     if (args.showthinking) {
       // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
@@ -16705,9 +16701,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Attach actual token stats to conversation message for later accurate analysis
       this._attachTokenStatsToConversation(stats, this.llm)
 
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(chatbotTokenTotal)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(chatbotTokenTotal)
-      global.__mini_a_metrics.llm_normal_calls.inc()
+      this._recordLlmStatsMetrics(stats, "main")
 
       var tokenStatsMsg = this._formatTokenStats(stats)
       this.fnI("output", `Chatbot model responded. ${tokenStatsMsg}`)
@@ -16968,9 +16962,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
       afterCall(fallbackTokenTotal)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(fallbackPrompt))
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
-      global.__mini_a_metrics.llm_normal_calls.inc()
+      this._recordLlmStatsMetrics(fallbackStats, "main")
       var fallbackTokenStatsMsg = this._formatTokenStats(fallbackStats)
       this.fnI("output", `Fallback response received. ${fallbackTokenStatsMsg}`)
       var fallbackAnswer = fallbackResponseWithStats.response
@@ -17066,10 +17058,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
-    var totalTokens = this._getTotalTokens(stats)
-    global.__mini_a_metrics.llm_actual_tokens.getAdd(totalTokens)
-    global.__mini_a_metrics.llm_normal_tokens.getAdd(totalTokens)
-    global.__mini_a_metrics.llm_normal_calls.inc()
+    var totalTokens = this._recordLlmStatsMetrics(stats, "main")
 
     var validationContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
     if (isObject(validationContent) && isString(validationContent.response)) {

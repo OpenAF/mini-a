@@ -970,13 +970,20 @@ jobs:
         return runHooks(event, contextVars)
       })
     }
-    _ma.init(args)
-    var _r = _ma.start(args)
-    var resultPreview = isString(_r) ? _r.substring(0, 2000) : (isDef(_r) ? stringify(_r, __, "").substring(0, 2000) : "")
-    runHooks("after_goal", { MINI_A_GOAL: originalGoalText, MINI_A_RESULT: resultPreview })
-    if (isUnDef(args.outfile)) {
-      if (isObject(_r)) 
-        ow.oJob.output(_r, args)
-      else
-        print(_r)
+    var _r = __
+    try {
+      _ma.init(args)
+      _r = _ma.start(args)
+      var resultPreview = isString(_r) ? _r.substring(0, 2000) : (isDef(_r) ? stringify(_r, __, "").substring(0, 2000) : "")
+      runHooks("after_goal", { MINI_A_GOAL: originalGoalText, MINI_A_RESULT: resultPreview })
+      if (isUnDef(args.outfile)) {
+        if (isObject(_r)) 
+          ow.oJob.output(_r, args)
+        else
+          print(_r)
+      }
+    } finally {
+      try {
+        if (isFunction(_ma._stopAgentResources)) _ma._stopAgentResources()
+      } catch(ignoreAgentStop) {}
     }

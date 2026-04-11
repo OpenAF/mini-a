@@ -3783,6 +3783,9 @@ try {
 
     try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
     try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
+    try {
+      if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) activeAgent._stopAgentResources()
+    } catch(ignoreAgentStop) {}
 
     if (commandHistory && typeof commandHistory.flush === "function") {
       try { commandHistory.flush() } catch(ignoreFlushError) {}
