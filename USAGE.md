@@ -809,7 +809,7 @@ The `start()` method accepts various configuration options:
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
 
 Advisor mode contract (internal-only, never user-facing):
-- Advisor responses must be strict JSON with exactly: `assessment` (string), `recommended_next_step` (string), `risk_flags` (array), `escalate_to_main` (boolean), `confidence` (number), `stop_or_continue` (`"stop"` or `"continue"`).
+- Advisor responses must be strict JSON that must include: `assessment` (string), `recommended_next_step` (string), `risk_flags` (array), `escalate_to_main` (boolean), `confidence` (number), `stop_or_continue` (`"stop"` or `"continue"`).
 - Responses that include execution intent (`tool`, `tool_calls`, `function_call`, or textual "run tool"/"invoke tool") are rejected.
 - Invalid advisor payloads are ignored safely, counted in telemetry, and executor flow continues with stricter guardrails.
 
