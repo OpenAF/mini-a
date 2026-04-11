@@ -14937,10 +14937,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (["low", "medium", "high"].indexOf(evidenceGateStrictness) < 0) evidenceGateStrictness = "medium"
     var advisorBudgetRatio = isDef(args.advisorbudgetratio) ? Number(args.advisorbudgetratio) : 0.20
     if (!isNumber(advisorBudgetRatio) || isNaN(advisorBudgetRatio)) advisorBudgetRatio = 0.20
-    advisorBudgetRatio = Math.max(0, advisorBudgetRatio)
+    advisorBudgetRatio = Math.min(1, Math.max(0, advisorBudgetRatio))
     var emergencyReserve = isDef(args.emergencyreserve) ? Number(args.emergencyreserve) : 0.10
     if (!isNumber(emergencyReserve) || isNaN(emergencyReserve)) emergencyReserve = 0.10
-    emergencyReserve = Math.max(0, emergencyReserve)
+    emergencyReserve = Math.min(1, Math.max(0, emergencyReserve))
 
     // Reset per-run cost tracker
     this._costTracker = {
