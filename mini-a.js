@@ -92,6 +92,10 @@ var MiniA = function() {
   this._memoryScope = "both"
   this._memoryConfig = { enabled: true, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
   this._memorychName = __
+  this._metricschName = __
+  this._metricschCollecting = false
+  this._metricschCreated = false
+  this._metricschRegistered = false
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -100,8 +104,10 @@ var MiniA = function() {
   // Per-step cost tracker (Issue 5)
   this._costTracker = {
     lc:   { calls: 0, totalTokens: 0, estimatedUSD: 0 },
-    main: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
+    main: { calls: 0, totalTokens: 0, estimatedUSD: 0 },
+    advisor: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
   }
+  this._modelStrategy = "default"
 
   // Check OAF_MINI_A_NOJSONPROMPT environment variable to disable promptJSONWithStats
   // This forces the use of promptWithStats instead. Required for Gemini models due to API restrictions.
@@ -191,6 +197,14 @@ var MiniA = function() {
     escalation_steps_without_action: $atomic(0, "long"),
     escalation_similar_thoughts: $atomic(0, "long"),
     escalation_context_window: $atomic(0, "long"),
+    advisor_calls: $atomic(0, "long"),
+    advisor_tokens: $atomic(0, "long"),
+    advisor_consultations_skipped: $atomic(0, "long"),
+    advisor_invalid_responses: $atomic(0, "long"),
+    advisor_helpful_escalations: $atomic(0, "long"),
+    advisor_declined_under_budget: $atomic(0, "long"),
+    hard_decision_checkpoints: $atomic(0, "long"),
+    evidence_gate_rejections: $atomic(0, "long"),
     mcp_lazy_init_success: $atomic(0, "long"),
     mcp_lazy_init_failed: $atomic(0, "long"),
     deep_research_sessions: $atomic(0, "long"),
@@ -691,6 +705,9 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._planningPhase = "none"  // Tracks planning phase: "none" | "planning" | "execution"
   this._debugFile = ""
   this._debugChannelFiles = {}
+  this._stopRequested = false
+  this._stopReason = ""
+  this._stopRequestedAt = __
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -698,9 +715,81 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
 
 MiniA._activeInstances = []
 MiniA._shutdownHookRegistered = false
+MiniA._metricsChannelRefs = {}
+MiniA._metricsChannelOwners = {}
 MiniA._registeredWorkers = []
 MiniA._registeredWorkerLastHeartbeat = {}
 MiniA._proxyTempFiles = []
+MiniA._terminalSubtaskStates = {
+  completed: true,
+  failed   : true,
+  cancelled: true,
+  canceled : true,
+  timeout  : true
+}
+
+MiniA.prototype._stopAgentResources = function() {
+  if (isFunction(MiniA._releaseMetricsChannel)) MiniA._releaseMetricsChannel(this)
+  this._metricschCollecting = false
+  this._metricschRegistered = false
+
+  if (isObject(this._subtaskManager)) {
+    try {
+      var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
+      if (isArray(subtasks)) {
+        subtasks.forEach(function(subtask) {
+          if (!isMap(subtask) || !isString(subtask.id) || !isString(subtask.status)) return
+          if (MiniA._terminalSubtaskStates[subtask.status] === true) return
+          try {
+            this._subtaskManager.cancel(subtask.id, this._stopReason || "Stop requested")
+          } catch(ignoreCancelErr) {}
+        }.bind(this))
+      }
+    } catch(ignoreSubtaskStop) {}
+  }
+
+  if (isDef(this._regHttpServer) && isDef(ow) && isDef(ow.server) && isDef(ow.server.httpd) && typeof ow.server.httpd.stop === "function") {
+    try { ow.server.httpd.stop(this._regHttpServer) } catch(ignoreRegStopErr) {}
+    this._regHttpServer = __
+  }
+
+  if (isDef(this._progCallServer) && isFunction(this._progCallServer.stop)) {
+    try { this._progCallServer.stop() } catch(ignoreProgCallStopErr) {}
+    this._progCallServer = __
+    this._progCallEnv    = __
+    this._progCallTmpDir = __
+  }
+
+  if (isObject(this._mcpConnections)) {
+    Object.keys(this._mcpConnections).forEach(function(connectionId) {
+      var client = this._mcpConnections[connectionId]
+      if (isObject(client) && typeof client.destroy === "function") {
+        try { client.destroy() } catch(ignoreMcpDestroyErr) {}
+      }
+    }.bind(this))
+  }
+}
+
+MiniA.prototype.requestStop = function(reason, options) {
+  var opts = isObject(options) ? options : {}
+  var stopReason = isString(reason) && reason.trim().length > 0 ? reason.trim() : "Stop requested"
+  var firstRequest = this._stopRequested !== true
+
+  this._stopRequested = true
+  this._stopReason = stopReason
+  if (isUnDef(this._stopRequestedAt)) this._stopRequestedAt = now()
+  this.state = "stop"
+
+  if (firstRequest && opts.quiet !== true) {
+    this.fnI("stop", stopReason)
+  }
+
+  if (opts.releaseResources !== false) {
+    this._stopAgentResources()
+  }
+
+  return firstRequest
+}
 
 MiniA.prototype._normalizePromptDataText = function(inputText) {
   if (isUnDef(inputText) || inputText === null) return ""
@@ -759,6 +848,76 @@ MiniA._trackInstance = function(instance) {
   if (MiniA._activeInstances.indexOf(instance) === -1) MiniA._activeInstances.push(instance)
 }
 
+MiniA._registerMetricsChannel = function(agent, channelName, options) {
+  if (!isObject(agent) || !isString(channelName) || channelName.length === 0) return false
+  if (!isObject(MiniA._metricsChannelRefs)) MiniA._metricsChannelRefs = {}
+  if (!isObject(MiniA._metricsChannelOwners)) MiniA._metricsChannelOwners = {}
+
+  var opts = isMap(options) ? options : {}
+  var currentRefs = isNumber(MiniA._metricsChannelRefs[channelName]) ? MiniA._metricsChannelRefs[channelName] : 0
+
+  if (agent._metricschRegistered === true && agent._metricschName === channelName) return currentRefs > 0
+
+  if (agent._metricschRegistered === true && isFunction(MiniA._releaseMetricsChannel)) {
+    MiniA._releaseMetricsChannel(agent)
+    currentRefs = isNumber(MiniA._metricsChannelRefs[channelName]) ? MiniA._metricsChannelRefs[channelName] : 0
+  }
+
+  if (currentRefs <= 0) {
+    try {
+      ow.metrics.startCollecting(channelName, opts.period, opts.some, opts.noDate)
+      currentRefs = 0
+    } catch(metricsCollectErr) {
+      throw metricsCollectErr
+    }
+  }
+
+  MiniA._metricsChannelRefs[channelName] = currentRefs + 1
+  if (agent._metricschCreated === true) MiniA._metricsChannelOwners[channelName] = true
+  agent._metricschName = channelName
+  agent._metricschRegistered = true
+  agent._metricschCollecting = true
+  return true
+}
+
+MiniA._releaseMetricsChannel = function(agent) {
+  if (!isObject(agent) || agent._metricschRegistered !== true || !isString(agent._metricschName) || agent._metricschName.length === 0) return
+  var channelName = agent._metricschName
+
+  if (!isObject(MiniA._metricsChannelRefs)) MiniA._metricsChannelRefs = {}
+  if (!isObject(MiniA._metricsChannelOwners)) MiniA._metricsChannelOwners = {}
+
+  var refs = isNumber(MiniA._metricsChannelRefs[channelName]) ? MiniA._metricsChannelRefs[channelName] : 0
+  refs = refs - 1
+
+  if (refs <= 0) {
+    delete MiniA._metricsChannelRefs[channelName]
+    try {
+      if (isDef(ow.metrics.__ch) && isArray(ow.metrics.__ch)) {
+        ow.metrics.__ch = ow.metrics.__ch.filter(function(ch) { return ch !== channelName })
+      }
+      if (isDef(ow.metrics.__t) && (!isArray(ow.metrics.__ch) || ow.metrics.__ch.length <= 0)) {
+        ow.metrics.__t.stop(true)
+        ow.metrics.__t = __
+      }
+    } catch(ignoreMetricsStopErr) {
+      try { ow.metrics.stopCollecting(channelName) } catch(ignoreStopFallbackErr) {}
+    }
+
+    if (MiniA._metricsChannelOwners[channelName] === true) {
+      try {
+        if ($ch().list().indexOf(channelName) >= 0) $ch(channelName).destroy()
+      } catch(ignoreMetricsDestroyErr) {}
+      delete MiniA._metricsChannelOwners[channelName]
+    }
+  } else {
+    MiniA._metricsChannelRefs[channelName] = refs
+  }
+
+  agent._metricschCollecting = false
+  agent._metricschRegistered = false
+}
+
 MiniA._destroyAllMcpConnections = function() {
   if (!isArray(MiniA._activeInstances)) return
   MiniA._activeInstances.forEach(function(agent) {
@@ -793,6 +952,14 @@ MiniA._stopAllProgCallServers = function() {
   })
 }
 
+MiniA._stopAllAgentResources = function() {
+  if (!isArray(MiniA._activeInstances)) return
+  MiniA._activeInstances.forEach(function(agent) {
+    if (!isObject(agent) || !isFunction(agent._stopAgentResources)) return
+    try { agent._stopAgentResources() } catch(ignoreAgentStopErr) {}
+  })
+}
+
 MiniA._registerShutdownHook = function() {
   if (MiniA._shutdownHookRegistered === true) return
   if (typeof addOnOpenAFShutdown !== "function") return
@@ -807,6 +974,7 @@ MiniA._registerShutdownHook = function() {
         })
       }
     } catch(ignoreDebugFlushError) {}
+    try { MiniA._stopAllAgentResources() } catch(ignoreAgentStopError) {}
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
     try { MiniA._cleanupSandboxTempFiles() } catch(ignoreSandboxTempCleanupError) {}
@@ -1464,6 +1632,19 @@ MiniA.prototype.getMetrics = function() {
             thinking_loops_detected: global.__mini_a_metrics.thinking_loops_detected.get(),
             similar_thoughts_detected: global.__mini_a_metrics.similar_thoughts_detected.get()
         },
+        advisor: {
+            calls: global.__mini_a_metrics.advisor_calls.get(),
+            tokens: global.__mini_a_metrics.advisor_tokens.get(),
+            consultations_skipped: global.__mini_a_metrics.advisor_consultations_skipped.get(),
+            invalid_responses: global.__mini_a_metrics.advisor_invalid_responses.get(),
+            helpful_escalations: global.__mini_a_metrics.advisor_helpful_escalations.get(),
+            declined_under_budget: global.__mini_a_metrics.advisor_declined_under_budget.get(),
+            trace: this._runtime && isArray(this._runtime.advisorTrace) ? this._runtime.advisorTrace.slice(-20) : []
+        },
+        guardrails: {
+            hard_decision_checkpoints: global.__mini_a_metrics.hard_decision_checkpoints.get(),
+            evidence_gate_rejections: global.__mini_a_metrics.evidence_gate_rejections.get()
+        },
         user_interaction: {
             requests: global.__mini_a_metrics.user_input_requested.get(),
             completed: global.__mini_a_metrics.user_input_completed.get(),
@@ -2012,11 +2193,154 @@ MiniA.prototype.getEscalationStats = function() {
  * { lc: { calls, totalTokens, estimatedUSD }, main: { calls, totalTokens, estimatedUSD } }
  */
 MiniA.prototype.getCostStats = function() {
-  var ct = this._costTracker || { lc: {}, main: {} }
+  var ct = this._costTracker || { lc: {}, main: {}, advisor: {} }
   return {
     lc  : Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.lc),
-    main: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.main)
+    main: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.main),
+    advisor: Object.assign({ calls: 0, totalTokens: 0, estimatedUSD: 0 }, ct.advisor)
   }
+}
+
+MiniA.prototype._normalizeModelStrategy = function(v) {
+  var s = isString(v) ? v.trim().toLowerCase() : "default"
+  if (s !== "advisor") return "default"
+  return s
+}
+
+MiniA.prototype._safeParseAdvisorJson = function(raw) {
+  if (isMap(raw)) return raw
+  if (!isString(raw)) return __
+  var parsed = jsonParse(raw, __, __, true)
+  if (isMap(parsed)) return parsed
+  var m = raw.match(/\{[\s\S]*\}/)
+  if (isArray(m) && isString(m[0])) {
+    parsed = jsonParse(m[0], __, __, true)
+    if (isMap(parsed)) return parsed
+  }
+  return __
+}
+
+MiniA.prototype._containsAdvisorExecution = function(obj) {
+  var walk = value => {
+    if (isUnDef(value) || value === null) return false
+    if (isArray(value)) {
+      for (var i = 0; i < value.length; i++) if (walk(value[i])) return true
+      return false
+    }
+    if (isMap(value)) {
+      var keys = Object.keys(value)
+      for (var k = 0; k < keys.length; k++) {
+        var key = String(keys[k] || "").toLowerCase()
+        if (key === "tool" || key === "tool_calls" || key === "function_call") return true
+        if (walk(value[keys[k]])) return true
+      }
+      return false
+    }
+    if (isString(value)) {
+      var lower = value.toLowerCase()
+      if (lower.indexOf("run tool") >= 0 || lower.indexOf("invoke tool") >= 0) return true
+    }
+    return false
+  }
+  return walk(obj)
+}
+
+MiniA.prototype._validateAdvisorResponse = function(obj) {
+  var expected = ["assessment", "recommended_next_step", "risk_flags", "escalate_to_main", "confidence", "stop_or_continue"]
+  if (!isMap(obj)) return { ok: false, reason: "not_object" }
+  if (this._containsAdvisorExecution(obj)) return { ok: false, reason: "execution_content_detected" }
+  for (var i = 0; i < expected.length; i++) {
+    if (!Object.prototype.hasOwnProperty.call(obj, expected[i])) return { ok: false, reason: "missing_field_" + expected[i] }
+  }
+  if (!isString(obj.assessment) || obj.assessment.trim().length === 0) return { ok: false, reason: "invalid_assessment" }
+  if (!isString(obj.recommended_next_step) || obj.recommended_next_step.trim().length === 0) return { ok: false, reason: "invalid_recommended_next_step" }
+  if (!isArray(obj.risk_flags)) return { ok: false, reason: "invalid_risk_flags" }
+  if (!isBoolean(obj.escalate_to_main)) return { ok: false, reason: "invalid_escalate_to_main" }
+  if (!isNumber(obj.confidence) || isNaN(obj.confidence)) return { ok: false, reason: "invalid_confidence" }
+  var soc = isString(obj.stop_or_continue) ? obj.stop_or_continue.toLowerCase().trim() : ""
+  if (soc !== "stop" && soc !== "continue") return { ok: false, reason: "invalid_stop_or_continue" }
+  return { ok: true, value: obj }
+}
+
+MiniA.prototype._sanitizeFinalOutput = function(text) {
+  if (!isString(text)) return text
+  var sanitized = text
+  var before = sanitized
+  sanitized = sanitized.replace(/\[ADVISOR[^\]]*\][^\n]*\n?/gi, "")
+  sanitized = sanitized.replace(/(^|\n)\s*\(recommendation\)\s.*$/gim, "$1")
+  if (before !== sanitized) this.fnI("warn", "Advisor-tagged content detected and removed from final output.")
+  return sanitized
+}
+
+MiniA.prototype._isHardDecision = function(step) {
+  if (!isString(step) || step.trim().length === 0) return false
+  return /\b(delete|remove|overwrite|write|apply\s+fix|security|policy|drop|truncate|chmod|chown|destroy)\b/i.test(step)
+}
+
+MiniA.prototype._hasEvidenceForStep = function(runtime, stepText, strictness) {
+  if (!isString(stepText) || stepText.trim().length === 0) return true
+  var lower = stepText.toLowerCase()
+  var nonTrivial = /\b(write|delete|remove|deploy|security|policy|fix|apply|final|conclude|recommend)\b/.test(lower)
+  if (!nonTrivial) return true
+  var s = isString(strictness) ? strictness.toLowerCase().trim() : "medium"
+  var windowSize = s === "high" ? 10 : (s === "low" ? 4 : 6)
+  var needed = s === "high" ? 2 : 1
+  var ctx = isObject(runtime) && isArray(runtime.context) ? runtime.context : []
+  var recent = ctx.slice(Math.max(0, ctx.length - windowSize))
+  var hits = 0
+  for (var i = 0; i < recent.length; i++) {
+    if (/\[(OBS|ACT|TOOL|STATE|EVIDENCE)/.test(String(recent[i] || ""))) hits++
+  }
+  return hits >= needed
+}
+
+MiniA.prototype._isAdvisorCallWorthIt = function(runtime, signalSet) {
+  var signals = isMap(signalSet) ? signalSet : {}
+  var score = 0
+  if (signals.hardDecision) score += 4
+  if (signals.preEscalation) score += 3
+  if (signals.risk) score += 3
+  if (signals.ambiguity) score += 2
+  if (signals.errorRecovery) score += 2
+  if (signals.repeatedReasoning) score += 1
+  if (signals.lowProgress) score += 1
+  var policy = isObject(runtime) && isObject(runtime.advisorPolicy) ? runtime.advisorPolicy : {}
+  var ratio = isNumber(policy.advisorBudgetRatio) ? Math.max(0, policy.advisorBudgetRatio) : 0.2
+  var reserve = isNumber(policy.emergencyReserve) ? Math.max(0, policy.emergencyReserve) : 0.1
+  var sessionBudget = isNumber(policy.sessionTokenBudget) ? policy.sessionTokenBudget : 0
+  if (sessionBudget <= 0) return { ok: true, reason: "no_budget_cap", score: score }
+  var advisorSpent = this._costTracker && this._costTracker.advisor ? (this._costTracker.advisor.totalTokens || 0) : 0
+  var cap = Math.max(1, Math.floor(sessionBudget * ratio))
+  var pressure = advisorSpent >= cap * (1 - reserve)
+  if (pressure && score < 3) return { ok: false, reason: "low_value_under_budget_pressure", score: score, cap: cap, spent: advisorSpent }
+  return { ok: true, reason: "worth_it", score: score, cap: cap, spent: advisorSpent }
+}
+
+MiniA.prototype._shouldConsultAdvisor = function(runtime, signalSet) {
+  var signals = isMap(signalSet) ? signalSet : {}
+  var policy = isObject(runtime) && isObject(runtime.advisorPolicy) ? runtime.advisorPolicy : {}
+  var reasons = []
+  var enabled = toBoolean(policy.enabled) === true
+  if (!enabled) return { ok: false, reason: "advisor_disabled", reasons: reasons }
+
+  var signalReasons = []
+  if (signals.preEscalation) signalReasons.push("pre-escalation")
+  if (signals.lowProgress) signalReasons.push("low_progress")
+  if (signals.repeatedReasoning) signalReasons.push("repeated_reasoning")
+  if (signals.errorRecovery) signalReasons.push("error_recovery")
+  if (signals.hardDecision && toBoolean(policy.onHardDecision) === true) signalReasons.push("hard_decision")
+  if (signals.ambiguity && toBoolean(policy.onAmbiguity) === true) signalReasons.push("ambiguity")
+  if (signals.risk && toBoolean(policy.onRisk) === true) signalReasons.push("risk")
+
+  if (signalReasons.length === 0) return { ok: false, reason: "no_signal", reasons: reasons }
+  reasons = reasons.concat(signalReasons)
+
+  if (runtime.advisorUses >= policy.maxUses) return { ok: false, reason: "max_uses_reached", reasons: reasons }
+  if ((runtime.currentStepNumber - runtime.advisorLastStep) < policy.cooldownSteps) return { ok: false, reason: "cooldown_active", reasons: reasons }
+
+  var worth = this._isAdvisorCallWorthIt(runtime, signals)
+  if (!worth.ok) return { ok: false, reason: worth.reason, reasons: reasons, worth: worth }
+  return { ok: true, reason: "allowed", reasons: reasons, worth: worth }
 }
 
 /**
@@ -2472,11 +2796,9 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
     var summaryTokenTotal = this._getTotalTokens(summaryStats)
 
-    if (isObject(global.__mini_a_metrics)) {
-        if (isObject(global.__mini_a_metrics.llm_actual_tokens)) global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
-        if (isObject(global.__mini_a_metrics.llm_normal_tokens)) global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
-        if (isObject(global.__mini_a_metrics.llm_normal_calls)) global.__mini_a_metrics.llm_normal_calls.inc()
-        if (isObject(global.__mini_a_metrics.summaries_made)) global.__mini_a_metrics.summaries_made.inc()
+    this._recordLlmStatsMetrics(summaryStats, "main")
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.summaries_made)) {
+        global.__mini_a_metrics.summaries_made.inc()
     }
 
     var finalTokens = this._estimateTokens(summaryResponseWithStats.response)
@@ -2506,6 +2828,35 @@ MiniA.prototype._getTotalTokens = function(stats) {
     var completion = isNumber(stats.completion_tokens) ? stats.completion_tokens : 0
     var derived = prompt + completion
     return derived > 0 ? derived : 0
+}
+
+MiniA.prototype._recordLlmStatsMetrics = function(stats, tier) {
+    if (!isObject(global.__mini_a_metrics)) return 0
+
+    var normalizedTier = isString(tier) && tier.toLowerCase() === "lc" ? "lc" : "main"
+    var totalTokens = this._getTotalTokens(stats)
+
+    if (isObject(global.__mini_a_metrics.llm_actual_tokens)) {
+        global.__mini_a_metrics.llm_actual_tokens.getAdd(totalTokens)
+    }
+
+    if (normalizedTier === "lc") {
+        if (isObject(global.__mini_a_metrics.llm_lc_tokens)) {
+            global.__mini_a_metrics.llm_lc_tokens.getAdd(totalTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_lc_calls)) {
+            global.__mini_a_metrics.llm_lc_calls.inc()
+        }
+    } else {
+        if (isObject(global.__mini_a_metrics.llm_normal_tokens)) {
+            global.__mini_a_metrics.llm_normal_tokens.getAdd(totalTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_normal_calls)) {
+            global.__mini_a_metrics.llm_normal_calls.inc()
+        }
+    }
+
+    return totalTokens
 }
 
 /**
@@ -7465,6 +7816,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   var structuredOutput = this._isStructuredOutputFormat(args.format)
 
   if (isString(answer) && args.format != "raw") answer = answer.trim()
+  answer = this._sanitizeFinalOutput(answer)
 
   // Remove outer code block markers when the answer is just a single fenced block.
   if ((args.format == "md" || structuredOutput) && args.format != "raw" && isString(answer)) {
@@ -8340,7 +8692,6 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
     if (methodNames.length === 0) return __
 
-    var parent = this
     var formatResponse = function(result) {
       if (isString(result) && result.indexOf("[ERROR]") === 0) {
         return {
@@ -12409,6 +12760,7 @@ MiniA.prototype.init = function(args) {
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
       { name: "toollog", type: "string", default: __ },
+      { name: "metricsch", type: "string", default: __ },
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
       { name: "debugvalch", type: "string", default: __ },
@@ -12695,6 +13047,45 @@ MiniA.prototype.init = function(args) {
         } catch (e) {
           this.fnI("error", `Failed to create tool log channel: ${e.message}`)
         }
+      }
+    }
+
+    // Check the need to init metricsch
+    if (isDef(args.metricsch) && args.metricsch.length > 0) {
+      try {
+        var _metricschm = af.fromJSSLON(args.metricsch)
+        if (isMap(_metricschm)) {
+          var _metricschName = isString(_metricschm.name) && _metricschm.name.trim().length > 0 ? _metricschm.name.trim() : "_mini_a_metrics_channel"
+          var _metricschType = isString(_metricschm.type) ? _metricschm.type : "simple"
+          var _metricschOpts = isMap(_metricschm.options) ? _metricschm.options : {}
+          var _metricschExists = false
+          try { _metricschExists = $ch().list().indexOf(_metricschName) >= 0 } catch(ignoreListMetrics) {}
+          this._metricschCreated = false
+          if (!_metricschExists) {
+            $ch(_metricschName).create(_metricschType, _metricschOpts)
+            this._metricschCreated = true
+            if (args.debug) this.fnI("info", `[metrics] channel '${_metricschName}' created.`)
+          } else {
+            if (args.debug) this.fnI("info", `[metrics] channel '${_metricschName}' reused.`)
+          }
+          this._metricschName = _metricschName
+
+          var _metricschPeriod = isNumber(_metricschm.period) && _metricschm.period > 0 ? _metricschm.period : 1000
+          var _metricschSome = isArray(_metricschm.some) && _metricschm.some.length > 0 ? _metricschm.some : ["mini-a"]
+          var _metricschNoDate = isBoolean(_metricschm.noDate) ? _metricschm.noDate : false
+          try {
+            MiniA._registerMetricsChannel(this, this._metricschName, {
+              period: _metricschPeriod,
+              some  : _metricschSome,
+              noDate: _metricschNoDate
+            })
+            if (args.debug) this.fnI("info", `[metrics] collecting '${_metricschSome.join(",")}' into '${this._metricschName}' every ${_metricschPeriod}ms.`)
+          } catch(metricsCollectErr) {
+            this.fnI("warn", `[metrics] failed to start metrics collection on '${this._metricschName}': ${__miniAErrMsg(metricsCollectErr)}`)
+          }
+        }
+      } catch(e) {
+        this.fnI("warn", `[metrics] failed to initialize metricsch channel: ${__miniAErrMsg(e)}`)
       }
     }
 
@@ -13741,28 +14132,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var normalizedTokens = isNumber(tokens) ? tokens : 0
         if (normalizedTokens > 0) {
           registerCallUsage(normalizedTokens)
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_actual_tokens)) {
-            global.__mini_a_metrics.llm_actual_tokens.getAdd(normalizedTokens)
-          }
-          if (tier === "lc") {
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_lc_tokens)) {
-              global.__mini_a_metrics.llm_lc_tokens.getAdd(normalizedTokens)
-            }
-          } else {
-            if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_normal_tokens)) {
-              global.__mini_a_metrics.llm_normal_tokens.getAdd(normalizedTokens)
-            }
-          }
         }
-        if (tier === "lc") {
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_lc_calls)) {
-            global.__mini_a_metrics.llm_lc_calls.inc()
-          }
-        } else {
-          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.llm_normal_calls)) {
-            global.__mini_a_metrics.llm_normal_calls.inc()
-          }
-        }
+        this._recordLlmStatsMetrics({
+          total_tokens: normalizedTokens
+        }, tier)
       }
     }
 
@@ -13885,14 +14258,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var summaryStats = isObject(summaryResponseWithStats) ? summaryResponseWithStats.stats : {}
         var summaryTokenTotal = self._getTotalTokens(summaryStats)
         registerCallUsage(summaryTokenTotal)
-        global.__mini_a_metrics.llm_actual_tokens.getAdd(summaryTokenTotal)
-        if (summarizeLLM === self.lc_llm) {
-          global.__mini_a_metrics.llm_lc_tokens.getAdd(summaryTokenTotal)
-          global.__mini_a_metrics.llm_lc_calls.inc()
-        } else {
-          global.__mini_a_metrics.llm_normal_tokens.getAdd(summaryTokenTotal)
-          global.__mini_a_metrics.llm_normal_calls.inc()
-        }
+        self._recordLlmStatsMetrics(summaryStats, summarizeLLM === self.lc_llm ? "lc" : "main")
         global.__mini_a_metrics.summaries_made.inc()
 
         var responseText = isObject(summaryResponseWithStats) && isString(summaryResponseWithStats.response)
@@ -14305,7 +14671,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       lastContextText         : "",
       lastContextTokens       : 0,
       contextDedupeInterval   : 10,
-      lastDedupContextLength  : 0
+      lastDedupContextLength  : 0,
+      advisorUses             : 0,
+      advisorLastStep         : -999,
+      advisorLastReason       : ""
     }
 
     var optimizeGoalBlock = () => {
@@ -14513,6 +14882,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var lcComplexityResp = isFunction(this.lc_llm.promptJSONWithStats)
           ? this.lc_llm.promptJSONWithStats(lcComplexityPrompt)
           : this.lc_llm.promptWithStats(lcComplexityPrompt)
+        this._recordLlmStatsMetrics(isObject(lcComplexityResp) ? lcComplexityResp.stats : {}, "lc")
         var lcComplexityParsed = isObject(lcComplexityResp) ? lcComplexityResp.response : lcComplexityResp
         if (isString(lcComplexityParsed)) {
           try { lcComplexityParsed = jsonParse(lcComplexityParsed, __, __, true) } catch(e) {}
@@ -14547,11 +14917,36 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Issue 5: LC token budget
     var lcBudget = isDef(args.lcbudget) ? parseInt(args.lcbudget) : 0
     var lcBudgetExceeded = false
+    var modelStrategy = this._normalizeModelStrategy(args.modelstrategy)
+    this._modelStrategy = modelStrategy
+    var advisorEnabled = modelStrategy === "advisor" && this._use_lc && modelLock !== "main"
+    var advisorMaxUses = isDef(args.advisormaxuses) ? parseInt(args.advisormaxuses) : 2
+    if (!isNumber(advisorMaxUses) || isNaN(advisorMaxUses)) advisorMaxUses = 2
+    advisorMaxUses = Math.max(0, advisorMaxUses)
+    var advisorCooldownSteps = isDef(args.advisorcooldownsteps) ? parseInt(args.advisorcooldownsteps) : 2
+    if (!isNumber(advisorCooldownSteps) || isNaN(advisorCooldownSteps)) advisorCooldownSteps = 2
+    advisorCooldownSteps = Math.max(0, advisorCooldownSteps)
+    var advisorConfigEnabled = isUnDef(args.advisorenable) ? true : toBoolean(args.advisorenable)
+    var advisorOnRisk = isUnDef(args.advisoronrisk) ? true : toBoolean(args.advisoronrisk)
+    var advisorOnAmbiguity = isUnDef(args.advisoronambiguity) ? true : toBoolean(args.advisoronambiguity)
+    var advisorOnHardDecision = isUnDef(args.advisoronharddecision) ? true : toBoolean(args.advisoronharddecision)
+    var hardDecisionMode = isString(args.harddecision) ? args.harddecision.toLowerCase().trim() : "warn"
+    if (["require", "warn", "off"].indexOf(hardDecisionMode) < 0) hardDecisionMode = "warn"
+    var evidenceGateEnabled = toBoolean(args.evidencegate) === true
+    var evidenceGateStrictness = isString(args.evidencegatestrictness) ? args.evidencegatestrictness.toLowerCase().trim() : "medium"
+    if (["low", "medium", "high"].indexOf(evidenceGateStrictness) < 0) evidenceGateStrictness = "medium"
+    var advisorBudgetRatio = isDef(args.advisorbudgetratio) ? Number(args.advisorbudgetratio) : 0.20
+    if (!isNumber(advisorBudgetRatio) || isNaN(advisorBudgetRatio)) advisorBudgetRatio = 0.20
+    advisorBudgetRatio = Math.min(1, Math.max(0, advisorBudgetRatio))
+    var emergencyReserve = isDef(args.emergencyreserve) ? Number(args.emergencyreserve) : 0.10
+    if (!isNumber(emergencyReserve) || isNaN(emergencyReserve)) emergencyReserve = 0.10
+    emergencyReserve = Math.min(1, Math.max(0, emergencyReserve))
 
     // Reset per-run cost tracker
     this._costTracker = {
       lc:   { calls: 0, totalTokens: 0, estimatedUSD: 0 },
-      main: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
+      main: { calls: 0, totalTokens: 0, estimatedUSD: 0 },
+      advisor: { calls: 0, totalTokens: 0, estimatedUSD: 0 }
     }
     // Reset escalation history for fresh run
     this._escalationHistory = []
@@ -14571,6 +14966,24 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     } else if (modelLock === "lc") {
       this.fnI("info", "Model lock active: always using lc model")
     }
+    if (advisorEnabled) {
+      this.fnI("info", `Model strategy active: advisor (max uses=${advisorMaxUses}, cooldown=${advisorCooldownSteps} step(s))`)
+    }
+    runtime.advisorPolicy = {
+      enabled           : advisorEnabled && advisorConfigEnabled,
+      maxUses           : advisorMaxUses,
+      cooldownSteps     : advisorCooldownSteps,
+      onRisk            : advisorOnRisk,
+      onAmbiguity       : advisorOnAmbiguity,
+      onHardDecision    : advisorOnHardDecision,
+      advisorBudgetRatio: advisorBudgetRatio,
+      emergencyReserve  : emergencyReserve,
+      sessionTokenBudget: isNumber(args.maxcontext) && args.maxcontext > 0 ? args.maxcontext : 0
+    }
+    runtime.advisorTrace = []
+    runtime.hardDecisionMode = hardDecisionMode
+    runtime.hardDecisionCheckpoints = []
+    runtime.evidenceGate = { enabled: evidenceGateEnabled, strictness: evidenceGateStrictness }
 
     var currentToolContext = {}
     this._setCheckpoint("initial", runtime)
@@ -14708,6 +15121,101 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
     this._finalizeToolExecution = finalizeToolExecution
+    var consultAdvisor = (signalSet, meta) => {
+      var signals = isMap(signalSet) ? signalSet : {}
+      var decision = this._shouldConsultAdvisor(runtime, signals)
+      var entry = {
+        step     : runtime.currentStepNumber,
+        reason   : decision.reason,
+        consulted: false,
+        escalated: false,
+        confidence: __
+      }
+      if (!decision.ok) {
+        if (decision.reason === "low_value_under_budget_pressure" && isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_declined_under_budget)) {
+          global.__mini_a_metrics.advisor_declined_under_budget.inc()
+        }
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_consultations_skipped)) {
+          global.__mini_a_metrics.advisor_consultations_skipped.inc()
+        }
+        runtime.advisorTrace.push(entry)
+        return { consulted: false, decision: decision, outcome: __ }
+      }
+
+      this._syncConversationForModelSwitch("main")
+      var advisorContextWindow = runtime.context.slice(Math.max(0, runtime.context.length - 12)).join("\n")
+      var advisorPromptParts = [
+        "You are the advisor model. Do not execute actions. Do not propose tool calls.",
+        "Return JSON only with keys: assessment, recommended_next_step, risk_flags, escalate_to_main (boolean), confidence (0..1), stop_or_continue ('stop'|'continue').",
+        "Keep assessment and recommendation concise and evidence-focused.",
+        "Step: " + runtime.currentStepNumber + ", advisor uses remaining: " + Math.max(0, (isObject(runtime.advisorPolicy) ? runtime.advisorPolicy.maxUses : 0) - runtime.advisorUses),
+        "Goal:",
+        args.goal || "",
+        ""
+      ]
+      var priorAdvisorEntry = isArray(runtime.advisorTrace) ? runtime.advisorTrace.slice().reverse().find(function(e) { return e && e.consulted }) : __
+      if (isObject(priorAdvisorEntry)) {
+        advisorPromptParts.push("Prior advisor recommendation (step " + priorAdvisorEntry.step + "): escalated=" + priorAdvisorEntry.escalated + ", confidence=" + priorAdvisorEntry.confidence)
+      }
+      advisorPromptParts.push("Recent context:")
+      advisorPromptParts.push(advisorContextWindow)
+      var advisorPrompt = advisorPromptParts.join("\n")
+      var advisorResp = __
+      try {
+        advisorResp = this._withExponentialBackoff(() => {
+          addCall()
+          if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
+          return this.llm.promptWithStats(advisorPrompt)
+        }, this._llmRetryOptions("Advisor model", { llmType: "advisor", step: runtime.currentStepNumber }, { maxDelay: 4000 }))
+      } catch (advisorErr) {
+        if (args.debug || args.verbose) this.fnI("warn", `Advisor call failed: ${advisorErr && advisorErr.message ? advisorErr.message : advisorErr}`)
+      }
+      if (isObject(advisorResp)) {
+        var advisorStats = advisorResp.stats || {}
+        var advisorTokenTotal = this._getTotalTokens(advisorStats)
+        registerCallUsage(advisorTokenTotal)
+        this._recordLlmStatsMetrics(advisorStats, "main")
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_calls)) global.__mini_a_metrics.advisor_calls.inc()
+        if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_tokens)) global.__mini_a_metrics.advisor_tokens.getAdd(advisorTokenTotal)
+        if (isMap(this._costTracker) && isMap(this._costTracker.advisor)) {
+          this._costTracker.advisor.calls++
+          this._costTracker.advisor.totalTokens += advisorTokenTotal
+        }
+        runtime.advisorUses++
+        runtime.advisorLastStep = runtime.currentStepNumber
+        runtime.advisorLastReason = isArray(decision.reasons) ? decision.reasons.join(",") : decision.reason
+        var parsedAdvisor = this._safeParseAdvisorJson(advisorResp.response)
+        var validAdvisor = this._validateAdvisorResponse(parsedAdvisor)
+        if (!validAdvisor.ok) {
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_invalid_responses)) {
+            global.__mini_a_metrics.advisor_invalid_responses.inc()
+          }
+          runtime.context.push(`[OBS ${runtime.currentStepNumber}] (advisor-invalid) Ignored advisor response (${validAdvisor.reason}).`)
+          runtime.context.push(`[OBS ${runtime.currentStepNumber}] (advisor-guardrail) Keep next step short and grounded in observed evidence.`)
+          this._syncConversationForModelSwitch("lc")
+          runtime.advisorTrace.push(entry)
+          return { consulted: true, decision: decision, outcome: __ }
+        }
+        var advisorOutcome = validAdvisor.value
+        entry.consulted = true
+        entry.escalated = toBoolean(advisorOutcome.escalate_to_main) === true
+        entry.confidence = advisorOutcome.confidence
+        runtime.advisorTrace.push(entry)
+        var advisorSummary = advisorOutcome.recommended_next_step
+        if (advisorSummary.length > 0) runtime.context.push(`[ADVISOR ${runtime.currentStepNumber}] (recommendation) ${advisorSummary}`)
+        if (isArray(advisorOutcome.risk_flags) && advisorOutcome.risk_flags.length > 0) {
+          runtime.context.push(`[ADVISOR ${runtime.currentStepNumber}] (risk-flags) ${advisorOutcome.risk_flags.join(", ")}`)
+        }
+        if (toBoolean(advisorOutcome.escalate_to_main) === true && isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_helpful_escalations)) {
+          global.__mini_a_metrics.advisor_helpful_escalations.inc()
+        }
+        this._syncConversationForModelSwitch("lc")
+        return { consulted: true, decision: decision, outcome: advisorOutcome }
+      }
+      this._syncConversationForModelSwitch("lc")
+      runtime.advisorTrace.push(entry)
+      return { consulted: false, decision: decision, outcome: __ }
+    }
 
     sessionStartTime = now()
     this.state = "processing"
@@ -14921,6 +15429,25 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
       }
 
+      var advisorOutcome = __
+      if (advisorEnabled && step > 0 && this._use_lc && !runtime.forceMainModel) {
+        var advisorSignals = {
+          preEscalation    : shouldEscalate,
+          lowProgress      : runtime.stepsWithoutAction >= Math.max(2, escalationLimits.stepsWithoutAction - 1),
+          repeatedReasoning: runtime.recentSimilarThoughts.length >= 2,
+          errorRecovery    : runtime.hadErrorThisStep === true,
+          ambiguity        : runtime.pendingAdvisorSignals && runtime.pendingAdvisorSignals.ambiguity === true,
+          risk             : runtime.pendingAdvisorSignals && runtime.pendingAdvisorSignals.risk === true
+        }
+        var advisorCall = consultAdvisor(advisorSignals, { source: "loop" })
+        runtime.pendingAdvisorSignals = __
+        advisorOutcome = advisorCall.outcome
+        if (isMap(advisorOutcome) && toBoolean(advisorOutcome.escalate_to_main) === true) {
+          shouldEscalate = true
+          escalationReason = escalationReason.length > 0 ? escalationReason : "advisor_recommended_escalation"
+        }
+      }
+
       // Issue 1: Determine model to use based on modellock
       var useLowCost
       if (modelLock === "main" || runtime.forceMainModel === true) {
@@ -15120,15 +15647,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
       var responseTokenTotal = this._getTotalTokens(stats)
       registerCallUsage(responseTokenTotal)
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(responseTokenTotal)
+      this._recordLlmStatsMetrics(stats, useLowCost ? "lc" : "main")
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(prompt))
 
       // Attach actual token stats to conversation message for later accurate analysis
       this._attachTokenStatsToConversation(stats, currentLLM)
 
       if (useLowCost) {
-        global.__mini_a_metrics.llm_lc_calls.inc()
-        global.__mini_a_metrics.llm_lc_tokens.getAdd(responseTokenTotal)
         // Issue 5: Update per-session cost tracker for LC
         if (isMap(this._costTracker)) {
           this._costTracker.lc.calls++
@@ -15140,8 +15665,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this.fnI("warn", `LC token budget (${lcBudget}) exceeded — switching to main model for remainder of session`)
         }
       } else {
-        global.__mini_a_metrics.llm_normal_calls.inc()
-        global.__mini_a_metrics.llm_normal_tokens.getAdd(responseTokenTotal)
         // Issue 5: Update per-session cost tracker for main
         if (isMap(this._costTracker)) {
           this._costTracker.main.calls++
@@ -15284,9 +15807,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
           registerCallUsage(fallbackTokenTotal)
-          global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
-          global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
-          global.__mini_a_metrics.llm_normal_calls.inc()
+          this._recordLlmStatsMetrics(fallbackStats, "main")
 
           // Attach actual token stats to conversation message for later accurate analysis
           this._attachTokenStatsToConversation(fallbackStats, this.llm)
@@ -15622,6 +16143,46 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         pendingToolActions = []
       }
+      var enforceDecisionGuards = (stepLabel, actionName, details, thoughtText) => {
+        var actionText = `${actionName || ""} ${details || ""}`.trim()
+        var isHard = this._isHardDecision(actionText)
+        if (isHard && runtime.hardDecisionMode !== "off") {
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.hard_decision_checkpoints)) {
+            global.__mini_a_metrics.hard_decision_checkpoints.inc()
+          }
+          runtime.hardDecisionCheckpoints.push({ step: stepLabel, action: actionName, text: actionText })
+          runtime.context.push(`[HARD_DECISION ${stepLabel}] ${actionText}`)
+          if (runtime.hardDecisionMode === "require") {
+            var hardAdvisor = consultAdvisor({ hardDecision: true, risk: true, ambiguity: true }, { source: "hard-decision" })
+            if (!hardAdvisor.consulted) {
+              runtime.context.push(`[OBS ${stepLabel}] (blocked) harddecision=require but advisor consultation was not available (${hardAdvisor.decision.reason}).`)
+              runtime.hadErrorThisStep = true
+              return false
+            }
+            if (isMap(hardAdvisor.outcome) && isString(hardAdvisor.outcome.stop_or_continue) && hardAdvisor.outcome.stop_or_continue.toLowerCase().trim() === "stop") {
+              runtime.context.push(`[OBS ${stepLabel}] (blocked) advisor recommended stop for hard decision.`)
+              runtime.hadErrorThisStep = true
+              return false
+            }
+            var ack = isString(thoughtText) ? thoughtText.trim() : ""
+            if (ack.length < 8) {
+              runtime.context.push(`[OBS ${stepLabel}] (blocked) hard decision requires explicit executor acknowledgement before acting.`)
+              runtime.hadErrorThisStep = true
+              return false
+            }
+          }
+        }
+        if (runtime.evidenceGate && runtime.evidenceGate.enabled === true && !this._hasEvidenceForStep(runtime, actionText, runtime.evidenceGate.strictness)) {
+          if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.evidence_gate_rejections)) {
+            global.__mini_a_metrics.evidence_gate_rejections.inc()
+          }
+          runtime.context.push(`[EVIDENCE_GATE ${stepLabel}] Rejected unsupported step/action. Ground next attempt in prior OBS/ACT evidence.`)
+          runtime.pendingAdvisorSignals = { ambiguity: true, risk: true }
+          runtime.hadErrorThisStep = true
+          return false
+        }
+        return true
+      }
 
       for (var actionIndex = 0; actionIndex < actionMessages.length; actionIndex++) {
         if (this.state == "stop") {
@@ -15762,6 +16323,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             flushToolActions()
             break
           }
+          if (!enforceDecisionGuards(stepLabel, "shell", commandValue, thoughtStr)) {
+            flushToolActions()
+            break
+          }
           // When tools mode is enabled, default to MCP shell route unless adaptive router picks direct shell.
           if (this._useTools === true && this.mcpToolToConnection && isDef(this.mcpToolToConnection["shell"])) {
             var routeToDirectShell = false
@@ -15848,6 +16413,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             global.__mini_a_metrics.mcp_actions_failed.inc()
             break
           }
+          if (!enforceDecisionGuards(stepLabel, origActionRaw, af.toSLON(paramsValue), thoughtStr)) {
+            flushToolActions()
+            break
+          }
 
           var shouldUpdateToolContext = !this._useTools || runtime.providerToolUseFailedDetected === true || origActionRaw === "proxy-dispatch"
           pendingToolActions.push({
@@ -15880,6 +16449,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               message : "missing final answer",
               context : { step: stepLabel }
             })
+            break
+          }
+          if (!enforceDecisionGuards(stepLabel, "final", answerToCheck, thoughtStr)) {
             break
           }
 
@@ -16032,9 +16604,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var finalStats = isObject(finalResponseWithStats) ? finalResponseWithStats.stats : {}
     var finalTokenTotal = this._getTotalTokens(finalStats)
     registerCallUsage(finalTokenTotal)
-    global.__mini_a_metrics.llm_actual_tokens.getAdd(finalTokenTotal)
-    global.__mini_a_metrics.llm_normal_tokens.getAdd(finalTokenTotal)
-    global.__mini_a_metrics.llm_normal_calls.inc()
+    this._recordLlmStatsMetrics(finalStats, "main")
     
     if (args.showthinking) {
       // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
@@ -16188,9 +16758,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Attach actual token stats to conversation message for later accurate analysis
       this._attachTokenStatsToConversation(stats, this.llm)
 
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(chatbotTokenTotal)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(chatbotTokenTotal)
-      global.__mini_a_metrics.llm_normal_calls.inc()
+      this._recordLlmStatsMetrics(stats, "main")
 
       var tokenStatsMsg = this._formatTokenStats(stats)
       this.fnI("output", `Chatbot model responded. ${tokenStatsMsg}`)
@@ -16425,6 +16993,11 @@ MiniA.prototype._runChatbotMode = function(options) {
       break
     }
 
+    if (this.state == "stop") {
+      this.fnI("stop", `Chatbot agent already in 'stop' state. Exiting...`)
+      return "(no answer)"
+    }
+
     if (isUnDef(finalAnswer)) {
       this.fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
@@ -16446,9 +17019,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
       afterCall(fallbackTokenTotal)
       global.__mini_a_metrics.llm_estimated_tokens.getAdd(this._estimateTokens(fallbackPrompt))
-      global.__mini_a_metrics.llm_actual_tokens.getAdd(fallbackTokenTotal)
-      global.__mini_a_metrics.llm_normal_tokens.getAdd(fallbackTokenTotal)
-      global.__mini_a_metrics.llm_normal_calls.inc()
+      this._recordLlmStatsMetrics(fallbackStats, "main")
       var fallbackTokenStatsMsg = this._formatTokenStats(fallbackStats)
       this.fnI("output", `Fallback response received. ${fallbackTokenStatsMsg}`)
       var fallbackAnswer = fallbackResponseWithStats.response
@@ -16544,10 +17115,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
-    var totalTokens = this._getTotalTokens(stats)
-    global.__mini_a_metrics.llm_actual_tokens.getAdd(totalTokens)
-    global.__mini_a_metrics.llm_normal_tokens.getAdd(totalTokens)
-    global.__mini_a_metrics.llm_normal_calls.inc()
+    var totalTokens = this._recordLlmStatsMetrics(stats, "main")
 
     var validationContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
     if (isObject(validationContent) && isString(validationContent.response)) {

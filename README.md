@@ -316,6 +316,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 
 - **Multi-Model Support** - Works with OpenAI, Google Gemini, GitHub Models, AWS Bedrock, Ollama, and more
 - **Dual-Model Cost Optimization** - Use a low-cost model for routine steps with smart escalation (see [USAGE.md](USAGE.md#dual-model-setup-cost-optimization))
+- **Advisor Strategy Mode** - Optional `modelstrategy=advisor` keeps LC as executor while consulting the main model for difficult steps with centralized gating, strict advisor JSON validation, lightweight no-tool enforcement, and budget-aware consult limits (default mode remains unchanged)
 - **Built-in Performance Optimizations** - Automatic context management, dynamic escalation, and parallel action support deliver 40-60% token reduction and 50-70% cost savings (see [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md))
 - **Real-Time Streaming** - Display LLM tokens as they arrive with markdown-aware buffering for smooth rendering (`usestream=true`)
 - **MCP Integration** - Seamless integration with Model Context Protocol servers (STDIO & HTTP)
@@ -433,6 +434,7 @@ Mini-A ships with complementary components:
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |
 | `memorych` | JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs (e.g. `{type:'file',options:{file:'/tmp/memory.json'}}`). With `memoryscope=both`, default writes go to global when a channel is configured; use explicit session scope for ephemeral entries. | - |
+| `metricsch` | JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots (for example `{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}`). By default Mini-A stores only the `mini-a` metric; optional `period`, `some`, and `noDate` fields mirror `ow.metrics.startCollecting`. | - |
 | `memorymaxpersection` | Per-section memory cap before compaction | `80` |
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
 | `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |

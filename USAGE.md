@@ -776,6 +776,7 @@ The `start()` method accepts various configuration options:
 - **`memoryscope`** (string, default: `both`): Select memory lookup scope: `session`, `global`, or `both` (session first, global fallback).
 - **`memorysessionid`** (string, optional): Session id for ephemeral memory isolation. Defaults to `conversation` when provided, otherwise the current runtime id.
 - **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When combined with `memoryscope=both`, Mini-A now defaults runtime writes to the global store so they survive reloads; use `memoryScope: "session"` for ephemeral per-session entries. When omitted, memory is in-process only and not persisted between runs.
+- **`metricsch`** (string, optional): JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots. Supports any channel type accepted by `$ch().create(...)`. Example: `metricsch="{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}"`. By default Mini-A collects only the `mini-a` metric every `1000` ms; optional `period`, `some`, and `noDate` fields map directly to `ow.metrics.startCollecting(ch, period, some, noDate)`.
 - **`memorysessionch`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload session-scoped working memory. Uses `session::<sessionId>` as the channel key so multiple sessions can coexist in the same channel. When omitted but `memorych` is set, session memory is persisted to `memorych` under the same namespaced key (option B). When both are set, session memory goes to `memorysessionch` and global memory to `memorych` independently (option A). Same format as `memorych`.
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
@@ -790,10 +791,30 @@ The `start()` method accepts various configuration options:
 - **`deescalate`** (number, default: 3): Number of consecutive successful steps required after an escalation before Mini-A automatically reverts to the low-cost model. Set to a higher value for more conservative de-escalation or `0` to disable de-escalation entirely.
 - **`lccontextlimit`** (number, default: 0 = disabled): Maximum context token count before escalating to the main model. When the estimated context size reaches this threshold, Mini-A switches to the main model for that step. Useful when the low-cost model has a smaller context window than the main model. Set to `0` to disable context-based escalation.
 - **`modellock`** (string, one of `"main"`, `"lc"`, or `"auto"` = default): Force Mini-A to always use a specific model tier for every step, bypassing all dynamic escalation and de-escalation logic. Use `modellock=main` to always use the main model (`OAF_MODEL`), `modellock=lc` to always use the low-cost model (`OAF_LC_MODEL`), or leave unset/`auto` for the default adaptive behaviour. A one-time info message is logged at startup when a lock is active.
+- **`modelstrategy`** (string, one of `"default"` or `"advisor"`, default: `"default"`): Select the model orchestration profile. `default` keeps current LC-first behavior with escalation. `advisor` keeps LC as the executor and selectively calls the main model as an internal advisor for difficult steps.
+- **`advisormaxuses`** (number, default: `2`): Maximum advisor consultations per run when `modelstrategy=advisor`.
+- **`advisorenable`** (boolean, default: `true`): Master toggle for advisor consultations inside `modelstrategy=advisor` runs.
+- **`advisoronrisk`** (boolean, default: `true`): Allow advisor consults on risk signals.
+- **`advisoronambiguity`** (boolean, default: `true`): Allow advisor consults on ambiguity signals.
+- **`advisoronharddecision`** (boolean, default: `true`): Allow advisor consults for hard-decision checkpoints.
+- **`advisorcooldownsteps`** (number, default: `2`): Minimum step distance between advisor consultations when `modelstrategy=advisor`.
+- **`advisorbudgetratio`** (number, default: `0.20`): Fraction of session token budget that advisor calls can consume before low-value consults are declined.
+- **`emergencyreserve`** (number, default: `0.10`): Portion of advisor budget reserved for higher-value/high-risk consults.
+- **`harddecision`** (string, one of `"require"`, `"warn"`, `"off"`, default: `"warn"`): Controls hard-decision checkpoints for high-impact actions. `require` blocks hard actions unless advisor consultation succeeds.
+- **`evidencegate`** (boolean, default: `false`): Enable lightweight evidence gating for non-trivial actions and final claims.
+- **`evidencegatestrictness`** (string, one of `"low"`, `"medium"`, `"high"`, default: `"medium"`): Tuning level for evidence gate heuristics.
 - **`lcescalatedefer`** (boolean, default: `true`): When enabled, if an escalation trigger fires but the current LC model response has a confidence score ≥ 0.7 (based on JSON validity, completeness, and action specificity), Mini-A defers the escalation by one additional step. If the next step also triggers escalation, it escalates immediately. Set to `false` to disable deferral and escalate as soon as the trigger fires.
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
+
+Advisor mode contract (internal-only, never user-facing):
+- Advisor responses must be strict JSON that must include: `assessment` (string), `recommended_next_step` (string), `risk_flags` (array), `escalate_to_main` (boolean), `confidence` (number), `stop_or_continue` (`"stop"` or `"continue"`).
+- Responses that include execution intent (`tool`, `tool_calls`, `function_call`, or textual "run tool"/"invoke tool") are rejected.
+- Invalid advisor payloads are ignored safely, counted in telemetry, and executor flow continues with stricter guardrails.
+
+Default behavior note:
+- If you keep `modelstrategy=default` (the default), runtime behavior remains unchanged. New advisor/evidence/hard-decision controls only apply when explicitly enabled or when advisor strategy is selected.
 
 #### Planning Controls
 - **`planmode`** (boolean, default: false): Switch to planning-only mode. Mini-A studies the goal/knowledge, generates a structured Markdown/JSON/YAML plan, and exits without executing any tasks. Mutually exclusive with `chatbotmode`.
@@ -988,6 +1009,7 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 #### Audit Logging
 - **`auditch`** (string): JSSLON definition for the OpenAF channel that stores Mini-A interaction events. When supplied, each call to `fnI` is persisted under the `_mini_a_audit_channel` key. Example for a file-backed log: `auditch="(type: 'file', options: (file: 'audit.json'))"`. Channel types and options follow the OpenAF channel conventions documented in `github.com/openaf/docs/openaf.md` and `github.com/openaf/docs/llm-guide.md`; keep the structure compatible with `$ch().create(type, options)`.
 - **`toollog`** (string): JSSLON definition for a dedicated tool-log channel. When supplied, every MCP tool usage is captured under `_mini_a_toollog_channel` including tool name, input arguments (`params`) and returned answer payload (`answer`) across both streaming and non-streaming runs.
+- **`metricsch`** (string): JSSLON definition for a metrics channel. When supplied, Mini-A starts `ow.metrics.startCollecting(...)` and writes periodic snapshots to the configured channel, defaulting to only the `mini-a` metric namespace.
 
 #### MCP Working Directory
 - **`nosetmcpwd`** (boolean, default: false): By default, Mini-A sets `__flags.JSONRPC.cmd.defaultDir` to the mini-a oPack installation location, providing a consistent working directory for MCP commands. Set `nosetmcpwd=true` to prevent this automatic configuration and use the system's default working directory instead.

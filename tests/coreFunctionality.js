@@ -654,6 +654,18 @@
     ow.test.assert(isDef(enabled.options.fnsMeta.skills), true, "Should expose skills metadata when useskills=true")
   }
 
+  exports.testUtilsMcpConsoleOnlyToolsToggle = function() {
+    var agent = createAgent()
+
+    var nonConsole = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-web" })
+    ow.test.assert(isMap(nonConsole) && isMap(nonConsole.options), true, "Should build utils MCP config for non-console interactions")
+    ow.test.assert(isUnDef(nonConsole.options.fns.userInput), true, "Should hide userInput outside console sessions")
+
+    var consoleMode = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    ow.test.assert(isMap(consoleMode) && isMap(consoleMode.options), true, "Should build utils MCP config for console interactions")
+    ow.test.assert(isDef(consoleMode.options.fns.userInput), true, "Should expose userInput in console sessions")
+  }
+
   exports.testUtilsMcpAllowAndDenyFilters = function() {
     var agent = createAgent()
 

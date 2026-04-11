@@ -315,7 +315,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "models", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -452,6 +452,7 @@ try {
     shellbatch     : { type: "boolean", default: false, description: "Automatically approve shell commands" },
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
+    showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
@@ -525,6 +526,7 @@ try {
     modelval       : { type: "string", description: "Override OAF_VAL_MODEL configuration" },
     auditch        : { type: "string", description: "Audit channel definition" },
     toollog        : { type: "string", description: "Tool usage log channel definition" },
+    metricsch      : { type: "string", description: "Metrics channel definition" },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
@@ -1703,7 +1705,7 @@ try {
 
     var deletedFiles = pruneConversationHistory()
     if (deletedFiles > 0) {
-      print(colorifyText("Deleted " + deletedFiles + " expired conversation file" + (deletedFiles === 1 ? "" : "s") + ".", hintColor))
+      print(colorifyText("♻️ Deleted " + deletedFiles + " expired conversation file" + (deletedFiles === 1 ? "" : "s") + ".", hintColor))
     }
 
     if (!explicitConversation && resumeConversation === true && toBoolean(sessionOptions.usehistory) === true) {
@@ -2773,6 +2775,82 @@ try {
     return false
   }
 
+  function printCurrentModels() {
+    var currentArgs = buildArgs("__model_info__")
+    var _sec = __
+
+    try {
+      _sec = $sec("mini-a", "models", __, currentArgs.secpass)
+    } catch(ignoreSecError) { }
+
+    function parseModelConfig(rawValue) {
+      if (isUnDef(rawValue)) return { config: __, raw: __ }
+      var parsed = rawValue
+      if (isString(parsed)) {
+        parsed = parsed.trim()
+        if (parsed.length === 0) return { config: __, raw: __ }
+        try {
+          parsed = af.fromJSSLON(parsed)
+        } catch (e) {
+          parsed = rawValue.trim()
+        }
+      }
+
+      if (!isMap(parsed) && isString(parsed)) {
+        if (isDef(_sec)) {
+          try {
+            var secObj = _sec.get(parsed, "models")
+            if (isDef(secObj) && isMap(secObj)) return { config: secObj, raw: parsed }
+          } catch(ignoreSecLookup) { }
+        }
+        return { config: __, raw: parsed }
+      }
+
+      if (isMap(parsed)) return { config: parsed, raw: __ }
+      return { config: __, raw: __ }
+    }
+
+    function getModelRow(label, key, envName) {
+      var rawValue = currentArgs[key]
+      var source = "unset"
+      if (isDef(rawValue)) {
+        source = "session"
+      } else {
+        rawValue = getEnv(envName)
+        if (isDef(rawValue)) source = envName
+      }
+
+      var parsed = parseModelConfig(rawValue)
+      var provider = "(not set)"
+      var modelName = "(not set)"
+
+      if (isMap(parsed.config)) {
+        provider = isString(parsed.config.type) && parsed.config.type.trim().length > 0 ? parsed.config.type : "(unknown)"
+        modelName = isString(parsed.config.model) && parsed.config.model.trim().length > 0 ? parsed.config.model : "(unknown)"
+      } else if (isString(parsed.raw) && parsed.raw.length > 0) {
+        modelName = parsed.raw
+        provider = "(unresolved)"
+      }
+
+      return {
+        target  : label,
+        model   : modelName,
+        provider: provider,
+        source  : source
+      }
+    }
+
+    var rows = [
+      getModelRow("main", "model", "OAF_MODEL"),
+      getModelRow("low", "modellc", "OAF_LC_MODEL"),
+      getModelRow("validation", "modelval", "OAF_VAL_MODEL")
+    ]
+
+    print(colorifyText("Current models:", accentColor))
+    print()
+    print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+  }
+
   function processFileAttachments(text) {
     if (!isString(text) || text.trim().length === 0) return text
 
@@ -3293,9 +3371,15 @@ try {
     var extra = isString(extraPrefix) ? extraPrefix : ""
     safeMessage = safeMessage.replace(/\n/g, "↵").trim()
     var textStyle = hintColor + ",ITALIC"
-    var iconIndent = repeat(Math.max(0, visibleLength(format.string._stripAnsi(iconPart))), " ")
-    var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + format.string._stripAnsi(iconPart)))
+    var separatorStyle = "FG(240)"
+    var separatorChar = "╌"
+    var iconPlain = format.string._stripAnsi(iconPart)
+    var normalizedIconPlain = iconPlain.replace(/\s{2,}$/, " ")
+    var iconIndent = repeat(Math.max(0, visibleLength(iconPlain)), " ")
+    var separatorIndent = repeat(Math.max(0, visibleLength(normalizedIconPlain)), " ")
+    var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + iconPlain))
     var continuationWidth = Math.max(8, contentWidth - visibleLength(extra + iconIndent))
+    var separatorWidth = Math.max(8, contentWidth - visibleLength(extra + separatorIndent))
     var wrappedLines = format.string.wordWrap(safeMessage, firstLineWidth).split("\n")
     var renderedLines = []
 
@@ -3310,6 +3394,11 @@ try {
       continuationText.split("\n").forEach(function(line) {
         renderedLines.push(extra + iconIndent + line)
       })
+    }
+
+    if (toBoolean(sessionOptions.showseparator) !== false) {
+      // Keep the separator aligned with the message text, not the side line or icon.
+      renderedLines.push(extra + separatorIndent + colorifyText(repeat(separatorWidth, separatorChar), separatorStyle))
     }
 
     return format.withSideLine(renderedLines.join("\n"), termWidth, promptColor, textStyle, sideLineTheme)
@@ -3491,7 +3580,11 @@ try {
             }
             if ((isNaN(followCode) || followCode <= 0) && !stopRequested) {
               stopRequested = true
-              agent.state = "stop"
+              if (isFunction(agent.requestStop)) {
+                agent.requestStop("Esc pressed. Requesting Mini-A to stop...", { quiet: true })
+              } else {
+                agent.state = "stop"
+              }
               if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goals_stopped) && isFunction(global.__mini_a_metrics.goals_stopped.inc)) {
                 try { global.__mini_a_metrics.goals_stopped.inc() } catch(ignoreInc) {}
               }
@@ -3690,6 +3783,9 @@ try {
 
     try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
     try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
+    try {
+      if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) activeAgent._stopAgentResources()
+    } catch(ignoreAgentStop) {}
 
     if (commandHistory && typeof commandHistory.flush === "function") {
       try { commandHistory.flush() } catch(ignoreFlushError) {}
@@ -4100,6 +4196,7 @@ try {
       "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n user goals (one per line)", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model, modellc or modelval)", hintColor),
+      "  " + colorifyText("/models", "BOLD") + colorifyText("             List current main, low and validation models", hintColor),
       "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools)", hintColor),
       "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
@@ -4502,6 +4599,10 @@ try {
           delete global.__mini_a_con_model_result
           if (isDef(originalGlobalArgs)) args = originalGlobalArgs
         }
+        continue
+      }
+      if (commandLower === "models") {
+        printCurrentModels()
         continue
       }
       if (parsedSlashCommand.name === "stats") {

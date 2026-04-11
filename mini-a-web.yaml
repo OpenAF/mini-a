@@ -199,6 +199,10 @@ help:
     desc     : "SLON/JSON definition of a channel that records tool calls, arguments and responses"
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
+  - name     : metricsch
+    desc     : "SLON/JSON definition of an OpenAF channel where Mini-A metrics snapshots are recorded"
+    example  : "(name: 'mini-a-metrics', type: 'mvs', options: (file: '/tmp/mini-a-metrics.db'))"
+    mandatory: false
 include:
 - oJobHTTPd.yaml
 
@@ -953,6 +957,7 @@ jobs:
       format         : isString().default(__)
       auditch        : isString().default(__)
       toollog        : isString().default(__)
+      metricsch      : isString().default(__)
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)
