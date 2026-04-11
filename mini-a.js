@@ -83,6 +83,8 @@ var MiniA = function() {
   this._memorychName = __
   this._metricschName = __
   this._metricschCollecting = false
+  this._metricschCreated = false
+  this._metricschRegistered = false
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -702,6 +704,8 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
 
 MiniA._activeInstances = []
 MiniA._shutdownHookRegistered = false
+MiniA._metricsChannelRefs = {}
+MiniA._metricsChannelOwners = {}
 MiniA._registeredWorkers = []
 MiniA._registeredWorkerLastHeartbeat = {}
 MiniA._proxyTempFiles = []
@@ -714,10 +718,9 @@ MiniA._terminalSubtaskStates = {
 }
 
 MiniA.prototype._stopAgentResources = function() {
-  if (this._metricschCollecting === true && isString(this._metricschName) && this._metricschName.length > 0) {
-    try { ow.metrics.stopCollecting(this._metricschName) } catch(ignoreMetricsStopErr) {}
-    this._metricschCollecting = false
-  }
+  if (isFunction(MiniA._releaseMetricsChannel)) MiniA._releaseMetricsChannel(this)
+  this._metricschCollecting = false
+  this._metricschRegistered = false
 
   if (isObject(this._subtaskManager)) {
     try {
@@ -832,6 +835,76 @@ MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
   if (!isArray(MiniA._activeInstances)) MiniA._activeInstances = []
   if (MiniA._activeInstances.indexOf(instance) === -1) MiniA._activeInstances.push(instance)
+}
+
+MiniA._registerMetricsChannel = function(agent, channelName, options) {
+  if (!isObject(agent) || !isString(channelName) || channelName.length === 0) return false
+  if (!isObject(MiniA._metricsChannelRefs)) MiniA._metricsChannelRefs = {}
+  if (!isObject(MiniA._metricsChannelOwners)) MiniA._metricsChannelOwners = {}
+
+  var opts = isMap(options) ? options : {}
+  var currentRefs = isNumber(MiniA._metricsChannelRefs[channelName]) ? MiniA._metricsChannelRefs[channelName] : 0
+
+  if (agent._metricschRegistered === true && agent._metricschName === channelName) return currentRefs > 0
+
+  if (agent._metricschRegistered === true && isFunction(MiniA._releaseMetricsChannel)) {
+    MiniA._releaseMetricsChannel(agent)
+    currentRefs = isNumber(MiniA._metricsChannelRefs[channelName]) ? MiniA._metricsChannelRefs[channelName] : 0
+  }
+
+  if (currentRefs <= 0) {
+    try {
+      ow.metrics.startCollecting(channelName, opts.period, opts.some, opts.noDate)
+      currentRefs = 0
+    } catch(metricsCollectErr) {
+      throw metricsCollectErr
+    }
+  }
+
+  MiniA._metricsChannelRefs[channelName] = currentRefs + 1
+  if (agent._metricschCreated === true) MiniA._metricsChannelOwners[channelName] = true
+  agent._metricschName = channelName
+  agent._metricschRegistered = true
+  agent._metricschCollecting = true
+  return true
+}
+
+MiniA._releaseMetricsChannel = function(agent) {
+  if (!isObject(agent) || agent._metricschRegistered !== true || !isString(agent._metricschName) || agent._metricschName.length === 0) return
+  var channelName = agent._metricschName
+
+  if (!isObject(MiniA._metricsChannelRefs)) MiniA._metricsChannelRefs = {}
+  if (!isObject(MiniA._metricsChannelOwners)) MiniA._metricsChannelOwners = {}
+
+  var refs = isNumber(MiniA._metricsChannelRefs[channelName]) ? MiniA._metricsChannelRefs[channelName] : 0
+  refs = refs - 1
+
+  if (refs <= 0) {
+    delete MiniA._metricsChannelRefs[channelName]
+    try {
+      if (isDef(ow.metrics.__ch) && isArray(ow.metrics.__ch)) {
+        ow.metrics.__ch = ow.metrics.__ch.filter(function(ch) { return ch !== channelName })
+      }
+      if (isDef(ow.metrics.__t) && (!isArray(ow.metrics.__ch) || ow.metrics.__ch.length <= 0)) {
+        ow.metrics.__t.stop(true)
+        ow.metrics.__t = __
+      }
+    } catch(ignoreMetricsStopErr) {
+      try { ow.metrics.stopCollecting(channelName) } catch(ignoreStopFallbackErr) {}
+    }
+
+    if (MiniA._metricsChannelOwners[channelName] === true) {
+      try {
+        if ($ch().list().indexOf(channelName) >= 0) $ch(channelName).destroy()
+      } catch(ignoreMetricsDestroyErr) {}
+      delete MiniA._metricsChannelOwners[channelName]
+    }
+  } else {
+    MiniA._metricsChannelRefs[channelName] = refs
+  }
+
+  agent._metricschCollecting = false
+  agent._metricschRegistered = false
 }
 
 MiniA._destroyAllMcpConnections = function() {
@@ -12903,8 +12976,10 @@ MiniA.prototype.init = function(args) {
           var _metricschOpts = isMap(_metricschm.options) ? _metricschm.options : {}
           var _metricschExists = false
           try { _metricschExists = $ch().list().indexOf(_metricschName) >= 0 } catch(ignoreListMetrics) {}
+          this._metricschCreated = false
           if (!_metricschExists) {
             $ch(_metricschName).create(_metricschType, _metricschOpts)
+            this._metricschCreated = true
             if (args.debug) this.fnI("info", `[metrics] channel '${_metricschName}' created.`)
           } else {
             if (args.debug) this.fnI("info", `[metrics] channel '${_metricschName}' reused.`)
@@ -12915,8 +12990,11 @@ MiniA.prototype.init = function(args) {
           var _metricschSome = isArray(_metricschm.some) && _metricschm.some.length > 0 ? _metricschm.some : ["mini-a"]
           var _metricschNoDate = isBoolean(_metricschm.noDate) ? _metricschm.noDate : false
           try {
-            ow.metrics.startCollecting(this._metricschName, _metricschPeriod, _metricschSome, _metricschNoDate)
-            this._metricschCollecting = true
+            MiniA._registerMetricsChannel(this, this._metricschName, {
+              period: _metricschPeriod,
+              some  : _metricschSome,
+              noDate: _metricschNoDate
+            })
             if (args.debug) this.fnI("info", `[metrics] collecting '${_metricschSome.join(",")}' into '${this._metricschName}' every ${_metricschPeriod}ms.`)
           } catch(metricsCollectErr) {
             this.fnI("warn", `[metrics] failed to start metrics collection on '${this._metricschName}': ${__miniAErrMsg(metricsCollectErr)}`)
