@@ -15164,7 +15164,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       try {
         advisorResp = this._withExponentialBackoff(() => {
           addCall()
-          if (isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
+          if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
           return this.llm.promptWithStats(advisorPrompt)
         }, this._llmRetryOptions("Advisor model", { llmType: "advisor", step: runtime.currentStepNumber }, { maxDelay: 4000 }))
       } catch (advisorErr) {
