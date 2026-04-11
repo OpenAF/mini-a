@@ -868,6 +868,14 @@ MiniA._stopAllProgCallServers = function() {
   })
 }
 
+MiniA._stopAllAgentResources = function() {
+  if (!isArray(MiniA._activeInstances)) return
+  MiniA._activeInstances.forEach(function(agent) {
+    if (!isObject(agent) || !isFunction(agent._stopAgentResources)) return
+    try { agent._stopAgentResources() } catch(ignoreAgentStopErr) {}
+  })
+}
+
 MiniA._registerShutdownHook = function() {
   if (MiniA._shutdownHookRegistered === true) return
   if (typeof addOnOpenAFShutdown !== "function") return
@@ -882,6 +890,7 @@ MiniA._registerShutdownHook = function() {
         })
       }
     } catch(ignoreDebugFlushError) {}
+    try { MiniA._stopAllAgentResources() } catch(ignoreAgentStopError) {}
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
     try { MiniA._cleanupSandboxTempFiles() } catch(ignoreSandboxTempCleanupError) {}
