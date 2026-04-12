@@ -596,6 +596,14 @@ Use the \`skills\` tool (operation="render" or "invoke") to use them.
   this._CHATBOT_SYSTEM_PROMPT = `
 {{{chatPersonaLine}}} Engage in natural dialogue while staying accurate and concise. Respond in plain language unless you explicitly need to call a tool.
 
+{{#if constrainedActions}}
+### LIGHTWEIGHT MODE
+• Keep action payloads minimal for small-model reliability.
+• If an action is required, return exactly one JSON object with this shape:
+  {"action":"think|final|<tool>|shell","thought":"optional short reason","params":{...},"answer":"...","command":"..."}
+• Prefer a direct natural-language reply when no action is needed.
+{{/if}}
+
 {{#if hasTools}}
 ## TOOL ACCESS
 You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through the host runtime. Use tools only when they materially improve the answer and always summarize tool results for the user.
@@ -626,11 +634,17 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 • Keep commands minimal, avoid destructive operations, and remember pipes/redirection may be blocked unless explicitly allowed.
 {{/if}}
 
+{{#if allowActionArrays}}
 ### MULTI-ACTION SUPPORT
 • For efficiency, you can reply with an array of action objects (or set "action" to an array) to run multiple operations.
 • Example: [{"action":"search","params":{...}}, {"action":"read","params":{...}}] executes both in parallel when possible.
 • Actions execute from top to bottom; include a clear "thought" for each step so the runtime understands your plan.
 • Use this for: reading multiple files, calling several tools, or gathering data from different sources simultaneously.
+{{else}}
+### ACTION FORMAT
+• Return only one action per message (no arrays).
+• Prefer this order: final answer first, then a single tool/shell action only when necessary.
+{{/if}}
 
 {{#if hasKnowledge}}
 ## ADDITIONAL CONTEXT
@@ -796,6 +810,29 @@ MiniA.prototype._normalizePromptDataText = function(inputText) {
   var text = isString(inputText) ? inputText : stringify(inputText, __, "")
   text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
   return text
+}
+
+MiniA.prototype._resolveChatbotRuntimeProfile = function(args) {
+  var profileRaw = isString(args.chatbotprofile) ? args.chatbotprofile.trim().toLowerCase() : ""
+  if (profileRaw.length === 0) {
+    if (toBoolean(args.chatbotlight) === true) {
+      profileRaw = "small"
+    } else {
+      profileRaw = "default"
+    }
+  }
+  if ([ "default", "small", "tiny" ].indexOf(profileRaw) < 0) profileRaw = "default"
+
+  var isConstrained = profileRaw !== "default"
+  return {
+    name            : profileRaw,
+    constrainedActions: isConstrained,
+    allowActionArrays: profileRaw === "default",
+    includeToolDetails: profileRaw === "default",
+    maxRepairRetries: profileRaw === "tiny" ? 1 : (profileRaw === "small" ? 2 : 3),
+    maxActionEntries: profileRaw === "tiny" ? 1 : (profileRaw === "small" ? 2 : 6),
+    defaultMaxSteps : profileRaw === "tiny" ? 6 : (profileRaw === "small" ? 8 : 10)
+  }
 }
 
 MiniA.prototype._buildUntrustedPromptBlock = function(label, inputText) {
@@ -12849,6 +12886,8 @@ MiniA.prototype.init = function(args) {
     if ((args.usesvg === true || args.usevectors === true) && isUnDef(args.browsercontext)) args.browsercontext = true
     args.usejsontool = _$(toBoolean(args.usejsontool), "args.usejsontool").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(args.chatbotmode)
+    args.chatbotlight = _$(toBoolean(args.chatbotlight), "args.chatbotlight").isBoolean().default(false)
+    args.chatbotprofile = _$(args.chatbotprofile, "args.chatbotprofile").isString().default(__)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(args.useplanning)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
@@ -13611,12 +13650,13 @@ MiniA.prototype.init = function(args) {
     var promptProfile = this._getPromptProfile(args)
 
     if (args.chatbotmode) {
+      var chatbotRuntimeProfile = this._resolveChatbotRuntimeProfile(args)
       var chatActions = []
       if (args.useshell) chatActions.push("shell")
       var chatbotVisibleToolNames = this.mcpToolNames.filter(name => !(shellViaActionPreferred && name === "shell"))
       var chatToolsList = chatbotVisibleToolNames.join(", ")
       var chatbotToolDetails = []
-      var includeChatToolDetails = this._shouldIncludeToolDetails(promptProfile, chatbotVisibleToolNames.length)
+      var includeChatToolDetails = chatbotRuntimeProfile.includeToolDetails && this._shouldIncludeToolDetails(promptProfile, chatbotVisibleToolNames.length)
       if (this.mcpTools.length > 0 && !this._useTools && includeChatToolDetails) {
         chatbotToolDetails = this.mcpTools.filter(tool => !(shellViaActionPreferred && tool.name === "shell")).map(tool => {
           var summary = this._getToolSchemaSummary(tool, {
@@ -13652,7 +13692,9 @@ MiniA.prototype.init = function(args) {
         toolDetails   : chatbotToolDetails,
         markdown      : args.format == "md",
         useshell      : args.useshell,
-        shellViaActionPreferred: shellViaActionPreferred
+        shellViaActionPreferred: shellViaActionPreferred,
+        constrainedActions: chatbotRuntimeProfile.constrainedActions,
+        allowActionArrays: chatbotRuntimeProfile.allowActionArrays
       }
       this._systemInst = this._buildSystemPromptWithBudget("chatbot", chatbotPayload, this._CHATBOT_SYSTEM_PROMPT, {
         args: args,
@@ -13966,6 +14008,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
+      { name: "chatbotlight", type: "boolean", default: false },
+      { name: "chatbotprofile", type: "string", default: __ },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "adaptiverouting", type: "boolean", default: false },
@@ -14018,6 +14062,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
+    args.chatbotlight = _$(toBoolean(args.chatbotlight), "args.chatbotlight").isBoolean().default(false)
+    args.chatbotprofile = _$(args.chatbotprofile, "args.chatbotprofile").isString().default(__)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
@@ -16650,10 +16696,11 @@ MiniA.prototype._runChatbotMode = function(options) {
     var afterCall = typeof opts.afterCall === "function" ? opts.afterCall : function() {}
     var sessionStartTime = isNumber(opts.sessionStartTime) ? opts.sessionStartTime : now()
 
-    this.fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}.`)
+    var chatbotRuntimeProfile = this._resolveChatbotRuntimeProfile(args)
+    this.fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}. Profile=${chatbotRuntimeProfile.name}.`)
     this.state = "processing"
 
-    var maxSteps = Math.max(1, args.maxsteps || 10)
+    var maxSteps = Math.max(1, isNumber(args.maxsteps) ? args.maxsteps : chatbotRuntimeProfile.defaultMaxSteps)
     var pendingPrompt = this._buildChatbotUserPrompt(args.goal, args.hookcontext)
     var finalAnswer
     var toolNames = this.mcpToolNames.filter(name => !(args.useshell === true && this._useTools === true && name === "shell"))
@@ -16661,7 +16708,8 @@ MiniA.prototype._runChatbotMode = function(options) {
     // Initialize runtime object for chatbot mode
     var runtime = this._runtime = {
       context            : [],
-      currentStepNumber  : 0
+      currentStepNumber  : 0,
+      chatbotRepairCount : 0
     }
 
     var hasToolCallsPayload = value => {
@@ -16847,6 +16895,26 @@ MiniA.prototype._runChatbotMode = function(options) {
         this._extractToolCallActionsFromDebugChannel(chatbotDebugSnapshot, toolNames).forEach(addActionEntry)
       }
 
+      if (actionEntries.length > chatbotRuntimeProfile.maxActionEntries) {
+        actionEntries = actionEntries.slice(0, chatbotRuntimeProfile.maxActionEntries)
+      }
+
+      var queueRepairPrompt = (message, fallbackCandidate) => {
+        if (runtime.chatbotRepairCount < chatbotRuntimeProfile.maxRepairRetries) {
+          runtime.chatbotRepairCount++
+          pendingPrompt = message + " Return exactly one valid JSON object with keys: action, optional thought, and params/answer/command as needed."
+          handled = true
+          return true
+        }
+        if (isString(fallbackCandidate) && fallbackCandidate.trim().length > 0) {
+          finalAnswer = fallbackCandidate.trim()
+        } else {
+          finalAnswer = "I can help with that. Please retry with a simpler request so I can respond reliably."
+        }
+        handled = false
+        return false
+      }
+
       if (actionEntries.length > 0) {
         for (var actionIndex = 0; actionIndex < actionEntries.length; actionIndex++) {
           var currentMsg = actionEntries[actionIndex]
@@ -16855,8 +16923,7 @@ MiniA.prototype._runChatbotMode = function(options) {
           var thoughtValue = currentMsg.thought || currentMsg.think
 
           if (actionName.length === 0) {
-            pendingPrompt = `Missing 'action' entry in the JSON object. Use one of: ${this._actionsList || (toolNames.join(" | ") || "think | final")}.`
-            handled = true
+            queueRepairPrompt(`Missing 'action' entry in the JSON object. Use one of: ${this._actionsList || (toolNames.join(" | ") || "think | final")}.`, extractedResponseText)
             break
           }
 
@@ -16866,8 +16933,7 @@ MiniA.prototype._runChatbotMode = function(options) {
             var paramsValue = currentMsg.params
             if (isUnDef(paramsValue) && isMap(currentMsg.arguments)) paramsValue = currentMsg.arguments
             if (isUnDef(paramsValue) || !isMap(paramsValue)) {
-              pendingPrompt = `Tool request for '${actionName}' is missing a valid 'params' object. Reply with JSON including proper params or continue without that tool.`
-              handled = true
+              queueRepairPrompt(`Tool request for '${actionName}' is missing a valid 'params' object. Reply with JSON including proper params or continue without that tool.`, extractedResponseText)
               break
             }
             var execution = this._callMcpTool(actionName, paramsValue)
@@ -16878,6 +16944,7 @@ MiniA.prototype._runChatbotMode = function(options) {
             pendingPrompt = execution.error
               ? `Tool '${actionName}' returned an error:\n${observation}\nPlease adjust and continue (use another tool or provide the answer).`
               : `Tool '${actionName}' result:\n${observation}\nUse this information to continue helping the user. Provide any remaining actions or the final answer.`
+            runtime.chatbotRepairCount = 0
             handled = true
             break
           }
@@ -16885,6 +16952,7 @@ MiniA.prototype._runChatbotMode = function(options) {
           if (lowerAction === "shell") {
             if (!canUseShell) {
               pendingPrompt = "Shell commands are not enabled in this session. Continue with tools or provide the answer."
+              runtime.chatbotRepairCount = 0
               handled = true
               break
             }
@@ -16894,8 +16962,7 @@ MiniA.prototype._runChatbotMode = function(options) {
               commandValue = currentMsg.params.command.trim()
             }
             if (commandValue.length === 0) {
-              pendingPrompt = `Shell action requires a 'command' string. Please provide it or continue without shell access.`
-              handled = true
+              queueRepairPrompt("Shell action requires a 'command' string. Please provide it or continue without shell access.", extractedResponseText)
               break
             }
             var shellResult = this._runCommand({
@@ -16914,6 +16981,7 @@ MiniA.prototype._runChatbotMode = function(options) {
             var shellOutput = isDef(shellResult) && isString(shellResult.output) ? shellResult.output : ""
             if (!isString(shellOutput) || shellOutput.length === 0) shellOutput = "(no output)"
             pendingPrompt = `Shell command '${commandValue}' output:\n${shellOutput}\nUse this result to determine your next action or final answer.`
+            runtime.chatbotRepairCount = 0
             handled = true
             break
           }
@@ -16921,6 +16989,7 @@ MiniA.prototype._runChatbotMode = function(options) {
           if (lowerAction === "think") {
             global.__mini_a_metrics.thinks_made.inc()
             this._logMessageWithCounter("think", thoughtMessage)
+            runtime.chatbotRepairCount = 0
             continue
           }
 
@@ -16929,6 +16998,7 @@ MiniA.prototype._runChatbotMode = function(options) {
             if (isUnDef(answerValue)) answerValue = currentMsg.result || currentMsg.response || topLevelMap && topLevelMap.answer || ""
             if (isString(answerValue)) answerValue = answerValue.trim()
             finalAnswer = answerValue
+            runtime.chatbotRepairCount = 0
             handled = false
             var stepTimeFinal = now() - stepStartTime
             var currentAvgFinal = global.__mini_a_metrics.avg_step_time.get()
@@ -16941,14 +17011,14 @@ MiniA.prototype._runChatbotMode = function(options) {
           var knownActions = this._actionsList && this._actionsList.length > 0
             ? this._actionsList
             : (toolNames.length > 0 ? toolNames.join(" | ") : "think | final")
-          pendingPrompt = `Unknown action '${actionName}'. Use one of: ${knownActions}.`
-          handled = true
+          queueRepairPrompt(`Unknown action '${actionName}'. Use one of: ${knownActions}.`, extractedResponseText)
           break
         }
       }
 
       if (!handled && actionEntries.length === 0 && runtime.modelToolCallDetected === true) {
         pendingPrompt = "Use the tool result to continue helping the user. Provide any remaining actions or the final answer."
+        runtime.chatbotRepairCount = 0
         handled = true
       }
 
@@ -16961,6 +17031,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         this._restoreNoToolsModels(false)
         pendingPrompt = this._buildChatbotUserPrompt(args.goal, args.hookcontext)
         this.fnI("warn", `Step ${step + 1}: model requested tool calling but no tool execution completed. Falling back to action-based mode.`)
+        runtime.chatbotRepairCount = 0
         handled = true
       }
 

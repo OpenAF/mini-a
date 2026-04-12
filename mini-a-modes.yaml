@@ -91,6 +91,16 @@ modes:
       chatbotmode: true
       usestream  : true
 
+  chatbot-lite:
+    description: "Lightweight chatbot mode for small models"
+    params     :
+      chatbotmode      : true
+      chatbotlight     : true
+      chatbotprofile   : small
+      promptprofile    : minimal
+      systempromptbudget: 900
+      usestream        : false
+
   web    :
     description: "Web mode with tools"
     params     :

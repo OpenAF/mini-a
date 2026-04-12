@@ -769,6 +769,8 @@ The `start()` method accepts various configuration options:
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
+- **`chatbotlight`** (boolean, default: false): When `chatbotmode=true`, enable constrained lightweight behavior tuned for small/very small models (simpler action grammar and stricter repair loop limits)
+- **`chatbotprofile`** (string, default: `default`): Chatbot runtime profile (`default`, `small`, `tiny`) controlling action-array support, tool-detail verbosity, and malformed-action retry budget
 - **`promptprofile`** (string, default: `balanced`): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the default reduced prompt, or `verbose` to keep richer guidance and examples. When `debug=true`, Mini-A defaults to `verbose` unless you override it.
 - **`systempromptbudget`** (number, optional): Maximum estimated system-prompt token budget. When the rendered prompt exceeds it, Mini-A automatically drops lower-priority sections in this order: examples, skill descriptions, detailed tool reference, extended planning guidance, then excess skill entries.
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
@@ -994,6 +996,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - `shellrw` – Enables shell access with write permissions (`readwrite=true`).
   - `shellutils` – Adds the Mini File Tool helpers as an MCP (`useutils=true mini-a-docs=true usetools=true`) exposing `init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, and console-only `userInput` when launched through `mini-a-con`.
   - `chatbot` – Switches to conversational mode (`chatbotmode=true`).
+  - `chatbot-lite` – Conversational mode optimized for smaller models (`chatbotmode=true chatbotlight=true chatbotprofile=small promptprofile=minimal`).
   - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
   - `web` – Optimizes for the browser UI with MCP tools registered and docs-aware utils (`usetools=true mini-a-docs=true`).
   - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.

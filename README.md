@@ -426,6 +426,8 @@ Mini-A ships with complementary components:
 | `mcpprogcalltools` | Optional comma-separated allowlist of tool names exposed through the bridge | `""` |
 | `mcpprogcallbatchmax` | Max calls accepted per `/call-tools-batch` request | `10` |
 | `chatbotmode` | Conversational assistant mode | `false` |
+| `chatbotlight` | Lightweight chatbot behavior for small/very small models (applies only with `chatbotmode=true`) | `false` |
+| `chatbotprofile` | Chatbot runtime profile: `default`, `small`, or `tiny` (action-shape + retry strictness) | `default` |
 | `promptprofile` | System prompt verbosity profile (`minimal`, `balanced`, `verbose`) | `balanced` |
 | `systempromptbudget` | Maximum estimated system-prompt token budget before low-priority sections are dropped | - |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
