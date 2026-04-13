@@ -276,6 +276,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Set "action" to an array of action objects{{#if useshell}}, for example: [{"action":"shell","command":"ls"}, {"action":"shell","command":"pwd"}]{{/if}}{{#if actionsList}}
 • Example with custom actions: [{"action":"read_file","params":{"path":"a.txt"}}, {"action":"read_file","params":{"path":"b.txt"}}]{{/if}}
 • Each action object must include an "action" field and required fields (command, params, answer)
+• Add top-level "parallel": true to run all actions simultaneously{{#if useshell}} (shell commands execute in parallel){{/if}}
 {{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
 ## WHEN TO USE ACTION ARRAYS:{{#if useshell}}
@@ -628,7 +629,8 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 
 ### MULTI-ACTION SUPPORT
 • For efficiency, you can reply with an array of action objects (or set "action" to an array) to run multiple operations.
-• Example: [{"action":"search","params":{...}}, {"action":"read","params":{...}}] executes both in parallel when possible.
+• Example: [{"action":"search","params":{...}}, {"action":"read","params":{...}}] executes sequentially by default.
+• Add top-level "parallel": true alongside an action array to run all actions simultaneously.
 • Actions execute from top to bottom; include a clear "thought" for each step so the runtime understands your plan.
 • Use this for: reading multiple files, calling several tools, or gathering data from different sources simultaneously.
 
@@ -9250,8 +9252,9 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
             },
             command: { type: "string", description: "Shell command when action is shell." },
             answer : { type: "string", description: "Final answer text when action is final." },
-            state  : { type: "object", description: "Optional state object to persist." },
-            params : { type: "object", description: "Optional action parameters." }
+            state    : { type: "object",  description: "Optional state object to persist." },
+            params   : { type: "object",  description: "Optional action parameters." },
+            parallel : { type: "boolean", description: "Run all actions in the array simultaneously. Default is sequential." }
           }
         }
       }
@@ -15343,6 +15346,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         return { consulted: false, decision: decision, outcome: __ }
       }
 
+      this.fnI("info", `Advisor consult: step ${runtime.currentStepNumber} reason=${isArray(decision.reasons) && decision.reasons.length > 0 ? decision.reasons.join(",") : decision.reason}`)
       this._syncConversationForModelSwitch("main")
       var advisorContextWindow = runtime.context.slice(Math.max(0, runtime.context.length - 12)).join("\n")
       var advisorPromptParts = [
@@ -15402,6 +15406,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         entry.escalated = toBoolean(advisorOutcome.escalate_to_main) === true
         entry.confidence = advisorOutcome.confidence
         runtime.advisorTrace.push(entry)
+        this.fnI("info", `Advisor result: step ${runtime.currentStepNumber} escalate=${entry.escalated} confidence=${entry.confidence}`)
         var advisorSummary = advisorOutcome.recommended_next_step
         if (advisorSummary.length > 0) runtime.context.push(`[ADVISOR ${runtime.currentStepNumber}] (recommendation) ${advisorSummary}`)
         if (isArray(advisorOutcome.risk_flags) && advisorOutcome.risk_flags.length > 0) {
@@ -16344,6 +16349,73 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         pendingToolActions = []
       }
+
+      var parallelMode = isMap(baseMsg) && baseMsg.parallel === true && actionMessages.length > 1
+      var pendingParallelShellBatch = []
+      var parent = this
+      var flushParallelShellBatch = () => {
+        if (pendingParallelShellBatch.length === 0) return
+        if (parent.state == "stop") {
+          pendingParallelShellBatch = []
+          return
+        }
+        var batchEntries = pendingParallelShellBatch.slice()
+        pendingParallelShellBatch = []
+        var shellExecFn = function(entry) {
+          if (parent.state == "stop") return { output: "(stopped)", entry: entry, error: false }
+          try {
+            var output = parent._runCommand({
+              command        : entry.command,
+              readwrite      : entry.readwrite,
+              checkall       : entry.checkall,
+              shellallow     : entry.shellallow,
+              shellbanextra  : entry.shellbanextra,
+              shellallowpipes: entry.shellallowpipes,
+              shelltimeout   : entry.shelltimeout,
+              usesandbox     : entry.usesandbox,
+              sandboxprofile : entry.sandboxprofile,
+              sandboxnonetwork: entry.sandboxnonetwork
+            }).output
+            return { output: output, entry: entry, error: false }
+          } catch(e) {
+            return { output: String(e), entry: entry, error: true }
+          }
+        }
+        var batchResults = pForEach(batchEntries, shellExecFn, function(e) {
+          parent.fnI("warn", `Parallel shell execution error: ${e}`)
+        }, batchEntries.length <= 1)
+        if (isArray(batchResults)) {
+          batchResults.forEach(function(res) {
+            if (!isObject(res)) return
+            var entry = res.entry
+            var shellOutput = isString(res.output) ? res.output : "(no output)"
+            runtime.context.push(`[ACT ${entry.stepLabel}] shell: ${entry.command}`)
+            runtime.context.push(`[OBS ${entry.stepLabel}] ${shellOutput.trim() || "(no output)"}`)
+            var shellEvidence = parent._memoryAppend("evidence", `Shell command executed: ${entry.command}`, {
+              provenance: { source: "shell", event: "shell-exec", step: entry.stepLabel, command: entry.command }
+            })
+            parent._memoryAppend("artifacts", (shellOutput || "(no output)").trim().substring(0, 500), {
+              evidenceRefs: isObject(shellEvidence) && isString(shellEvidence.id) ? [shellEvidence.id] : [],
+              provenance  : { source: "shell", event: "shell-output", step: entry.stepLabel }
+            })
+          })
+        }
+        runtime.consecutiveThoughts = 0
+        runtime.stepsWithoutAction = 0
+        runtime.totalThoughts = Math.max(0, runtime.totalThoughts - 1)
+        runtime.recentSimilarThoughts = []
+        global.__mini_a_metrics.consecutive_thoughts.set(0)
+        runtime.successfulActionDetected = true
+        if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
+        if (isArray(batchResults)) {
+          batchResults.forEach(function(res) {
+            if (isObject(res) && isObject(res.entry)) runtime.lastActions.push(`shell: ${res.entry.command}`)
+          })
+        }
+        if (runtime.lastActions.length > 3) runtime.lastActions = runtime.lastActions.slice(-3)
+        checkAndSummarizeContext()
+      }
+      var flushAll = () => { flushParallelShellBatch(); flushToolActions() }
       var enforceDecisionGuards = (stepLabel, actionName, details, thoughtText) => {
         var actionText = `${actionName || ""} ${details || ""}`.trim()
         var isHard = this._isHardDecision(actionText)
@@ -16387,7 +16459,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       for (var actionIndex = 0; actionIndex < actionMessages.length; actionIndex++) {
         if (this.state == "stop") {
-          flushToolActions()
+          flushAll()
           break
         }
         var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
@@ -16503,7 +16575,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
           }
 
-          flushToolActions()
+          flushAll()
           checkAndSummarizeContext()
           continue
         }
@@ -16511,7 +16583,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         if (action == "shell") {
           if (!args.useshell) {
             runtime.context.push(`[OBS ${stepLabel}] (shell) Shell commands are not enabled in this session. Use other actions or provide a final answer.`)
-            flushToolActions()
+            flushAll()
             break
           }
           if (!commandValue) {
@@ -16521,11 +16593,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               message : "missing shell command",
               context : { step: stepLabel }
             })
-            flushToolActions()
+            flushAll()
             break
           }
           if (!enforceDecisionGuards(stepLabel, "shell", commandValue, thoughtStr)) {
-            flushToolActions()
+            flushAll()
             break
           }
           // When tools mode is enabled, default to MCP shell route unless adaptive router picks direct shell.
@@ -16563,7 +16635,23 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             continue
             }
           }
-          // Legacy path (no tools integration)
+          // Legacy path (no tools integration — non-parallel branch)
+          if (parallelMode) {
+            pendingParallelShellBatch.push({
+              command        : commandValue,
+              readwrite      : args.readwrite,
+              checkall       : args.checkall,
+              shellallow     : args.shellallow,
+              shellbanextra  : args.shellbanextra,
+              shellallowpipes: args.shellallowpipes,
+              shelltimeout   : args.shelltimeout,
+              usesandbox     : args.usesandbox,
+              sandboxprofile : args.sandboxprofile,
+              sandboxnonetwork: args.sandboxnonetwork,
+              stepLabel      : stepLabel
+            })
+            continue
+          }
           flushToolActions()
           var shellOutput = this._runCommand({
             command        : commandValue,
@@ -16604,7 +16692,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         if (isKnownTool && action != "final") {
           if (isDef(paramsValue) && !isMap(paramsValue)) {
-            flushToolActions()
+            flushAll()
             runtime.context.push(`[OBS ${stepLabel}] (${origActionRaw}) missing or invalid 'params' from model.`)
             this._registerRuntimeError(runtime, {
               category: "permanent",
@@ -16615,7 +16703,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
           if (!enforceDecisionGuards(stepLabel, origActionRaw, af.toSLON(paramsValue), thoughtStr)) {
-            flushToolActions()
+            flushAll()
             break
           }
 
@@ -16629,7 +16717,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           continue
         }
 
-        flushToolActions()
+        flushAll()
 
         if (action == "final") {
           if (args.format != 'md' && args.format != 'raw') {
@@ -16694,7 +16782,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         checkAndSummarizeContext()
       }
 
-      flushToolActions()
+      flushAll()
 
       if (stateUpdatedThisStep && !stateRecordedInContext) {
         runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
