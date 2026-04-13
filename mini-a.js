@@ -2883,6 +2883,112 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     return summaryResponseWithStats.response
 }
 
+MiniA.prototype._flattenConversationContent = function(value, depth) {
+    depth = isNumber(depth) ? depth : 0
+    if (depth > 6) return ""
+    if (isUnDef(value) || value === null) return ""
+    if (isString(value)) return value
+    if (isNumber(value) || typeof value === "boolean") return String(value)
+    if (isArray(value)) {
+        var parts = []
+        value.forEach(part => {
+            var flattened = this._flattenConversationContent(part, depth + 1)
+            if (flattened.length > 0) parts.push(flattened)
+        })
+        return parts.join("\n")
+    }
+    if (isObject(value)) {
+        if (isString(value.text)) return value.text
+        if (isString(value.content)) return value.content
+        if (isArray(value.parts)) return this._flattenConversationContent(value.parts, depth + 1)
+        if (isArray(value.messages)) return this._flattenConversationContent(value.messages, depth + 1)
+        if (isString(value.body)) return value.body
+    }
+    try {
+        return stringify(value, __, "")
+    } catch(ignore) {
+        return ""
+    }
+}
+
+MiniA.prototype._extractGoalFromPlannerPrompt = function(text) {
+    if (!isString(text)) return ""
+    var normalized = text.replace(/\r/g, "")
+    var goalMatch = normalized.match(/BEGIN_UNTRUSTED_GOAL\s*\n([\s\S]*?)\nEND_UNTRUSTED_GOAL/)
+    if (isArray(goalMatch) && isString(goalMatch[1])) return goalMatch[1].trim()
+    return normalized.trim()
+}
+
+MiniA.prototype._extractAssistantAnswerFromConversationEntry = function(entry) {
+    var content = this._flattenConversationContent(isObject(entry) ? entry.content : "")
+    if (!isString(content) || content.trim().length === 0) return ""
+    var text = content.trim()
+    if (text.indexOf("```") >= 0) {
+        text = text.replace(/^```[a-zA-Z0-9_-]*\s*/, "").replace(/\s*```$/, "").trim()
+    }
+    try {
+        var parsed = jsonParse(text, __, __, true)
+        if (isMap(parsed) && isString(parsed.answer) && parsed.answer.trim().length > 0) {
+            return parsed.answer.trim()
+        }
+    } catch(ignoreParse) { }
+    return text
+}
+
+MiniA.prototype._buildConversationCarryoverContext = function(currentGoal) {
+    if (!isObject(this.llm) || !isFunction(this.llm.getGPT)) return ""
+    var conversation = __
+    try {
+        conversation = this.llm.getGPT().getConversation()
+    } catch(ignoreConversationRead) { }
+    if (!isArray(conversation) || conversation.length === 0) return ""
+
+    var normalizedCurrentGoal = isString(currentGoal) ? currentGoal.replace(/\s+/g, " ").trim().toLowerCase() : ""
+    var recentPairs = []
+
+    for (var i = 0; i < conversation.length; i++) {
+        var entry = conversation[i]
+        if (!isMap(entry) || !isString(entry.role)) continue
+        var role = entry.role.toLowerCase()
+        if (role !== "user") continue
+
+        var goalText = this._extractGoalFromPlannerPrompt(this._flattenConversationContent(entry.content))
+        goalText = goalText.replace(/\s+/g, " ").trim()
+        if (goalText.length === 0) continue
+        if (normalizedCurrentGoal.length > 0 && goalText.toLowerCase() === normalizedCurrentGoal) continue
+
+        var answerText = ""
+        for (var j = i + 1; j < conversation.length; j++) {
+            var nextEntry = conversation[j]
+            if (!isMap(nextEntry) || !isString(nextEntry.role)) continue
+            var nextRole = nextEntry.role.toLowerCase()
+            if (nextRole === "user") break
+            if (nextRole !== "assistant") continue
+            answerText = this._extractAssistantAnswerFromConversationEntry(nextEntry)
+            if (answerText.length > 0) break
+        }
+
+        recentPairs.push({
+            goal  : goalText,
+            answer: answerText
+        })
+    }
+
+    if (recentPairs.length === 0) return ""
+
+    var lines = ["[PREVIOUS CONVERSATION CONTEXT]"]
+    recentPairs.slice(-2).forEach((pair, idx) => {
+        lines.push(`Previous goal ${idx + 1}: ${pair.goal}`)
+        if (isString(pair.answer) && pair.answer.trim().length > 0) {
+            var normalizedAnswer = pair.answer.replace(/\s+/g, " ").trim()
+            if (normalizedAnswer.length > 1200) normalizedAnswer = normalizedAnswer.substring(0, 1200) + "..."
+            lines.push(`Previous answer ${idx + 1}: ${normalizedAnswer}`)
+        }
+    })
+
+    return lines.join("\n")
+}
+
 // Fast helpers for status checks used across planning code paths
 MiniA.prototype._isStatusDone = function(status) {
   var s = isString(status) ? status.toLowerCase() : ""
@@ -14760,6 +14866,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       advisorUses             : 0,
       advisorLastStep         : -999,
       advisorLastReason       : ""
+    }
+
+    var carryoverContext = this._buildConversationCarryoverContext(args.goal)
+    if (isString(carryoverContext) && carryoverContext.length > 0) {
+      runtime.context.push(carryoverContext)
     }
 
     var optimizeGoalBlock = () => {
