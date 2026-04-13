@@ -194,7 +194,7 @@ filesHash:
   mcps/mcp-es-search.yaml: 389c99cbc70b1da2ab37ea555f9f7297eb70febc
   mcps/mcp-file.yaml: 995249f68f27578648a6ced34957b872b62cd6e7
   mcps/mcp-fin.yaml: 919e509a174ba2fec50a1f6066ce57654d179244
-  mcps/mcp-kube.yaml: 431dde2e8a85f813f8c42e7d32d6c6582b719057
+  mcps/mcp-kube.yaml: 3f80e75010d3340f2f78315548e4039e288346c6
   mcps/mcp-math.yaml: 60944a11b129d9eca27888ef0ef189b33023a432
   mcps/mcp-mini-a.yaml: b8d27e917e35966f75ccfc27a74447aa94c6e138
   mcps/mcp-net.yaml: dff5115d164807f71c61f9ff153e96553144e6a9
