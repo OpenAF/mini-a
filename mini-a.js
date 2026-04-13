@@ -239,6 +239,25 @@ var MiniA = function() {
     system_prompt_tool_details_dropped: $atomic(0, "long"),
     system_prompt_planning_details_dropped: $atomic(0, "long"),
     system_prompt_skills_trimmed: $atomic(0, "long"),
+    memory_appends: $atomic(0, "long"),
+    memory_dedup_hits: $atomic(0, "long"),
+    memory_updates: $atomic(0, "long"),
+    memory_removes: $atomic(0, "long"),
+    memory_status_marks: $atomic(0, "long"),
+    memory_evidence_attached: $atomic(0, "long"),
+    memory_promotions: $atomic(0, "long"),
+    memory_promoted_entries: $atomic(0, "long"),
+    memory_session_clears: $atomic(0, "long"),
+    memory_compactions: $atomic(0, "long"),
+    memory_compaction_entries_dropped: $atomic(0, "long"),
+    memory_global_reads: $atomic(0, "long"),
+    memory_global_read_failures: $atomic(0, "long"),
+    memory_session_reads: $atomic(0, "long"),
+    memory_session_read_failures: $atomic(0, "long"),
+    memory_global_writes: $atomic(0, "long"),
+    memory_global_write_failures: $atomic(0, "long"),
+    memory_session_writes: $atomic(0, "long"),
+    memory_session_write_failures: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -1618,11 +1637,16 @@ MiniA.prototype._logToolUsage = function(toolName, params, answer, meta) {
 MiniA.prototype.getMetrics = function() {
     this._syncDelegationMetrics()
 
+    var llmNormalCalls = global.__mini_a_metrics.llm_normal_calls.get()
+    var llmLcCalls = global.__mini_a_metrics.llm_lc_calls.get()
+    var advisorCalls = global.__mini_a_metrics.advisor_calls.get()
+    var memorySnapshot = this._getMemoryMetricsSnapshot()
+
     return {
         llm_calls: {
-            normal: global.__mini_a_metrics.llm_normal_calls.get(),
-            low_cost: global.__mini_a_metrics.llm_lc_calls.get(),
-            total: global.__mini_a_metrics.llm_normal_calls.get() + global.__mini_a_metrics.llm_lc_calls.get(),
+            normal: llmNormalCalls,
+            low_cost: llmLcCalls,
+            total: llmNormalCalls + llmLcCalls + advisorCalls,
             fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get()
         },
         goals: {
@@ -1729,6 +1753,35 @@ MiniA.prototype.getMetrics = function() {
             summaries_original_tokens: global.__mini_a_metrics.summaries_original_tokens.get(),
             summaries_final_tokens: global.__mini_a_metrics.summaries_final_tokens.get()
         },
+        memory: {
+            enabled: memorySnapshot.enabled,
+            scope: memorySnapshot.scope,
+            appends: global.__mini_a_metrics.memory_appends.get(),
+            dedup_hits: global.__mini_a_metrics.memory_dedup_hits.get(),
+            updates: global.__mini_a_metrics.memory_updates.get(),
+            removes: global.__mini_a_metrics.memory_removes.get(),
+            status_marks: global.__mini_a_metrics.memory_status_marks.get(),
+            evidence_attached: global.__mini_a_metrics.memory_evidence_attached.get(),
+            promotions: global.__mini_a_metrics.memory_promotions.get(),
+            promoted_entries: global.__mini_a_metrics.memory_promoted_entries.get(),
+            session_clears: global.__mini_a_metrics.memory_session_clears.get(),
+            compactions: global.__mini_a_metrics.memory_compactions.get(),
+            compaction_entries_dropped: global.__mini_a_metrics.memory_compaction_entries_dropped.get(),
+            global_reads: global.__mini_a_metrics.memory_global_reads.get(),
+            global_read_failures: global.__mini_a_metrics.memory_global_read_failures.get(),
+            session_reads: global.__mini_a_metrics.memory_session_reads.get(),
+            session_read_failures: global.__mini_a_metrics.memory_session_read_failures.get(),
+            global_writes: global.__mini_a_metrics.memory_global_writes.get(),
+            global_write_failures: global.__mini_a_metrics.memory_global_write_failures.get(),
+            session_writes: global.__mini_a_metrics.memory_session_writes.get(),
+            session_write_failures: global.__mini_a_metrics.memory_session_write_failures.get(),
+            resolved_entries: memorySnapshot.resolvedEntries,
+            session_entries: memorySnapshot.sessionEntries,
+            global_entries: memorySnapshot.globalEntries,
+            resolved_sections: memorySnapshot.resolvedSections,
+            session_sections: memorySnapshot.sessionSections,
+            global_sections: memorySnapshot.globalSections
+        },
         tool_selection: {
             dynamic_used: global.__mini_a_metrics.tool_selection_dynamic_used.get(),
             keyword: global.__mini_a_metrics.tool_selection_keyword.get(),
@@ -1805,6 +1858,79 @@ MiniA.prototype.getMetrics = function() {
             files_deleted_by_count: global.__mini_a_metrics.history_files_deleted_by_count.get()
         }
     }
+}
+
+MiniA.prototype._sumMemorySectionEntries = function(memorySnapshot) {
+  var counts = {}
+  var total = 0
+  var sections = isObject(memorySnapshot) && isObject(memorySnapshot.sections) ? memorySnapshot.sections : {}
+  Object.keys(sections).forEach(function(section) {
+    var entries = isArray(sections[section]) ? sections[section] : []
+    counts[section] = entries.length
+    total += entries.length
+  })
+  return { total: total, sections: counts }
+}
+
+MiniA.prototype._getMemoryMetricsSnapshot = function() {
+  var empty = {
+    enabled: this._memoryConfig && this._memoryConfig.enabled === true,
+    scope: isString(this._memoryScope) ? this._memoryScope : "both",
+    resolvedEntries: 0,
+    sessionEntries: 0,
+    globalEntries: 0,
+    resolvedSections: {},
+    sessionSections: {},
+    globalSections: {}
+  }
+  if (!empty.enabled) return empty
+
+  var resolved = this._sumMemorySectionEntries(this._agentState && this._agentState.workingMemory)
+  var session = this._sumMemorySectionEntries(this._agentState && this._agentState.workingMemorySession)
+  var globalMem = this._sumMemorySectionEntries(this._agentState && this._agentState.workingMemoryGlobal)
+  empty.resolvedEntries = resolved.total
+  empty.sessionEntries = session.total
+  empty.globalEntries = globalMem.total
+  empty.resolvedSections = resolved.sections
+  empty.sessionSections = session.sections
+  empty.globalSections = globalMem.sections
+  return empty
+}
+
+MiniA.prototype._createMemoryEventHandler = function(scopeLabel) {
+  var normalizedScope = isString(scopeLabel) && scopeLabel.length > 0 ? scopeLabel : "session"
+  return function(type, payload) {
+    if (!isObject(global.__mini_a_metrics)) return
+    var meta = isObject(payload) ? payload : {}
+    if (type === "append" && isObject(global.__mini_a_metrics.memory_appends)) {
+      global.__mini_a_metrics.memory_appends.inc()
+      return
+    }
+    if (type === "dedup" && isObject(global.__mini_a_metrics.memory_dedup_hits)) {
+      global.__mini_a_metrics.memory_dedup_hits.inc()
+      return
+    }
+    if (type === "compact") {
+      if (isObject(global.__mini_a_metrics.memory_compactions)) global.__mini_a_metrics.memory_compactions.inc()
+      if (isObject(global.__mini_a_metrics.memory_compaction_entries_dropped) && isNumber(meta.droppedEntries) && meta.droppedEntries > 0) {
+        global.__mini_a_metrics.memory_compaction_entries_dropped.getAdd(meta.droppedEntries)
+      }
+      return
+    }
+    if (type === "save") {
+      var writeMetric = normalizedScope === "global" ? "memory_global_writes" : "memory_session_writes"
+      var writeFailureMetric = normalizedScope === "global" ? "memory_global_write_failures" : "memory_session_write_failures"
+      if (meta.ok === true && isObject(global.__mini_a_metrics[writeMetric])) global.__mini_a_metrics[writeMetric].inc()
+      if (meta.ok !== true && isObject(global.__mini_a_metrics[writeFailureMetric])) global.__mini_a_metrics[writeFailureMetric].inc()
+      return
+    }
+    if (type === "load") {
+      var readMetric = normalizedScope === "global" ? "memory_global_reads" : "memory_session_reads"
+      var readFailureMetric = normalizedScope === "global" ? "memory_global_read_failures" : "memory_session_read_failures"
+      if (meta.ok === true && isObject(global.__mini_a_metrics[readMetric])) global.__mini_a_metrics[readMetric].inc()
+      if (meta.ok !== true && isObject(global.__mini_a_metrics[readFailureMetric])) global.__mini_a_metrics[readFailureMetric].inc()
+    }
+  }
 }
 
 MiniA.prototype._writeConversationPayload = function(path) {
@@ -3009,7 +3135,12 @@ MiniA.prototype._getTotalTokens = function(stats) {
 MiniA.prototype._recordLlmStatsMetrics = function(stats, tier) {
     if (!isObject(global.__mini_a_metrics)) return 0
 
-    var normalizedTier = isString(tier) && tier.toLowerCase() === "lc" ? "lc" : "main"
+    var normalizedTier = "main"
+    if (isString(tier)) {
+        var tierKey = tier.toLowerCase()
+        if (tierKey === "lc") normalizedTier = "lc"
+        if (tierKey === "advisor") normalizedTier = "advisor"
+    }
     var totalTokens = this._getTotalTokens(stats)
 
     if (isObject(global.__mini_a_metrics.llm_actual_tokens)) {
@@ -3023,7 +3154,7 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier) {
         if (isObject(global.__mini_a_metrics.llm_lc_calls)) {
             global.__mini_a_metrics.llm_lc_calls.inc()
         }
-    } else {
+    } else if (normalizedTier === "main") {
         if (isObject(global.__mini_a_metrics.llm_normal_tokens)) {
             global.__mini_a_metrics.llm_normal_tokens.getAdd(totalTokens)
         }
@@ -7473,7 +7604,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
 
   if (scope === "session" || scope === "both") {
     if (!isObject(this._sessionMemoryManagers[sessionId])) {
-      this._sessionMemoryManagers[sessionId] = new MiniAMemoryManager(cfg, function(level, msg) {
+      var sessionMemoryCfg = merge({}, cfg)
+      sessionMemoryCfg.onEvent = this._createMemoryEventHandler("session")
+      this._sessionMemoryManagers[sessionId] = new MiniAMemoryManager(sessionMemoryCfg, function(level, msg) {
         if (cfg.debug) this.fnI(level || "info", "[memory][session] " + msg)
       }.bind(this))
       var seededSession = __
@@ -7489,7 +7622,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
         this._sessionMemoryManagers[sessionId].init(seededSession)
       }
     } else {
-      this._sessionMemoryManagers[sessionId].configure(cfg)
+      var sessionMemoryReconfigure = merge({}, cfg)
+      sessionMemoryReconfigure.onEvent = this._createMemoryEventHandler("session")
+      this._sessionMemoryManagers[sessionId].configure(sessionMemoryReconfigure)
       if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._sessionMemoryManagers[sessionId].loadFromChannel(this._memorysessionChEffective, this._memorysessionChNamespace)
     }
     this._sessionMemoryManager = this._sessionMemoryManagers[sessionId]
@@ -7497,7 +7632,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
 
   if (scope === "global" || scope === "both") {
     if (!isObject(this._globalMemoryManager)) {
-      this._globalMemoryManager = new MiniAMemoryManager(cfg, function(level, msg) {
+      var globalMemoryCfg = merge({}, cfg)
+      globalMemoryCfg.onEvent = this._createMemoryEventHandler("global")
+      this._globalMemoryManager = new MiniAMemoryManager(globalMemoryCfg, function(level, msg) {
         if (cfg.debug) this.fnI(level || "info", "[memory][global] " + msg)
       }.bind(this))
       var seededGlobal = isObject(seedState) && isObject(seedState.workingMemoryGlobal) ? seedState.workingMemoryGlobal : __
@@ -7508,7 +7645,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
       if (_loadedGlobal !== true) this._globalMemoryManager.init(seededGlobal)
       else if (isString(this._memorychName) && this._memorychName.length > 0) this.fnI("info", `📼 [mem:read] global loaded from channel '${this._memorychName}'`)
     } else {
-      this._globalMemoryManager.configure(cfg)
+      var globalMemoryReconfigure = merge({}, cfg)
+      globalMemoryReconfigure.onEvent = this._createMemoryEventHandler("global")
+      this._globalMemoryManager.configure(globalMemoryReconfigure)
       if (isString(this._memorychName) && this._memorychName.length > 0) this._globalMemoryManager.loadFromChannel(this._memorychName)
     }
   }
@@ -7682,6 +7821,7 @@ MiniA.prototype._memoryUpdate = function(section, id, patch) {
     usedGlobal = ok
   }
   if (ok) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.memory_updates)) global.__mini_a_metrics.memory_updates.inc()
     var _uscope = usedGlobal ? "global" : "session"
     var _patchKeys = isObject(patch) ? Object.keys(patch).join(", ") : ""
     this.fnI("info", `📝 [mem:write] update ${_uscope}/${section}/${id}${_patchKeys.length > 0 ? " (" + _patchKeys + ")" : ""}`)
@@ -7708,6 +7848,7 @@ MiniA.prototype._memoryRemove = function(section, id) {
   var _rscope = usedGlobal ? "global" : (usedSession ? "session" : "")
   this.fnI("info", `🗑️ [mem:delete] ${_rscope ? _rscope + "/" : ""}${section}/${id}: ${ok ? "removed" : "not found"}`)
   if (ok) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.memory_removes)) global.__mini_a_metrics.memory_removes.inc()
     this._syncWorkingMemoryState()
     if (usedGlobal) this._persistWorkingMemory("remove")
     if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("remove")
@@ -7729,6 +7870,7 @@ MiniA.prototype._memoryAttachEvidence = function(section, id, evidenceId) {
     usedGlobal = ok
   }
   if (ok) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.memory_evidence_attached)) global.__mini_a_metrics.memory_evidence_attached.inc()
     this._syncWorkingMemoryState()
     if (usedGlobal) this._persistWorkingMemory("attach-evidence")
     if (usedSession && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("attach-evidence")
@@ -7746,6 +7888,7 @@ MiniA.prototype._memoryMarkStatus = function(section, id, status, supersededBy) 
     target.mark(section, id, "supersededBy", supersededBy)
   }
   if (ok) {
+    if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.memory_status_marks)) global.__mini_a_metrics.memory_status_marks.inc()
     this._syncWorkingMemoryState()
     if (target === this._globalMemoryManager) this._persistWorkingMemory("mark")
     if (target === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("mark")
@@ -7768,6 +7911,10 @@ MiniA.prototype.promoteSessionMemory = function(section, ids) {
     promoted++
   }.bind(this))
   if (promoted > 0) {
+    if (isObject(global.__mini_a_metrics)) {
+      if (isObject(global.__mini_a_metrics.memory_promotions)) global.__mini_a_metrics.memory_promotions.inc()
+      if (isObject(global.__mini_a_metrics.memory_promoted_entries)) global.__mini_a_metrics.memory_promoted_entries.getAdd(promoted)
+    }
     this._syncWorkingMemoryState()
     this._persistWorkingMemory("promotion")
   }
@@ -7786,6 +7933,7 @@ MiniA.prototype.clearSessionMemory = function(sessionId) {
     this._syncWorkingMemoryState()
   }
   if (this._memoryConfig.enabled === true) this.fnI("info", `🧹 [mem:clear] session ${sid}`)
+  if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.memory_session_clears)) global.__mini_a_metrics.memory_session_clears.inc()
   return true
 }
 
@@ -15379,7 +15527,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var advisorStats = advisorResp.stats || {}
         var advisorTokenTotal = this._getTotalTokens(advisorStats)
         registerCallUsage(advisorTokenTotal)
-        this._recordLlmStatsMetrics(advisorStats, "main")
+        this._recordLlmStatsMetrics(advisorStats, "advisor")
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_calls)) global.__mini_a_metrics.advisor_calls.inc()
         if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.advisor_tokens)) global.__mini_a_metrics.advisor_tokens.getAdd(advisorTokenTotal)
         if (isMap(this._costTracker) && isMap(this._costTracker.advisor)) {

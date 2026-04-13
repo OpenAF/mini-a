@@ -3907,7 +3907,8 @@ try {
         goals: {},
         llm_calls: {},
         actions: {},
-        performance: {}
+        performance: {},
+        memory: {}
       }
 
       // Goals
@@ -3941,6 +3942,7 @@ try {
           normal: metrics.llm_calls.normal || 0,
           low_cost: metrics.llm_calls.low_cost || 0
         }
+        if ((metrics.llm_calls.fallback_to_main || 0) > 0) summaryExport.llm_calls.fallback_to_main = metrics.llm_calls.fallback_to_main || 0
         summaryRows.push({
           category: "LLM Calls",
           metric: "Total",
@@ -3956,6 +3958,13 @@ try {
           metric: "Low Cost",
           value: metrics.llm_calls.low_cost || 0
         })
+        if ((metrics.llm_calls.fallback_to_main || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Fallback to Main",
+            value: metrics.llm_calls.fallback_to_main || 0
+          })
+        }
       }
 
       // Actions
@@ -3966,6 +3975,7 @@ try {
           shell_commands_executed: metrics.actions.shell_commands_executed || 0,
           thoughts_made: metrics.actions.thoughts_made || 0
         }
+        if ((metrics.actions.shell_commands_blocked || 0) > 0) summaryExport.actions.shell_commands_blocked = metrics.actions.shell_commands_blocked || 0
         summaryRows.push({
           category: "Actions",
           metric: "MCP Executed",
@@ -3986,6 +3996,13 @@ try {
           metric: "Thoughts Made",
           value: metrics.actions.thoughts_made || 0
         })
+        if ((metrics.actions.shell_commands_blocked || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Shell Blocked",
+            value: metrics.actions.shell_commands_blocked || 0
+          })
+        }
       }
 
       // Performance
@@ -3997,6 +4014,9 @@ try {
           summaryExport.performance.total_session_time_ms = metrics.performance.total_session_time_ms
           summaryExport.performance.total_session_time_seconds = Number((metrics.performance.total_session_time_ms / 1000).toFixed(2))
         }
+        if ((metrics.performance.llm_actual_tokens || 0) > 0) summaryExport.performance.llm_actual_tokens = metrics.performance.llm_actual_tokens || 0
+        if ((metrics.performance.max_context_tokens || 0) > 0) summaryExport.performance.max_context_tokens = metrics.performance.max_context_tokens || 0
+        if ((metrics.performance.avg_step_time_ms || 0) > 0) summaryExport.performance.avg_step_time_ms = metrics.performance.avg_step_time_ms || 0
         summaryRows.push({
           category: "Performance",
           metric: "Steps Taken",
@@ -4009,6 +4029,77 @@ try {
             value: (metrics.performance.total_session_time_ms / 1000).toFixed(2)
           })
         }
+        if ((metrics.performance.avg_step_time_ms || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Avg Step (ms)",
+            value: metrics.performance.avg_step_time_ms || 0
+          })
+        }
+        if ((metrics.performance.llm_actual_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "LLM Actual Tokens",
+            value: metrics.performance.llm_actual_tokens || 0
+          })
+        }
+        if ((metrics.performance.max_context_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Max Context Tokens",
+            value: metrics.performance.max_context_tokens || 0
+          })
+        }
+      }
+
+      if (isObject(metrics.summarization) && (metrics.summarization.context_summarizations || 0) > 0) {
+        summaryExport.summarization = {
+          context_summarizations: metrics.summarization.context_summarizations || 0
+        }
+        if ((metrics.summarization.summaries_tokens_reduced || 0) > 0) {
+          summaryExport.summarization.summaries_tokens_reduced = metrics.summarization.summaries_tokens_reduced || 0
+        }
+        summaryRows.push({
+          category: "Summaries",
+          metric: "Context Summaries",
+          value: metrics.summarization.context_summarizations || 0
+        })
+        if ((metrics.summarization.summaries_tokens_reduced || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Tokens Reduced",
+            value: metrics.summarization.summaries_tokens_reduced || 0
+          })
+        }
+      }
+
+      if (isObject(metrics.memory) && metrics.memory.enabled === true) {
+        summaryExport.memory = {
+          resolved_entries: metrics.memory.resolved_entries || 0,
+          appends: metrics.memory.appends || 0,
+          dedup_hits: metrics.memory.dedup_hits || 0,
+          compactions: metrics.memory.compactions || 0
+        }
+        summaryRows.push({
+          category: "Memory",
+          metric: "Resolved Entries",
+          value: metrics.memory.resolved_entries || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Appends",
+          value: metrics.memory.appends || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Dedup Hits",
+          value: metrics.memory.dedup_hits || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Compactions",
+          value: metrics.memory.compactions || 0
+        })
       }
 
       print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))

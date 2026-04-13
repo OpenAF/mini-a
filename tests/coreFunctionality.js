@@ -6,6 +6,19 @@
     return new MiniA()
   }
 
+  var resetMiniAMetrics = function() {
+    if (!isObject(global.__mini_a_metrics)) return
+    Object.keys(global.__mini_a_metrics).forEach(function(key) {
+      if (key === "per_tool_stats") {
+        global.__mini_a_metrics.per_tool_stats = {}
+        return
+      }
+      if (isObject(global.__mini_a_metrics[key]) && isFunction(global.__mini_a_metrics[key].set)) {
+        global.__mini_a_metrics[key].set(0)
+      }
+    })
+  }
+
   var renderAgentPrompt = function(agent, overrides, args) {
     var basePayload = {
       agentPersonaLine: "You are a decisive, action-oriented agent that executes efficiently.",
@@ -1241,6 +1254,65 @@
     second._agentState = {}
     second._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-2", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
     ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(e) { return e.value === "default both persisted decision" }), true, "Default writes should persist globally when memorych is configured under both scope")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemoryMetrics = function() {
+    resetMiniAMetrics()
+
+    var channelName = "__mini_a_test_memory_metrics_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent.fnI = function() {}
+    agent._initWorkingMemory({
+      usememory: true,
+      memoryscope: "both",
+      memorysessionid: "metrics-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorymaxpersection: 2,
+      memorycompactevery: 1,
+      memorydedup: true,
+      debug: false,
+      verbose: false
+    }, agent._agentState)
+
+    var entry = agent._memoryAppend("facts", "Primary fact")
+    agent._memoryAppend("facts", "primary fact")
+    agent._memoryUpdate("facts", entry.id, { stale: true })
+    agent._memoryAttachEvidence("facts", entry.id, "ev-1")
+    agent._memoryMarkStatus("facts", entry.id, "superseded", "fact-2")
+    agent._memoryAppend("facts", "Fact 2")
+    agent._memoryAppend("facts", "Fact 3")
+    agent._memoryRemove("facts", entry.id)
+    agent._memoryAppend("decisions", "Promote me", { memoryScope: "session" })
+    var decisionEntry = agent._agentState.workingMemory.sections.decisions[0]
+    agent.promoteSessionMemory("decisions", [decisionEntry.id])
+    agent._persistWorkingMemory("test")
+    agent._persistSessionMemory("test")
+    agent.clearSessionMemory("metrics-1")
+
+    var metrics = agent.getMetrics()
+    ow.test.assert(isMap(metrics.memory), true, "Memory metrics block should be present")
+    ow.test.assert(metrics.memory.enabled === true, true, "Memory metrics should report enabled state")
+    ow.test.assert(metrics.memory.appends >= 4, true, "Memory appends should be counted")
+    ow.test.assert(metrics.memory.dedup_hits >= 1, true, "Memory dedup hits should be counted")
+    ow.test.assert(metrics.memory.updates >= 1, true, "Memory updates should be counted")
+    ow.test.assert(metrics.memory.evidence_attached >= 1, true, "Memory evidence attachments should be counted")
+    ow.test.assert(metrics.memory.status_marks >= 1, true, "Memory status marks should be counted")
+    ow.test.assert(metrics.memory.removes >= 1, true, "Memory removals should be counted")
+    ow.test.assert(metrics.memory.promotions >= 1, true, "Memory promotions should be counted")
+    ow.test.assert(metrics.memory.promoted_entries >= 1, true, "Promoted entry count should be tracked")
+    ow.test.assert(metrics.memory.compactions >= 1, true, "Memory compactions should be counted")
+    ow.test.assert(metrics.memory.global_writes >= 1, true, "Global memory writes should be counted")
+    ow.test.assert(metrics.memory.session_writes >= 1, true, "Session memory writes should be counted")
+    ow.test.assert(metrics.memory.global_reads >= 1, true, "Global memory reads should be counted")
+    ow.test.assert(metrics.memory.session_reads >= 1, true, "Session memory reads should be counted")
+    ow.test.assert(metrics.memory.session_clears >= 1, true, "Session clears should be counted")
+    ow.test.assert(isNumber(metrics.memory.resolved_entries), true, "Resolved entry count should be exposed")
+    ow.test.assert(isMap(metrics.memory.resolved_sections), true, "Resolved section counts should be exposed")
 
     try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }

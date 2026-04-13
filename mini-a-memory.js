@@ -4,12 +4,14 @@
 
 var MiniAMemoryManager = function(config, loggerFn) {
   this._logFn = isFunction(loggerFn) ? loggerFn : function() {}
+  this._onEvent = function() {}
   this.configure(config)
   this._memory = this._createEmptyMemory()
 }
 
 MiniAMemoryManager.prototype.configure = function(config) {
   var cfg = isObject(config) ? config : {}
+  if (isFunction(cfg.onEvent)) this._onEvent = cfg.onEvent
   this._config = {
     enabled          : toBoolean(cfg.enabled) !== false,
     maxPerSection    : isNumber(cfg.maxPerSection) ? Math.max(5, Math.round(cfg.maxPerSection)) : 80,
@@ -18,6 +20,13 @@ MiniAMemoryManager.prototype.configure = function(config) {
     dedup            : toBoolean(cfg.dedup) !== false,
     debug            : toBoolean(cfg.debug) === true
   }
+}
+
+MiniAMemoryManager.prototype._emitEvent = function(type, payload) {
+  if (!isFunction(this._onEvent)) return
+  try {
+    this._onEvent(type, isObject(payload) ? payload : {})
+  } catch(ignoreMemoryEventErr) {}
 }
 
 MiniAMemoryManager.prototype._sections = function() {
@@ -168,6 +177,7 @@ MiniAMemoryManager.prototype.append = function(section, entry, options) {
   var list = this._getSection(section)
   if (!isArray(list)) return __
   var opts = isObject(options) ? options : {}
+  var beforeLength = list.length
   var normalized = this._normalizeEntry(entry, opts)
 
   if (this._config.dedup === true) {
@@ -178,6 +188,7 @@ MiniAMemoryManager.prototype.append = function(section, entry, options) {
           list[i].evidenceRefs = (list[i].evidenceRefs || []).concat(normalized.evidenceRefs)
         }
         this._touch()
+        this._emitEvent("dedup", { section: section, id: list[i].id, totalEntries: beforeLength })
         return list[i]
       }
     }
@@ -186,6 +197,7 @@ MiniAMemoryManager.prototype.append = function(section, entry, options) {
   list.push(normalized)
   this._touch()
   this._boundedMaintenance(opts)
+  this._emitEvent("append", { section: section, id: normalized.id, totalEntries: beforeLength + 1 })
   return normalized
 }
 
@@ -270,6 +282,8 @@ MiniAMemoryManager.prototype._priority = function(section) {
 MiniAMemoryManager.prototype.compact = function() {
   var self = this
   var sections = this._sections()
+  var droppedEntries = 0
+  var sectionDrops = {}
 
   sections.forEach(function(section) {
     var list = self._getSection(section) || []
@@ -284,6 +298,8 @@ MiniAMemoryManager.prototype.compact = function() {
     var dropped = list.slice(self._config.maxPerSection)
     self._memory.sections[section] = kept
     if (dropped.length > 0) {
+      droppedEntries += dropped.length
+      sectionDrops[section] = (sectionDrops[section] || 0) + dropped.length
       self._memory.sections.summaries.push(self._normalizeEntry({
         value: "Compacted " + dropped.length + " older " + section + " entr" + (dropped.length === 1 ? "y" : "ies"),
         status: "active",
@@ -306,6 +322,8 @@ MiniAMemoryManager.prototype.compact = function() {
       return String(b.item.updatedAt).localeCompare(String(a.item.updatedAt))
     })
     var allowed = all.slice(0, this._config.maxTotalEntries)
+    var trimmedByTotal = Math.max(0, all.length - allowed.length)
+    droppedEntries += trimmedByTotal
     var allowedById = {}
     allowed.forEach(function(e) { allowedById[e.item.id] = true })
     sections.forEach(function(section) {
@@ -316,6 +334,7 @@ MiniAMemoryManager.prototype.compact = function() {
   }
 
   this._touch()
+  this._emitEvent("compact", { droppedEntries: droppedEntries, sectionDrops: sectionDrops })
   return this.snapshot()
 }
 
@@ -335,8 +354,10 @@ MiniAMemoryManager.prototype.saveToChannel = function(channelName, namespace) {
     for (var i = 0; i < sections.length; i++) {
       $ch(channelName).set({ section: sections[i], ns: ns }, snap.sections[sections[i]] || [])
     }
+    this._emitEvent("save", { channel: channelName, namespace: ns, ok: true })
     return true
   } catch(e) {
+    this._emitEvent("save", { channel: channelName, namespace: ns, ok: false, error: String(e) })
     return false
   }
 }
@@ -346,7 +367,10 @@ MiniAMemoryManager.prototype.loadFromChannel = function(channelName, namespace) 
   var ns = isString(namespace) && namespace.length > 0 ? namespace : ""
   try {
     var meta = $ch(channelName).get({ section: "_meta", ns: ns })
-    if (!isObject(meta)) return false
+    if (!isObject(meta)) {
+      this._emitEvent("load", { channel: channelName, namespace: ns, ok: false, reason: "missing-meta" })
+      return false
+    }
     var sections = this._sections()
     var seedData = { sections: {} }
     for (var i = 0; i < sections.length; i++) {
@@ -356,8 +380,10 @@ MiniAMemoryManager.prototype.loadFromChannel = function(channelName, namespace) 
     this.init(seedData)
     if (isString(meta.createdAt)) this._memory.createdAt = meta.createdAt
     if (isNumber(meta.revision)) this._memory.revision = meta.revision
+    this._emitEvent("load", { channel: channelName, namespace: ns, ok: true })
     return true
   } catch(e) {
+    this._emitEvent("load", { channel: channelName, namespace: ns, ok: false, error: String(e) })
     return false
   }
 }
