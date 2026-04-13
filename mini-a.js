@@ -1491,15 +1491,20 @@ MiniA.prototype.fnI = function(event, message) {
   }
   if (this._auditon) {
     var _t = nowUTC()
-    $ch("_mini_a_audit_channel").set({
-      ts: _t,
-      id: this._id
-    }, {
+    var auditRecord = {
       ts: _t,
       id: this._id,
       e : event,
       m : message
-    })
+    }
+    if (isDef(this._pendingAuditMeta)) {
+      auditRecord.meta = this._pendingAuditMeta
+      this._pendingAuditMeta = __
+    }
+    $ch("_mini_a_audit_channel").set({
+      ts: _t,
+      id: this._id
+    }, auditRecord)
   }
   if (isString(this._debugFile) && this._debugFile.length > 0) {
     try {
@@ -1509,6 +1514,69 @@ MiniA.prototype.fnI = function(event, message) {
   }
   this._flushAllDebugChannelsToFiles()
   return this._fnI(event, message)
+}
+
+MiniA.prototype._truncateAuditValue = function(value, maxLen) {
+  maxLen = isNumber(maxLen) && maxLen > 0 ? maxLen : 500
+  if (isUnDef(value) || value === null) return value
+  if (isString(value)) {
+    if (value.length <= maxLen) return value
+    return value.substring(0, maxLen) + "... [truncated]"
+  }
+  return value
+}
+
+MiniA.prototype._sanitizeArgsForAudit = function(args) {
+  if (!isMap(args)) return {}
+  var self = this
+  var out = {}
+  var redactKeys = {
+    model: true, modellc: true, modelval: true, auditch: true, debugch: true, debuglcch: true, debugvalch: true
+  }
+  Object.keys(args).forEach(function(key) {
+    if (!isString(key) || key.length === 0) return
+    if (key.charAt(0) === "_") return
+    if (redactKeys[key] === true) return
+    var lower = key.toLowerCase()
+    if (lower.indexOf("key") >= 0 || lower.indexOf("token") >= 0 || lower.indexOf("secret") >= 0 || lower.indexOf("password") >= 0) {
+      out[key] = "[redacted]"
+      return
+    }
+    var value = args[key]
+    if (isUnDef(value)) return
+    if (isString(value)) {
+      out[key] = self._truncateAuditValue(value, key === "goal" ? 4000 : 800)
+      return
+    }
+    if (isNumber(value) || isBoolean(value)) {
+      out[key] = value
+      return
+    }
+    try {
+      out[key] = self._truncateAuditValue(stringify(value, __, ""), 1200)
+    } catch(ignoreAuditArgErr) {
+      out[key] = "[unserializable]"
+    }
+  })
+  return out
+}
+
+MiniA.prototype._queueAuditMeta = function(meta) {
+  if (!isMap(meta)) return
+  this._pendingAuditMeta = meta
+}
+
+MiniA.prototype._coerceGoalText = function(value) {
+  if (isUnDef(value) || value === null) return ""
+  if (isString(value)) return String(value)
+  try {
+    var coerced = String(value)
+    if (isString(coerced)) return coerced
+  } catch(ignoreGoalCoercionErr) { }
+  try {
+    return stringify(value, __, "")
+  } catch(ignoreGoalStringifyErr) { }
+  return ""
 }
 
 MiniA.prototype._logToolUsage = function(toolName, params, answer, meta) {
@@ -8602,6 +8670,8 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
 
 MiniA.prototype._createUtilsMcpConfig = function(args) {
   try {
+    var parent = this
+
     if (typeof MiniUtilsTool !== "function") {
       //if (io.fileExists("mini-a-utils.js")) {
       loadLib("mini-a-utils.js")
@@ -14460,13 +14530,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return true
     }.bind(this)
 
+    args.goal = this._coerceGoalText(args.goal)
+
     // Check if goal is a string or a file path
     if (args.goal.length > 0 && args.goal.indexOf("\n") < 0 && io.fileExists(args.goal) && io.fileInfo(args.goal).isFile) {
       this.fnI("load", `Loading goal from file: ${args.goal}...`)
-      args.goal = io.readFileString(args.goal)
+      args.goal = this._coerceGoalText(io.readFileString(args.goal))
     }
 
     this.fnI("user", `${args.goal}`)
+    if (args.debug === true) {
+      this.fnI("debug", `[goal-trace] pre-init goal length=${isString(args.goal) ? args.goal.length : 0} preview=${this._truncateAuditValue(isString(args.goal) ? args.goal : stringify(args.goal, __, ""), 500)}`)
+    }
 
     if (toBoolean(args.mcpdynamic) === true) {
       args.mcplazy = true
@@ -14514,6 +14589,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     this.init(args)
+    args.goal = this._coerceGoalText(args.goal)
+    if (args.debug === true) {
+      this.fnI("debug", `[goal-trace] post-init goal length=${isString(args.goal) ? args.goal.length : 0} preview=${this._truncateAuditValue(isString(args.goal) ? args.goal : stringify(args.goal, __, ""), 500)}`)
+    }
+    if (this._auditon) {
+      this._queueAuditMeta({
+        args: this._sanitizeArgsForAudit(args)
+      })
+      this.fnI("args", "Execution arguments captured for audit.")
+    }
 
     if (this._isTaskLanePolicyProbe(args)) {
       var blockedAnswer = "I can't help with requests to retrieve or expose policy-lane/system instruction contents. Please provide a task-lane request that does not ask for internal policy text."
@@ -14685,12 +14770,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // Threshold: if goal is > 250 tokens, attempt to compress it
       if (goalTokens > 250 && goalText.length > 1000) {
         try {
-          var compressedGoal = this.summarizeText(goalText, {
+          var compressedGoal = this._coerceGoalText(this.summarizeText(goalText, {
             instructionText: "You are condensing a user goal. KEEP the core objective, constraints, and success criteria. REMOVE fluff, examples, and explanations. Be terse.",
             verbose: false
-          })
+          }))
           var compressedTokens = this._estimateTokens(compressedGoal)
-          if (compressedTokens < goalTokens * 0.7) {
+          if (compressedGoal.trim().length > 0 && compressedTokens < goalTokens * 0.7) {
             // Compression was effective (> 30% reduction)
             if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.goal_block_compressed)) {
               global.__mini_a_metrics.goal_block_compressed.inc()
@@ -14699,6 +14784,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               global.__mini_a_metrics.goal_block_tokens_saved.getAdd(goalTokens - compressedTokens)
             }
             return this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", compressedGoal)
+          } else if (compressedGoal.trim().length === 0) {
+            this.fnI("warn", "Goal compression returned an empty result, using original goal.")
           }
         } catch (e) {
           // Fall back to original goal if compression fails
@@ -14742,6 +14829,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     var cachedGoalBlock = optimizeGoalBlock()
+    if (args.debug === true) {
+      this.fnI("debug", `[goal-trace] cached goal block built from goal length=${isString(args.goal) ? args.goal.length : 0} blockPreview=${this._truncateAuditValue(cachedGoalBlock, 500)}`)
+    }
     var cachedHookContextBlock = optimizeHookContextBlock()
     var getStateSnapshot = () => {
       if (runtime.stateSnapshotDirty !== true && isString(runtime.lastStateSnapshot) && runtime.lastStateSnapshot.length > 0) {
