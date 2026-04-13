@@ -772,7 +772,7 @@ jobs:
       usevectors     : toBoolean.isBoolean.default(false)
       usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
-      mcpproxy       : toBoolean.isBoolean.default(false)
+      mcpproxy       : toBoolean.isBoolean.default(__)
       mcpproxythreshold: toNumber.isNumber.default(__)
       mcpproxytoon   : toBoolean.isBoolean.default(false)
       mcplazy        : toBoolean.isBoolean.default(false)

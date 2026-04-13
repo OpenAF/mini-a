@@ -2596,7 +2596,19 @@ try {
     return opts
   }
 
+  function resetExplicitOptions() {
+    var opts = {}
+    Object.keys(explicitCLIArgKeys).forEach(function(key) {
+      var normalized = isString(key) ? key.toLowerCase() : ""
+      if (normalized.length === 0) return
+      if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, normalized)) return
+      opts[normalized] = true
+    })
+    return opts
+  }
+
   var sessionOptions = resetOptions()
+  var sessionExplicitOptions = resetExplicitOptions()
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true }
   var activeAgent = __
@@ -2675,6 +2687,7 @@ try {
       value = unwrapConsoleQuotedValue(value)
     }
     sessionOptions[key] = value
+    sessionExplicitOptions[key] = true
     if (key === "conversation") {
       lastConversationStats = __
       historyFileKeptRecorded = false
@@ -2710,6 +2723,7 @@ try {
     } else {
       delete sessionOptions[key]
     }
+    delete sessionExplicitOptions[key]
     if (key === "conversation") {
       lastConversationStats = __
       historyFileKeptRecorded = false
@@ -3005,6 +3019,7 @@ try {
     }
     args.goal = cleanGoal
     args.__interaction_source = "mini-a-con"
+    args.__explicitargkeys = merge({}, sessionExplicitOptions, true)
     if (isDef(args.format) && isUnDef(args.__format)) args.__format = args.format
     return args
   }
@@ -4499,6 +4514,7 @@ try {
       }
       if (commandLower === "reset") {
         sessionOptions = resetOptions()
+        sessionExplicitOptions = resetExplicitOptions()
         lastConversationStats = __
         historyFileKeptRecorded = false
         initializeConversationPath(false)

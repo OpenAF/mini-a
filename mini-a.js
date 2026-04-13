@@ -12995,6 +12995,37 @@ MiniA.prototype._applyAgentMetadata = function(args) {
   }
 }
 
+MiniA.prototype._applyExplicitExternalArgs = function(args, explicitExternalArgs) {
+  if (!isMap(args) || !isMap(explicitExternalArgs)) return
+
+  var explicitKeys = {}
+  var rawExplicitKeys = args.__explicitargkeys
+  if (isArray(rawExplicitKeys)) {
+    rawExplicitKeys.forEach(key => {
+      var normalized = isDef(key) ? String(key).trim().toLowerCase() : ""
+      if (normalized.length > 0) explicitKeys[normalized] = true
+    })
+  } else if (isMap(rawExplicitKeys)) {
+    Object.keys(rawExplicitKeys).forEach(key => {
+      var normalized = isDef(key) ? String(key).trim().toLowerCase() : ""
+      if (normalized.length > 0 && rawExplicitKeys[key] === true) explicitKeys[normalized] = true
+    })
+  }
+  var hasExplicitKeys = Object.keys(explicitKeys).length > 0
+
+  Object.keys(explicitExternalArgs).forEach(key => {
+    var normalized = isString(key) ? key.toLowerCase() : ""
+    if (normalized === "agent" || normalized === "agentfile") return
+    if (hasExplicitKeys && normalized.indexOf("__") !== 0 && explicitKeys[normalized] !== true) return
+    if (normalized === "goal") {
+      var explicitGoal = explicitExternalArgs[key]
+      var explicitGoalText = isDef(explicitGoal) && explicitGoal !== null ? String(explicitGoal).trim() : ""
+      if (explicitGoalText.length === 0 && isString(args.goal) && args.goal.trim().length > 0) return
+    }
+    args[key] = explicitExternalArgs[key]
+  })
+}
+
 // ============================================================================
 // MAIN METHODS
 // ============================================================================
@@ -13003,18 +13034,7 @@ MiniA.prototype.init = function(args) {
   args = _$(args, "args").isMap().default({})
   var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
   this._applyAgentMetadata(args)
-  if (isMap(explicitExternalArgs)) {
-    Object.keys(explicitExternalArgs).forEach(key => {
-      var normalized = isString(key) ? key.toLowerCase() : ""
-      if (normalized === "agent" || normalized === "agentfile") return
-      if (normalized === "goal") {
-        var explicitGoal = explicitExternalArgs[key]
-        var explicitGoalText = isDef(explicitGoal) && explicitGoal !== null ? String(explicitGoal).trim() : ""
-        if (explicitGoalText.length === 0 && isString(args.goal) && args.goal.trim().length > 0) return
-      }
-      args[key] = explicitExternalArgs[key]
-    })
-  }
+  this._applyExplicitExternalArgs(args, explicitExternalArgs)
   var currentWorkingDir = __
   try {
     currentWorkingDir = String((new java.io.File(".")).getCanonicalPath())
@@ -13083,6 +13103,7 @@ MiniA.prototype.init = function(args) {
       { name: "shellmaxbytes", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
+      { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "auditch", type: "string", default: __ },
@@ -13182,6 +13203,7 @@ MiniA.prototype.init = function(args) {
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
+    args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
@@ -14293,6 +14315,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
+      { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
       { name: "adaptiverouting", type: "boolean", default: false },
@@ -14349,6 +14372,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
+    args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)

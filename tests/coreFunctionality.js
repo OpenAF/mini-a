@@ -1368,4 +1368,60 @@
     ow.test.assert(args.useutils === false, true, "Explicit useutils=false should override agent capabilities")
     ow.test.assert(args.usetools === false, true, "Explicit usetools=false should override agent capabilities")
   }
+
+  exports.testAgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var args = {
+      agent: [
+        "---",
+        "mini-a:",
+        "  usetools: true",
+        "  mcpproxy: true",
+        "---"
+      ].join("\n"),
+      usetools: false,
+      mcpproxy: false,
+      __explicitargkeys: {
+        agent: true
+      }
+    }
+    var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
+
+    agent._applyAgentMetadata(args)
+    agent._applyExplicitExternalArgs(args, explicitExternalArgs)
+
+    ow.test.assert(args.usetools === true, true, "Non-explicit CLI defaults should not override agent mini-a usetools")
+    ow.test.assert(args.mcpproxy === true, true, "Non-explicit CLI defaults should not override agent mini-a mcpproxy")
+  }
+
+  exports.testAgentMiniAOverridesYieldToExplicitCliFlags = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var args = {
+      agent: [
+        "---",
+        "mini-a:",
+        "  usetools: true",
+        "  mcpproxy: true",
+        "---"
+      ].join("\n"),
+      usetools: false,
+      mcpproxy: false,
+      __explicitargkeys: {
+        agent: true,
+        usetools: true,
+        mcpproxy: true
+      }
+    }
+    var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
+
+    agent._applyAgentMetadata(args)
+    agent._applyExplicitExternalArgs(args, explicitExternalArgs)
+
+    ow.test.assert(args.usetools === false, true, "Explicit CLI usetools=false should override agent mini-a usetools")
+    ow.test.assert(args.mcpproxy === false, true, "Explicit CLI mcpproxy=false should override agent mini-a mcpproxy")
+  }
 })()
