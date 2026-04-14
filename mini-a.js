@@ -8994,6 +8994,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
     if (this._supportsConsoleUserInput(args) !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "userInput" })
+      methodNames = methodNames.filter(function(name) { return name !== "showMessage" })
     }
     var utilsAllow = this._parseUtilsToolList(args.utilsallow)
     if (utilsAllow.length > 0) {
@@ -9139,6 +9140,15 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         if (op === "choose") return "Asking the user to choose one option."
         if (["multiple", "multi"].indexOf(op) >= 0) return "Asking the user to choose multiple options."
         if (["struct", "form"].indexOf(op) >= 0) return "Asking the user a structured set of questions."
+      }
+
+      if (name === "showMessage") {
+        if (isString(payload.message) && payload.message.trim().length > 0) {
+          var preview = payload.message.trim().substring(0, 60)
+          var suffix  = payload.message.trim().length > 60 ? "..." : ""
+          return "Displaying message: " + _quoted(preview + suffix) + "."
+        }
+        return "Displaying a message."
       }
 
       if (name === "timeUtilities") {
@@ -13908,6 +13918,14 @@ MiniA.prototype.init = function(args) {
     }
     if (args.useshell === true && args.usetools === true) {
       baseRules.push("When shell and tools are both enabled, always execute shell with action=\"shell\" and top-level command. Do not invoke shell as an MCP tool/function.")
+    }
+    if (this._supportsConsoleUserInput(args) === true) {
+      baseRules.push(
+        "When you need information, clarification, or a decision from the user — such as a missing value, a choice between options, sensitive input, or a confirmation — call the 'userInput' tool instead of asking in your final answer or pausing execution."
+      )
+      baseRules.push(
+        "When you want to show the user a progress update, status notification, or important finding during execution (not as a final answer), call the 'showMessage' tool. This prints directly to the console in real time."
+      )
     }
 
     var shellViaActionPreferred = args.useshell === true && this._useTools === true

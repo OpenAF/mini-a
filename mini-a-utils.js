@@ -2766,6 +2766,42 @@ MiniUtilsTool.prototype._askStruct = function(questions) {
 
 /**
  * <odoc>
+ * <key>MiniUtilsTool.showMessage(params) : Object</key>
+ * Displays a message to the user during execution.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.showMessage = function(params) {
+  params = params || {}
+  var message = isString(params.message) ? params.message : ""
+  if (message.length === 0) return "[ERROR] message is required"
+
+  var level = isString(params.level) ? params.level.toLowerCase().trim() : "info"
+  var title = isString(params.title) ? params.title.trim() : ""
+
+  var colorFn = (typeof ansiColor === "function") ? ansiColor : function(_, t) { return t }
+  var colorMap = { info: "CYAN", warn: "YELLOW", error: "RED", success: "GREEN", debug: "FAINT" }
+  var prefixMap = { info: "", warn: " ⚠️", error: " ❌", success: " ✅", debug: " 🪳" }
+  var color  = colorMap[level]  || "CYAN"
+  var prefix = prefixMap[level] || ""
+
+  try {
+    if (title.length > 0) {
+      print(colorFn("BOLD," + color, title))
+    }
+    var line = colorFn(color, "🗨️ " + prefix + "  " + message)
+    if (level === "error" || level === "warn") {
+      printErr(line)
+    } else {
+      print(line)
+    }
+    return { operation: "showMessage", displayed: true, level: level, message: message }
+  } catch(e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+/**
+ * <odoc>
  * <key>MiniUtilsTool.userInput(params) : Object</key>
  * Interactively asks the user for input using OpenAF ask* helpers.
  * This tool is intended for interactive console sessions.
@@ -3227,7 +3263,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     userInput: {
       name       : "userInput",
-      description: "Interactive user-input helper for mini-a-con console sessions. Ask free-form, secret, single-choice, multi-choice, or structured questions through OpenAF ask* prompts.",
+      description: "Request input or a decision from the user. Call this tool whenever you need a value, clarification, or choice from the user — instead of asking in your final answer or stopping execution. Supports free-form text (ask), secret/password (secret), single-key (char), single-choice list (choose), multi-choice list (multiple), and structured multi-question forms (struct).",
       inputSchema: {
         type      : "object",
         properties: {
@@ -3275,6 +3311,24 @@ MiniUtilsTool._metadataByFn = (function() {
             then: { required: ["questions"] }
           }
         ]
+      }
+    },
+    showMessage: {
+      name       : "showMessage",
+      description: "Display a message to the user during execution — before the final answer. Use this for progress updates, status notifications, important findings, or any output the user should see immediately in real time. Supports levels: info (cyan), warn (yellow), error (red), success (green), debug (faint). Optionally provide a title to print a bold header line above the message.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          message: { type: "string", description: "The message text to display." },
+          level  : {
+            type       : "string",
+            description: "Display level controlling color and prefix. Default: 'info'.",
+            enum       : ["info", "warn", "error", "success", "debug"],
+            default    : "info"
+          },
+          title  : { type: "string", description: "Optional bold header printed above the message." }
+        },
+        required: ["message"]
       }
     },
     markdownFiles: {
