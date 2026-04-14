@@ -1165,6 +1165,24 @@ try {
     return { filePath: token, suffix: suffix }
   }
 
+  function countImmediateBackslashes(text, position) {
+    if (!isString(text) || !isNumber(position) || position <= 0) return 0
+    var count = 0
+    for (var idx = position - 1; idx >= 0 && text.charAt(idx) === "\\"; idx--) count++
+    return count
+  }
+
+  function canStartInlineShortcut(text, markerPos) {
+    if (!isString(text) || !isNumber(markerPos) || markerPos < 0 || markerPos >= text.length) return false
+    if (markerPos === 0) return true
+
+    var prevChar = text.charAt(markerPos - 1)
+    if (/\s/.test(prevChar)) return true
+    if (/[\(\[\{<"'`,;:!?]/.test(prevChar)) return true
+
+    return false
+  }
+
   function preprocessSkillTemplateReferences(templateText, templateDef) {
     if (!isString(templateText) || templateText.length === 0) return templateText
     if (!isObject(templateDef) || templateDef.sourceCategory !== "skill") return templateText
@@ -1187,9 +1205,13 @@ try {
         break
       }
 
-      var backslashes = 0
-      for (var b = atPos - 1; b >= 0 && text.charAt(b) === "\\"; b--) backslashes++
+      var backslashes = countImmediateBackslashes(text, atPos)
       if (backslashes > 0) {
+        chunks.push(text.substring(cursor, atPos + 1))
+        cursor = atPos + 1
+        continue
+      }
+      if (!canStartInlineShortcut(text, atPos)) {
         chunks.push(text.substring(cursor, atPos + 1))
         cursor = atPos + 1
         continue
@@ -1341,9 +1363,9 @@ try {
       var tokenEnd = tokenStart + fullToken.length
 
       // Allow escaping \$skill to keep it literal.
-      var backslashes = 0
-      for (var i = tokenStart - 1; i >= 0 && goalText.charAt(i) === "\\"; i--) backslashes++
+      var backslashes = countImmediateBackslashes(goalText, tokenStart)
       if (backslashes > 0) continue
+      if (!canStartInlineShortcut(goalText, tokenStart)) continue
 
       var matchedSkillDef = findCustomTemplateDefinition(skillName, { includeCommands: false, includeSkills: true })
       if (isUnDef(matchedSkillDef)) continue
@@ -1421,7 +1443,7 @@ try {
           if (lastAtPos !== -1) {
             var afterAt = uptoCursor.substring(lastAtPos + 1)
             // Only complete if there's no space after @
-            if (afterAt.indexOf(" ") === -1) {
+            if (afterAt.indexOf(" ") === -1 && canStartInlineShortcut(uptoCursor, lastAtPos) && countImmediateBackslashes(uptoCursor, lastAtPos) === 0) {
               var fileCompletions = getFileCompletions(afterAt)
               fileCompletions.forEach(function(path) {
                 candidates.add(path)
@@ -1435,12 +1457,10 @@ try {
           if (lastDollarPos !== -1) {
             var afterDollar = uptoCursor.substring(lastDollarPos + 1)
             // Only complete if there's no space after $
-            if (afterDollar.indexOf(" ") === -1) {
+            if (afterDollar.indexOf(" ") === -1 && canStartInlineShortcut(uptoCursor, lastDollarPos)) {
               // Respect escaped \$skill usage.
               var escapedDollar = false
-              for (var j = lastDollarPos - 1; j >= 0 && uptoCursor.charAt(j) === "\\"; j--) {
-                escapedDollar = true
-              }
+              if (countImmediateBackslashes(uptoCursor, lastDollarPos) > 0) escapedDollar = true
               if (!escapedDollar) {
                 var partialSkill = afterDollar.toLowerCase()
                 if (/^[a-z0-9_-]*$/.test(partialSkill)) {
@@ -2916,13 +2936,17 @@ try {
       }
 
       // Count contiguous backslashes immediately before '@' to detect escaping.
-      var backslashes = 0
-      for (var b = atPos - 1; b >= 0 && text.charAt(b) === "\\"; b--) backslashes++
+      var backslashes = countImmediateBackslashes(text, atPos)
       if (backslashes > 0) {
         // Any backslash directly before @ disables attachment parsing.
         // Keep it literal and remove one escaping backslash.
         chunks.push(text.substring(cursor, atPos - 1))
         chunks.push("@")
+        cursor = atPos + 1
+        continue
+      }
+      if (!canStartInlineShortcut(text, atPos)) {
+        chunks.push(text.substring(cursor, atPos + 1))
         cursor = atPos + 1
         continue
       }
