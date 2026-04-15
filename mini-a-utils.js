@@ -2787,7 +2787,7 @@ MiniUtilsTool.prototype.showMessage = function(params) {
     success: "BG(22),FG(255)",
     debug  : "BG(236),FG(252)"
   }
-  var prefixMap = { info: "i", warn: "!", error: "x", success: "ok", debug: "dbg" }
+  var prefixMap = { info: "i", warn: "!", error: "x", success: "✓", debug: "🐞" }
   var borderColor = borderColorMap[level] || "FG(51)"
   var textStyle   = textStyleMap[level]   || "BG(235),FG(255)"
   var prefix      = prefixMap[level]      || "i"
