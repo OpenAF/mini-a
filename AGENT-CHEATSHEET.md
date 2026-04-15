@@ -8,6 +8,7 @@ Quick reference for Mini-A `agent=` files.
 - File path: `mini-a agent=examples/summary.agent.md goal="..."`
 - Inline markdown: `mini-a agent="---\nname: quick\n...\n---" goal="..."`
 - Print starter template: `mini-a --agent`
+- Related starter templates: `mini-a --skill`, `mini-a --command`, `mini-a --hook`
 
 ## Supported frontmatter keys
 

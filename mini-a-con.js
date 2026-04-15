@@ -54,14 +54,18 @@ try {
     return found
   }
 
-  function hasAgentTemplateFlag(map) {
-    if (!isObject(map)) return false
-    var found = false
+  function findRequestedTemplateKind(map) {
+    if (!isObject(map)) return __
+    var kinds = ["agent", "hook", "skill", "command"]
+    var found = __
     Object.keys(map).some(function(key) {
       var normalized = String(key || "").toLowerCase()
-      if (normalized === "--agent" || (normalized === "agent" && toBoolean(map[key]) === true)) {
-        found = true
-        return true
+      for (var i = 0; i < kinds.length; i++) {
+        var kind = kinds[i]
+        if (normalized === "--" + kind || (normalized === kind && toBoolean(map[key]) === true)) {
+          found = kind
+          return true
+        }
       }
       return false
     })
@@ -70,7 +74,7 @@ try {
 
   var helpRequested = hasHelpFlag(args)
   var cheatsheetRequested = hasCheatsheetFlag(args)
-  var agentTemplateRequested = hasAgentTemplateFlag(args)
+  var requestedTemplateKind = findRequestedTemplateKind(args)
 
   // Init
   if (!(isString(args.libs) && args.libs.trim().length > 0)) {
@@ -87,7 +91,7 @@ try {
     if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
   }
 
-  if (!helpRequested && !cheatsheetRequested && !agentTemplateRequested) {
+  if (!helpRequested && !cheatsheetRequested && isUnDef(requestedTemplateKind)) {
     (function(args, explicitKeys) {
       if (args.__modeApplied === true) return
       if (!isString(args.mode)) return
@@ -621,7 +625,10 @@ try {
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
       { option: "--help | -h", description: "Show this help text." },
       { option: "--cheatsheet", description: "Render CHEATSHEET.md and exit." },
-      { option: "--agent", description: "Print a starter agent markdown template and exit." }
+      { option: "--agent", description: "Print a starter agent markdown template and exit." },
+      { option: "--hook", description: "Print a starter hook YAML template and exit." },
+      { option: "--skill", description: "Print a starter skill markdown template and exit." },
+      { option: "--command", description: "Print a starter slash-command markdown template and exit." }
     ]
 
     var maxOptionLength = options.reduce(function(max, opt) {
@@ -790,9 +797,137 @@ try {
     return true
   }
 
-  if (agentTemplateRequested) {
-    printAgentTemplate()
-    exit(0)
+  function printHookTemplate() {
+    var lines = [
+      "# Mini-A Hook Template",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "# Save as: ~/.openaf-mini-a/hooks/my-hook.yaml",
+      "# Or load from another directory with: mini-a extrahooks=/path/to/hooks",
+      "#",
+      "# Reference docs:",
+      "#   Full hook guide           → USAGE.md  (Console Hooks)",
+      "#   Quick parameter reference → CHEATSHEET.md  (or: mini-a --cheatsheet)",
+      "#   Feature overview          → README.md",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "",
+      "name: my-hook",
+      "event: before_goal",
+      "# Valid events: before_goal, after_goal, before_tool, after_tool, before_shell, after_shell",
+      "",
+      "# Optional: limit tool hooks to specific tool names (comma-separated)",
+      "#toolFilter: list-tools,delegate-subtask",
+      "",
+      "# Optional: include stdout in agent context for before_goal/before_tool flows",
+      "injectOutput: false",
+      "",
+      "# Optional: stop the action when this hook exits non-zero",
+      "failBlocks: false",
+      "",
+      "# Optional timeout in milliseconds",
+      "timeout: 5000",
+      "",
+      "# Optional static environment variables added to the runtime hook context",
+      "env:",
+      "  TEAM: platform",
+      "",
+      "# Runtime env vars include: MINI_A_GOAL, MINI_A_RESULT, MINI_A_TOOL,",
+      "# MINI_A_TOOL_PARAMS, MINI_A_TOOL_RESULT, MINI_A_SHELL_COMMAND,",
+      "# MINI_A_SHELL_OUTPUT, MINI_A_HOOK_NAME, MINI_A_HOOK_EVENT",
+      "command: |",
+      "  sh -c 'echo \"[hook:$MINI_A_HOOK_EVENT]\" >&2; exit 0'"
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
+  function printSkillTemplate() {
+    var lines = [
+      "---",
+      "name: my-skill",
+      "description: Short description shown by /skills and help listings",
+      "---",
+      "",
+      "# Mini-A Skill Template",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "# Save as either:",
+      "#   ~/.openaf-mini-a/skills/my-skill.md",
+      "# or:",
+      "#   ~/.openaf-mini-a/skills/my-skill/SKILL.md",
+      "#",
+      "# Invoke in the console with:",
+      "#   /my-skill <args...>",
+      "#   $my-skill <args...>",
+      "# Or non-interactively with:",
+      "#   mini-a exec=\"/my-skill <args...>\"",
+      "#",
+      "# Placeholders:",
+      "#   {{args}}  → raw argument string",
+      "#   {{argv}}  → parsed argv JSON",
+      "#   {{argc}}  → argument count",
+      "#   {{arg1}}  → first positional argument (same for {{arg2}}, ...)",
+      "#",
+      "# Relative @file.md references and markdown links to local .md files are",
+      "# resolved from the skill folder/file location.",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "",
+      "You are a specialized assistant for {{arg1}}.",
+      "",
+      "Focus on the following request:",
+      "{{args}}",
+      "",
+      "If no arguments are provided, ask the user what they want to do with this skill."
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
+  function printCommandTemplate() {
+    var lines = [
+      "---",
+      "name: my-command",
+      "description: Short description shown by /help for this slash command",
+      "---",
+      "",
+      "# Mini-A Slash Command Template",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "# Save as: ~/.openaf-mini-a/commands/my-command.md",
+      "# Or load from another directory with: mini-a extracommands=/path/to/commands",
+      "#",
+      "# Invoke in the console with:",
+      "#   /my-command <args...>",
+      "# Or non-interactively with:",
+      "#   mini-a exec=\"/my-command <args...>\"",
+      "#",
+      "# Placeholders:",
+      "#   {{args}}  → raw argument string",
+      "#   {{argv}}  → parsed argv JSON",
+      "#   {{argc}}  → argument count",
+      "#   {{arg1}}  → first positional argument (same for {{arg2}}, ...)",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "",
+      "Follow these instructions exactly.",
+      "",
+      "Primary target: {{arg1}}",
+      "All arguments: {{args}}",
+      "Parsed argv: {{argv}}",
+      "",
+      "Produce the final answer directly unless the user asked for an intermediate plan first."
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
+  function printNamedTemplate(kind) {
+    if (kind === "agent") return printAgentTemplate()
+    if (kind === "hook") return printHookTemplate()
+    if (kind === "skill") return printSkillTemplate()
+    if (kind === "command") return printCommandTemplate()
+    return false
+  }
+
+  if (isDef(requestedTemplateKind)) {
+    if (printNamedTemplate(requestedTemplateKind)) exit(0)
+    exit(1)
   }
 
   function printCheatSheet() {

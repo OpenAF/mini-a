@@ -46,9 +46,22 @@ All command-line flags documented below work with the console (`opack exec mini-
 
 Need a quick reference of every option? Run `mini-a -h` (or `mini-a --help`) to print the colorized console help followed by a table of shared Mini-A arguments sourced directly from `mini-a.js`. That listing mirrors the parameter catalog below, so it is always up to date with the agent’s runtime defaults.
 
+Need starter files quickly? Use the built-in template printers:
+
+- `mini-a --agent` — print a starter agent profile markdown file
+- `mini-a --skill` — print a starter skill markdown template
+- `mini-a --command` — print a starter slash-command markdown template
+- `mini-a --hook` — print a starter hook YAML template
+
 Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`. Use `/skills [prefix]` to list discovered skills and optionally filter by skill name prefix.
 
 Custom slash commands are supported through markdown templates in `~/.openaf-mini-a/commands/`. Typing `/<name> ...args...` looks for `~/.openaf-mini-a/commands/<name>.md`, renders placeholders, and submits the result as the goal text.
+
+To print a starter command template instead of writing one from scratch, run:
+
+```bash
+mini-a --command
+```
 
 To load commands from additional directories, pass `extracommands=<path1>,<path2>`. Commands in the default directory always win on name conflicts; among extra directories, earlier entries take precedence:
 
@@ -59,6 +72,12 @@ mini-a extracommands=/path/to/team-commands,/path/to/project-commands
 Skill slash templates support both formats in `~/.openaf-mini-a/skills/`:
 - Claude Code-style folder skills: `~/.openaf-mini-a/skills/<name>/SKILL.md`
 - Legacy single-file skills: `~/.openaf-mini-a/skills/<name>.md`
+
+To print a starter skill template, run:
+
+```bash
+mini-a --skill
+```
 
 Both are invoked with `/<name> ...args...`, and skills also support `$<name> ...args...`. If both directories define the same slash name, the skill template in `~/.openaf-mini-a/skills/` takes precedence over `~/.openaf-mini-a/commands/`.
 
@@ -110,6 +129,12 @@ Notes:
 ### Console Hooks (`~/.openaf-mini-a/hooks`)
 
 The console can run local hooks before/after goals, tool calls, and shell commands. Hook definitions are loaded from `~/.openaf-mini-a/hooks/*.yaml`, `*.yml`, or `*.json`.
+
+To print a starter hook definition, run:
+
+```bash
+mini-a --hook
+```
 
 To load hooks from additional directories, pass `extrahooks=<path1>,<path2>`. Hooks from all directories are merged additively — every matching hook fires regardless of which directory it came from:
 

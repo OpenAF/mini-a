@@ -49,6 +49,9 @@ mini-a goal="summarize this repository"
 
 - Use `agent=<path-or-inline-markdown>` to preload Mini-A parameters from YAML frontmatter metadata.
 - Use `--agent` to print a starter agent markdown template.
+- Use `--skill` to print a starter skill markdown template.
+- Use `--command` to print a starter slash-command markdown template.
+- Use `--hook` to print a starter hook YAML template.
 - See [AGENT-CHEATSHEET.md](AGENT-CHEATSHEET.md) for the full key mapping and examples.
 
 ---

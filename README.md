@@ -69,6 +69,13 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
    ```bash
    opack exec mini-a exec="/my-command first second"
    ```
+- Print starter templates for reusable console assets:
+   ```bash
+   mini-a --agent
+   mini-a --skill
+   mini-a --command
+   mini-a --hook
+   ```
 
 `exec=` resolves a slash template from `~/.openaf-mini-a/commands/` or `~/.openaf-mini-a/skills/`, renders placeholders, runs the resulting goal (including hooks), and exits.
 
@@ -77,6 +84,7 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Custom commands: `~/.openaf-mini-a/commands/*.md` (`extracommands=<path1>,<path2>`)
 - Skills: `~/.openaf-mini-a/skills/<name>/SKILL.md` or `~/.openaf-mini-a/skills/<name>.md` (`extraskills=<path1>,<path2>`)
 - Hooks: `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` with events `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell` (`extrahooks=<path1>,<path2>`)
+- Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
 
 See [USAGE.md](USAGE.md) for full template placeholders, precedence rules, and examples.
 
