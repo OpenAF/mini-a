@@ -9437,17 +9437,25 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
 MiniA.prototype._isOpenAIOssJsonToolModel = function(modelConfig) {
   if (!isMap(modelConfig)) return false
 
-  var modelName = ""
-  if (isString(modelConfig.model) && modelConfig.model.trim().length > 0) {
-    modelName = modelConfig.model.trim()
-  } else if (isMap(modelConfig.options) && isString(modelConfig.options.model) && modelConfig.options.model.trim().length > 0) {
-    modelName = modelConfig.options.model.trim()
-  }
-
+  var modelName = this._getConfiguredModelName(modelConfig)
   if (!isString(modelName) || modelName.length === 0) return false
 
   var normalized = modelName.toLowerCase()
   return normalized.indexOf("gpt-oss-120b") >= 0 || normalized.indexOf("gpt-oss-20b") >= 0
+}
+
+MiniA.prototype._getConfiguredModelName = function(modelConfig, defaultValue) {
+  if (!isMap(modelConfig)) return isDef(defaultValue) ? defaultValue : ""
+
+  if (isString(modelConfig.model) && modelConfig.model.trim().length > 0) {
+    return modelConfig.model.trim()
+  }
+
+  if (isMap(modelConfig.options) && isString(modelConfig.options.model) && modelConfig.options.model.trim().length > 0) {
+    return modelConfig.options.model.trim()
+  }
+
+  return isDef(defaultValue) ? defaultValue : ""
 }
 
 MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasDefined) {
@@ -13542,7 +13550,7 @@ MiniA.prototype.init = function(args) {
 
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
-      this.fnI("info", `Low-cost model enabled: ${this._oaf_lc_model.model} (${this._oaf_lc_model.type})`)
+      this.fnI("info", `Low-cost model enabled: ${this._getConfiguredModelName(this._oaf_lc_model, "unknown")} (${this._oaf_lc_model.type})`)
 
       // Auto-enable no-json prompt mode for Gemini LC model when OAF_MINI_A_LCNOJSONPROMPT is not defined.
       if (this._oaf_lc_model.type === "gemini" && !this._noJsonPromptLC && !this._noJsonPromptLCEnvDefined) {
@@ -14956,9 +14964,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
-    var modelName = isDef(this._oaf_model.model)
-      ? this._oaf_model.model
-      : (isDef(this._oaf_model.options) ? this._oaf_model.options.model : "unknown");
+    var modelName = this._getConfiguredModelName(this._oaf_model, "unknown")
     this.fnI("info", `Using model: ${modelName} (${this._oaf_model.type})`)
 
     // Warn if Gemini model is used without OAF_MINI_A_NOJSONPROMPT=true
@@ -16249,8 +16255,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
           var _geminiModelName = useLowCost
-            ? (isMap(this._oaf_lc_model) ? (this._oaf_lc_model.model || "") : "")
-            : (isMap(this._oaf_model) ? (this._oaf_model.model || "") : "")
+            ? this._getConfiguredModelName(this._oaf_lc_model, "")
+            : this._getConfiguredModelName(this._oaf_model, "")
           var _geminiModelType = useLowCost
             ? (isMap(this._oaf_lc_model) ? (this._oaf_lc_model.type || "") : "")
             : (isMap(this._oaf_model) ? (this._oaf_model.type || "") : "")
