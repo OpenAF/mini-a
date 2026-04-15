@@ -80,6 +80,7 @@ modes:
       usehistory       : true
       historykeep      : true
       historykeepperiod: 10080
+      modelstrategy    : advisor
       mcp              : 
       - type   : ojob
         options:

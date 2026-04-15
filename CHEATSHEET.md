@@ -2,11 +2,14 @@
 
 A comprehensive quick reference for all Mini-A parameters, modes, and common usage patterns.
 
+**Website**: https://mini-a.ai | **Toolkit**: https://tk.mini-a.ai
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
 - [Core Parameters](#core-parameters)
 - [Model Configuration](#model-configuration)
+  - [Advisor Strategy Mode](#advisor-strategy-mode)
 - [Shell & Execution](#shell--execution)
 - [MCP Integration](#mcp-integration)
 - [Planning Features](#planning-features)
@@ -103,6 +106,50 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
 | `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
 | `llmcomplexity` | Use LC model to validate "medium" complexity heuristic (default: `false`) | `llmcomplexity=true` |
+
+### Advisor Strategy Mode
+
+When `modelstrategy=advisor`, the LC model stays as executor and the main model is consulted selectively for difficult steps — combining cost efficiency with main-model quality on hard decisions.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `modelstrategy` | string | `default` | Model orchestration profile: `"default"` (LC-first with escalation) or `"advisor"` (LC executor + main model as advisor) |
+| `advisormaxuses` | number | `2` | Maximum advisor consultations per run when `modelstrategy=advisor` |
+| `advisorenable` | boolean | `true` | Master toggle for advisor consultations when `modelstrategy=advisor` |
+| `advisoronrisk` | boolean | `true` | Allow advisor consults on risk signals |
+| `advisoronambiguity` | boolean | `true` | Allow advisor consults on ambiguity signals |
+| `advisoronharddecision` | boolean | `true` | Allow advisor consults for hard-decision checkpoints |
+| `advisorcooldownsteps` | number | `2` | Minimum step distance between consecutive advisor consultations |
+| `advisorbudgetratio` | number | `0.20` | Fraction of session token budget advisor calls may consume before low-value consults are declined |
+| `emergencyreserve` | number | `0.10` | Portion of advisor budget reserved for high-risk / high-value consults |
+| `harddecision` | string | `warn` | Hard-decision checkpoint mode: `"require"` (blocks action until advisor succeeds), `"warn"`, or `"off"` |
+| `evidencegate` | boolean | `false` | Enable lightweight evidence gating for non-trivial actions and final claims |
+| `evidencegatestrictness` | string | `medium` | Tuning level for evidence gate heuristics: `"low"`, `"medium"`, or `"high"` |
+
+**Examples:**
+
+```bash
+# Advisor strategy: LC executes, main model advises on hard steps
+# Requires OAF_MODEL (main) and OAF_LC_MODEL (executor)
+mini-a goal="refactor authentication system" \
+  modelstrategy=advisor useshell=true
+
+# Limit to 3 advisor consultations per run
+mini-a goal="complex analysis task" \
+  modelstrategy=advisor advisormaxuses=3
+
+# Require advisor approval for hard-decision actions
+mini-a goal="deploy to production" \
+  modelstrategy=advisor harddecision=require useshell=true
+
+# Advisor with evidence gating for higher-confidence final answers
+mini-a goal="research topic and summarize" \
+  modelstrategy=advisor evidencegate=true evidencegatestrictness=high
+
+# Increase budget fraction allowed for advisor calls
+mini-a goal="long complex task" \
+  modelstrategy=advisor advisorbudgetratio=0.35
+```
 
 ### Provider Examples
 
@@ -214,7 +261,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mcpprogcalltools` | string | `""` | Optional comma-separated allowlist of tool names exposed by the bridge |
 | `mcpprogcallbatchmax` | number | `10` | Maximum calls accepted by `/call-tools-batch` |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
-| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput` (`mini-a-con`) |
+| `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput`, `showMessage` (`mini-a-con`) |
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
@@ -270,6 +317,14 @@ mini-a goal="inspect docs only" \
   useutils=true utilsallow=filesystemQuery,markdownFiles utilsdeny=filesystemModify
 ```
 
+**Enable real-time progress messages in console sessions:**
+```bash
+# Agent can call showMessage to display progress updates as it works
+mini-a goal="analyze and report on the project" useutils=true
+# Restrict to only progress messages and file reads:
+mini-a goal="analyze project" useutils=true utilsallow=filesystemQuery,showMessage
+```
+
 **Proxy Aggregation (single tool exposed):**
 ```bash
 mini-a goal="compare S3 usage with database stats" \
@@ -300,12 +355,12 @@ mini-a goal="run MCP tool calls from a script and summarize output" \
 | `mcp-s3` | S3 operations | `mcp="(cmd: 'ojob mcps/mcp-s3.yaml bucket=my-bucket prefix=files/')"` |
 | `mcp-rss` | RSS feeds | `mcp="(cmd: 'ojob mcps/mcp-rss.yaml')"` |
 | `mcp-fin` | Market data | `mcp="(cmd: 'ojob mcps/mcp-fin.yaml')"` |
-| `mcp-email` | Email sending | `mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=bot@example.com')"` |
+| `mcp-email` | Email sending (text, HTML, or Markdown via `markdown=true markdowntheme=default`) | `mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=bot@example.com')"` |
 | `mcp-shell` | Local shell | `mcp="(cmd: 'ojob mcps/mcp-shell.yaml shellallow=df,du')"` |
 | `mcp-file` | File operations | `mcp="(cmd: 'ojob mcps/mcp-file.yaml root=./data readwrite=true')"` |
 | `mcp-web` | Web search/fetch | `mcp="(cmd: 'ojob mcps/mcp-web.yaml')"` |
 | `mcp-weather` | Weather info | `mcp="(cmd: 'ojob mcps/mcp-weather.yaml')"` |
-| `mcp-kube` | Kubernetes | `mcp="(cmd: 'ojob mcps/mcp-kube.yaml')"` |
+| `mcp-kube` | Kubernetes (pods, deployments, HPAs, generic objects, and more) | `mcp="(cmd: 'ojob mcps/mcp-kube.yaml')"` |
 | `mcp-random` | Random data | `mcp="(cmd: 'ojob mcps/mcp-random.yaml')"` |
 | `mcp-math` | Math operations | `mcp="(cmd: 'ojob mcps/mcp-math.yaml')"` |
 | `mcp-mini-a` | Run Mini-A | `mcp="(cmd: 'ojob mcps/mcp-mini-a.yaml')"` |
@@ -1212,6 +1267,8 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 
 ## Getting Help
 
+- **Website**: https://mini-a.ai
+- **Toolkit**: https://tk.mini-a.ai
 - **Full Documentation**: [USAGE.md](USAGE.md)
 - **MCP Catalog**: [mcps/README.md](mcps/README.md)
 - **Creating MCPs**: [mcps/CREATING.md](mcps/CREATING.md)

@@ -2,6 +2,143 @@
 
 ## Recent Updates
 
+### showMessage — Real-Time Console Progress Tool
+
+**Change**: Added a new `showMessage` utility to the Mini Utils Tool that lets the agent display progress updates, status messages, and notifications directly in the console during execution — before the final answer.
+
+**What's New**:
+- Available when `useutils=true` in console sessions (`mini-a-con`); not exposed in non-interactive environments.
+- Supports five display levels, each with a distinct color and prefix icon:
+  - `info` (cyan) — general progress updates
+  - `warn` (yellow, ⚠️) — warnings or non-critical issues
+  - `error` (red, ❌) — errors the user should see immediately
+  - `success` (green, ✅) — completion or positive outcomes
+  - `debug` (faint, 🪳) — verbose diagnostic output
+- Optional `title` field prints a bold header line above the message.
+- Tool name for `utilsallow`/`utilsdeny`: `showMessage`
+
+**Example** (agent tool call):
+```json
+{
+  "action": "showMessage",
+  "params": {
+    "title": "Analysis Step 1/3",
+    "message": "Reading configuration files...",
+    "level": "info"
+  }
+}
+```
+
+**Usage**:
+```bash
+mini-a goal="analyze project and report findings" useutils=true
+# Agent can now emit real-time status updates as it works
+```
+
+**Impact**: Agents can give users immediate visibility into long-running tasks without waiting for the final answer.
+
+---
+
+### Markdown Email Support in mcp-email
+
+**Change**: The `mcp-email` MCP server now supports Markdown email bodies, automatically converting them to email-safe HTML via the `md2email` opack.
+
+**What's New**:
+- **Server-level**: Pass `markdown=true` when starting `mcp-email` to treat all outgoing message bodies as Markdown.
+- **Per-message override**: Each `sendEmail` call accepts `markdown` (boolean) and `markdownTheme` (string) fields to override the server default.
+- **Theme support**: Specify a theme name (e.g., `default`, `dark`) via `markdowntheme` (server) or `markdownTheme` (per-message).
+- The `md2email` opack is loaded automatically when Markdown mode is active.
+
+**Examples**:
+```bash
+# Start mcp-email with Markdown enabled for all messages
+mini-a goal="send weekly report" \
+  mcp="(cmd: 'ojob mcps/mcp-email.yaml smtpserver=smtp.example.com from=bot@example.com markdown=true markdowntheme=default')"
+
+# Per-message Markdown override (in tool call)
+# { "subject": "Report", "body": "# Summary\n...", "to": "...", "markdown": true, "markdownTheme": "dark" }
+```
+
+**Impact**: Agents can now compose rich formatted emails using Markdown syntax, rendered as polished HTML in recipients' inboxes.
+
+---
+
+### Conversation Carryover Context for Multi-Turn Sessions
+
+**Change**: Mini-A now automatically extracts recent goal/answer pairs from conversation history and injects them into the runtime context at the start of each new goal, improving coherence across turns.
+
+**What's New**:
+- Up to 2 recent goal/answer pairs from the loaded conversation are included as carryover context.
+- Works transparently when `conversation=<path>` is used (or `usehistory=true` / `resume=true` in `mini-a-con`).
+- No configuration required — context injection happens automatically when prior turns are available.
+- Handles diverse conversation content formats (plain text, JSON, Gemini `parts[]`, multi-modal entries).
+
+**Impact**: Agents in multi-turn sessions stay aware of what was discussed recently, avoiding repetitive clarification and producing more coherent follow-up responses.
+
+---
+
+### Agent Config Overrides Non-Explicit CLI Defaults
+
+**Change**: The `mini-a:` section in agent files can now override parameter values that were not explicitly set on the CLI, including defaults previously applied by mode presets.
+
+**What's New**:
+- The console now tracks which arguments were *explicitly* provided by the user vs. derived from defaults or mode presets.
+- `mini-a:` keys in an agent file take precedence over **non-explicit** defaults, giving agent authors finer control over agent behaviour without overriding intentional user flags.
+- Explicit CLI flags still take precedence over agent file values — this change only affects unset defaults.
+
+**Example**:
+```yaml
+---
+name: my-agent
+mini-a:
+  maxsteps: 30        # overrides default of 15 unless user passed maxsteps= explicitly
+  useplanning: true   # enables planning unless user explicitly set useplanning=false
+---
+```
+
+**Impact**: Agent files can now reliably set sensible defaults for parameters like `maxsteps`, `useplanning`, or `planstyle` without risking a fight with the user's intentional CLI flags.
+
+---
+
+### Enhanced Metrics: Memory Tracking, Fallback Events, and Step Timing
+
+**Change**: The `/metrics` summary and the `agent.getMetrics()` export now include working memory statistics, LLM fallback counts, shell-blocking events, average step time, and token-level context usage.
+
+**What's New**:
+- **Memory metrics** (`memory.*`): `appends`, `dedup_hits`, `promotions`, `compactions` — tracked when `usememory=true`.
+- **LLM fallback** (`llm_calls.fallback_to_main`): counts how many times the low-cost model fell back to the main model (shown in summary only when > 0).
+- **Shell blocked** (`actions.shell_commands_blocked`): counts commands blocked by the ban-list (shown in summary only when > 0).
+- **Average step time** (`performance.avg_step_time_ms`): mean milliseconds per agent step.
+- **Token tracking** (`performance.llm_actual_tokens`, `performance.max_context_tokens`): actual tokens reported by the LLM API and peak context window size.
+
+**Impact**: More detailed runtime diagnostics for optimizing agent performance, cost, and safety without changing any configuration.
+
+---
+
+### mcp-kube — HPA Queries and Generic Object Requests
+
+**Change**: The `mcp-kube` MCP server now supports Horizontal Pod Autoscaler (HPA) queries and generic Kubernetes object retrieval for any custom resource type.
+
+**What's New**:
+- **HPA support**: Use `resource=hpas`, `resource=hpa`, or `resource=horizontalpodautoscalers` to list/fetch HPA objects.
+- **Generic objects**: Use `resource=object` (or `objects`, `kind`) with `apiVersion`, `kind`, and `plural` parameters to retrieve any custom or extension resource.
+- **Expanded resource enum**: Added `ingressclasses`, `endpointslices`, `replicationcontrollers`, `limitranges`, `poddisruptionbudgets`, `leases`, `priorityclasses`, `runtimeclasses`, `certificatesigningrequests` (`csrs`), `customresourcedefinitions` (`crds`), `apiservices`, and `version`.
+
+**Examples**:
+```bash
+# List all HPAs in the production namespace
+mini-a goal="show HPA status in production" \
+  mcp="(cmd: 'ojob mcps/mcp-kube.yaml')"
+# → use resource=hpas, namespace=production
+
+# Fetch an Argo CD Application (custom resource)
+# → use resource=object, apiVersion=argoproj.io/v1alpha1, kind=Application, plural=applications, name=my-app
+```
+
+**Impact**: Agents working with Kubernetes can now inspect autoscalers and query any CRD-based resource without additional tooling.
+
+---
+
 ### Managed Runtime Working Memory (`usememory`)
 
 **Change**: Introduced a structured, scoped working memory subsystem (`MiniAMemoryManager`) that the agent maintains automatically throughout every run.

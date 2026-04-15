@@ -2,6 +2,8 @@
 
 Quick reference for Mini-A `agent=` files.
 
+**Website**: https://mini-a.ai | **Toolkit**: https://tk.mini-a.ai
+
 ## Use
 - File path: `mini-a agent=examples/summary.agent.md goal="..."`
 - Inline markdown: `mini-a agent="---\nname: quick\n...\n---" goal="..."`
@@ -62,6 +64,13 @@ youare: |
 ## Notes
 - `agent=` is the primary parameter.
 - `agentfile=` still works as a backward-compatible alias.
-- `mini-a:` overrides values set before agent parsing (for example mode defaults).
-- Explicit CLI flags still take precedence over agent file values.
+- `mini-a:` overrides values that were **not explicitly set** on the CLI — including mode defaults and parameter defaults. Explicit CLI flags always take precedence.
 - Relative file references inside file-backed agent profiles are resolved from the profile's own directory.
+
+## Resources
+
+- **Website**: https://mini-a.ai
+- **Toolkit**: https://tk.mini-a.ai
+- **Full Cheatsheet**: [CHEATSHEET.md](CHEATSHEET.md)
+- **Usage Guide**: [USAGE.md](USAGE.md)
+- **Issues**: https://github.com/openaf/mini-a/issues

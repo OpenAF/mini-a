@@ -355,6 +355,8 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 
 ## Documentation
 
+- **[Mini-A Website](https://mini-a.ai)** - Project home, guides, and announcements
+- **[Mini-A Toolkit](https://tk.mini-a.ai)** - Online toolkit and utilities
 - **[What's New](docs/WHATS-NEW.md)** - Latest performance improvements and migration guide
 - **[Quick Reference Cheatsheet](CHEATSHEET.md)** - Fast lookup for all parameters and common patterns
 - **[Performance Optimizations](docs/OPTIMIZATIONS.md)** - Built-in optimizations for token reduction and cost savings
@@ -564,6 +566,8 @@ The run generates an `autoTestAll.results.json` file with detailed results—ins
 
 ## Community
 
+- **Website**: https://mini-a.ai
+- **Toolkit**: https://tk.mini-a.ai
 - **Issues**: [GitHub Issues](https://github.com/openaf/mini-a/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/openaf/mini-a/discussions)
 - **Email**: openaf@openaf.io
