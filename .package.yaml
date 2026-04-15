@@ -152,13 +152,13 @@ files:
 filesHash:
   .gitignore: 341ba158ffc0e0c413934985c5cdcf5685c5687a
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  AGENT-CHEATSHEET.md: a2d5f12f23b6370f704ee3bc922931faf04ad659
+  AGENT-CHEATSHEET.md: 2417ce58bf86a734eb352eaa3ff374927c775ff2
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: ac15cf378508aa045af811ae6719724bfa5ba1fc
+  CHEATSHEET.md: e13b2fc12e49bb8177162ca434450300854520f6
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: c1476b52add822d6335f0daf3b58e240bcdfc3b9
+  README.md: 4d277cde3bec930f2d4b4161bd3ef2c5e9197c56
   USAGE.md: b8459daaea52403ffa3f40280fa3a32d9fe4ae03
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
@@ -167,7 +167,7 @@ filesHash:
   docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: ade217ca36d90ce02eb1595b8b713e357da4e6d3
+  docs/WHATS-NEW.md: 0b84542a4270573b396abf91c21bc1e491a32a6f
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -219,7 +219,7 @@ filesHash:
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-memory.js: b97883c6eb35e09e2902921b9b29fdd2fb06aae9
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
-  mini-a-modes.yaml: 7b809917b4c9bc828b326ed5d05042f637d615ff
+  mini-a-modes.yaml: de72e195f5746549e4e7abd59c353275d5b664da
   mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-subtask.js: 976976911a86659d8852992f88357245a1599307
