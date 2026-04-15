@@ -621,6 +621,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `memoryscope` | string | `both` | Which store the agent reads from and defaults writes to: `session`, `global`, or `both` (reads both; writes default to session when no channel, or global when `memorych` is set). |
 | `memorych` | string | - | SLON/JSON definition of an OpenAF channel used to **persist the global memory** store. Reloaded at startup and flushed on every significant event. |
 | `memorysessionch` | string | - | SLON/JSON definition of a dedicated OpenAF channel for the **session memory** store. Falls back to `memorych` when omitted. |
+| `memoryuser` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, and sets `memorych` (name `mini_a_global_mem`) + `memorysessionch` (name `mini_a_session_mem`) to file channels backed by `~/.openaf-mini-a/memory.json` — only for channels not already defined. |
 | `memorysessionid` | string | `<agent-id>` | Session key used to namespace session memory in the channel (defaults to `conversation` arg if set, otherwise the internal agent ID). |
 | `memorymaxpersection` | number | `80` | Maximum entries kept per section before compaction drops stale/old ones. |
 | `memorymaxentries` | number | `500` | Hard cap on total entries across all sections (priority-ordered: decisions > evidence > risks > facts > summaries > hypotheses > openQuestions > artifacts). |
@@ -669,6 +670,9 @@ mini-a goal="analyze all source files" useshell=true \
 # Reuse persisted global memory from a previous run (automatic on restart)
 mini-a goal="continue from where we left off" \
   memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
+
+# User-local persistent memory shorthand (home-dir file channels, auto-creates directory)
+mini-a goal="iterative research task" memoryuser=true
 ```
 
 ### Programmatic API (embedding use)

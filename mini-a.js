@@ -14303,6 +14303,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isUnDef(args.memoryscope) && isDef(args.memoryScope)) args.memoryscope = args.memoryScope
     if (isUnDef(args.memorysessionid) && isDef(args.memorySessionId)) args.memorysessionid = args.memorySessionId
     if (isUnDef(args.memorysessionch) && isDef(args.memorySessionCh)) args.memorysessionch = args.memorySessionCh
+    if (isUnDef(args.memoryuser) && isDef(args.memoryUser)) args.memoryuser = args.memoryUser
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -14354,6 +14355,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorysessionid", type: "string", default: __ },
       { name: "memorych", type: "string", default: __ },
       { name: "memorysessionch", type: "string", default: __ },
+      { name: "memoryuser", type: "boolean", default: false },
       { name: "memorymaxpersection", type: "number", default: 80 },
       { name: "memorymaxentries", type: "number", default: 500 },
       { name: "memorycompactevery", type: "number", default: 8 },
@@ -14425,6 +14427,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.memorysessionid = _$(args.memorysessionid, "args.memorysessionid").isString().default(__)
     args.memorych = _$(args.memorych, "args.memorych").isString().default(__)
     args.memorysessionch = _$(args.memorysessionch, "args.memorysessionch").isString().default(__)
+    args.memoryuser = _$(toBoolean(args.memoryuser), "args.memoryuser").isBoolean().default(false)
+    if (args.memoryuser) {
+      var _memUserHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+      var _memUserDir  = _memUserHome + "/.openaf-mini-a"
+      var _memUserFile = _memUserDir + "/memory.json"
+      io.mkdir(_memUserDir)
+      if (isUnDef(args.memorych)) {
+        args.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserFile } }, __, "")
+      }
+      if (isUnDef(args.memorysessionch)) {
+        args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserFile } }, __, "")
+      }
+      if (!args.usememory) args.usememory = true
+    }
     args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
     args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
     args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)
