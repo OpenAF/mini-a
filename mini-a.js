@@ -14431,12 +14431,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.memoryuser) {
       var _memUserHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
       var _memUserDir  = _memUserHome + "/.openaf-mini-a"
-      io.mkdir(_memUserDir)
+      var _memUserMemDir = _memUserDir + "/memory"
+      io.mkdir(_memUserMemDir)
       if (isUnDef(args.memorych)) {
-        args.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserDir + "/memory-global.json" } }, __, "")
+        args.memorych = stringify({ name: "mini_a_global_mem", type: "mvs", options: { file: _memUserMemDir + "/memory-global.db", shouldCompress: true, compact: true } }, __, "")
       }
       if (isUnDef(args.memorysessionch)) {
-        args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserDir + "/memory-session.json" } }, __, "")
+        args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "mvs", options: { file: _memUserMemDir + "/memory-session.db", shouldCompress: true, compact: true } }, __, "")
       }
       if (!args.usememory) args.usememory = true
     }
