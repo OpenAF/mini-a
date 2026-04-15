@@ -2779,16 +2779,27 @@ MiniUtilsTool.prototype.showMessage = function(params) {
   var title = isString(params.title) ? params.title.trim() : ""
 
   var colorFn = (typeof ansiColor === "function") ? ansiColor : function(_, t) { return t }
-  var colorMap = { info: "CYAN", warn: "YELLOW", error: "RED", success: "GREEN", debug: "FAINT" }
-  var prefixMap = { info: "", warn: " !", error: " ✕", success: " ✓", debug: " 🐞" }
-  var color  = colorMap[level]  || "CYAN"
-  var prefix = prefixMap[level] || ""
+  var borderColorMap = { info: "FG(51)", warn: "FG(220)", error: "FG(196)", success: "FG(46)", debug: "FG(244)" }
+  var textStyleMap   = {
+    info   : "BG(235),FG(255)",
+    warn   : "BG(235),FG(255)",
+    error  : "BG(52),FG(255)",
+    success: "BG(22),FG(255)",
+    debug  : "BG(236),FG(252)"
+  }
+  var prefixMap = { info: "i", warn: "!", error: "x", success: "ok", debug: "dbg" }
+  var borderColor = borderColorMap[level] || "FG(51)"
+  var textStyle   = textStyleMap[level]   || "BG(235),FG(255)"
+  var prefix      = prefixMap[level]      || "i"
 
   try {
+    ow.loadFormat()
+    var lines = []
     if (title.length > 0) {
-      print(colorFn("BOLD," + color, title))
+      lines.push(colorFn("BOLD", title))
     }
-    var line = colorFn(color, "🗨️ " + prefix + "  " + message)
+    lines.push("(" + prefix + ") " + message)
+    var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
     if (level === "error" || level === "warn") {
       printErr(line)
     } else {
