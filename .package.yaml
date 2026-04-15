@@ -152,14 +152,14 @@ files:
 filesHash:
   .gitignore: 341ba158ffc0e0c413934985c5cdcf5685c5687a
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  AGENT-CHEATSHEET.md: 2417ce58bf86a734eb352eaa3ff374927c775ff2
+  AGENT-CHEATSHEET.md: 92655c4d95ff0f80d0532aa8803d1091471a9a9a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: e13b2fc12e49bb8177162ca434450300854520f6
+  CHEATSHEET.md: b0779bb37a6742fde0495873dd635e3487f21c4e
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: 4d277cde3bec930f2d4b4161bd3ef2c5e9197c56
-  USAGE.md: b8459daaea52403ffa3f40280fa3a32d9fe4ae03
+  README.md: 5f2617aab2a8d5a7b0ecc37cf3efececfb0592d4
+  USAGE.md: b08ca4d7c2c6f12037fa1d9a13cca2964f9e7412
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: f61deadd3ac871db27ee292b840d72b95df2de7a
@@ -167,7 +167,7 @@ filesHash:
   docs/MCPPROXY-FEATURE.md: 95dccab604c97f07a561f193e4727dd7796d0e0a
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: 0b84542a4270573b396abf91c21bc1e491a32a6f
+  docs/WHATS-NEW.md: b2eee63a4df33977ea34f6fb13bad90bc938cd1e
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -215,11 +215,11 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 4dd78a6193bc3ed6fc3e35ae869f1d42b74ecacf
-  mini-a-con.js: 4e7fff6b5890c1be0a8d19790103c6f27a602c39
+  mini-a-con.js: c7146ba415a2b473410ec846b80a21ccaff44565
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-memory.js: b97883c6eb35e09e2902921b9b29fdd2fb06aae9
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
-  mini-a-modes.yaml: de72e195f5746549e4e7abd59c353275d5b664da
+  mini-a-modes.yaml: f45a3114f88e510f9cc4d1e066fa8cf36be39ee5
   mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-subtask.js: 976976911a86659d8852992f88357245a1599307
@@ -227,7 +227,7 @@ filesHash:
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 89c6201e16de5d89bb71a893b06adaff7984ba3a
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: 3ef12a9f3c1fac578923e7bb50391443b111ecf1
+  mini-a.js: 884fbcda29ff69682c2b6a3fea6b9774e4bad099
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: c288e6eb239286e2eefeb2ed76ca7bcbce4e5abd
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
