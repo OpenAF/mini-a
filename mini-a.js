@@ -14434,10 +14434,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var _memUserMemDir = _memUserDir + "/memory"
       io.mkdir(_memUserMemDir)
       if (isUnDef(args.memorych)) {
-        args.memorych = stringify({ name: "mini_a_global_mem", type: "mvs", options: { file: _memUserMemDir + "/memory-global.db", shouldCompress: true, compact: true } }, __, "")
+        args.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserMemDir + "/memory-global.json", lock: _memUserMemDir + "/memory-global.lock", multifile: false } }, __, "")
       }
       if (isUnDef(args.memorysessionch)) {
-        args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "mvs", options: { file: _memUserMemDir + "/memory-session.db", shouldCompress: true, compact: true } }, __, "")
+        args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserMemDir + "/memory-session.json", lock: _memUserMemDir + "/memory-session.lock", multifile: false } }, __, "")
       }
       if (!args.usememory) args.usememory = true
     }
