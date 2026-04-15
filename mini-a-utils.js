@@ -2780,7 +2780,7 @@ MiniUtilsTool.prototype.showMessage = function(params) {
 
   var colorFn = (typeof ansiColor === "function") ? ansiColor : function(_, t) { return t }
   var colorMap = { info: "CYAN", warn: "YELLOW", error: "RED", success: "GREEN", debug: "FAINT" }
-  var prefixMap = { info: "", warn: " ⚠️", error: " ❌", success: " ✅", debug: " 🪳" }
+  var prefixMap = { info: "", warn: " !", error: " ✕", success: " ✓", debug: " 🐞" }
   var color  = colorMap[level]  || "CYAN"
   var prefix = prefixMap[level] || ""
 
