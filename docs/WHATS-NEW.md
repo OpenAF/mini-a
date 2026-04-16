@@ -2,6 +2,49 @@
 
 ## Recent Updates
 
+### Self-Contained Skill Format (SKILL.yaml)
+
+**Change**: Added support for a self-contained YAML/JSON skill format that bundles the prompt body, metadata, and all referenced files into a single `SKILL.yaml` file.
+
+**What's New**:
+- New skill file types: `SKILL.yaml`, `SKILL.yml`, and `SKILL.json` are now discovered alongside existing `SKILL.md` and `skill.md` files.
+- File precedence (highest to lowest): `SKILL.yaml` → `SKILL.yml` → `SKILL.json` → `SKILL.md` → `skill.md`.
+- New `--skills` CLI flag prints an annotated starter YAML skill template.
+- Schema `mini-a.skill/v1` with `name`, `summary`, `body`, `meta`, `refs`, and `children` fields.
+- `refs` embeds virtual reference files inline — `@context.md` in the body resolves from embedded refs first, then falls back to the filesystem.
+- `children` models nested sub-folder structure for complex skill packs.
+- Existing `SKILL.md` skills are unchanged and continue to work.
+
+**Starter template**:
+```bash
+mini-a --skills
+# or redirect to a new file:
+mkdir -p ~/.openaf-mini-a/skills/my-skill
+mini-a --skills > ~/.openaf-mini-a/skills/my-skill/SKILL.yaml
+```
+
+**Minimal example**:
+```yaml
+schema: mini-a.skill/v1
+name: my-skill
+summary: Short description
+
+body: |
+  You are a specialized assistant for {{arg1}}.
+  @context.md
+  {{args}}
+
+refs:
+  context.md: |
+    Add any context or constraints here.
+```
+
+**Impact**: Skills can now be authored, shared, and deployed as single portable files — no folder of supporting markdown files required.
+
+For the full schema reference, `refs` styles, and migration guide, see **[docs/SKILLS-YAML-FORMAT.md](SKILLS-YAML-FORMAT.md)**.
+
+---
+
 ### showMessage — Real-Time Console Progress Tool
 
 **Change**: Added a new `showMessage` utility to the Mini Utils Tool that lets the agent display progress updates, status messages, and notifications directly in the console during execution — before the final answer.
