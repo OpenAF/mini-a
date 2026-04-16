@@ -1042,22 +1042,28 @@ try {
   function readTemplateHelpText(templatePath) {
     if (!isString(templatePath) || templatePath.trim().length === 0) return __
     try {
-      if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
-      var content = io.readFileString(templatePath)
-      if (!isString(content) || content.length === 0) return __
-      var normalized = String(content).replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
-      var frontMatterMatch = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/)
-      if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
-      var meta = af.fromYAML(frontMatterMatch[1])
-      if (!isObject(meta)) return __
-
-      var description = isString(meta.description) ? meta.description.replace(/\s+/g, " ").trim() : ""
-      if (description.length > 0) return description
-
-      var name = isString(meta.name) ? meta.name.replace(/\s+/g, " ").trim() : ""
-      if (name.length > 0) return name
+      var loaded = __miniALoadSkillTemplateDocument(templatePath)
+      if (isObject(loaded) && isString(loaded.description) && loaded.description.trim().length > 0) {
+        return loaded.description.trim()
+      }
+      if (isObject(loaded) && isObject(loaded.meta) && isString(loaded.meta.name) && loaded.meta.name.trim().length > 0) {
+        return loaded.meta.name.trim()
+      }
     } catch (e) {}
     return __
+  }
+
+  function loadCustomTemplateDocument(templateDef) {
+    if (!isObject(templateDef) || !isString(templateDef.file) || templateDef.file.trim().length === 0) return __
+    if (isObject(templateDef._parsedTemplateDoc)) return templateDef._parsedTemplateDoc
+    try {
+      var loaded = __miniALoadSkillTemplateDocument(templateDef.file)
+      if (!isObject(loaded)) return __
+      templateDef._parsedTemplateDoc = loaded
+      return loaded
+    } catch (e) {
+      return __
+    }
   }
 
   function parseExtraDirPaths(commaSeparated) {
@@ -1095,13 +1101,14 @@ try {
           commandName = file.filename.toLowerCase()
           fullPath = resolveSkillTemplateFromFolder(canonicalizePath(dirPath + "/" + file.filename))
           if (isUnDef(fullPath)) {
-            logWarn("Ignoring skill folder without SKILL.md/skill.md: " + file.filename)
+            logWarn("Ignoring skill folder without SKILL.yaml|yml|json or SKILL.md/skill.md: " + file.filename)
             return
           }
           sourceType = "folder"
         } else {
-          if (!/\.md$/i.test(file.filename)) return
-          commandName = file.filename.replace(/\.md$/i, "").toLowerCase()
+          var fileRegex = sourceCategory === "skill" ? /\.(md|ya?ml|json)$/i : /\.md$/i
+          if (!fileRegex.test(file.filename)) return
+          commandName = file.filename.replace(fileRegex, "").toLowerCase()
           fullPath = canonicalizePath(dirPath + "/" + file.filename)
         }
 
@@ -1126,6 +1133,7 @@ try {
           name: commandName,
           file: fullPath,
           sourceType: sourceType,
+          skillFormat: (sourceCategory === "skill") ? __miniASkillTemplateFormatFromPath(fullPath) : "markdown",
           sourceCategory: sourceCategory,
           description: (sourceType === "folder") ? readSkillDescriptionFromTemplate(fullPath) : readTemplateHelpText(fullPath)
         }
@@ -1328,6 +1336,18 @@ try {
     if (!isString(templateDir) || templateDir.length === 0) return templateText
 
     var text = String(templateText)
+    var loadedTemplateDoc = loadCustomTemplateDocument(templateDef)
+    var virtualFiles = (isObject(loadedTemplateDoc) && isObject(loadedTemplateDoc.virtualFiles)) ? loadedTemplateDoc.virtualFiles : {}
+
+    function normalizeVirtualPath(rawPath) {
+      if (!isString(rawPath)) return __
+      var normalized = rawPath.trim().replace(/\\/g, "/")
+      if (normalized.length === 0) return __
+      if (normalized.charAt(0) === "<" && normalized.charAt(normalized.length - 1) === ">") normalized = normalized.substring(1, normalized.length - 1).trim()
+      if (normalized.indexOf("./") === 0) normalized = normalized.substring(2)
+      while (normalized.indexOf("//") >= 0) normalized = normalized.replace(/\/\//g, "/")
+      return normalized.length > 0 ? normalized : __
+    }
 
     // Resolve relative @file tokens against the skill folder so @reference.md works naturally.
     var chunks = []
@@ -1358,8 +1378,13 @@ try {
       var tokenParts = splitAttachmentToken(rawToken)
       var filePath = normalizeSkillReferencePath(tokenParts.filePath)
       var replacement = "@" + tokenParts.filePath
+      var normalizedVirtualPath = normalizeVirtualPath(filePath)
 
-      if (isString(filePath) && filePath.length > 0 && !isAbsoluteOrExternalPath(filePath)) {
+      if (isString(normalizedVirtualPath) && Object.prototype.hasOwnProperty.call(virtualFiles, normalizedVirtualPath)) {
+        var virtualBody = virtualFiles[normalizedVirtualPath]
+        if (!isString(virtualBody)) virtualBody = String(virtualBody || "")
+        replacement = "\n\n--- Skill reference from " + normalizedVirtualPath + " ---\n" + virtualBody + "\n--- End of " + normalizedVirtualPath + " ---\n"
+      } else if (isString(filePath) && filePath.length > 0 && !isAbsoluteOrExternalPath(filePath)) {
         var resolved = canonicalizePath(templateDir + "/" + filePath)
         try {
           if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) replacement = "@" + resolved
@@ -1387,6 +1412,15 @@ try {
 
       var cleanTarget = normalizedTarget.split("#")[0].split("?")[0]
       if (!/\.md$/i.test(cleanTarget)) return _
+      var normalizedVirtualTarget = normalizeVirtualPath(cleanTarget)
+      if (isString(normalizedVirtualTarget) && Object.prototype.hasOwnProperty.call(virtualFiles, normalizedVirtualTarget)) {
+        if (Object.prototype.hasOwnProperty.call(includedPaths, "virtual:" + normalizedVirtualTarget)) return _
+        includedPaths["virtual:" + normalizedVirtualTarget] = true
+        var virtualRefContent = virtualFiles[normalizedVirtualTarget]
+        if (!isString(virtualRefContent)) virtualRefContent = String(virtualRefContent || "")
+        includeBlocks.push("\n\n--- Skill reference from " + normalizedVirtualTarget + " ---\n" + virtualRefContent + "\n--- End of " + normalizedVirtualTarget + " ---\n")
+        return _
+      }
 
       var resolvedPath = canonicalizePath(templateDir + "/" + cleanTarget)
       if (Object.prototype.hasOwnProperty.call(includedPaths, resolvedPath)) return _
@@ -1519,7 +1553,9 @@ try {
           return { changed: false, text: goalText }
         }
 
-        var skillTemplate = __miniAStripMarkdownFrontMatter(io.readFileString(matchedSkillDef.file))
+        var loadedSkillDoc = loadCustomTemplateDocument(matchedSkillDef)
+        if (!isObject(loadedSkillDoc)) throw new Error("Failed to parse template")
+        var skillTemplate = isString(loadedSkillDoc.bodyTemplate) ? loadedSkillDoc.bodyTemplate : ""
         var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
         goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, matchedSkillDef)
         var prefix = goalText.substring(0, tokenStart)
@@ -3885,7 +3921,9 @@ try {
     }
 
     try {
-      var template = __miniAStripMarkdownFrontMatter(io.readFileString(matchedDef.file))
+      var loadedTemplateDoc = loadCustomTemplateDocument(matchedDef)
+      if (!isObject(loadedTemplateDoc)) throw new Error("Failed to parse template")
+      var template = isString(loadedTemplateDoc.bodyTemplate) ? loadedTemplateDoc.bodyTemplate : ""
       var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
       goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
       return runGoal(goalFromTemplate) === true
@@ -4637,7 +4675,9 @@ try {
             printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedSkillArgs.error, errorColor))
             continue
           }
-          var skillTemplate = __miniAStripMarkdownFrontMatter(io.readFileString(_matchedSkillDef.file))
+          var _loadedSkillDoc = loadCustomTemplateDocument(_matchedSkillDef)
+          if (!isObject(_loadedSkillDoc)) throw new Error("Failed to parse template")
+          var skillTemplate = isString(_loadedSkillDoc.bodyTemplate) ? _loadedSkillDoc.bodyTemplate : ""
           var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
           goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, _matchedSkillDef)
           runGoal(goalFromSkillTemplate)
@@ -5029,7 +5069,9 @@ try {
             printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + parsedArgs.error, errorColor))
             continue
           }
-          var template = __miniAStripMarkdownFrontMatter(io.readFileString(_matchedDef.file))
+          var _loadedTemplateDoc = loadCustomTemplateDocument(_matchedDef)
+          if (!isObject(_loadedTemplateDoc)) throw new Error("Failed to parse template")
+          var template = isString(_loadedTemplateDoc.bodyTemplate) ? _loadedTemplateDoc.bodyTemplate : ""
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
           runGoal(goalFromTemplate)

@@ -124,6 +124,7 @@ Notes:
 - If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
 - Discovered command and skill templates appear in `/help` and Tab completion.
 - Skill packs downloaded from catalogs such as `skillsmp.com` can be copied directly as folders under `~/.openaf-mini-a/skills/` as long as each skill folder contains `SKILL.md` (or `skill.md`).
+- Alternative self-contained skill formats are supported via `SKILL.yaml|yml|json` (metadata, `body` markdown, and embedded refs/children), alongside existing markdown skill templates.
 - Skill templates resolve relative `@file.md` attachment paths against the skill folder, and relative markdown links to `.md` files are auto-inlined as additional reference content.
 
 ### Console Hooks (`~/.openaf-mini-a/hooks`)
