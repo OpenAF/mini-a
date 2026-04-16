@@ -56,7 +56,7 @@ try {
 
   function findRequestedTemplateKind(map) {
     if (!isObject(map)) return __
-    var kinds = ["agent", "hook", "skill", "command"]
+    var kinds = ["agent", "hook", "skill", "skills", "command"]
     var found = __
     Object.keys(map).some(function(key) {
       var normalized = String(key || "").toLowerCase()
@@ -628,6 +628,7 @@ try {
       { option: "--agent", description: "Print a starter agent markdown template and exit." },
       { option: "--hook", description: "Print a starter hook YAML template and exit." },
       { option: "--skill", description: "Print a starter skill markdown template and exit." },
+      { option: "--skills", description: "Print a starter self-contained skill YAML template and exit." },
       { option: "--command", description: "Print a starter slash-command markdown template and exit." }
     ]
 
@@ -881,6 +882,85 @@ try {
     return true
   }
 
+  function printSkillsTemplate() {
+    var lines = [
+      "# Mini-A Self-Contained Skill Template (YAML format)",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "# Save as:",
+      "#   ~/.openaf-mini-a/skills/my-skill/SKILL.yaml",
+      "# or:",
+      "#   ~/.openaf-mini-a/skills/my-skill/SKILL.yml",
+      "#",
+      "# Invoke in the console with:",
+      "#   /my-skill <args...>",
+      "#   $my-skill <args...>",
+      "# Or non-interactively with:",
+      "#   mini-a exec=\"/my-skill <args...>\"",
+      "#",
+      "# Precedence (highest to lowest) when multiple files exist in the same folder:",
+      "#   SKILL.yaml → SKILL.yml → SKILL.json → SKILL.md → skill.md",
+      "#",
+      "# Placeholders (usable in body and refs content):",
+      "#   {{args}}  → raw argument string",
+      "#   {{argv}}  → parsed argv JSON",
+      "#   {{argc}}  → argument count",
+      "#   {{arg1}}  → first positional argument (same for {{arg2}}, ...)",
+      "#",
+      "# @-references in body are resolved from embedded refs first, then filesystem.",
+      "# Use \\@token to prevent resolution.",
+      "# ─────────────────────────────────────────────────────────────────────────────",
+      "",
+      "schema: mini-a.skill/v1",
+      "name: my-skill",
+      "summary: Short description shown by /skills and help listings",
+      "",
+      "# ── Body ────────────────────────────────────────────────────────────────────",
+      "# Main prompt template.  Use the | block scalar for multi-line markdown.",
+      "# @-references here are resolved from refs below (then fallback to filesystem).",
+      "body: |",
+      "  You are a specialized assistant for {{arg1}}.",
+      "",
+      "  @context.md",
+      "",
+      "  Focus on the following request:",
+      "  {{args}}",
+      "",
+      "  If no arguments are provided, ask the user what they want to do with this skill.",
+      "",
+      "# ── Metadata ────────────────────────────────────────────────────────────────",
+      "# Optional.  Mirrors front-matter metadata for discovery and tooling.",
+      "meta:",
+      "  tags: [example]",
+      "  version: 1",
+      "  author: your-name",
+      "",
+      "# ── Refs ────────────────────────────────────────────────────────────────────",
+      "# Embedded reference files resolved when body (or nested refs) contains @path.",
+      "#",
+      "# Flat style (preferred for simple cases):",
+      "refs:",
+      "  context.md: |",
+      "    Add any context, constraints, or background that the skill should know.",
+      "  prompts/style.md: |",
+      "    Keep answers concise and actionable.",
+      "",
+      "# ── Children ────────────────────────────────────────────────────────────────",
+      "# Optional sub-folder definitions, each with their own refs (and nested children).",
+      "# children:",
+      "#   - path: checks",
+      "#     refs:",
+      "#       checks/quality.md: |",
+      "#         Validate formatting and consistency.",
+      "#     children:",
+      "#       - path: checks/security",
+      "#         refs:",
+      "#           checks/security/redflags.md: |",
+      "#             Flag any secrets or internal tokens."
+    ]
+    print(lines.join("\n"))
+    return true
+  }
+
   function printCommandTemplate() {
     var lines = [
       "---",
@@ -921,6 +1001,7 @@ try {
     if (kind === "agent") return printAgentTemplate()
     if (kind === "hook") return printHookTemplate()
     if (kind === "skill") return printSkillTemplate()
+    if (kind === "skills") return printSkillsTemplate()
     if (kind === "command") return printCommandTemplate()
     return false
   }
