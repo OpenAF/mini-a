@@ -17,7 +17,7 @@ var MiniUtilsTool = function(options) {
   this._readWrite = false
   this._separator = String(java.io.File.separator)
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
-  this._skillTemplateCandidates = ["SKILL.md", "skill.md"]
+  this._skillTemplateCandidates = ["SKILL.yaml", "SKILL.yml", "SKILL.json", "SKILL.md", "skill.md"]
   this._skillsRoots = []
   //if (isDef(options)) {
     this.init(options)
@@ -278,8 +278,8 @@ MiniUtilsTool.prototype._listSkills = function(params) {
         if (isUnDef(templatePath)) return
         sourceType = "folder"
       } else {
-        if (!/\.md$/i.test(entryName)) return
-        name = entryName.replace(/\.md$/i, "").toLowerCase()
+        if (!/\.(md|ya?ml|json)$/i.test(entryName)) return
+        name = entryName.replace(/\.(md|ya?ml|json)$/i, "").toLowerCase()
         try {
           templatePath = String(new java.io.File(rootPath, entryName).getCanonicalPath())
         } catch (fileErr) {
@@ -293,7 +293,11 @@ MiniUtilsTool.prototype._listSkills = function(params) {
 
       var description = sourceType === "folder"
         ? self._readSkillDescriptionFromTemplate(templatePath)
-        : __
+        : (function() {
+            var doc = __miniALoadSkillTemplateDocument(templatePath)
+            return isObject(doc) && isString(doc.description) ? doc.description : __
+          })()
+      var skillFormat = __miniASkillTemplateFormatFromPath(templatePath)
       var relativePath = self._getSkillRelativeToRoot(rootPath, templatePath)
       var queryText = [
         name,
@@ -306,6 +310,7 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       results.push({
         name        : name,
         sourceType  : sourceType,
+        skillFormat : skillFormat,
         description : description,
         templatePath: templatePath,
         relativePath: relativePath,
@@ -1223,6 +1228,7 @@ MiniUtilsTool.prototype.skills = function(params) {
           return {
             name       : entry.name,
             sourceType : entry.sourceType,
+            skillFormat: entry.skillFormat,
             description: entry.description,
             relativePath: entry.relativePath
           }
@@ -1243,18 +1249,22 @@ MiniUtilsTool.prototype.skills = function(params) {
       }
       if (isUnDef(selected)) return "[ERROR] Skill not found: " + params.name
 
-      var content = io.readFileString(selected.templatePath)
-      var processedContent = __miniAStripMarkdownFrontMatter(content)
+      var loadedDoc = __miniALoadSkillTemplateDocument(selected.templatePath)
+      if (!isObject(loadedDoc)) return "[ERROR] Failed to parse skill template: " + selected.name
+      var content = isString(loadedDoc.rawContent) ? loadedDoc.rawContent : io.readFileString(selected.templatePath)
+      var processedContent = isString(loadedDoc.bodyTemplate) ? loadedDoc.bodyTemplate : ""
       if (op === "read") {
         if (params.compact === true) {
           return {
             name  : selected.name,
+            skillFormat: selected.skillFormat,
             content: content
           }
         }
         return {
           name        : selected.name,
           sourceType  : selected.sourceType,
+          skillFormat : selected.skillFormat,
           description : selected.description,
           relativePath: selected.relativePath,
           contentLength: isString(content) ? content.length : 0,
@@ -1299,6 +1309,7 @@ MiniUtilsTool.prototype.skills = function(params) {
       return {
         name        : selected.name,
         sourceType  : selected.sourceType,
+        skillFormat : selected.skillFormat,
         description : selected.description,
         relativePath: selected.relativePath,
         args        : {
@@ -2795,10 +2806,16 @@ MiniUtilsTool.prototype.showMessage = function(params) {
   try {
     ow.loadFormat()
     var lines = []
+    var messageBgColor = ""
+    var messageBgMatch = textStyle.match(/(?:^|,)(BG\([^)]+\)|BG_[A-Z0-9_]+)(?:,|$)/)
+    if (isArray(messageBgMatch) && isString(messageBgMatch[1])) messageBgColor = messageBgMatch[1]
+    var messageLineWidth = isDef(__con) ? __con.getTerminal().getWidth() - 3 : 77
+    //var renderedMessage = ow.format.withMD(message, __, Math.max(1, messageLineWidth), messageBgColor)
+    var renderedMessage = message
     if (title.length > 0) {
       lines.push(colorFn("BOLD", title))
     }
-    lines.push("(" + prefix + ") " + message)
+    lines.push("(" + prefix + ") " + renderedMessage)
     var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
     if (level === "error" || level === "warn") {
       printErr(line)

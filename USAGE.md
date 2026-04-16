@@ -50,6 +50,7 @@ Need starter files quickly? Use the built-in template printers:
 
 - `mini-a --agent` — print a starter agent profile markdown file
 - `mini-a --skill` — print a starter skill markdown template
+- `mini-a --skills` — print a starter self-contained skill YAML template
 - `mini-a --command` — print a starter slash-command markdown template
 - `mini-a --hook` — print a starter hook YAML template
 
@@ -76,8 +77,11 @@ Skill slash templates support both formats in `~/.openaf-mini-a/skills/`:
 To print a starter skill template, run:
 
 ```bash
-mini-a --skill
+mini-a --skill          # markdown format (SKILL.md)
+mini-a --skills         # self-contained YAML format (SKILL.yaml)
 ```
+
+For a full guide to the YAML skill format including schema reference, `refs` styles, `@`-reference resolution, and migration from `SKILL.md`, see **[docs/SKILLS-YAML-FORMAT.md](docs/SKILLS-YAML-FORMAT.md)**.
 
 Both are invoked with `/<name> ...args...`, and skills also support `$<name> ...args...`. If both directories define the same slash name, the skill template in `~/.openaf-mini-a/skills/` takes precedence over `~/.openaf-mini-a/commands/`.
 
@@ -124,6 +128,7 @@ Notes:
 - If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
 - Discovered command and skill templates appear in `/help` and Tab completion.
 - Skill packs downloaded from catalogs such as `skillsmp.com` can be copied directly as folders under `~/.openaf-mini-a/skills/` as long as each skill folder contains `SKILL.md` (or `skill.md`).
+- Alternative self-contained skill formats are supported via `SKILL.yaml|yml|json` (metadata, `body` markdown, and embedded refs/children), alongside existing markdown skill templates.
 - Skill templates resolve relative `@file.md` attachment paths against the skill folder, and relative markdown links to `.md` files are auto-inlined as additional reference content.
 
 ### Console Hooks (`~/.openaf-mini-a/hooks`)

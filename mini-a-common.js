@@ -18,7 +18,7 @@ function __miniAErrMsg(e) {
  * @param {string[]} [candidates] - Filenames to try (default: ["SKILL.md", "skill.md"]).
  */
 function __miniAResolveSkillTemplateFromFolder(folderPath, candidates) {
-  candidates = candidates || ["SKILL.md", "skill.md"]
+  candidates = candidates || ["SKILL.yaml", "SKILL.yml", "SKILL.json", "SKILL.md", "skill.md"]
   if (!isString(folderPath) || folderPath.trim().length === 0) return __
   for (var i = 0; i < candidates.length; i++) {
     try {
@@ -31,6 +31,176 @@ function __miniAResolveSkillTemplateFromFolder(folderPath, candidates) {
   return __
 }
 
+function __miniASkillTemplateFormatFromPath(templatePath) {
+  if (!isString(templatePath)) return "markdown"
+  var lower = templatePath.toLowerCase()
+  if (/\.ya?ml$/i.test(lower)) return "yaml"
+  if (/\.json$/i.test(lower)) return "json"
+  return "markdown"
+}
+
+function __miniAExtractFrontMatterMeta(markdownText) {
+  var meta = __
+  var body = isString(markdownText) ? String(markdownText) : String(markdownText || "")
+  var normalized = body.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n")
+  var frontMatterMatch = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/)
+  if (frontMatterMatch && isString(frontMatterMatch[1])) {
+    try {
+      var parsed = af.fromYAML(frontMatterMatch[1])
+      if (isObject(parsed)) meta = parsed
+    } catch (ignoreMetaParseError) {}
+    body = normalized.substring(frontMatterMatch[0].length)
+  } else {
+    body = normalized
+  }
+  return {
+    meta: isObject(meta) ? meta : __,
+    body: body
+  }
+}
+
+function __miniASanitizeVirtualSkillPath(pathValue) {
+  if (!isString(pathValue)) return __
+  var normalized = pathValue.trim().replace(/\\/g, "/")
+  if (normalized.length === 0) return __
+  if (normalized.charAt(0) === "/") return __
+  if (/^[A-Za-z]:\//.test(normalized)) return __
+  if (/^[a-z][a-z0-9+.-]*:/i.test(normalized)) return __
+  if (normalized.indexOf("..") >= 0) return __
+  while (normalized.indexOf("//") >= 0) normalized = normalized.replace(/\/\//g, "/")
+  if (normalized.length === 0 || normalized === ".") return __
+  if (normalized.indexOf("./") === 0) normalized = normalized.substring(2)
+  return normalized.length > 0 ? normalized : __
+}
+
+function __miniANormalizeSkillVirtualFiles(skillDoc) {
+  var files = {}
+
+  function joinPath(basePath, childPath) {
+    if (!isString(childPath)) return __
+    var sanitizedChild = __miniASanitizeVirtualSkillPath(childPath)
+    if (!isString(sanitizedChild)) return __
+    if (!isString(basePath) || basePath.length === 0) return sanitizedChild
+    var merged = basePath + "/" + sanitizedChild
+    return __miniASanitizeVirtualSkillPath(merged)
+  }
+
+  function appendFile(pathKey, value) {
+    var normalizedPath = __miniASanitizeVirtualSkillPath(pathKey)
+    if (!isString(normalizedPath)) return
+    if (isUnDef(value) || value === null) {
+      files[normalizedPath] = ""
+      return
+    }
+    if (isString(value) || value instanceof java.lang.String) {
+      files[normalizedPath] = String(value)
+      return
+    }
+    if (isObject(value)) {
+      if (isString(value.body)) {
+        files[normalizedPath] = value.body
+        return
+      }
+      if (isString(value.content)) {
+        files[normalizedPath] = value.content
+        return
+      }
+      if (isString(value.text)) {
+        files[normalizedPath] = value.text
+        return
+      }
+      files[normalizedPath] = ""
+      return
+    }
+    files[normalizedPath] = String(value)
+  }
+
+  function visitRefs(refsMap, basePath) {
+    if (!isObject(refsMap)) return
+    Object.keys(refsMap).forEach(function(rawKey) {
+      var refValue = refsMap[rawKey]
+      var key = isString(rawKey) ? rawKey : String(rawKey)
+      var joined = joinPath(basePath, key)
+      if (!isString(joined)) return
+      if (isObject(refValue) && isObject(refValue.refs)) {
+        visitRefs(refValue.refs, joined)
+        if (isString(refValue.body) || isString(refValue.content) || isString(refValue.text)) appendFile(joined, refValue)
+        return
+      }
+      appendFile(joined, refValue)
+    })
+  }
+
+  function visitChildren(children, basePath) {
+    if (!isArray(children)) return
+    children.forEach(function(child) {
+      if (!isObject(child)) return
+      var childPath = isString(child.path) ? child.path : ""
+      var childBase = basePath
+      if (childPath.length > 0) {
+        childBase = joinPath(basePath, childPath)
+        if (!isString(childBase)) childBase = basePath
+      }
+      if (isObject(child.refs)) visitRefs(child.refs, childBase)
+      if (isArray(child.children)) visitChildren(child.children, childBase)
+    })
+  }
+
+  if (isObject(skillDoc)) {
+    if (isObject(skillDoc.refs)) visitRefs(skillDoc.refs, "")
+    if (isArray(skillDoc.children)) visitChildren(skillDoc.children, "")
+  }
+  return files
+}
+
+function __miniALoadSkillTemplateDocument(templatePath) {
+  if (!isString(templatePath) || templatePath.trim().length === 0) return __
+  if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
+  var raw = io.readFileString(templatePath)
+  if (!isString(raw)) raw = String(raw || "")
+  var format = __miniASkillTemplateFormatFromPath(templatePath)
+
+  if (format === "markdown") {
+    var md = __miniAExtractFrontMatterMeta(raw)
+    var mdMeta = isObject(md.meta) ? md.meta : {}
+    var mdDescription = isString(mdMeta.description) ? mdMeta.description.replace(/\s+/g, " ").trim() : ""
+    return {
+      format      : "markdown",
+      rawContent  : raw,
+      bodyTemplate: isString(md.body) ? md.body : "",
+      description : mdDescription.length > 0 ? mdDescription : __,
+      meta        : mdMeta,
+      virtualFiles: {}
+    }
+  }
+
+  var parsed
+  try {
+    parsed = format === "json" ? jsonParse(raw) : af.fromYAML(raw)
+  } catch (parseError) {
+    parsed = __
+  }
+  if (!isObject(parsed)) return __
+  var bodyTemplate = ""
+  if (isString(parsed.body)) bodyTemplate = parsed.body
+  if (bodyTemplate.length === 0 && isString(parsed.goal)) bodyTemplate = parsed.goal
+  var description = ""
+  if (isString(parsed.summary)) description = parsed.summary
+  if (description.length === 0 && isString(parsed.description)) description = parsed.description
+  if (description.length === 0 && isObject(parsed.meta) && isString(parsed.meta.description)) description = parsed.meta.description
+  description = isString(description) ? description.replace(/\s+/g, " ").trim() : ""
+
+  return {
+    format      : format,
+    rawContent  : raw,
+    bodyTemplate: bodyTemplate,
+    description : description.length > 0 ? description : __,
+    meta        : isObject(parsed.meta) ? parsed.meta : {},
+    skillData   : parsed,
+    virtualFiles: __miniANormalizeSkillVirtualFiles(parsed)
+  }
+}
+
 /**
  * Reads a skill description from the YAML front-matter of a SKILL.md template.
  * Returns the description string, or undefined if not present / on error.
@@ -40,15 +210,9 @@ function __miniAResolveSkillTemplateFromFolder(folderPath, candidates) {
 function __miniAReadSkillDescriptionFromTemplate(templatePath) {
   if (!isString(templatePath) || templatePath.trim().length === 0) return __
   try {
-    if (!io.fileExists(templatePath) || io.fileInfo(templatePath).isFile !== true) return __
-    var content = io.readFileString(templatePath)
-    if (!isString(content) || content.length === 0) return __
-    var normalized = String(content).replace(/\r\n/g, "\n")
-    var frontMatterMatch = normalized.match(/^---\n([\s\S]*?)\n---(?:\n|$)/)
-    if (!frontMatterMatch || !isString(frontMatterMatch[1])) return __
-    var meta = af.fromYAML(frontMatterMatch[1])
-    if (!isObject(meta) || !isString(meta.description)) return __
-    var description = meta.description.replace(/\s+/g, " ").trim()
+    var loaded = __miniALoadSkillTemplateDocument(String(templatePath))
+    if (!isObject(loaded) || !isString(loaded.description)) return __
+    var description = loaded.description.replace(/\s+/g, " ").trim()
     return description.length > 0 ? description : __
   } catch (e) {
     return __
