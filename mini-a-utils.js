@@ -2810,7 +2810,8 @@ MiniUtilsTool.prototype.showMessage = function(params) {
     var messageBgMatch = textStyle.match(/(?:^|,)(BG\([^)]+\)|BG_[A-Z0-9_]+)(?:,|$)/)
     if (isArray(messageBgMatch) && isString(messageBgMatch[1])) messageBgColor = messageBgMatch[1]
     var messageLineWidth = isDef(__con) ? __con.getTerminal().getWidth() - 3 : 77
-    var renderedMessage = ow.format.withMD(message, __, Math.max(1, messageLineWidth), messageBgColor)
+    //var renderedMessage = ow.format.withMD(message, __, Math.max(1, messageLineWidth), messageBgColor)
+    var renderedMessage = message
     if (title.length > 0) {
       lines.push(colorFn("BOLD", title))
     }
