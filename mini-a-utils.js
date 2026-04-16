@@ -2806,10 +2806,12 @@ MiniUtilsTool.prototype.showMessage = function(params) {
   try {
     ow.loadFormat()
     var lines = []
+    var messageLineWidth = isDef(__con) ? __con.getTerminal().getWidth() - 4 : 76
+    var renderedMessage = ow.format.withMD(message, __, Math.max(1, messageLineWidth))
     if (title.length > 0) {
       lines.push(colorFn("BOLD", title))
     }
-    lines.push("(" + prefix + ") " + message)
+    lines.push("(" + prefix + ") " + renderedMessage)
     var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
     if (level === "error" || level === "warn") {
       printErr(line)
