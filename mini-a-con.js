@@ -1681,7 +1681,7 @@ try {
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
-      var statsCompletions = ["detailed", "tools", "out=", "file=", "save=", "json="]
+      var statsCompletions = ["detailed", "tools", "memory", "out=", "file=", "save=", "json="]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
@@ -4116,6 +4116,7 @@ try {
     var options = {
       showDetailed: false,
       showTools: false,
+      showMemory: false,
       outputPath: __
     }
 
@@ -4129,6 +4130,10 @@ try {
       }
       if (tokenLower === "tools" || tokenLower === "tool") {
         options.showTools = true
+        continue
+      }
+      if (tokenLower === "memory" || tokenLower === "mem") {
+        options.showMemory = true
         continue
       }
 
@@ -4397,8 +4402,71 @@ try {
 
       print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       print()
-      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, or add out=<file.json> to save.", hintColor))
+      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, '/stats memory' for working-memory stats, or add out=<file.json> to save.", hintColor))
       exportPayload = { mode: "summary", data: summaryExport }
+    }
+
+    if (statsOptions.showMemory === true) {
+      if (!isObject(metrics.memory)) {
+        print(colorifyText("No memory statistics available.", hintColor))
+      } else {
+        var memory = metrics.memory
+        var memoryRows = [
+          { category: "Status", metric: "Enabled", value: memory.enabled === true ? "true" : "false" },
+          { category: "", metric: "Scope", value: isString(memory.scope) ? memory.scope : "n/a" },
+          { category: "Entries", metric: "Resolved", value: memory.resolved_entries || 0 },
+          { category: "", metric: "Session", value: memory.session_entries || 0 },
+          { category: "", metric: "Global", value: memory.global_entries || 0 },
+          { category: "Activity", metric: "Appends", value: memory.appends || 0 },
+          { category: "", metric: "Dedup Hits", value: memory.dedup_hits || 0 },
+          { category: "", metric: "Updates", value: memory.updates || 0 },
+          { category: "", metric: "Removes", value: memory.removes || 0 },
+          { category: "", metric: "Compactions", value: memory.compactions || 0 },
+          { category: "", metric: "Promotions", value: memory.promotions || 0 }
+        ]
+
+        if ((memory.promoted_entries || 0) > 0) memoryRows.push({ category: "", metric: "Promoted Entries", value: memory.promoted_entries || 0 })
+        if ((memory.status_marks || 0) > 0) memoryRows.push({ category: "", metric: "Status Marks", value: memory.status_marks || 0 })
+        if ((memory.evidence_attached || 0) > 0) memoryRows.push({ category: "", metric: "Evidence Attached", value: memory.evidence_attached || 0 })
+        if ((memory.session_clears || 0) > 0) memoryRows.push({ category: "", metric: "Session Clears", value: memory.session_clears || 0 })
+        if ((memory.compaction_entries_dropped || 0) > 0) memoryRows.push({ category: "", metric: "Dropped on Compact", value: memory.compaction_entries_dropped || 0 })
+        if ((memory.session_reads || 0) > 0 || (memory.global_reads || 0) > 0) {
+          memoryRows.push({ category: "I/O", metric: "Session Reads", value: memory.session_reads || 0 })
+          memoryRows.push({ category: "", metric: "Global Reads", value: memory.global_reads || 0 })
+        }
+        if ((memory.session_writes || 0) > 0 || (memory.global_writes || 0) > 0) {
+          memoryRows.push({ category: "", metric: "Session Writes", value: memory.session_writes || 0 })
+          memoryRows.push({ category: "", metric: "Global Writes", value: memory.global_writes || 0 })
+        }
+        if ((memory.session_read_failures || 0) > 0 || (memory.global_read_failures || 0) > 0 || (memory.session_write_failures || 0) > 0 || (memory.global_write_failures || 0) > 0) {
+          memoryRows.push({ category: "", metric: "Session Read Failures", value: memory.session_read_failures || 0 })
+          memoryRows.push({ category: "", metric: "Global Read Failures", value: memory.global_read_failures || 0 })
+          memoryRows.push({ category: "", metric: "Session Write Failures", value: memory.session_write_failures || 0 })
+          memoryRows.push({ category: "", metric: "Global Write Failures", value: memory.global_write_failures || 0 })
+        }
+
+        print(colorifyText("Memory Statistics:", accentColor))
+        print()
+        print(printTable(memoryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+
+        var sectionRows = []
+        ;["facts", "evidence", "openQuestions", "hypotheses", "decisions", "artifacts", "risks", "summaries"].forEach(function(sectionName) {
+          sectionRows.push({
+            section: sectionName,
+            resolved: isObject(memory.resolved_sections) && isNumber(memory.resolved_sections[sectionName]) ? memory.resolved_sections[sectionName] : 0,
+            session: isObject(memory.session_sections) && isNumber(memory.session_sections[sectionName]) ? memory.session_sections[sectionName] : 0,
+            global: isObject(memory.global_sections) && isNumber(memory.global_sections[sectionName]) ? memory.global_sections[sectionName] : 0
+          })
+        })
+
+        print()
+        print(colorifyText("Memory Sections:", accentColor))
+        print()
+        print(printTable(sectionRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+      }
+      if (!showDetailed && !showTools) {
+        exportPayload = { mode: "memory", data: isObject(metrics.memory) ? metrics.memory : {} }
+      }
     }
 
     // Show detailed stats
@@ -4406,7 +4474,7 @@ try {
       print(colorifyText("Detailed Statistics:", accentColor))
       print()
       print(printTree(metrics))
-      exportPayload = { mode: (showTools ? "detailed+tools" : "detailed"), data: metrics }
+      exportPayload = { mode: (showTools ? "detailed+tools" : (statsOptions.showMemory === true ? "detailed+memory" : "detailed")), data: metrics }
     }
 
     // Show per-tool stats
@@ -4581,7 +4649,7 @@ try {
       "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n user goals (one per line)", hintColor),
       "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model, modellc or modelval)", hintColor),
       "  " + colorifyText("/models", "BOLD") + colorifyText("             List current main, low and validation models", hintColor),
-      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools)", hintColor),
+      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools, memory)", hintColor),
       "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
       "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
       "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),

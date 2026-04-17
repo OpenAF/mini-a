@@ -228,6 +228,8 @@ To view conversation token usage:
 
 - `/context` — Displays a visual breakdown of token usage across different message types (System, User, Assistant, Tool, Other) using internal token estimation or actual API statistics when available.
 - `/context llm` or `/context analyze` — Requires an active agent session. Asks the LLM (preferring the low-cost model if configured) to analyze the conversation and provide accurate token counts by category. This provides more precise token breakdowns than internal estimates, especially useful for understanding actual model token consumption.
+- `/stats memory` — Displays working-memory statistics for the current console session when `usememory=true`, including resolved/session/global entry totals, activity counters, and per-section counts across `facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, and `summaries`.
+- `/stats detailed memory` — Prints the regular detailed metrics tree plus the focused memory tables. Add `out=<file.json>` to save the exported data.
 
 Need to revisit or store the most recent response? `/last [md]` reprints the previous final answer so you can copy it (add `md` to emit the raw Markdown instead of the formatted view), and `/save <path>` writes that answer straight to a file. When providing a path, press <kbd>Tab</kbd> to leverage the console's new filesystem auto-completion for slash commands.
 
