@@ -964,6 +964,9 @@ jobs:
       validationthreshold: isString().default("PASS")
       persistlearnings: toBoolean().isBoolean().default(true)
   exec : | #js
+    MiniA.warnUnknownArgs(args, {
+      logger: function(message) { logWarn(message) }
+    })
     global.__res = {}
     global.__usehistory = args.usehistory
     global.__historypath = args.historypath

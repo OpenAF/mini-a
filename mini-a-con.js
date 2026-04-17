@@ -224,6 +224,10 @@ try {
       args.__modeApplied = true
     })(args, explicitCLIArgKeys)
 
+    MiniA.warnUnknownArgs(args, {
+      logger: function(message) { logWarn(message) }
+    })
+
     // Choose
     if (toBoolean(args.modelman) === true) {
       // Start model management mode
@@ -2928,10 +2932,19 @@ try {
     return value
   }
 
+  function buildUnknownParameterMessage(name) {
+    var msg = "Unknown parameter: " + name
+    var suggestion = MiniA.findClosestKnownArg(name, Object.keys(parameterDefinitions), 3)
+    if (isMap(suggestion) && isString(suggestion.match) && suggestion.match.length > 0) {
+      msg += ". Did you mean '" + suggestion.match + "'?"
+    }
+    return msg
+  }
+
   function setOption(name, rawValue) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
-      print(colorifyText("Unknown parameter: " + name, errorColor))
+      print(colorifyText(buildUnknownParameterMessage(name), errorColor))
       return
     }
     var def = parameterDefinitions[key]
@@ -2987,7 +3000,7 @@ try {
   function unsetOption(name) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
-      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown parameter: " + name, errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + buildUnknownParameterMessage(name), errorColor))
       return
     }
     if (Object.prototype.hasOwnProperty.call(parameterDefinitions[key], "default")) {
@@ -3010,7 +3023,7 @@ try {
   function toggleOption(name) {
     var key = name.toLowerCase()
     if (!Object.prototype.hasOwnProperty.call(parameterDefinitions, key)) {
-      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unknown parameter: " + name, errorColor))
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" " + buildUnknownParameterMessage(name), errorColor))
       return
     }
     var def = parameterDefinitions[key]

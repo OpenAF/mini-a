@@ -227,6 +227,31 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testManagedMemoryDefaultBothWithChannelWritesGlobal
 
+- name: MiniA Core Tests::WarnUnknownArgsIgnoresInternalParameters
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWarnUnknownArgsIgnoresInternalParameters
+
+- name: MiniA Core Tests::WarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing
+
+- name: MiniA Core Tests::WarnUnknownArgsAcceptsValidRuntimeParameters
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWarnUnknownArgsAcceptsValidRuntimeParameters
+
+- name: MiniA Core Tests::WarnUnknownArgsAcceptsAdditionalValidParameters
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWarnUnknownArgsAcceptsAdditionalValidParameters
+
+- name: MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWarnUnknownArgsSuggestsClosestMatch
+
 include:
 - oJobTest.yaml
 
