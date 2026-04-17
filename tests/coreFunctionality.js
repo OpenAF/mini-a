@@ -1426,4 +1426,130 @@
     ow.test.assert(args.usetools === false, true, "Explicit CLI usetools=false should override agent mini-a usetools")
     ow.test.assert(args.mcpproxy === false, true, "Explicit CLI mcpproxy=false should override agent mini-a mcpproxy")
   }
+
+  exports.testWarnUnknownArgsIgnoresInternalParameters = function() {
+    var agent = createAgent()
+    var warnings = []
+    agent.fnI = function(level, message) {
+      if (level === "warn") warnings.push(message)
+    }
+
+    var args = {
+      goal: "test",
+      exec: "/skills summarize",
+      "mini-a": true,
+      __id: "123",
+      init: true,
+      objId: "abc",
+      execid: "def",
+      foo: "bar",
+      __explicitargkeys: {
+        goal: true,
+        exec: true,
+        "mini-a": true,
+        __id: true,
+        init: true,
+        objId: true,
+        execid: true,
+        foo: true
+      }
+    }
+
+    var unknown = agent._warnUnknownArgs(args)
+    ow.test.assert(unknown.length, 1, "Only the real unknown parameter should be reported")
+    ow.test.assert(unknown[0], "foo", "The reported unknown parameter should preserve the original key")
+    ow.test.assert(warnings.length, 1, "A single warning should be emitted")
+    ow.test.assert(warnings[0].indexOf("foo") >= 0, true, "The warning should mention the unknown parameter")
+    ow.test.assert(warnings[0].indexOf("exec") < 0, true, "Internal exec should not be reported as unknown")
+  }
+
+  exports.testWarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing = function() {
+    var warnings = []
+    var args = {
+      onport: 8888,
+      historyretention: 600,
+      execid: "internal",
+      weirdflag: true
+    }
+
+    var unknown = MiniA.warnUnknownArgs(args, {
+      logger: function(message) { warnings.push(message) }
+    })
+
+    ow.test.assert(unknown.length, 1, "Fallback raw-args detection should still report unknown parameters")
+    ow.test.assert(unknown[0], "weirdflag", "The unknown raw argument should be preserved")
+    ow.test.assert(warnings.length, 1, "Fallback raw-args detection should emit one warning")
+    ow.test.assert(warnings[0].indexOf("weirdflag") >= 0, true, "The warning should mention the unknown raw argument")
+    ow.test.assert(warnings[0].indexOf("execid") < 0, true, "Internal OpenAF parameters should be ignored")
+  }
+
+  exports.testWarnUnknownArgsAcceptsValidRuntimeParameters = function() {
+    var warnings = []
+    var args = {
+      useshell: true,
+      llmcomplexity: true,
+      modelstrategy: "advisor",
+      advisormaxuses: 2,
+      __explicitargkeys: {
+        useshell: true,
+        llmcomplexity: true,
+        modelstrategy: true,
+        advisormaxuses: true
+      }
+    }
+
+    var unknown = MiniA.warnUnknownArgs(args, {
+      logger: function(message) { warnings.push(message) }
+    })
+
+    ow.test.assert(unknown.length, 0, "Valid runtime parameters should not be reported as unknown")
+    ow.test.assert(warnings.length, 0, "Valid runtime parameters should not emit warnings")
+  }
+
+  exports.testWarnUnknownArgsAcceptsAdditionalValidParameters = function() {
+    var warnings = []
+    var args = {
+      shellbatch: true,
+      earlystopthreshold: 4,
+      validateplan: true,
+      plancontent: "# Plan",
+      planstyle: "legacy",
+      state: "(foo: 'bar')",
+      secpass: "secret",
+      __explicitargkeys: {
+        shellbatch: true,
+        earlystopthreshold: true,
+        validateplan: true,
+        plancontent: true,
+        planstyle: true,
+        state: true,
+        secpass: true
+      }
+    }
+
+    var unknown = MiniA.warnUnknownArgs(args, {
+      logger: function(message) { warnings.push(message) }
+    })
+
+    ow.test.assert(unknown.length, 0, "Additional valid runtime parameters should not be reported as unknown")
+    ow.test.assert(warnings.length, 0, "Additional valid runtime parameters should not emit warnings")
+  }
+
+  exports.testWarnUnknownArgsSuggestsClosestMatch = function() {
+    var warnings = []
+    var args = {
+      useshel: true,
+      __explicitargkeys: {
+        useshel: true
+      }
+    }
+
+    var unknown = MiniA.warnUnknownArgs(args, {
+      logger: function(message) { warnings.push(message) }
+    })
+
+    ow.test.assert(unknown.length, 1, "Misspelled parameters should still be reported as unknown")
+    ow.test.assert(warnings.length, 1, "Misspelled parameters should emit one warning")
+    ow.test.assert(warnings[0].indexOf("Did you mean 'useshell'?") >= 0, true, "Unknown parameter warning should suggest the closest valid parameter")
+  }
 })()
