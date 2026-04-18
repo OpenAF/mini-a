@@ -647,6 +647,11 @@
         skillsDir + java.io.File.separator + "planner" + java.io.File.separator + "SKILL.md",
         "---\ndescription: Build a practical plan\n---\nPlan for {{arg1}}"
       )
+      io.mkdir(skillsDir + java.io.File.separator + "archived.disabled")
+      io.writeFileString(
+        skillsDir + java.io.File.separator + "archived.disabled" + java.io.File.separator + "SKILL.md",
+        "---\ndescription: Should stay hidden\n---\nDo not load"
+      )
 
       var tool = new MiniUtilsTool({ root: testDir, skillsroots: [skillsDir] })
 
@@ -655,6 +660,7 @@
       var listedNames = isArray(listResult.skills) ? listResult.skills.map(function(entry) { return entry.name }) : []
       ow.test.assert(listedNames.indexOf("planner") >= 0, true, "Skills list should include folder skills")
       ow.test.assert(listedNames.indexOf("summarize") >= 0, true, "Skills list should include file skills")
+      ow.test.assert(listedNames.indexOf("archived.disabled") < 0, true, "Skills list should ignore folders ending with .disabled")
 
       var searchResult = tool.skills({ operation: "search", query: "plan" })
       ow.test.assert(searchResult.count === 1, true, "Skills search should filter skills")

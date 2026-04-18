@@ -39,6 +39,13 @@ function __miniASkillTemplateFormatFromPath(templatePath) {
   return "markdown"
 }
 
+function __miniAShouldIgnoreSkillEntryName(entryName, includeHidden) {
+  if (!isString(entryName) || entryName.length === 0) return true
+  if (String(entryName).toLowerCase().endsWith(".disabled")) return true
+  if (includeHidden !== true && entryName.indexOf(".") === 0) return true
+  return false
+}
+
 function __miniAExtractFrontMatterMeta(markdownText) {
   var meta = __
   var body = isString(markdownText) ? String(markdownText) : String(markdownText || "")

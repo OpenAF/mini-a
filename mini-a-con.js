@@ -1255,7 +1255,7 @@ try {
       listing.files.forEach(function(file) {
         if (!isObject(file)) return
         if (!isString(file.filename) || file.filename.length === 0) return
-        if (file.filename.indexOf(".") === 0) return
+        if (__miniAShouldIgnoreSkillEntryName(file.filename, false)) return
 
         var commandName
         var fullPath

@@ -12935,6 +12935,32 @@ MiniA.prototype._resolveAgentRelativeFile = function(baseDir, value) {
   return original
 }
 
+MiniA.prototype._getMiniAHomeDir = function() {
+  var homeDir = ""
+  try { homeDir = String(isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home", "") || "") } catch(ignoreHomeDirError) {}
+  if (homeDir.trim().length === 0) return ""
+  return homeDir + "/.openaf-mini-a"
+}
+
+MiniA.prototype._resolveAgentProfilePath = function(rawAgent) {
+  if (!isString(rawAgent)) return __
+
+  var candidate = rawAgent.trim()
+  if (candidate.length === 0 || candidate.indexOf("\n") >= 0) return __
+
+  if (io.fileExists(candidate) && io.fileInfo(candidate).isFile === true) return candidate
+
+  if (candidate.indexOf("/") >= 0 || candidate.indexOf("\\") >= 0) return __
+
+  var miniAHomeDir = this._getMiniAHomeDir()
+  if (miniAHomeDir.length === 0) return __
+
+  var homeAgentPath = miniAHomeDir + "/agents/" + candidate
+  if (io.fileExists(homeAgentPath) && io.fileInfo(homeAgentPath).isFile === true) return homeAgentPath
+
+  return __
+}
+
 MiniA.prototype._inspectMcpJobPath = function(jobPath, searchDirs) {
   var result = { jobPath: jobPath, defaultDir: __ }
   if (!isString(jobPath)) return result
@@ -13124,15 +13150,16 @@ MiniA.prototype._applyAgentMetadata = function(args) {
   var rawAgent = args.agent.trim()
   var sourceLabel = "inline agent"
   var agentBaseDir = __
-  if (rawAgent.indexOf("\n") < 0 && io.fileExists(rawAgent) && io.fileInfo(rawAgent).isFile) {
-    sourceLabel = "agent: " + rawAgent
+  var resolvedAgentPath = this._resolveAgentProfilePath(rawAgent)
+  if (isString(resolvedAgentPath) && resolvedAgentPath.length > 0) {
+    sourceLabel = "agent: " + resolvedAgentPath
     try {
-      agentBaseDir = String(new java.io.File(rawAgent).getCanonicalFile().getParent())
+      agentBaseDir = String(new java.io.File(resolvedAgentPath).getCanonicalFile().getParent())
       if (isString(agentBaseDir) && agentBaseDir.trim().length > 0 && isUnDef(args._agentBaseDir)) {
         args._agentBaseDir = agentBaseDir
       }
     } catch(ignoreAgentBaseDirError) { }
-    rawAgent = io.readFileString(rawAgent)
+    rawAgent = io.readFileString(resolvedAgentPath)
   }
 
   var parsedAgent = __

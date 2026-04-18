@@ -6,6 +6,8 @@ This format is an alternative to the standard `SKILL.md` approach and is designe
 
 Existing `SKILL.md` skills continue to work unchanged.
 
+Skill discovery ignores folders whose names end with `.disabled`, which lets you keep a skill installed without exposing it.
+
 ---
 
 ## When to use YAML vs Markdown

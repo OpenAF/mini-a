@@ -261,7 +261,7 @@ MiniUtilsTool.prototype._listSkills = function(params) {
       }
 
       if (!isString(entryName) || entryName.length === 0) return
-      if (!includeHidden && entryName.indexOf(".") === 0) return
+      if (__miniAShouldIgnoreSkillEntryName(entryName, includeHidden)) return
 
       var name = __
       var sourceType = "file"

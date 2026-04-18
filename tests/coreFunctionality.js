@@ -1686,6 +1686,41 @@
     ow.test.assert(args.mcpproxy === false, true, "Explicit CLI mcpproxy=false should override agent mini-a mcpproxy")
   }
 
+  exports.testAgentProfileBareNameResolvesFromMiniAHomeAgentsDir = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var originalHome = String(java.lang.System.getProperty("user.home", "") || "")
+    var tempHomeFile = io.createTempFile("mini-a-home-", "")
+    var tempHomePath = String(tempHomeFile.getAbsolutePath())
+    tempHomeFile.delete()
+    new java.io.File(tempHomePath).mkdirs()
+
+    var agentsDir = tempHomePath + "/.openaf-mini-a/agents"
+    new java.io.File(agentsDir).mkdirs()
+    var agentPath = agentsDir + "/tester.md"
+    io.writeFileString(agentPath, [
+      "---",
+      "youare: You are loaded from home agents.",
+      "---",
+      "fallback goal from home"
+    ].join("\n"))
+
+    try {
+      java.lang.System.setProperty("user.home", tempHomePath)
+
+      var args = { agent: "tester.md" }
+      agent._applyAgentMetadata(args)
+
+      ow.test.assert(args.youare === "You are loaded from home agents.", true, "Bare agent name should resolve from ~/.openaf-mini-a/agents")
+      ow.test.assert(args.goal === "fallback goal from home", true, "Resolved home agent profile should provide fallback goal text")
+      ow.test.assert(isString(args._agentBaseDir) && args._agentBaseDir.indexOf("/.openaf-mini-a/agents") >= 0, true, "Resolved home agent should set the agent base dir")
+    } finally {
+      java.lang.System.setProperty("user.home", originalHome)
+      try { io.rm(tempHomePath) } catch(ignoreCleanup) {}
+    }
+  }
+
   exports.testWarnUnknownArgsIgnoresInternalParameters = function() {
     var agent = createAgent()
     var warnings = []

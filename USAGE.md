@@ -73,6 +73,7 @@ mini-a extracommands=/path/to/team-commands,/path/to/project-commands
 Skill slash templates support both formats in `~/.openaf-mini-a/skills/`:
 - Claude Code-style folder skills: `~/.openaf-mini-a/skills/<name>/SKILL.md`
 - Legacy single-file skills: `~/.openaf-mini-a/skills/<name>.md`
+- Folders whose names end with `.disabled` are ignored during skill discovery
 
 To print a starter skill template, run:
 
@@ -128,6 +129,7 @@ Notes:
 - If a referenced command file is missing or unreadable, Mini-A reports a hard error and does not execute a goal.
 - Discovered command and skill templates appear in `/help` and Tab completion.
 - Skill packs downloaded from catalogs such as `skillsmp.com` can be copied directly as folders under `~/.openaf-mini-a/skills/` as long as each skill folder contains `SKILL.md` (or `skill.md`).
+- Append `.disabled` to a skill folder name to keep it installed but excluded from discovery (for example `reviewer.disabled/`).
 - Alternative self-contained skill formats are supported via `SKILL.yaml|yml|json` (metadata, `body` markdown, and embedded refs/children), alongside existing markdown skill templates.
 - Skill templates resolve relative `@file.md` attachment paths against the skill folder, and relative markdown links to `.md` files are auto-inlined as additional reference content.
 

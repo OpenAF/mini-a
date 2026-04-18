@@ -1273,6 +1273,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 - Supported layouts:
   - `~/.openaf-mini-a/skills/<name>/SKILL.md` (Claude Code-style folder skill)
   - `~/.openaf-mini-a/skills/<name>.md` (legacy file skill)
+- Folders ending in `.disabled` are ignored during skill discovery
 - If both folders define the same name, `commands` takes precedence and the `skills` entry is ignored
 - Skills downloaded from sites like `skillsmp.com` can be copied as folders under `~/.openaf-mini-a/skills/` when each folder includes `SKILL.md` (or `skill.md`)
 - Use `extraskills=<path1>,<path2>` to load skills from additional directories (default dir wins on name conflicts)
