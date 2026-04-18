@@ -155,12 +155,12 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 92655c4d95ff0f80d0532aa8803d1091471a9a9a
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: bb7a98f97cb5f510f7fff9c9b7994940930c1fc1
+  CHEATSHEET.md: c12de131a012b1a479cab4f66b170a8235220921
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  README.md: cf8155ea3b7f37e9b46b39eb20f02e9a80f7aa13
-  USAGE.md: cb26cf468813f8955ea0925fc47ed1176a2aea07
+  README.md: aa8cf9a313b8aa317bb7efe68346566f232f782d
+  USAGE.md: 98b4af9e237841cda8630c83742abe565a060154
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: f61deadd3ac871db27ee292b840d72b95df2de7a
@@ -217,11 +217,11 @@ filesHash:
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mini-a-common.js: 82d93c8f075c1d296e05e7c1708f1f92f9e43a8b
-  mini-a-con.js: f184e0f0af354792e1b2575cc126c4136f653643
+  mini-a-con.js: 3fe58e44bb3c06cff0f54d3346f716852297974a
   mini-a-mcptest.js: 78e67c38ddd7156b9f4a2be17ba3789bcda47bec
   mini-a-memory.js: b97883c6eb35e09e2902921b9b29fdd2fb06aae9
   mini-a-modelman.js: 7ff0ed995206a334da106e26baa26130f1d0750c
-  mini-a-modes.yaml: f45a3114f88e510f9cc4d1e066fa8cf36be39ee5
+  mini-a-modes.yaml: 5eab1b7d29cffe20b7dc6d4e0ec97b907c7ee444
   mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-subtask.js: 976976911a86659d8852992f88357245a1599307
