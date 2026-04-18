@@ -57,6 +57,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testThoughtMessagesAreSingleLineAndTrimmed
 
+- name: MiniA Core Tests::CanonicalThoughtEmitterSeparatesThoughtAndThink
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCanonicalThoughtEmitterSeparatesThoughtAndThink
+
+- name: MiniA Core Tests::CanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
+
+- name: MiniA Core Tests::StreamThinkingTagsDoNotEmitCanonicalThoughtEvents
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStreamThinkingTagsDoNotEmitCanonicalThoughtEvents
+
+- name: MiniA Core Tests::ExtractThinkingBlocksReadsProviderThinkingFields
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testExtractThinkingBlocksReadsProviderThinkingFields
+
 - name: MiniA Core Tests::TaskLanePolicyProbeDetection
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -157,6 +177,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testUtilsMcpSkillsToggle
 
+- name: MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUtilsMcpConsoleOnlyToolsToggle
+
+- name: MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyDispatchPropagatesDownstreamToolErrors
+
 - name: MiniA Core Tests::UtilsMcpAllowAndDeny
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -222,6 +252,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMacSandboxReuseWarningIsDebugOnly
 
+- name: MiniA Core Tests::AdaptiveRouterSelectionAndFallback
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAdaptiveRouterSelectionAndFallback
+
+- name: MiniA Core Tests::AdaptiveRouterAllowDenyCompatibility
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAdaptiveRouterAllowDenyCompatibility
+
+- name: MiniA Core Tests::AdaptiveRouterEnvelopeNormalization
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAdaptiveRouterEnvelopeNormalization
+
 - name: MiniA Core Tests::WorkingMemoryInitialization
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -247,6 +292,36 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWorkingMemoryCompactionBounds
 
+- name: MiniA Core Tests::ManagedMemoryDisabledSkipsReadsAndWrites
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryDisabledSkipsReadsAndWrites
+
+- name: MiniA Core Tests::ManagedMemorySessionIsolation
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemorySessionIsolation
+
+- name: MiniA Core Tests::ManagedMemoryGlobalReadWriteAcrossSessions
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryGlobalReadWriteAcrossSessions
+
+- name: MiniA Core Tests::ManagedMemorySessionFirstResolutionAndOverride
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemorySessionFirstResolutionAndOverride
+
+- name: MiniA Core Tests::ManagedMemoryPromotionAndCleanup
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryPromotionAndCleanup
+
+- name: MiniA Core Tests::ManagedMemoryBackwardCompatibilityDefaultBoth
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryBackwardCompatibilityDefaultBoth
+
 - name: MiniA Core Tests::ManagedMemoryDefaultBothWritesToSession
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -262,15 +337,50 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMemoryFreshnessRefreshAndSweep
 
+- name: MiniA Core Tests::ManagedMemoryMetrics
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryMetrics
+
 - name: MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testManagedMemoryRefreshAndStaleMetrics
 
+- name: MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAgentCapabilitiesEnableUndefinedFlags
+
+- name: MiniA Core Tests::AgentCapabilitiesRespectExplicitFalseFlags
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAgentCapabilitiesRespectExplicitFalseFlags
+
+- name: MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit
+
+- name: MiniA Core Tests::AgentMiniAOverridesYieldToExplicitCliFlags
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAgentMiniAOverridesYieldToExplicitCliFlags
+
+- name: MiniA Core Tests::AgentProfileBareNameResolvesFromMiniAHomeAgentsDir
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAgentProfileBareNameResolvesFromMiniAHomeAgentsDir
+
 - name: MiniA Core Tests::WarnUnknownArgsIgnoresInternalParameters
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testWarnUnknownArgsIgnoresInternalParameters
+
+- name: MiniA Core Tests::WarnUnknownArgsSupportsExtraIgnoredLauncherParameters
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWarnUnknownArgsSupportsExtraIgnoredLauncherParameters
 
 - name: MiniA Core Tests::WarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing
   from: MiniA Core Tests::Init
@@ -311,6 +421,10 @@ todo:
 - MiniA Core Tests::ProcessFinalAnswerToonOutfile
 - MiniA Core Tests::ProcessFinalAnswerSlonOutfile
 - MiniA Core Tests::ThoughtMessagesNormalized
+- MiniA Core Tests::CanonicalThoughtEmitterSeparatesThoughtAndThink
+- MiniA Core Tests::CanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
+- MiniA Core Tests::StreamThinkingTagsDoNotEmitCanonicalThoughtEvents
+- MiniA Core Tests::ExtractThinkingBlocksReadsProviderThinkingFields
 - MiniA Core Tests::TaskLanePolicyProbeDetection
 - MiniA Core Tests::ConfigureDebugChannel
 - MiniA Core Tests::RebuildLlmPair
@@ -331,6 +445,8 @@ todo:
 - MiniA Core Tests::PromptSnapshotPlanningExecution
 - MiniA Core Tests::PromptSnapshotBudgetedPrompt
 - MiniA Core Tests::UtilsMcpSkillsToggle
+- MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle
+- MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization
 - MiniA Core Tests::WorkerSkillRouting
@@ -344,12 +460,33 @@ todo:
 - MiniA Core Tests::WindowsSandboxBestEffort
 - MiniA Core Tests::WindowsSandboxNoNetwork
 - MiniA Core Tests::MacSandboxReuseWarning
+- MiniA Core Tests::AdaptiveRouterSelectionAndFallback
+- MiniA Core Tests::AdaptiveRouterAllowDenyCompatibility
+- MiniA Core Tests::AdaptiveRouterEnvelopeNormalization
 - MiniA Core Tests::WorkingMemoryInitialization
 - MiniA Core Tests::WorkingMemoryDeduplicateAndMutationApis
 - MiniA Core Tests::WorkingMemoryPersistenceAndReload
 - MiniA Core Tests::WorkingMemorySessionWritesDoNotPersistWithoutPromotion
 - MiniA Core Tests::WorkingMemoryCompactionBounds
+- MiniA Core Tests::ManagedMemoryDisabledSkipsReadsAndWrites
+- MiniA Core Tests::ManagedMemorySessionIsolation
+- MiniA Core Tests::ManagedMemoryGlobalReadWriteAcrossSessions
+- MiniA Core Tests::ManagedMemorySessionFirstResolutionAndOverride
+- MiniA Core Tests::ManagedMemoryPromotionAndCleanup
+- MiniA Core Tests::ManagedMemoryBackwardCompatibilityDefaultBoth
 - MiniA Core Tests::ManagedMemoryDefaultBothWritesToSession
 - MiniA Core Tests::AutoPromoteSessionToGlobal
 - MiniA Core Tests::MemoryFreshnessRefreshAndSweep
+- MiniA Core Tests::ManagedMemoryMetrics
 - MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
+- MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
+- MiniA Core Tests::AgentCapabilitiesRespectExplicitFalseFlags
+- MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit
+- MiniA Core Tests::AgentMiniAOverridesYieldToExplicitCliFlags
+- MiniA Core Tests::AgentProfileBareNameResolvesFromMiniAHomeAgentsDir
+- MiniA Core Tests::WarnUnknownArgsIgnoresInternalParameters
+- MiniA Core Tests::WarnUnknownArgsSupportsExtraIgnoredLauncherParameters
+- MiniA Core Tests::WarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing
+- MiniA Core Tests::WarnUnknownArgsAcceptsValidRuntimeParameters
+- MiniA Core Tests::WarnUnknownArgsAcceptsAdditionalValidParameters
+- MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch

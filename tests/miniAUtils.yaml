@@ -172,6 +172,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testEncodingAndAdvancedParams
 
+- name: MiniA Utils Tests::ShowMessageAcceptsPromptAlias
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testShowMessageAcceptsPromptAlias
+
 include:
 - oJobTest.yaml
 
@@ -214,3 +219,4 @@ todo:
 - MiniA Utils Tests::TimeOpsConvert
 - MiniA Utils Tests::TimeOpsSleep
 - MiniA Utils Tests::EncodingAndAdvancedParams
+- MiniA Utils Tests::ShowMessageAcceptsPromptAlias
