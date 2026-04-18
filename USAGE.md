@@ -816,12 +816,15 @@ The `start()` method accepts various configuration options:
 - **`memorysessionid`** (string, optional): Session id for ephemeral memory isolation. Defaults to `conversation` when provided, otherwise the current runtime id.
 - **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When combined with `memoryscope=both`, Mini-A now defaults runtime writes to the global store so they survive reloads; use `memoryScope: "session"` for ephemeral per-session entries. When omitted, memory is in-process only and not persisted between runs.
 - **`metricsch`** (string, optional): JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots. Supports any channel type accepted by `$ch().create(...)`. Example: `metricsch="{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}"`. By default Mini-A collects only the `mini-a` metric every `1000` ms; optional `period`, `some`, and `noDate` fields map directly to `ow.metrics.startCollecting(ch, period, some, noDate)`.
-- **`memoryuser`** (boolean, default: false): Convenience shorthand that activates `usememory` and pre-configures `memorych` (global, name `mini_a_global_mem`) and `memorysessionch` (session, name `mini_a_session_mem`) as file-backed channels pointing to `~/.openaf-mini-a/memory.json`. Only sets channels that are not already explicitly defined. The directory is auto-created if it does not exist. Equivalent to: `usememory=true memorych="(name:mini_a_global_mem,type:file,options:(file:~/.openaf-mini-a/memory.json))" memorysessionch="(name:mini_a_session_mem,type:file,options:(file:~/.openaf-mini-a/memory.json))"`.
-- **`memorysessionch`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload session-scoped working memory. Uses `session::<sessionId>` as the channel key so multiple sessions can coexist in the same channel. When omitted but `memorych` is set, session memory is persisted to `memorych` under the same namespaced key (option B). When both are set, session memory goes to `memorysessionch` and global memory to `memorych` independently (option A). Same format as `memorych`.
+- **`memoryuser`** (boolean, default: false): Convenience shorthand that activates `usememory`, pre-configures `memorych` and `memorysessionch` as file-backed channels under `~/.openaf-mini-a/`, and sets `memorypromote=facts,decisions,summaries` + `memorystaledays=30`. Only sets channels not already explicitly defined. The directory is auto-created if absent.
+- **`memorysessionch`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload session-scoped working memory. When both `memorych` and `memorysessionch` are set, default writes under `memoryscope=both` go to the session store; knowledge is promoted to global automatically at session end via `memorypromote`. Same format as `memorych`.
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
 - **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
 - **`memorydedup`** (boolean, default: true): Deduplicate near-identical entries during append.
+- **`memorypromote`** (string, default: `""`): Comma-separated list of memory sections to auto-promote from the session store to the global store at session end. Uses a refresh-or-append strategy: near-duplicate global entries have their `confirmedAt` and `confirmCount` updated rather than duplicated; entirely new entries are appended. `memoryuser=true` sets this to `facts,decisions,summaries`. Set to `""` to disable promotion.
+- **`memorystaledays`** (number, default: `0`): Number of days after which a global memory entry that has not been re-confirmed by any session is marked `stale=true`. The sweep runs automatically after each auto-promotion pass. Stale entries are not deleted immediately — they are evicted by compaction when a section overflows `memorymaxpersection`, giving recently confirmed entries priority. Set to `0` to disable staleness tracking. `memoryuser=true` sets this to `30`.
+- **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
@@ -2724,9 +2727,11 @@ When `usememory=true`, Mini-A initializes memory stores at run start and resolve
 - `memoryscope=global`: read global memory only,
 - `memoryscope=both`: read session first, then global fallback (session entries win on conflicts).
 
-When `memorych` is configured, default runtime writes under `memoryscope=both` go to the global store so they persist across runs. Use `_memoryAppend(..., { memoryScope: "session" })` for ephemeral session-only entries, or `_memoryAppend(..., { memoryScope: "global" })` to force global writes explicitly.
+**Write routing under `memoryscope=both`**: when a dedicated `memorysessionch` is configured, default runtime writes go to the session store. When only `memorych` is set (no dedicated session channel), writes go to the global store for backward compatibility. Use `_memoryAppend(..., { memoryScope: "session" })` or `{ memoryScope: "global" }` to force a specific target regardless of routing rules.
 
-Session memory persistence follows this priority: if `memorysessionch` is set it is used as a dedicated channel (option A); otherwise, if `memorych` is set, session memory is persisted to the same channel under key `session::<sessionId>` (option B). This allows resuming an interrupted session without polluting global memory.
+**Session persistence**: if `memorysessionch` is set it is used as a dedicated channel (option A); otherwise, if `memorych` is set, session memory is persisted to the same channel under key `session::<sessionId>` (option B).
+
+**Auto-promotion and staleness**: at session end (after final answer synthesis), Mini-A runs `_autoPromoteSessionToGlobal()` when `memorypromote` is non-empty. For each configured section it uses a **refresh-or-append** strategy — near-duplicate global entries have their `confirmedAt` timestamp and `confirmCount` incremented rather than duplicated; new entries are appended. After promotion, if `memorystaledays > 0`, a sweep marks all global entries whose `confirmedAt` (or `createdAt` for legacy entries) exceeds the threshold as `stale=true`. Stale entries remain in the store and visible to the LLM but are deprioritized and evicted first when compaction runs.
 
 Mini-A then updates memory incrementally after:
 - planning generation/critique,
@@ -2736,6 +2741,25 @@ Mini-A then updates memory incrementally after:
 - delegated subtask completion,
 - final answer synthesis.
 
+### Context Injection and `memory_search`
+
+By default (`memoryinject=summary`), the step context contains only a compact section-count map — e.g. `workingMemory:{facts:12,decisions:3}` — instead of all entry content. This reduces per-step memory token overhead by ~95% while letting the model fetch entries on demand using the built-in `memory_search` action:
+
+```json
+{
+  "thought": "I need to recall what decisions were made about authentication",
+  "action": "memory_search",
+  "params": { "query": "authentication decision", "section": "decisions", "limit": 5 }
+}
+```
+
+`memory_search` params:
+- `query` (required) — keyword string matched against entry values
+- `section` (optional) — restrict to one section (`facts`, `decisions`, `evidence`, `openQuestions`, `hypotheses`, `artifacts`, `risks`, `summaries`)
+- `limit` (optional, default `10`) — max results per section
+
+Results are keyword-scored (word overlap) and returned as TOON text in the step context. Use `memoryinject=full` to restore the previous behaviour of embedding all compact entries in every step prompt.
+
 ### Extension Points
 
 Runtime helpers available in code:
@@ -2744,6 +2768,7 @@ Runtime helpers available in code:
 - `_memoryRemove(section, id)`
 - `_memoryAttachEvidence(section, id, evidenceId)`
 - `_memoryMarkStatus(section, id, status, supersededBy)`
+- `_memorySearch(query, { section, maxPerSection })` — keyword search across all active managers; returns `{ sectionName: [compactEntries] }`
 - `promoteSessionMemory(section, ids)` (explicit session → global promotion)
 - `clearSessionMemory(sessionId)` (session cleanup hook)
 

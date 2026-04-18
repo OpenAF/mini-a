@@ -72,12 +72,14 @@ MiniAMemoryManager.prototype._normalizeEntry = function(entry, defaults) {
     provenance : isObject(e.provenance) ? e.provenance : (isObject(defaults && defaults.provenance) ? defaults.provenance : {}),
     evidenceRefs: isArray(e.evidenceRefs) ? e.evidenceRefs.slice() : (isArray(defaults && defaults.evidenceRefs) ? defaults.evidenceRefs.slice() : []),
     tags       : isArray(e.tags) ? e.tags.slice() : [],
-    createdAt  : isString(e.createdAt) ? e.createdAt : nowIso,
-    updatedAt  : nowIso,
-    stale      : toBoolean(e.stale) === true,
+    createdAt   : isString(e.createdAt) ? e.createdAt : nowIso,
+    updatedAt   : nowIso,
+    confirmedAt : isString(e.confirmedAt) ? e.confirmedAt : nowIso,
+    confirmCount: isNumber(e.confirmCount) && e.confirmCount > 0 ? e.confirmCount : 1,
+    stale       : toBoolean(e.stale) === true,
     supersededBy: isString(e.supersededBy) ? e.supersededBy : __,
-    unresolved : toBoolean(e.unresolved) === true,
-    meta       : isObject(e.meta) ? merge({}, e.meta) : {}
+    unresolved  : toBoolean(e.unresolved) === true,
+    meta        : isObject(e.meta) ? merge({}, e.meta) : {}
   }
 }
 
@@ -250,6 +252,53 @@ MiniAMemoryManager.prototype.attachEvidenceRef = function(section, id, evidenceI
     return true
   }
   return false
+}
+
+MiniAMemoryManager.prototype.findNearDuplicate = function(section, value) {
+  var list = this._getSection(section)
+  if (!isArray(list)) return __
+  for (var i = list.length - 1; i >= 0; i--) {
+    if (this._isNearDuplicate(list[i].value, value)) return list[i]
+  }
+  return __
+}
+
+MiniAMemoryManager.prototype.refresh = function(section, id) {
+  var list = this._getSection(section)
+  if (!isArray(list)) return false
+  var nowIso = new Date().toISOString()
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].id !== id) continue
+    list[i].confirmedAt  = nowIso
+    list[i].updatedAt    = nowIso
+    list[i].confirmCount = (isNumber(list[i].confirmCount) ? list[i].confirmCount : 1) + 1
+    list[i].stale        = false
+    this._touch()
+    return true
+  }
+  return false
+}
+
+MiniAMemoryManager.prototype.sweepStale = function(thresholdDays) {
+  if (!isNumber(thresholdDays) || thresholdDays <= 0) return 0
+  var thresholdMs = thresholdDays * 86400000
+  var now = Date.now()
+  var marked = 0
+  var self = this
+  this._sections().forEach(function(section) {
+    var list = self._getSection(section) || []
+    list.forEach(function(entry) {
+      if (entry.stale === true) return
+      var anchor = isString(entry.confirmedAt) ? entry.confirmedAt : (isString(entry.createdAt) ? entry.createdAt : null)
+      if (!anchor) return
+      if (now - new Date(anchor).getTime() > thresholdMs) {
+        entry.stale = true
+        marked++
+      }
+    })
+  })
+  if (marked > 0) self._touch()
+  return marked
 }
 
 MiniAMemoryManager.prototype.clear = function() {

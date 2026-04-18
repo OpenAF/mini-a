@@ -247,10 +247,25 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWorkingMemoryCompactionBounds
 
-- name: MiniA Core Tests::ManagedMemoryDefaultBothWithChannelWritesGlobal
+- name: MiniA Core Tests::ManagedMemoryDefaultBothWritesToSession
   from: MiniA Core Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testManagedMemoryDefaultBothWithChannelWritesGlobal
+  exec: args.func = args.tests.testManagedMemoryDefaultBothWritesToSession
+
+- name: MiniA Core Tests::AutoPromoteSessionToGlobal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutoPromoteSessionToGlobal
+
+- name: MiniA Core Tests::MemoryFreshnessRefreshAndSweep
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryFreshnessRefreshAndSweep
+
+- name: MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testManagedMemoryRefreshAndStaleMetrics
 
 - name: MiniA Core Tests::WarnUnknownArgsIgnoresInternalParameters
   from: MiniA Core Tests::Init
@@ -334,4 +349,7 @@ todo:
 - MiniA Core Tests::WorkingMemoryPersistenceAndReload
 - MiniA Core Tests::WorkingMemorySessionWritesDoNotPersistWithoutPromotion
 - MiniA Core Tests::WorkingMemoryCompactionBounds
-- MiniA Core Tests::ManagedMemoryDefaultBothWithChannelWritesGlobal
+- MiniA Core Tests::ManagedMemoryDefaultBothWritesToSession
+- MiniA Core Tests::AutoPromoteSessionToGlobal
+- MiniA Core Tests::MemoryFreshnessRefreshAndSweep
+- MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics

@@ -247,6 +247,8 @@ var MiniA = function() {
     memory_evidence_attached: $atomic(0, "long"),
     memory_promotions: $atomic(0, "long"),
     memory_promoted_entries: $atomic(0, "long"),
+    memory_refreshes: $atomic(0, "long"),
+    memory_stale_marked: $atomic(0, "long"),
     memory_session_clears: $atomic(0, "long"),
     memory_compactions: $atomic(0, "long"),
     memory_compaction_entries_dropped: $atomic(0, "long"),
@@ -285,7 +287,8 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 {{/if~}}
 ## ACTION USAGE:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
-• "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if actionsList}}
+• "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
+• "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -1789,6 +1792,8 @@ MiniA.prototype.getMetrics = function() {
             evidence_attached: global.__mini_a_metrics.memory_evidence_attached.get(),
             promotions: global.__mini_a_metrics.memory_promotions.get(),
             promoted_entries: global.__mini_a_metrics.memory_promoted_entries.get(),
+            refreshes: global.__mini_a_metrics.memory_refreshes.get(),
+            stale_marked: global.__mini_a_metrics.memory_stale_marked.get(),
             session_clears: global.__mini_a_metrics.memory_session_clears.get(),
             compactions: global.__mini_a_metrics.memory_compactions.get(),
             compaction_entries_dropped: global.__mini_a_metrics.memory_compaction_entries_dropped.get(),
@@ -7595,7 +7600,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
     dedup          : toBoolean(isDef(args.memorydedup) ? args.memorydedup : true),
     debug          : toBoolean(args.debug) || toBoolean(args.verbose),
     scope          : scope,
-    sessionId      : sessionId
+    sessionId      : sessionId,
+    promoteSections: isString(args.memorypromote) ? args.memorypromote : "",
+    staleDays      : isNumber(args.memorystaledays) ? args.memorystaledays : 0
   }
   this._memoryConfig = cfg
   this._memoryScope = scope
@@ -7718,6 +7725,7 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
 MiniA.prototype._getDefaultMemoryWriteManager = function() {
   if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
   if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
+  if (isString(this._memorysessionchName) && this._memorysessionchName.length > 0 && isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
   if (isString(this._memorychName) && this._memorychName.length > 0 && isObject(this._globalMemoryManager)) return this._globalMemoryManager
   if (isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
   return this._globalMemoryManager
@@ -7790,6 +7798,63 @@ MiniA.prototype._buildCompactMemoryForLLM = function() {
     if (output.length > 0) merged[section] = output
   })
   return merged
+}
+
+// Returns section entry counts (only non-empty sections) for lean LLM state injection.
+MiniA.prototype._buildMemorySummaryForLLM = function() {
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  if (!isArray(managers) || managers.length === 0) return {}
+  var sectionNames = managers[0]._sections()
+  var counts = {}
+  sectionNames.forEach(function(section) {
+    var total = 0
+    managers.forEach(function(manager) {
+      var compact = manager.snapshotCompact()
+      if (isArray(compact[section])) total += compact[section].length
+    })
+    if (total > 0) counts[section] = total
+  })
+  return counts
+}
+
+// Keyword search across all active memory managers. Returns matching entries per section.
+MiniA.prototype._memorySearch = function(query, opts) {
+  var options = isObject(opts) ? opts : {}
+  var maxPerSection = isNumber(options.maxPerSection) && options.maxPerSection > 0 ? options.maxPerSection : 10
+  var filterSection = isString(options.section) && options.section.length > 0 ? options.section.toLowerCase().trim() : null
+  if (!isString(query) || query.trim().length === 0) return {}
+
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  if (!isArray(managers) || managers.length === 0) return {}
+
+  var qWords = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(function(w) { return w.length > 2 })
+  if (qWords.length === 0) return {}
+
+  var sectionNames = managers[0]._sections()
+  var results = {}
+
+  sectionNames.forEach(function(section) {
+    if (filterSection && section !== filterSection) return
+    var seen = {}
+    var scored = []
+    managers.forEach(function(manager) {
+      var compact = manager.snapshotCompact()
+      var entries = isArray(compact[section]) ? compact[section] : []
+      entries.forEach(function(entry) {
+        var key = entry.id || entry.v
+        if (seen[key]) return
+        seen[key] = true
+        var text = String(entry.v || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ")
+        var matchCount = 0
+        qWords.forEach(function(w) { if (text.indexOf(w) >= 0) matchCount++ })
+        if (matchCount > 0) scored.push({ score: matchCount, entry: entry })
+      })
+    })
+    if (scored.length === 0) return
+    scored.sort(function(a, b) { return b.score - a.score })
+    results[section] = scored.slice(0, maxPerSection).map(function(s) { return s.entry })
+  })
+  return results
 }
 
 MiniA.prototype._syncWorkingMemoryState = function() {
@@ -7978,6 +8043,53 @@ MiniA.prototype.promoteSessionMemory = function(section, ids) {
     this._persistWorkingMemory("promotion")
   }
   return { promoted: promoted }
+}
+
+MiniA.prototype._autoPromoteSessionToGlobal = function() {
+  if (this._memoryConfig.enabled !== true) return
+  if (!isObject(this._sessionMemoryManager) || !isObject(this._globalMemoryManager)) return
+  if (!isString(this._memorychName) || this._memorychName.length === 0) return
+  var promoteSections = isString(this._memoryConfig.promoteSections) && this._memoryConfig.promoteSections.length > 0
+    ? this._memoryConfig.promoteSections.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
+    : []
+  if (promoteSections.length === 0) return
+
+  var totalNew = 0
+  var totalRefreshed = 0
+  promoteSections.forEach(function(section) {
+    var entries = this._sessionMemoryManager.getSectionEntries(section)
+    entries.forEach(function(entry) {
+      var match = this._globalMemoryManager.findNearDuplicate(section, entry.value)
+      if (match) {
+        this._globalMemoryManager.refresh(section, match.id)
+        totalRefreshed++
+      } else {
+        this._globalMemoryManager.append(section, entry, { silent: true })
+        totalNew++
+      }
+    }.bind(this))
+  }.bind(this))
+
+  var totalSweepMarked = 0
+  if (isNumber(this._memoryConfig.staleDays) && this._memoryConfig.staleDays > 0) {
+    totalSweepMarked = this._globalMemoryManager.sweepStale(this._memoryConfig.staleDays)
+  }
+
+  if (totalNew > 0 || totalRefreshed > 0 || totalSweepMarked > 0) {
+    if (isObject(global.__mini_a_metrics)) {
+      if (totalNew > 0 && isObject(global.__mini_a_metrics.memory_promotions)) global.__mini_a_metrics.memory_promotions.inc()
+      if (totalNew > 0 && isObject(global.__mini_a_metrics.memory_promoted_entries)) global.__mini_a_metrics.memory_promoted_entries.getAdd(totalNew)
+      if (totalRefreshed > 0 && isObject(global.__mini_a_metrics.memory_refreshes)) global.__mini_a_metrics.memory_refreshes.getAdd(totalRefreshed)
+      if (totalSweepMarked > 0 && isObject(global.__mini_a_metrics.memory_stale_marked)) global.__mini_a_metrics.memory_stale_marked.getAdd(totalSweepMarked)
+    }
+    var parts = []
+    if (totalNew > 0) parts.push(`${totalNew} new`)
+    if (totalRefreshed > 0) parts.push(`${totalRefreshed} refreshed`)
+    if (totalSweepMarked > 0) parts.push(`${totalSweepMarked} marked stale`)
+    this.fnI("info", `📤 [mem:promote] session → global: ${parts.join(", ")}`)
+    this._syncWorkingMemoryState()
+    this._persistWorkingMemory("auto-promotion")
+  }
 }
 
 MiniA.prototype.clearSessionMemory = function(sessionId) {
@@ -8228,6 +8340,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   })
   this._persistWorkingMemory("process-final-answer")
   if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("process-final-answer")
+  this._autoPromoteSessionToGlobal()
 
   this._recordPlanActivity("final", {
     step       : this._runtime && this._runtime.currentStepNumber,
@@ -13125,7 +13238,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "state", "maxcontent", "earlystopthreshold", "adaptiverouting", "routerorder",
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
     "memorysessionch", "memoryuser", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
-    "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
+    "memorypromote", "memorystaledays", "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
@@ -14289,6 +14402,7 @@ MiniA.prototype.init = function(args) {
       chatActions.concat(chatbotVisibleToolNames).forEach(name => {
         if (isString(name) && name.length > 0) chatActionSet[name] = true
       })
+      if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
       this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
@@ -14320,9 +14434,10 @@ MiniA.prototype.init = function(args) {
       var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
       var skillPromptEntries = this._buildSkillPromptEntries(promptProfile, args.goal, args.hookcontext)
 
-      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
-        actionsList: promptActionsList,
-        useshell   : args.useshell
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
+        actionsList     : promptActionsList,
+        useshell        : args.useshell,
+        useMemorySearch : args.usememory && args.memoryinject !== "full"
       })
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
@@ -14369,7 +14484,8 @@ MiniA.prototype.init = function(args) {
         completedSteps   : stepContext ? stepContext.completedSteps : "",
         remainingSteps   : stepContext ? stepContext.remainingSteps : "",
         availableSkills    : skillPromptEntries.length > 0,
-        availableSkillsList: skillPromptEntries
+        availableSkillsList: skillPromptEntries,
+        useMemorySearch    : args.usememory && args.memoryinject !== "full"
       }
       this._systemInst = this._buildSystemPromptWithBudget("agent", agentPayload, this._SYSTEM_PROMPT, {
         args: args,
@@ -14582,6 +14698,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isUnDef(args.memorysessionid) && isDef(args.memorySessionId)) args.memorysessionid = args.memorySessionId
     if (isUnDef(args.memorysessionch) && isDef(args.memorySessionCh)) args.memorysessionch = args.memorySessionCh
     if (isUnDef(args.memoryuser) && isDef(args.memoryUser)) args.memoryuser = args.memoryUser
+    if (isUnDef(args.memorypromote) && isDef(args.memoryPromote)) args.memorypromote = args.memoryPromote
+    if (isUnDef(args.memorystaledays) && isDef(args.memoryStaledays)) args.memorystaledays = args.memoryStaledays
 
     // Validate common arguments
     this._validateArgs(args, [
@@ -14637,7 +14755,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorymaxpersection", type: "number", default: 80 },
       { name: "memorymaxentries", type: "number", default: 500 },
       { name: "memorycompactevery", type: "number", default: 8 },
-      { name: "memorydedup", type: "boolean", default: true }
+      { name: "memorydedup", type: "boolean", default: true },
+      { name: "memorypromote", type: "string", default: __ },
+      { name: "memorystaledays", type: "number", default: 0 },
+      { name: "memoryinject", type: "string", default: "summary" }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -14718,11 +14839,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserMemDir + "/memory-session.json.gz", lock: _memUserMemDir + "/memory-session.lock", multifile: false, gzip: true, compact: true } }, __, "")
       }
       if (!args.usememory) args.usememory = true
+      if (isUnDef(args.memorypromote)) args.memorypromote = "facts,decisions,summaries"
+      if (isUnDef(args.memorystaledays)) args.memorystaledays = 30
     }
     args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
     args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
     args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)
     args.memorydedup = _$(toBoolean(args.memorydedup), "args.memorydedup").isBoolean().default(true)
+    args.memorypromote = _$(args.memorypromote, "args.memorypromote").isString().default("")
+    args.memorystaledays = _$(isNumber(args.memorystaledays) ? args.memorystaledays : toNumber(args.memorystaledays), "args.memorystaledays").isNumber().default(0)
+    args.memoryinject = _$(args.memoryinject, "args.memoryinject").isString().default("summary")
+    if (["full", "summary"].indexOf(args.memoryinject.toLowerCase().trim()) < 0) args.memoryinject = "summary"
+    else args.memoryinject = args.memoryinject.toLowerCase().trim()
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -15447,7 +15575,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         Object.keys(this._agentState).forEach(function(k) {
           if (k !== "workingMemorySession" && k !== "workingMemoryGlobal") stateForLLM[k] = this._agentState[k]
         }.bind(this))
-        stateForLLM.workingMemory = this._buildCompactMemoryForLLM()
+        stateForLLM.workingMemory = args.memoryinject === "full"
+          ? this._buildCompactMemoryForLLM()
+          : this._buildMemorySummaryForLLM()
         runtime.lastStateSnapshot = af.toTOON(stateForLLM)
       } else {
         runtime.lastStateSnapshot = stringify(this._agentState, __, "")
@@ -17267,6 +17397,32 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           return this._processFinalAnswer(answerValue, args)
         }
 
+        if (action == "memory_search" && args.usememory) {
+          var msParams = isMap(currentMsg.params) ? currentMsg.params : {}
+          var msQuery = isString(msParams.query) ? msParams.query.trim() : (isString(currentMsg.query) ? currentMsg.query.trim() : "")
+          var msSection = isString(msParams.section) ? msParams.section.trim() : __
+          var msLimit = isNumber(msParams.limit) && msParams.limit > 0 ? msParams.limit : 10
+          if (msQuery.length === 0) {
+            runtime.context.push(`[OBS ${stepLabel}] (memory_search) Missing 'query' param. Provide: {"query":"keyword(s)"[,"section":"..."][,"limit":N]}`)
+          } else {
+            var msResults = this._memorySearch(msQuery, { section: msSection, maxPerSection: msLimit })
+            var msSections = Object.keys(msResults)
+            if (msSections.length === 0) {
+              runtime.context.push(`[OBS ${stepLabel}] (memory_search) No memory entries match query "${msQuery}".`)
+            } else {
+              var msSummary = msSections.map(function(s) { return s + "(" + msResults[s].length + ")" }).join(", ")
+              runtime.context.push(`[OBS ${stepLabel}] (memory_search) Results for "${msQuery}" [${msSummary}]:\n${af.toTOON(msResults)}`)
+            }
+          }
+          runtime.consecutiveThoughts = 0
+          runtime.stepsWithoutAction = 0
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
+          flushAll()
+          continue
+        }
+
         //runtime.context.push(`[THOUGHT ${stepLabel}] ((unknown action -> think) ${thoughtStr || "no thought"})`)
         runtime.context.push(`[ERROR ${stepLabel}] (unknown action '${origActionRaw}'; use ${this._actionsList}) ${thoughtStr || "(no thought)"}`)
 
@@ -17732,6 +17888,27 @@ MiniA.prototype._runChatbotMode = function(options) {
             var currentStepsFinal = global.__mini_a_metrics.steps_taken.get()
             var newAvgFinal = currentStepsFinal === 1 ? stepTimeFinal : ((currentAvgFinal * (currentStepsFinal - 1)) + stepTimeFinal) / currentStepsFinal
             global.__mini_a_metrics.avg_step_time.set(Math.round(newAvgFinal))
+            break
+          }
+
+          if (lowerAction === "memory_search" && args.usememory) {
+            var cbMsParams = isMap(currentMsg.params) ? currentMsg.params : {}
+            var cbMsQuery = isString(cbMsParams.query) ? cbMsParams.query.trim() : (isString(currentMsg.query) ? currentMsg.query.trim() : "")
+            var cbMsSection = isString(cbMsParams.section) ? cbMsParams.section.trim() : __
+            var cbMsLimit = isNumber(cbMsParams.limit) && cbMsParams.limit > 0 ? cbMsParams.limit : 10
+            if (cbMsQuery.length === 0) {
+              pendingPrompt = `memory_search requires a 'query' param. Provide: {"query":"keyword(s)"[,"section":"..."][,"limit":N]}`
+            } else {
+              var cbMsResults = this._memorySearch(cbMsQuery, { section: cbMsSection, maxPerSection: cbMsLimit })
+              var cbMsSections = Object.keys(cbMsResults)
+              if (cbMsSections.length === 0) {
+                pendingPrompt = `No memory entries match query "${cbMsQuery}". Continue with what you know or provide the final answer.`
+              } else {
+                var cbMsSummary = cbMsSections.map(function(s) { return s + "(" + cbMsResults[s].length + ")" }).join(", ")
+                pendingPrompt = `memory_search results for "${cbMsQuery}" [${cbMsSummary}]:\n${af.toTOON(cbMsResults)}\nUse this information to continue.`
+              }
+            }
+            handled = true
             break
           }
 

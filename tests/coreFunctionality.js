@@ -1348,21 +1348,126 @@
     ow.test.assert(agent._memoryScope === "both", true, "Default memory scope should be both")
   }
 
-  exports.testManagedMemoryDefaultBothWithChannelWritesGlobal = function() {
+  exports.testManagedMemoryDefaultBothWritesToSession = function() {
     var channelName = "__mini_a_test_default_both_channel_memory_" + nowNano()
+    var sessionChannelName = "__mini_a_test_default_both_session_memory_" + nowNano()
     try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    try { $ch(sessionChannelName).create("simple") } catch(ignoreCreate) {}
 
-    var first = createAgent()
-    first._agentState = {}
-    first._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, first._agentState)
-    first._memoryAppend("decisions", "default both persisted decision")
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "default-both-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorysessionch: stringify({ name: sessionChannelName, type: "simple" }, __, ""),
+      debug: false, verbose: false
+    }, agent._agentState)
+    agent._memoryAppend("decisions", "session-first decision")
 
-    var second = createAgent()
-    second._agentState = {}
-    second._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "default-both-2", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
-    ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(e) { return e.value === "default both persisted decision" }), true, "Default writes should persist globally when memorych is configured under both scope")
+    ow.test.assert(agent._agentState.workingMemorySession.sections.decisions.some(function(e) { return e.value === "session-first decision" }), true, "Default writes under both scope with dedicated session channel should go to session manager")
+    ow.test.assert(!isArray(agent._agentState.workingMemoryGlobal.sections.decisions) || agent._agentState.workingMemoryGlobal.sections.decisions.length === 0, true, "Global memory should remain empty until promotion when dedicated session channel is set")
 
     try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+    try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testAutoPromoteSessionToGlobal = function() {
+    var channelName = "__mini_a_test_auto_promote_memory_" + nowNano()
+    var sessionChannelName = "__mini_a_test_auto_promote_session_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    try { $ch(sessionChannelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "auto-promote-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorysessionch: stringify({ name: sessionChannelName, type: "simple" }, __, ""),
+      memorypromote: "facts,decisions",
+      debug: false, verbose: false
+    }, agent._agentState)
+    agent._memoryAppend("facts", "auto-promote fact")
+    agent._memoryAppend("decisions", "auto-promote decision")
+    agent._memoryAppend("summaries", "auto-promote summary")
+    agent._autoPromoteSessionToGlobal()
+
+    ow.test.assert(agent._agentState.workingMemoryGlobal.sections.facts.some(function(e) { return e.value === "auto-promote fact" }), true, "Facts should be promoted to global")
+    ow.test.assert(agent._agentState.workingMemoryGlobal.sections.decisions.some(function(e) { return e.value === "auto-promote decision" }), true, "Decisions should be promoted to global")
+    ow.test.assert(!agent._agentState.workingMemoryGlobal.sections.summaries || agent._agentState.workingMemoryGlobal.sections.summaries.length === 0, true, "Summaries should not be promoted (not in memorypromote list)")
+
+    // Session still retains all entries
+    ow.test.assert(agent._agentState.workingMemorySession.sections.facts.some(function(e) { return e.value === "auto-promote fact" }), true, "Session should still retain promoted facts")
+
+    // Auto-promotion is idempotent: re-running refreshes confirmCount but does not duplicate
+    var countBefore = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.value === "auto-promote fact" }).length
+    agent._autoPromoteSessionToGlobal()
+    var countAfter = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.value === "auto-promote fact" }).length
+    ow.test.assert(countBefore === 1 && countAfter === 1, true, "Re-promotion should not duplicate entries")
+    var refreshed = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.value === "auto-promote fact" })[0]
+    ow.test.assert(isNumber(refreshed.confirmCount) && refreshed.confirmCount >= 2, true, "Re-promotion should increment confirmCount")
+
+    // Second agent loading from global channel sees promoted entries
+    agent.clearSessionMemory("auto-promote-1")
+    var second = createAgent()
+    second._agentState = {}
+    second._initWorkingMemory({
+      usememory: true, memoryscope: "global",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      debug: false, verbose: false
+    }, second._agentState)
+    ow.test.assert(second._agentState.workingMemory.sections.facts.some(function(e) { return e.value === "auto-promote fact" }), true, "Promoted entries should be visible to a new agent loading from global channel")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+    try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testMemoryFreshnessRefreshAndSweep = function() {
+    var channelName = "__mini_a_test_freshness_memory_" + nowNano()
+    var sessionChannelName = "__mini_a_test_freshness_session_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    try { $ch(sessionChannelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "freshness-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorysessionch: stringify({ name: sessionChannelName, type: "simple" }, __, ""),
+      memorypromote: "facts",
+      memorystaledays: 30,
+      debug: false, verbose: false
+    }, agent._agentState)
+
+    // Promote a fact, then simulate it going stale by backdating confirmedAt
+    agent._memoryAppend("facts", "confirmed fact")
+    agent._autoPromoteSessionToGlobal()
+    var globalEntry = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.value === "confirmed fact" })[0]
+    ow.test.assert(isObject(globalEntry), true, "Fact should exist in global after promotion")
+    ow.test.assert(globalEntry.confirmCount === 1, true, "confirmCount should be 1 after first promotion")
+    ow.test.assert(globalEntry.stale === false, true, "Entry should not be stale after first promotion")
+
+    // Backdate confirmedAt to simulate aging past the threshold
+    var oldDate = new Date(Date.now() - 31 * 86400000).toISOString()
+    agent._globalMemoryManager.update("facts", globalEntry.id, { confirmedAt: oldDate })
+
+    // Sweep without re-promoting: entry should be marked stale
+    var markedCount = agent._globalMemoryManager.sweepStale(30)
+    ow.test.assert(markedCount === 1, true, "sweepStale should mark 1 aged entry stale")
+    var afterSweep = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.id === globalEntry.id })[0]
+    ow.test.assert(afterSweep.stale === true, true, "Aged entry should be marked stale after sweep")
+
+    // Re-promoting the same fact from session revives it
+    agent._autoPromoteSessionToGlobal()
+    var revived = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.id === globalEntry.id })[0]
+    ow.test.assert(revived.stale === false, true, "Re-promotion of a stale entry should clear stale flag")
+    ow.test.assert(isNumber(revived.confirmCount) && revived.confirmCount >= 2, true, "Re-promotion should increment confirmCount on revival")
+
+    // sweepStale with threshold 0 is a no-op
+    var markedByZero = agent._globalMemoryManager.sweepStale(0)
+    ow.test.assert(markedByZero === 0, true, "sweepStale(0) should be a no-op")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+    try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
   }
 
   exports.testManagedMemoryMetrics = function() {
@@ -1412,6 +1517,8 @@
     ow.test.assert(metrics.memory.removes >= 1, true, "Memory removals should be counted")
     ow.test.assert(metrics.memory.promotions >= 1, true, "Memory promotions should be counted")
     ow.test.assert(metrics.memory.promoted_entries >= 1, true, "Promoted entry count should be tracked")
+    ow.test.assert(isNumber(metrics.memory.refreshes), true, "Memory refreshes counter should be present")
+    ow.test.assert(isNumber(metrics.memory.stale_marked), true, "Memory stale_marked counter should be present")
     ow.test.assert(metrics.memory.compactions >= 1, true, "Memory compactions should be counted")
     ow.test.assert(metrics.memory.global_writes >= 1, true, "Global memory writes should be counted")
     ow.test.assert(metrics.memory.session_writes >= 1, true, "Session memory writes should be counted")
@@ -1422,6 +1529,53 @@
     ow.test.assert(isMap(metrics.memory.resolved_sections), true, "Resolved section counts should be exposed")
 
     try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testManagedMemoryRefreshAndStaleMetrics = function() {
+    resetMiniAMetrics()
+
+    var channelName = "__mini_a_test_refresh_stale_metrics_" + nowNano()
+    var sessionChannelName = "__mini_a_test_refresh_stale_session_metrics_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    try { $ch(sessionChannelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "rs-metrics-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorysessionch: stringify({ name: sessionChannelName, type: "simple" }, __, ""),
+      memorypromote: "facts",
+      memorystaledays: 1,
+      debug: false, verbose: false
+    }, agent._agentState)
+
+    // First promotion: new entry → promoted_entries=1, refreshes=0
+    agent._memoryAppend("facts", "metric fact")
+    agent._autoPromoteSessionToGlobal()
+    var m1 = agent.getMetrics()
+    ow.test.assert(m1.memory.promoted_entries >= 1, true, "promoted_entries should count new promotions")
+    ow.test.assert(m1.memory.refreshes === 0, true, "refreshes should be 0 after first promotion (no near-dup existed)")
+
+    // Second promotion of same fact: refresh → refreshes increments, promoted_entries unchanged
+    agent._autoPromoteSessionToGlobal()
+    var m2 = agent.getMetrics()
+    ow.test.assert(m2.memory.refreshes >= 1, true, "refreshes should increment when re-promoting an existing entry")
+    ow.test.assert(m2.memory.promoted_entries === m1.memory.promoted_entries, true, "promoted_entries should not grow on refresh")
+
+    // Backdate confirmedAt and run auto-promote again to trigger sweep
+    var globalEntry = agent._globalMemoryManager.getSectionEntries("facts")[0]
+    var oldDate = new Date(Date.now() - 2 * 86400000).toISOString()
+    agent._globalMemoryManager.update("facts", globalEntry.id, { confirmedAt: oldDate })
+    // Remove from session so no refresh happens, only sweep
+    agent._sessionMemoryManager.remove("facts", agent._sessionMemoryManager.getSectionEntries("facts")[0].id)
+    agent._autoPromoteSessionToGlobal()
+    var m3 = agent.getMetrics()
+    ow.test.assert(m3.memory.stale_marked >= 1, true, "stale_marked should increment when sweep marks aged entries")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+    try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
   }
 
   exports.testAgentCapabilitiesEnableUndefinedFlags = function() {

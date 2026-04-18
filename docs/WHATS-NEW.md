@@ -2,6 +2,68 @@
 
 ## Recent Updates
 
+### Global Memory Freshness — Auto-Promotion, Refresh, and Staleness Sweep
+
+**Change**: Session memory now auto-promotes to global at session end using a freshness-tracking model that prevents unbounded accumulation of stale knowledge.
+
+**What's New**:
+
+- **Session-first writes**: when both `memorych` and `memorysessionch` are configured (e.g. `memoryuser=true`), default writes under `memoryscope=both` now go to the **session** store, not global. Global only receives knowledge via explicit promotion or `memoryScope: "global"` writes.
+
+- **Auto-promotion (`memorypromote`)**: at session end, Mini-A copies entries from configured sections (default for `memoryuser=true`: `facts,decisions,summaries`) into the global store using a **refresh-or-append** strategy:
+  - Near-duplicate global entries are **refreshed** (`confirmedAt` + `confirmCount` incremented, `stale` cleared) rather than duplicated.
+  - Entirely new entries are appended.
+
+- **Staleness sweep (`memorystaledays`)**: after each promotion pass, global entries whose `confirmedAt` (or `createdAt` for pre-existing entries) exceeds the threshold are marked `stale=true`. Default for `memoryuser=true`: 30 days. Set to `0` to disable.
+
+- **Eviction via compaction**: stale entries are not deleted immediately. They are deprioritized by `compact()` and evicted when a section overflows `memorymaxpersection`. Knowledge re-confirmed in a new session has its `stale` flag cleared.
+
+- **New entry fields**: `confirmedAt` (ISO timestamp of last re-confirmation) and `confirmCount` (integer, starts at 1) are now tracked on every memory entry. Legacy entries use `createdAt` as their effective `confirmedAt`.
+
+- **New `MiniAMemoryManager` methods** (available for embedding use):
+  - `findNearDuplicate(section, value)` — returns the first near-duplicate entry or `undefined`
+  - `refresh(section, id)` — updates `confirmedAt`, increments `confirmCount`, clears `stale`
+  - `sweepStale(thresholdDays)` — marks aged entries stale, returns count marked
+
+**New parameters**:
+
+| Parameter | Default | `memoryuser=true` |
+|---|---|---|
+| `memorypromote` | `""` (disabled) | `"facts,decisions,summaries"` |
+| `memorystaledays` | `0` (disabled) | `30` |
+
+**Entry lifecycle example**:
+```
+Session 1 → "auth uses JWT" promoted → global: confirmedAt=T1, confirmCount=1
+Session 5 → "auth uses JWT" re-promoted → global: confirmedAt=T5, confirmCount=2
+Session 20 → 35 days pass without re-confirmation → sweep: stale=true
+Session 21 → "auth uses JWT" re-promoted → global: stale=false, confirmCount=3
+           OR section overflows → compact() evicts stale entry
+```
+
+**Migration**: no action needed. Existing `memoryuser=false` or explicit-channel setups are unchanged. `memoryuser=true` users get freshness tracking automatically with the 30-day default.
+
+---
+
+### Memory Context Reduction (`memoryinject` + `memory_search`)
+
+**Change**: Working memory is now injected into the step context as a compact section-count summary by default instead of dumping all entries on every step.
+
+**What's New**:
+- New `memoryinject` parameter (`"summary"` default, `"full"` restores old behaviour).
+- In `summary` mode, the step state shows only how many entries exist per section — e.g. `workingMemory:{facts:12,decisions:3}` — cutting per-step memory token overhead by ~95%.
+- New built-in `memory_search` action available whenever `usememory=true` and `memoryinject=summary`. The model calls it with a keyword query to retrieve relevant entries on demand:
+  ```json
+  { "action": "memory_search", "params": { "query": "authentication", "section": "decisions", "limit": 5 } }
+  ```
+- `section` and `limit` params are optional; omitting `section` searches all sections.
+- Results are keyword-scored by word overlap and returned as TOON text in the step context.
+- `_memorySearch(query, opts)` is also available as a runtime API for embedding use.
+
+**Migration**: No action needed. `memoryinject=full` restores the previous full-inject behaviour exactly.
+
+---
+
 ### Self-Contained Skill Format (SKILL.yaml)
 
 **Change**: Added support for a self-contained YAML/JSON skill format that bundles the prompt body, metadata, and all referenced files into a single `SKILL.yaml` file.

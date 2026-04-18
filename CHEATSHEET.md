@@ -625,12 +625,15 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `memoryscope` | string | `both` | Which store the agent reads from and defaults writes to: `session`, `global`, or `both` (reads both; writes default to session when no channel, or global when `memorych` is set). |
 | `memorych` | string | - | SLON/JSON definition of an OpenAF channel used to **persist the global memory** store. Reloaded at startup and flushed on every significant event. |
 | `memorysessionch` | string | - | SLON/JSON definition of a dedicated OpenAF channel for the **session memory** store. Falls back to `memorych` when omitted. |
-| `memoryuser` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, and sets `memorych` (name `mini_a_global_mem`) + `memorysessionch` (name `mini_a_session_mem`) to file channels backed by `~/.openaf-mini-a/memory.json` — only for channels not already defined. |
+| `memoryuser` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, sets `memorych` + `memorysessionch` to file channels, and defaults `memorypromote=facts,decisions,summaries` + `memorystaledays=30`. |
 | `memorysessionid` | string | `<agent-id>` | Session key used to namespace session memory in the channel (defaults to `conversation` arg if set, otherwise the internal agent ID). |
 | `memorymaxpersection` | number | `80` | Maximum entries kept per section before compaction drops stale/old ones. |
 | `memorymaxentries` | number | `500` | Hard cap on total entries across all sections (priority-ordered: decisions > evidence > risks > facts > summaries > hypotheses > openQuestions > artifacts). |
 | `memorycompactevery` | number | `8` | How many `append` calls trigger an automatic compaction pass. |
 | `memorydedup` | boolean | `true` | Suppress near-duplicate entries (85% word-overlap fingerprint). |
+| `memorypromote` | string | `""` | Comma-separated list of sections to auto-promote from session → global at session end. `memoryuser=true` sets this to `facts,decisions,summaries`. Empty string disables auto-promotion. |
+| `memorystaledays` | number | `0` | Days without re-confirmation before a global entry is marked `stale`. `0` disables the sweep. `memoryuser=true` sets this to `30`. Stale entries are removed by compaction when a section overflows `memorymaxpersection`. |
+| `memoryinject` | string | `summary` | Controls how much memory is embedded in each step's context: `summary` (default) injects only section entry counts and enables the `memory_search` action; `full` injects the entire compact memory snapshot (old behaviour). |
 
 ### Memory Sections
 
@@ -645,6 +648,25 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `artifacts` | Short excerpts of generated content (first 500 chars) |
 | `summaries` | Narrative overviews of completed phases |
 
+### Context Injection Modes (`memoryinject`)
+
+By default (`memoryinject=summary`), the step context contains only a compact section-count map — e.g. `workingMemory:{facts:12,decisions:3}` — instead of all entry content. This reduces per-step memory overhead by ~95%. The agent can retrieve entries on demand using the `memory_search` action:
+
+```json
+{
+  "thought": "I need to recall what decisions were made",
+  "action": "memory_search",
+  "params": { "query": "authentication decision", "section": "decisions", "limit": 5 }
+}
+```
+
+`memory_search` params:
+- `query` (required) — keyword string to match against entry values
+- `section` (optional) — restrict to one section (`facts`, `decisions`, `evidence`, `openQuestions`, `hypotheses`, `artifacts`, `risks`, `summaries`)
+- `limit` (optional, default `10`) — max results per section
+
+Use `memoryinject=full` to restore the previous behaviour (all entries in every step context).
+
 ### Examples
 
 ```bash
@@ -653,6 +675,12 @@ mini-a goal="analyze repo and suggest improvements" useshell=true
 
 # Disable working memory entirely
 mini-a goal="quick lookup" usememory=false
+
+# Enable memory with default summary injection (memory_search action available)
+mini-a goal="iterative research task" usememory=true
+
+# Restore legacy full-inject mode (all memory entries in every step)
+mini-a goal="iterative research task" usememory=true memoryinject=full
 
 # Persist global memory to a file channel across runs
 mini-a goal="iterative research task" \
@@ -676,7 +704,17 @@ mini-a goal="continue from where we left off" \
   memorych="(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))"
 
 # User-local persistent memory shorthand (home-dir file channels, auto-creates directory)
+# Also enables auto-promotion (facts,decisions,summaries) and 30-day staleness sweep
 mini-a goal="iterative research task" memoryuser=true
+
+# Custom promotion sections and staleness window
+mini-a goal="long research" memoryuser=true memorypromote=facts,decisions memorystaledays=14
+
+# Disable auto-promotion but keep staleness sweep
+mini-a goal="..." memoryuser=true memorypromote=""
+
+# Disable staleness sweep entirely
+mini-a goal="..." memoryuser=true memorystaledays=0
 ```
 
 ### Programmatic API (embedding use)
@@ -685,8 +723,21 @@ mini-a goal="iterative research task" memoryuser=true
 var agent = new MiniA()
 agent.start({ goal: "...", usememory: true })
 
-// Promote specific session entries to the global store
+// Promote specific session entries to the global store (manual, selective)
 agent.promoteSessionMemory("decisions", ["entry-id-1"])
+
+// Auto-promote configured sections (refresh-or-append) + run staleness sweep
+// Called automatically at session end when memorypromote is set
+agent._autoPromoteSessionToGlobal()
+
+// Find a near-duplicate entry in a section (returns entry or undefined)
+var match = agent._globalMemoryManager.findNearDuplicate("facts", "some fact text")
+
+// Refresh an entry's confirmedAt + confirmCount (clears stale flag)
+agent._globalMemoryManager.refresh("facts", match.id)
+
+// Mark global entries older than N days as stale (returns count marked)
+var marked = agent._globalMemoryManager.sweepStale(30)
 
 // Clear the session memory for a given session
 agent.clearSessionMemory("my-session-id")
