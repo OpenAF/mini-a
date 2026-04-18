@@ -698,6 +698,8 @@ agent.clearSessionMemory("my-session-id")
 
 Quick configuration bundles for common use cases.
 
+Modes can inherit from other modes using `include` (string, comma-separated string, or array). Included mode params are merged first, then local params override them.
+
 | Mode | Description | Equivalent Parameters |
 |------|-------------|----------------------|
 | `shell` | Read-only shell access | `useshell=true` |
@@ -722,11 +724,15 @@ mini-a mode=chatbot goal="help me plan a trip"
 
 # Custom preset (in ~/.openaf-mini-a/modes.yaml)
 modes:
+  mybase:
+    params:
+      useshell: true
+      maxsteps: 30
   mypreset:
-    useshell: true
-    readwrite: true
-    maxsteps: 30
-    knowledge: "Always use concise responses"
+    include: mybase
+    params:
+      readwrite: true
+      knowledge: "Always use concise responses"
 
 # Use custom preset
 mini-a mode=mypreset goal="your goal here"

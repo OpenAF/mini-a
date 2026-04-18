@@ -454,7 +454,7 @@ Mini-A ships with complementary components:
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
-| `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` | - |
+| `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (supports `include` inheritance) | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
 | `workers` | Comma-separated list of worker URLs for remote delegation (`workers=http://host1:8080,http://host2:8080`) | - |
