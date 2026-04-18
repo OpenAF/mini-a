@@ -6,9 +6,9 @@ modes:
       useshell: true
 
   shellrw:
+    include    : shell
     description: "Read-write mode for shell commands"
     params     :
-      useshell       : true
       useutils       : true
       readwrite      : true
       shellallowpipes: true
@@ -18,6 +18,14 @@ modes:
 
   utils:
     description: "Utilities mode"
+    params     :
+      useutils   : true
+      mini-a-docs: true
+      usetools   : true
+
+  shellutils:
+    include    : shell
+    description: "Shell + utilities mode"
     params     :
       useutils   : true
       mini-a-docs: true
@@ -44,9 +52,9 @@ modes:
       mcpproxy : true
 
   news:
+    include    : internet
     description: "News from the internet mode"
     params     :
-      usetools   : true
       mcp        :
       - type   : ojob
         options:
@@ -122,23 +130,13 @@ modes:
           job: mcps/mcp-net.yaml
 
   webfull:
+    include    : web
     description: "Web full mode"
     params     :
-      usediagrams: true
-      usecharts  : true
-      usemaps    : true
       useascii   : false
-      usemath    : true
-      usevectors : true
-      usetools   : true
-      usehistory : true
-      useattach  : true
       usestream  : true
       historykeep: true
       useplanning: false 
-      mcpproxy   : true
-      mcpproxythreshold: 51200
-      mcpproxytoon     : true
       llmcomplexity    : true
       historykeepperiod: 10080
       historykeepcount : 15

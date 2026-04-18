@@ -360,6 +360,8 @@ Mini-A ships with reusable argument bundles so you can switch behaviors without 
 
 Set `OAF_MINI_A_MODE=<name>` to pick a default preset when you do not supply `mode=` on the command line (helpful when using the `mini-a` alias). Explicit `mode=` arguments continue to take precedence over the environment variable.
 
+Modes can now inherit from other modes using `include`. Use `include: <mode>` (or an array / comma-separated list) to merge one or more base presets first, then override only the settings you need in the current mode.
+
 ### Built-in Presets
 
 - **`shell`** – Read-only shell access (`useshell=true`).
@@ -379,11 +381,16 @@ Create your own presets by creating either a `~/.openaf-mini-a_modes.yaml` file 
 ```yaml
 # In ~/.openaf-mini-a/modes.yaml
 modes:
+  mybase:
+    params:
+      useshell: true
+      maxsteps: 30
+
   mypreset:
-    useshell: true
-    readwrite: true
-    maxsteps: 30
-    knowledge: "Always use concise responses"
+    include: mybase
+    params:
+      readwrite: true
+      knowledge: "Always use concise responses"
 ```
 
 **Usage:**
@@ -1030,6 +1037,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - `internet` – Registers internet-focused MCP presets with docs-aware utils (`usetools=true mini-a-docs=true mcp=...`).
   - `web` – Optimizes for the browser UI with MCP tools registered and docs-aware utils (`usetools=true mini-a-docs=true`).
   - `webfull` – Turns on diagrams, charts, ASCII sketches, attachments, history retention, planning, MCP proxying, streaming, and docs-aware utils for the web UI (`usetools=true useutils=true usestream=true mcpproxy=true mini-a-docs=true usediagrams=true usecharts=true useascii=true usemath=true usehistory=true useattach=true historykeep=true useplanning=true`). Add `usemaps=true` when you also want interactive maps baked into this preset.
+  - Modes may use `include` to inherit another preset (or multiple presets) and then override values locally.
 
 Extend or override these presets by editing the YAML file—Mini-A reloads it on each run.
 
