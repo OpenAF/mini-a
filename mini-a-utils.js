@@ -2819,6 +2819,7 @@ MiniUtilsTool.prototype.showMessage = function(params) {
       lines.push(colorFn("BOLD", title))
     }
     lines.push("(" + prefix + ") " + renderedMessage)
+    print("")
     var line = ow.format.withSideLine(lines.join("\n"), __, borderColor, textStyle, ow.format.withSideLineThemes().closedCurvedRect)
     if (level === "error" || level === "warn") {
       printErr(line)

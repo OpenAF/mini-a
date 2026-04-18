@@ -3858,9 +3858,27 @@ try {
       _prevEventRenderLines = _getRenderedLineCount(_msg)
       _prevEventLastUpdate = now()
       if (type != "final" && type != "error") {
+        var _animEventStartTime = now()
+        var _animIsInteracting = (type === "input" && message.indexOf("Interacting with") === 0)
+        var _animBaseMsg = _animIsInteracting ? message.replace(/\.\.\.+$/, "") : message
         _prevEventAnimatedRenderer = function(resetToDefault) {
           var cueSymbol = resetToDefault === true ? _resetActivityCueSymbol() : _nextActivityCueSymbol()
-          return _renderEventMessage(colorifyText(cueSymbol, "RESET," + (eventPalette[type] || accentColor)) + " ", message, extra)
+          var displayMsg = message
+          if (_animIsInteracting) {
+            var elapsed = now() - _animEventStartTime
+            if (elapsed > 5000) {
+              var secs = Math.floor(elapsed / 1000)
+              var elapsedStr
+              if (secs >= 60) {
+                elapsedStr = Math.floor(secs / 60) + "m " + String(secs % 60).padStart(2, "0") + "s"
+              } else {
+                elapsedStr = secs + "s"
+              }
+              var counterColor = elapsed >= 60000 ? "FG(208)" : (elapsed >= 30000 ? "FG(220)" : "FG(240)")
+              displayMsg = _animBaseMsg + colorifyText(" · " + elapsedStr, counterColor)
+            }
+          }
+          return _renderEventMessage(colorifyText(cueSymbol, "RESET," + (eventPalette[type] || accentColor)) + " ", displayMsg, extra)
         }
       } else {
         _prevEventAnimatedRenderer = __

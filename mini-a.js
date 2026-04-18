@@ -2997,6 +2997,7 @@ MiniA.prototype.summarizeText = function(ctx, options) {
     var self = this
 
     try {
+        this.fnI("input", `Interacting with ${llmType} model (summarizing)...`)
         summaryResponseWithStats = this._withExponentialBackoff(function() {
             // Save current conversation to restore later
             var gptInstance = summarizeLLM.getGPT()
@@ -5643,6 +5644,7 @@ MiniA.prototype._collectPlanningInsights = function(args, controls) {
         "\n\nGoal:" +
         `\n${args.goal}` +
         (insights.knowledge.length > 0 ? `\n\nExtra knowledge:\n${insights.knowledge.slice(0, 1500)}` : "")
+      this.fnI("input", `Interacting with ${analyzerLLM === this.lc_llm ? "low-cost" : "main"} model (plan analysis)...`)
       var analysisResponse = this._withExponentialBackoff(() => {
         if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
         if (isFunction(analyzerLLM.promptWithStats)) return analyzerLLM.promptWithStats(analysisPrompt)
@@ -5696,6 +5698,7 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
   }
 
   try {
+    this.fnI("input", `Interacting with ${validatorLLM === this.lc_llm ? "low-cost" : "main"} model (plan critique)...`)
     var responseWithStats = this._withExponentialBackoff(() => {
       if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
       if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
@@ -6021,6 +6024,7 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   var prompt = this._buildPlanningPrompt(args, insights, targetFormat)
   var plannerLLM = this.llm
 
+  this.fnI("input", "Interacting with main model (plan generation)...")
   var responseWithStats = this._withExponentialBackoff(() => {
     if (controls && isFunction(controls.beforeCall)) controls.beforeCall()
     // Use JSON prompt for both json and yaml formats (yaml uses same structure as json)
@@ -11470,6 +11474,10 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
       MINI_A_TOOL_RESULT : resultDisplay.substring(0, 2000)
     })
 
+    if (parent._useToolsActual === true && parent.state !== "stop") {
+      parent.fnI("input", "Waiting for model response (tool results)...")
+    }
+
     return {
       toolName : toolName,
       result   : envelope,
@@ -15029,6 +15037,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         var summaryResponseWithStats
         try {
+          self.fnI("input", `Interacting with ${llmType} model (summarizing)...`)
           summaryResponseWithStats = self._withExponentialBackoff(function() {
             addCall()
             var summarizer = summarizeLLM.withInstructions(isString(customInstructionText) ? customInstructionText : instructionText)
@@ -15987,6 +15996,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var advisorPrompt = advisorPromptParts.join("\n")
       var advisorResp = __
       try {
+        this.fnI("input", "Interacting with main model (advisor consult)...")
         advisorResp = this._withExponentialBackoff(() => {
           addCall()
           if (!this._noJsonPrompt && isDef(this.llm.promptJSONWithStats)) return this.llm.promptJSONWithStats(advisorPrompt)
@@ -17511,6 +17521,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var finalResponseWithStats
     try {
+      this.fnI("input", "Interacting with main model (final answer)...")
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
         var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
