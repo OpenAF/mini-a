@@ -1399,6 +1399,31 @@ MiniA.prototype._emitCanonicalThoughtEvent = function(actionName, thoughtValue, 
   return thoughtMessage
 }
 
+MiniA.prototype._resolveShellActionAlias = function(actionName, opts) {
+  if (!isString(actionName)) return actionName
+
+  var trimmed = actionName.trim()
+  if (trimmed.length === 0) return trimmed
+
+  var normalized = trimmed.toLowerCase()
+  if (normalized !== "bash" && normalized !== "sh") return trimmed
+
+  var options = isObject(opts) ? opts : {}
+  if (toBoolean(options.useshell) !== true) return trimmed
+
+  var available = {}
+  if (isArray(options.availableTools)) {
+    options.availableTools.forEach(toolName => {
+      if (isString(toolName) && toolName.trim().length > 0) {
+        available[toolName.trim().toLowerCase()] = true
+      }
+    })
+  }
+
+  if (available[normalized] === true) return trimmed
+  return "shell"
+}
+
 /**
  * <odoc>
  * <key>MinA.defaultInteractionFn(event, message, cFn)</key>
@@ -2019,6 +2044,25 @@ MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
 
   this._activeConversationModel = targetModelName
   return moved
+}
+
+MiniA.prototype._resolveToolExecutionStepLabel = function(details, toolCtx, runtime) {
+  var payload = isObject(details) ? details : {}
+  var context = isObject(toolCtx) ? toolCtx : {}
+  var activeRuntime = isObject(runtime) ? runtime : this._runtime
+
+  if (isDef(payload.stepLabel) && String(payload.stepLabel).length > 0) return String(payload.stepLabel)
+  if (isDef(context.stepLabel) && String(context.stepLabel).length > 0) return String(context.stepLabel)
+  if (isObject(activeRuntime) && isNumber(activeRuntime.currentStepNumber) && activeRuntime.currentStepNumber > 0) {
+    return String(activeRuntime.currentStepNumber)
+  }
+  return __
+}
+
+MiniA.prototype._shouldFinalizeToolExecutionInHook = function(runtime, currentCtx) {
+  if (!this._useTools || !isObject(runtime)) return false
+  if (isObject(currentCtx) && isDef(currentCtx.stepLabel) && String(currentCtx.stepLabel).length > 0) return false
+  return true
 }
 
 MiniA.prototype._configureDebugChannel = function(llmInstance, debugConfig, defaultName, label) {
@@ -6223,7 +6267,7 @@ MiniA.prototype._buildDecomposedPlan = function(goalText, context, useLegacy) {
 
   var steps = []
   var checkpoints = []
-  var requiresShellKeywords = [/shell/i, /command/i, /script/i, /terminal/i, /cli/i]
+  var requiresShellKeywords = [/\bshell\b/i, /\bcommand\b/i, /\bscript\b/i, /\bterminal\b/i, /\bcli\b/i, /\bbash\b/i, /\bsh\b/i]
 
   for (var i = 0; i < rawSegments.length; i++) {
     var segment = rawSegments[i]
@@ -6314,6 +6358,7 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
   var issues = []
   var canUseShell = toBoolean(args.useshell)
   var availableTools = this.mcpToolNames.slice()
+  var parent = this
 
   var visit = function(nodes) {
     if (!isArray(nodes)) return
@@ -6322,9 +6367,15 @@ MiniA.prototype._validatePlanStructure = function(plan, args) {
       var title = isString(node.title) ? node.title : (isString(node.task) ? node.task : stringify(node, __, ""))
       var requires = []
       if (isArray(node.requires)) requires = node.requires.slice()
+      requires = requires.map(function(req) {
+        return parent._resolveShellActionAlias(req, {
+          useshell     : canUseShell,
+          availableTools: availableTools
+        })
+      })
       var text = isString(node.title) ? node.title.toLowerCase() : (isString(node.task) ? node.task.toLowerCase() : "")
       if (text.indexOf("tool") >= 0 && availableTools.length === 0) requires.push("mcp_tool")
-      if ((/shell|command|script|terminal|cli/.test(text)) && requires.indexOf("shell") < 0) requires.push("shell")
+      if ((/\bshell\b|\bcommand\b|\bscript\b|\bterminal\b|\bcli\b|\bbash\b|\bsh\b/.test(text)) && requires.indexOf("shell") < 0) requires.push("shell")
 
       if (requires.indexOf("shell") >= 0 && !canUseShell) {
         issues.push(`Step '${title}' requires shell access but it is disabled.`)
@@ -7018,10 +7069,11 @@ MiniA.prototype._extractJsonActionFromPseudoToolCall = function(payload) {
     return __
 }
 
-MiniA.prototype._extractToolCallActions = function(payload, allowedTools) {
+MiniA.prototype._extractToolCallActions = function(payload, allowedTools, opts) {
     var results = []
     var seen = {}
     var allowed = {}
+    var options = isObject(opts) ? opts : {}
 
     if (isArray(allowedTools)) {
         allowedTools.forEach(toolName => {
@@ -7040,11 +7092,16 @@ MiniA.prototype._extractToolCallActions = function(payload, allowedTools) {
 
     var shouldAcceptTool = toolName => {
         if (!isString(toolName) || toolName.trim().length === 0) return false
+        if (toolName.trim().toLowerCase() === "shell" && toBoolean(options.useshell) === true) return true
         if (Object.keys(allowed).length === 0) return true
         return allowed[toolName.trim().toLowerCase()] === true
     }
 
     var addToolCall = (toolName, args, source) => {
+        toolName = this._resolveShellActionAlias(toolName, {
+            useshell     : options.useshell,
+            availableTools: allowedTools
+        })
         if (!shouldAcceptTool(toolName)) return
         var normalizedArgs = parseArguments(args)
         var normalizedTool = toolName.trim()
@@ -7121,10 +7178,12 @@ MiniA.prototype._snapshotDebugChannel = function(channelSpec, defaultName) {
     }
 }
 
-MiniA.prototype._extractToolCallActionsFromDebugChannel = function(snapshot, allowedTools, waitMs) {
+MiniA.prototype._extractToolCallActionsFromDebugChannel = function(snapshot, allowedTools, waitMsOrOpts) {
     try {
         if (!isMap(snapshot) || !isString(snapshot.name) || snapshot.name.trim().length === 0) return []
         if ($ch().list().indexOf(snapshot.name) < 0) return []
+        var opts = isObject(waitMsOrOpts) ? waitMsOrOpts : {}
+        var waitMs = isNumber(waitMsOrOpts) ? waitMsOrOpts : opts.waitMs
         var maxWait = isNumber(waitMs) && waitMs >= 0 ? waitMs : 400
         var deadline = now() + maxWait
         do {
@@ -7136,7 +7195,7 @@ MiniA.prototype._extractToolCallActionsFromDebugChannel = function(snapshot, all
                     .sort((a, b) => Number(a._t || 0) - Number(b._t || 0))
                 var start = isNumber(snapshot.count) && snapshot.count >= 0 ? snapshot.count : 0
                 if (start < entries.length) {
-                    var extracted = this._extractToolCallActions(entries.slice(start), allowedTools)
+                    var extracted = this._extractToolCallActions(entries.slice(start), allowedTools, opts)
                     if (extracted.length > 0) return extracted
                 }
             }
@@ -10346,6 +10405,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               content: [{ type: "text", text: contentText }]
             }
 
+            if (isMap(result) && isDef(result.error)) responseObj.error = result.error
             if (autoSpilled) responseObj.autoSpilled = true
             if (!useResultFile && resultByteSize > 0) responseObj.estimatedTokens = Math.ceil(resultByteSize / 4)
 
@@ -13087,9 +13147,9 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
 MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
   var ignored = {}
   ;[
-    "exec", "mini-a", "__id", "init", "objid", "execid",
+    "exec", "mini-a", "__id", "init", "objid", "execid", "agent",
     "__format", "__interaction_source", "__explicitargkeys", "__unknownargsreported",
-    "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
+    "__modeapplied", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
     "knowledgeupdated"
   ].forEach(function(name) {
     var normalized = String(name || "").trim().toLowerCase()
@@ -13097,6 +13157,13 @@ MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
   })
   return ignored
 })()
+
+MiniA._normalizeArgName = function(name) {
+  var normalized = String(name || "").trim().toLowerCase()
+  if (normalized.length === 0) return ""
+  normalized = normalized.replace(/^-+/, "")
+  return normalized
+}
 
 MiniA._argLevenshteinDistance = function(a, b) {
   var left = String(a || "")
@@ -13127,7 +13194,7 @@ MiniA._argLevenshteinDistance = function(a, b) {
 }
 
 MiniA.findClosestKnownArg = function(name, knownNames, maxDistance) {
-  var normalized = String(name || "").trim().toLowerCase()
+  var normalized = MiniA._normalizeArgName(name)
   if (normalized.length === 0 || !isArray(knownNames) || knownNames.length === 0) return __
 
   var threshold = isNumber(maxDistance) ? maxDistance : 3
@@ -13152,7 +13219,7 @@ MiniA.findClosestKnownArg = function(name, knownNames, maxDistance) {
   }
 
   knownNames.forEach(function(candidate) {
-    var normalizedCandidate = String(candidate || "").trim().toLowerCase()
+    var normalizedCandidate = MiniA._normalizeArgName(candidate)
     if (normalizedCandidate.length === 0) return
     var distance = MiniA._argLevenshteinDistance(normalized, normalizedCandidate)
     if (distance < bestDistance) {
@@ -13172,13 +13239,27 @@ MiniA.warnUnknownArgs = function(args, options) {
   var extraKnown = opts.extraKnownArgs
   if (isArray(extraKnown)) {
     extraKnown.forEach(function(name) {
-      var normalized = String(name || "").trim().toLowerCase()
+      var normalized = MiniA._normalizeArgName(name)
       if (normalized.length > 0) known[normalized] = true
     })
   } else if (isMap(extraKnown)) {
     Object.keys(extraKnown).forEach(function(name) {
-      var normalized = String(name || "").trim().toLowerCase()
+      var normalized = MiniA._normalizeArgName(name)
       if (normalized.length > 0 && extraKnown[name] === true) known[normalized] = true
+    })
+  }
+
+  var ignored = merge({}, MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES, true)
+  var extraIgnored = opts.extraIgnoredArgs
+  if (isArray(extraIgnored)) {
+    extraIgnored.forEach(function(name) {
+      var normalized = MiniA._normalizeArgName(name)
+      if (normalized.length > 0) ignored[normalized] = true
+    })
+  } else if (isMap(extraIgnored)) {
+    Object.keys(extraIgnored).forEach(function(name) {
+      var normalized = MiniA._normalizeArgName(name)
+      if (normalized.length > 0 && extraIgnored[name] === true) ignored[normalized] = true
     })
   }
 
@@ -13198,9 +13279,9 @@ MiniA.warnUnknownArgs = function(args, options) {
   var seen = {}
   explicitKeys.forEach(function(key) {
     var rawKey = String(key || "").trim()
-    var normalized = rawKey.toLowerCase()
+    var normalized = MiniA._normalizeArgName(rawKey)
     if (normalized.length === 0) return
-    if (MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES[normalized] === true) return
+    if (ignored[normalized] === true) return
     if (normalized.indexOf("__") === 0 || normalized.indexOf("_") === 0) return
     if (known[normalized] === true) return
     if (seen[normalized] === true) return
@@ -13948,7 +14029,8 @@ MiniA.prototype.init = function(args) {
                   }
                 }
 
-                if (parent._useTools && typeof parent._finalizeToolExecution === "function") {
+                var currentCtx = parent._runtime && parent._runtime.currentTool
+                if (typeof parent._finalizeToolExecution === "function" && parent._shouldFinalizeToolExecutionInHook(parent._runtime, currentCtx)) {
                   var normalized = typeof parent._normalizeToolResult === "function"
                     ? parent._normalizeToolResult(r)
                     : { display: stringify(r, __, "") || "(no output)", hasError: hasError }
@@ -13963,6 +14045,9 @@ MiniA.prototype.init = function(args) {
                     params       : a,
                     result       : r,
                     observation  : displayText,
+                    stepLabel    : parent._resolveToolExecutionStepLabel({}, currentCtx, parent._runtime),
+                    context      : currentCtx,
+                    contextId    : isObject(currentCtx) ? currentCtx.contextId : __,
                     updateContext: false,
                     error        : hasError || (isObject(normalized) && normalized.hasError === true)
                   })
@@ -15626,7 +15711,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
       var toolName = details.toolName || toolCtx.action || ""
       var params = isDef(details.params) ? details.params : toolCtx.params
-      var stepLabel = details.stepLabel || toolCtx.stepLabel
+      var stepLabel = this._resolveToolExecutionStepLabel(details, toolCtx, runtime)
       var updateContext = isBoolean(details.updateContext) ? details.updateContext : toolCtx.updateContext
       var observation = details.observation
       var rawResult = isDef(details.result) ? details.result : details.rawResult
@@ -16670,7 +16755,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       } else if (isMap(baseMsg) && isArray(baseMsg.action)) {
         baseMsg.action.forEach(addActionMessage)
       } else if (isMap(baseMsg) && isUnDef(baseMsg.action)) {
-        this._extractToolCallActions(baseMsg, this.mcpToolNames).forEach(addActionMessage)
+        this._extractToolCallActions(baseMsg, this.mcpToolNames, {
+          useshell: args.useshell
+        }).forEach(addActionMessage)
       } else if (isMap(baseMsg) && !isString(baseMsg.action)) {
         var receivedType = isUnDef(baseMsg.action) ? "undefined" : (isArray(baseMsg.action) ? "array" : typeof baseMsg.action)
         runtime.context.push(`[OBS ${step + 1}] (error) invalid top-level 'action' string from model (needs to be: (${this._actionsList}) with 'params' on the JSON object). Received 'action' as ${receivedType}: ${stringify(baseMsg.action, __, "")}. Available keys: ${Object.keys(baseMsg).join(", ")}`)
@@ -16871,6 +16958,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var stepLabel = `${step + 1}${stepSuffix}`
         var currentMsg = actionMessages[actionIndex]
         var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
+        origActionRaw = this._resolveShellActionAlias(origActionRaw, {
+          useshell     : args.useshell,
+          availableTools: this.mcpToolNames
+        })
+        if (origActionRaw.length > 0) currentMsg.action = origActionRaw
         var action = origActionRaw.toLowerCase()
         var thoughtValue = jsonParse(((currentMsg.thought || currentMsg.think || "") + "").trim())
         var commandValue = ((currentMsg.command || "") + "").trim()
@@ -17035,10 +17127,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 sandboxnonetwork: args.sandboxnonetwork
               },
               stepLabel    : stepLabel,
-              updateContext: !this._useTools
+              updateContext: true
             })
             continue
-            }
+          }
           }
           // Legacy path (no tools integration — non-parallel branch)
           if (parallelMode) {
@@ -17112,7 +17204,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             break
           }
 
-          var shouldUpdateToolContext = !this._useTools || runtime.providerToolUseFailedDetected === true || origActionRaw === "proxy-dispatch"
+          var shouldUpdateToolContext = true
           pendingToolActions.push({
             toolName     : origActionRaw,
             params       : paramsValue,
@@ -17529,22 +17621,33 @@ MiniA.prototype._runChatbotMode = function(options) {
       } else if (isMap(parsedResponse) && isArray(parsedResponse.action)) {
         parsedResponse.action.forEach(addActionEntry)
       } else if (isMap(parsedResponse) && isUnDef(parsedResponse.action)) {
-        this._extractToolCallActions(parsedResponse, toolNames).forEach(addActionEntry)
+        this._extractToolCallActions(parsedResponse, toolNames, {
+          useshell: args.useshell
+        }).forEach(addActionEntry)
       } else if (isMap(parsedResponse) && isString(parsedResponse.action)) {
         addActionEntry(parsedResponse)
       }
 
       if (actionEntries.length === 0) {
-        this._extractToolCallActions(responseWithStats, toolNames).forEach(addActionEntry)
+        this._extractToolCallActions(responseWithStats, toolNames, {
+          useshell: args.useshell
+        }).forEach(addActionEntry)
       }
       if (actionEntries.length === 0) {
-        this._extractToolCallActionsFromDebugChannel(chatbotDebugSnapshot, toolNames).forEach(addActionEntry)
+        this._extractToolCallActionsFromDebugChannel(chatbotDebugSnapshot, toolNames, {
+          useshell: args.useshell
+        }).forEach(addActionEntry)
       }
 
       if (actionEntries.length > 0) {
         for (var actionIndex = 0; actionIndex < actionEntries.length; actionIndex++) {
           var currentMsg = actionEntries[actionIndex]
           var actionName = isString(currentMsg.action) ? currentMsg.action.trim() : ""
+          actionName = this._resolveShellActionAlias(actionName, {
+            useshell     : args.useshell,
+            availableTools: toolNames
+          })
+          if (actionName.length > 0) currentMsg.action = actionName
           var lowerAction = actionName.toLowerCase()
           var thoughtValue = currentMsg.thought || currentMsg.think
 

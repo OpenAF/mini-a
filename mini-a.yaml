@@ -840,47 +840,22 @@ jobs:
     var _ma = new MiniA()
     function warnOnUnknownParameters() {
       if (!isMap(args)) return
-      ow.loadFormat()
-      var knownParams = [
-        "goal", "mcp", "verbose", "rpm", "rtm", "tpm", "maxsteps", "maxcontext", "maxcontent",
-        "readwrite", "checkall", "debug", "useshell", "shell", "usesandbox", "sandboxprofile",
-        "sandboxnonetwork", "extrahooks", "knowledge", "youare", "chatyouare", "outfile", "outfileall",
-        "outputfile", "libs", "model", "modellc", "modelval", "conversation", "format", "raw",
-        "showthinking", "shellallow", "shellbanextra", "shellallowpipes", "shellbatch", "shellprefix",
-        "shelltimeout", "shellmaxbytes", "toolcachettl", "validationgoal", "valgoal", "deepresearch",
-        "maxcycles", "validationthreshold", "persistlearnings", "usetools", "usejsontool", "useutils",
-        "useskills", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps", "usemath",
-        "usesvg", "usevectors", "usestream", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "mcpproxytoon",
-        "mcplazy", "useplanning", "forceplanning", "planstyle", "earlystopthreshold", "planmode",
-        "validateplan", "convertplan", "resumefailed", "chatbotmode", "promptprofile", "systempromptbudget",
-        "planfile", "planformat", "plancontent", "updatefreq", "updateinterval", "forceupdates", "planlog",
-        "rules", "state", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl",
-        "maxconcurrent", "delegationmaxdepth", "delegationtimeout", "delegationmaxretries", "auditch",
-        "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "nosetmcpwd", "miniadocs",
-        "extraskills", "secpass", "utilsroot", "utilsallow", "utilsdeny", "saveplannotes", "modellock",
-        "modelstrategy", "advisormaxuses", "advisorenable", "advisoronrisk", "advisoronambiguity",
-        "advisoronharddecision", "advisorcooldownsteps", "advisorbudgetratio", "emergencyreserve",
-        "harddecision", "evidencegate", "evidencegatestrictness", "lcescalatedefer", "lcbudget",
-        "llmcomplexity"
-      ]
-      var knownLookup = {}
-      knownParams.forEach(function(name) { knownLookup[name] = true })
-      Object.keys(args).forEach(function(key) {
-        if (!isString(key)) return
-        if (knownLookup[key]) return
-        var normalizedKey = key.toLowerCase()
-        if (knownLookup[normalizedKey]) return
-        var bestMatch = __
-        var bestDistance = Number.MAX_SAFE_INTEGER
-        if (isDef(ow.format) && isDef(ow.format.string) && isFunction(ow.format.string.closest)) {
-          bestMatch = ow.format.string.closest(normalizedKey, knownParams, 3)
-        }
-        if (isString(bestMatch) && isDef(ow.format) && isDef(ow.format.string) && isFunction(ow.format.string.distance)) {
-          bestDistance = ow.format.string.distance(normalizedKey, bestMatch)
-        }
-        var suggestionMsg = ""
-        if (isString(bestMatch) && bestDistance <= 3) suggestionMsg = " Did you mean '" + bestMatch + "'?"
-        logWarn("Unknown parameter '" + key + "' provided." + suggestionMsg)
+      MiniA.warnUnknownArgs(args, {
+        extraIgnoredArgs: {
+          "mini-a"                : true,
+          exec                    : true,
+          agent                   : true,
+          init                    : true,
+          "__id"                  : true,
+          objid                   : true,
+          execid                  : true,
+          "__format"              : true,
+          "__interaction_source"  : true,
+          "__explicitargkeys"     : true,
+          "__modeapplied"         : true,
+          "__unknownargsreported" : true
+        },
+        logger: function(message) { logWarn(message) }
       })
     }
     warnOnUnknownParameters()

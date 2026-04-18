@@ -108,6 +108,62 @@
     ow.test.assert(missing === null, true, "Should ignore non-final embedded payloads")
   }
 
+  exports.testShellToolCallAliasFallsBackToShell = function() {
+    var agent = createAgent()
+    var payload = {
+      tool_calls: [
+        {
+          function: {
+            name: "bash",
+            arguments: "{\"command\":\"pwd\"}"
+          }
+        }
+      ]
+    }
+
+    var extracted = agent._extractToolCallActions(payload, ["shell", "read_file"], { useshell: true })
+    ow.test.assert(isArray(extracted) && extracted.length === 1, true, "Should extract one aliased shell tool call")
+    ow.test.assert(extracted[0].action === "shell", true, "bash should alias to shell when no bash tool exists")
+    ow.test.assert(extracted[0].params.command === "pwd", true, "Should preserve tool arguments when aliasing to shell")
+  }
+
+  exports.testShellToolCallAliasPreservesRealBashTool = function() {
+    var agent = createAgent()
+    var payload = {
+      tool_calls: [
+        {
+          function: {
+            name: "bash",
+            arguments: "{\"command\":\"pwd\"}"
+          }
+        }
+      ]
+    }
+
+    var extracted = agent._extractToolCallActions(payload, ["bash", "shell"], { useshell: true })
+    ow.test.assert(isArray(extracted) && extracted.length === 1, true, "Should extract one bash tool call")
+    ow.test.assert(extracted[0].action === "bash", true, "Real bash tools should not be remapped to shell")
+  }
+
+  exports.testShellToolCallAliasWorksInProxyMode = function() {
+    var agent = createAgent()
+    var payload = {
+      tool_calls: [
+        {
+          function: {
+            name: "sh",
+            arguments: "{\"command\":\"date\"}"
+          }
+        }
+      ]
+    }
+
+    var extracted = agent._extractToolCallActions(payload, ["proxy-dispatch"], { useshell: true })
+    ow.test.assert(isArray(extracted) && extracted.length === 1, true, "Proxy mode should still recover aliased shell tool calls")
+    ow.test.assert(extracted[0].action === "shell", true, "sh should alias to shell even when proxy-dispatch is the only registered tool")
+    ow.test.assert(extracted[0].params.command === "date", true, "Proxy mode aliasing should preserve command arguments")
+  }
+
   exports.testProcessFinalAnswerUnwrapsFencedJson = function() {
     var agent = createAgent()
     agent.fnI = function() {}
@@ -459,6 +515,24 @@
     ow.test.assert(emptyResult.hasError === false, true, "Missing error field should not flag hasError")
   }
 
+  exports.testResolveToolExecutionStepLabelFallsBackToRuntimeStep = function() {
+    var agent = createAgent()
+    var runtime = { currentStepNumber: 7 }
+
+    ow.test.assert(agent._resolveToolExecutionStepLabel({}, {}, runtime) === "7", true, "Missing tool step labels should fall back to the active runtime step")
+    ow.test.assert(agent._resolveToolExecutionStepLabel({ stepLabel: "3.1" }, {}, runtime) === "3.1", true, "Explicit payload step labels should win over runtime fallback")
+    ow.test.assert(agent._resolveToolExecutionStepLabel({}, { stepLabel: "2" }, runtime) === "2", true, "Prepared tool context step labels should win over runtime fallback")
+  }
+
+  exports.testHookFinalizationSkipsPreparedToolContexts = function() {
+    var agent = createAgent()
+    agent._useTools = true
+
+    ow.test.assert(agent._shouldFinalizeToolExecutionInHook({ currentStepNumber: 4 }, { stepLabel: "4.1" }), false, "Prepared tool contexts should be finalized by the main tool batch, not the MCP hook")
+    ow.test.assert(agent._shouldFinalizeToolExecutionInHook({ currentStepNumber: 4 }, {}), true, "Hook finalization should remain enabled when there is no prepared tool step context")
+    ow.test.assert(agent._shouldFinalizeToolExecutionInHook(__, { stepLabel: "4.1" }), false, "Missing runtime should disable hook finalization")
+  }
+
   exports.testPromptProfileHelpers = function() {
     var agent = createAgent()
 
@@ -679,6 +753,37 @@
     ow.test.assert(isMap(consoleMode) && isMap(consoleMode.options), true, "Should build utils MCP config for console interactions")
     ow.test.assert(isDef(consoleMode.options.fns.userInput), true, "Should expose userInput in console sessions")
     ow.test.assert(isDef(consoleMode.options.fns.showMessage), true, "Should expose showMessage in console sessions")
+  }
+
+  exports.testProxyDispatchPropagatesDownstreamToolErrors = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    ow.test.assert(isMap(utilsConfig) && isMap(utilsConfig.options), true, "Should build utils config for proxy test")
+
+    var originalPrint = print
+    var originalPrintErr = printErr
+    try {
+      print = function() {}
+      printErr = function() {}
+
+      var proxyConfig = agent._createMcpProxyConfig([ utilsConfig ], {})
+      ow.test.assert(isMap(proxyConfig) && isMap(proxyConfig.options) && isMap(proxyConfig.options.fns), true, "Should build proxy config")
+
+      var result = proxyConfig.options.fns["proxy-dispatch"]({
+        action    : "call",
+        connection: "default",
+        tool      : "showMessage",
+        arguments : { level: "info" }
+      })
+
+      ow.test.assert(isMap(result), true, "Proxy dispatch should return a result map")
+      ow.test.assert(isString(result.error) && result.error.indexOf("[ERROR] message is required") >= 0, true, "Proxy should preserve downstream tool errors")
+    } finally {
+      print = originalPrint
+      printErr = originalPrintErr
+    }
   }
 
   exports.testUtilsMcpAllowAndDenyFilters = function() {
@@ -1461,6 +1566,40 @@
     ow.test.assert(warnings.length, 1, "A single warning should be emitted")
     ow.test.assert(warnings[0].indexOf("foo") >= 0, true, "The warning should mention the unknown parameter")
     ow.test.assert(warnings[0].indexOf("exec") < 0, true, "Internal exec should not be reported as unknown")
+  }
+
+  exports.testWarnUnknownArgsSupportsExtraIgnoredLauncherParameters = function() {
+    var warnings = []
+    var args = {
+      exec: "/skills summarize",
+      "mini-a": true,
+      agent: true,
+      init: true,
+      __unknownargsreported: false,
+      __id: "123",
+      objId: "abc",
+      execid: "def",
+      oddflag: true
+    }
+
+    var unknown = MiniA.warnUnknownArgs(args, {
+      extraIgnoredArgs: {
+        "mini-a": true,
+        exec: true,
+        agent: true,
+        init: true,
+        "__id": true,
+        objid: true,
+        execid: true,
+        "__unknownargsreported": true
+      },
+      logger: function(message) { warnings.push(message) }
+    })
+
+    ow.test.assert(unknown.length, 1, "Only non-ignored launcher leftovers should be reported")
+    ow.test.assert(unknown[0], "oddflag", "Unknown launcher leftovers should preserve the original key")
+    ow.test.assert(warnings.length, 1, "Only one warning should be emitted for real unknown parameters")
+    ow.test.assert(warnings[0].indexOf("oddflag") >= 0, true, "The warning should mention the real unknown parameter")
   }
 
   exports.testWarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing = function() {

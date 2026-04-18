@@ -294,6 +294,17 @@ try {
     })(args, explicitCLIArgKeys)
 
     MiniA.warnUnknownArgs(args, {
+      extraIgnoredArgs: {
+        "mini-a": true,
+        exec: true,
+        agent: true,
+        init: true,
+        "__id": true,
+        objid: true,
+        execid: true,
+        "__modeapplied": true,
+        "__unknownargsreported": true
+      },
       logger: function(message) { logWarn(message) }
     })
 

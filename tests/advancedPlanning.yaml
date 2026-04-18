@@ -37,6 +37,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testPlanValidation
 
+- name: MiniA Tests::ValidationShellAlias
+  from: MiniA Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPlanValidationAliasesBashRequirementToShell
+
 - name: MiniA Tests::DynamicReplan
   from: MiniA Tests::Init
   to  : oJob Test
@@ -57,4 +62,5 @@ todo:
 - MiniA Tests::SimplePlan
 - MiniA Tests::TreePlan
 - MiniA Tests::Validation
+- MiniA Tests::ValidationShellAlias
 - MiniA Tests::DynamicReplan

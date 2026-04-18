@@ -88,6 +88,25 @@
     ow.test.assert(blocked === true, true, "Validation should block unavailable steps")
   }
 
+  exports.testPlanValidationAliasesBashRequirementToShell = function() {
+    var agent = createAgent()
+    var plan = {
+      version: 2,
+      steps: [
+        {
+          id: "1",
+          title: "Collect diagnostics",
+          status: "pending",
+          requires: ["bash"]
+        }
+      ]
+    }
+
+    var result = agent._validatePlanStructure(plan, { useshell: true })
+    ow.test.assert(result.valid === true, true, "bash requirement should be satisfied by shell access when no bash tool exists")
+    ow.test.assert(plan.steps[0].status !== "blocked", true, "Aliased shell requirement should not block the plan")
+  }
+
   exports.testDynamicReplanning = function() {
     var agent = createAgent()
     var goal = "Draft meeting notes"

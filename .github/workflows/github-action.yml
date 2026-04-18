@@ -20,7 +20,7 @@ jobs:
     - name: Cache OpenAF runtime
       uses: actions/cache@v3
       with:
-        key : oaf-nightly
+        key : oaf-t8
         path: /tmp/oaf
         
     # -------------------------
@@ -32,11 +32,11 @@ jobs:
       with:
         script: | #js
           ow.loadFormat()
-          oPack("genpack . --exclude .github")
+          oPack("genpack . --exclude .github,tests")
           var pack = io.readFileYAML(".package.yaml")
           pack.version = ow.format.fromDate(new Date(), "yyyyMMdd")
           io.writeFileYAML(".package.yaml", pack)
-        dist  : 'nightly'
+        dist  : 't8'
         
     # --------------------------
     - name: Update version badge

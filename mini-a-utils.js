@@ -2783,7 +2783,10 @@ MiniUtilsTool.prototype._askStruct = function(questions) {
  */
 MiniUtilsTool.prototype.showMessage = function(params) {
   params = params || {}
+  // Some models incorrectly reuse the userInput shape and send `prompt`.
+  // Accept it as a compatibility alias so status messages still render.
   var message = isString(params.message) ? params.message : ""
+  if (message.length === 0 && isString(params.prompt)) message = params.prompt
   if (message.length === 0) return "[ERROR] message is required"
 
   var level = isString(params.level) ? params.level.toLowerCase().trim() : "info"

@@ -12,6 +12,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testExtractEmbeddedFinalAction
 
+- name: MiniA Core Tests::ShellToolCallAliasFallsBackToShell
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testShellToolCallAliasFallsBackToShell
+
+- name: MiniA Core Tests::ShellToolCallAliasPreservesRealBashTool
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testShellToolCallAliasPreservesRealBashTool
+
+- name: MiniA Core Tests::ShellToolCallAliasWorksInProxyMode
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testShellToolCallAliasWorksInProxyMode
+
 - name: MiniA Core Tests::ProcessFinalAnswerJson
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -76,6 +91,16 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testNormalizeToolResultVariants
+
+- name: MiniA Core Tests::ToolStepLabelFallback
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveToolExecutionStepLabelFallsBackToRuntimeStep
+
+- name: MiniA Core Tests::HookFinalizationSkipsPreparedToolContexts
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testHookFinalizationSkipsPreparedToolContexts
 
 - name: MiniA Core Tests::PromptProfileHelpers
   from: MiniA Core Tests::Init
@@ -262,6 +287,9 @@ ojob:
 todo:
 - MiniA Core Tests::CleanCodeBlocks
 - MiniA Core Tests::ExtractFinalAction
+- MiniA Core Tests::ShellToolCallAliasFallsBackToShell
+- MiniA Core Tests::ShellToolCallAliasPreservesRealBashTool
+- MiniA Core Tests::ShellToolCallAliasWorksInProxyMode
 - MiniA Core Tests::ProcessFinalAnswerJson
 - MiniA Core Tests::ProcessFinalAnswerOutfileJson
 - MiniA Core Tests::ProcessFinalAnswerYaml
@@ -275,6 +303,8 @@ todo:
 - MiniA Core Tests::CategorizeError
 - MiniA Core Tests::ErrorHistory
 - MiniA Core Tests::NormalizeToolResult
+- MiniA Core Tests::ToolStepLabelFallback
+- MiniA Core Tests::HookFinalizationSkipsPreparedToolContexts
 - MiniA Core Tests::PromptProfileHelpers
 - MiniA Core Tests::ToolSchemaSummaryCompaction
 - MiniA Core Tests::SystemPromptBudget

@@ -559,6 +559,25 @@
     }
   }
 
+  exports.testShowMessageAcceptsPromptAlias = function() {
+    var tool = new MiniUtilsTool()
+    var originalPrint = print
+    var originalPrintErr = printErr
+
+    try {
+      print = function() {}
+      printErr = function() {}
+
+      var result = tool.showMessage({ prompt: "Compatibility alias message", level: "info" })
+      ow.test.assert(isMap(result), true, "Should return a result map for prompt alias")
+      ow.test.assert(result.displayed === true, true, "Should render output when prompt alias is provided")
+      ow.test.assert(result.message === "Compatibility alias message", true, "Should preserve prompt alias as the rendered message")
+    } finally {
+      print = originalPrint
+      printErr = originalPrintErr
+    }
+  }
+
   exports.testPathSecurity = function() {
     var testDir = createTestDir()
     var outsideDir = createTestDir()
