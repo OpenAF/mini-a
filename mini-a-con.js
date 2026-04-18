@@ -4682,9 +4682,12 @@ try {
     function formatAlignedHelpLines(commandText, descriptionText, commandColumnWidth, maxLineWidth) {
       var commandLabel = isString(commandText) ? commandText : String(commandText)
       var descriptionLabel = isString(descriptionText) ? descriptionText : String(descriptionText)
-      var padSize = Math.max(2, commandColumnWidth - commandLabel.length + 2)
+      // Keep a fixed spacer between the command label and wrapped help text.
+      // Tabs expand inconsistently in the console table renderer and trigger early wraps.
+      var minSpacing = 3
+      var padSize = Math.max(minSpacing, commandColumnWidth - commandLabel.length + minSpacing)
       var leftPrefix = "  "
-      var continuationPrefix = leftPrefix + repeat(commandColumnWidth + 2, " ")
+      var continuationPrefix = leftPrefix + repeat(commandColumnWidth + minSpacing, " ")
       var firstLinePrefixWidth = leftPrefix.length + commandLabel.length + padSize
       var continuationPrefixWidth = continuationPrefix.length
       var firstLineWidth = Math.max(8, maxLineWidth - firstLinePrefixWidth)
@@ -4742,31 +4745,33 @@ try {
       "• Conversation is stored at " + colorifyText(conversationDisplay, accentColor) + " (clear with /clear).",
       "• Saved history files live under " + colorifyText(historyDisplay, accentColor) + " when " + colorifyText("historykeep=true", accentColor) + colorifyText(".", hintColor),
       "",
-      "Commands (prefix with '/'):",
-      "  " + colorifyText("/help", "BOLD") + colorifyText("               Show this help message", hintColor),
-      "  " + colorifyText("/set", "BOLD") + colorifyText(" <key> <value>  Update a Mini-A parameter (use '", hintColor) + colorifyText("\"\"\"", accentColor) + colorifyText("' for multi-line values)", hintColor),
-      "  " + colorifyText("/toggle", "BOLD") + colorifyText(" <key>       Toggle boolean parameter", hintColor),
-      "  " + colorifyText("/unset", "BOLD") + colorifyText(" <key>        Clear a parameter", hintColor),
-      "  " + colorifyText("/show", "BOLD") + colorifyText(" [prefix]      Display configured parameters (filtered by prefix)", hintColor),
-      "  " + colorifyText("/reset", "BOLD") + colorifyText("              Restore default parameters", hintColor),
-      "  " + colorifyText("/restore", "BOLD") + colorifyText("            Restore a saved conversation like resume=true", hintColor),
-      "  " + colorifyText("/last", "BOLD") + colorifyText(" [md]          Print the previous final answer (md: raw markdown)", hintColor),
-      "  " + colorifyText("/save", "BOLD") + colorifyText(" [file.md]     Save the last response to a file (default: response.md)", hintColor),
-      "  " + colorifyText("/clear", "BOLD") + colorifyText("              Reset the ongoing conversation and accumulated metrics", hintColor),
-      "  " + colorifyText("/cls", "BOLD") + colorifyText("                Clear the console screen", hintColor),
-      "  " + colorifyText("/context", "BOLD") + colorifyText("            Visualize conversation/context size", hintColor),
-      "  " + colorifyText("/compact", "BOLD") + colorifyText(" [n]        Summarize old context, keep last n messages", hintColor),
-      "  " + colorifyText("/summarize", "BOLD") + colorifyText(" [n]      Compact and display an LLM-generated conversation summary", hintColor),
-      "  " + colorifyText("/history", "BOLD") + colorifyText(" [n]        Show the last n user goals (one per line)", hintColor),
-      "  " + colorifyText("/model", "BOLD") + colorifyText(" [target]     Choose a different model (target: model, modellc or modelval)", hintColor),
-      "  " + colorifyText("/models", "BOLD") + colorifyText("             List current main, low and validation models", hintColor),
-      "  " + colorifyText("/stats", "BOLD") + colorifyText(" [mode] [out=file.json]  Show session statistics (modes: detailed, tools, memory)", hintColor),
-      "  " + colorifyText("/skills", "BOLD") + colorifyText(" [prefix]    List discovered skills (optionally filtered by prefix)", hintColor),
-      "  " + colorifyText("/delegate", "BOLD") + colorifyText(" <goal>    Delegate a sub-goal to a child agent (requires usedelegation=true)", hintColor),
-      "  " + colorifyText("/subtasks", "BOLD") + colorifyText("           List all subtasks and their status", hintColor),
-      "  " + colorifyText("/subtask", "BOLD") + colorifyText(" <id>       Show details for a subtask", hintColor),
-      "  " + colorifyText("/exit", "BOLD") + colorifyText("               Leave the console", hintColor)
+      "Commands (prefix with '/'):"
     ]
+    appendAlignedHelpRows(lines, [
+      { command: "/help", description: "Show this help message" },
+      { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
+      { command: "/toggle <key>", description: "Toggle boolean parameter" },
+      { command: "/unset <key>", description: "Clear a parameter" },
+      { command: "/show [prefix]", description: "Display configured parameters (filtered by prefix)" },
+      { command: "/reset", description: "Restore default parameters" },
+      { command: "/restore", description: "Restore a saved conversation like resume=true" },
+      { command: "/last [md]", description: "Print the previous final answer (md: raw markdown)" },
+      { command: "/save [file.md]", description: "Save the last response to a file (default: response.md)" },
+      { command: "/clear", description: "Reset the ongoing conversation and accumulated metrics" },
+      { command: "/cls", description: "Clear the console screen" },
+      { command: "/context", description: "Visualize conversation/context size" },
+      { command: "/compact [n]", description: "Summarize old context, keep last n messages" },
+      { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
+      { command: "/history [n]", description: "Show the last n user goals (one per line)" },
+      { command: "/model [target]", description: "Choose a different model (target: model, modellc or modelval)" },
+      { command: "/models", description: "List current main, low and validation models" },
+      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory)" },
+      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
+      { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
+      { command: "/subtasks", description: "List all subtasks and their status" },
+      { command: "/subtask <id>", description: "Show details for a subtask" },
+      { command: "/exit", description: "Leave the console" }
+    ])
     var commandNames = Object.keys(customSlashCommands).sort()
     if (commandNames.length > 0) {
       lines.push("")
