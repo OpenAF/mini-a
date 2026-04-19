@@ -311,18 +311,12 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Add top-level "parallel": true to run all actions simultaneously{{#if useshell}} (shell commands execute in parallel){{/if}}
 {{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
-## WHEN TO USE ACTION ARRAYS:{{#if useshell}}
-• Running multiple shell commands{{/if}}{{#if actionsList}}
-• Executing multiple custom actions{{/if}}
-{{#if usetoolsActual}}• **NOT for MCP tools** - use function calling for those{{/if}}
-
 {{#if useMcpProxy}}
 {{#if usetoolsActual}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH FUNCTION CALLING):
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-{{#if shellViaActionPreferred}}• This function-calling rule applies to non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
@@ -346,18 +340,12 @@ Arguments: {
   }
 }
 
-### Listing available tools:
-Function name: "proxy-dispatch"
-Arguments: {
-  "action": "list",
-  "includeTools": true
-}
+• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}
 {{else}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH ACTION-BASED):
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • Call the proxy-dispatch tool through the JSON "action" field
-{{#if shellViaActionPreferred}}• This proxy-dispatch path is for non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "proxy-dispatch" | "final"
 
 ### How to call MCP tools:
@@ -390,7 +378,6 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 ## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
 • {{toolCount}} MCP tools are available via direct function calling
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-{{#if shellViaActionPreferred}}• This function-calling rule applies to non-shell MCP tools. Shell commands still use "action":"shell" with top-level "command".{{/if}}
 • The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
 • Each tool has its own function signature - call tools directly by their name
 • Tool schemas are provided via the tool interface, so keep prompts concise.
@@ -408,7 +395,6 @@ Arguments: {
 ## MCP TOOL ACCESS (ACTION-BASED):
 • {{toolCount}} MCP tools are available as action types
 • Call MCP tools through the JSON "action" field, just like shell or custom actions
-{{#if shellViaActionPreferred}}• For shell commands, use "action":"shell" with top-level "command"; reserve MCP action names for non-shell tools.{{/if}}
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | [MCP tool name] | "final"
 
 ### How to call MCP tools:
@@ -429,9 +415,6 @@ Use the action field with the tool name and provide parameters in the params fie
 }
 {{/if}}{{/if}}
 {{/if}}
-## STATE MANAGEMENT:
-• You can persist and update structured state in the 'state' object at each step.
-• To do this, include a top-level "state" field in your response, which will be passed to subsequent steps.
 
 {{#if planning}}
 ## PLANNING:
@@ -499,32 +482,24 @@ REMAINING (do not work on these yet):
 ### Example 1: Direct Knowledge (GOOD - minimal thought)
 **Prompt**: GOAL: what is the capital of France?
 **Response**:
-\`\`\`
 { "thought": "I know this directly", "action": "final", "answer": "The capital of France is Paris." }
-\`\`\`
 
 ### Example 2: Tool Usage (GOOD - action-oriented){{#if useshell}}
 **Prompt**: GOAL: what files are in the current directory?
 **Response**:
-\`\`\`
-{ "thought": "list directory", "action": "shell", "command": "ls -la" }
-\`\`\`{{/if}}
+{ "thought": "list directory", "action": "shell", "command": "ls -la" }{{/if}}
 
 ### Example 3: Overthinking (BAD - avoid this)
 **Prompt**: GOAL: what is the capital of France?
 **Response** ❌:
-\`\`\`
 { "thought": "The user is asking for the capital of France. I know this information directly without needing to use any tools or commands. The goal is achieved and I should provide the final answer with the information.", "action": "final", "answer": "The capital of France is Paris." }
-\`\`\`
 {{#if useMcpProxy}}
 {{#if usetoolsActual}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Step 1 - JSON Response**:
-\`\`\`
 { "thought": "Search for CNN RSS feed", "action": "think" }
-\`\`\`
 **Step 1 - Function Call** (separate from JSON):
 \`\`\`
 Function: "proxy-dispatch"
@@ -535,29 +510,21 @@ Arguments: {
 }
 \`\`\`
 **Step 2 - After receiving tool result**:
-\`\`\`
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-\`\`\`
 
 ### Example 5: MCP Tool Usage (WRONG - Don't do this)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Response** ❌:
-\`\`\`
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
-\`\`\`
 **Why wrong**: MCP tools cannot be invoked directly. You must use function calling with "proxy-dispatch".
 {{else}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Action-Based)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Response**:
-\`\`\`
 { "thought": "Search for CNN RSS feed", "action": "proxy-dispatch", "params": {"action": "call", "tool": "find-rss-url", "arguments": {"query": "CNN"}} }
-\`\`\`
 **After receiving result**:
-\`\`\`
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-\`\`\`
 {{/if}}
 {{else}}
 {{#if usetoolsActual}}
@@ -565,9 +532,7 @@ Arguments: {
 ### Example 4: MCP Tool Usage (CORRECT - Direct Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Step 1 - JSON Response**:
-\`\`\`
 { "thought": "Search for CNN RSS feed", "action": "think" }
-\`\`\`
 **Step 1 - Function Call** (separate from JSON):
 \`\`\`
 Function: "find-rss-url"
@@ -576,29 +541,21 @@ Arguments: {
 }
 \`\`\`
 **Step 2 - After receiving tool result**:
-\`\`\`
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-\`\`\`
 
 ### Example 5: MCP Tool Usage (WRONG - Don't do this)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Response** ❌:
-\`\`\`
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
-\`\`\`
 **Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with the tool name.
 {{else}}{{#if usetools}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Action-Based)
 **Prompt**: GOAL: check if CNN has an RSS feed
 **Response**:
-\`\`\`
 { "thought": "Search for CNN RSS feed", "action": "find-rss-url", "params": {"query": "CNN"} }
-\`\`\`
 **After receiving result**:
-\`\`\`
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-\`\`\`
 {{/if}}{{/if}}
 {{/if}}
 {{/if}}
@@ -648,7 +605,7 @@ You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through 
 {{/if}}
 
 ### TOOL CALLING STEPS
-• If you truly need a tool, reply with a single JSON object following this schema: {"thought":"why the tool is needed","action":"<tool name>","params":{...}}.
+• If you truly need a tool, reply with a JSON object following this schema: {"thought":"why the tool is needed","action":"<tool name>","params":{...}}.
 • The "action" must match one of the available tool names exactly; "params" must be a JSON object with the required fields.
 {{#if shellViaActionPreferred}}• Exception: for shell commands use {"thought":"...","action":"shell","command":"..."} (top-level "command", not params.command).{{/if}}
 • After you receive the tool result, continue answering in natural language (use JSON again only if you need another tool).
@@ -14566,7 +14523,7 @@ MiniA.prototype.init = function(args) {
         useWiki         : args.usewiki && isObject(this._wikiManager)
       })
 
-      var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
+      var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 8 : 7) + ". " + rule)
 
       // Build step context for simple plan style
       var simplePlanStyle = this._isSimplePlanStyle()
