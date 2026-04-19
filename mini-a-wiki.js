@@ -6,50 +6,23 @@ var MiniAWikiManager = function(config, loggerFn) {
   this._logFn  = isFunction(loggerFn) ? loggerFn : function() {}
   this._config = {}
   this._backend = __
-  this.list = function(prefix) {
-    var pfx = isString(prefix) ? prefix : ""
-    if (this._backendType === "fs" && isObject(this._backend) && isString(this._backend.root)) {
-      try {
-        var sep = String(java.io.File.separator)
-        var root = String(this._backend.root)
-        var normalizedPrefix = isDef(pfx) ? String(pfx).trim().replace(/\\/g, "/") : ""
-        if (normalizedPrefix.startsWith("./")) normalizedPrefix = normalizedPrefix.substring(2)
-        while (normalizedPrefix.startsWith("/")) normalizedPrefix = normalizedPrefix.substring(1)
-        if (normalizedPrefix.length > 0 && !normalizedPrefix.endsWith("/")) normalizedPrefix = normalizedPrefix + "/"
-        var dir = normalizedPrefix.length > 0 ? String(new java.io.File(root, normalizedPrefix).getCanonicalPath()) : root
-        var rootPrefix = root.endsWith(sep) ? root : root + sep
-        if (dir !== root && dir.indexOf(rootPrefix) !== 0) return []
-        if (!io.fileExists(dir) || io.fileInfo(dir).isDirectory !== true) return []
-        var dirPrefix = dir.endsWith(sep) ? dir : dir + sep
-        var raw = []
-        try { raw = af.fromJavaArray(listFilesRecursive(dir)) } catch(ignoreListRecursiveErr) { raw = [] }
-        if (!isArray(raw)) raw = []
-        var selected = $from(raw)
-          .equals("isFile", true)
-          .ends("canonicalPath", ".md")
-          .match("canonicalPath", "^" + dirPrefix.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"))
-          .select(function(entry) {
-            return normalizedPrefix + String(entry.canonicalPath).substring(dirPrefix.length).replace(/\\/g, "/")
-          })
-        var dedup = []
-        var seen = {}
-        selected.forEach(function(page) {
-          if (!isString(page) || page.length === 0 || seen[page] === true) return
-          seen[page] = true
-          dedup.push(page)
-        })
-        return dedup.sort()
-      } catch(ignoreFsListErr) {
-        return []
-      }
-    }
-    return this._backend.list(pfx)
-  }
   this.configure(config)
 }
 
+MiniAWikiManager.prototype.list = function(prefix) {
+  var pfx = isString(prefix) ? prefix : ""
+  if (this._backendType === "fs" && isMap(this._backend) && isDef(this._backend.root)) {
+    try {
+      return __miniAWikiFsList(io.fileInfo(String(this._backend.root)).isDirectory === true ? String(this._backend.root) : ".", pfx, String(java.io.File.separator))
+    } catch(e) {
+      return []
+    }
+  }
+  return this._backend.list(pfx)
+}
+
 MiniAWikiManager.prototype.configure = function(config) {
-  var cfg = isObject(config) ? config : {}
+  var cfg = isMap(config) ? config : {}
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
@@ -207,8 +180,7 @@ var __miniAWikiFsList = function(dir, normalizedPrefix, sep) {
   if (!io.fileExists(dir) || io.fileInfo(dir).isDirectory !== true) return []
 
   var dirPrefix = dir.endsWith(sep) ? dir : dir + sep
-  var raw = []
-  try { raw = af.fromJavaArray(listFilesRecursive(dir)) } catch(ignoreListRecursiveErr) { raw = [] }
+  var raw = listFilesRecursive(dir)
   if (!isArray(raw)) raw = []
 
   var selected = $from(raw)
@@ -219,11 +191,7 @@ var __miniAWikiFsList = function(dir, normalizedPrefix, sep) {
       return normalizedPrefix + String(entry.canonicalPath).substring(dirPrefix.length).replace(/\\/g, "/")
     })
 
-  var results = []
-  if (isArray(selected)) results = selected
-  else if (isDef(selected) && isDef(selected.length) && !isString(selected)) {
-    for (var i = 0; i < Number(selected.length); i++) results.push(selected[i])
-  }
+  var results = isArray(selected) ? selected : (isDef(selected) && isDef(selected.length) && !isString(selected) ? af.fromJavaArray(selected) : [])
 
   var dedup = []
   var seen = {}
@@ -413,48 +381,6 @@ MiniAWikiManager.prototype._isNearDuplicate = function(a, b) {
   return (overlap / denom) >= 0.85
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-MiniAWikiManager.prototype.list = new Function("prefix", [
-  'var pfx = isString(prefix) ? prefix : ""',
-  'if (this._backendType === "fs" && isObject(this._backend) && isString(this._backend.root)) {',
-  '  try {',
-  '    var sep = String(java.io.File.separator)',
-  '    var root = String(this._backend.root)',
-  '    var normalizedPrefix = isDef(pfx) ? String(pfx).trim().replace(/\\\\/g, "/") : ""',
-  '    if (normalizedPrefix.startsWith("./")) normalizedPrefix = normalizedPrefix.substring(2)',
-  '    while (normalizedPrefix.startsWith("/")) normalizedPrefix = normalizedPrefix.substring(1)',
-  '    if (normalizedPrefix.length > 0 && !normalizedPrefix.endsWith("/")) normalizedPrefix = normalizedPrefix + "/"',
-  '    var dir = normalizedPrefix.length > 0 ? String(new java.io.File(root, normalizedPrefix).getCanonicalPath()) : root',
-  '    var rootPrefix = root.endsWith(sep) ? root : root + sep',
-  '    if (dir !== root && dir.indexOf(rootPrefix) !== 0) return []',
-  '    if (!io.fileExists(dir) || io.fileInfo(dir).isDirectory !== true) return []',
-  '    var dirPrefix = dir.endsWith(sep) ? dir : dir + sep',
-  '    var raw = []',
-  '    try { raw = af.fromJavaArray(listFilesRecursive(dir)) } catch(ignoreListRecursiveErr) { raw = [] }',
-  '    if (!isArray(raw)) raw = []',
-  '    var selected = $from(raw)',
-  '      .equals("isFile", true)',
-  '      .ends("canonicalPath", ".md")',
-  '      .match("canonicalPath", "^" + dirPrefix.replace(/([.*+?^${}()|[\\\\]\\\\])/g, "\\\\$1"))',
-  '      .select(function(entry) {',
-  '        return normalizedPrefix + String(entry.canonicalPath).substring(dirPrefix.length).replace(/\\\\/g, "/")',
-  '      })',
-  '    var dedup = []',
-  '    var seen = {}',
-  '    selected.forEach(function(page) {',
-  '      if (!isString(page) || page.length === 0 || seen[page] === true) return',
-  '      seen[page] = true',
-  '      dedup.push(page)',
-  '    })',
-  '    return dedup.sort()',
-  '  } catch(ignoreFsListErr) {',
-  '    return []',
-  '  }',
-  '}',
-  'return this._backend.list(pfx)'
-].join("\n"))
-
 MiniAWikiManager.prototype.read = function(path) {
   if (!isString(path) || path.trim().length === 0) return __
   var raw = this._backend.read(path.trim())
@@ -467,40 +393,35 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
   path = path.trim()
-  var content
+
+  var meta, bodyText, parsedRaw
   if (isUnDef(body) && isString(metaOrRaw)) {
-    var parsedRaw = this.parseFrontmatter(metaOrRaw)
-    var meta = isObject(parsedRaw.meta) ? parsedRaw.meta : {}
-    var now = new Date().toISOString()
-    var existingRaw = this.read(path)
-    if (!meta.created) {
-      meta.created = (isObject(existingRaw) && isObject(existingRaw.meta) && existingRaw.meta.created)
-        ? existingRaw.meta.created : now
-    }
-    meta.updated = now
-    if (!isString(meta.title) || meta.title.trim().length === 0) {
-      if (isObject(existingRaw) && isObject(existingRaw.meta) && isString(existingRaw.meta.title) && existingRaw.meta.title.trim().length > 0) {
-        meta.title = existingRaw.meta.title.trim()
-      } else {
-        meta.title = path.replace(/\.md$/, "").replace(/[-_/]/g, " ")
-      }
-    }
-    content = this._serializeFrontmatter(meta, parsedRaw.body)
+    parsedRaw = this.parseFrontmatter(metaOrRaw)
+    meta = isObject(parsedRaw.meta) ? parsedRaw.meta : {}
+    bodyText = parsedRaw.body
   } else {
-    var meta = isObject(metaOrRaw) ? metaOrRaw : {}
-    var now = new Date().toISOString()
-    if (!meta.created) {
-      var existing = this.read(path)
-      meta.created = (isObject(existing) && isObject(existing.meta) && existing.meta.created)
-        ? existing.meta.created : now
-    }
-    meta.updated = now
-    if (!isString(meta.title) || meta.title.length === 0) {
+    meta = isObject(metaOrRaw) ? metaOrRaw : {}
+    bodyText = isString(body) ? body : ""
+  }
+
+  var now = new Date().toISOString()
+  var existing = this.read(path)
+
+  if (!meta.created) {
+    meta.created = (isObject(existing) && isObject(existing.meta) && existing.meta.created) ? existing.meta.created : now
+  }
+  meta.updated = now
+
+  if (!isString(meta.title) || meta.title.trim().length === 0) {
+    if (isObject(existing) && isObject(existing.meta) && isString(existing.meta.title) && existing.meta.title.trim().length > 0) {
+      meta.title = existing.meta.title.trim()
+    } else {
       meta.title = path.replace(/\.md$/, "").replace(/[-_/]/g, " ")
     }
-    content = this._serializeFrontmatter(meta, isString(body) ? body : "")
   }
+
   try {
+    var content = this._serializeFrontmatter(meta, bodyText)
     this._backend.write(path, content)
     return { ok: true, path: path }
   } catch(e) {
@@ -537,7 +458,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
 MiniAWikiManager.prototype.lint = function(memoryManager, options) {
   var opts      = isObject(options) ? options : {}
   var staleDays = isNumber(opts.staleDays) ? opts.staleDays : 90
-  var pages     = this.list("")
+  var pages     = this.list("").filter(p => p != "AGENTS.md") // skip AGENTS.md since it's more of a policy doc than a content page
   var issues    = []
   var pageData  = {}   // path -> { meta, body, links }
   var incomingCount = {}
@@ -563,7 +484,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     var pd = pageData[p]
     if (!pd) return
 
-    // 1. Broken internal links
+    // Check 1: Broken internal links
     pd.links.forEach(function(target) {
       var exists = self._backend.exists(target)
       if (!exists) {
@@ -574,7 +495,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
       }
     })
 
-    // 2. Missing front-matter fields
+    // Check 2: Missing front-matter fields
     if (!isString(pd.meta.title) || pd.meta.title.trim().length === 0) {
       issues.push({ severity: "warning", type: "missing_frontmatter", page: p, field: "title" })
     }
@@ -582,7 +503,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
       issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "description" })
     }
 
-    // 4. Heading hierarchy
+    // Check 3: Heading hierarchy
     var h2seen = false, h3seen = false
     pd.body.split("\n").forEach(function(line) {
       if (/^## /.test(line)) h2seen = true
@@ -595,7 +516,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
       }
     })
 
-    // 6. Stale pages
+    // Check 4: Stale pages
     if (staleDays > 0) {
       var rawAnchor = isDef(pd.meta.updated) ? pd.meta.updated : (isDef(pd.meta.created) ? pd.meta.created : __)
       if (isDef(rawAnchor)) {
@@ -613,7 +534,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   })
 
-  // 3. Orphaned pages (no incoming links — skip index-like files)
+  // Check 5: Orphaned pages (no incoming links — skip index-like files)
   pages.forEach(function(p) {
     var name = p.replace(/.*\//, "").toLowerCase()
     if (name === "index.md" || name === "readme.md") return
@@ -622,7 +543,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   })
 
-  // 5. Near-duplicate page bodies
+  // Check 6: Near-duplicate page bodies
   var pageList = Object.keys(pageData)
   for (var i = 0; i < pageList.length; i++) {
     for (var j = i + 1; j < pageList.length; j++) {
@@ -634,7 +555,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   }
 
-  // 7. Memory cross-check (optional)
+  // Check 7: Memory cross-check (optional)
   if (isObject(memoryManager) && isFunction(memoryManager.getSectionEntries)) {
     var factSections = ["facts", "decisions"]
     factSections.forEach(function(section) {
