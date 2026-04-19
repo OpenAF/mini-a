@@ -391,40 +391,180 @@ MiniAWikiManager.prototype._isNearDuplicate = function(a, b) {
   return (overlap / denom) >= 0.85
 }
 
-MiniAWikiManager.prototype.read = function(path) {
+// _sliceLines: slice an array of raw lines by range or section name.
+// Returns { linesTotal, lineStart, lineEnd, linesRead, content } or { linesTotal } for countLines.
+MiniAWikiManager.prototype._sliceLines = function(lines, options) {
+  var total = lines.length
+  var opts  = isObject(options) ? options : {}
+
+  if (opts.countLines === true) return { linesTotal: total }
+
+  var start, end
+
+  if (isString(opts.section) && opts.section.trim().length > 0) {
+    var sectionName  = opts.section.trim().toLowerCase()
+    var sectionStart = -1
+    var sectionLevel = 0
+    for (var i = 0; i < lines.length; i++) {
+      var sm = /^(#{1,6})\s+(.+)/.exec(lines[i])
+      if (sm && sm[2].trim().toLowerCase().indexOf(sectionName) >= 0) {
+        sectionStart = i; sectionLevel = sm[1].length; break
+      }
+    }
+    if (sectionStart < 0) return { linesTotal: total, lineStart: 0, lineEnd: 0, linesRead: 0, content: "" }
+    var sectionEnd = lines.length
+    for (var j = sectionStart + 1; j < lines.length; j++) {
+      var em = /^(#{1,6})\s+/.exec(lines[j])
+      if (em && em[1].length <= sectionLevel) { sectionEnd = j; break }
+    }
+    start = sectionStart
+    end   = sectionEnd - 1
+  } else {
+    start = isNumber(opts.lineStart) && opts.lineStart > 0 ? opts.lineStart - 1 : 0
+    if (isNumber(opts.maxLines) && opts.maxLines > 0) {
+      end = start + opts.maxLines - 1
+    } else if (isNumber(opts.lineEnd) && opts.lineEnd > 0) {
+      end = opts.lineEnd - 1
+    } else {
+      end = lines.length - 1
+    }
+  }
+
+  if (start < 0) start = 0
+  end = Math.min(end, lines.length - 1)
+  if (start > end) end = start
+
+  var sliced = lines.slice(start, end + 1)
+  return {
+    linesTotal: total,
+    lineStart : start + 1,
+    lineEnd   : end + 1,
+    linesRead : sliced.length,
+    content   : sliced.join("\n")
+  }
+}
+
+MiniAWikiManager.prototype.read = function(path, options) {
   if (!isString(path) || path.trim().length === 0) return __
   var raw = this._backend.read(path.trim())
   if (isUnDef(raw)) return __
   var parsed = this.parseFrontmatter(raw)
-  return { path: path.trim(), meta: parsed.meta, body: parsed.body, raw: raw }
+
+  var opts = isObject(options) ? options : {}
+  var hasRangeOpts = opts.countLines === true
+    || (isNumber(opts.lineStart) && opts.lineStart > 0)
+    || (isNumber(opts.lineEnd)   && opts.lineEnd   > 0)
+    || (isNumber(opts.maxLines)  && opts.maxLines  > 0)
+    || (isString(opts.section)   && opts.section.trim().length > 0)
+
+  if (!hasRangeOpts) {
+    return { path: path.trim(), meta: parsed.meta, body: parsed.body, raw: raw }
+  }
+
+  var lines  = raw.split("\n")
+  var sliced = this._sliceLines(lines, opts)
+
+  if (opts.countLines === true) {
+    return { path: path.trim(), meta: parsed.meta, linesTotal: sliced.linesTotal }
+  }
+
+  return {
+    path      : path.trim(),
+    meta      : parsed.meta,
+    body      : sliced.content,
+    raw       : sliced.content,
+    lineStart : sliced.lineStart,
+    lineEnd   : sliced.lineEnd,
+    linesTotal: sliced.linesTotal,
+    linesRead : sliced.linesRead
+  }
 }
 
-MiniAWikiManager.prototype.write = function(path, metaOrRaw, body) {
+MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
   path = path.trim()
 
+  var opts         = isObject(options) ? options : {}
+  var doAppend     = opts.append === true
+  var doInsert     = isNumber(opts.lineInsert) && opts.lineInsert > 0
+  var doRangeEdit  = (isNumber(opts.lineStart) && opts.lineStart > 0) || (isNumber(opts.lineEnd) && opts.lineEnd > 0)
+  var doSection    = isString(opts.section) && opts.section.trim().length > 0
+  var now          = new Date().toISOString()
+
+  if (doAppend || doInsert || doRangeEdit || doSection) {
+    var existing = this.read(path)
+    if (!isObject(existing)) return { ok: false, error: "page not found: " + path }
+
+    var rawLines   = existing.raw.split("\n")
+    var newContent = isString(metaOrRaw) ? metaOrRaw : (isString(body) ? body : "")
+    var newLines   = newContent.split("\n")
+    var resultLines
+
+    if (doAppend) {
+      resultLines = rawLines.concat(newLines)
+    } else if (doSection) {
+      var sectionName  = opts.section.trim().toLowerCase()
+      var sectionStart = -1
+      var sectionLevel = 0
+      for (var i = 0; i < rawLines.length; i++) {
+        var sm = /^(#{1,6})\s+(.+)/.exec(rawLines[i])
+        if (sm && sm[2].trim().toLowerCase().indexOf(sectionName) >= 0) {
+          sectionStart = i; sectionLevel = sm[1].length; break
+        }
+      }
+      if (sectionStart < 0) return { ok: false, error: "section not found: " + opts.section }
+      var sectionEnd = rawLines.length
+      for (var j = sectionStart + 1; j < rawLines.length; j++) {
+        var em = /^(#{1,6})\s+/.exec(rawLines[j])
+        if (em && em[1].length <= sectionLevel) { sectionEnd = j; break }
+      }
+      resultLines = rawLines.slice(0, sectionStart + 1).concat(newLines).concat(rawLines.slice(sectionEnd))
+    } else if (doInsert) {
+      var insertAt = Math.max(0, Math.min(opts.lineInsert - 1, rawLines.length))
+      resultLines  = rawLines.slice(0, insertAt).concat(newLines).concat(rawLines.slice(insertAt))
+    } else {
+      var replStart = isNumber(opts.lineStart) && opts.lineStart > 0 ? opts.lineStart - 1 : 0
+      var replEnd   = isNumber(opts.lineEnd)   && opts.lineEnd   > 0 ? opts.lineEnd        : replStart + 1
+      replEnd       = Math.min(replEnd, rawLines.length)
+      resultLines   = rawLines.slice(0, replStart).concat(newLines).concat(rawLines.slice(replEnd))
+    }
+
+    var fullRaw   = resultLines.join("\n")
+    var reparsed  = this.parseFrontmatter(fullRaw)
+    var updatedMeta = (isObject(reparsed.meta) && Object.keys(reparsed.meta).length > 0)
+      ? reparsed.meta : (isObject(existing.meta) ? existing.meta : {})
+    if (!updatedMeta.created && isObject(existing.meta) && existing.meta.created) updatedMeta.created = existing.meta.created
+    updatedMeta.updated = now
+
+    try {
+      this._backend.write(path, this._serializeFrontmatter(updatedMeta, reparsed.body))
+      return { ok: true, path: path }
+    } catch(e) {
+      return { ok: false, error: __miniAErrMsg(e) }
+    }
+  }
+
+  // Full-page write (existing behavior)
   var meta, bodyText, parsedRaw
   if (isUnDef(body) && isString(metaOrRaw)) {
     parsedRaw = this.parseFrontmatter(metaOrRaw)
-    meta = isObject(parsedRaw.meta) ? parsedRaw.meta : {}
-    bodyText = parsedRaw.body
+    meta      = isObject(parsedRaw.meta) ? parsedRaw.meta : {}
+    bodyText  = parsedRaw.body
   } else {
-    meta = isObject(metaOrRaw) ? metaOrRaw : {}
+    meta     = isObject(metaOrRaw) ? metaOrRaw : {}
     bodyText = isString(body) ? body : ""
   }
 
-  var now = new Date().toISOString()
-  var existing = this.read(path)
-
+  var existingPage = this.read(path)
   if (!meta.created) {
-    meta.created = (isObject(existing) && isObject(existing.meta) && existing.meta.created) ? existing.meta.created : now
+    meta.created = (isObject(existingPage) && isObject(existingPage.meta) && existingPage.meta.created) ? existingPage.meta.created : now
   }
   meta.updated = now
 
   if (!isString(meta.title) || meta.title.trim().length === 0) {
-    if (isObject(existing) && isObject(existing.meta) && isString(existing.meta.title) && existing.meta.title.trim().length > 0) {
-      meta.title = existing.meta.title.trim()
+    if (isObject(existingPage) && isObject(existingPage.meta) && isString(existingPage.meta.title) && existingPage.meta.title.trim().length > 0) {
+      meta.title = existingPage.meta.title.trim()
     } else {
       meta.title = path.replace(/\.md$/, "").replace(/[-_/]/g, " ")
     }
@@ -456,25 +596,59 @@ MiniAWikiManager.prototype.delete = function(path) {
 
 MiniAWikiManager.prototype.search = function(query, options) {
   if (!isString(query) || query.trim().length === 0) return []
-  var opts  = isObject(options) ? options : {}
-  var q     = query.trim().toLowerCase()
-  var limit = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : 20
-  var pages = this.list("")
+  var opts       = isObject(options) ? options : {}
+  var limit      = isNumber(opts.limit)        && opts.limit        > 0 ? opts.limit        : 20
+  var contextN   = isNumber(opts.contextLines) && opts.contextLines > 0 ? Math.min(opts.contextLines, 10) : 0
+  var caseSens   = opts.caseSensitive === true
+  var searchIn   = isString(opts.searchIn) && opts.searchIn.toLowerCase() === "body" ? "body" : "all"
+  var scopedPath = isString(opts.path) && opts.path.trim().length > 0 ? opts.path.trim() : ""
+
+  var q = query.trim()
+  var pattern
+  try {
+    var re = opts.regex === true ? q : q.replace(/([.*+?^${}()|[\]\\])/g, "\\$1")
+    pattern = new RegExp(re, caseSens ? "g" : "gi")
+  } catch(e) {
+    this._logFn("warn", "Invalid regex '" + q + "', falling back to literal: " + e)
+    pattern = new RegExp(q.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"), caseSens ? "g" : "gi")
+  }
+
+  var pages   = scopedPath.length > 0 ? [scopedPath] : this.list("")
   var results = []
+
   for (var i = 0; i < pages.length && results.length < limit; i++) {
     var raw = this._backend.read(pages[i])
     if (!isString(raw)) continue
-    var lower = raw.toLowerCase()
-    var idx   = lower.indexOf(q)
-    if (idx < 0) continue
-    var parsed  = this.parseFrontmatter(raw)
-    var snippet = raw.substring(Math.max(0, idx - 60), idx + 120).replace(/\n/g, " ").trim()
-    results.push({
-      path   : pages[i],
-      title  : isString(parsed.meta.title) ? parsed.meta.title : pages[i],
-      snippet: snippet
-    })
+    var parsed = this.parseFrontmatter(raw)
+    var title  = isString(parsed.meta.title) ? parsed.meta.title : pages[i]
+    var lines  = raw.split("\n")
+
+    var bodyStartLine = 0
+    if (searchIn === "body" && raw.startsWith("---\n")) {
+      var fmEnd = raw.indexOf("\n---\n", 4)
+      if (fmEnd >= 0) {
+        bodyStartLine = raw.substring(0, fmEnd + 5).split("\n").length - 1
+      }
+    }
+
+    for (var li = bodyStartLine; li < lines.length && results.length < limit; li++) {
+      pattern.lastIndex = 0
+      var m = pattern.exec(lines[li])
+      if (!m) continue
+
+      var matchIdx = m.index
+      var snippet  = lines[li].substring(Math.max(0, matchIdx - 60), matchIdx + 120).replace(/\n/g, " ").trim()
+      if (snippet.length === 0) snippet = lines[li].substring(0, 180).trim()
+
+      var result = { path: pages[i], title: title, line: li + 1, snippet: snippet }
+      if (contextN > 0) {
+        result.contextBefore = lines.slice(Math.max(0, li - contextN), li)
+        result.contextAfter  = lines.slice(li + 1, Math.min(lines.length, li + 1 + contextN))
+      }
+      results.push(result)
+    }
   }
+
   return results
 }
 

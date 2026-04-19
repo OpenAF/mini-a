@@ -174,3 +174,78 @@ jobs:
   from: MiniA Wiki Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testFsBackendDeleteWithPath
+
+- name: MiniA Wiki Tests::SearchReturnsLineNumbers
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchReturnsLineNumbers
+
+- name: MiniA Wiki Tests::SearchWithRegex
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchWithRegex
+
+- name: MiniA Wiki Tests::SearchScopedToPath
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchScopedToPath
+
+- name: MiniA Wiki Tests::SearchWithContextLines
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchWithContextLines
+
+- name: MiniA Wiki Tests::SearchBodyOnlySkipsFrontmatter
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchBodyOnlySkipsFrontmatter
+
+- name: MiniA Wiki Tests::ReadWithLineRange
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadWithLineRange
+
+- name: MiniA Wiki Tests::ReadCountLines
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadCountLines
+
+- name: MiniA Wiki Tests::ReadSection
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadSection
+
+- name: MiniA Wiki Tests::ReadMaxLines
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadMaxLines
+
+- name: MiniA Wiki Tests::WriteAppend
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteAppend
+
+- name: MiniA Wiki Tests::WriteLineInsert
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteLineInsert
+
+- name: MiniA Wiki Tests::WriteReplaceLineRange
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteReplaceLineRange
+
+- name: MiniA Wiki Tests::WriteSection
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteSection
+
+- name: MiniA Wiki Tests::WriteSectionNotFound
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteSectionNotFound
+
+- name: MiniA Wiki Tests::WritePartialModesRequireExistingPage
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWritePartialModesRequireExistingPage

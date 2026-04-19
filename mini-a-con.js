@@ -3962,7 +3962,13 @@ try {
       _prevEventLastUpdate = now()
       if (type != "final" && type != "error") {
         var _animEventStartTime = now()
-        var _animIsInteracting = (type === "input" && message.indexOf("Interacting with") === 0) || (type === "info" && /\[(mem:(list|read|write))\]/.test(message))
+        var _animIsInteracting = (
+          type === "input" ||
+          type === "rate" ||
+          (type === "mcp" && /^(Preparing|Initializing|Analyzing|Requesting)\b/.test(message)) ||
+          (type === "info" && /^Execution of action '.+' finished (successfully|unsuccessfully)\b/.test(message)) ||
+          (type === "info" && /\[(mem:(list|read|write))\]/.test(message))
+        )
         var _animBaseMsg = _animIsInteracting ? message.replace(/\.\.\.+$/, "") : message
         _prevEventAnimatedRenderer = function(resetToDefault) {
           var cueSymbol = resetToDefault === true ? _resetActivityCueSymbol() : _nextActivityCueSymbol()

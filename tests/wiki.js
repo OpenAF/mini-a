@@ -500,5 +500,250 @@
     }
   }
 
+  // ── Search enhancements ──────────────────────────────────────────────────────
+
+  exports.testSearchReturnsLineNumbers = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nFirst line.\nSecond line.\nThird line.")
+      var hits = wm.search("Second")
+      ow.test.assert(hits.length > 0, true, "should find a hit")
+      ow.test.assert(isNumber(hits[0].line), true, "result should have line number")
+      ow.test.assert(hits[0].line > 0, true, "line number should be positive")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchWithRegex = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nError code 404 returned.\nAll good.")
+      var hits = wm.search("\\d+", { regex: true })
+      ow.test.assert(hits.length > 0, true, "regex search should find digits")
+      var noHits = wm.search("^ZZZZ$", { regex: true })
+      ow.test.assert(noHits.length, 0, "regex with no match should return empty")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchScopedToPath = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("a.md", { title: "A" }, "# A\n\nTarget keyword here.")
+      wm.write("b.md", { title: "B" }, "# B\n\nNothing relevant.")
+      var hits = wm.search("Target", { path: "a.md" })
+      ow.test.assert(hits.length > 0, true, "should find match in scoped page")
+      ow.test.assert(hits[0].path, "a.md", "result should be from scoped page")
+      var missHits = wm.search("Target", { path: "b.md" })
+      ow.test.assert(missHits.length, 0, "scoped search should not find match in other page")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchWithContextLines = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nLine one.\nLine two MATCH.\nLine three.")
+      var hits = wm.search("MATCH", { contextLines: 1 })
+      ow.test.assert(hits.length > 0, true, "should find match")
+      ow.test.assert(isArray(hits[0].contextBefore), true, "should have contextBefore")
+      ow.test.assert(isArray(hits[0].contextAfter), true, "should have contextAfter")
+      ow.test.assert(hits[0].contextBefore.length > 0, true, "contextBefore should not be empty")
+      ow.test.assert(hits[0].contextAfter.length > 0, true, "contextAfter should not be empty")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchBodyOnlySkipsFrontmatter = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "MySpecialTitle" }, "# Page\n\nBody content only.")
+      var allHits  = wm.search("MySpecialTitle", { searchIn: "all" })
+      var bodyHits = wm.search("MySpecialTitle", { searchIn: "body" })
+      ow.test.assert(allHits.length > 0, true, "all search should find title in front-matter")
+      ow.test.assert(bodyHits.length, 0, "body-only search should skip front-matter")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  // ── Read enhancements ─────────────────────────────────────────────────────────
+
+  exports.testReadWithLineRange = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nLine A.\nLine B.\nLine C.\nLine D.")
+      var full = wm.read("page.md")
+      var totalLines = full.raw.split("\n").length
+      var partial = wm.read("page.md", { lineStart: 1, lineEnd: 3 })
+      ow.test.assert(isObject(partial), true, "partial read should return object")
+      ow.test.assert(partial.linesTotal, totalLines, "linesTotal should match full file")
+      ow.test.assert(partial.linesRead, 3, "linesRead should be 3")
+      ow.test.assert(partial.lineStart, 1, "lineStart should be 1")
+      ow.test.assert(partial.lineEnd, 3, "lineEnd should be 3")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testReadCountLines = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nLine one.\nLine two.")
+      var full = wm.read("page.md")
+      var totalLines = full.raw.split("\n").length
+      var counted = wm.read("page.md", { countLines: true })
+      ow.test.assert(isObject(counted), true, "countLines result should be object")
+      ow.test.assert(counted.linesTotal, totalLines, "linesTotal should match full file line count")
+      ow.test.assert(isUnDef(counted.body) || counted.body === __, true, "body should not be included in countLines result")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testReadSection = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\n## Overview\n\nOverview content here.\n\n## Details\n\nDetail content here.")
+      var section = wm.read("page.md", { section: "Overview" })
+      ow.test.assert(isObject(section), true, "section read should return object")
+      ow.test.assert(section.body.indexOf("Overview content") >= 0, true, "should contain section content")
+      ow.test.assert(section.body.indexOf("Detail content") >= 0, false, "should not contain next section")
+      ow.test.assert(section.linesRead > 0, true, "linesRead should be positive")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testReadMaxLines = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nA.\nB.\nC.\nD.\nE.")
+      var partial = wm.read("page.md", { lineStart: 1, maxLines: 2 })
+      ow.test.assert(partial.linesRead, 2, "maxLines should limit lines read")
+      ow.test.assert(partial.lineEnd - partial.lineStart, 1, "lineEnd - lineStart should equal maxLines - 1")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  // ── Write enhancements ────────────────────────────────────────────────────────
+
+  exports.testWriteAppend = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nOriginal content.")
+      var result = wm.write("page.md", "Appended content.", __, { append: true })
+      ow.test.assert(result.ok, true, "append should succeed")
+      var page = wm.read("page.md")
+      ow.test.assert(page.body.indexOf("Original content") >= 0, true, "original content should be preserved")
+      ow.test.assert(page.body.indexOf("Appended content") >= 0, true, "appended content should be present")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testWriteLineInsert = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nLine A.\nLine C.")
+      var full = wm.read("page.md")
+      var lineCount = full.raw.split("\n").length
+      var result = wm.write("page.md", "Line B.", __, { lineInsert: lineCount - 1 })
+      ow.test.assert(result.ok, true, "lineInsert should succeed")
+      var page = wm.read("page.md")
+      var bodyLines = page.body.split("\n").filter(function(l) { return l.trim().length > 0 })
+      var aIdx = bodyLines.indexOf("Line A.")
+      var bIdx = bodyLines.indexOf("Line B.")
+      var cIdx = bodyLines.indexOf("Line C.")
+      ow.test.assert(aIdx >= 0, true, "Line A should exist")
+      ow.test.assert(bIdx >= 0, true, "Line B should exist after insert")
+      ow.test.assert(cIdx >= 0, true, "Line C should exist")
+      ow.test.assert(bIdx < cIdx, true, "Line B should appear before Line C")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testWriteReplaceLineRange = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\nKeep this.\nOld line.\nAlso keep.")
+      var full = wm.read("page.md")
+      var lines = full.raw.split("\n")
+      var oldLineIdx = -1
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].indexOf("Old line") >= 0) { oldLineIdx = i + 1; break }
+      }
+      ow.test.assert(oldLineIdx > 0, true, "should find old line")
+      var result = wm.write("page.md", "New line.", __, { lineStart: oldLineIdx, lineEnd: oldLineIdx })
+      ow.test.assert(result.ok, true, "replace range should succeed")
+      var page = wm.read("page.md")
+      ow.test.assert(page.body.indexOf("Old line") >= 0, false, "old line should be gone")
+      ow.test.assert(page.body.indexOf("New line") >= 0, true, "new line should be present")
+      ow.test.assert(page.body.indexOf("Keep this") >= 0, true, "other content should be preserved")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testWriteSection = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\n## Overview\n\nOld overview text.\n\n## Details\n\nDetail text.")
+      var result = wm.write("page.md", "\nNew overview text.", __, { section: "Overview" })
+      ow.test.assert(result.ok, true, "section write should succeed")
+      var page = wm.read("page.md")
+      ow.test.assert(page.body.indexOf("Old overview text") >= 0, false, "old section content should be gone")
+      ow.test.assert(page.body.indexOf("New overview text") >= 0, true, "new section content should be present")
+      ow.test.assert(page.body.indexOf("## Overview") >= 0, true, "section heading should be preserved")
+      ow.test.assert(page.body.indexOf("## Details") >= 0, true, "other section should be preserved")
+      ow.test.assert(page.body.indexOf("Detail text") >= 0, true, "other section content should be preserved")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testWriteSectionNotFound = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\n\n## Overview\n\nContent.")
+      var result = wm.write("page.md", "replacement", __, { section: "Nonexistent Section" })
+      ow.test.assert(result.ok, false, "write to nonexistent section should fail")
+      ow.test.assert(isString(result.error), true, "should return error message")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testWritePartialModesRequireExistingPage = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.write("nonexistent.md", "content", __, { append: true })
+      ow.test.assert(result.ok, false, "append to nonexistent page should fail")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   return exports
 })()
