@@ -356,6 +356,36 @@ Key capabilities:
 The flag works with `opack exec mini-a`, the optional `mini-a` alias, and all
 oJob wrappers (for example `ojob mini-a.yaml modelman=true`).
 
+### Managing Working Memory Interactively
+
+Use the memory manager TUI to inspect and maintain session/global memory
+stores configured with `usememory`, `memorych`, and `memorysessionch`:
+
+```bash
+mini-a memoryman=true usememory=true memoryuser=true
+```
+
+You can also point directly to existing channels:
+
+```bash
+mini-a memoryman=true usememory=true \
+  memorych=\"{type:'file',options:{file:'/tmp/mini-a-global.json'}}\" \
+  memorysessionch=\"{type:'file',options:{file:'/tmp/mini-a-session.json'}}\" \
+  memorysessionid=\"demo-session\"
+```
+
+Key capabilities:
+
+- **Dual-scope visibility** — inspect both `global` and `session` stores with
+  per-section counts, stale totals, unresolved totals, and revision metadata.
+- **List + inspect workflow** — filter by section/stale/unresolved, then open
+  full entry payloads (including provenance/meta/evidence refs).
+- **Selective delete** — remove individual entries by `section/id`.
+- **Age-based pruning** — delete entries older than a relative time (`30d`,
+  `12h`, `90m`) or absolute timestamp (ISO date/epoch).
+- **Operational helpers** — keyword search, compaction, stale sweep, full
+  snapshot export, and optional full-store clear with confirmation.
+
 ## Mode Presets
 
 Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` and `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and `~/.openaf-mini-a/modes.yaml` overrides the legacy file when both exist) before applying any explicit flags you provide on the command line.
@@ -852,6 +882,7 @@ The `start()` method accepts various configuration options:
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
+- **`memoryman`** (boolean, default: false): Launch the interactive working-memory manager TUI (`mini-a-memoryman.js`) instead of the normal console. Designed for operators using `usememory=true` with `memorych`/`memorysessionch`.
 
 Advisor mode contract (internal-only, never user-facing):
 - Advisor responses must be strict JSON that must include: `assessment` (string), `recommended_next_step` (string), `risk_flags` (array), `escalate_to_main` (boolean), `confidence` (number), `stop_or_continue` (`"stop"` or `"continue"`).

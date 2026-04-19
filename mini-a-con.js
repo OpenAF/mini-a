@@ -319,6 +319,11 @@ try {
       global._args = args
       load("mini-a-mcptest.js")
       exit(0)
+    } else if (toBoolean(args.memoryman) === true) {
+      // Start memory management mode
+      global._args = args
+      load("mini-a-memoryman.js")
+      exit(0)
     } else if (toBoolean(args.workermode) === true) {
       // Start worker mode
       oJobRunFile(miniABasePath + "/mini-a-worker.yaml", args, genUUID(), __, false)
@@ -555,6 +560,11 @@ try {
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
+    memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed memory channels." },
+    memoryscope    : { type: "string", default: "both", description: "Memory read scope: session, global, or both." },
+    memorysessionid: { type: "string", description: "Session id namespace used by memorysessionch persistence." },
+    memorych       : { type: "string", description: "JSSLON channel definition for global memory persistence." },
+    memorysessionch: { type: "string", description: "JSSLON channel definition for session memory persistence." },
     usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
     wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
     wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs or s3." },
@@ -666,6 +676,7 @@ try {
     web: true,
     modelman: true,
     mcptest: true,
+    memoryman: true,
     workermode: true,
     resume: true,
     conversation: true,
@@ -717,6 +728,7 @@ try {
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
+      { option: "memoryman=true", description: "Start the memory manager UI for global/session stores." },
       { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },
       { option: "resume=true", description: "Resume a previous conversation (interactive picker when usehistory=true)." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
@@ -750,6 +762,7 @@ try {
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
       { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
+      { cmd: "mini-a memoryman=true usememory=true memoryuser=true", desc: "# Launch memory manager with user channels." },
       { cmd: "mini-a workermode=true onport=8080", desc: "# Launch worker API on port 8080." }
     ]
 
