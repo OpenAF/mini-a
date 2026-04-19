@@ -1335,7 +1335,7 @@ MiniUtilsTool.prototype.skills = function(params) {
  * <key>MiniUtilsTool.wiki(params) : Object|String</key>
  * Interact with the wiki knowledge base configured in the agent.
  * The `params` object supports:
- * - `operation` (string): list, read, search, write, lint.
+ * - `operation` (string): list, read, search, write, delete, lint.
  * - `path` (string): Page path for read/write operations.
  * - `query` (string): Search query for operation=search.
  * - `content` (string): Raw markdown content for operation=write.
@@ -1391,7 +1391,13 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return lintResult
     }
 
-    return "[ERROR] Unknown wiki operation: " + op + ". Use list, read, search, write, lint."
+    if (op === "delete" || op === "remove" || op === "rm") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for delete"
+      var dResult = wm.delete(params.path.trim())
+      return isObject(dResult) ? dResult : { ok: false, error: String(dResult) }
+    }
+
+    return "[ERROR] Unknown wiki operation: " + op + ". Use list, read, search, write, delete, lint."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -3507,7 +3513,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page (requires wikiaccess=rw), 'lint' to validate wiki health.",
+      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page, 'delete' to remove a page (both require wikiaccess=rw), 'lint' to validate wiki health.",
       inputSchema: {
         type      : "object",
         properties: {

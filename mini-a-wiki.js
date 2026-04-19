@@ -256,6 +256,13 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
     },
     exists: function(path) {
       try { return io.fileExists(resolvePath(path, false)) } catch(e) { return false }
+    },
+    delete: function(path) {
+      var full = resolvePath(path, false)
+      var file = new java.io.File(full)
+      if (!file.exists()) throw "file not found"
+      if (!file.isFile()) throw "not a file"
+      if (!file.delete()) throw "failed to delete file"
     }
   }
 }
@@ -302,6 +309,9 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
         if (isDef(stream)) { try { stream.close() } catch(ig) {} return true }
         return false
       } catch(e) { return false }
+    },
+    delete: function(path) {
+      s3client.removeObject(bucket, prefix + path)
     }
   }
 }
@@ -423,6 +433,19 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body) {
   try {
     var content = this._serializeFrontmatter(meta, bodyText)
     this._backend.write(path, content)
+    return { ok: true, path: path }
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
+}
+
+MiniAWikiManager.prototype.delete = function(path) {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
+  if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
+  path = path.trim()
+
+  try {
+    this._backend.delete(path)
     return { ok: true, path: path }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }

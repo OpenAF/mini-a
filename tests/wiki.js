@@ -438,5 +438,67 @@
     }
   }
 
+  // ── Delete ────────────────────────────────────────────────────────────────────
+
+  exports.testFsBackendDelete = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("todelete.md", { title: "Delete Me" }, "# Delete Me\nThis page will be deleted.")
+      var exists1 = wm._backend.exists("todelete.md")
+      ow.test.assert(exists1, true, "file should exist before delete")
+      var result = wm.delete("todelete.md")
+      ow.test.assert(result.ok, true, "delete should succeed")
+      var exists2 = wm._backend.exists("todelete.md")
+      ow.test.assert(exists2, false, "file should not exist after delete")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendDeleteNonExistent = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.delete("nonexistent.md")
+      ow.test.assert(result.ok, false, "delete of non-existent file should fail")
+      ow.test.assert(isString(result.error), true, "error message should be provided")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendDeleteReadOnly = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("readonly.md", { title: "Read Only" }, "# Read Only")
+      var wmRo = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var result = wmRo.delete("readonly.md")
+      ow.test.assert(result.ok, false, "delete in read-only mode should fail")
+      ow.test.assert(result.error.indexOf("read-only") > -1, true, "error should mention read-only")
+      var exists = wm._backend.exists("readonly.md")
+      ow.test.assert(exists, true, "file should still exist after failed delete")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendDeleteWithPath = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("subdir/nested.md", { title: "Nested" }, "# Nested")
+      var exists1 = wm._backend.exists("subdir/nested.md")
+      ow.test.assert(exists1, true, "nested file should exist before delete")
+      var result = wm.delete("subdir/nested.md")
+      ow.test.assert(result.ok, true, "delete nested file should succeed")
+      var exists2 = wm._backend.exists("subdir/nested.md")
+      ow.test.assert(exists2, false, "nested file should not exist after delete")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   return exports
 })()

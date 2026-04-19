@@ -1965,6 +1965,7 @@ try {
 
           // Handle /wiki command completions
           if (lookupName === "wiki") {
+            if (toBoolean(sessionOptions.usewiki) !== true) return -1
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -3961,7 +3962,7 @@ try {
       _prevEventLastUpdate = now()
       if (type != "final" && type != "error") {
         var _animEventStartTime = now()
-        var _animIsInteracting = (type === "input" && message.indexOf("Interacting with") === 0)
+        var _animIsInteracting = (type === "input" && message.indexOf("Interacting with") === 0) || (type === "info" && /\[(mem:(list|read|write))\]/.test(message))
         var _animBaseMsg = _animIsInteracting ? message.replace(/\.\.\.+$/, "") : message
         _prevEventAnimatedRenderer = function(resetToDefault) {
           var cueSymbol = resetToDefault === true ? _resetActivityCueSymbol() : _nextActivityCueSymbol()
@@ -4898,7 +4899,7 @@ try {
       "",
       "Commands (prefix with '/'):"
     ]
-    appendAlignedHelpRows(lines, [
+    var helpCommands = [
       { command: "/help", description: "Show this help message" },
       { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
       { command: "/toggle <key>", description: "Toggle boolean parameter" },
@@ -4917,13 +4918,18 @@ try {
       { command: "/model [target]", description: "Choose a different model (target: model, modellc or modelval)" },
       { command: "/models", description: "List current main, low and validation models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
-      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
-      { command: "/wiki [list|read|search|lint] [args]", description: "Interact with wiki (requires usewiki=true)" },
+      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
+    ]
+    if (toBoolean(sessionOptions.usewiki) === true) {
+      helpCommands.push({ command: "/wiki [list|read|search|delete|lint|write] [args]", description: "Interact with wiki" })
+    }
+    helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
       { command: "/subtasks", description: "List all subtasks and their status" },
       { command: "/subtask <id>", description: "Show details for a subtask" },
       { command: "/exit", description: "Leave the console" }
-    ])
+    )
+    appendAlignedHelpRows(lines, helpCommands)
     var commandNames = Object.keys(customSlashCommands).sort()
     if (commandNames.length > 0) {
       lines.push("")
@@ -5096,8 +5102,21 @@ try {
         } else {
           print(colorifyText("Wiki write failed: " + (isObject(writeResult) ? writeResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "delete" || sub === "remove" || sub === "rm") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable deletes.", errorColor))
+          return
+        }
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki delete <path>", errorColor)); return }
+        var deletePath = rest.trim()
+        var deleteResult = wm.delete(deletePath)
+        if (isObject(deleteResult) && deleteResult.ok === true) {
+          print(colorifyText("Deleted " + deletePath, successColor))
+        } else {
+          print(colorifyText("Wiki delete failed: " + (isObject(deleteResult) ? deleteResult.error : "unknown error"), errorColor))
+        }
       } else {
-        print(colorifyText("Usage: /wiki [list|read|search|lint|write] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [list|read|search|delete|lint|write] [args]", errorColor))
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))

@@ -154,3 +154,23 @@ jobs:
   from: MiniA Wiki Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testRawWritePreservesCreatedMetadata
+
+- name: MiniA Wiki Tests::FsBackendDelete
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendDelete
+
+- name: MiniA Wiki Tests::FsBackendDeleteNonExistent
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendDeleteNonExistent
+
+- name: MiniA Wiki Tests::FsBackendDeleteReadOnly
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendDeleteReadOnly
+
+- name: MiniA Wiki Tests::FsBackendDeleteWithPath
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendDeleteWithPath
