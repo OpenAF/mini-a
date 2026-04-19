@@ -2,6 +2,57 @@
 
 ## Recent Updates
 
+### Wiki Knowledge Base (`usewiki`)
+
+**Change**: Mini-A now supports a persistent, shared Markdown wiki following Andrej Karpathy's LLM Wiki pattern — agents distil knowledge into structured pages and retrieve it across sessions.
+
+**What's New**:
+
+- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS and S3 backends, `parseFrontmatter`, `extractLinks`, `search`, `lint`, and `write` operations.
+
+- **New `wiki` agent action**: the agent can call `list`, `read`, `search`, `lint`, or `write` (when `wikiaccess=rw`) at any step:
+  ```json
+  { "action": "wiki", "params": { "op": "search", "query": "authentication decision" } }
+  ```
+
+- **Lint checks**: `broken_link` (error), `missing_frontmatter` (warning), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
+
+- **Auto-bootstrapping**: when a new empty wiki is opened in `rw` mode, Mini-A creates both `AGENTS.md` and `index.md`. `AGENTS.md` contains the ingestion workflow and contribution rules; `index.md` is the wiki entrypoint and starter table of contents.
+
+- **Console commands**: `/wiki list`, `/wiki read <page>`, `/wiki search <query>`, `/wiki lint`.
+
+- **`/stats wiki`**: new stats mode showing per-op counters and error counts for the current session.
+
+- **MiniUtilsTool** `wiki` method: available as an MCP tool when `useutils=true`.
+
+**New parameters**:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `usewiki` | `false` | Enable wiki knowledge base |
+| `wikiaccess` | `ro` | `ro` or `rw` |
+| `wikibackend` | `fs` | `fs` or `s3` |
+| `wikiroot` | `.` | Root directory (FS backend) |
+| `wikibucket` | — | S3 bucket |
+| `wikiprefix` | — | S3 key prefix |
+| `wikiurl` | — | S3 endpoint URL |
+| `wikiaccesskey` | — | S3 access key |
+| `wikisecret` | — | S3 secret key |
+| `wikiregion` | — | S3 region |
+| `wikiuseversion1` | `false` | S3 path-style signing |
+| `wikiignorecertcheck` | `false` | Skip TLS cert check |
+| `wikilintstaleddays` | `90` | Stale threshold for lint |
+
+**When to use `usewiki` vs `usememory`**:
+
+- **`usememory=true`** — tracks in-flight reasoning (facts, decisions, evidence) for the current agent; scoped to one session or one user's global store.
+- **`usewiki=true`** — encyclopaedic knowledge shared across all agents and users pointing to the same root/bucket; survives restarts; human-readable Markdown.
+- **Both together** — agent reasons with memory, then distils durable findings into wiki pages for future sessions and other agents.
+
+See [CHEATSHEET.md — Choosing Knowledge Features](../CHEATSHEET.md#choosing-knowledge-features) for a full decision guide.
+
+---
+
 ### Global Memory Freshness — Auto-Promotion, Refresh, and Staleness Sweep
 
 **Change**: Session memory now auto-promotes to global at session end using a freshness-tracking model that prevents unbounded accumulation of stale knowledge.

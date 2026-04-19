@@ -1,0 +1,156 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Wiki Tests::Init
+  exec: args.tests = require("tests/wiki.js")
+
+- name: MiniA Wiki Tests::ParseFrontmatterWithYaml
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseFrontmatterWithYaml
+
+- name: MiniA Wiki Tests::ParseFrontmatterWithoutBlock
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseFrontmatterWithoutBlock
+
+- name: MiniA Wiki Tests::ExtractMarkdownLinks
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testExtractMarkdownLinks
+
+- name: MiniA Wiki Tests::ExtractWikiStyleLinks
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testExtractWikiStyleLinks
+
+- name: MiniA Wiki Tests::ExtractLinksDeduplicates
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testExtractLinksDeduplicates
+
+- name: MiniA Wiki Tests::NearDuplicateIdentical
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testNearDuplicateIdentical
+
+- name: MiniA Wiki Tests::NearDuplicateDifferent
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testNearDuplicateDifferent
+
+- name: MiniA Wiki Tests::FsBackendList
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendList
+
+- name: MiniA Wiki Tests::FsBackendListRealFiles
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendListRealFiles
+
+- name: MiniA Wiki Tests::FsBackendListWithPrefixKeepsPrefix
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendListWithPrefixKeepsPrefix
+
+- name: MiniA Wiki Tests::FsBackendListHandlesNestedListFilesRecursiveShape
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendListHandlesNestedListFilesRecursiveShape
+
+- name: MiniA Wiki Tests::FsBackendListHandlesIterableListFilesRecursiveShape
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendListHandlesIterableListFilesRecursiveShape
+
+- name: MiniA Wiki Tests::FsBackendReadWrite
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendReadWrite
+
+- name: MiniA Wiki Tests::BootstrapCreatesAgentsAndIndexForEmptyWritableWiki
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBootstrapCreatesAgentsAndIndexForEmptyWritableWiki
+
+- name: MiniA Wiki Tests::BootstrapAddsIndexToLegacyAgentsOnlyWiki
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBootstrapAddsIndexToLegacyAgentsOnlyWiki
+
+- name: MiniA Wiki Tests::BootstrapDoesNotModifyNonEmptyWikiWithoutIndex
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBootstrapDoesNotModifyNonEmptyWikiWithoutIndex
+
+- name: MiniA Wiki Tests::FsBackendRejectsTraversalRead
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendRejectsTraversalRead
+
+- name: MiniA Wiki Tests::FsBackendRejectsTraversalWrite
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendRejectsTraversalWrite
+
+- name: MiniA Wiki Tests::FsBackendReadOnlyWrite
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendReadOnlyWrite
+
+- name: MiniA Wiki Tests::FsBackendReadMissing
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendReadMissing
+
+- name: MiniA Wiki Tests::FsBackendSearch
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFsBackendSearch
+
+- name: MiniA Wiki Tests::LintBrokenLink
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintBrokenLink
+
+- name: MiniA Wiki Tests::LintOrphan
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintOrphan
+
+- name: MiniA Wiki Tests::LintMissingFrontmatter
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintMissingFrontmatter
+
+- name: MiniA Wiki Tests::LintHeadingHierarchy
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintHeadingHierarchy
+
+- name: MiniA Wiki Tests::LintStalePage
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintStalePage
+
+- name: MiniA Wiki Tests::LintNearDuplicate
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintNearDuplicate
+
+- name: MiniA Wiki Tests::LintSummaryCountsCorrect
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintSummaryCountsCorrect
+
+- name: MiniA Wiki Tests::WriteReadRoundTrip
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteReadRoundTrip
+
+- name: MiniA Wiki Tests::RawWritePreservesCreatedMetadata
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRawWritePreservesCreatedMetadata

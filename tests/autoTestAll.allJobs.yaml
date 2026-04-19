@@ -5,3 +5,4 @@ include:
 - tests/coreFunctionality.yaml
 - tests/miniAUtils.yaml
 - tests/progToolCall.yaml
+- tests/wiki.yaml

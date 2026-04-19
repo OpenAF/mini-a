@@ -16,6 +16,8 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Visual & Output](#visual--output)
 - [Knowledge & Context](#knowledge--context)
 - [Working Memory](#working-memory)
+- [Wiki Knowledge Base](#wiki-knowledge-base)
+- [Choosing Knowledge Features](#choosing-knowledge-features)
 - [Mode Presets](#mode-presets)
 - [Advanced Features](#advanced-features)
 - [Rate Limiting & Performance](#rate-limiting--performance)
@@ -745,6 +747,127 @@ agent.clearSessionMemory("my-session-id")
 
 ---
 
+## Wiki Knowledge Base
+
+Mini-A can read from and write to a persistent Markdown wiki following Andrej Karpathy's LLM Wiki pattern: the agent distils knowledge from each session into structured pages, then retrieves that knowledge in future sessions.  The wiki is stored in a shared filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) sees the same pages.
+
+When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps two starter pages:
+- `AGENTS.md` for contribution rules and ingestion workflow
+- `index.md` for the main entrypoint and top-level table of contents
+
+### Wiki Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usewiki` | boolean | `false` | Enable the wiki knowledge base |
+| `wikiaccess` | string | `ro` | Access mode: `ro` (read-only) or `rw` (read-write) |
+| `wikibackend` | string | `fs` | Backend: `fs` (filesystem) or `s3` |
+| `wikiroot` | string | `.` | Root directory for the `fs` backend |
+| `wikibucket` | string | - | S3 bucket name (`s3` backend) |
+| `wikiprefix` | string | - | S3 key prefix (`s3` backend) |
+| `wikiurl` | string | - | S3-compatible endpoint URL (`s3` backend) |
+| `wikiaccesskey` | string | - | S3 access key (`s3` backend) |
+| `wikisecret` | string | - | S3 secret key (`s3` backend) |
+| `wikiregion` | string | - | S3 region (`s3` backend) |
+| `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3` backend) |
+| `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3` backend) |
+| `wikilintstaleddays` | number | `90` | Days before a page without an `updated` update is marked stale in lint |
+
+### Wiki Actions (agent)
+
+The agent uses the `wiki` action:
+```json
+{ "action": "wiki", "params": { "op": "list|read|search|lint|write", "path": "page.md", "query": "...", "content": "..." } }
+```
+
+| Op | Description |
+|----|-------------|
+| `list` | List all pages; optional `path` prefix filters results |
+| `read` | Return full content + front-matter of `path` |
+| `search` | Full-text search; returns ranked hits for `query` |
+| `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates |
+| `write` | Write or update `path` with `content` (requires `wikiaccess=rw`) |
+
+### Console Commands
+
+| Command | Description |
+|---------|-------------|
+| `/wiki list [prefix]` | List all pages (optionally filtered by prefix) |
+| `/wiki read <page.md>` | Print a page's front-matter and body |
+| `/wiki search <query>` | Full-text search across all pages |
+| `/wiki lint` | Run the lint check and print a report |
+| `/stats wiki` | Show wiki operation statistics for the current session |
+
+### Examples
+
+```bash
+# Read-only wiki from a shared folder (agents can read, not write)
+mini-a goal="summarize our architecture decisions" \
+  usewiki=true wikiroot=/shared/wiki
+
+# Read-write wiki — agent can contribute new pages
+mini-a goal="research topic X and document findings in the wiki" \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+
+# S3-backed wiki (shared across machines or containers)
+mini-a goal="analyze and wiki" \
+  usewiki=true wikiaccess=rw wikibackend=s3 \
+  wikibucket=my-wiki-bucket wikiprefix=knowledge/ \
+  wikiurl=https://s3.amazonaws.com wikiaccesskey=AKI... wikisecret=xxx wikiregion=us-east-1
+
+# Wiki + memory for maximum knowledge retention
+mini-a goal="deep research with persistent knowledge" \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki \
+  usememory=true memoryuser=true
+
+# Lint the wiki from the console
+mini-a ➤ /wiki lint
+```
+
+---
+
+## Choosing Knowledge Features
+
+Mini-A has two complementary knowledge persistence mechanisms.  Choose based on the scope, structure, and lifetime of the knowledge.
+
+| Dimension | `usememory=true` | `usewiki=true` |
+|-----------|-----------------|----------------|
+| **Scope** | Single agent session (session store) or personal across sessions (global store) | Shared across all agents and users pointing to the same root/bucket |
+| **Structure** | Typed sections: facts, decisions, evidence, risks, hypotheses, artifacts, summaries | Free-form Markdown pages with YAML front-matter |
+| **Granularity** | Short entries (one fact / decision per entry) | Full articles (one concept per page) |
+| **Retrieval** | Keyword search via `memory_search` action | Full-text search + list + direct read via `wiki` action |
+| **Lifetime** | Session ends when conversation ends; global persists via channel | Persists as files/objects; survives agent restarts and machine changes |
+| **Authorship** | Fully automated (agent appends automatically) | Semi-automated (agent writes on demand; you control when) |
+| **Lint / QA** | Compaction + dedup | `/wiki lint` validates links, orphans, staleness, near-duplicates |
+| **Best for** | Tracking in-flight reasoning, decisions, and evidence during a task | Encyclopaedic knowledge that should outlive sessions and be shared |
+
+### Decision Guide
+
+**Use `usememory=true` when:**
+- The agent needs to track its own reasoning across many steps (hypotheses, evidence, risks).
+- You want automatic deduplication and compaction without managing files.
+- Knowledge is personal to one agent instance or one session.
+- You need the agent to recall decisions made earlier in the same run.
+
+**Use `usewiki=true` when:**
+- Knowledge must survive across agent restarts and be accessible to other agents or users.
+- You are building a shared team knowledge base (architecture decisions, runbooks, API docs).
+- Content is encyclopaedic — one well-named page per concept, with links between pages.
+- You want human-readable, versionable Markdown files.
+
+**Use both together when:**
+- The agent researches and reasons (memory tracks in-flight state), then distils durable findings into wiki pages at the end.
+- Multiple agents collaborate: each tracks its own working state in memory, but contributes shared conclusions to the wiki.
+
+```bash
+# Recommended combined setup for knowledge-building agents
+mini-a goal="research and document X" \
+  usememory=true memoryuser=true \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+```
+
+---
+
 ## Mode Presets
 
 Quick configuration bundles for common use cases.
@@ -1249,6 +1372,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/context llm` or `/context analyze` | Analyze conversation tokens using LLM (prefers low-cost model if configured) |
 | `/stats memory` | Show working-memory statistics and per-section counts for the active session |
 | `/stats detailed memory` | Show full metrics plus the focused memory view (`out=file.json` also supported) |
+| `/stats wiki` | Show wiki operation statistics (list/read/search/write/lint counts and errors) |
 | `/compact [n]` | Summarize older messages, keep last n exchanges (default: 6) |
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |

@@ -19,6 +19,7 @@ var MiniUtilsTool = function(options) {
   this._listNestedKeys = ["files", "dirs", "children", "items", "list", "entries", "content"]
   this._skillTemplateCandidates = ["SKILL.yaml", "SKILL.yml", "SKILL.json", "SKILL.md", "skill.md"]
   this._skillsRoots = []
+  this._wikiManager = __
   //if (isDef(options)) {
     this.init(options)
   //}
@@ -1324,6 +1325,73 @@ MiniUtilsTool.prototype.skills = function(params) {
     }
 
     return "[ERROR] Unknown skills operation: " + op
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+/**
+ * <odoc>
+ * <key>MiniUtilsTool.wiki(params) : Object|String</key>
+ * Interact with the wiki knowledge base configured in the agent.
+ * The `params` object supports:
+ * - `operation` (string): list, read, search, write, lint.
+ * - `path` (string): Page path for read/write operations.
+ * - `query` (string): Search query for operation=search.
+ * - `content` (string): Raw markdown content for operation=write.
+ * - `compact` (boolean): Return compact output.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.wiki = function(params) {
+  params = params || {}
+  try {
+    this._ensureInitialized()
+    var wm = isObject(this._wikiManager) ? this._wikiManager : __
+    if (!isObject(wm)) return "[ERROR] Wiki is not configured. Set usewiki=true and wikiroot (or wikibackend=s3) when starting the agent."
+    var op = isString(params.operation) ? params.operation.toLowerCase().trim()
+      : (isString(params.op) ? params.op.toLowerCase().trim() : "list")
+    if (op === "get" || op === "view" || op === "cat") op = "read"
+    if (op === "find") op = "search"
+    if (op === "validate" || op === "check") op = "lint"
+    if (op === "save" || op === "put" || op === "create" || op === "update") op = "write"
+
+    if (op === "list") {
+      var prefix = isString(params.path) ? params.path : ""
+      var pages = wm.list(prefix)
+      if (params.compact === true) return { count: pages.length, pages: pages }
+      return { count: pages.length, pages: pages }
+    }
+
+    if (op === "read") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for read"
+      var page = wm.read(params.path.trim())
+      if (!isObject(page)) return "[ERROR] Page not found: " + params.path
+      if (params.compact === true) return { path: page.path, title: isString(page.meta.title) ? page.meta.title : page.path, body: page.body }
+      return page
+    }
+
+    if (op === "search") {
+      if (!isString(params.query) || params.query.trim().length === 0) return "[ERROR] query is required for search"
+      var hits = wm.search(params.query.trim(), { limit: isNumber(params.limit) ? params.limit : 20 })
+      return { count: hits.length, results: hits }
+    }
+
+    if (op === "write") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for write"
+      if (!isString(params.content) || params.content.trim().length === 0) return "[ERROR] content is required for write"
+      var wResult = wm.write(params.path.trim(), params.content)
+      return isObject(wResult) ? wResult : { ok: false, error: String(wResult) }
+    }
+
+    if (op === "lint") {
+      var lintOpts = {}
+      if (isNumber(params.staleDays)) lintOpts.staleDays = params.staleDays
+      var lintResult = wm.lint(__, lintOpts)
+      if (params.compact === true) return lintResult.summary
+      return lintResult
+    }
+
+    return "[ERROR] Unknown wiki operation: " + op + ". Use list, read, search, write, lint."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -3433,6 +3501,41 @@ MiniUtilsTool._metadataByFn = (function() {
           {
             if  : { required: ["operation"], properties: { operation: { enum: ["read", "get", "view", "cat", "render", "use", "expand", "apply", "invoke", "run"] } } },
             then: { required: ["name"] }
+          }
+        ]
+      }
+    },
+    wiki: {
+      name       : "wiki",
+      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page (requires wikiaccess=rw), 'lint' to validate wiki health.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: {
+            type       : "string",
+            description: "Operation: list, read, search, write, lint (aliases: get/view/cat for read; find for search; validate/check for lint; save/put/create/update for write).",
+            enum       : ["list", "read", "search", "write", "lint", "get", "view", "cat", "find", "validate", "check", "save", "put", "create", "update"],
+            default    : "list"
+          },
+          path     : { type: "string", description: "Page path for read/write operations, or path prefix for list." },
+          query    : { type: "string", description: "Search query for operation=search." },
+          content  : { type: "string", description: "Raw markdown content for operation=write." },
+          limit    : { type: "number", description: "Maximum results for search." },
+          staleDays: { type: "number", description: "Override stale threshold in days for lint." },
+          compact  : { type: "boolean", description: "Return compact responses to reduce token usage." }
+        },
+        allOf: [
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["read", "get", "view", "cat"] } } },
+            then: { required: ["path"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["search", "find"] } } },
+            then: { required: ["query"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["write", "save", "put", "create", "update"] } } },
+            then: { required: ["path", "content"] }
           }
         ]
       }

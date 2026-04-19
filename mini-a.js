@@ -6,6 +6,7 @@ ow.loadMetrics()
 loadLib("mini-a-common.js")
 loadLib("mini-a-router.js")
 loadLib("mini-a-memory.js")
+loadLib("mini-a-wiki.js")
 
 // Shared thinking-tag list and normalizer used across streaming filter,
 // block extraction, and tag stripping.
@@ -92,6 +93,7 @@ var MiniA = function() {
   this._memoryScope = "both"
   this._memoryConfig = { enabled: true, maxPerSection: 80, maxTotalEntries: 500, compactEvery: 8, dedup: true }
   this._memorychName = __
+  this._wikiManager = __
   this._metricschName = __
   this._metricschCollecting = false
   this._metricschCreated = false
@@ -260,6 +262,12 @@ var MiniA = function() {
     memory_global_write_failures: $atomic(0, "long"),
     memory_session_writes: $atomic(0, "long"),
     memory_session_write_failures: $atomic(0, "long"),
+    wiki_ops_list: $atomic(0, "long"),
+    wiki_ops_read: $atomic(0, "long"),
+    wiki_ops_search: $atomic(0, "long"),
+    wiki_ops_write: $atomic(0, "long"),
+    wiki_ops_lint: $atomic(0, "long"),
+    wiki_ops_errors: $atomic(0, "long"),
     per_tool_stats: {}
   }
 
@@ -288,7 +296,8 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 ## ACTION USAGE:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
-• "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if actionsList}}
+• "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"list|read|search|lint{{#if wikiRw}}|write{{/if}}","path":"page.md","query":"...","content":"...{{#if wikiRw}} (rw only){{/if}}"}); list returns all pages, search finds pages matching query, read returns page content, lint validates wiki health{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -1886,6 +1895,16 @@ MiniA.prototype.getMetrics = function() {
             files_deleted: global.__mini_a_metrics.history_files_deleted.get(),
             files_deleted_by_period: global.__mini_a_metrics.history_files_deleted_by_period.get(),
             files_deleted_by_count: global.__mini_a_metrics.history_files_deleted_by_count.get()
+        },
+        wiki: {
+            enabled: isObject(this._wikiManager),
+            ops_list: global.__mini_a_metrics.wiki_ops_list.get(),
+            ops_read: global.__mini_a_metrics.wiki_ops_read.get(),
+            ops_search: global.__mini_a_metrics.wiki_ops_search.get(),
+            ops_write: global.__mini_a_metrics.wiki_ops_write.get(),
+            ops_lint: global.__mini_a_metrics.wiki_ops_lint.get(),
+            ops_errors: global.__mini_a_metrics.wiki_ops_errors.get(),
+            ops_total: global.__mini_a_metrics.wiki_ops_list.get() + global.__mini_a_metrics.wiki_ops_read.get() + global.__mini_a_metrics.wiki_ops_search.get() + global.__mini_a_metrics.wiki_ops_write.get() + global.__mini_a_metrics.wiki_ops_lint.get()
         }
     }
 }
@@ -7726,6 +7745,36 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
   this._syncWorkingMemoryState()
 }
 
+MiniA.prototype._initWiki = function(args) {
+  this._wikiManager = __
+  if (toBoolean(args.usewiki) !== true) return
+  try {
+    var cfg = {
+      access : args.wikiaccess,
+      backend: args.wikibackend
+    }
+    if (args.wikibackend === "s3") {
+      cfg.bucket          = args.wikibucket
+      cfg.prefix          = args.wikiprefix
+      cfg.url             = args.wikiurl
+      cfg.accessKey       = args.wikiaccesskey
+      cfg.secret          = args.wikisecret
+      cfg.region          = args.wikiregion
+      cfg.useVersion1     = args.wikiuseversion1
+      cfg.ignoreCertCheck = args.wikiignorecertcheck
+    } else {
+      cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
+    }
+    this._wikiManager = new MiniAWikiManager(cfg, function(level, msg) {
+      this.fnI(level || "info", "[wiki] " + msg)
+    }.bind(this))
+    this._wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : 90
+    this.fnI("info", `📖 [wiki] enabled (backend=${args.wikibackend}, access=${args.wikiaccess})`)
+  } catch(e) {
+    this.fnI("warn", `[wiki] failed to initialize: ${__miniAErrMsg(e)}`)
+  }
+}
+
 MiniA.prototype._getDefaultMemoryWriteManager = function() {
   if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
   if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
@@ -9132,6 +9181,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         return __
       }
     }
+    if (isObject(this._wikiManager)) fileTool._wikiManager = this._wikiManager
 
     var metadataByFn = {}
     if (isFunction(MiniUtilsTool.getMetadataByFn)) {
@@ -9203,6 +9253,16 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         }
       }
 
+      if (isMap(result) && ((result.ok === false && isDef(result.error)) || isDef(result.error))) {
+        var errText = isString(result.error) ? result.error : stringify(result, __, "")
+        if (!isString(errText) || errText.length === 0) errText = "Unknown tool error."
+        if (errText.indexOf("[ERROR]") !== 0) errText = "[ERROR] " + errText
+        return {
+          error  : errText,
+          content: [{ type: "text", text: errText }]
+        }
+      }
+
       var output = result
       if (result === fileTool) {
         output = {
@@ -9241,7 +9301,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     var _buildUtilsIntentMessage = function(name, payload) {
       if (!isMap(payload)) return "Running tool '" + name + "'."
 
-      var op = _normalizeOp(payload.operation)
+      var op = _normalizeOp(isDef(payload.operation) ? payload.operation : payload.op)
       var pathPart = _formatPathPart(payload)
 
       if (name === "filesystemQuery") {
@@ -9393,6 +9453,19 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           }
           return "Rendering skill."
         }
+      }
+
+      if (name === "wiki") {
+        if (op === "" || op === "list") return "Listing wiki pages" + pathPart + "."
+        if (op === "read") return "Reading wiki page" + pathPart + "."
+        if (op === "search") {
+          if (isString(payload.query) && payload.query.trim().length > 0) {
+            return "Searching wiki for " + _quoted(payload.query.trim()) + "."
+          }
+          return "Searching wiki."
+        }
+        if (op === "write") return "Writing wiki page" + pathPart + "."
+        if (op === "lint") return "Checking wiki health."
       }
 
       if (isString(op) && op.length > 0) {
@@ -13283,7 +13356,10 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
-    "lcescalatedefer", "lcbudget", "llmcomplexity"
+    "lcescalatedefer", "lcbudget", "llmcomplexity",
+    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
+    "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
+    "wikiignorecertcheck", "wikilintstaleddays"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -13799,6 +13875,7 @@ MiniA.prototype.init = function(args) {
     this._useTools = args.usetools
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
+    this._initWiki(args)
 
     // Normalize format argument based on outfile
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"
@@ -14438,6 +14515,7 @@ MiniA.prototype.init = function(args) {
         if (isString(name) && name.length > 0) chatActionSet[name] = true
       })
       if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
+      if (args.usewiki && isObject(this._wikiManager)) chatActionSet["wiki"] = true
       this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
@@ -14469,10 +14547,11 @@ MiniA.prototype.init = function(args) {
       var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
       var skillPromptEntries = this._buildSkillPromptEntries(promptProfile, args.goal, args.hookcontext)
 
-      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
-        useMemorySearch : args.usememory && args.memoryinject !== "full"
+        useMemorySearch : args.usememory && args.memoryinject !== "full",
+        useWiki         : args.usewiki && isObject(this._wikiManager)
       })
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 7 : 6) + ". " + rule)
@@ -14520,7 +14599,9 @@ MiniA.prototype.init = function(args) {
         remainingSteps   : stepContext ? stepContext.remainingSteps : "",
         availableSkills    : skillPromptEntries.length > 0,
         availableSkillsList: skillPromptEntries,
-        useMemorySearch    : args.usememory && args.memoryinject !== "full"
+        useMemorySearch    : args.usememory && args.memoryinject !== "full",
+        useWiki            : args.usewiki && isObject(this._wikiManager),
+        wikiRw             : args.usewiki && args.wikiaccess === "rw" && isObject(this._wikiManager)
       }
       this._systemInst = this._buildSystemPromptWithBudget("agent", agentPayload, this._SYSTEM_PROMPT, {
         args: args,
@@ -14882,10 +14963,31 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)
     args.memorydedup = _$(toBoolean(args.memorydedup), "args.memorydedup").isBoolean().default(true)
     args.memorypromote = _$(args.memorypromote, "args.memorypromote").isString().default("")
-    args.memorystaledays = _$(isNumber(args.memorystaledays) ? args.memorystaledays : toNumber(args.memorystaledays), "args.memorystaledays").isNumber().default(0)
+    var _memoryStaleDays = isNumber(args.memorystaledays) ? args.memorystaledays : Number(args.memorystaledays)
+    if (isNaN(_memoryStaleDays)) _memoryStaleDays = __
+    args.memorystaledays = _$( _memoryStaleDays, "args.memorystaledays").isNumber().default(0)
     args.memoryinject = _$(args.memoryinject, "args.memoryinject").isString().default("summary")
     if (["full", "summary"].indexOf(args.memoryinject.toLowerCase().trim()) < 0) args.memoryinject = "summary"
     else args.memoryinject = args.memoryinject.toLowerCase().trim()
+    args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
+    args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
+    if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
+    else args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
+    args.wikibackend = _$(args.wikibackend, "args.wikibackend").isString().default("fs")
+    if (["fs", "s3"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
+    else args.wikibackend = String(args.wikibackend).toLowerCase().trim()
+    args.wikiroot = _$(args.wikiroot, "args.wikiroot").isString().default(__)
+    args.wikibucket = _$(args.wikibucket, "args.wikibucket").isString().default(__)
+    args.wikiprefix = _$(args.wikiprefix, "args.wikiprefix").isString().default("wiki/")
+    args.wikiurl = _$(args.wikiurl, "args.wikiurl").isString().default("https://s3.amazonaws.com")
+    args.wikiaccesskey = _$(args.wikiaccesskey, "args.wikiaccesskey").isString().default(__)
+    args.wikisecret = _$(args.wikisecret, "args.wikisecret").isString().default(__)
+    args.wikiregion = _$(args.wikiregion, "args.wikiregion").isString().default(__)
+    args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
+    args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
+    var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
+    if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
+    args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -15372,8 +15474,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return this._processFinalAnswer(blockedAnswer, args)
     }
 
-    this._registerMcpToolsForGoal(args)
-
     var initialState = {}
     if (isDef(args.state)) {
       var providedState = args.state
@@ -15388,6 +15488,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     this._agentState = isObject(initialState) ? initialState : {}
     this._initWorkingMemory(args, this._agentState)
+    this._registerMcpToolsForGoal(args)
     this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
     if (this._hasExternalPlan) {
       this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: isObject(preloadedPlan) ? (preloadedPlan.path || "") : "" } })
@@ -17460,6 +17561,66 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           continue
         }
 
+        if (action == "wiki" && args.usewiki && isObject(this._wikiManager)) {
+          var wkParams = isMap(currentMsg.params) ? currentMsg.params : {}
+          var wkOp = isString(wkParams.op) ? wkParams.op.trim().toLowerCase() : "list"
+          var wkPath = isString(wkParams.path) ? wkParams.path.trim() : ""
+          var wkQuery = isString(wkParams.query) ? wkParams.query.trim() : ""
+          var wkContent = isString(wkParams.content) ? wkParams.content : ""
+          try {
+            var wkResult
+            if (wkOp === "list") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              var wkPages = this._wikiManager.list(wkPath)
+              wkResult = "Wiki pages (" + wkPages.length + "):\n" + wkPages.join("\n")
+            } else if (wkOp === "read") {
+              global.__mini_a_metrics.wiki_ops_read.inc()
+              if (wkPath.length === 0) {
+                wkResult = "[ERROR] wiki read requires 'path'"
+              } else {
+                var wkPage = this._wikiManager.read(wkPath)
+                wkResult = isObject(wkPage) ? af.toTOON(wkPage) : "[ERROR] Page not found: " + wkPath
+              }
+            } else if (wkOp === "search") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              if (wkQuery.length === 0) {
+                wkResult = "[ERROR] wiki search requires 'query'"
+              } else {
+                var wkHits = this._wikiManager.search(wkQuery)
+                wkResult = wkHits.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
+              }
+            } else if (wkOp === "lint") {
+              global.__mini_a_metrics.wiki_ops_lint.inc()
+              var wkLint = this._wikiManager.lint(this._memoryManager, { staleDays: this._wikiLintStaleDays })
+              wkResult = af.toTOON(wkLint)
+            } else if (wkOp === "write") {
+              global.__mini_a_metrics.wiki_ops_write.inc()
+              if (args.wikiaccess !== "rw") {
+                wkResult = "[ERROR] wiki write requires wikiaccess=rw"
+              } else if (wkPath.length === 0 || wkContent.length === 0) {
+                wkResult = "[ERROR] wiki write requires 'path' and 'content'"
+              } else {
+                var wkWrite = this._wikiManager.write(wkPath, wkContent)
+                wkResult = isObject(wkWrite) && wkWrite.ok ? "Wrote " + wkPath : "[ERROR] " + (isObject(wkWrite) ? wkWrite.error : "write failed")
+              }
+            } else {
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use list, read, search, lint" + (args.wikiaccess === "rw" ? ", write" : "")
+            }
+            if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
+            runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) ${wkResult}`)
+          } catch(wkErr) {
+            global.__mini_a_metrics.wiki_ops_errors.inc()
+            runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) [ERROR] ${__miniAErrMsg(wkErr)}`)
+          }
+          runtime.consecutiveThoughts = 0
+          runtime.stepsWithoutAction = 0
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
+          flushAll()
+          continue
+        }
+
         //runtime.context.push(`[THOUGHT ${stepLabel}] ((unknown action -> think) ${thoughtStr || "no thought"})`)
         runtime.context.push(`[ERROR ${stepLabel}] (unknown action '${origActionRaw}'; use ${this._actionsList}) ${thoughtStr || "(no thought)"}`)
 
@@ -17945,6 +18106,50 @@ MiniA.prototype._runChatbotMode = function(options) {
                 var cbMsSummary = cbMsSections.map(function(s) { return s + "(" + cbMsResults[s].length + ")" }).join(", ")
                 pendingPrompt = `memory_search results for "${cbMsQuery}" [${cbMsSummary}]:\n${af.toTOON(cbMsResults)}\nUse this information to continue.`
               }
+            }
+            handled = true
+            break
+          }
+
+          if (lowerAction === "wiki" && args.usewiki && isObject(this._wikiManager)) {
+            var cbWkParams = isMap(currentMsg.params) ? currentMsg.params : {}
+            var cbWkOp = isString(cbWkParams.op) ? cbWkParams.op.trim().toLowerCase() : "list"
+            var cbWkPath = isString(cbWkParams.path) ? cbWkParams.path.trim() : ""
+            var cbWkQuery = isString(cbWkParams.query) ? cbWkParams.query.trim() : ""
+            var cbWkContent = isString(cbWkParams.content) ? cbWkParams.content : ""
+            try {
+              var cbWkResult
+              if (cbWkOp === "list") {
+                var cbWkPages = this._wikiManager.list(cbWkPath)
+                cbWkResult = "Wiki pages (" + cbWkPages.length + "):\n" + cbWkPages.join("\n")
+              } else if (cbWkOp === "read") {
+                if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki read requires 'path'" }
+                else {
+                  var cbWkPage = this._wikiManager.read(cbWkPath)
+                  cbWkResult = isObject(cbWkPage) ? af.toTOON(cbWkPage) : "[ERROR] Page not found: " + cbWkPath
+                }
+              } else if (cbWkOp === "search") {
+                if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
+                else {
+                  var cbWkHits = this._wikiManager.search(cbWkQuery)
+                  cbWkResult = cbWkHits.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
+                }
+              } else if (cbWkOp === "lint") {
+                var cbWkLint = this._wikiManager.lint(this._memoryManager, { staleDays: this._wikiLintStaleDays })
+                cbWkResult = af.toTOON(cbWkLint)
+              } else if (cbWkOp === "write") {
+                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki write requires wikiaccess=rw" }
+                else if (cbWkPath.length === 0 || cbWkContent.length === 0) { cbWkResult = "[ERROR] wiki write requires 'path' and 'content'" }
+                else {
+                  var cbWkWrite = this._wikiManager.write(cbWkPath, cbWkContent)
+                  cbWkResult = isObject(cbWkWrite) && cbWkWrite.ok ? "Wrote " + cbWkPath : "[ERROR] " + (isObject(cbWkWrite) ? cbWkWrite.error : "write failed")
+                }
+              } else {
+                cbWkResult = "[ERROR] Unknown wiki op: " + cbWkOp
+              }
+              pendingPrompt = `wiki/${cbWkOp} result:\n${cbWkResult}\nUse this information to continue.`
+            } catch(cbWkErr) {
+              pendingPrompt = `wiki/${cbWkOp} error: ${__miniAErrMsg(cbWkErr)}`
             }
             handled = true
             break

@@ -403,7 +403,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "models", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "models", "stats", "skills", "wiki", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -555,6 +555,19 @@ try {
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
+    usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
+    wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
+    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs or s3." },
+    wikiroot       : { type: "string", description: "Root directory for the filesystem wiki backend." },
+    wikibucket     : { type: "string", description: "Bucket name for the S3 wiki backend." },
+    wikiprefix     : { type: "string", default: "wiki/", description: "Prefix path for the S3 wiki backend." },
+    wikiurl        : { type: "string", description: "S3 endpoint URL for the wiki backend." },
+    wikiaccesskey  : { type: "string", description: "S3 access key for the wiki backend." },
+    wikisecret     : { type: "string", description: "S3 secret key for the wiki backend." },
+    wikiregion     : { type: "string", description: "S3 region for the wiki backend." },
+    wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
+    wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
+    wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -1196,6 +1209,54 @@ try {
     return completions
   }
 
+  function getConsoleWikiManager() {
+    var wm = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
+    if (isObject(wm)) return wm
+    if (toBoolean(sessionOptions.usewiki) !== true) return __
+
+    try {
+      var wikiCfg = {
+        access : sessionOptions.wikiaccess,
+        backend: sessionOptions.wikibackend
+      }
+      if (sessionOptions.wikibackend === "s3") {
+        wikiCfg.bucket          = sessionOptions.wikibucket
+        wikiCfg.prefix          = sessionOptions.wikiprefix
+        wikiCfg.url             = sessionOptions.wikiurl
+        wikiCfg.accessKey       = sessionOptions.wikiaccesskey
+        wikiCfg.secret          = sessionOptions.wikisecret
+        wikiCfg.region          = sessionOptions.wikiregion
+        wikiCfg.useVersion1     = sessionOptions.wikiuseversion1
+        wikiCfg.ignoreCertCheck = sessionOptions.wikiignorecertcheck
+      } else {
+        wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
+      }
+      return new MiniAWikiManager(wikiCfg)
+    } catch(ignoreWikiInitError) {
+      return __
+    }
+  }
+
+  function getWikiSubcommandCompletions() {
+    var completions = ["list", "read", "search", "lint"]
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write")
+    return completions
+  }
+
+  function getWikiPageCompletions(partialPath) {
+    var completions = []
+    try {
+      var wm = getConsoleWikiManager()
+      if (!isObject(wm)) return completions
+      var prefix = isString(partialPath) ? partialPath.trim() : ""
+      wm.list("").forEach(function(path) {
+        if (!isString(path)) return
+        if (prefix.length === 0 || path.indexOf(prefix) === 0) completions.push(path)
+      })
+    } catch(ignoreWikiCompletionError) { }
+    return completions
+  }
+
   function resolveSkillTemplateFromFolder(folderPath) {
     return __miniAResolveSkillTemplateFromFolder(folderPath)
   }
@@ -1765,10 +1826,11 @@ try {
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
-      var statsCompletions = ["detailed", "tools", "memory", "out=", "file=", "save=", "json="]
+      var statsCompletions = ["detailed", "tools", "memory", "wiki", "out=", "file=", "save=", "json="]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
+      var wikiReadPathCommands = { list: true, read: true, write: true }
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -1899,6 +1961,39 @@ try {
               if (option.indexOf(trimmedRemainder) === 0) candidates.add(option)
             })
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
+
+          // Handle /wiki command completions
+          if (lookupName === "wiki") {
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            if (trimmedRemainder.length === 0) {
+              getWikiSubcommandCompletions().forEach(function(option) { candidates.add(option) })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            var wikiParts = trimmedRemainder.split(/\s+/)
+            var wikiSubcmd = String(wikiParts[0] || "").toLowerCase()
+
+            if (wikiParts.length <= 1 && !/\s$/.test(trimmedRemainder)) {
+              getWikiSubcommandCompletions().forEach(function(option) {
+                if (option.indexOf(wikiSubcmd) === 0) candidates.add(option)
+              })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            if (Object.prototype.hasOwnProperty.call(wikiReadPathCommands, wikiSubcmd)) {
+              var pathPrefix = wikiParts.slice(1).join(" ")
+              var pathInsertionPoint = insertionPoint + trimmedRemainder.indexOf(pathPrefix)
+              getWikiPageCompletions(pathPrefix).forEach(function(path) {
+                candidates.add(path)
+              })
+              return candidates.isEmpty() ? -1 : Number(pathInsertionPoint)
+            }
+
+            return -1
           }
 
           if (!Object.prototype.hasOwnProperty.call(slashParameterHints, lookupName)) return -1
@@ -2965,6 +3060,13 @@ try {
 
   var sessionOptions = resetOptions()
   var sessionExplicitOptions = resetExplicitOptions()
+  // Seed interactive session options from CLI/mode args so console-only
+  // commands (/wiki, /show, /skills, etc.) see the same startup config.
+  Object.keys(parameterDefinitions).forEach(function(key) {
+    if (Object.prototype.hasOwnProperty.call(args, key) && isDef(args[key])) {
+      sessionOptions[key] = args[key]
+    }
+  })
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true }
   var activeAgent = __
@@ -4228,6 +4330,7 @@ try {
       showDetailed: false,
       showTools: false,
       showMemory: false,
+      showWiki: false,
       outputPath: __
     }
 
@@ -4245,6 +4348,10 @@ try {
       }
       if (tokenLower === "memory" || tokenLower === "mem") {
         options.showMemory = true
+        continue
+      }
+      if (tokenLower === "wiki") {
+        options.showWiki = true
         continue
       }
 
@@ -4303,6 +4410,7 @@ try {
 
     var showDetailed = statsOptions.showDetailed === true
     var showTools = statsOptions.showTools === true
+    var showWiki = statsOptions.showWiki === true
     var summaryExport = __
     var exportPayload = __
 
@@ -4511,9 +4619,28 @@ try {
         })
       }
 
+      if (isObject(metrics.wiki) && metrics.wiki.enabled === true) {
+        summaryExport.wiki = {
+          ops_total: metrics.wiki.ops_total || 0,
+          ops_errors: metrics.wiki.ops_errors || 0
+        }
+        summaryRows.push({
+          category: "Wiki",
+          metric: "Total Ops",
+          value: metrics.wiki.ops_total || 0
+        })
+        if ((metrics.wiki.ops_errors || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Errors",
+            value: metrics.wiki.ops_errors || 0
+          })
+        }
+      }
+
       print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       print()
-      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, '/stats memory' for working-memory stats, or add out=<file.json> to save.", hintColor))
+      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, '/stats memory' for working-memory stats, '/stats wiki' for wiki stats, or add out=<file.json> to save.", hintColor))
       exportPayload = { mode: "summary", data: summaryExport }
     }
 
@@ -4575,8 +4702,32 @@ try {
         print()
         print(printTable(sectionRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       }
-      if (!showDetailed && !showTools) {
+      if (!showDetailed && !showTools && !showWiki) {
         exportPayload = { mode: "memory", data: isObject(metrics.memory) ? metrics.memory : {} }
+      }
+    }
+
+    if (showWiki === true) {
+      if (!isObject(metrics.wiki) || metrics.wiki.enabled !== true) {
+        print(colorifyText("No wiki statistics available (usewiki=true required).", hintColor))
+      } else {
+        var wiki = metrics.wiki
+        var wikiRows = [
+          { category: "Status",   metric: "Enabled",  value: "true" },
+          { category: "Ops",      metric: "Total",    value: wiki.ops_total || 0 },
+          { category: "",         metric: "List",     value: wiki.ops_list  || 0 },
+          { category: "",         metric: "Read",     value: wiki.ops_read  || 0 },
+          { category: "",         metric: "Search",   value: wiki.ops_search || 0 },
+          { category: "",         metric: "Write",    value: wiki.ops_write || 0 },
+          { category: "",         metric: "Lint",     value: wiki.ops_lint  || 0 },
+          { category: "Errors",   metric: "Op Errors", value: wiki.ops_errors || 0 }
+        ]
+        print(colorifyText("Wiki Statistics:", accentColor))
+        print()
+        print(printTable(wikiRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+      }
+      if (!showDetailed && !showTools) {
+        exportPayload = { mode: "wiki", data: isObject(metrics.wiki) ? metrics.wiki : {} }
       }
     }
 
@@ -4585,7 +4736,7 @@ try {
       print(colorifyText("Detailed Statistics:", accentColor))
       print()
       print(printTree(metrics))
-      exportPayload = { mode: (showTools ? "detailed+tools" : (statsOptions.showMemory === true ? "detailed+memory" : "detailed")), data: metrics }
+      exportPayload = { mode: (showTools ? "detailed+tools" : (statsOptions.showMemory === true ? "detailed+memory" : (statsOptions.showWiki === true ? "detailed+wiki" : "detailed"))), data: metrics }
     }
 
     // Show per-tool stats
@@ -4765,8 +4916,9 @@ try {
       { command: "/history [n]", description: "Show the last n user goals (one per line)" },
       { command: "/model [target]", description: "Choose a different model (target: model, modellc or modelval)" },
       { command: "/models", description: "List current main, low and validation models" },
-      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory)" },
+      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
+      { command: "/wiki [list|read|search|lint] [args]", description: "Interact with wiki (requires usewiki=true)" },
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
       { command: "/subtasks", description: "List all subtasks and their status" },
       { command: "/subtask <id>", description: "Show details for a subtask" },
@@ -4865,6 +5017,91 @@ try {
     print()
     print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
     print(colorifyText("Run a skill with /<name> ...args... or $<name> ...args...", hintColor))
+  }
+
+  function printWiki(subcmdRaw) {
+    var wm = getConsoleWikiManager()
+    if (!isObject(wm)) {
+      print(colorifyText("Wiki is not enabled. Start with usewiki=true and wikiroot=<path> (or wikibackend=s3).", hintColor))
+      return
+    }
+    var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
+    var sub   = parts.length > 0 ? parts[0].toLowerCase() : "list"
+    var rest  = parts.slice(1).join(" ").trim()
+
+    try {
+      if (sub === "list" || sub === "") {
+        var pages = wm.list(rest)
+        if (pages.length === 0) {
+          print(colorifyText("Wiki is empty.", hintColor))
+        } else {
+          print(colorifyText("Wiki pages (" + pages.length + "):", accentColor))
+          pages.forEach(function(p) { print("  " + colorifyText(p, promptColor)) })
+        }
+      } else if (sub === "read") {
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki read <path>", errorColor)); return }
+        var page = wm.read(rest)
+        if (!isObject(page)) { print(colorifyText("Page not found: " + rest, errorColor)); return }
+        print(colorifyText("── " + rest + " ──", accentColor))
+        if (isObject(page.meta) && isString(page.meta.title)) print(colorifyText(page.meta.title, "BOLD"))
+        print(page.body)
+      } else if (sub === "search") {
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki search <query>", errorColor)); return }
+        var hits = wm.search(rest)
+        if (hits.length === 0) {
+          print(colorifyText("No results for: " + rest, hintColor))
+        } else {
+          print(colorifyText("Results (" + hits.length + "):", accentColor))
+          hits.forEach(function(h) {
+            print("  " + colorifyText(h.path, promptColor) + (h.title && h.title !== h.path ? " — " + h.title : ""))
+            if (h.snippet) print("    " + colorifyText(h.snippet, hintColor))
+          })
+        }
+      } else if (sub === "lint") {
+        var lintResult = wm.lint(isObject(activeAgent) ? activeAgent._memoryManager : __)
+        var s = lintResult.summary
+        print(colorifyText("Wiki lint: " + s.pages + " pages, " + s.errors + " errors, " + s.warnings + " warnings, " + s.info + " info", accentColor))
+        if (lintResult.issues.length === 0) {
+          print(colorifyText("No issues found.", successColor))
+        } else {
+          lintResult.issues.forEach(function(iss) {
+            var sev   = iss.severity === "error" ? colorifyText("ERROR", errorColor) : (iss.severity === "warning" ? colorifyText("WARN ", "YELLOW") : colorifyText("INFO ", hintColor))
+            var label = "[" + sev + "] " + iss.type + " — " + iss.page
+            if (iss.target) label += " → " + iss.target
+            if (iss.similar) label += " ≈ " + iss.similar
+            if (iss.age_days) label += " (" + iss.age_days + "d)"
+            if (iss.field) label += " (missing: " + iss.field + ")"
+            if (iss.detail) label += " (" + iss.detail + ")"
+            print("  " + label)
+          })
+        }
+      } else if (sub === "write") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable writes.", errorColor))
+          return
+        }
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
+        var spacePos = rest.indexOf(" ")
+        var writePath = spacePos >= 0 ? rest.substring(0, spacePos).trim() : rest
+        var writeContent = spacePos >= 0 ? rest.substring(spacePos + 1) : ""
+        if (writePath.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
+        if (writeContent.trim().length === 0) {
+          print(colorifyText("Enter wiki page content. Finish with a line containing only \"\"\".", hintColor))
+          writeContent = collectMultiline("")
+          if (isUnDef(writeContent)) return
+        }
+        var writeResult = wm.write(writePath, writeContent)
+        if (isObject(writeResult) && writeResult.ok === true) {
+          print(colorifyText("Wrote " + writePath, successColor))
+        } else {
+          print(colorifyText("Wiki write failed: " + (isObject(writeResult) ? writeResult.error : "unknown error"), errorColor))
+        }
+      } else {
+        print(colorifyText("Usage: /wiki [list|read|search|lint|write] [args]", errorColor))
+      }
+    } catch(wikiErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))
+    }
   }
 
   const miniaLogo = ` ._ _ ${colorifyText("o", promptColor)}._ ${colorifyText("o", promptColor)}   _ 
@@ -5192,6 +5429,14 @@ try {
       }
       if (commandLower.indexOf("skills ") === 0) {
         printSkills(command.substring(7))
+        continue
+      }
+      if (commandLower === "wiki") {
+        printWiki("list")
+        continue
+      }
+      if (commandLower.indexOf("wiki ") === 0) {
+        printWiki(command.substring(5))
         continue
       }
       if (commandLower.indexOf("delegate ") === 0) {

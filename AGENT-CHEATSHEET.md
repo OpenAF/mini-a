@@ -23,7 +23,7 @@ Quick reference for Mini-A `agent=` files.
 | `rules` | array/string | `rules=` (used when not already provided) |
 | `knowledge` | array/string | `knowledge=` |
 | `youare` | array/string | `youare=` |
-| `mini-a` | map | Direct Mini-A arg overrides from the agent file |
+| `mini-a` | map | Direct Mini-A arg overrides from the agent file — supports all params including `usewiki`, `wikiaccess`, `wikibackend`, `wikiroot`, `wikibucket`, `usememory`, `memoryuser`, etc. |
 
 ## Tools entries
 
