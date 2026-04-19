@@ -3984,7 +3984,9 @@ try {
                 elapsedStr = secs + "s"
               }
               var counterColor = elapsed >= 60000 ? "FG(208)" : (elapsed >= 30000 ? "FG(220)" : "FG(240)")
-              displayMsg = _animBaseMsg + colorifyText(" · " + elapsedStr, counterColor)
+              displayMsg = _animBaseMsg +
+                colorifyText(" · " + elapsedStr, counterColor) +
+                colorifyText(" · Esc to cancel", "FG(238),ITALIC")
             }
           }
           return _renderEventMessage(colorifyText(cueSymbol, "RESET," + (eventPalette[type] || accentColor)) + " ", displayMsg, extra)
