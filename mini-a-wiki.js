@@ -444,6 +444,8 @@ MiniAWikiManager.prototype.delete = function(path) {
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
   path = path.trim()
 
+  if (path === "AGENTS.md") return { ok: false, error: "cannot delete AGENTS.md (protected)" }
+
   try {
     this._backend.delete(path)
     return { ok: true, path: path }

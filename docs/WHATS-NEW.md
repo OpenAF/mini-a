@@ -43,6 +43,8 @@
 | `wikiignorecertcheck` | `false` | Skip TLS cert check |
 | `wikilintstaleddays` | `90` | Stale threshold for lint |
 
+**Protected Pages**: `AGENTS.md` is protected and cannot be deleted via the `delete` operation. Attempting to delete it returns an error: `"cannot delete AGENTS.md (protected)"`. This ensures the wiki's ingestion workflow and contribution rules always remain accessible.
+
 **When to use `usewiki` vs `usememory`**:
 
 - **`usememory=true`** — tracks in-flight reasoning (facts, decisions, evidence) for the current agent; scoped to one session or one user's global store.
