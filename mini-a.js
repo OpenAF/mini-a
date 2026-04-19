@@ -13307,7 +13307,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "memorysessionch", "memoryuser", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
-    "onport", "web", "modelman", "mcptest", "workermode", "path", "usehistory", "useattach", "historypath",
+    "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",

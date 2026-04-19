@@ -107,6 +107,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `modellc` | Override OAF_LC_MODEL for this session | `modellc="(type: openai, model: gpt-3.5-turbo, key: '...')"` |
 | `modelval` | Override OAF_VAL_MODEL for this session | `modelval="(type: openai, model: gpt-4o-mini, key: '...')"` |
 | `modelman` | Launch interactive model manager | `modelman=true` |
+| `memoryman` | Launch interactive memory manager (global/session memory ops) | `memoryman=true usememory=true memoryuser=true` |
 | `modellock` | Lock model tier: `"main"`, `"lc"`, or `"auto"` (default) | `modellock=lc` |
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
 | `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
@@ -718,6 +719,29 @@ mini-a goal="..." memoryuser=true memorypromote=""
 # Disable staleness sweep entirely
 mini-a goal="..." memoryuser=true memorystaledays=0
 ```
+
+### Memory Manager TUI Cheatsheet (`memoryman=true`)
+
+```bash
+# Open memory manager with default user-local channels
+mini-a memoryman=true usememory=true memoryuser=true
+
+# Open memory manager against explicit channels + session namespace
+mini-a memoryman=true usememory=true \
+  memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionid="demo-session"
+```
+
+Common actions inside the TUI:
+- `📊 Summary` — totals, stale/unresolved counts, per-section table.
+- `📃 List entries` — filter by section and stale/unresolved flags.
+- `🔎 Inspect entry` — print full payload for a selected `section/id`.
+- `🧽 Delete by id` — selective removal of one entry.
+- `⏳ Delete older than...` — prune by relative age (`30d`, `12h`, `90m`) or absolute timestamp (ISO/epoch).
+- `🔍 Search entries` — keyword search across ids/values/tags.
+- `🧰 Maintenance` — run compaction, stale sweep, or full store clear.
+- `💾 Export snapshot` — print JSON snapshot for backup/audit.
 
 ### Programmatic API (embedding use)
 

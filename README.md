@@ -45,6 +45,13 @@ Two steps to use:
    The manager lets you create, import, rename, export, and delete reusable
    definitions that can then be exported as `OAF_MODEL`/`OAF_LC_MODEL` values or copied as raw SLON/JSON for sharing.
 
+   For working-memory operations, launch the memory manager:
+   ```bash
+   mini-a memoryman=true usememory=true memoryuser=true
+   ```
+   It provides global/session memory summaries, entry inspection, search,
+   selective delete, and age-based pruning.
+
 2. Run the console:
    ```bash
    opack exec mini-a
@@ -392,6 +399,7 @@ Mini-A ships with complementary components:
 - **`mini-a.yaml`** - Core oJob definition that implements the agent workflow
 - **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
+- **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
@@ -456,6 +464,7 @@ Mini-A ships with complementary components:
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (supports `include` inheritance) | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
+| `memoryman` | Launch the interactive working-memory manager (inspect/list/search/delete/prune global+session stores) | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
 | `workers` | Comma-separated list of worker URLs for remote delegation (`workers=http://host1:8080,http://host2:8080`) | - |
 | `usea2a` | Use A2A HTTP+JSON/REST binding (`/message:send`, `/tasks`, `/tasks:cancel`) for remote delegation | `false` |
