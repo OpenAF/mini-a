@@ -853,6 +853,7 @@ jobs:
       llmcomplexity  : toBoolean.isBoolean.default(false)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
+    MiniA.applyLibEnvDefault(args)
     var _ma = new MiniA()
     function warnOnUnknownParameters() {
       if (!isMap(args)) return

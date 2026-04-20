@@ -1900,4 +1900,115 @@
     ow.test.assert(warnings.length, 1, "Misspelled parameters should emit one warning")
     ow.test.assert(warnings[0].indexOf("Did you mean 'useshell'?") >= 0, true, "Unknown parameter warning should suggest the closest valid parameter")
   }
+
+  exports.testShouldWarnUnknownArgsOnlyForConsoleMode = function() {
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({}), true, "Plain console startup should keep unknown-arg warnings enabled")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ resume: true }), true, "Resume stays on the interactive console path")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ goal: "ship it", writeReport: "writeReport.yaml" }), false, "Goal execution should suppress console-only unknown-arg warnings")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ onport: 8888, writeReport: "writeReport.yaml" }), false, "Web mode should suppress console-only unknown-arg warnings")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ exec: "/skill run", customflag: true }), false, "Template execution should suppress console-only unknown-arg warnings")
+  }
+
+  exports.testInitSkipsUnknownArgWarningsForNonConsoleRuns = function() {
+    var agent = createAgent()
+    var warned = false
+    agent._warnUnknownArgs = function() {
+      warned = true
+      return []
+    }
+    agent._normalizeMcpJobPaths = function() {
+      throw new Error("__stop_after_warning_check__")
+    }
+
+    try {
+      agent.init({
+        goal: "generate a report",
+        writeReport: "writeReport.yaml"
+      })
+    } catch(e) {
+      if (String(e.message || e) !== "__stop_after_warning_check__") throw e
+    }
+
+    ow.test.assert(warned, false, "Non-console runs should not invoke unknown-argument warnings during init")
+  }
+
+  exports.testInitKeepsUnknownArgWarningsForConsoleRuns = function() {
+    var agent = createAgent()
+    var warned = false
+    agent._warnUnknownArgs = function() {
+      warned = true
+      return []
+    }
+    agent._normalizeMcpJobPaths = function() {
+      throw new Error("__stop_after_warning_check__")
+    }
+
+    try {
+      agent.init({
+        oddflag: true
+      })
+    } catch(e) {
+      if (String(e.message || e) !== "__stop_after_warning_check__") throw e
+    }
+
+    ow.test.assert(warned, true, "Interactive console runs should still validate unknown arguments during init")
+  }
+
+  exports.testApplyLauncherEnvDefaultsSetsLibsAndModeFromEnvOverrides = function() {
+    var args = {
+      OAF_MINI_A_LIBS: " libA,libB ",
+      OAF_MINI_A_MODE: " research "
+    }
+    MiniA.applyLauncherEnvDefaults(args)
+
+    ow.test.assert(args.libs, "libA,libB", "Launcher env defaults should trim and apply OAF_MINI_A_LIBS")
+    ow.test.assert(args.mode, "research", "Launcher env defaults should trim and apply OAF_MINI_A_MODE")
+  }
+
+  exports.testApplyLibEnvDefaultSetsOnlyLibsFromEnvOverride = function() {
+    var args = {
+      OAF_MINI_A_LIBS: " shared-lib ",
+      OAF_MINI_A_MODE: "research"
+    }
+
+    MiniA.applyLibEnvDefault(args)
+
+    ow.test.assert(args.libs, "shared-lib", "Lib env defaults should trim and apply OAF_MINI_A_LIBS")
+    ow.test.assert(isUnDef(args.mode), true, "Lib env defaults should not apply OAF_MINI_A_MODE")
+  }
+
+  exports.testApplyLauncherEnvDefaultsPreservesExplicitLibsAndMode = function() {
+    var args = {
+      libs: "explicit-lib",
+      mode: "explicit-mode",
+      OAF_MINI_A_LIBS: "env-lib",
+      OAF_MINI_A_MODE: "env-mode"
+    }
+
+    MiniA.applyLauncherEnvDefaults(args)
+
+    ow.test.assert(args.libs, "explicit-lib", "Explicit libs should win over launcher env defaults")
+    ow.test.assert(args.mode, "explicit-mode", "Explicit mode should win over launcher env defaults")
+  }
+
+  exports.testApplyLauncherEnvDefaultsSupportsRoutedNonInteractiveLaunches = function() {
+    var goalArgs = {
+      goal: "generate report",
+      OAF_MINI_A_LIBS: "goal-lib",
+      OAF_MINI_A_MODE: "research"
+    }
+    var webArgs = {
+      onport: 8888,
+      OAF_MINI_A_LIBS: "web-lib",
+      OAF_MINI_A_MODE: "webmode"
+    }
+
+    MiniA.applyLauncherEnvDefaults(goalArgs)
+    MiniA.applyLauncherEnvDefaults(webArgs)
+
+    ow.test.assert(goalArgs.libs, "goal-lib", "Goal mode should inherit launcher env libs before dispatch")
+    ow.test.assert(goalArgs.mode, "research", "Goal mode should inherit launcher env mode before dispatch")
+    ow.test.assert(webArgs.libs, "web-lib", "Web mode should inherit launcher env libs before dispatch")
+    ow.test.assert(webArgs.mode, "webmode", "Web mode should inherit launcher env mode before dispatch")
+  }
 })()

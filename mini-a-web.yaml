@@ -1802,6 +1802,7 @@ jobs:
     }
 
     args.browsercontext = browserContext
+    MiniA.applyLibEnvDefault(args)
     global.maArgs = merge(args, {})
     var needsWorkerRegBootstrap = isNumber(args.workerreg)
     if (!toBoolean(args.mcplazy) || needsWorkerRegBootstrap) {

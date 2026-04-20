@@ -13628,6 +13628,51 @@ MiniA.findClosestKnownArg = function(name, knownNames, maxDistance) {
   return { match: bestMatch, distance: bestDistance }
 }
 
+MiniA.applyLibEnvDefault = function(args) {
+  var target = isMap(args) ? args : {}
+
+  if (!(isString(target.libs) && target.libs.trim().length > 0)) {
+    var envLibs = target.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
+    if (isString(envLibs) && envLibs.trim().length > 0) {
+      target.libs = envLibs.trim()
+    }
+  }
+
+  return target
+}
+
+MiniA.applyLauncherEnvDefaults = function(args) {
+  var target = MiniA.applyLibEnvDefault(args)
+
+  if (!(isString(target.mode) && target.mode.trim().length > 0)) {
+    var envMode = target.OAF_MINI_A_MODE || getEnv("OAF_MINI_A_MODE")
+    if (isString(envMode) && envMode.trim().length > 0) {
+      target.mode = envMode.trim()
+    }
+  }
+
+  return target
+}
+
+MiniA.shouldWarnUnknownArgs = function(args) {
+  if (!isMap(args)) return false
+  if (args.warnunknownargs === false || toBoolean(args.warnunknownargs) === false) return false
+
+  var launchesNonConsoleFlow =
+    isDef(args.goal) ||
+    isDef(args.agent) ||
+    isDef(args.agentfile) ||
+    isDef(args.exec) ||
+    toBoolean(args.web) === true ||
+    toBoolean(args.onport) === true ||
+    toBoolean(args.modelman) === true ||
+    toBoolean(args.mcptest) === true ||
+    toBoolean(args.memoryman) === true ||
+    toBoolean(args.workermode) === true
+
+  return launchesNonConsoleFlow !== true
+}
+
 MiniA.warnUnknownArgs = function(args, options) {
   if (!isMap(args) || args.__unknownargsreported === true) return []
 
@@ -13723,7 +13768,7 @@ MiniA.prototype.init = function(args) {
   var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
   this._applyAgentMetadata(args)
   this._applyExplicitExternalArgs(args, explicitExternalArgs)
-  this._warnUnknownArgs(args)
+  if (MiniA.shouldWarnUnknownArgs(args)) this._warnUnknownArgs(args)
   var currentWorkingDir = __
   try {
     currentWorkingDir = String((new java.io.File(".")).getCanonicalPath())

@@ -77,19 +77,7 @@ try {
   var requestedTemplateKind = findRequestedTemplateKind(args)
 
   // Init
-  if (!(isString(args.libs) && args.libs.trim().length > 0)) {
-    var envLibs = args.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
-    if (isString(envLibs) && envLibs.trim().length > 0) {
-      args.libs = envLibs.trim()
-      //log("Using libs from OAF_MINI_A_LIBS environment variable.")
-    }
-    //global._args = args
-  }
-
-  if (!(isString(args.mode) && args.mode.trim().length > 0)) {
-    var envMode = args.OAF_MINI_A_MODE || getEnv("OAF_MINI_A_MODE")
-    if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
-  }
+  MiniA.applyLauncherEnvDefaults(args)
 
   if (!helpRequested && !cheatsheetRequested && isUnDef(requestedTemplateKind)) {
     (function(args, explicitKeys) {
@@ -293,20 +281,22 @@ try {
       args.__modeApplied = true
     })(args, explicitCLIArgKeys)
 
-    MiniA.warnUnknownArgs(args, {
-      extraIgnoredArgs: {
-        "mini-a": true,
-        exec: true,
-        agent: true,
-        init: true,
-        "__id": true,
-        objid: true,
-        execid: true,
-        "__modeapplied": true,
-        "__unknownargsreported": true
-      },
-      logger: function(message) { logWarn(message) }
-    })
+    if (MiniA.shouldWarnUnknownArgs(args)) {
+      MiniA.warnUnknownArgs(args, {
+        extraIgnoredArgs: {
+          "mini-a": true,
+          exec: true,
+          agent: true,
+          init: true,
+          "__id": true,
+          objid: true,
+          execid: true,
+          "__modeapplied": true,
+          "__unknownargsreported": true
+        },
+        logger: function(message) { logWarn(message) }
+      })
+    }
 
     // Choose
     if (toBoolean(args.modelman) === true) {
