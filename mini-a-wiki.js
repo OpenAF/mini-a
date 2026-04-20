@@ -33,6 +33,7 @@ MiniAWikiManager.prototype.configure = function(config) {
 }
 
 MiniAWikiManager.prototype._bootstrapWiki = function() {
+  this._bootstrappedFiles = []
   try {
     var pages = this.list("")
     var hasAgents = this._backend.exists("AGENTS.md")
@@ -170,8 +171,8 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
       "- Add links to newly created or important pages here until the topic structure is stable.",
     ].join("\n")
 
-    if (!hasAgents) this._backend.write("AGENTS.md", agentsContent)
-    if (!hasIndex) this._backend.write("index.md", indexContent)
+    if (!hasAgents) { this._backend.write("AGENTS.md", agentsContent); this._bootstrappedFiles.push("AGENTS.md") }
+    if (!hasIndex)  { this._backend.write("index.md", indexContent);   this._bootstrappedFiles.push("index.md")  }
   } catch(e) {}
 }
 
@@ -180,6 +181,8 @@ MiniAWikiManager.prototype.init = function() {
   var now = new Date().toISOString()
   var hasAgents = this._backend.exists("AGENTS.md")
   var hasIndex  = this._backend.exists("index.md")
+  var bootstrapped = isArray(this._bootstrappedFiles) ? this._bootstrappedFiles : []
+  this._bootstrappedFiles = []
   var created = []
   var skipped = []
   try {
@@ -283,6 +286,8 @@ MiniAWikiManager.prototype.init = function() {
       ].join("\n")
       this._backend.write("AGENTS.md", agentsContent)
       created.push("AGENTS.md")
+    } else if (bootstrapped.indexOf("AGENTS.md") >= 0) {
+      created.push("AGENTS.md")
     } else {
       skipped.push("AGENTS.md")
     }
@@ -316,6 +321,8 @@ MiniAWikiManager.prototype.init = function() {
         "- Add links to newly created or important pages here until the topic structure is stable.",
       ].join("\n")
       this._backend.write("index.md", indexContent)
+      created.push("index.md")
+    } else if (bootstrapped.indexOf("index.md") >= 0) {
       created.push("index.md")
     } else {
       skipped.push("index.md")

@@ -2236,6 +2236,40 @@ MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jso
   throw new Error("Streaming with stats is not supported by this LLM instance")
 }
 
+MiniA.prototype._shouldDisableStreamingForOllamaToolCallTurn = function(modelConfig, functionCallingActive, structuredOutputExpected) {
+  return functionCallingActive === true
+    && structuredOutputExpected === true
+    && isMap(modelConfig)
+    && isString(modelConfig.type)
+    && modelConfig.type.toLowerCase() === "ollama"
+}
+
+MiniA.prototype._fallbackFromToolCallingFailure = function(runtime, opts) {
+  opts = isObject(opts) ? opts : {}
+
+  var stepLabel = isDef(opts.stepLabel) ? opts.stepLabel : "?"
+  var reason = isString(opts.reason) && opts.reason.trim().length > 0
+    ? opts.reason.trim()
+    : "model rejected tool-calling request"
+  var useLowCost = opts.useLowCost === true
+
+  if (useLowCost) {
+    runtime.forceMainModel = true
+    runtime.pendingAdvisorSignals = __
+    runtime.context.push(`[OBS ${stepLabel}] (recover) ${reason}. Escalating to main model while keeping function calling enabled.`)
+    this.fnI("warn", `Step ${stepLabel}: ${reason}. Escalating to main model with tools still enabled.`)
+    return
+  }
+
+  this._useToolsActual = false
+  runtime.forceMainModel = true
+  runtime.forceNoStream = true
+  runtime.forceNoJson = true
+  this._restoreNoToolsModels(false)
+  runtime.context.push(`[OBS ${stepLabel}] (recover) ${reason}. Disabling function calling and retrying in action-based mode.`)
+  this.fnI("warn", `Step ${stepLabel}: ${reason}. Falling back to action-based mode without tools.`)
+}
+
 MiniA.prototype._syncDelegationMetrics = function() {
   try {
     if (!isObject(this._subtaskManager) || typeof this._subtaskManager.getMetrics !== "function") return
@@ -7262,19 +7296,29 @@ MiniA.prototype._extractMalformedActionModeToolRequest = function(payload) {
     return inspect(payload)
 }
 
-MiniA.prototype._fallbackFromMalformedToolCall = function(runtime, stepLabel, reason) {
+MiniA.prototype._fallbackFromMalformedToolCall = function(runtime, stepLabel, reason, opts) {
+    opts = isObject(opts) ? opts : {}
     if (!isObject(runtime) || !isArray(runtime.context)) return false
     if (this._useToolsActual !== true || isUnDef(this._llmNoTools)) return false
+
+    var reasonText = isString(reason) && reason.trim().length > 0
+      ? reason.trim()
+      : "model emitted malformed pseudo tool-call JSON instead of a real tool call"
+    var useLowCost = opts.useLowCost === true
+
+    if (useLowCost) {
+      runtime.forceMainModel = true
+      runtime.pendingAdvisorSignals = __
+      runtime.context.push(`[OBS ${stepLabel}] (recover) ${reasonText}. Escalating to main model while keeping function calling enabled.`)
+      this.fnI("warn", `Step ${stepLabel}: ${reasonText}. Escalating to main model with tools still enabled.`)
+      return true
+    }
 
     this._useToolsActual = false
     runtime.forceMainModel = true
     runtime.forceNoStream = true
     runtime.forceNoJson = true
     this._restoreNoToolsModels(false)
-
-    var reasonText = isString(reason) && reason.trim().length > 0
-      ? reason.trim()
-      : "model emitted malformed pseudo tool-call JSON instead of a real tool call"
     runtime.actionModeFallbackActive = true
     runtime.context.push(`[OBS ${stepLabel}] (recover) ${reasonText}. Disabling function calling and retrying in action-based mode.`)
     this.fnI("warn", `Step ${stepLabel}: ${reasonText}. Falling back to action-based mode without tools.`)
@@ -7388,6 +7432,29 @@ MiniA.prototype._extractToolCallActions = function(payload, allowedTools, opts) 
 
     visit(payload)
     return results
+}
+
+MiniA.prototype._recoverToolCallPayload = function(payload, allowedTools, opts) {
+    var extracted = this._extractToolCallActions(payload, allowedTools, opts)
+    if (!isArray(extracted) || extracted.length === 0) return __
+    return extracted
+}
+
+MiniA.prototype._recoverToolCallPayloadFromConversation = function(llmInstance, allowedTools, opts) {
+    if (!(isDef(llmInstance) && isFunction(llmInstance.getGPT))) return __
+    var gpt = llmInstance.getGPT()
+    if (!(isDef(gpt) && isFunction(gpt.getConversation))) return __
+
+    var conversation = gpt.getConversation()
+    if (!isArray(conversation) || conversation.length === 0) return __
+
+    for (var i = conversation.length - 1; i >= 0; i--) {
+        var entry = conversation[i]
+        var recovered = this._recoverToolCallPayload(entry, allowedTools, opts)
+        if (isArray(recovered) && recovered.length > 0) return recovered
+    }
+
+    return __
 }
 
 MiniA.prototype._resolveDebugChannelName = function(channelSpec, defaultName) {
@@ -16877,19 +16944,26 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             return currentLLM.promptWithStats(prompt)
           }
-          // When function calling is active, skip format:json only for Ollama models.
-          // Some Ollama thinking models fail when both "tools" and "format:json" are requested.
+          // When function calling is active, avoid streaming only for Ollama-backed
+          // turns that still expect structured/tool-calling output.
+          // The streaming adapter can surface thinking deltas while dropping the final
+          // tool_calls payload from the execution path, which leaves the loop with an
+          // empty/non-JSON body even though the provider emitted a valid tool call.
+          // Also skip format:json for these models because some fail when both tools
+          // and JSON mode are requested together.
           var currentModelConfig = useLowCost ? this._oaf_lc_model : this._oaf_model
-          var isOllamaToolJsonConflict = this._useToolsActual === true
-            && isMap(currentModelConfig)
-            && isString(currentModelConfig.type)
-            && currentModelConfig.type.toLowerCase() === "ollama"
+          var isOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
+            currentModelConfig,
+            this._useToolsActual === true,
+            !noJsonPromptFlag
+          )
+          var isOllamaToolJsonConflict = isOllamaToolCallMode
           // usejsontool models respond via tool_calls; tool_calls are not auto-executed
           // in streaming mode, so pendingJsonToolPayload would never be set. Use non-streaming.
           var isJsonToolMode = toBoolean(args.usejsontool) === true
-          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode) {
+          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode && !isOllamaToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, true, onDelta)
-          } else if (canStream && !isJsonToolMode) {
+          } else if (canStream && !isJsonToolMode && !isOllamaToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, false, onDelta)
           }
           if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
@@ -17180,6 +17254,34 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
+          var recoveredToolPayload = __
+          if (this._useToolsActual === true) {
+            recoveredToolPayload = this._recoverToolCallPayload(responseWithStats, this.mcpToolNames, {
+              useshell: args.useshell
+            })
+            if (!(isArray(recoveredToolPayload) && recoveredToolPayload.length > 0)) {
+              recoveredToolPayload = this._recoverToolCallPayload(rmsg, this.mcpToolNames, {
+                useshell: args.useshell
+              })
+            }
+            if (!(isArray(recoveredToolPayload) && recoveredToolPayload.length > 0)) {
+              recoveredToolPayload = this._recoverToolCallPayloadFromConversation(currentLLM, this.mcpToolNames, {
+                useshell: args.useshell
+              })
+            }
+          }
+          if (isArray(recoveredToolPayload) && recoveredToolPayload.length > 0) {
+            msg = recoveredToolPayload
+            runtime.modelToolCallDetected = true
+            runtime.context.push(`[OBS ${step + 1}] (recover) recovered ${recoveredToolPayload.length} tool call(s) from provider response without valid JSON body.`)
+            if (args.debug || args.verbose) {
+              this.fnI("recover", `Step ${step + 1}: recovered ${recoveredToolPayload.length} tool call(s) after invalid JSON normalization.`)
+              this.fnI("info", `[STATE after step ${step + 1}] ${stateSnapshot}`)
+            }
+          }
+        }
+
+        if (isUnDef(msg) || !(isMap(msg) || isArray(msg))) {
           var _geminiModelName = useLowCost
             ? this._getConfiguredModelName(this._oaf_lc_model, "")
             : this._getConfiguredModelName(this._oaf_model, "")
@@ -17217,13 +17319,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                   }
                 }
               } catch(eGemFbConv) {}
-              this._useToolsActual = false
-              runtime.forceMainModel = true
-              runtime.forceNoStream = true
-              runtime.forceNoJson = true
-              this._restoreNoToolsModels(false)
-              runtime.context.push(`[OBS ${step + 1}] (recover) Gemini via Ollama returned empty response with tools active (tool call not executed by runtime). Disabling function calling and retrying in action-based mode.`)
-              this.fnI("warn", `Step ${step + 1}: Gemini via Ollama returned empty response with tools active. Falling back to action-based mode.`)
+              this._fallbackFromToolCallingFailure(runtime, {
+                stepLabel : step + 1,
+                reason    : "Gemini via Ollama returned empty response with tools active (tool call not executed by runtime)",
+                useLowCost: useLowCost
+              })
               continue
             }
             runtime.context.push(`[OBS ${step + 1}] (warn) empty text response from Gemini; treating as transient and continuing.`)
@@ -17351,13 +17451,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               }
             }
           } catch(eFbConv) {}
-          this._useToolsActual = false
-          runtime.forceMainModel = true
-          runtime.forceNoStream = true
-          runtime.forceNoJson = true
-          this._restoreNoToolsModels(false)
-          runtime.context.push(`[OBS ${step + 1}] (recover) model returned error payload with tools active: "${baseMsg.error}". Disabling function calling and retrying in action-based mode.`)
-          this.fnI("warn", `Step ${step + 1}: model rejected tool-calling request ("${baseMsg.error}"). Falling back to action-based mode without tools.`)
+          this._fallbackFromToolCallingFailure(runtime, {
+            stepLabel : step + 1,
+            reason    : `model returned error payload with tools active: "${baseMsg.error}"`,
+            useLowCost: useLowCost
+          })
           continue
         }
       }
@@ -17432,7 +17530,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var malformedToolLabel = isString(malformedPseudoToolCall.tool) && malformedPseudoToolCall.tool.length > 0
             ? ` for '${malformedPseudoToolCall.tool}'`
             : ""
-          if (this._fallbackFromMalformedToolCall(runtime, step + 1, `model emitted pseudo tool-call JSON${malformedToolLabel} instead of a real tool call`)) {
+          if (this._fallbackFromMalformedToolCall(runtime, step + 1, `model emitted pseudo tool-call JSON${malformedToolLabel} instead of a real tool call`, {
+            useLowCost: useLowCost
+          })) {
             continue
           }
         }
@@ -18324,12 +18424,18 @@ MiniA.prototype._runChatbotMode = function(options) {
 
       var responseWithStats
       var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
+      var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format)
       var canStream = args.usestream && runtime.forceNoStream !== true && isFunction(this.llm.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(this.llm.promptStreamJSONWithStats)
+      var chatbotOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
+        this._oaf_model,
+        this._useToolsActual === true,
+        chatbotStructuredOutput
+      )
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       if (args.usestream) {
-        onDelta = canStreamJson && !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format) && this._useToolsActual !== true
+        onDelta = canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
       }
@@ -18337,7 +18443,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Use new promptJSONWithStatsRaw if available for showthinking
       if (args.showthinking) {
         // Streaming not compatible with showthinking - use regular prompts
-        var jsonFlag = !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format)
+        var jsonFlag = chatbotStructuredOutput
         if (jsonFlag && isDef(this.llm.promptJSONWithStatsRaw)) {
           responseWithStats = this.llm.promptJSONWithStatsRaw(pendingPrompt)
         } else if (isDef(this.llm.rawPromptWithStats)) {
@@ -18345,11 +18451,11 @@ MiniA.prototype._runChatbotMode = function(options) {
         } else {
           responseWithStats = this.llm.promptWithStats(pendingPrompt)
         }
-      } else if (canStreamJson && !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format) && this._useToolsActual !== true) {
+      } else if (canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true && !chatbotOllamaToolCallMode) {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
-      } else if (canStream) {
+      } else if (canStream && !chatbotOllamaToolCallMode) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
-      } else if (!chatbotNoJsonPromptFlag && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
+      } else if (chatbotStructuredOutput && isDef(this.llm.promptJSONWithStats)) {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)

@@ -108,6 +108,103 @@
     ow.test.assert(missing === null, true, "Should ignore non-final embedded payloads")
   }
 
+  exports.testDisableStreamingOnlyForStructuredOllamaToolTurns = function() {
+    var agent = createAgent()
+    ow.test.assert(
+      agent._shouldDisableStreamingForOllamaToolCallTurn({ type: "ollama" }, true, true),
+      true,
+      "Should disable streaming for Ollama tool-calling turns that expect structured output"
+    )
+    ow.test.assert(
+      agent._shouldDisableStreamingForOllamaToolCallTurn({ type: "ollama" }, true, false),
+      false,
+      "Should keep streaming enabled for Ollama plain-text turns"
+    )
+    ow.test.assert(
+      agent._shouldDisableStreamingForOllamaToolCallTurn({ type: "openai" }, true, true),
+      false,
+      "Should not disable streaming for non-Ollama tool-calling turns"
+    )
+  }
+
+  exports.testToolCallingFailureFallbackEscalatesLowCostOnly = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() {
+      throw new Error("Low-cost fallback should not rebuild both models without tools")
+    }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromToolCallingFailure(runtime, {
+      stepLabel : 1,
+      reason    : "low-cost tool error",
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual, true, "Low-cost fallback should keep main-model function calling enabled")
+    ow.test.assert(runtime.forceMainModel, true, "Low-cost fallback should escalate to the main model")
+    ow.test.assert(runtime.forceNoStream, __, "Low-cost fallback should not force-disable streaming globally")
+  }
+
+  exports.testToolCallingFailureFallbackDisablesMainTools = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromToolCallingFailure(runtime, {
+      stepLabel : 2,
+      reason    : "main tool error",
+      useLowCost: false
+    })
+
+    ow.test.assert(agent._useToolsActual, false, "Main-model fallback should disable function calling")
+    ow.test.assert(runtime.forceMainModel, true, "Main-model fallback should remain on the main model")
+    ow.test.assert(runtime.forceNoStream, true, "Main-model fallback should disable streaming for action mode retry")
+    ow.test.assert(restoreCalls === 1, true, "Main-model fallback should rebuild no-tools models once")
+  }
+
+  exports.testMalformedToolCallFallbackEscalatesLowCostOnly = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() {
+      throw new Error("Low-cost malformed fallback should not rebuild both models without tools")
+    }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromMalformedToolCall(runtime, 3, "low-cost malformed tool call", {
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual, true, "Low-cost malformed fallback should keep main-model function calling enabled")
+    ow.test.assert(runtime.forceMainModel, true, "Low-cost malformed fallback should escalate to the main model")
+    ow.test.assert(runtime.forceNoStream, __, "Low-cost malformed fallback should not force-disable streaming globally")
+    ow.test.assert(runtime.actionModeFallbackActive, __, "Low-cost malformed fallback should not activate action-mode fallback")
+  }
+
+  exports.testMalformedToolCallFallbackDisablesMainTools = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromMalformedToolCall(runtime, 4, "main malformed tool call", {
+      useLowCost: false
+    })
+
+    ow.test.assert(agent._useToolsActual, false, "Main malformed fallback should disable function calling")
+    ow.test.assert(runtime.forceMainModel, true, "Main malformed fallback should remain on the main model")
+    ow.test.assert(runtime.forceNoStream, true, "Main malformed fallback should disable streaming for action mode retry")
+    ow.test.assert(runtime.actionModeFallbackActive, true, "Main malformed fallback should activate action-mode fallback")
+    ow.test.assert(restoreCalls === 1, true, "Main malformed fallback should rebuild no-tools models once")
+  }
+
   exports.testShellToolCallAliasFallsBackToShell = function() {
     var agent = createAgent()
     var payload = {
@@ -162,6 +259,59 @@
     ow.test.assert(isArray(extracted) && extracted.length === 1, true, "Proxy mode should still recover aliased shell tool calls")
     ow.test.assert(extracted[0].action === "shell", true, "sh should alias to shell even when proxy-dispatch is the only registered tool")
     ow.test.assert(extracted[0].params.command === "date", true, "Proxy mode aliasing should preserve command arguments")
+  }
+
+  exports.testRecoverToolCallPayloadFromEnvelope = function() {
+    var agent = createAgent()
+    var payload = {
+      response: {
+        message: {
+          tool_calls: [
+            {
+              function: {
+                name: "proxy-dispatch",
+                arguments: "{\"action\":\"call\",\"tool\":\"timeUtilities\",\"arguments\":{\"operation\":\"current-time\"}}"
+              }
+            }
+          ]
+        }
+      }
+    }
+
+    var recovered = agent._recoverToolCallPayload(payload, ["proxy-dispatch"], { useshell: true })
+    ow.test.assert(isArray(recovered) && recovered.length === 1, true, "Should recover tool call actions from nested provider envelopes")
+    ow.test.assert(recovered[0].action === "proxy-dispatch", true, "Recovered envelope tool call should preserve tool name")
+    ow.test.assert(recovered[0].params.tool === "timeUtilities", true, "Recovered envelope tool call should preserve nested tool target")
+  }
+
+  exports.testRecoverToolCallPayloadFromConversation = function() {
+    var agent = createAgent()
+    var llmStub = {
+      getGPT: function() {
+        return {
+          getConversation: function() {
+            return [
+              { role: "user", content: "what time is it?" },
+              {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    function: {
+                      name: "proxy-dispatch",
+                      arguments: "{\"action\":\"call\",\"tool\":\"showMessage\",\"arguments\":{\"message\":\"hi\"}}"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+
+    var recovered = agent._recoverToolCallPayloadFromConversation(llmStub, ["proxy-dispatch"], { useshell: true })
+    ow.test.assert(isArray(recovered) && recovered.length === 1, true, "Should recover tool calls from conversation history when top-level response is empty")
+    ow.test.assert(recovered[0].params.tool === "showMessage", true, "Conversation recovery should preserve downstream tool name")
   }
 
   exports.testProcessFinalAnswerUnwrapsFencedJson = function() {
