@@ -857,6 +857,7 @@ jobs:
     var _ma = new MiniA()
     function warnOnUnknownParameters() {
       if (!isMap(args)) return
+      if (!MiniA.shouldWarnUnknownArgs(args)) return
       MiniA.warnUnknownArgs(args, {
         extraIgnoredArgs: {
           "mini-a"                : true,

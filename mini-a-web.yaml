@@ -1705,9 +1705,11 @@ jobs:
       if (isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
       delete args.valgoal
     }
-    MiniA.warnUnknownArgs(args, {
-      logger: function(message) { logWarn(message) }
-    })
+    if (MiniA.shouldWarnUnknownArgs(args)) {
+      MiniA.warnUnknownArgs(args, {
+        logger: function(message) { logWarn(message) }
+      })
+    }
     global.__res = {}
     global.__usehistory = args.usehistory
     global.__historypath = args.historypath
