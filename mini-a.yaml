@@ -135,6 +135,19 @@ help:
     desc     : "Maximum context size in tokens (default: 0 = disable proactive summarization; recover automatically on provider context-window errors)"
     example  : "200000"
     mandatory: false
+  - name     : compressgoal
+    desc     : "Boolean to enable/disable automatic compression of oversized goal text before execution (default: false)"
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : compressgoaltokens
+    desc     : "Estimated token threshold above which goal compression is considered when compressgoal=true (default: 250)"
+    example  : "400"
+    mandatory: false
+  - name     : compressgoalchars
+    desc     : "Character threshold above which goal compression is considered when compressgoal=true (default: 1000)"
+    example  : "1500"
+    mandatory: false
   - name     : maxcontent
     desc     : Alias for maxcontext
     example  : "0"
@@ -721,6 +734,9 @@ jobs:
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
       maxcontext     : toNumber.isNumber.default(0)
+      compressgoal   : toBoolean.isBoolean.default(false)
+      compressgoaltokens: toNumber.isNumber.default(250)
+      compressgoalchars : toNumber.isNumber.default(1000)
       maxcontent     : toNumber.isNumber.default(__)
       readwrite      : toBoolean.isBoolean.default(__)
       checkall       : toBoolean.isBoolean.default(false)

@@ -1348,6 +1348,26 @@
     ow.test.assert(agent._memoryScope === "both", true, "Default memory scope should be both")
   }
 
+  exports.testMemoryUserDefaults = function() {
+    var cfg = __miniAApplyMemoryUserDefaults({ memoryuser: true })
+    ow.test.assert(cfg.usememory === true, true, "memoryuser should enable memory")
+    ow.test.assert(isString(cfg.memorych) && cfg.memorych.length > 0, true, "memoryuser should configure global persistence")
+    ow.test.assert(isString(cfg.memorysessionch) && cfg.memorysessionch.length > 0, true, "memoryuser should configure session persistence")
+    ow.test.assert(isUnDef(cfg.memoryscope), true, "memoryuser should not override memory scope")
+    ow.test.assert(cfg.memorypromote === "facts,decisions,summaries", true, "memoryuser should auto-enable promotion")
+    ow.test.assert(cfg.memorystaledays === 30, true, "memoryuser should auto-enable stale tracking")
+  }
+
+  exports.testMemoryUserSessionDefaults = function() {
+    var cfg = __miniAApplyMemoryUserDefaults({ memoryusersession: true })
+    ow.test.assert(cfg.usememory === true, true, "memoryusersession should enable memory")
+    ow.test.assert(cfg.memoryscope === "session", true, "memoryusersession should default to session scope")
+    ow.test.assert(isString(cfg.memorysessionch) && cfg.memorysessionch.length > 0, true, "memoryusersession should configure session persistence")
+    ow.test.assert(isUnDef(cfg.memorych), true, "memoryusersession should not auto-configure global persistence")
+    ow.test.assert(isUnDef(cfg.memorypromote), true, "memoryusersession should not auto-enable promotion")
+    ow.test.assert(isUnDef(cfg.memorystaledays), true, "memoryusersession should not auto-enable stale tracking")
+  }
+
   exports.testManagedMemoryDefaultBothWritesToSession = function() {
     var channelName = "__mini_a_test_default_both_channel_memory_" + nowNano()
     var sessionChannelName = "__mini_a_test_default_both_session_memory_" + nowNano()

@@ -849,6 +849,7 @@ The `start()` method accepts various configuration options:
 - **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When combined with `memoryscope=both`, Mini-A now defaults runtime writes to the global store so they survive reloads; use `memoryScope: "session"` for ephemeral per-session entries. When omitted, memory is in-process only and not persisted between runs.
 - **`metricsch`** (string, optional): JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots. Supports any channel type accepted by `$ch().create(...)`. Example: `metricsch="{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}"`. By default Mini-A collects only the `mini-a` metric every `1000` ms; optional `period`, `some`, and `noDate` fields map directly to `ow.metrics.startCollecting(ch, period, some, noDate)`.
 - **`memoryuser`** (boolean, default: false): Convenience shorthand that activates `usememory`, pre-configures `memorych` and `memorysessionch` as file-backed channels under `~/.openaf-mini-a/`, and sets `memorypromote=facts,decisions,summaries` + `memorystaledays=30`. Only sets channels not already explicitly defined. The directory is auto-created if absent.
+- **`memoryusersession`** (boolean, default: false): Convenience shorthand that activates `usememory`, defaults `memoryscope=session`, and pre-configures `memorysessionch` as a file-backed channel under `~/.openaf-mini-a/`. Only sets the session channel when it is not already explicitly defined. The directory is auto-created if absent.
 - **`memorysessionch`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload session-scoped working memory. When both `memorych` and `memorysessionch` are set, default writes under `memoryscope=both` go to the session store; knowledge is promoted to global automatically at session end via `memorypromote`. Same format as `memorych`.
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
@@ -1015,6 +1016,9 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
+- **`compressgoal`** (boolean, default: false): Compress oversized rendered goal text before execution; when disabled, Mini-A preserves the original goal verbatim
+- **`compressgoaltokens`** (number, default: 250): Estimated token threshold above which goal compression is considered when `compressgoal=true`
+- **`compressgoalchars`** (number, default: 1000): Character threshold above which goal compression is considered when `compressgoal=true`
 - **`maxcontent`** (number): Alias for `maxcontext`
 - **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt (can be text or file path)
 

@@ -175,6 +175,157 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
   } catch(e) {}
 }
 
+MiniAWikiManager.prototype.init = function() {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  var now = new Date().toISOString()
+  var hasAgents = this._backend.exists("AGENTS.md")
+  var hasIndex  = this._backend.exists("index.md")
+  var created = []
+  var skipped = []
+  try {
+    if (!hasAgents) {
+      var agentsContent = [
+        "---",
+        "title: Wiki Contribution Guidelines",
+        "description: Rules and workflow for agents reading from and writing to this wiki.",
+        "created: " + now,
+        "updated: " + now,
+        "---",
+        "",
+        "# Wiki Contribution Guidelines",
+        "",
+        "This file defines how agents should read, distil, and contribute knowledge to this wiki.",
+        "All agents that use this wiki **must** read this file before performing any write operation.",
+        "",
+        "## Page Schema",
+        "",
+        "Every page is a Markdown file with a YAML front-matter block.",
+        "",
+        "### Required front-matter fields",
+        "",
+        "```yaml",
+        "---",
+        "title: Human-readable title (string)",
+        "description: One-sentence summary of the page (string)",
+        "created: <ISO 8601 timestamp>",
+        "updated: <ISO 8601 timestamp>   # must be refreshed on every write",
+        "---",
+        "```",
+        "",
+        "### Optional front-matter fields",
+        "",
+        "```yaml",
+        "tags: [tag1, tag2]              # lowercase slugs",
+        "aliases: [alt-name]             # alternative page names for search",
+        "supersedes: path/to/old.md      # when this page replaces another",
+        "status: draft | review | stable # omit for stable",
+        "```",
+        "",
+        "### Body conventions",
+        "",
+        "- Start with a single `# Title` heading that matches `front-matter.title`.",
+        "- Use `## Section` headings to organise content; never skip levels (e.g. h1 → h3).",
+        "- Keep pages focused on one concept. Split into sub-pages when a section exceeds ~300 words.",
+        "- End with a `## See Also` section listing related pages when relevant.",
+        "",
+        "## Ingestion Workflow",
+        "",
+        "Follow these steps **in order** whenever you want to add knowledge to the wiki:",
+        "",
+        "1. **Search first** — call `wiki search <keywords>` before creating anything.",
+        "   If a relevant page exists, update it rather than creating a duplicate.",
+        "2. **Distil, do not dump** — extract the essential, reusable fact or concept.",
+        "   Strip conversation context, ephemeral details, and task-specific phrasing.",
+        "3. **Choose the right page** — one concept per page.",
+        "   If the knowledge spans multiple concepts, create one page per concept and link them.",
+        "4. **Write or update** — use `wiki write <path> <meta> <body>`.",
+        "   - New page: set `created` and `updated` to now.",
+        "   - Existing page: update `updated` to now; preserve `created`.",
+        "   - If you are superseding stale content, set `supersedes` in the new page's front-matter",
+        "     and mark the old page's body with `> **Superseded** — see [[New Page]]` at the top.",
+        "5. **Link** — add relative Markdown links from related pages to the new page.",
+        "   Use `[[Page Title]]` wiki-style links or `[Page Title](path/to/page.md)` links.",
+        "6. **Lint** — call `wiki lint` and fix all `error`-severity issues before finishing.",
+        "",
+        "## Retrieval Conventions",
+        "",
+        "- Start with `wiki read index.md` for the wiki entrypoint and top-level navigation.",
+        "- Use `wiki search <query>` for keyword search across page bodies.",
+        "- Use `wiki list` to browse available pages when you need to discover structure.",
+        "- Use `wiki read <path>` to load a specific page.",
+        "- Prefer reading the most-recently-updated page when multiple pages cover similar ground.",
+        "- Trust content marked `status: stable`; treat `status: draft` as provisional.",
+        "",
+        "## Linking",
+        "",
+        "- Use relative Markdown links: `[Page Title](path/to/page.md)`.",
+        "- Wiki-style links are also supported: `[[Page Title]]` (auto-slugified).",
+        "- Always link back to this `AGENTS.md` from any page that documents wiki-wide conventions.",
+        "",
+        "## Content Rules",
+        "",
+        "- Write concise, factual, durable content. Avoid task-specific or ephemeral phrasing.",
+        "- Do not contradict existing pages without first marking the old content as superseded.",
+        "- Do not duplicate information that already exists on another page — link instead.",
+        "- Use neutral, encyclopaedic tone. Avoid first-person ('I found...', 'we decided...').",
+        "",
+        "## Lint",
+        "",
+        "- Run `wiki lint` before finishing to check for broken links, orphan pages, and stale content.",
+        "- Fix all `error`-severity issues.",
+        "- Address `warning`-severity issues where possible.",
+        "- `info`-severity issues (near-duplicates, stale pages) are advisory; use judgement.",
+        "",
+        "## Entry Point",
+        "",
+        "- The wiki entrypoint is [Wiki Home](index.md). Keep it updated with the top-level structure.",
+        "- Add new sections there when introducing a new major topic area.",
+      ].join("\n")
+      this._backend.write("AGENTS.md", agentsContent)
+      created.push("AGENTS.md")
+    } else {
+      skipped.push("AGENTS.md")
+    }
+    if (!hasIndex) {
+      var indexContent = [
+        "---",
+        "title: Wiki Home",
+        "description: Main entrypoint and table of contents for this wiki.",
+        "created: " + now,
+        "updated: " + now,
+        "tags:",
+        "  - home",
+        "  - index",
+        "---",
+        "",
+        "# Wiki Home",
+        "",
+        "This is the main entrypoint for the wiki. Start here to discover the available knowledge.",
+        "",
+        "## Start Here",
+        "",
+        "- [AGENTS.md](AGENTS.md) — contribution rules, page schema, and ingestion workflow for agents.",
+        "",
+        "## Topics",
+        "",
+        "- Add top-level topic pages here as the wiki grows.",
+        "- Keep this page short; use it as a table of contents, not a dumping ground.",
+        "",
+        "## Recent Additions",
+        "",
+        "- Add links to newly created or important pages here until the topic structure is stable.",
+      ].join("\n")
+      this._backend.write("index.md", indexContent)
+      created.push("index.md")
+    } else {
+      skipped.push("index.md")
+    }
+    return { ok: true, created: created, skipped: skipped }
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
+}
+
 var __miniAWikiFsList = function(dir, normalizedPrefix, sep) {
   if (!isString(dir) || dir.length === 0) return []
   if (!io.fileExists(dir) || io.fileInfo(dir).isDirectory !== true) return []
@@ -204,6 +355,37 @@ var __miniAWikiFsList = function(dir, normalizedPrefix, sep) {
   return dedup.sort()
 }
 
+var __miniAWikiNormalizePath = function(path, options) {
+  var opts = isMap(options) ? options : {}
+  if (!isString(path)) throw "path is required"
+
+  var value = String(path).trim().replace(/\\/g, "/")
+  if (value.length === 0) throw "path is required"
+  if (/[\x00-\x1f]/.test(value)) throw "path contains control characters"
+  if (value.startsWith("/") || value.startsWith("//") || /^[A-Za-z]:\//.test(value)) throw "absolute paths are not allowed"
+  if (!opts.allowDirectory && value.endsWith("/")) throw "path must target a file"
+
+  var parts = value.split("/")
+  var normalized = []
+
+  for (var i = 0; i < parts.length; i++) {
+    var part = String(parts[i] || "").trim()
+    if (part.length === 0) throw "path contains empty segments"
+    if (part === ".") continue
+    if (part === "..") throw "path traversal is not allowed"
+    normalized.push(part)
+  }
+
+  if (normalized.length === 0) throw "path is required"
+
+  var finalPath = normalized.join("/")
+  if (opts.requireMarkdown === true && !finalPath.toLowerCase().endsWith(".md")) {
+    throw "path must end with .md"
+  }
+
+  return finalPath
+}
+
 // ── Filesystem backend ───────────────────────────────────────────────────────
 
 MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
@@ -214,13 +396,18 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
   var canonicalRootPrefix = canonicalRoot.endsWith(sep) ? canonicalRoot : canonicalRoot + sep
   var normalizePrefix = function(value) {
     var prefix = isDef(value) ? String(value).trim().replace(/\\/g, "/") : ""
+    if (prefix.length === 0) return ""
+    prefix = __miniAWikiNormalizePath(prefix, { allowDirectory: true })
     if (prefix.startsWith("./")) prefix = prefix.substring(2)
     while (prefix.startsWith("/")) prefix = prefix.substring(1)
     if (prefix.length > 0 && !prefix.endsWith("/")) prefix = prefix + "/"
     return prefix
   }
   var resolvePath = function(relPath, allowMissingLeaf) {
-    var rel = isDef(relPath) ? String(relPath).trim() : ""
+    var rel = isDef(relPath) ? __miniAWikiNormalizePath(relPath, {
+      allowDirectory  : allowMissingLeaf !== true,
+      requireMarkdown : allowMissingLeaf !== true
+    }) : ""
     var candidate = rel.length > 0 ? new java.io.File(canonicalRoot, rel) : new java.io.File(canonicalRoot)
     var canonical
     if (allowMissingLeaf === true && !candidate.exists()) {
@@ -270,6 +457,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
 // ── S3 backend ───────────────────────────────────────────────────────────────
 
 MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
+  loadLib("s3.js")
   var bucket  = isString(cfg.bucket) ? cfg.bucket.trim() : ""
   var prefix  = isString(cfg.prefix) ? cfg.prefix.trim() : "wiki/"
   if (prefix.length > 0 && !prefix.endsWith("/")) prefix = prefix + "/"
@@ -285,11 +473,11 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
     list: function(pfx) {
       var p = prefix + (isString(pfx) && pfx.length > 0 ? pfx : "")
       try {
-        var objs = s3client.listObjects(bucket, p)
+        var objs = s3client.listObjects(bucket, p, false, true)
         if (!isArray(objs)) return []
         return objs
-          .map(function(o) { return isString(o.objectName) ? o.objectName : (isString(o.name) ? o.name : "") })
-          .filter(function(n) { return n.length > 0 && n.endsWith(".md") })
+          .map(function(o) { return isString(o.filename) ? o.filename : (isString(o.canonicalPath) ? o.canonicalPath : "") })
+          .filter(function(n) { return n.length > 0 && n.endsWith(".md") && !n.endsWith("/") })
           .map(function(n) { return n.startsWith(prefix) ? n.substring(prefix.length) : n })
       } catch(e) { return [] }
     },
@@ -312,7 +500,16 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
     },
     delete: function(path) {
       s3client.removeObject(bucket, prefix + path)
+    },
+    close: function() {
+      try { s3client.close() } catch(e) {}
     }
+  }
+}
+
+MiniAWikiManager.prototype.close = function() {
+  if (isObject(this._backend) && isFunction(this._backend.close)) {
+    this._backend.close()
   }
 }
 
@@ -446,7 +643,8 @@ MiniAWikiManager.prototype._sliceLines = function(lines, options) {
 
 MiniAWikiManager.prototype.read = function(path, options) {
   if (!isString(path) || path.trim().length === 0) return __
-  var raw = this._backend.read(path.trim())
+  try { path = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return __ }
+  var raw = this._backend.read(path)
   if (isUnDef(raw)) return __
   var parsed = this.parseFrontmatter(raw)
 
@@ -483,7 +681,11 @@ MiniAWikiManager.prototype.read = function(path, options) {
 MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
-  path = path.trim()
+  try {
+    path = __miniAWikiNormalizePath(path, { requireMarkdown: true })
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
 
   var opts         = isObject(options) ? options : {}
   var doAppend     = opts.append === true
@@ -582,7 +784,11 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
 MiniAWikiManager.prototype.delete = function(path) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
   if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
-  path = path.trim()
+  try {
+    path = __miniAWikiNormalizePath(path, { requireMarkdown: true })
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
 
   if (path === "AGENTS.md") return { ok: false, error: "cannot delete AGENTS.md (protected)" }
 
@@ -601,7 +807,10 @@ MiniAWikiManager.prototype.search = function(query, options) {
   var contextN   = isNumber(opts.contextLines) && opts.contextLines > 0 ? Math.min(opts.contextLines, 10) : 0
   var caseSens   = opts.caseSensitive === true
   var searchIn   = isString(opts.searchIn) && opts.searchIn.toLowerCase() === "body" ? "body" : "all"
-  var scopedPath = isString(opts.path) && opts.path.trim().length > 0 ? opts.path.trim() : ""
+  var scopedPath = ""
+  if (isString(opts.path) && opts.path.trim().length > 0) {
+    try { scopedPath = __miniAWikiNormalizePath(opts.path, { requireMarkdown: true }) } catch(e) { return [] }
+  }
 
   var q = query.trim()
   var pattern

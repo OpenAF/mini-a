@@ -759,6 +759,10 @@ MiniA.prototype._stopAgentResources = function() {
       }
     }.bind(this))
   }
+
+  if (isObject(this._wikiManager) && isFunction(this._wikiManager.close)) {
+    try { this._wikiManager.close() } catch(ignoreWikiCloseErr) {}
+  }
 }
 
 MiniA.prototype.requestStop = function(reason, options) {
@@ -7056,6 +7060,216 @@ MiniA.prototype._extractJsonActionFromPseudoToolCall = function(payload) {
     return __
 }
 
+MiniA.prototype._extractMalformedPseudoToolCall = function(payload) {
+    var parseArguments = args => {
+        if (isMap(args) || isArray(args)) return args
+        if (!isString(args)) return __
+        var parsed = this._parseJsonCandidate(args)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+        return __
+    }
+
+    var inspect = value => {
+        if (isUnDef(value)) return __
+        if (isArray(value)) {
+            for (var i = 0; i < value.length; i++) {
+                var arrMatch = inspect(value[i])
+                if (isMap(arrMatch)) return arrMatch
+            }
+            return __
+        }
+        if (!isMap(value)) return __
+
+        var directToolName =
+            (isString(value.tool_name) && value.tool_name.trim().length > 0) ? value.tool_name.trim() :
+            (isString(value.toolName) && value.toolName.trim().length > 0) ? value.toolName.trim() :
+            (isString(value.function_name) && value.function_name.trim().length > 0) ? value.function_name.trim() :
+            (isString(value.functionName) && value.functionName.trim().length > 0) ? value.functionName.trim() :
+            ""
+        var directToolArgs = isDef(value.parameters) ? value.parameters :
+                             isDef(value.arguments) ? value.arguments :
+                             isDef(value.params) ? value.params :
+                             isDef(value.input) ? value.input : __
+        if (directToolName.length > 0) {
+            return {
+                action   : "tool_name",
+                tool     : directToolName,
+                arguments: parseArguments(directToolArgs)
+            }
+        }
+
+        var actionName = isString(value.action) ? value.action.trim().toLowerCase() : ""
+        if (actionName.length > 0) {
+            var hintedToolName =
+                (isString(value.action_name) && value.action_name.trim().length > 0) ? value.action_name.trim() :
+                (isString(value.actionName) && value.actionName.trim().length > 0) ? value.actionName.trim() :
+                (isString(value.tool) && value.tool.trim().length > 0) ? value.tool.trim() :
+                (isString(value.tool_name) && value.tool_name.trim().length > 0) ? value.tool_name.trim() :
+                (isString(value.function_name) && value.function_name.trim().length > 0) ? value.function_name.trim() :
+                (isString(value.name) && value.name.trim().length > 0) ? value.name.trim() : ""
+            var hintedArgs = isDef(value.action_input) ? value.action_input :
+                             isDef(value.actionInput) ? value.actionInput :
+                             isDef(value.input) ? value.input :
+                             isDef(value.arguments) ? value.arguments :
+                             isDef(value.params) ? value.params : __
+            if (
+                actionName === "call" ||
+                actionName === "tool_call" ||
+                actionName === "call_tool" ||
+                actionName === "invoke" ||
+                actionName === "invoke_tool" ||
+                actionName === "function"
+            ) {
+                if (hintedToolName.length > 0 || isDef(hintedArgs)) {
+                    return {
+                        action   : actionName,
+                        tool     : hintedToolName,
+                        arguments: parseArguments(hintedArgs)
+                    }
+                }
+            }
+        }
+
+        if (isMap(value.message)) {
+            var msgMatch = inspect(value.message)
+            if (isMap(msgMatch)) return msgMatch
+        }
+        if (isMap(value.response)) {
+            var responseMatch = inspect(value.response)
+            if (isMap(responseMatch)) return responseMatch
+        }
+        if (isArray(value.responses)) {
+            var responsesMatch = inspect(value.responses)
+            if (isMap(responsesMatch)) return responsesMatch
+        }
+        if (isArray(value.choices)) {
+            var choicesMatch = inspect(value.choices)
+            if (isMap(choicesMatch)) return choicesMatch
+        }
+        if (isMap(value.delta)) {
+            var deltaMatch = inspect(value.delta)
+            if (isMap(deltaMatch)) return deltaMatch
+        }
+
+        return __
+    }
+
+    return inspect(payload)
+}
+
+MiniA.prototype._extractMalformedActionModeToolRequest = function(payload) {
+    var parseArguments = args => {
+        if (isMap(args) || isArray(args)) return args
+        if (!isString(args)) return __
+        var parsed = this._parseJsonCandidate(args)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+        return __
+    }
+
+    var inspect = value => {
+        if (isUnDef(value)) return __
+        if (isArray(value)) {
+            for (var i = 0; i < value.length; i++) {
+                var arrMatch = inspect(value[i])
+                if (isMap(arrMatch)) return arrMatch
+            }
+            return __
+        }
+        if (!isMap(value)) return __
+
+        var actionName = isString(value.action) ? value.action.trim().toLowerCase() : ""
+        if (
+            actionName === "request_tool" ||
+            actionName === "tool_request" ||
+            actionName === "use_tool" ||
+            actionName === "request_mcp_tool"
+        ) {
+            var toolName =
+                (isString(value.tool_name) && value.tool_name.trim().length > 0) ? value.tool_name.trim() :
+                (isString(value.toolName) && value.toolName.trim().length > 0) ? value.toolName.trim() :
+                (isString(value.tool) && value.tool.trim().length > 0) ? value.tool.trim() :
+                (isString(value.name) && value.name.trim().length > 0) ? value.name.trim() : ""
+            var toolArgs = isDef(value.parameters) ? value.parameters :
+                           isDef(value.arguments) ? value.arguments :
+                           isDef(value.params) ? value.params :
+                           isDef(value.input) ? value.input : __
+            return {
+                action   : actionName,
+                tool     : toolName,
+                arguments: parseArguments(toolArgs)
+            }
+        }
+
+        if (isMap(value.message)) {
+            var msgMatch = inspect(value.message)
+            if (isMap(msgMatch)) return msgMatch
+        }
+        if (isMap(value.response)) {
+            var responseMatch = inspect(value.response)
+            if (isMap(responseMatch)) return responseMatch
+        }
+        if (isArray(value.responses)) {
+            var responsesMatch = inspect(value.responses)
+            if (isMap(responsesMatch)) return responsesMatch
+        }
+        if (isArray(value.choices)) {
+            var choicesMatch = inspect(value.choices)
+            if (isMap(choicesMatch)) return choicesMatch
+        }
+        if (isMap(value.delta)) {
+            var deltaMatch = inspect(value.delta)
+            if (isMap(deltaMatch)) return deltaMatch
+        }
+
+        return __
+    }
+
+    return inspect(payload)
+}
+
+MiniA.prototype._fallbackFromMalformedToolCall = function(runtime, stepLabel, reason) {
+    if (!isObject(runtime) || !isArray(runtime.context)) return false
+    if (this._useToolsActual !== true || isUnDef(this._llmNoTools)) return false
+
+    this._useToolsActual = false
+    runtime.forceMainModel = true
+    runtime.forceNoStream = true
+    runtime.forceNoJson = true
+    this._restoreNoToolsModels(false)
+
+    var reasonText = isString(reason) && reason.trim().length > 0
+      ? reason.trim()
+      : "model emitted malformed pseudo tool-call JSON instead of a real tool call"
+    runtime.actionModeFallbackActive = true
+    runtime.context.push(`[OBS ${stepLabel}] (recover) ${reasonText}. Disabling function calling and retrying in action-based mode.`)
+    this.fnI("warn", `Step ${stepLabel}: ${reasonText}. Falling back to action-based mode without tools.`)
+    return true
+}
+
+MiniA.prototype._handleMalformedActionModeToolRequest = function(runtime, stepLabel, malformedRequest) {
+    if (!isObject(runtime) || !isArray(runtime.context)) return "ignore"
+    if (runtime.actionModeFallbackActive !== true) return "ignore"
+    if (!isMap(malformedRequest)) return "ignore"
+
+    var malformedToolLabel = isString(malformedRequest.tool) && malformedRequest.tool.trim().length > 0
+      ? ` for '${malformedRequest.tool.trim()}'`
+      : ""
+
+    if (runtime.actionModeToolRetryUsed !== true) {
+      runtime.actionModeToolRetryUsed = true
+      runtime.context.push(`[OBS ${stepLabel}] (recover) model emitted malformed action-mode tool request${malformedToolLabel} after tool fallback. Do not request tools/functions; reply only with Mini-A JSON using top-level 'thought' plus action 'think', 'shell', or 'final'.`)
+      this.fnI("warn", `Step ${stepLabel}: malformed action-mode tool request${malformedToolLabel} after fallback. Retrying once with stricter action-only guidance.`)
+      return "retry"
+    }
+
+    runtime.earlyStopTriggered = true
+    runtime.earlyStopReason = "model repeated malformed action-mode tool requests after tool fallback"
+    runtime.forceFastStop = true
+    runtime.context.push(`[OBS ${stepLabel}] (error) model repeated malformed action-mode tool request${malformedToolLabel} after tool fallback. Stopping early to request a final answer instead of retrying the same invalid schema.`)
+    this.fnI("warn", `Step ${stepLabel}: repeated malformed action-mode tool request${malformedToolLabel} after fallback. Stopping early.`)
+    return "stop"
+}
+
 MiniA.prototype._extractToolCallActions = function(payload, allowedTools, opts) {
     var results = []
     var seen = {}
@@ -13299,12 +13513,12 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "delegationmaxdepth", "delegationtimeout", "delegationmaxretries", "mcpprogcall", "mcpprogcallport",
     "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
     "verbose", "readwrite", "debug", "debugfile", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
-    "shellbatch", "usetools", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
+    "shellbatch", "usetools", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
     "usemath", "usesvg", "usevectors", "browsercontext", "chatbotmode", "useplanning", "planmode", "validateplan",
-    "convertplan", "resumefailed", "showexecs", "usestream", "format", "maxcontext", "maxpromptchars", "rules",
+    "convertplan", "resumefailed", "showexecs", "usestream", "format", "maxcontext", "compressgoal", "compressgoaltokens", "compressgoalchars", "maxpromptchars", "rules",
     "state", "maxcontent", "earlystopthreshold", "adaptiverouting", "routerorder",
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
-    "memorysessionch", "memoryuser", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
+    "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
@@ -13603,6 +13817,7 @@ MiniA.prototype.init = function(args) {
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
+      { name: "toolfallback", type: "boolean", default: false },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
       { name: "workerreg", type: "number", default: __ },
@@ -14626,6 +14841,7 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  *   is replaced with a head+tail excerpt separated by an informative banner. Default is 8000 chars.
  *   Set to 0 or leave unset to use the default. Pass a large value to raise the limit.
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
+ * - toolfallback (boolean, default=false): When usetools=true, automatically retry in action-based mode if the model emits malformed pseudo tool-call JSON instead of real tool calls.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
  * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP (only when useutils=true).
  * - utilsroot (string, optional): Root directory for Mini Utils Tool file operations (only when useutils=true).
@@ -14639,6 +14855,9 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * - raw (boolean, default=false): If true, returns the final answer as a raw string instead of formatted output.
  * - checkall (boolean, default=false): If true, asks for confirmation before executing any shell command.
  * - maxcontext (number, optional): Maximum context size in tokens. If the conversation exceeds this size, it will be summarized.
+ * - compressgoal (boolean, default=false): When true, Mini-A may summarize oversized goal text before execution.
+ * - compressgoaltokens (number, default=250): Minimum estimated goal token count before goal compression is considered.
+ * - compressgoalchars (number, default=1000): Minimum goal character count before goal compression is considered.
  * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
  * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
  * - promptprofile (string, optional): System prompt verbosity profile ("minimal", "balanced", "verbose"). Defaults to "balanced" and switches to "verbose" when debug=true.
@@ -14783,6 +15002,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isUnDef(args.memorysessionid) && isDef(args.memorySessionId)) args.memorysessionid = args.memorySessionId
     if (isUnDef(args.memorysessionch) && isDef(args.memorySessionCh)) args.memorysessionch = args.memorySessionCh
     if (isUnDef(args.memoryuser) && isDef(args.memoryUser)) args.memoryuser = args.memoryUser
+    if (isUnDef(args.memoryusersession) && isDef(args.memoryUserSession)) args.memoryusersession = args.memoryUserSession
+    if (isUnDef(args.toolfallback) && isDef(args.toolFallback)) args.toolfallback = args.toolFallback
     if (isUnDef(args.memorypromote) && isDef(args.memoryPromote)) args.memorypromote = args.memoryPromote
     if (isUnDef(args.memorystaledays) && isDef(args.memoryStaledays)) args.memorystaledays = args.memoryStaledays
 
@@ -14799,6 +15020,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "libs", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "maxcontext", type: "number", default: 0 },
+      { name: "compressgoal", type: "boolean", default: false },
+      { name: "compressgoaltokens", type: "number", default: 250 },
+      { name: "compressgoalchars", type: "number", default: 1000 },
       { name: "rules", type: "string", default: "" },
       { name: "shell", type: "string", default: "" },
       { name: "usesandbox", type: "string", default: __ },
@@ -14823,6 +15047,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
+      { name: "toolfallback", type: "boolean", default: false },
       { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
@@ -14837,6 +15062,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorych", type: "string", default: __ },
       { name: "memorysessionch", type: "string", default: __ },
       { name: "memoryuser", type: "boolean", default: false },
+      { name: "memoryusersession", type: "boolean", default: false },
       { name: "memorymaxpersection", type: "number", default: 80 },
       { name: "memorymaxentries", type: "number", default: 500 },
       { name: "memorycompactevery", type: "number", default: 8 },
@@ -14865,6 +15091,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.toolfallback = _$(toBoolean(args.toolfallback), "args.toolfallback").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
@@ -14912,21 +15139,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.memorych = _$(args.memorych, "args.memorych").isString().default(__)
     args.memorysessionch = _$(args.memorysessionch, "args.memorysessionch").isString().default(__)
     args.memoryuser = _$(toBoolean(args.memoryuser), "args.memoryuser").isBoolean().default(false)
-    if (args.memoryuser) {
-      var _memUserHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-      var _memUserDir  = _memUserHome + "/.openaf-mini-a"
-      var _memUserMemDir = _memUserDir + "/memory"
-      io.mkdir(_memUserMemDir)
-      if (isUnDef(args.memorych)) {
-        args.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserMemDir + "/memory-global.json.gz", lock: _memUserMemDir + "/memory-global.lock", multifile: false, gzip: true, compact: true } }, __, "")
-      }
-      if (isUnDef(args.memorysessionch)) {
-        args.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserMemDir + "/memory-session.json.gz", lock: _memUserMemDir + "/memory-session.lock", multifile: false, gzip: true, compact: true } }, __, "")
-      }
-      if (!args.usememory) args.usememory = true
-      if (isUnDef(args.memorypromote)) args.memorypromote = "facts,decisions,summaries"
-      if (isUnDef(args.memorystaledays)) args.memorystaledays = 30
-    }
+    args.memoryusersession = _$(toBoolean(args.memoryusersession), "args.memoryusersession").isBoolean().default(false)
+    __miniAApplyMemoryUserDefaults(args)
     args.memorymaxpersection = _$(args.memorymaxpersection, "args.memorymaxpersection").isNumber().default(80)
     args.memorymaxentries = _$(args.memorymaxentries, "args.memorymaxentries").isNumber().default(500)
     args.memorycompactevery = _$(args.memorycompactevery, "args.memorycompactevery").isNumber().default(8)
@@ -15604,9 +15818,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // Strategy: summarize long goals to reduce prompt size while preserving intent
       var goalText = isString(args.goal) ? args.goal : ""
       var goalTokens = this._estimateTokens(goalText)
+      var goalTokenThreshold = isNumber(args.compressgoaltokens) ? Math.max(0, Math.floor(args.compressgoaltokens)) : 250
+      var goalCharThreshold = isNumber(args.compressgoalchars) ? Math.max(0, Math.floor(args.compressgoalchars)) : 1000
+      if (args.compressgoal !== true) return this._buildUntrustedPromptBlock("UNTRUSTED_GOAL", goalText)
       
-      // Threshold: if goal is > 250 tokens, attempt to compress it
-      if (goalTokens > 250 && goalText.length > 1000) {
+      // Threshold: if goal exceeds configured token and char minimums, attempt to compress it
+      if (goalTokens > goalTokenThreshold && goalText.length > goalCharThreshold) {
         try {
           var compressedGoal = this._coerceGoalText(this.summarizeText(goalText, {
             instructionText: "You are condensing a user goal. KEEP the core objective, constraints, and success criteria. REMOVE fluff, examples, and explanations. Be terse.",
@@ -17008,6 +17225,31 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         runtime.context.push(`[OBS ${step + 1}] (recover) consumed payload from 'json' compatibility tool.`)
       }
 
+      if (args.toolfallback === true && this._useToolsActual === true && isDef(this._llmNoTools)) {
+        var malformedPseudoToolCall = this._extractMalformedPseudoToolCall(baseMsg)
+        if (!isMap(malformedPseudoToolCall) && isArray(actionMessages) && actionMessages.length > 0) {
+          malformedPseudoToolCall = this._extractMalformedPseudoToolCall(actionMessages)
+        }
+        if (isMap(malformedPseudoToolCall)) {
+          var malformedToolLabel = isString(malformedPseudoToolCall.tool) && malformedPseudoToolCall.tool.length > 0
+            ? ` for '${malformedPseudoToolCall.tool}'`
+            : ""
+          if (this._fallbackFromMalformedToolCall(runtime, step + 1, `model emitted pseudo tool-call JSON${malformedToolLabel} instead of a real tool call`)) {
+            continue
+          }
+        }
+      }
+
+      if (args.toolfallback === true && this._useToolsActual !== true && runtime.actionModeFallbackActive === true) {
+        var malformedActionModeToolRequest = this._extractMalformedActionModeToolRequest(baseMsg)
+        if (!isMap(malformedActionModeToolRequest) && isArray(actionMessages) && actionMessages.length > 0) {
+          malformedActionModeToolRequest = this._extractMalformedActionModeToolRequest(actionMessages)
+        }
+        var malformedActionModeDecision = this._handleMalformedActionModeToolRequest(runtime, step + 1, malformedActionModeToolRequest)
+        if (malformedActionModeDecision === "retry") continue
+        if (malformedActionModeDecision === "stop") break
+      }
+
       if (actionMessages.length === 0) {
         if (runtime.modelToolCallDetected === true) {
           if (stateUpdatedThisStep && !stateRecordedInContext) {
@@ -17638,6 +17880,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       flushAll()
 
+      if (runtime.forceFastStop === true) {
+        break
+      }
+
       if (stateUpdatedThisStep && !stateRecordedInContext) {
         runtime.context.push(`[STATE ${step + 1}] ${updatedStateSnapshot}`)
         stateRecordedInContext = true
@@ -17997,7 +18243,42 @@ MiniA.prototype._runChatbotMode = function(options) {
         }).forEach(addActionEntry)
       }
 
-      if (actionEntries.length > 0) {
+      if (args.toolfallback === true && this._useToolsActual === true && isDef(this._llmNoTools)) {
+        var chatbotMalformedPseudoToolCall = this._extractMalformedPseudoToolCall(parsedResponse)
+        if (!isMap(chatbotMalformedPseudoToolCall)) chatbotMalformedPseudoToolCall = this._extractMalformedPseudoToolCall(responseWithStats)
+        if (!isMap(chatbotMalformedPseudoToolCall) && isArray(actionEntries) && actionEntries.length > 0) {
+          chatbotMalformedPseudoToolCall = this._extractMalformedPseudoToolCall(actionEntries)
+        }
+        if (isMap(chatbotMalformedPseudoToolCall)) {
+          var chatbotMalformedToolLabel = isString(chatbotMalformedPseudoToolCall.tool) && chatbotMalformedPseudoToolCall.tool.length > 0
+            ? ` for '${chatbotMalformedPseudoToolCall.tool}'`
+            : ""
+          if (this._fallbackFromMalformedToolCall(runtime, step + 1, `model emitted pseudo tool-call JSON${chatbotMalformedToolLabel} instead of a real tool call`)) {
+            actionEntries = []
+            pendingPrompt = this._buildChatbotUserPrompt(args.goal, args.hookcontext)
+            handled = true
+          }
+        }
+      }
+
+      if (!handled && args.toolfallback === true && this._useToolsActual !== true && runtime.actionModeFallbackActive === true) {
+        var chatbotMalformedActionModeToolRequest = this._extractMalformedActionModeToolRequest(parsedResponse)
+        if (!isMap(chatbotMalformedActionModeToolRequest)) chatbotMalformedActionModeToolRequest = this._extractMalformedActionModeToolRequest(responseWithStats)
+        if (!isMap(chatbotMalformedActionModeToolRequest) && isArray(actionEntries) && actionEntries.length > 0) {
+          chatbotMalformedActionModeToolRequest = this._extractMalformedActionModeToolRequest(actionEntries)
+        }
+        var chatbotMalformedActionDecision = this._handleMalformedActionModeToolRequest(runtime, step + 1, chatbotMalformedActionModeToolRequest)
+        if (chatbotMalformedActionDecision === "retry") {
+          pendingPrompt = this._buildChatbotUserPrompt(args.goal, args.hookcontext)
+          handled = true
+        } else if (chatbotMalformedActionDecision === "stop") {
+          finalAnswer = `I couldn't complete the request because the model kept emitting malformed action-mode tool requests after the tool fallback was activated.`
+          handled = false
+          break
+        }
+      }
+
+      if (!handled && actionEntries.length > 0) {
         for (var actionIndex = 0; actionIndex < actionEntries.length; actionIndex++) {
           var currentMsg = actionEntries[actionIndex]
           var actionName = isString(currentMsg.action) ? currentMsg.action.trim() : ""

@@ -66,7 +66,6 @@ function buildOAFModelInit(args) {
   }
 }
 
-// Build OAF model
 function buildOAFModel(args) {
     buildOAFModelInit(args)
 
@@ -74,7 +73,8 @@ function buildOAFModel(args) {
     // configuration as the user answers follow-up prompts.
     var iProvider = args.type, _out = {}
     if (isUnDef(args.type)) {
-      iProvider = askChoose("Choose a provider: ", args.init.providers.sort(), 8)
+      iProvider = __miniANormalizeChoiceIndex(askChoose("Choose a provider: ", args.init.providers.sort(), 8), args.init.providers.length)
+      if (iProvider < 0) return __
     }
     _out.type = args.init.providers[iProvider]
 
@@ -99,11 +99,13 @@ function buildOAFModel(args) {
         if (_models != null && _models.length > 0) {
           if (isDef(_models[0].id)) {
             var _m = _models.map(r => r.id).sort()
-            var _id = askChoose( "Choose a model: ", _m, 8 )
+            var _id = __miniANormalizeChoiceIndex(askChoose( "Choose a model: ", _m, 8 ), _m.length)
+            if (_id < 0) return __
             _out.model = _m[_id]
           } else if (isDef(_models[0].name)) {
             var _m = _models.map(r => r.name).map(r => r.replace(/^models\//, "")).sort()
-            var _name = askChoose( "Choose a model: ", _m, 8 )
+            var _name = __miniANormalizeChoiceIndex(askChoose( "Choose a model: ", _m, 8 ), _m.length)
+            if (_name < 0) return __
             _out.model = _m[_name]
           }
         }
@@ -134,11 +136,13 @@ function buildOAFModel(args) {
       if (_models != null && _models.length > 0) {
         if (isDef(_models[0].modelId)) {
           var _m = _models.map(r => r.modelId).sort()
-          var _modelId = askChoose( "Choose a model: ", _m, 8 )
+          var _modelId = __miniANormalizeChoiceIndex(askChoose( "Choose a model: ", _m, 8 ), _m.length)
+          if (_modelId < 0) return __
           _out.options.model = _m[_modelId]
         } else if (isDef(_models[0].name)) {
           var _m = _models.map(r => r.name).map(r => r.replace(/^models\//, "")).sort()
-          var _name = askChoose( "Choose a model: ", _m, 8 )
+          var _name = __miniANormalizeChoiceIndex(askChoose( "Choose a model: ", _m, 8 ), _m.length)
+          if (_name < 0) return __
           _out.options.model = _m[_name]
         }
       }
@@ -220,7 +224,8 @@ function mainOAFModel(args) {
         // Combine existing definitions with the available actions shown to the
         // user. The action ordering is mirrored later in the switch statement.
         var _options = _lst.sort().map(r => "🤖 " + r).concat([ "───", "✨ New definition", "📥 Import definition", "📤 Export definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
-        var _action = askChoose("Choose a definition or an action: ", _options, 8)
+        var _action = __miniANormalizeChoiceIndex(askChoose("Choose a definition or an action: ", _options, 8), _options.length - 1)
+        if (_action < 0) _action = _options.length - 1
 
         switch(_action) {
         case _options.length - 6 - 1: // Separator
@@ -252,7 +257,7 @@ function mainOAFModel(args) {
             break
         case _options.length - 4: // Export definition
             print()
-            var _exportName = askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]), 8)
+            var _exportName = __miniANormalizeChoiceIndex(askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]), 8), _lst.length)
             if (_exportName < _lst.length) {
               var _exportDef = _sec.get(_lst[_exportName], "models")
               print("\n" + ansiColor("FAINT", "─────"))
@@ -262,7 +267,7 @@ function mainOAFModel(args) {
             break
         case _options.length - 3: // Rename existing definition
             print()
-            var _oldName = askChoose("✏️ Choose a definition to rename: ", _lst.sort().concat([ "🔙 Go back" ]), 8)
+            var _oldName = __miniANormalizeChoiceIndex(askChoose("✏️ Choose a definition to rename: ", _lst.sort().concat([ "🔙 Go back" ]), 8), _lst.length)
             if (_oldName < _lst.length) {
             var _newName = ask("✨ New name for the definition '" + _lst[_oldName] + "': ")
                 if (isDef(_newName) && _newName.length > 0) {
@@ -276,6 +281,7 @@ function mainOAFModel(args) {
         case _options.length - 2: // Delete existing definitions
             var _sortedLst = _lst.sort()
             var selectedIndexes = askChooseMultiple("🗑️  Choose definitions to delete (use space to select, enter to confirm): ", _sortedLst, 8)
+            if (!isArray(selectedIndexes)) selectedIndexes = []
             if (selectedIndexes.length > 0) {
                 print("✖️ Deleting definitions...")
                 selectedIndexes.forEach(idx => {

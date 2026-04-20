@@ -322,6 +322,7 @@ mini-a goal="show HPA status in production" \
 | `memorych` | - | SLON/JSON channel definition for global memory persistence |
 | `memorysessionch` | - | SLON/JSON channel definition for session memory persistence (falls back to `memorych`) |
 | `memoryuser` | `false` | Shorthand: activates `usememory` + file-backed global+session channels at `~/.openaf-mini-a/memory.json` |
+| `memoryusersession` | `false` | Shorthand: activates `usememory`, defaults `memoryscope=session`, and configures file-backed session persistence under `~/.openaf-mini-a/` |
 | `memorysessionid` | `<agent-id>` | Key namespace for session memory in the channel |
 | `memorymaxpersection` | `80` | Max entries per section before compaction |
 | `memorymaxentries` | `500` | Hard cap across all sections |

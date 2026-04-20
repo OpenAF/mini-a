@@ -90,20 +90,8 @@ function _resolveMemoryArgs(baseArgs) {
   var cfg = merge({}, isObject(baseArgs) ? baseArgs : {})
   cfg.usememory = toBoolean(cfg.usememory) === true
   cfg.memoryuser = toBoolean(cfg.memoryuser) === true
-
-  if (cfg.memoryuser) {
-    var _memUserHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
-    var _memUserDir  = _memUserHome + "/.openaf-mini-a"
-    var _memUserMemDir = _memUserDir + "/memory"
-    io.mkdir(_memUserMemDir)
-    if (isUnDef(cfg.memorych)) {
-      cfg.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserMemDir + "/memory-global.json.gz", lock: _memUserMemDir + "/memory-global.lock", multifile: false, gzip: true, compact: true } }, __, "")
-    }
-    if (isUnDef(cfg.memorysessionch)) {
-      cfg.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserMemDir + "/memory-session.json.gz", lock: _memUserMemDir + "/memory-session.lock", multifile: false, gzip: true, compact: true } }, __, "")
-    }
-    cfg.usememory = true
-  }
+  cfg.memoryusersession = toBoolean(cfg.memoryusersession) === true
+  __miniAApplyMemoryUserDefaults(cfg)
 
   if (!cfg.usememory && (isDef(cfg.memorych) || isDef(cfg.memorysessionch))) cfg.usememory = true
 
@@ -150,6 +138,96 @@ function _persistStore(store) {
   if (!isObject(store) || !isObject(store.manager)) return false
   if (!isObject(store.channel) || !isString(store.channel.name) || store.channel.name.length === 0) return false
   return store.manager.saveToChannel(store.channel.name, store.namespace) === true
+}
+
+function _scanSessionNamespaces(channelCfg) {
+  if (!isObject(channelCfg) || !isString(channelCfg.name) || channelCfg.name.length === 0) return []
+  return MiniAMemoryManager.listChannelNamespaces(channelCfg.name).map(function(entry) {
+    var tmpStore = _createManager("session", channelCfg, entry.namespace)
+    var stats = _collectStats(tmpStore)
+    var meta = isObject(entry.meta) ? entry.meta : {}
+    return {
+      namespace: entry.namespace,
+      total: stats.total,
+      stale: stats.stale,
+      unresolved: stats.unresolved,
+      revision: isNumber(meta.revision) ? meta.revision : stats.revision,
+      updatedAt: isString(meta.updatedAt) ? meta.updatedAt : stats.updatedAt,
+      createdAt: isString(meta.createdAt) ? meta.createdAt : "-"
+    }
+  }).sort(function(a, b) {
+    return String(b.updatedAt).localeCompare(String(a.updatedAt))
+  })
+}
+
+function _reloadSessionStore(stores, namespace) {
+  if (!isObject(stores) || !isObject(stores.session)) return false
+  stores.session = _createManager("session", stores.session.channel, _trim(namespace))
+  return true
+}
+
+function _printSessionNamespaces(stores) {
+  var rows = _scanSessionNamespaces(isObject(stores) && isObject(stores.session) ? stores.session.channel : __)
+  if (rows.length === 0) {
+    print(ansiColor("FAINT", "No persisted session namespaces found."))
+    return []
+  }
+  var activeNs = isObject(stores) && isObject(stores.session) ? _safeString(stores.session.namespace) : ""
+  print(ansiColor("BOLD", "Persisted session namespaces"))
+  print(printTable(rows.map(function(entry, idx) {
+    return {
+      "#": idx + 1,
+      active: entry.namespace === activeNs ? "*" : "",
+      age: _formatAge(entry.updatedAt),
+      entries: entry.total,
+      stale: entry.stale,
+      unresolved: entry.unresolved,
+      revision: entry.revision,
+      namespace: entry.namespace
+    }
+  }), __, true, __conAnsi, __, __, true, false, true))
+  print()
+  return rows
+}
+
+function _chooseSessionNamespace(stores, message) {
+  var rows = _scanSessionNamespaces(isObject(stores) && isObject(stores.session) ? stores.session.channel : __)
+  if (rows.length === 0) {
+    print(ansiColor("FAINT", "No persisted session namespaces found."))
+    return __
+  }
+  var options = rows.map(function(entry) {
+    return entry.namespace + " [" + entry.total + " entries, " + _formatAge(entry.updatedAt) + "]"
+  })
+  options.push("🔙 Cancel")
+  var idx = __miniANormalizeChoiceIndex(askChoose(message || "Choose session namespace: ", options, 10), rows.length)
+  if (idx < 0 || idx >= rows.length) return __
+  return rows[idx].namespace
+}
+
+function _deleteSessionNamespace(stores, namespace) {
+  var ns = _trim(namespace)
+  if (ns.length === 0) return false
+  if (!isObject(stores) || !isObject(stores.session) || !isObject(stores.session.channel)) return false
+  var deleted = MiniAMemoryManager.deleteChannelNamespace(stores.session.channel.name, ns)
+  if (_safeString(stores.session.namespace) === ns) _reloadSessionStore(stores, "")
+  if (deleted > 0) print("🗑️ Deleted session namespace '" + ns + "' (" + deleted + " records).")
+  else print(ansiColor("FAINT", "No records found for session namespace '" + ns + "'."))
+  return deleted > 0
+}
+
+function _deleteSessionNamespacesOlderThan(stores, thresholdDate) {
+  var rows = _scanSessionNamespaces(isObject(stores) && isObject(stores.session) ? stores.session.channel : __)
+  var deleted = 0
+  rows.forEach(function(entry) {
+    var anchor = isString(entry.updatedAt) ? entry.updatedAt : entry.createdAt
+    var ts = new Date(anchor).getTime()
+    if (isNaN(ts) || ts >= thresholdDate.getTime()) return
+    if (_deleteSessionNamespace(stores, entry.namespace)) deleted++
+  })
+  if (deleted > 0) print("🧹 Deleted " + deleted + " session namespace" + (deleted === 1 ? "" : "s") + " older than " + thresholdDate.toISOString() + ".")
+  else print(ansiColor("FAINT", "No session namespaces older than " + thresholdDate.toISOString() + "."))
+  return deleted
 }
 
 function _collectStats(store) {
@@ -211,7 +289,7 @@ function _chooseStore(stores, message, includeBoth) {
     map.push("both")
   }
   options.push("🔙 Cancel")
-  var idx = askChoose(message || "Choose memory scope: ", options, 8)
+  var idx = __miniANormalizeChoiceIndex(askChoose(message || "Choose memory scope: ", options, 8), map.length)
   if (idx >= map.length) return __
   return map[idx]
 }
@@ -351,10 +429,14 @@ function _searchEntries(store, query) {
 function _printHelp() {
   print(ansiColor("BOLD", "Memory Manager actions"))
   print("  • 📊 Summary: per-scope section counts + stale/unresolved totals")
+  print("  • 🧭 Session namespaces: list every persisted session namespace")
+  print("  • 🎯 Switch session namespace: inspect a different persisted session")
   print("  • 📃 List entries: show entries by section with quick metadata")
   print("  • 🔎 Inspect entry: full entry payload (meta, provenance, refs, timestamps)")
   print("  • 🧽 Delete by id: remove one entry by section/id")
   print("  • ⏳ Delete older than: prune entries older than an age/date")
+  print("  • 🗑️ Delete session namespace: remove one persisted session namespace")
+  print("  • 🧹 Delete old session namespaces: prune whole sessions older than an age/date")
   print("  • 🔍 Search: keyword search across ids, values and tags")
   print("  • 🧰 Maintenance: compact or clear stale flag sweep")
   print("  • 💾 Export snapshot: print full JSON snapshot for backups")
@@ -368,7 +450,8 @@ function _maintenance(store) {
     "Clear entire store",
     "🔙 Back"
   ]
-  var act = askChoose("Maintenance action for " + store.kind + " memory: ", options, 8)
+  var act = __miniANormalizeChoiceIndex(askChoose("Maintenance action for " + store.kind + " memory: ", options, 8), 3)
+  if (act < 0) return
   if (act === 0) {
     store.manager.compact()
     _persistStore(store)
@@ -428,18 +511,27 @@ function mainMemoryManager(rawArgs) {
 
   var shouldExit = false
   while (!shouldExit) {
-    var action = askChoose("Choose an action: ", [
+    var action = __miniANormalizeChoiceIndex(askChoose("Choose an action: ", [
       "📊 Summary",
+      "🧭 List session namespaces",
+      "🎯 Switch active session namespace",
       "📃 List entries",
       "🔎 Inspect entry",
       "🧽 Delete by id",
       "⏳ Delete entries older than...",
+      "🗑️ Delete session namespace",
+      "🧹 Delete session namespaces older than...",
       "🔍 Search entries",
       "🧰 Maintenance",
       "💾 Export snapshot",
       "❓ Help",
       "🔙 Exit"
-    ], 10)
+    ], 12), 13)
+
+    if (action < 0) {
+      shouldExit = true
+      continue
+    }
 
     if (action === 0) {
       _printStoreStatus(stores.global)
@@ -448,6 +540,19 @@ function mainMemoryManager(rawArgs) {
     }
 
     if (action === 1) {
+      _printSessionNamespaces(stores)
+      continue
+    }
+
+    if (action === 2) {
+      var selectedNamespace = _chooseSessionNamespace(stores, "Switch active session namespace to:")
+      if (!isString(selectedNamespace)) continue
+      _reloadSessionStore(stores, selectedNamespace)
+      print("🎯 Active session namespace set to " + selectedNamespace)
+      continue
+    }
+
+    if (action === 3) {
       var chosenStore = _chooseStore(stores, "List entries from which memory scope?", false)
       if (!isString(chosenStore)) continue
       var section = _trim(ask("Optional section filter (facts/evidence/openQuestions/hypotheses/decisions/artifacts/risks/summaries): "))
@@ -457,7 +562,7 @@ function mainMemoryManager(rawArgs) {
       continue
     }
 
-    if (action === 2) {
+    if (action === 4) {
       var scopeInspect = _chooseStore(stores, "Inspect entry from which scope?", false)
       if (!isString(scopeInspect)) continue
       var sectionInspect = _trim(ask("Section: "))
@@ -466,7 +571,7 @@ function mainMemoryManager(rawArgs) {
       continue
     }
 
-    if (action === 3) {
+    if (action === 5) {
       var scopeDelete = _chooseStore(stores, "Delete from which scope?", false)
       if (!isString(scopeDelete)) continue
       var sectionDelete = _trim(ask("Section: "))
@@ -475,7 +580,7 @@ function mainMemoryManager(rawArgs) {
       continue
     }
 
-    if (action === 4) {
+    if (action === 6) {
       var scopeOld = _chooseStore(stores, "Prune old entries from which scope?", true)
       if (!isString(scopeOld)) continue
       var thresholdRaw = ask("Delete entries older than (e.g. '30d', '12h', '2026-01-15', epoch): ")
@@ -499,7 +604,35 @@ function mainMemoryManager(rawArgs) {
       continue
     }
 
-    if (action === 5) {
+    if (action === 7) {
+      var namespaceDelete = _chooseSessionNamespace(stores, "Delete which persisted session namespace?")
+      if (!isString(namespaceDelete)) continue
+      var confirmDeleteNs = _trim(ask("Type 'delete session' to remove '" + namespaceDelete + "': "))
+      if (confirmDeleteNs.toLowerCase() !== "delete session") {
+        print(ansiColor("FAINT", "Cancelled."))
+        continue
+      }
+      _deleteSessionNamespace(stores, namespaceDelete)
+      continue
+    }
+
+    if (action === 8) {
+      var thresholdSessionRaw = ask("Delete session namespaces older than (e.g. '30d', '12h', '2026-01-15', epoch): ")
+      var parsedSessionThreshold = _parseDateInput(thresholdSessionRaw)
+      if (!isDate(parsedSessionThreshold) && !(parsedSessionThreshold instanceof Date)) {
+        printErr("Could not parse date/age value.")
+        continue
+      }
+      var confirmSessionOld = _trim(ask("Type 'yes' to delete session namespaces older than " + parsedSessionThreshold.toISOString() + ": "))
+      if (confirmSessionOld.toLowerCase() !== "yes") {
+        print(ansiColor("FAINT", "Cancelled."))
+        continue
+      }
+      _deleteSessionNamespacesOlderThan(stores, parsedSessionThreshold)
+      continue
+    }
+
+    if (action === 9) {
       var scopeSearch = _chooseStore(stores, "Search which scope?", true)
       if (!isString(scopeSearch)) continue
       var query = ask("Query: ")
@@ -514,14 +647,14 @@ function mainMemoryManager(rawArgs) {
       continue
     }
 
-    if (action === 6) {
+    if (action === 10) {
       var scopeMaint = _chooseStore(stores, "Maintenance scope:", false)
       if (!isString(scopeMaint)) continue
       _maintenance(stores[scopeMaint])
       continue
     }
 
-    if (action === 7) {
+    if (action === 11) {
       var scopeExport = _chooseStore(stores, "Export snapshot from which scope?", true)
       if (!isString(scopeExport)) continue
       if (scopeExport === "both") {
@@ -537,7 +670,7 @@ function mainMemoryManager(rawArgs) {
       continue
     }
 
-    if (action === 8) {
+    if (action === 12) {
       _printHelp()
       continue
     }

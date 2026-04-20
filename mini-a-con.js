@@ -518,6 +518,43 @@ try {
     return candidate
   }
 
+  function ensureMemoryChannelFromDef(rawValue, fallbackName, fallbackType) {
+    if (!isString(rawValue) || rawValue.trim().length === 0) return __
+    var parsed = __
+    try { parsed = af.fromJSSLON(rawValue) } catch(ignoreMemoryChannelParse) {}
+    if (!isMap(parsed)) return __
+    var cName = isString(parsed.name) && parsed.name.trim().length > 0 ? parsed.name.trim() : fallbackName
+    var cType = isString(parsed.type) && parsed.type.trim().length > 0 ? parsed.type.trim() : (fallbackType || "simple")
+    var cOpts = isMap(parsed.options) ? parsed.options : {}
+    var exists = false
+    try { exists = $ch().list().indexOf(cName) >= 0 } catch(ignoreMemoryChannelList) {}
+    if (!exists) {
+      try { $ch(cName).create(cType, cOpts) } catch(ignoreMemoryChannelCreate) {}
+    }
+    return { name: cName, type: cType, options: cOpts }
+  }
+
+  function resolveConversationMemorySessionNamespace(conversationPath) {
+    var convoPath = isString(conversationPath) ? canonicalizePath(conversationPath) : ""
+    if (convoPath.length === 0) return __
+    var explicitSessionId = isString(sessionOptions.memorysessionid) ? sessionOptions.memorysessionid.trim() : ""
+    if (explicitSessionId.length > 0 && explicitSessionId !== convoPath) return __
+    return convoPath
+  }
+
+  function deleteConversationSessionMemory(conversationPath) {
+    if (typeof MiniAMemoryManager === "undefined" || !isFunction(MiniAMemoryManager.deleteChannelNamespace)) return 0
+    var namespace = resolveConversationMemorySessionNamespace(conversationPath)
+    if (!isString(namespace) || namespace.length === 0) return 0
+
+    var sessionChannel = ensureMemoryChannelFromDef(sessionOptions.memorysessionch, "_mini_a_session_memory_channel", "simple")
+    var globalChannel = ensureMemoryChannelFromDef(sessionOptions.memorych, "_mini_a_memory_channel", "simple")
+    var effectiveChannel = isObject(sessionChannel) ? sessionChannel : globalChannel
+    if (!isObject(effectiveChannel) || !isString(effectiveChannel.name) || effectiveChannel.name.length === 0) return 0
+
+    return MiniAMemoryManager.deleteChannelNamespace(effectiveChannel.name, namespace)
+  }
+
   function unwrapSingleMarkdownCodeBlock(text) {
     if (!isString(text)) return text
     var normalized = text.replace(/\r\n/g, "\n")
@@ -560,7 +597,8 @@ try {
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
-    memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed memory channels." },
+    memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed global and session memory." },
+    memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
     memoryscope    : { type: "string", default: "both", description: "Memory read scope: session, global, or both." },
     memorysessionid: { type: "string", description: "Session id namespace used by memorysessionch persistence." },
     memorych       : { type: "string", description: "JSSLON channel definition for global memory persistence." },
@@ -603,6 +641,9 @@ try {
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
+    compressgoal   : { type: "boolean", default: false, description: "Automatically compress oversized goal text before execution" },
+    compressgoaltokens: { type: "number", default: 250, description: "Estimated token threshold before goal compression is considered" },
+    compressgoalchars: { type: "number", default: 1000, description: "Character threshold before goal compression is considered" },
     earlystopthreshold: { type: "number", description: "Number of identical consecutive errors before early stop (default: 3, increases to 5 with low-cost models)" },
     toolcachettl   : { type: "number", description: "Default MCP result cache TTL (ms)" },
     goalprefix     : { type: "string", description: "Optional prefix automatically added to every goal" },
@@ -884,6 +925,9 @@ try {
       "#",
       "#  # ── Context & Memory ─────────────────────────────────────────────────",
       "#  maxcontext   : 60000       # trim context when it exceeds this token count",
+      "#  compressgoal : false       # summarize oversized goal text before execution",
+      "#  compressgoaltokens : 250   # min estimated tokens before goal compression",
+      "#  compressgoalchars  : 1000  # min characters before goal compression",
       "#  usehistory   : true        # persist conversation history between sessions",
       "#  usememory    : true        # enable structured working memory",
       "#",
@@ -1252,7 +1296,7 @@ try {
 
   function getWikiSubcommandCompletions() {
     var completions = ["list", "read", "search", "lint"]
-    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write")
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "init")
     return completions
   }
 
@@ -2117,6 +2161,7 @@ try {
       try {
         if (io.fileExists(path) && io.fileInfo(path).isFile) {
           io.rm(path)
+          deleteConversationSessionMemory(path)
           deleted += 1
           if (deleteTargets[path].period === true) deletedByPeriod += 1
           if (deleteTargets[path].count === true) deletedByCount += 1
@@ -2802,6 +2847,7 @@ try {
     }
     try {
       if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
+      deleteConversationSessionMemory(convoPath)
       // Also clear the in-memory conversation from the active agent
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
         try {
@@ -5136,8 +5182,20 @@ try {
         } else {
           print(colorifyText("Wiki delete failed: " + (isObject(deleteResult) ? deleteResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "init") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable init.", errorColor))
+          return
+        }
+        var initResult = wm.init()
+        if (isObject(initResult) && initResult.ok === true) {
+          if (initResult.created.length > 0) print(colorifyText("Created: " + initResult.created.join(", "), successColor))
+          if (initResult.skipped.length > 0) print(colorifyText("Already exists (skipped): " + initResult.skipped.join(", "), hintColor))
+        } else {
+          print(colorifyText("Wiki init failed: " + (isObject(initResult) ? initResult.error : "unknown error"), errorColor))
+        }
       } else {
-        print(colorifyText("Usage: /wiki [list|read|search|delete|lint|write] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [list|read|search|delete|lint|write|init] [args]", errorColor))
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))

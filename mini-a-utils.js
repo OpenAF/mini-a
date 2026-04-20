@@ -1397,7 +1397,12 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return isObject(dResult) ? dResult : { ok: false, error: String(dResult) }
     }
 
-    return "[ERROR] Unknown wiki operation: " + op + ". Use list, read, search, write, delete, lint."
+    if (op === "init") {
+      var iResult = wm.init()
+      return isObject(iResult) ? iResult : { ok: false, error: String(iResult) }
+    }
+
+    return "[ERROR] Unknown wiki operation: " + op + ". Use list, read, search, write, delete, lint, init."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -2842,7 +2847,8 @@ MiniUtilsTool.prototype._askChoose = function(prompt, options, max, help) {
 }
 
 MiniUtilsTool.prototype._askChooseMultiple = function(prompt, options, max, help) {
-  return askChooseMultiple(prompt, options, max, help)
+  var result = askChooseMultiple(prompt, options, max, help)
+  return isArray(result) ? result : []
 }
 
 MiniUtilsTool.prototype._askStruct = function(questions) {
@@ -3513,7 +3519,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page, 'delete' to remove a page (both require wikiaccess=rw), 'lint' to validate wiki health.",
+      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page, 'delete' to remove a page (both require wikiaccess=rw), 'lint' to validate wiki health, 'init' to create AGENTS.md and index.md if they don't exist (requires wikiaccess=rw).",
       inputSchema: {
         type      : "object",
         properties: {

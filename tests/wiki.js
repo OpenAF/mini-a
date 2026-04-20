@@ -265,6 +265,60 @@
     }
   }
 
+  exports.testFsBackendRejectsTraversalDelete = function() {
+    var dir = createTestDir()
+    var outsideFile = dir + "-delete-outside.md"
+    try {
+      io.writeFileString(outsideFile, "# Outside")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.delete("../" + new java.io.File(outsideFile).getName())
+      ow.test.assert(isObject(result) && result.ok === false, true, "traversal delete should fail")
+      ow.test.assert(io.fileExists(outsideFile), true, "traversal delete should not remove outside file")
+    } finally {
+      try { io.rm(outsideFile) } catch(ignoreOutsideCleanup) {}
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendRejectsAbsoluteWrite = function() {
+    var dir = createTestDir()
+    var outsideFile = dir + "-absolute-write.md"
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.write(outsideFile, "# Outside")
+      ow.test.assert(isObject(result) && result.ok === false, true, "absolute write should fail")
+      ow.test.assert(io.fileExists(outsideFile), false, "absolute write should not create target")
+    } finally {
+      try { io.rm(outsideFile) } catch(ignoreOutsideCleanup) {}
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendRejectsNonMarkdownWrite = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.write("notes.txt", "# Not Markdown")
+      ow.test.assert(isObject(result) && result.ok === false, true, "non-markdown write should fail")
+      ow.test.assert(io.fileExists(dir + java.io.File.separator + "notes.txt"), false, "non-markdown write should not create file")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendRejectsNonMarkdownDelete = function() {
+    var dir = createTestDir()
+    try {
+      io.writeFileString(dir + java.io.File.separator + "notes.txt", "keep me")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.delete("notes.txt")
+      ow.test.assert(isObject(result) && result.ok === false, true, "non-markdown delete should fail")
+      ow.test.assert(io.fileExists(dir + java.io.File.separator + "notes.txt"), true, "non-markdown delete should not remove file")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testFsBackendReadOnlyWrite = function() {
     var dir = createTestDir()
     try {

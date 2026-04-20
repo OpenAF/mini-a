@@ -452,7 +452,8 @@ Mini-A ships with complementary components:
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |
 | `memorych` | JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs (e.g. `{type:'file',options:{file:'/tmp/memory.json'}}`). With `memoryscope=both`, default writes go to global when a channel is configured; use explicit session scope for ephemeral entries. | - |
-| `memoryuser` | Convenience shorthand: enables `usememory` and sets `memorych`/`memorysessionch` to file channels backed by `~/.openaf-mini-a/memory.json` (only channels not already defined; directory auto-created). | `false` |
+| `memoryuser` | Convenience shorthand: enables `usememory` and sets `memorych`/`memorysessionch` to file channels under `~/.openaf-mini-a/` (only channels not already defined; directory auto-created). Also defaults `memorypromote=facts,decisions,summaries` and `memorystaledays=30`. | `false` |
+| `memoryusersession` | Convenience shorthand: enables `usememory`, defaults `memoryscope=session`, and sets `memorysessionch` to a file-backed store under `~/.openaf-mini-a/` (only when not already defined; directory auto-created). | `false` |
 | `metricsch` | JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots (for example `{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}`). By default Mini-A stores only the `mini-a` metric; optional `period`, `some`, and `noDate` fields mirror `ow.metrics.startCollecting`. | - |
 | `memorymaxpersection` | Per-section memory cap before compaction | `80` |
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
@@ -479,6 +480,9 @@ Mini-A ships with complementary components:
 | `rpm` | Rate limit (requests per minute) | - |
 | `tpm` | Rate limit (tokens per minute across prompt + completion) | - |
 | `maxcontext` | Context budget in tokens before proactive summarization | `0` |
+| `compressgoal` | Automatically compress oversized goal text before execution | `false` |
+| `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
+| `compressgoalchars` | Character threshold before goal compression is considered | `1000` |
 | `maxcontent` | Alias for `maxcontext` | `0` |
 | `outfile` | Path to save final answer output | - |
 | `outfileall` | Deep-research-only path to save full cycle output (verdicts/learnings/history) | - |

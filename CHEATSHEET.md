@@ -257,6 +257,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mcp` | string | - | MCP connection object (single or array) in SLON/JSON format |
 | `usetools` | boolean | `false` | Register MCP tools directly on the model instead of in prompt |
 | `usejsontool` | boolean | `false` | Register compatibility `json` tool when `usetools=true` |
+| `toolfallback` | boolean | `false` | When `usetools=true`, automatically fall back to action-based mode for the current run if the model emits malformed pseudo tool-call JSON instead of real tool calls |
 | `mcpdynamic` | boolean | `false` | Analyze goal and only register relevant MCP tools |
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
@@ -304,6 +305,13 @@ mini-a goal="query database" \
   mcp="[(cmd: 'ojob mcps/mcp-db.yaml ...'), (cmd: 'ojob mcps/mcp-net.yaml ...')]" \
   usetools=true mcpdynamic=true
 ```
+
+**Opt-in Tool Fallback:**
+```bash
+mini-a goal="what is the current time" \
+  usetools=true toolfallback=true
+```
+Use this when a model/provider sometimes describes tool usage as JSON text instead of emitting real tool calls. Mini-A will retry the current run in action-based mode only when that malformed tool-call pattern is detected.
 
 **Lazy Initialization:**
 ```bash
@@ -551,6 +559,9 @@ mini-a goal="show meetup locations on a map" \
 | `state` | string/object | - | Initial state data as structured JSON/SLON |
 | `conversation` | string | - | Conversation history file to load/save |
 | `maxcontext` | number | `0` | Maximum context size in tokens (auto-summarize when exceeded) |
+| `compressgoal` | boolean | `false` | Automatically compress oversized goal text before execution |
+| `compressgoaltokens` | number | `250` | Estimated token threshold before goal compression is considered |
+| `compressgoalchars` | number | `1000` | Character threshold before goal compression is considered |
 | `maxcontent` | number | `0` | Alias for `maxcontext` |
 | `libs` | string | - | Comma-separated list of additional OJob libraries to load |
 | `secpass` | string | - | Password for opening OpenAF sBucket model secrets |
@@ -629,6 +640,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `memorych` | string | - | SLON/JSON definition of an OpenAF channel used to **persist the global memory** store. Reloaded at startup and flushed on every significant event. |
 | `memorysessionch` | string | - | SLON/JSON definition of a dedicated OpenAF channel for the **session memory** store. Falls back to `memorych` when omitted. |
 | `memoryuser` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, sets `memorych` + `memorysessionch` to file channels, and defaults `memorypromote=facts,decisions,summaries` + `memorystaledays=30`. |
+| `memoryusersession` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, defaults `memoryscope=session`, and sets `memorysessionch` to a file channel. |
 | `memorysessionid` | string | `<agent-id>` | Session key used to namespace session memory in the channel (defaults to `conversation` arg if set, otherwise the internal agent ID). |
 | `memorymaxpersection` | number | `80` | Maximum entries kept per section before compaction drops stale/old ones. |
 | `memorymaxentries` | number | `500` | Hard cap on total entries across all sections (priority-ordered: decisions > evidence > risks > facts > summaries > hypotheses > openQuestions > artifacts). |
