@@ -6,6 +6,32 @@ help:
     desc     : Port to run the HTTP server on
     example  : "8888"
     mandatory: false
+  - name     : verbose
+    desc     : Print detailed interaction events
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : debug
+    desc     : Enable debug logging
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : debugfile
+    desc     : Write debug output to a file instead of screen (implies debug=true)
+    example  : "/tmp/mini-a-web-debug.ndjson"
+    mandatory: false
+  - name     : debugch
+    desc     : SLON/JSON debug channel for the main LLM
+    example  : "(type: file, options: (file: '/tmp/mini-a-main-debug.ndjson'))"
+    mandatory: false
+  - name     : debuglcch
+    desc     : SLON/JSON debug channel for the low-cost LLM
+    example  : "(type: file, options: (file: '/tmp/mini-a-lc-debug.ndjson'))"
+    mandatory: false
+  - name     : debugvalch
+    desc     : SLON/JSON debug channel for the validation LLM
+    example  : "(type: file, options: (file: '/tmp/mini-a-val-debug.ndjson'))"
+    mandatory: false
   - name     : showexecs
     desc     : Show executed commands in the interaction
     example  : "false"
@@ -34,6 +60,18 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : historykeepperiod
+    desc     : Delete kept history files older than this many minutes
+    example  : "1440"
+    mandatory: false
+  - name     : historykeepcount
+    desc     : Keep only the newest N kept history files
+    example  : "200"
+    mandatory: false
+  - name     : ssequeuetimeout
+    desc     : SSE queue timeout in seconds before stale stream state is purged
+    example  : "120"
+    mandatory: false
   - name     : useattach
     desc     : "Boolean to enable/disable file attachments (default: false)"
     example  : "true"
@@ -73,6 +111,22 @@ help:
     desc     : "Maximum accepted prompt size in characters (default: 120000)"
     example  : "120000"
     mandatory: false
+  - name     : rpm
+    desc     : Requests per minute limit
+    example  : "60"
+    mandatory: false
+  - name     : tpm
+    desc     : Tokens per minute limit
+    example  : "120000"
+    mandatory: false
+  - name     : maxsteps
+    desc     : Maximum consecutive non-success steps
+    example  : "50"
+    mandatory: false
+  - name     : earlystopthreshold
+    desc     : Consecutive identical errors before early stop
+    example  : "3"
+    mandatory: false
   - name     : useplanning
     desc     : "Boolean to enable/disable task planning (default: false)"
     example  : "true"
@@ -95,8 +149,40 @@ help:
     desc     : "Optional log file to append plan update entries"
     example  : "plan-updates.log"
     mandatory: false
+  - name     : forceplanning
+    desc     : Force planning even when heuristics would skip it
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : planfile
+    desc     : Plan file to load or save before execution
+    example  : "plan.md"
+    mandatory: false
+  - name     : planformat
+    desc     : Plan format override (md or json)
+    example  : "json"
+    mandatory: false
+  - name     : plancontent
+    desc     : Inline plan content (JSON or Markdown) to preload
+    example  : "# Plan"
+    mandatory: false
+  - name     : saveplannotes
+    desc     : Append execution learnings to saved plan notes
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : resumefailed
+    desc     : Attempt to resume the last failed goal on startup
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usediagrams
     desc     : "Boolean to enable/disable Mermaid diagram generation (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usemermaid
+    desc     : Alias for usediagrams
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -127,6 +213,194 @@ help:
     options  : ["true", "false"]
   - name     : usemath
     desc     : "Boolean to enable/disable math formula rendering guidance (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : knowledge
+    desc     : Extra knowledge or context injected into the agent
+    example  : "This repository uses OpenAF jobs."
+    mandatory: false
+  - name     : rules
+    desc     : Custom agent rules (string, JSON or SLON)
+    example  : "Always explain tradeoffs briefly."
+    mandatory: false
+  - name     : youare
+    desc     : Override the opening agent persona line
+    example  : "You are a precise release engineer."
+    mandatory: false
+  - name     : chatyouare
+    desc     : Override the chatbot persona line when chatbotmode=true
+    example  : "You are a helpful support assistant."
+    mandatory: false
+  - name     : goalprefix
+    desc     : Optional prefix automatically added to every goal
+    example  : "[web] "
+    mandatory: false
+  - name     : libs
+    desc     : Comma-separated list of additional OJob libraries to load
+    example  : "@AWS/aws.js,custom.js"
+    mandatory: false
+  - name     : model
+    desc     : Override OAF_MODEL for this web server session
+    example  : "(type: openai, model: gpt-5-mini, key: '...')"
+    mandatory: false
+  - name     : modellc
+    desc     : Override OAF_LC_MODEL for this web server session
+    example  : "(type: openai, model: gpt-5-nano, key: '...')"
+    mandatory: false
+  - name     : modelval
+    desc     : Override OAF_VAL_MODEL for this web server session
+    example  : "(type: openai, model: gpt-5-mini, key: '...')"
+    mandatory: false
+  - name     : modellock
+    desc     : Lock model tier selection (auto, main or lc)
+    example  : "lc"
+    mandatory: false
+  - name     : modelstrategy
+    desc     : Model orchestration profile (default or advisor)
+    example  : "advisor"
+    mandatory: false
+  - name     : advisormaxuses
+    desc     : Maximum advisor consultations per run
+    example  : "2"
+    mandatory: false
+  - name     : advisorenable
+    desc     : Master toggle for advisor consultations
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisoronrisk
+    desc     : Allow advisor consults on risk signals
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisoronambiguity
+    desc     : Allow advisor consults on ambiguity signals
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisoronharddecision
+    desc     : Allow advisor consults for hard-decision checkpoints
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : advisorcooldownsteps
+    desc     : Minimum step distance between advisor consultations
+    example  : "2"
+    mandatory: false
+  - name     : advisorbudgetratio
+    desc     : Fraction of token budget advisor calls may consume
+    example  : "0.20"
+    mandatory: false
+  - name     : emergencyreserve
+    desc     : Reserved advisor budget fraction for high-value consults
+    example  : "0.10"
+    mandatory: false
+  - name     : harddecision
+    desc     : Hard-decision checkpoint mode (require, warn or off)
+    example  : "warn"
+    mandatory: false
+  - name     : evidencegate
+    desc     : Enable lightweight evidence gating
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : evidencegatestrictness
+    desc     : Evidence gate strictness (low, medium or high)
+    example  : "medium"
+    mandatory: false
+  - name     : lcescalatedefer
+    desc     : Defer low-cost escalation by one step when confidence is high
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : lcbudget
+    desc     : Max low-cost model tokens before switching permanently to main model
+    example  : "50000"
+    mandatory: false
+  - name     : llmcomplexity
+    desc     : Use the low-cost model to validate medium-complexity decisions
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : useshell
+    desc     : Allow shell command execution
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : shell
+    desc     : Prefix applied to every shell command
+    example  : "docker exec sandbox"
+    mandatory: false
+  - name     : readwrite
+    desc     : Allow write operations during shell commands
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : checkall
+    desc     : Ask for confirmation before shell commands
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : shellbatch
+    desc     : Automatically approve shell commands
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : shellprefix
+    desc     : Prefix applied to each shell command
+    example  : "docker exec sandbox"
+    mandatory: false
+  - name     : shellallow
+    desc     : Comma-separated shell allow list
+    example  : "curl,wget"
+    mandatory: false
+  - name     : shellbanextra
+    desc     : Comma-separated extra banned shell commands
+    example  : "rm,mkfs"
+    mandatory: false
+  - name     : shellallowpipes
+    desc     : Allow pipes, redirections and shell control operators
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : shelltimeout
+    desc     : Maximum shell command runtime in milliseconds
+    example  : "120000"
+    mandatory: false
+  - name     : shellmaxbytes
+    desc     : Maximum shell output size in characters
+    example  : "12000"
+    mandatory: false
+  - name     : usesandbox
+    desc     : Built-in shell sandbox preset (off, auto, linux, macos, windows)
+    example  : "auto"
+    mandatory: false
+  - name     : sandboxprofile
+    desc     : Optional macOS sandbox profile path
+    example  : "/tmp/mini-a.sb"
+    mandatory: false
+  - name     : sandboxnonetwork
+    desc     : Disable network inside the built-in sandbox when supported
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcp
+    desc     : MCP connection definition (single or array) in SLON/JSON
+    example  : "[(type: stdio, command: 'node', args: ['server.js'])]"
+    mandatory: false
+  - name     : usetools
+    desc     : Register MCP tools directly on the model
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usejsontool
+    desc     : Register compatibility json tool when usetools=true
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : toolfallback
+    desc     : Fallback to action mode when malformed pseudo tool calls are emitted
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
@@ -169,6 +443,50 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : mcpdynamic
+    desc     : Select MCP tools dynamically per goal
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcpproxy
+    desc     : Aggregate all MCP connections behind a single proxy tool
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcpproxythreshold
+    desc     : Global byte threshold for proxy auto-spill to temporary files
+    example  : "4096"
+    mandatory: false
+  - name     : mcpproxytoon
+    desc     : Serialize spilled proxy results as TOON text
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcpprogcall
+    desc     : Start the per-session localhost bridge for programmatic MCP calls
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcpprogcallport
+    desc     : Port for the programmatic MCP bridge (0 auto-selects)
+    example  : "0"
+    mandatory: false
+  - name     : mcpprogcallmaxbytes
+    desc     : Maximum inline JSON size before bridge results spill to /result/{id}
+    example  : "4096"
+    mandatory: false
+  - name     : mcpprogcallresultttl
+    desc     : TTL in seconds for spilled bridge results
+    example  : "600"
+    mandatory: false
+  - name     : mcpprogcalltools
+    desc     : Optional comma-separated allowlist of tools exposed by the bridge
+    example  : "filesystemQuery,markdownFiles"
+    mandatory: false
+  - name     : mcpprogcallbatchmax
+    desc     : Maximum calls accepted per bridge batch request
+    example  : "10"
+    mandatory: false
   - name     : toolcachettl
     desc     : "Default cache TTL in milliseconds for MCP tool results"
     example  : "600000"
@@ -178,6 +496,15 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : useskills
+    desc     : Expose the skills utility tool within Mini Utils MCP
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : utilsroot
+    desc     : Optional root directory used by Mini Utils Tool
+    example  : "/path/to/repo"
+    mandatory: false
   - name     : utilsallow
     desc     : "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true"
     example  : "filesystemQuery,markdownFiles"
@@ -186,11 +513,157 @@ help:
     desc     : "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)"
     example  : "systemInfo,textUtilities"
     mandatory: false
+  - name     : mini-a-docs
+    desc     : Point utilsroot to the Mini-A opack path so docs can be navigated directly
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : miniadocs
+    desc     : Alias for mini-a-docs
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : chatbotmode
     desc     : "Run Mini-A in chatbot mode without agent planning prompts"
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : adaptiverouting
+    desc     : Enable rule-based route selection via mini-a-router.js
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : routerorder
+    desc     : Comma-separated preferred route order
+    example  : "mcp_direct_call,mcp_proxy_path,shell_execution"
+    mandatory: false
+  - name     : routerallow
+    desc     : Comma-separated allowlist of route types
+    example  : "mcp_direct_call,mcp_proxy_path"
+    mandatory: false
+  - name     : routerdeny
+    desc     : Comma-separated denylist of route types
+    example  : "shell_execution"
+    mandatory: false
+  - name     : routerproxythreshold
+    desc     : Payload size in bytes where proxy-style handling is preferred
+    example  : "4096"
+    mandatory: false
+  - name     : usememory
+    desc     : Enable the structured working memory subsystem
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryuser
+    desc     : Enable usememory and auto-configure file-backed global and session memory
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryusersession
+    desc     : Enable usememory and auto-configure file-backed session memory only
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryscope
+    desc     : Memory read scope (session, global or both)
+    example  : "both"
+    mandatory: false
+  - name     : memorysessionid
+    desc     : Session key used to namespace session memory
+    example  : "research-2024"
+    mandatory: false
+  - name     : memorych
+    desc     : SLON/JSON channel definition for global memory persistence
+    example  : "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))"
+    mandatory: false
+  - name     : memorysessionch
+    desc     : SLON/JSON channel definition for session memory persistence
+    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
+    mandatory: false
+  - name     : memorymaxpersection
+    desc     : Maximum memory entries kept per section
+    example  : "80"
+    mandatory: false
+  - name     : memorymaxentries
+    desc     : Maximum total memory entries
+    example  : "500"
+    mandatory: false
+  - name     : memorycompactevery
+    desc     : Compact memory every N updates
+    example  : "8"
+    mandatory: false
+  - name     : memorydedup
+    desc     : Enable memory deduplication
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memorypromote
+    desc     : Comma-separated memory sections to promote
+    example  : "facts,decisions,summaries"
+    mandatory: false
+  - name     : memorystaledays
+    desc     : Mark memory entries stale after this many days
+    example  : "30"
+    mandatory: false
+  - name     : memoryinject
+    desc     : Memory context injection mode (summary or full)
+    example  : "summary"
+    mandatory: false
+  - name     : usewiki
+    desc     : Enable the wiki knowledge base
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikiaccess
+    desc     : Wiki access mode (ro or rw)
+    example  : "rw"
+    mandatory: false
+  - name     : wikibackend
+    desc     : Wiki backend (fs or s3)
+    example  : "fs"
+    mandatory: false
+  - name     : wikiroot
+    desc     : Root directory for the filesystem wiki backend
+    example  : "/shared/wiki"
+    mandatory: false
+  - name     : wikibucket
+    desc     : Bucket name for the S3 wiki backend
+    example  : "mini-a-wiki"
+    mandatory: false
+  - name     : wikiprefix
+    desc     : Prefix path for the S3 wiki backend
+    example  : "wiki/"
+    mandatory: false
+  - name     : wikiurl
+    desc     : S3 endpoint URL for the wiki backend
+    example  : "https://s3.amazonaws.com"
+    mandatory: false
+  - name     : wikiaccesskey
+    desc     : S3 access key for the wiki backend
+    example  : "AKIA..."
+    mandatory: false
+  - name     : wikisecret
+    desc     : S3 secret key for the wiki backend
+    example  : "secret"
+    mandatory: false
+  - name     : wikiregion
+    desc     : S3 region for the wiki backend
+    example  : "eu-west-1"
+    mandatory: false
+  - name     : wikiuseversion1
+    desc     : Use S3 signature v1 for wiki access
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikiignorecertcheck
+    desc     : Disable TLS certificate checks for the wiki S3 backend
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikilintstaleddays
+    desc     : Default stale-page threshold in days for wiki lint
+    example  : "90"
+    mandatory: false
   - name     : promptprofile
     desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose)"
     example  : "balanced"
@@ -215,6 +688,119 @@ help:
   - name     : metricsch
     desc     : "SLON/JSON definition of an OpenAF channel where Mini-A metrics snapshots are recorded"
     example  : "(name: 'mini-a-metrics', type: 'mvs', options: (file: '/tmp/mini-a-metrics.db'))"
+    mandatory: false
+  - name     : usedelegation
+    desc     : Enable sub-goal delegation to child Mini-A agents
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usea2a
+    desc     : Use A2A HTTP+JSON/REST endpoints for remote worker delegation
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : workers
+    desc     : Comma-separated list of remote worker URLs
+    example  : "http://worker-a:8080,http://worker-b:8080"
+    mandatory: false
+  - name     : maxconcurrent
+    desc     : Maximum concurrent child agents when delegation is enabled
+    example  : "4"
+    mandatory: false
+  - name     : delegationmaxdepth
+    desc     : Maximum delegation nesting depth
+    example  : "3"
+    mandatory: false
+  - name     : delegationtimeout
+    desc     : Default subtask deadline in milliseconds
+    example  : "300000"
+    mandatory: false
+  - name     : delegationmaxretries
+    desc     : Default retry count for failed subtasks
+    example  : "2"
+    mandatory: false
+  - name     : workerreg
+    desc     : Port for worker dynamic registration server
+    example  : "12345"
+    mandatory: false
+  - name     : workerregtoken
+    desc     : Bearer token for worker registration endpoints
+    example  : "secret"
+    mandatory: false
+  - name     : workerevictionttl
+    desc     : Heartbeat TTL in milliseconds before dynamic worker eviction
+    example  : "60000"
+    mandatory: false
+  - name     : workerregurl
+    desc     : Comma-separated registration URL(s) used by workers in workermode
+    example  : "http://main-host:12345"
+    mandatory: false
+  - name     : workerreginterval
+    desc     : Worker heartbeat interval in milliseconds for self-registration
+    example  : "30000"
+    mandatory: false
+  - name     : workerskills
+    desc     : JSON/SLON array of worker skills exposed by workermode
+    example  : "[(name: 'research')]"
+    mandatory: false
+  - name     : workertags
+    desc     : Comma-separated tags appended to the default workermode skill
+    example  : "web,analysis"
+    mandatory: false
+  - name     : showdelegate
+    desc     : Show delegate/subtask events as separate lines
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : deepresearch
+    desc     : Enable deep research mode with iterative validation
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : maxcycles
+    desc     : Maximum research cycles in deep research mode
+    example  : "3"
+    mandatory: false
+  - name     : validationgoal
+    desc     : Validation criteria for deep research outcomes
+    example  : "Must include benchmarks and tradeoffs"
+    mandatory: false
+  - name     : valgoal
+    desc     : Alias for validationgoal
+    example  : "Must include benchmarks and tradeoffs"
+    mandatory: false
+  - name     : validationthreshold
+    desc     : Required validation verdict (PASS or score>=0.x)
+    example  : "score>=0.8"
+    mandatory: false
+  - name     : persistlearnings
+    desc     : Carry forward learnings between deep research cycles
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : agent
+    desc     : Markdown agent profile path or inline content with YAML metadata
+    example  : "agents/reviewer.md"
+    mandatory: false
+  - name     : agentfile
+    desc     : Legacy alias for agent
+    example  : "agents/reviewer.md"
+    mandatory: false
+  - name     : secpass
+    desc     : Password used to initialize the OpenAF sBucket for model references
+    example  : "secret"
+    mandatory: false
+  - name     : extracommands
+    desc     : Comma-separated extra directories for custom slash commands
+    example  : "/opt/mini-a/commands"
+    mandatory: false
+  - name     : extraskills
+    desc     : Comma-separated extra directories for custom skills
+    example  : "/opt/mini-a/skills"
+    mandatory: false
+  - name     : extrahooks
+    desc     : Comma-separated extra directories for custom hooks
+    example  : "/opt/mini-a/hooks"
     mandatory: false
 include:
 - oJobHTTPd.yaml
@@ -928,25 +1514,87 @@ jobs:
   check:
     in:
       showexecs       : toBoolean().isBoolean().default(false)
+      verbose         : toBoolean().isBoolean().default(false)
+      debug           : toBoolean().isBoolean().default(false)
+      debugfile       : isString().default(__)
+      debugch         : isString().default(__)
+      debuglcch       : isString().default(__)
+      debugvalch      : isString().default(__)
       usestream       : toBoolean().isBoolean().default(false)
       showthinking    : toBoolean().isBoolean().default(false)
       logpromptheaders: isString().default("")
       memorysessionheader: isString().default("")
+      rpm             : toNumber().isNumber().default(__)
+      tpm             : toNumber().isNumber().default(__)
+      maxsteps        : toNumber().isNumber().default(__)
+      earlystopthreshold: toNumber().isNumber().default(__)
       maxcontext      : toNumber().isNumber().default(200000)
       compressgoal    : toBoolean().isBoolean().default(false)
       compressgoaltokens: toNumber().isNumber().default(250)
       compressgoalchars : toNumber().isNumber().default(1000)
       maxpromptchars  : toNumber().isNumber().default(120000)
+      knowledge       : isString().default(__)
+      rules           : isString().default(__)
+      youare          : isString().default(__)
+      chatyouare      : isString().default(__)
+      goalprefix      : isString().default(__)
+      libs            : isString().default(__)
+      model           : isString().default(__)
+      modellc         : isString().default(__)
+      modelval        : isString().default(__)
+      modellock       : isString().default(__)
+      modelstrategy   : isString().default(__)
+      advisormaxuses  : toNumber().isNumber().default(__)
+      advisorenable   : toBoolean().isBoolean().default(__)
+      advisoronrisk   : toBoolean().isBoolean().default(__)
+      advisoronambiguity: toBoolean().isBoolean().default(__)
+      advisoronharddecision: toBoolean().isBoolean().default(__)
+      advisorcooldownsteps: toNumber().isNumber().default(__)
+      advisorbudgetratio: toNumber().isNumber().default(__)
+      emergencyreserve: toNumber().isNumber().default(__)
+      harddecision    : isString().default(__)
+      evidencegate    : toBoolean().isBoolean().default(false)
+      evidencegatestrictness: isString().default(__)
+      lcescalatedefer : toBoolean().isBoolean().default(__)
+      lcbudget        : toNumber().isNumber().default(__)
+      llmcomplexity   : toBoolean().isBoolean().default(false)
       usehistory      : toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)
       historypath     : isString().default(".")
       historykeep     : toBoolean().isBoolean().default(false)
+      historykeepperiod: toNumber().isNumber().default(__)
+      historykeepcount: toNumber().isNumber().default(__)
       useplanning     : toBoolean().isBoolean().default(false)
       updatefreq      : isString().default("auto")
       updateinterval  : toNumber().isNumber().default(3)
       forceupdates    : toBoolean().isBoolean().default(false)
       planlog         : isString().default(__)
+      forceplanning   : toBoolean().isBoolean().default(false)
+      planfile        : isString().default(__)
+      planformat      : isString().default(__)
+      plancontent     : isString().default(__)
+      saveplannotes   : toBoolean().isBoolean().default(false)
+      resumefailed    : toBoolean().isBoolean().default(false)
+      useshell        : toBoolean().isBoolean().default(false)
+      shell           : isString().default(__)
+      readwrite       : toBoolean().isBoolean().default(false)
+      checkall        : toBoolean().isBoolean().default(false)
+      shellbatch      : toBoolean().isBoolean().default(false)
+      shellprefix     : isString().default(__)
+      shellallow      : isString().default(__)
+      shellbanextra   : isString().default(__)
+      shellallowpipes : toBoolean().isBoolean().default(false)
+      shelltimeout    : toNumber().isNumber().default(__)
+      shellmaxbytes   : toNumber().isNumber().default(__)
+      usesandbox      : isString().default(__)
+      sandboxprofile  : isString().default(__)
+      sandboxnonetwork: toBoolean().isBoolean().default(false)
+      mcp             : isString().default(__)
+      usetools        : toBoolean().isBoolean().default(false)
+      usejsontool     : toBoolean().isBoolean().default(__)
+      toolfallback    : toBoolean().isBoolean().default(false)
       usediagrams     : toBoolean().isBoolean().default(false)
+      usemermaid      : toBoolean().isBoolean().default(__)
       usecharts       : toBoolean().isBoolean().default(false)
       usemaps         : toBoolean().isBoolean().default(false)
       usesvg          : toBoolean().isBoolean().default(false)
@@ -963,23 +1611,100 @@ jobs:
       historys3useversion1: toBoolean().isBoolean().default(false)
       historys3ignorecertcheck: toBoolean().isBoolean().default(false)
       mcplazy        : toBoolean().isBoolean().default(false)
+      mcpdynamic     : toBoolean().isBoolean().default(false)
+      mcpproxy       : toBoolean().isBoolean().default(false)
+      mcpproxythreshold: toNumber().isNumber().default(0)
+      mcpproxytoon   : toBoolean().isBoolean().default(false)
+      mcpprogcall    : toBoolean().isBoolean().default(false)
+      mcpprogcallport: toNumber().isNumber().default(0)
+      mcpprogcallmaxbytes: toNumber().isNumber().default(4096)
+      mcpprogcallresultttl: toNumber().isNumber().default(600)
+      mcpprogcalltools: isString().default(__)
+      mcpprogcallbatchmax: toNumber().isNumber().default(10)
       toolcachettl   : toNumber().isNumber().default(__)
       useutils       : toBoolean().isBoolean().default(false)
+      useskills      : toBoolean().isBoolean().default(false)
+      utilsroot      : isString().default(__)
       utilsallow     : isString().default(__)
       utilsdeny      : isString().default(__)
+      "mini-a-docs"  : toBoolean().isBoolean().default(false)
+      miniadocs      : toBoolean().isBoolean().default(false)
       chatbotmode    : toBoolean().isBoolean().default(false)
+      adaptiverouting: toBoolean().isBoolean().default(false)
+      routerorder    : isString().default(__)
+      routerallow    : isString().default(__)
+      routerdeny     : isString().default(__)
+      routerproxythreshold: toNumber().isNumber().default(__)
+      usememory      : toBoolean().isBoolean().default(false)
+      memoryuser     : toBoolean().isBoolean().default(false)
+      memoryusersession: toBoolean().isBoolean().default(false)
+      memoryscope    : isString().default(__)
+      memorysessionid: isString().default(__)
+      memorych       : isString().default(__)
+      memorysessionch: isString().default(__)
+      memorymaxpersection: toNumber().isNumber().default(__)
+      memorymaxentries: toNumber().isNumber().default(__)
+      memorycompactevery: toNumber().isNumber().default(__)
+      memorydedup    : toBoolean().isBoolean().default(__)
+      memorypromote  : isString().default(__)
+      memorystaledays: toNumber().isNumber().default(__)
+      memoryinject   : isString().default(__)
+      usewiki        : toBoolean().isBoolean().default(false)
+      wikiaccess     : isString().default(__)
+      wikibackend    : isString().default(__)
+      wikiroot       : isString().default(__)
+      wikibucket     : isString().default(__)
+      wikiprefix     : isString().default(__)
+      wikiurl        : isString().default(__)
+      wikiaccesskey  : isString().default(__)
+      wikisecret     : isString().default(__)
+      wikiregion     : isString().default(__)
+      wikiuseversion1: toBoolean().isBoolean().default(false)
+      wikiignorecertcheck: toBoolean().isBoolean().default(false)
+      wikilintstaleddays: toNumber().isNumber().default(__)
       promptprofile  : isString().default(__)
       systempromptbudget: toNumber().isNumber().default(__)
       format         : isString().default(__)
       auditch        : isString().default(__)
       toollog        : isString().default(__)
       metricsch      : isString().default(__)
+      usedelegation  : toBoolean().isBoolean().default(false)
+      usea2a         : toBoolean().isBoolean().default(false)
+      workers        : isString().default(__)
+      maxconcurrent  : toNumber().isNumber().default(4)
+      delegationmaxdepth: toNumber().isNumber().default(3)
+      delegationtimeout: toNumber().isNumber().default(300000)
+      delegationmaxretries: toNumber().isNumber().default(2)
+      workerreg      : toNumber().isNumber().default(__)
+      workerregtoken : isString().default(__)
+      workerevictionttl: toNumber().isNumber().default(60000)
+      workerregurl   : isString().default(__)
+      workerreginterval: toNumber().isNumber().default(__)
+      workerskills   : isString().default(__)
+      workertags     : isString().default(__)
+      showdelegate   : toBoolean().isBoolean().default(false)
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)
+      valgoal        : isString().default(__)
       validationthreshold: isString().default("PASS")
       persistlearnings: toBoolean().isBoolean().default(true)
+      agent          : isString().default(__)
+      agentfile      : isString().default(__)
+      secpass        : isString().default(__)
+      extracommands  : isString().default(__)
+      extraskills    : isString().default(__)
+      extrahooks     : isString().default(__)
+      ssequeuetimeout: toNumber().isNumber().default(120)
   exec : | #js
+    if (isDef(args.usemermaid)) {
+      if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
+      delete args.usemermaid
+    }
+    if (isDef(args.valgoal)) {
+      if (isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
+      delete args.valgoal
+    }
     MiniA.warnUnknownArgs(args, {
       logger: function(message) { logWarn(message) }
     })
