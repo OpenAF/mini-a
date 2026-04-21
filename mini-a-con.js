@@ -574,6 +574,7 @@ try {
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
+    usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
     utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },

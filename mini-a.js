@@ -67,6 +67,10 @@ var MiniA = function() {
   this._loadedPlanPayload = null
   this._savePlanNotes = false
   this._useToolsActual = false
+  this._useToolsMain = false
+  this._useToolsLC = false
+  this._useToolsActualMain = false
+  this._useToolsActualLC = false
   this._useMcpProxy = false
   this._planUpdateConfig = { frequency: "auto", interval: 3, force: false, logFile: null }
   this._planUpdateState = { lastStep: 0, updates: 0, lastReason: "", lastReminderStep: 0, checkpoints: [], nextCheckpointIndex: 0 }
@@ -2008,6 +2012,19 @@ MiniA.prototype._copyConversationBetweenLlms = function(sourceLLM, targetLLM) {
   return false
 }
 
+MiniA.prototype._isToolInterfaceEnabledForModel = function(modelName) {
+  return modelName === "lc" ? this._useToolsLC === true : this._useToolsMain === true
+}
+
+MiniA.prototype._hasToolInterfaceForModel = function(modelName) {
+  return modelName === "lc" ? this._useToolsActualLC === true : this._useToolsActualMain === true
+}
+
+MiniA.prototype._setActiveToolMode = function(modelName) {
+  this._useToolsActual = this._hasToolInterfaceForModel(modelName === "lc" ? "lc" : "main")
+  return this._useToolsActual
+}
+
 MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
   if (!this._use_lc) {
     this._activeConversationModel = "main"
@@ -2253,7 +2270,7 @@ MiniA.prototype._fallbackFromToolCallingFailure = function(runtime, opts) {
     : "model rejected tool-calling request"
   var useLowCost = opts.useLowCost === true
 
-  if (useLowCost) {
+  if (useLowCost && this._hasToolInterfaceForModel("main") === true) {
     runtime.forceMainModel = true
     runtime.pendingAdvisorSignals = __
     runtime.context.push(`[OBS ${stepLabel}] (recover) ${reason}. Escalating to main model while keeping function calling enabled.`)
@@ -2262,6 +2279,7 @@ MiniA.prototype._fallbackFromToolCallingFailure = function(runtime, opts) {
   }
 
   this._useToolsActual = false
+  this._useToolsActualMain = false
   runtime.forceMainModel = true
   runtime.forceNoStream = true
   runtime.forceNoJson = true
@@ -7306,7 +7324,7 @@ MiniA.prototype._fallbackFromMalformedToolCall = function(runtime, stepLabel, re
       : "model emitted malformed pseudo tool-call JSON instead of a real tool call"
     var useLowCost = opts.useLowCost === true
 
-    if (useLowCost) {
+    if (useLowCost && this._hasToolInterfaceForModel("main") === true) {
       runtime.forceMainModel = true
       runtime.pendingAdvisorSignals = __
       runtime.context.push(`[OBS ${stepLabel}] (recover) ${reasonText}. Escalating to main model while keeping function calling enabled.`)
@@ -7315,6 +7333,7 @@ MiniA.prototype._fallbackFromMalformedToolCall = function(runtime, stepLabel, re
     }
 
     this._useToolsActual = false
+    this._useToolsActualMain = false
     runtime.forceMainModel = true
     runtime.forceNoStream = true
     runtime.forceNoJson = true
@@ -7834,11 +7853,20 @@ MiniA.prototype._extractThinkingBlocksFromResponse = function(rawResponse) {
     var candidates = this._extractResponseTextCandidates(rawResponse)
     var contentMatches = []
     var seen = {}
+    var normalizeThinkingContent = function(value) {
+        var text = (value || "").toString().trim()
+        if (text.length === 0) return ""
+        var wrappedMatch = text.match(/^<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>$/)
+        if (isArray(wrappedMatch) && wrappedMatch.length >= 3 && _MINI_A_THINKING_TAGS[_MINI_A_TAG_NORM(wrappedMatch[1])]) {
+            text = (wrappedMatch[2] || "").toString().trim()
+        }
+        return text
+    }
 
     // Collect structured thinking blocks first (e.g. Claude {type:"thinking"} content blocks)
     var structured = this._extractStructuredThinkingTexts(rawResponse)
     structured.forEach(function(block) {
-        var trimmed = (block || "").toString().trim()
+        var trimmed = normalizeThinkingContent(block)
         if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; contentMatches.push(trimmed) }
     })
 
@@ -7847,7 +7875,7 @@ MiniA.prototype._extractThinkingBlocksFromResponse = function(rawResponse) {
         var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
         candidates.join("\n").replace(tagPattern, function(match, tag, content) {
             if (!_MINI_A_THINKING_TAGS[_MINI_A_TAG_NORM(tag)]) return match
-            var trimmed = (content || "").toString().trim()
+            var trimmed = normalizeThinkingContent(content)
             if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; contentMatches.push(trimmed) }
             return match
         })
@@ -7950,6 +7978,7 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
   var rawScope = isString(args.memoryscope) ? args.memoryscope : (isString(args.memoryScope) ? args.memoryScope : "both")
   var scope = String(rawScope || "both").toLowerCase().trim()
   if (["session", "global", "both"].indexOf(scope) < 0) scope = "both"
+  var previousSessionId = this._sessionMemoryId
   var sessionId = isString(args.memorysessionid) && args.memorysessionid.trim().length > 0
     ? args.memorysessionid.trim()
     : (isString(args.conversation) && args.conversation.trim().length > 0 ? args.conversation.trim() : this._id)
@@ -8037,8 +8066,14 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
         if (cfg.debug) this.fnI(level || "info", "[memory][session] " + msg)
       }.bind(this))
       var seededSession = __
-      if (isObject(seedState) && isObject(seedState.workingMemorySession)) seededSession = seedState.workingMemorySession
-      if (isUnDef(seededSession) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "session")) {
+      var canReuseSeededSession = false
+      if (isObject(seedState) && isObject(seedState.workingMemorySession)) {
+        if (isString(seedState.workingMemorySessionId) && seedState.workingMemorySessionId === sessionId) canReuseSeededSession = true
+        if (isUnDef(seedState.workingMemorySessionId) && (!isString(previousSessionId) || previousSessionId === sessionId)) canReuseSeededSession = true
+      }
+      if (canReuseSeededSession) seededSession = seedState.workingMemorySession
+      if (isUnDef(seededSession) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "session") &&
+          (!isString(previousSessionId) || previousSessionId === sessionId)) {
         seededSession = seedState.workingMemory
       }
       if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) {
@@ -8253,11 +8288,17 @@ MiniA.prototype._syncWorkingMemoryState = function() {
   if (this._memoryConfig.enabled !== true) {
     delete this._agentState.workingMemory
     delete this._agentState.workingMemorySession
+    delete this._agentState.workingMemorySessionId
     delete this._agentState.workingMemoryGlobal
     return
   }
-  if (isObject(this._sessionMemoryManager)) this._agentState.workingMemorySession = this._sessionMemoryManager.snapshot()
-  else delete this._agentState.workingMemorySession
+  if (isObject(this._sessionMemoryManager)) {
+    this._agentState.workingMemorySession = this._sessionMemoryManager.snapshot()
+    this._agentState.workingMemorySessionId = this._sessionMemoryId
+  } else {
+    delete this._agentState.workingMemorySession
+    delete this._agentState.workingMemorySessionId
+  }
   if (isObject(this._globalMemoryManager)) this._agentState.workingMemoryGlobal = this._globalMemoryManager.snapshot()
   else delete this._agentState.workingMemoryGlobal
   var resolved = this._buildResolvedWorkingMemory(this._memoryScope)
@@ -13155,6 +13196,8 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
 
   var useDynamicSelection = toBoolean(args.mcpdynamic)
   var selectedToolNames = []
+  this._useToolsActualMain = false
+  this._useToolsActualLC = false
 
   if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
     if (useDynamicSelection && isString(args.goal) && args.goal.length > 0) {
@@ -13162,7 +13205,10 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
     }
 
     var parent = this
-    var registerMcpTools = function(llmInstance) {
+    var registerMcpTools = function(llmInstance, modelName) {
+      var normalizedModel = modelName === "lc" ? "lc" : "main"
+      if (!parent._isToolInterfaceEnabledForModel(normalizedModel)) return llmInstance
+
       // Check if we're using mcpproxy - if so, force function calling mode
       var usingMcpProxy = toBoolean(args.mcpproxy) === true
       var hasMcpProxyConnection = Object.keys(parent._mcpConnections || {}).some(function(id) {
@@ -13177,7 +13223,8 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       // NOTE: _useToolsActual is already pre-set before init() to ensure correct prompt template
       if (usingMcpProxy && hasMcpProxyConnection) {
         parent.fnI("info", "MCP proxy mode enabled - using function calling for proxy-dispatch tool.")
-        parent._useToolsActual = true  // Confirm function calling mode for proxy (already set before init)
+        if (normalizedModel === "lc") parent._useToolsActualLC = true
+        else parent._useToolsActualMain = true
 
       // Even if LLM doesn't have withMcpTools, proceed with registration
       // The proxy-dispatch tool will be registered via the OpenAI functions format
@@ -13189,14 +13236,16 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       }
     } else if (isUnDef(llmInstance) || typeof llmInstance.withMcpTools != "function") {
       // Check if LLM actually supports function calling (non-proxy mode)
-      parent.fnI("warn", "usetools=true but model doesn't support function calling. Falling back to action-based mode.")
-      parent._useToolsActual = false  // Confirm action-based mode
+      parent.fnI("warn", `${normalizedModel === "lc" ? "usetoolslc/usetools" : "usetools"} enabled but ${normalizedModel} model doesn't support function calling. Falling back to action-based mode.`)
+      if (normalizedModel === "lc") parent._useToolsActualLC = false
+      else parent._useToolsActualMain = false
         return llmInstance
       } else {
-        parent._useToolsActual = true  // Confirm function calling is supported
+        if (normalizedModel === "lc") parent._useToolsActualLC = true
+        else parent._useToolsActualMain = true
       }
       var updated = llmInstance
-      parent.fnI("info", `Registering MCP tools on LLM via tool interface...`)
+      parent.fnI("info", `Registering MCP tools on ${normalizedModel} LLM via tool interface...`)
 
       Object.keys(parent._mcpConnections || {}).forEach(function(connectionId) {
         var client = parent._mcpConnections[connectionId]
@@ -13251,7 +13300,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       this._debugchConfig,
       "__mini_a_llm_debug",
       "LLM",
-      registerMcpTools
+      function(llmInstance) { return registerMcpTools(llmInstance, "main") }
     )
     if (isDef(rebuiltMainLlmPair.bare)) this._llmNoTools = rebuiltMainLlmPair.bare
     if (isDef(rebuiltMainLlmPair.working)) this.llm = rebuiltMainLlmPair.working
@@ -13263,7 +13312,7 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
         this._debuglcchConfig,
         "__mini_a_lc_llm_debug",
         "Low-cost LLM",
-        registerMcpTools
+        function(llmInstance) { return registerMcpTools(llmInstance, "lc") }
       )
       if (isDef(rebuiltLowCostPair.bare)) this._lcLlmNoTools = rebuiltLowCostPair.bare
       if (isDef(rebuiltLowCostPair.working)) this.lc_llm = rebuiltLowCostPair.working
@@ -13272,14 +13321,20 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
     var toolCountMsg = useDynamicSelection && selectedToolNames.length > 0
       ? `${selectedToolNames.length} dynamically selected`
       : `${this.mcpTools.length}`
-    this.fnI("mcp", `Registered ${toolCountMsg} MCP tool(s) via LLM tool interface${this._use_lc ? " (main + low-cost)" : ""}.`)
+    var registeredTargets = []
+    if (this._useToolsMain) registeredTargets.push("main")
+    if (this._useToolsLC) registeredTargets.push("low-cost")
+    this.fnI("mcp", `Registered ${toolCountMsg} MCP tool(s) via LLM tool interface${registeredTargets.length > 0 ? " (" + registeredTargets.join(" + ") + ")" : ""}.`)
   } else {
     this._useToolsActual = false  // No tools or usetools=false
+    this._useToolsActualMain = false
+    this._useToolsActualLC = false
     if (useDynamicSelection) {
       this.fnI("mcp", "Dynamic MCP selection requested, but MCP tool interface is disabled or no tools are available.")
     }
   }
 
+  this._setActiveToolMode(this._activeConversationModel === "lc" ? "lc" : "main")
   this._applySystemInstructions(args)
 }
 
@@ -13643,6 +13698,7 @@ MiniA.prototype._applyAgentMetadata = function(args) {
       if (name === "readwrite" && isUnDef(args.readwrite)) args.readwrite = true
       if (name === "useutils" && isUnDef(args.useutils)) args.useutils = true
       if (name === "usetools" && isUnDef(args.usetools)) args.usetools = true
+      if (name === "usetoolslc" && isUnDef(args.usetoolslc)) args.usetoolslc = true
     })
   }
   if (isDef(metadata.tools)) {
@@ -13706,7 +13762,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "delegationmaxdepth", "delegationtimeout", "delegationmaxretries", "mcpprogcall", "mcpprogcallport",
     "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
     "verbose", "readwrite", "debug", "debugfile", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
-    "shellbatch", "usetools", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
+    "shellbatch", "usetools", "usetoolslc", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
     "usemath", "usesvg", "usevectors", "browsercontext", "chatbotmode", "useplanning", "planmode", "validateplan",
     "convertplan", "resumefailed", "showexecs", "usestream", "format", "maxcontext", "compressgoal", "compressgoaltokens", "compressgoalchars", "maxpromptchars", "rules",
     "state", "maxcontent", "earlystopthreshold", "adaptiverouting", "routerorder",
@@ -14055,6 +14111,7 @@ MiniA.prototype.init = function(args) {
       { name: "useskills", type: "boolean", default: false },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
+      { name: "usetoolslc", type: "boolean", default: false },
       { name: "toolfallback", type: "boolean", default: false },
       { name: "usedelegation", type: "boolean", default: false },
       { name: "workers", type: "string", default: __ },
@@ -14092,6 +14149,7 @@ MiniA.prototype.init = function(args) {
     args.checkall = _$(toBoolean(args.checkall), "args.checkall").isBoolean().default(false)
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.usetoolslc = _$(toBoolean(args.usetoolslc), "args.usetoolslc").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
     if (args.useskills === true) args.useutils = true
@@ -14284,7 +14342,9 @@ MiniA.prototype.init = function(args) {
     this._shellSandboxNoNetwork = args.sandboxnonetwork
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
-    this._useTools = args.usetools
+    this._useToolsMain = args.usetools
+    this._useToolsLC = args.usetools || args.usetoolslc
+    this._useTools = this._useToolsMain || this._useToolsLC
     this._useUtils = args.useutils
     this._configurePlanUpdates(args)
     this._initWiki(args)
@@ -14470,6 +14530,7 @@ MiniA.prototype.init = function(args) {
       }
     } else {
       this._use_lc = false
+      if (args.usetoolslc === true) this.fnI("warn", "usetoolslc=true was requested but no low-cost model is configured.")
     }
 
     // Re-evaluate validation model config on every init() call so reused MiniA
@@ -14565,20 +14626,20 @@ MiniA.prototype.init = function(args) {
       }
 
       // Register delegation MCP config if usetools is enabled
-      if (args.usedelegation === true && args.usetools === true) {
+      if (args.usedelegation === true && this._useTools === true) {
         var delegationMcpConfig = this._createDelegationMcpConfig(args)
         if (isMap(delegationMcpConfig)) aggregatedMcpConfigs.push(delegationMcpConfig)
       }
 
       // Auto-register a dummy MCP for shell execution when both usetools and useshell are enabled
-      if (args.usetools === true && args.useshell === true) {
+      if (this._useTools === true && args.useshell === true) {
         var shellMcpConfig = this._createShellMcpConfig(args)
         if (isMap(shellMcpConfig)) aggregatedMcpConfigs.push(shellMcpConfig)
       }
 
       var jsonToolMcpConfig = __
       // Optional compatibility shim for models that attempt to call a 'json' tool
-      if (args.usetools === true && args.usejsontool === true) {
+      if (this._useTools === true && args.usejsontool === true) {
         jsonToolMcpConfig = this._createJsonToolMcpConfig(args)
         // Keep json as a direct top-level tool when proxy mode is enabled.
         if (isMap(jsonToolMcpConfig) && toBoolean(args.mcpproxy) !== true) aggregatedMcpConfigs.push(jsonToolMcpConfig)
@@ -14839,7 +14900,7 @@ MiniA.prototype.init = function(args) {
         "The 'estimatedTokens' field in inline results shows approximate token cost — use it to decide proactively whether to use 'resultToFile=true' next time."
       )
     }
-    if (args.useshell === true && args.usetools === true) {
+    if (args.useshell === true && this._useTools === true) {
       baseRules.push("When shell and tools are both enabled, always execute shell with action=\"shell\" and top-level command. Do not invoke shell as an MCP tool/function.")
     }
     if (this._supportsConsoleUserInput(args) === true) {
@@ -15285,6 +15346,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
+      { name: "usetoolslc", type: "boolean", default: false },
       { name: "toolfallback", type: "boolean", default: false },
       { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
@@ -15329,6 +15391,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.shellallowpipes = _$(toBoolean(args.shellallowpipes), "args.shellallowpipes").isBoolean().default(false)
     args.shellbatch = _$(toBoolean(args.shellbatch), "args.shellbatch").isBoolean().default(false)
     args.usetools = _$(toBoolean(args.usetools), "args.usetools").isBoolean().default(false)
+    args.usetoolslc = _$(toBoolean(args.usetoolslc), "args.usetoolslc").isBoolean().default(false)
     args.toolfallback = _$(toBoolean(args.toolfallback), "args.toolfallback").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
@@ -15451,7 +15514,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._shellSandboxNoNetwork = args.sandboxnonetwork
     this._shellTimeout = args.shelltimeout
     this._shellMaxBytes = args.shellmaxbytes
-    this._useTools = args.usetools
+    this._useToolsMain = args.usetools
+    this._useToolsLC = args.usetools || args.usetoolslc
+    this._useTools = this._useToolsMain || this._useToolsLC
     this._useUtils = args.useutils
     this._adaptiveRouting = args.adaptiverouting === true
     var routeOrder = this._parseListOption(args.routerorder)
@@ -15866,11 +15931,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._useMcpProxy = promptProxyMode
 
     if (promptProxyMode) {
-      // MCP proxy mode: useToolsActual depends on whether usetools=true
-      this._useToolsActual = this._useTools === true
+      // MCP proxy mode: pre-set prompt mode for the main model only.
+      this._useToolsActual = this._useToolsMain === true
       var proxyPresetSuffix = hasMcpProxyConnection ? " (connection already present)" : " (connection will be initialized)"
       this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()" + proxyPresetSuffix)
-    } else if (this._useTools && isArray(this.mcpTools) && this.mcpTools.length > 0) {
+    } else if (this._useToolsMain && isArray(this.mcpTools) && this.mcpTools.length > 0) {
       // Check if LLM supports function calling (non-proxy mode)
       this._useToolsActual = isDef(this.llm) && typeof this.llm.withMcpTools === "function"
       if (!this._useToolsActual) {
@@ -15879,7 +15944,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this.fnI("info", "Pre-setting _useToolsActual=true (LLM supports function calling)")
       }
     } else {
-      // No tools or usetools=false
+      // No main-model tool interface configured
       this._useToolsActual = false
     }
 
@@ -16854,6 +16919,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       this._syncConversationForModelSwitch(useLowCost ? "lc" : "main")
+      this._setActiveToolMode(useLowCost ? "lc" : "main")
       this._refreshConfiguredLlmChannels()
       var currentLLM = useLowCost ? this.lc_llm : this.llm
       var llmType = useLowCost ? "low-cost" : "main"
@@ -18260,6 +18326,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Get final answer from model
     // Use an isolated no-tools LLM instance for this fallback call to avoid
     // tool-calling loops (e.g., repeated invalid shell/proxy invocations).
+    this._setActiveToolMode("main")
     var finalLLM = this.llm
     if (this._useToolsActual === true) {
       try {
@@ -18362,6 +18429,7 @@ MiniA.prototype._runChatbotMode = function(options) {
 
     this.fnI("info", `Chatbot mode enabled${this.mcpToolNames.length > 0 ? " (tool-capable)" : ""}.`)
     this.state = "processing"
+    this._setActiveToolMode("main")
 
     var maxSteps = Math.max(1, args.maxsteps || 10)
     var pendingPrompt = this._buildChatbotUserPrompt(args.goal, args.hookcontext)

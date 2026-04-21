@@ -928,6 +928,7 @@ Default behavior note:
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
+- **`usetoolslc`** (boolean, default: false): Register MCP tools directly only on the low-cost model (`OAF_LC_MODEL` / `modellc`). Useful when you want native tool calling on the cheaper tier without enabling it on the main model.
 - **`usejsontool`** (boolean, default: false): When `usetools=true`, registers an optional compatibility `json` tool. Useful for models that intermittently emit `json` tool calls instead of returning a plain JSON action object.
 - **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations

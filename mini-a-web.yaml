@@ -394,6 +394,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usetoolslc
+    desc     : Register MCP tools directly only on the low-cost model
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usejsontool
     desc     : Register compatibility json tool when usetools=true
     example  : "true"
@@ -1591,6 +1596,7 @@ jobs:
       sandboxnonetwork: toBoolean().isBoolean().default(false)
       mcp             : isString().default(__)
       usetools        : toBoolean().isBoolean().default(false)
+      usetoolslc      : toBoolean().isBoolean().default(false)
       usejsontool     : toBoolean().isBoolean().default(__)
       toolfallback    : toBoolean().isBoolean().default(false)
       usediagrams     : toBoolean().isBoolean().default(false)

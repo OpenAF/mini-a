@@ -167,6 +167,27 @@
     ow.test.assert(restoreCalls === 1, true, "Main-model fallback should rebuild no-tools models once")
   }
 
+  exports.testToolCallingFailureFallbackDisablesToolsWhenMainHasNoToolInterface = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+    agent._useToolsActual = true
+    agent._useToolsActualMain = false
+
+    var runtime = { context: [] }
+    agent._fallbackFromToolCallingFailure(runtime, {
+      stepLabel : 2,
+      reason    : "low-cost tool error",
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual === false, true, "Low-cost fallback should disable function calling when main has no tool interface")
+    ow.test.assert(runtime.forceMainModel === true, true, "Low-cost fallback should still escalate to the main model")
+    ow.test.assert(runtime.forceNoStream === true, true, "Low-cost fallback should disable streaming when dropping to action mode on main")
+    ow.test.assert(restoreCalls === 1, true, "Low-cost fallback should rebuild no-tools models once when main has no tool interface")
+  }
+
   exports.testMalformedToolCallFallbackEscalatesLowCostOnly = function() {
     var agent = createAgent()
     agent.fnI = function() {}
@@ -203,6 +224,26 @@
     ow.test.assert(runtime.forceNoStream, true, "Main malformed fallback should disable streaming for action mode retry")
     ow.test.assert(runtime.actionModeFallbackActive, true, "Main malformed fallback should activate action-mode fallback")
     ow.test.assert(restoreCalls === 1, true, "Main malformed fallback should rebuild no-tools models once")
+  }
+
+  exports.testMalformedToolCallFallbackDisablesToolsWhenMainHasNoToolInterface = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+    agent._useToolsActual = true
+    agent._useToolsActualMain = false
+
+    var runtime = { context: [] }
+    agent._fallbackFromMalformedToolCall(runtime, 4, "low-cost malformed tool call", {
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual === false, true, "Low-cost malformed fallback should disable function calling when main has no tool interface")
+    ow.test.assert(runtime.forceMainModel === true, true, "Low-cost malformed fallback should still escalate to the main model")
+    ow.test.assert(runtime.forceNoStream === true, true, "Low-cost malformed fallback should disable streaming when dropping to action mode on main")
+    ow.test.assert(runtime.actionModeFallbackActive === true, true, "Low-cost malformed fallback should activate action-mode fallback when main has no tool interface")
+    ow.test.assert(restoreCalls === 1, true, "Low-cost malformed fallback should rebuild no-tools models once when main has no tool interface")
   }
 
   exports.testShellToolCallAliasFallsBackToShell = function() {
@@ -1760,6 +1801,7 @@
         "  - readwrite",
         "  - useutils",
         "  - usetools",
+        "  - usetoolslc",
         "---"
       ].join("\n")
     }
@@ -1770,6 +1812,7 @@
     ow.test.assert(args.readwrite === true, true, "Agent capabilities should enable readwrite when omitted")
     ow.test.assert(args.useutils === true, true, "Agent capabilities should enable useutils when omitted")
     ow.test.assert(args.usetools === true, true, "Agent capabilities should enable usetools when omitted")
+    ow.test.assert(args.usetoolslc === true, true, "Agent capabilities should enable usetoolslc when omitted")
   }
 
   exports.testAgentCapabilitiesRespectExplicitFalseFlags = function() {
@@ -1784,12 +1827,14 @@
         "  - readwrite",
         "  - useutils",
         "  - usetools",
+        "  - usetoolslc",
         "---"
       ].join("\n"),
       useshell: false,
       readwrite: false,
       useutils: false,
-      usetools: false
+      usetools: false,
+      usetoolslc: false
     }
 
     agent._applyAgentMetadata(args)
@@ -1798,6 +1843,7 @@
     ow.test.assert(args.readwrite === false, true, "Explicit readwrite=false should override agent capabilities")
     ow.test.assert(args.useutils === false, true, "Explicit useutils=false should override agent capabilities")
     ow.test.assert(args.usetools === false, true, "Explicit usetools=false should override agent capabilities")
+    ow.test.assert(args.usetoolslc === false, true, "Explicit usetoolslc=false should override agent capabilities")
   }
 
   exports.testAgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit = function() {

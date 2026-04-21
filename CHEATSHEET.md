@@ -20,6 +20,7 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Choosing Knowledge Features](#choosing-knowledge-features)
 - [Mode Presets](#mode-presets)
 - [Advanced Features](#advanced-features)
+  - [Web UI Parameters](#web-ui-parameters)
 - [Rate Limiting & Performance](#rate-limiting--performance)
 - [Security & Safety](#security--safety)
 - [Common Examples](#common-examples)
@@ -112,6 +113,8 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
 | `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
 | `llmcomplexity` | Use LC model to validate "medium" complexity heuristic (default: `false`) | `llmcomplexity=true` |
+| `promptprofile` | System prompt verbosity profile: `minimal`, `balanced` (default), or `verbose` (auto when `debug=true`) | `promptprofile=minimal` |
+| `systempromptbudget` | Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority sections such as examples and detailed tool guidance | `systempromptbudget=4000` |
 
 ### Advisor Strategy Mode
 
@@ -256,11 +259,13 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 |-----------|------|---------|-------------|
 | `mcp` | string | - | MCP connection object (single or array) in SLON/JSON format |
 | `usetools` | boolean | `false` | Register MCP tools directly on the model instead of in prompt |
+| `usetoolslc` | boolean | `false` | Register MCP tools directly only on the low-cost model; the main model stays in prompt/action mode unless `usetools=true` |
 | `usejsontool` | boolean | `false` | Register compatibility `json` tool when `usetools=true` |
 | `toolfallback` | boolean | `false` | When `usetools=true`, automatically fall back to action-based mode for the current run if the model emits malformed pseudo tool-call JSON instead of real tool calls |
 | `mcpdynamic` | boolean | `false` | Analyze goal and only register relevant MCP tools |
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
+| `mcpproxythreshold` | number | `0` | Global byte threshold for proxy auto-spill to temporary files (`0` disables). When the serialized result exceeds this size the result is written to a temp file and a reference is returned instead |
 | `mcpproxytoon` | boolean | `false` | Serialize proxy-spilled object/array results as TOON text when `mcpproxythreshold>0` |
 | `mcpprogcall` | boolean | `false` | Start a per-session localhost HTTP bridge so scripts can list/search/call MCP tools programmatically (requires `useshell=true` for script execution) |
 | `mcpprogcallport` | number | `0` | Port for programmatic tool-calling bridge (`0` auto-selects a free port) |
@@ -272,6 +277,8 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput`, `showMessage` (`mini-a-con`) |
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
+| `utilsroot` | string | - | Root path exposed to Mini Utils Tool file/document helpers (e.g. `markdownFiles`, `filesystemQuery`) |
+| `useskills` | boolean | `false` | Expose the `skills` utility tool within Mini Utils MCP (only effective when `useutils=true`) |
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
 | `miniadocs` | boolean | `false` | Alias for `mini-a-docs` |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
@@ -305,6 +312,15 @@ mini-a goal="query database" \
   mcp="[(cmd: 'ojob mcps/mcp-db.yaml ...'), (cmd: 'ojob mcps/mcp-net.yaml ...')]" \
   usetools=true mcpdynamic=true
 ```
+
+**Tool Calling Only On The Low-Cost Model:**
+```bash
+mini-a goal="scan docs, then escalate only if needed" \
+  modellc="(type: openai, model: gpt-5-mini, key: '...')" \
+  mcp="(cmd: 'ojob mcps/mcp-files.yaml', timeout: 5000)" \
+  usetoolslc=true
+```
+Use this when you want the low-cost model to call MCP tools directly, while escalations to the main model continue using prompt/action-based tool guidance.
 
 **Opt-in Tool Fallback:**
 ```bash
@@ -518,6 +534,9 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
 | `usevectors` | boolean | `false` | Enable vector guidance bundle (`usesvg=true` + `usediagrams=true`), preferring Mermaid for structural diagrams and SVG for infographics/custom visuals |
 | `format` | string | `md` | Output format (`md`, `json`, `yaml`, `toon` or `slon`) |
 | `usemath` | boolean | `false` | Encourage LaTeX math output (`$...$` / `$$...$$`) for KaTeX rendering |
+| `usestream` | boolean | `false` | Stream LLM tokens to the console in real-time as they arrive |
+| `showexecs` | boolean | `false` | Show shell/exec events as separate lines in the interaction stream |
+| `showseparator` | boolean | `true` | Show a subtle separator line between interaction events (disable for a more compact view) |
 | `outputfile` | string | - | Alternative key for `outfile`, used mainly during plan conversions |
 
 **Examples:**
@@ -564,6 +583,7 @@ mini-a goal="show meetup locations on a map" \
 | `compressgoalchars` | number | `1000` | Character threshold before goal compression is considered |
 | `maxcontent` | number | `0` | Alias for `maxcontext` |
 | `libs` | string | - | Comma-separated list of additional OJob libraries to load |
+| `goalprefix` | string | - | Optional prefix automatically prepended to every goal before the agent sees it |
 | `secpass` | string | - | Password for opening OpenAF sBucket model secrets |
 
 **Examples:**
@@ -649,6 +669,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `memorypromote` | string | `""` | Comma-separated list of sections to auto-promote from session → global at session end. `memoryuser=true` sets this to `facts,decisions,summaries`. Empty string disables auto-promotion. |
 | `memorystaledays` | number | `0` | Days without re-confirmation before a global entry is marked `stale`. `0` disables the sweep. `memoryuser=true` sets this to `30`. Stale entries are removed by compaction when a section overflows `memorymaxpersection`. |
 | `memoryinject` | string | `summary` | Controls how much memory is embedded in each step's context: `summary` (default) injects only section entry counts and enables the `memory_search` action; `full` injects the entire compact memory snapshot (old behaviour). |
+| `memorysessionheader` | string | - | HTTP request header name used to derive the memory session ID in web mode (e.g. `X-User-Id`) |
 
 ### Memory Sections
 
@@ -972,6 +993,9 @@ mini-a mode=mypreset goal="your goal here"
 | `shellworker` | boolean | `false` | Convenience flag: sets `useshell=true` and advertises the `shell` A2A skill automatically |
 | `workerskills` | string | - | Comma-separated skill IDs (or JSON array) advertised by this worker in its AgentCard |
 | `workerspecialties` | string | - | Comma-separated specialty tags injected into the `run-goal` A2A skill |
+| `workertags` | string | - | Comma-separated tags appended to the default workermode skill in the AgentCard |
+| `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST endpoints for remote worker delegation instead of the default Mini-A protocol |
+| `apitoken` | string | - | Bearer token required to authenticate requests to the worker API server (set on both worker and main) |
 | `extracommands` | string | | Comma-separated extra directories for custom slash commands |
 | `extraskills` | string | | Comma-separated extra directories for custom skills |
 | `extrahooks` | string | | Comma-separated extra directories for custom hooks |
@@ -1055,6 +1079,7 @@ mini-a chatbotmode=true goal="draft a friendly release note"
 |-----------|-------------|
 | `auditch` | SLON/JSON definition of audit channel to record agent activity |
 | `toollog` | SLON/JSON definition of tool-log channel to record MCP tool call arguments/results |
+| `metricsch` | SLON/JSON definition of a metrics channel to collect per-run performance counters |
 | `showthinking` | Surface XML-tagged `<thinking>...</thinking>` blocks as thought logs |
 
 ```bash
@@ -1071,6 +1096,49 @@ mini-a goal="perform audit" \
 ```bash
 # Use system default working directory for MCP commands
 mini-a goal="run command" nosetmcpwd=true
+```
+
+### Browser Context
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `browsercontext` | string/boolean | - | Browser context configuration (SLON/JSON) or `true` to auto-enable when needed. Used by MCP tools that control a browser session |
+
+### Web UI Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `onport` | number | - | Start the Mini-A web UI on the provided port |
+| `maxpromptchars` | number | `120000` | Maximum accepted prompt size in characters for web mode |
+| `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds |
+| `logpromptheaders` | string | - | Comma-separated HTTP request header names to log alongside incoming web prompts |
+| `usehistory` | boolean | `false` | Enable conversation history persistence in web mode |
+| `historykeep` | boolean | `false` | Keep (persist) finished conversations instead of discarding them |
+| `historypath` | string | - | Directory path used to store web conversation history files |
+| `historyretention` | number | `600` | Web history retention window in seconds |
+| `historykeepperiod` | number | - | Delete kept conversation files older than this many minutes |
+| `historykeepcount` | number | - | Keep only the newest N kept conversation files |
+| `historys3bucket` | string | - | S3 bucket used to mirror history files |
+| `historys3prefix` | string | - | S3 key prefix for mirrored history files |
+| `historys3url` | string | - | S3 endpoint URL for history mirroring |
+| `historys3accesskey` | string | - | S3 access key for history mirroring |
+| `historys3secret` | string | - | S3 secret key for history mirroring |
+| `historys3region` | string | - | S3 region for history mirroring |
+| `historys3useversion1` | boolean | `false` | Use S3 path-style (v1) signing for history mirroring |
+| `historys3ignorecertcheck` | boolean | `false` | Disable TLS certificate checks for history S3 access |
+| `useattach` | boolean | `false` | Enable file attachment support in web mode |
+
+```bash
+# Web UI with history and file attachment support
+./mini-a-web.sh onport=8888 usehistory=true historykeep=true useattach=true
+
+# Limit prompt size and log User header
+./mini-a-web.sh onport=8888 maxpromptchars=40000 logpromptheaders=X-User-Id
+
+# Persist history to S3
+./mini-a-web.sh onport=8888 usehistory=true historykeep=true \
+  historys3bucket=my-hist-bucket historys3prefix=mini-a/ \
+  historys3url=https://s3.amazonaws.com historys3region=us-east-1
 ```
 
 ### Adaptive Tool Routing

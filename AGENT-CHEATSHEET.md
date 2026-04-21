@@ -17,7 +17,7 @@ Quick reference for Mini-A `agent=` files.
 | `name` | string | Metadata only (for your own labeling) |
 | `description` | string | Metadata only |
 | `model` | string/object | `model=` |
-| `capabilities` | array/string | `useshell`, `readwrite`, `useutils`, `usetools` |
+| `capabilities` | array/string | `useshell`, `readwrite`, `useutils`, `usetools`, `usetoolslc` |
 | `tools` | array | Merged into `mcp` |
 | `constraints` | array/string | Appended to `rules` as bullet list |
 | `rules` | array/string | `rules=` (used when not already provided) |

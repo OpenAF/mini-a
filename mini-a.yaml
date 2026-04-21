@@ -211,6 +211,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usetoolslc
+    desc     : Register MCP tools directly only on the low-cost model when OAF_LC_MODEL/modellc is configured
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usejsontool
     desc     : Register an optional compatibility json tool when usetools=true (for models that may emit json tool calls)
     example  : "false"
@@ -648,6 +653,7 @@ jobs:
         validationthreshold: validationthreshold
         persistlearnings: persistlearnings
         usetools       : usetools
+        usetoolslc     : usetoolslc
         usejsontool    : usejsontool
         useutils       : useutils
         useskills      : useskills
@@ -775,6 +781,7 @@ jobs:
       validationthreshold: isString.default(__)
       persistlearnings: toBoolean.isBoolean.default(__)
       usetools       : toBoolean.isBoolean.default(__)
+      usetoolslc     : toBoolean.isBoolean.default(__)
       usejsontool    : toBoolean.isBoolean.default(__)
       useutils       : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
