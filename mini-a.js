@@ -281,7 +281,12 @@ var MiniA = function() {
 {{agentDirectiveLine}}
 
 ## RESPONSE FORMAT
+{{#if usetoolsActual}}
+When you do NOT need an MCP tool, respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
+When you DO need an MCP tool, call it directly via function calling instead of returning JSON that describes the intended tool call. Do not emit placeholder JSON or shell commands that merely narrate the tool call.
+{{else}}
 Always respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
+{{/if}}
 {
     "thought": "brief next step (1 sentence max, keep it minimal)",
     "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
@@ -321,7 +326,8 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
 ### How to call MCP tools:
@@ -382,7 +388,8 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 ## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
 • {{toolCount}} MCP tools are available via direct function calling
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Each tool has its own function signature - call tools directly by their name
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
@@ -502,9 +509,7 @@ REMAINING (do not work on these yet):
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
-**Step 1 - JSON Response**:
-{ "thought": "Search for CNN RSS feed", "action": "think" }
-**Step 1 - Function Call** (separate from JSON):
+**Step 1 - Function Call**:
 \`\`\`
 Function: "proxy-dispatch"
 Arguments: {
@@ -513,7 +518,7 @@ Arguments: {
   "arguments": { "query": "CNN" }
 }
 \`\`\`
-**Step 2 - After receiving tool result**:
+**Step 2 - After receiving tool result, return JSON**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
 
 ### Example 5: MCP Tool Usage (WRONG - Don't do this)
@@ -521,6 +526,12 @@ Arguments: {
 **Response** ❌:
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
 **Why wrong**: MCP tools cannot be invoked directly. You must use function calling with "proxy-dispatch".
+
+### Example 6: MCP Tool Usage (WRONG - Narrating a Tool Call)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response** ❌:
+{ "thought": "Calling proxy-dispatch now", "action": "shell", "command": "echo \"Calling proxy-dispatch now\"" }
+**Why wrong**: Narrating an MCP tool call is not executing it. Make the function call directly.
 {{else}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Action-Based)
@@ -535,16 +546,14 @@ Arguments: {
 
 ### Example 4: MCP Tool Usage (CORRECT - Direct Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
-**Step 1 - JSON Response**:
-{ "thought": "Search for CNN RSS feed", "action": "think" }
-**Step 1 - Function Call** (separate from JSON):
+**Step 1 - Function Call**:
 \`\`\`
 Function: "find-rss-url"
 Arguments: {
   "query": "CNN"
 }
 \`\`\`
-**Step 2 - After receiving tool result**:
+**Step 2 - After receiving tool result, return JSON**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
 
 ### Example 5: MCP Tool Usage (WRONG - Don't do this)
@@ -552,6 +561,12 @@ Arguments: {
 **Response** ❌:
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
 **Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with the tool name.
+
+### Example 6: MCP Tool Usage (WRONG - Narrating a Tool Call)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response** ❌:
+{ "thought": "Calling the tool", "action": "shell", "command": "echo \"Calling the tool\"" }
+**Why wrong**: Narrating a tool call is not executing it. Make the function call directly.
 {{else}}{{#if usetools}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Action-Based)

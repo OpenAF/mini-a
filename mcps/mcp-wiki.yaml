@@ -15,7 +15,7 @@ help:
     example  : "rw"
     mandatory: false
   - name     : wikiroot
-    desc     : Base directory for fs backend (default: current directory)
+    desc     : "Base directory for fs backend (default: current directory)"
     example  : "./wiki"
     mandatory: false
   - name     : wikibucket
@@ -58,10 +58,10 @@ help:
   - name     : label
     desc     : Human-readable wiki label injected into templated tool descriptions
     example  : "Team wiki"
-    mandatory: false
+    mandatory: true
 
 todo:
-- Init wiki context
+- Init
 - (if    ): "isDef(args.onport)"
   ((then)):
   - (httpdStart   ): "${onport:-8080}"
@@ -225,7 +225,7 @@ include:
 
 jobs:
 # -----------------------
-- name : Init wiki context
+- name : Init
   check:
     in:
       wikibackend         : isString.default("fs")
