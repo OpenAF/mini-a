@@ -2028,6 +2028,7 @@ MiniA.prototype._setActiveToolMode = function(modelName) {
 MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
   if (!this._use_lc) {
     this._activeConversationModel = "main"
+    this._setActiveToolMode("main")
     return false
   }
   if (!isString(targetModelName) || (targetModelName !== "main" && targetModelName !== "lc")) return false
@@ -2035,6 +2036,7 @@ MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
   var previousModelName = this._activeConversationModel
   if (!isString(previousModelName) || previousModelName.length === 0) {
     this._activeConversationModel = targetModelName
+    this._setActiveToolMode(targetModelName)
     return false
   }
   if (previousModelName === targetModelName) return false
@@ -2048,6 +2050,7 @@ MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
   }
 
   this._activeConversationModel = targetModelName
+  this._setActiveToolMode(targetModelName)
   return moved
 }
 
@@ -16919,7 +16922,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       this._syncConversationForModelSwitch(useLowCost ? "lc" : "main")
-      this._setActiveToolMode(useLowCost ? "lc" : "main")
       this._refreshConfiguredLlmChannels()
       var currentLLM = useLowCost ? this.lc_llm : this.llm
       var llmType = useLowCost ? "low-cost" : "main"
