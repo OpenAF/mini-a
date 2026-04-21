@@ -1520,7 +1520,7 @@
     var agent = createAgent()
     agent._agentState = {}
     agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "promote-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
-    var entry = agent._memoryAppend("facts", "candidate for promotion")
+    var entry = agent._memoryAppend("facts", "candidate for promotion", { memoryScope: "session" })
     var promoted = agent.promoteSessionMemory("facts", [entry.id])
     ow.test.assert(promoted.promoted === 1, true, "Promotion should copy selected session entries to global memory")
     agent.clearSessionMemory("promote-1")
@@ -1702,13 +1702,13 @@
       verbose: false
     }, agent._agentState)
 
-    var entry = agent._memoryAppend("facts", "Primary fact")
-    agent._memoryAppend("facts", "primary fact")
+    var entry = agent._memoryAppend("facts", "Background context established")
+    agent._memoryAppend("facts", "background context established")
     agent._memoryUpdate("facts", entry.id, { stale: true })
     agent._memoryAttachEvidence("facts", entry.id, "ev-1")
     agent._memoryMarkStatus("facts", entry.id, "superseded", "fact-2")
-    agent._memoryAppend("facts", "Fact 2")
-    agent._memoryAppend("facts", "Fact 3")
+    agent._memoryAppend("facts", "Second analysis completed")
+    agent._memoryAppend("facts", "Third hypothesis validated")
     agent._memoryRemove("facts", entry.id)
     agent._memoryAppend("decisions", "Promote me", { memoryScope: "session" })
     var decisionEntry = agent._agentState.workingMemory.sections.decisions[0]
@@ -1716,6 +1716,12 @@
     agent._persistWorkingMemory("test")
     agent._persistSessionMemory("test")
     agent.clearSessionMemory("metrics-1")
+    // Re-init to trigger channel reads (global_reads and session_reads metrics)
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "metrics-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorymaxpersection: 2, memorycompactevery: 1, memorydedup: true, debug: false, verbose: false
+    }, agent._agentState)
 
     var metrics = agent.getMetrics()
     ow.test.assert(isMap(metrics.memory), true, "Memory metrics block should be present")
@@ -1907,10 +1913,9 @@
     agent.fnI = function() {}
 
     var originalHome = String(java.lang.System.getProperty("user.home", "") || "")
-    var tempHomeFile = io.createTempFile("mini-a-home-", "")
-    var tempHomePath = String(tempHomeFile.getAbsolutePath())
-    tempHomeFile.delete()
-    new java.io.File(tempHomePath).mkdirs()
+    var tempHomePath = String(io.createTempFile("mini-a-home-", ""))
+    io.rm(tempHomePath)
+    io.mkdir(tempHomePath)
 
     var agentsDir = tempHomePath + "/.openaf-mini-a/agents"
     new java.io.File(agentsDir).mkdirs()
