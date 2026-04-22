@@ -77,19 +77,7 @@ try {
   var requestedTemplateKind = findRequestedTemplateKind(args)
 
   // Init
-  if (!(isString(args.libs) && args.libs.trim().length > 0)) {
-    var envLibs = args.OAF_MINI_A_LIBS || getEnv("OAF_MINI_A_LIBS")
-    if (isString(envLibs) && envLibs.trim().length > 0) {
-      args.libs = envLibs.trim()
-      //log("Using libs from OAF_MINI_A_LIBS environment variable.")
-    }
-    //global._args = args
-  }
-
-  if (!(isString(args.mode) && args.mode.trim().length > 0)) {
-    var envMode = args.OAF_MINI_A_MODE || getEnv("OAF_MINI_A_MODE")
-    if (isString(envMode) && envMode.trim().length > 0) args.mode = envMode.trim()
-  }
+  MiniA.applyLauncherEnvDefaults(args)
 
   if (!helpRequested && !cheatsheetRequested && isUnDef(requestedTemplateKind)) {
     (function(args, explicitKeys) {
@@ -293,20 +281,22 @@ try {
       args.__modeApplied = true
     })(args, explicitCLIArgKeys)
 
-    MiniA.warnUnknownArgs(args, {
-      extraIgnoredArgs: {
-        "mini-a": true,
-        exec: true,
-        agent: true,
-        init: true,
-        "__id": true,
-        objid: true,
-        execid: true,
-        "__modeapplied": true,
-        "__unknownargsreported": true
-      },
-      logger: function(message) { logWarn(message) }
-    })
+    if (MiniA.shouldWarnUnknownArgs(args)) {
+      MiniA.warnUnknownArgs(args, {
+        extraIgnoredArgs: {
+          "mini-a": true,
+          exec: true,
+          agent: true,
+          init: true,
+          "__id": true,
+          objid: true,
+          execid: true,
+          "__modeapplied": true,
+          "__unknownargsreported": true
+        },
+        logger: function(message) { logWarn(message) }
+      })
+    }
 
     // Choose
     if (toBoolean(args.modelman) === true) {
@@ -318,6 +308,11 @@ try {
       // Start MCP test mode
       global._args = args
       load("mini-a-mcptest.js")
+      exit(0)
+    } else if (toBoolean(args.memoryman) === true) {
+      // Start memory management mode
+      global._args = args
+      load("mini-a-memoryman.js")
       exit(0)
     } else if (toBoolean(args.workermode) === true) {
       // Start worker mode
@@ -403,7 +398,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "models", "stats", "skills", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "history", "model", "models", "stats", "skills", "wiki", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -513,6 +508,43 @@ try {
     return candidate
   }
 
+  function ensureMemoryChannelFromDef(rawValue, fallbackName, fallbackType) {
+    if (!isString(rawValue) || rawValue.trim().length === 0) return __
+    var parsed = __
+    try { parsed = af.fromJSSLON(rawValue) } catch(ignoreMemoryChannelParse) {}
+    if (!isMap(parsed)) return __
+    var cName = isString(parsed.name) && parsed.name.trim().length > 0 ? parsed.name.trim() : fallbackName
+    var cType = isString(parsed.type) && parsed.type.trim().length > 0 ? parsed.type.trim() : (fallbackType || "simple")
+    var cOpts = isMap(parsed.options) ? parsed.options : {}
+    var exists = false
+    try { exists = $ch().list().indexOf(cName) >= 0 } catch(ignoreMemoryChannelList) {}
+    if (!exists) {
+      try { $ch(cName).create(cType, cOpts) } catch(ignoreMemoryChannelCreate) {}
+    }
+    return { name: cName, type: cType, options: cOpts }
+  }
+
+  function resolveConversationMemorySessionNamespace(conversationPath) {
+    var convoPath = isString(conversationPath) ? canonicalizePath(conversationPath) : ""
+    if (convoPath.length === 0) return __
+    var explicitSessionId = isString(sessionOptions.memorysessionid) ? sessionOptions.memorysessionid.trim() : ""
+    if (explicitSessionId.length > 0 && explicitSessionId !== convoPath) return __
+    return convoPath
+  }
+
+  function deleteConversationSessionMemory(conversationPath) {
+    if (typeof MiniAMemoryManager === "undefined" || !isFunction(MiniAMemoryManager.deleteChannelNamespace)) return 0
+    var namespace = resolveConversationMemorySessionNamespace(conversationPath)
+    if (!isString(namespace) || namespace.length === 0) return 0
+
+    var sessionChannel = ensureMemoryChannelFromDef(sessionOptions.memorysessionch, "_mini_a_session_memory_channel", "simple")
+    var globalChannel = ensureMemoryChannelFromDef(sessionOptions.memorych, "_mini_a_memory_channel", "simple")
+    var effectiveChannel = isObject(sessionChannel) ? sessionChannel : globalChannel
+    if (!isObject(effectiveChannel) || !isString(effectiveChannel.name) || effectiveChannel.name.length === 0) return 0
+
+    return MiniAMemoryManager.deleteChannelNamespace(effectiveChannel.name, namespace)
+  }
+
   function unwrapSingleMarkdownCodeBlock(text) {
     if (!isString(text)) return text
     var normalized = text.replace(/\r\n/g, "\n")
@@ -542,6 +574,7 @@ try {
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
+    usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
     utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },
@@ -555,6 +588,25 @@ try {
     usestream      : { type: "boolean", default: false, description: "Stream LLM tokens in real-time as they arrive" },
     useplanning    : { type: "boolean", default: false, description: "Track and expose task planning" },
     usememory      : { type: "boolean", default: false, description: "Enable structured working memory during execution" },
+    memoryuser     : { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed global and session memory." },
+    memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
+    memoryscope    : { type: "string", default: "both", description: "Memory read scope: session, global, or both." },
+    memorysessionid: { type: "string", description: "Session id namespace used by memorysessionch persistence." },
+    memorych       : { type: "string", description: "JSSLON channel definition for global memory persistence." },
+    memorysessionch: { type: "string", description: "JSSLON channel definition for session memory persistence." },
+    usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
+    wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
+    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs or s3." },
+    wikiroot       : { type: "string", description: "Root directory for the filesystem wiki backend." },
+    wikibucket     : { type: "string", description: "Bucket name for the S3 wiki backend." },
+    wikiprefix     : { type: "string", default: "wiki/", description: "Prefix path for the S3 wiki backend." },
+    wikiurl        : { type: "string", description: "S3 endpoint URL for the wiki backend." },
+    wikiaccesskey  : { type: "string", description: "S3 access key for the wiki backend." },
+    wikisecret     : { type: "string", description: "S3 secret key for the wiki backend." },
+    wikiregion     : { type: "string", description: "S3 region for the wiki backend." },
+    wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
+    wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
+    wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -563,6 +615,22 @@ try {
     chatbotmode    : { type: "boolean", default: false, description: "Run Mini-A in chatbot mode" },
     promptprofile  : { type: "string", description: "Prompt verbosity profile (minimal|balanced|verbose)" },
     systempromptbudget: { type: "number", description: "Maximum system prompt size in estimated tokens before low-priority sections are dropped" },
+    modellock      : { type: "string", description: "Lock model selection to main, lc, or auto." },
+    modelstrategy  : { type: "string", description: "Model orchestration profile (default|advisor)." },
+    advisormaxuses : { type: "number", default: 2, description: "Maximum advisor consultations per run when modelstrategy=advisor." },
+    advisorenable  : { type: "boolean", default: true, description: "Master toggle for advisor consultations." },
+    advisoronrisk  : { type: "boolean", default: true, description: "Allow advisor consults on risk signals." },
+    advisoronambiguity: { type: "boolean", default: true, description: "Allow advisor consults on ambiguity signals." },
+    advisoronharddecision: { type: "boolean", default: true, description: "Allow advisor consults for hard-decision checkpoints." },
+    advisorcooldownsteps: { type: "number", default: 2, description: "Minimum step distance between advisor consultations." },
+    advisorbudgetratio: { type: "number", default: 0.20, description: "Fraction of token budget advisor calls may consume." },
+    emergencyreserve: { type: "number", default: 0.10, description: "Reserved advisor budget fraction for high-value consults." },
+    harddecision   : { type: "string", default: "warn", description: "Hard-decision policy: require, warn, or off." },
+    evidencegate   : { type: "boolean", default: false, description: "Enable lightweight evidence gating for non-trivial actions and claims." },
+    evidencegatestrictness: { type: "string", default: "medium", description: "Evidence gate strictness: low, medium, or high." },
+    lcescalatedefer: { type: "boolean", default: true, description: "Defer low-cost escalation decisions when the LC tier is near a handoff." },
+    lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
+    llmcomplexity  : { type: "boolean", default: false, description: "Use an extra low-cost complexity check for medium-complexity goals." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
     mcpproxy       : { type: "boolean", default: false, description: "Aggregate all MCP connections through a single proxy interface" },
@@ -580,26 +648,50 @@ try {
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
+    compressgoal   : { type: "boolean", default: false, description: "Automatically compress oversized goal text before execution" },
+    compressgoaltokens: { type: "number", default: 250, description: "Estimated token threshold before goal compression is considered" },
+    compressgoalchars: { type: "number", default: 1000, description: "Character threshold before goal compression is considered" },
     earlystopthreshold: { type: "number", description: "Number of identical consecutive errors before early stop (default: 3, increases to 5 with low-cost models)" },
     toolcachettl   : { type: "number", description: "Default MCP result cache TTL (ms)" },
+    shellmaxbytes  : { type: "number", description: "Maximum shell output size before truncating to a head/tail excerpt." },
     goalprefix     : { type: "string", description: "Optional prefix automatically added to every goal" },
     shellprefix    : { type: "string", description: "Prefix applied to each shell command" },
     shellallow     : { type: "string", description: "Comma-separated shell allow list" },
     shellbanextra  : { type: "string", description: "Comma-separated extra banned commands" },
+    browsercontext : { type: "string", description: "Browser context configuration (JSSLON/JSON) or true to auto-enable when needed." },
     mcp            : { type: "string", description: "MCP connection definition (SLON/JSON)" },
     agent          : { type: "string", description: "Markdown agent profile path or inline content with YAML metadata to prefill args" },
     agentfile      : { type: "string", description: "Legacy alias for agent" },
+    mode           : { type: "string", description: "Apply one of the presets defined in mini-a-modes." },
+    goal           : { type: "string", description: "Goal text to execute." },
     knowledge      : { type: "string", description: "Extra knowledge or context" },
     libs           : { type: "string", description: "Comma-separated libraries to load" },
     conversation   : { type: "string", description: "Conversation history file" },
+    resume         : { type: "boolean", default: false, description: "Resume the last console conversation/history entry on startup." },
     usehistory     : { type: "boolean", default: false, description: "List previous console conversations from ~/.openaf-mini-a/history" },
+    useattach      : { type: "boolean", default: false, description: "Enable file attachments in the web UI." },
+    historypath    : { type: "string", description: "Directory path used to store web conversation history." },
+    historyretention: { type: "number", default: 600, description: "Web history retention window in seconds." },
     historykeep    : { type: "boolean", default: false, description: "Keep console conversations under ~/.openaf-mini-a/history" },
     historykeepperiod: { type: "number", description: "Delete kept conversation files older than this many minutes" },
     historykeepcount: { type: "number", description: "Keep only the newest N kept conversation files" },
+    historys3bucket: { type: "string", description: "S3 bucket used to mirror history files." },
+    historys3prefix: { type: "string", description: "S3 key prefix used for mirrored history files." },
+    historys3url   : { type: "string", description: "S3 endpoint URL for history mirroring." },
+    historys3accesskey: { type: "string", description: "S3 access key for history mirroring." },
+    historys3secret: { type: "string", description: "S3 secret key for history mirroring." },
+    historys3region: { type: "string", description: "S3 region for history mirroring." },
+    historys3useversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for history mirroring." },
+    historys3ignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for history S3 access." },
+    ssequeuetimeout: { type: "number", default: 120, description: "Web SSE queue timeout in seconds." },
+    maxpromptchars : { type: "number", default: 120000, description: "Maximum accepted web prompt size in characters." },
+    logpromptheaders: { type: "string", description: "Comma-separated request header names to log with web prompts." },
     outfile        : { type: "string", description: "Save final answer to file" },
+    outfileall     : { type: "string", description: "Write the full deep-research output payload to file." },
     outputfile     : { type: "string", description: "Alias for outfile for plan conversions" },
     planfile       : { type: "string", description: "Plan file to load or save before execution" },
     planformat     : { type: "string", description: "Plan format override (md|json)" },
+    planstyle      : { type: "string", default: "simple", description: "Planning style: simple or legacy." },
     plancontent    : { type: "string", description: "Inline plan content (JSON or Markdown) to preload" },
     updatefreq     : { type: "string", default: "auto", description: "Plan update frequency (auto|always|checkpoints|never)" },
     updateinterval : { type: "number", default: 3, description: "Steps between plan updates when updatefreq=auto" },
@@ -609,18 +701,27 @@ try {
     rules          : { type: "string", description: "Custom agent rules (JSON or SLON)" },
     state          : { type: "string", description: "Initial agent state (JSON or SLON)" },
     format         : { type: "string", description: "Final answer format (md|json|yaml|toon|slon)" },
+    maxcontent     : { type: "number", description: "Alias for maxcontext." },
     model          : { type: "string", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
     modelval       : { type: "string", description: "Override OAF_VAL_MODEL configuration" },
     auditch        : { type: "string", description: "Audit channel definition" },
     toollog        : { type: "string", description: "Tool usage log channel definition" },
     metricsch      : { type: "string", description: "Metrics channel definition" },
+    debugch        : { type: "string", description: "Debug channel definition for the main model." },
+    debuglcch      : { type: "string", description: "Debug channel definition for the low-cost model." },
+    debugvalch     : { type: "string", description: "Debug channel definition for the validation model." },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
     valgoal        : { type: "string", description: "Alias for validationgoal (string or file path)" },
     validationthreshold: { type: "string", default: "PASS", description: "Required validation verdict (e.g., 'PASS' or 'score>=0.7')" },
     persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" },
+    adaptiverouting: { type: "boolean", default: false, description: "Enable adaptive tool routing." },
+    routerorder    : { type: "string", description: "Comma-separated preferred routing order." },
+    routerallow    : { type: "string", description: "Comma-separated allowlist of routing backends." },
+    routerdeny     : { type: "string", description: "Comma-separated denylist of routing backends." },
+    routerproxythreshold: { type: "number", description: "Proxy threshold override used by adaptive routing." },
     usedelegation  : { type: "boolean", default: false, description: "Enable sub-goal delegation to child Mini-A agents" },
     workers        : { type: "string", description: "Comma-separated list of worker URLs to enable remote delegation" },
     usea2a        : { type: "boolean", default: false, description: "Use A2A HTTP+JSON/REST endpoints for remote worker delegation" },
@@ -636,6 +737,28 @@ try {
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
+    toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
+    usejsontool    : { type: "boolean", default: false, description: "Enable the compatibility json tool when usetools=true." },
+    useskills      : { type: "boolean", default: false, description: "Expose the skills utility tool when useutils=true." },
+    miniadocs      : { type: "boolean", default: false, description: "Alias for mini-a-docs." },
+    utilsroot      : { type: "string", description: "Root path exposed to Mini Utils Tool file/document helpers." },
+    usemaps        : { type: "boolean", default: false, description: "Encourage Leaflet-based interactive map outputs." },
+    usemath        : { type: "boolean", default: false, description: "Encourage LaTeX-style math output for KaTeX rendering." },
+    memorymaxpersection: { type: "number", default: 80, description: "Per-section working-memory entry cap before compaction." },
+    memorymaxentries: { type: "number", default: 500, description: "Total working-memory entry cap across sections." },
+    memorycompactevery: { type: "number", default: 8, description: "Run memory compaction every N memory mutations." },
+    memorydedup    : { type: "boolean", default: true, description: "Deduplicate near-identical working-memory entries." },
+    memorypromote  : { type: "string", default: "", description: "Comma-separated memory sections to promote from session to global store." },
+    memorystaledays: { type: "number", default: 0, description: "Mark promoted global memory entries as stale after N days (0 disables)." },
+    memorysessionheader: { type: "string", default: "", description: "Request header name used to derive a web memory session id." },
+    onport         : { type: "number", description: "Start the web UI on the provided port." },
+    web            : { type: "boolean", default: false, description: "Start in web UI mode." },
+    modelman       : { type: "boolean", default: false, description: "Start the model manager UI instead of the console." },
+    mcptest        : { type: "boolean", default: false, description: "Start the MCP test mode instead of the console." },
+    memoryman      : { type: "boolean", default: false, description: "Start the memory manager UI instead of the console." },
+    workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
+    path           : { type: "string", description: "Static asset path used by the web UI/worker modes." },
+    secpass        : { type: "string", description: "Security password used for protected model config access." },
     extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
     extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
     extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" }
@@ -653,6 +776,7 @@ try {
     web: true,
     modelman: true,
     mcptest: true,
+    memoryman: true,
     workermode: true,
     resume: true,
     conversation: true,
@@ -704,6 +828,7 @@ try {
       { option: "onport=<port>", description: "Start the Mini-A web UI on the provided port (alias for web mode)." },
       { option: "modelman=true", description: "Start the model manager instead of the console experience." },
       { option: "mcptest=true", description: "Start the MCP test client instead of the console experience." },
+      { option: "memoryman=true", description: "Start the memory manager UI for global/session stores." },
       { option: "workermode=true", description: "Start the headless worker API server (mini-a-worker.yaml)." },
       { option: "resume=true", description: "Resume a previous conversation (interactive picker when usehistory=true)." },
       { option: "conversation=<fp>", description: "Path to a conversation JSON file to reuse/save." },
@@ -737,6 +862,7 @@ try {
       { cmd: "mini-a onport=9090", desc: "# Start web chat on port 9090." },
       { cmd: "mini-a modelman=true", desc: "# Launch model manager UI." },
       { cmd: "mini-a mcptest=true", desc: "# Launch MCP test client." },
+      { cmd: "mini-a memoryman=true usememory=true memoryuser=true", desc: "# Launch memory manager with user channels." },
       { cmd: "mini-a workermode=true onport=8080", desc: "# Launch worker API on port 8080." }
     ]
 
@@ -858,6 +984,9 @@ try {
       "#",
       "#  # ── Context & Memory ─────────────────────────────────────────────────",
       "#  maxcontext   : 60000       # trim context when it exceeds this token count",
+      "#  compressgoal : false       # summarize oversized goal text before execution",
+      "#  compressgoaltokens : 250   # min estimated tokens before goal compression",
+      "#  compressgoalchars  : 1000  # min characters before goal compression",
       "#  usehistory   : true        # persist conversation history between sessions",
       "#  usememory    : true        # enable structured working memory",
       "#",
@@ -1193,6 +1322,54 @@ try {
     } catch(e) {
       // Ignore errors during file listing
     }
+    return completions
+  }
+
+  function getConsoleWikiManager() {
+    var wm = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
+    if (isObject(wm)) return wm
+    if (toBoolean(sessionOptions.usewiki) !== true) return __
+
+    try {
+      var wikiCfg = {
+        access : sessionOptions.wikiaccess,
+        backend: sessionOptions.wikibackend
+      }
+      if (sessionOptions.wikibackend === "s3") {
+        wikiCfg.bucket          = sessionOptions.wikibucket
+        wikiCfg.prefix          = sessionOptions.wikiprefix
+        wikiCfg.url             = sessionOptions.wikiurl
+        wikiCfg.accessKey       = sessionOptions.wikiaccesskey
+        wikiCfg.secret          = sessionOptions.wikisecret
+        wikiCfg.region          = sessionOptions.wikiregion
+        wikiCfg.useVersion1     = sessionOptions.wikiuseversion1
+        wikiCfg.ignoreCertCheck = sessionOptions.wikiignorecertcheck
+      } else {
+        wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
+      }
+      return new MiniAWikiManager(wikiCfg)
+    } catch(ignoreWikiInitError) {
+      return __
+    }
+  }
+
+  function getWikiSubcommandCompletions() {
+    var completions = ["list", "read", "search", "lint"]
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "init")
+    return completions
+  }
+
+  function getWikiPageCompletions(partialPath) {
+    var completions = []
+    try {
+      var wm = getConsoleWikiManager()
+      if (!isObject(wm)) return completions
+      var prefix = isString(partialPath) ? partialPath.trim() : ""
+      wm.list("").forEach(function(path) {
+        if (!isString(path)) return
+        if (prefix.length === 0 || path.indexOf(prefix) === 0) completions.push(path)
+      })
+    } catch(ignoreWikiCompletionError) { }
     return completions
   }
 
@@ -1765,10 +1942,11 @@ try {
   if (consoleReader) {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
-      var statsCompletions = ["detailed", "tools", "memory", "out=", "file=", "save=", "json="]
+      var statsCompletions = ["detailed", "tools", "memory", "wiki", "out=", "file=", "save=", "json="]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
+      var wikiReadPathCommands = { list: true, read: true, write: true }
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -1901,6 +2079,40 @@ try {
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
           }
 
+          // Handle /wiki command completions
+          if (lookupName === "wiki") {
+            if (toBoolean(sessionOptions.usewiki) !== true) return -1
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            if (trimmedRemainder.length === 0) {
+              getWikiSubcommandCompletions().forEach(function(option) { candidates.add(option) })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            var wikiParts = trimmedRemainder.split(/\s+/)
+            var wikiSubcmd = String(wikiParts[0] || "").toLowerCase()
+
+            if (wikiParts.length <= 1 && !/\s$/.test(trimmedRemainder)) {
+              getWikiSubcommandCompletions().forEach(function(option) {
+                if (option.indexOf(wikiSubcmd) === 0) candidates.add(option)
+              })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            if (Object.prototype.hasOwnProperty.call(wikiReadPathCommands, wikiSubcmd)) {
+              var pathPrefix = wikiParts.slice(1).join(" ")
+              var pathInsertionPoint = insertionPoint + trimmedRemainder.indexOf(pathPrefix)
+              getWikiPageCompletions(pathPrefix).forEach(function(path) {
+                candidates.add(path)
+              })
+              return candidates.isEmpty() ? -1 : Number(pathInsertionPoint)
+            }
+
+            return -1
+          }
+
           if (!Object.prototype.hasOwnProperty.call(slashParameterHints, lookupName)) return -1
 
           var remainder = uptoCursor.substring(firstSpace + 1)
@@ -2008,6 +2220,7 @@ try {
       try {
         if (io.fileExists(path) && io.fileInfo(path).isFile) {
           io.rm(path)
+          deleteConversationSessionMemory(path)
           deleted += 1
           if (deleteTargets[path].period === true) deletedByPeriod += 1
           if (deleteTargets[path].count === true) deletedByCount += 1
@@ -2693,6 +2906,7 @@ try {
     }
     try {
       if (io.fileExists(convoPath) && io.fileInfo(convoPath).isFile) io.rm(convoPath)
+      deleteConversationSessionMemory(convoPath)
       // Also clear the in-memory conversation from the active agent
       if (isObject(activeAgent) && isObject(activeAgent.llm) && typeof activeAgent.llm.getGPT === "function") {
         try {
@@ -2965,6 +3179,13 @@ try {
 
   var sessionOptions = resetOptions()
   var sessionExplicitOptions = resetExplicitOptions()
+  // Seed interactive session options from CLI/mode args so console-only
+  // commands (/wiki, /show, /skills, etc.) see the same startup config.
+  Object.keys(parameterDefinitions).forEach(function(key) {
+    if (Object.prototype.hasOwnProperty.call(args, key) && isDef(args[key])) {
+      sessionOptions[key] = args[key]
+    }
+  })
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true }
   var activeAgent = __
@@ -3859,7 +4080,13 @@ try {
       _prevEventLastUpdate = now()
       if (type != "final" && type != "error") {
         var _animEventStartTime = now()
-        var _animIsInteracting = (type === "input" && message.indexOf("Interacting with") === 0)
+        var _animIsInteracting = (
+          type === "input" ||
+          type === "rate" ||
+          (type === "mcp" && /^(Preparing|Initializing|Analyzing|Requesting)\b/.test(message)) ||
+          (type === "info" && /^Execution of action '.+' finished (successfully|unsuccessfully)\b/.test(message)) ||
+          (type === "info" && /\[(mem:(list|read|write))\]/.test(message))
+        )
         var _animBaseMsg = _animIsInteracting ? message.replace(/\.\.\.+$/, "") : message
         _prevEventAnimatedRenderer = function(resetToDefault) {
           var cueSymbol = resetToDefault === true ? _resetActivityCueSymbol() : _nextActivityCueSymbol()
@@ -3875,7 +4102,9 @@ try {
                 elapsedStr = secs + "s"
               }
               var counterColor = elapsed >= 60000 ? "FG(208)" : (elapsed >= 30000 ? "FG(220)" : "FG(240)")
-              displayMsg = _animBaseMsg + colorifyText(" · " + elapsedStr, counterColor)
+              displayMsg = _animBaseMsg +
+                colorifyText(" · " + elapsedStr, counterColor) +
+                colorifyText(" · Esc to cancel", "FG(238),ITALIC")
             }
           }
           return _renderEventMessage(colorifyText(cueSymbol, "RESET," + (eventPalette[type] || accentColor)) + " ", displayMsg, extra)
@@ -4228,6 +4457,7 @@ try {
       showDetailed: false,
       showTools: false,
       showMemory: false,
+      showWiki: false,
       outputPath: __
     }
 
@@ -4245,6 +4475,10 @@ try {
       }
       if (tokenLower === "memory" || tokenLower === "mem") {
         options.showMemory = true
+        continue
+      }
+      if (tokenLower === "wiki") {
+        options.showWiki = true
         continue
       }
 
@@ -4303,6 +4537,7 @@ try {
 
     var showDetailed = statsOptions.showDetailed === true
     var showTools = statsOptions.showTools === true
+    var showWiki = statsOptions.showWiki === true
     var summaryExport = __
     var exportPayload = __
 
@@ -4511,9 +4746,28 @@ try {
         })
       }
 
+      if (isObject(metrics.wiki) && metrics.wiki.enabled === true) {
+        summaryExport.wiki = {
+          ops_total: metrics.wiki.ops_total || 0,
+          ops_errors: metrics.wiki.ops_errors || 0
+        }
+        summaryRows.push({
+          category: "Wiki",
+          metric: "Total Ops",
+          value: metrics.wiki.ops_total || 0
+        })
+        if ((metrics.wiki.ops_errors || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Errors",
+            value: metrics.wiki.ops_errors || 0
+          })
+        }
+      }
+
       print(printTable(summaryRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       print()
-      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, '/stats memory' for working-memory stats, or add out=<file.json> to save.", hintColor))
+      print(colorifyText("Use '/stats detailed' for all metrics, '/stats tools' for per-tool statistics, '/stats memory' for working-memory stats, '/stats wiki' for wiki stats, or add out=<file.json> to save.", hintColor))
       exportPayload = { mode: "summary", data: summaryExport }
     }
 
@@ -4575,8 +4829,32 @@ try {
         print()
         print(printTable(sectionRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
       }
-      if (!showDetailed && !showTools) {
+      if (!showDetailed && !showTools && !showWiki) {
         exportPayload = { mode: "memory", data: isObject(metrics.memory) ? metrics.memory : {} }
+      }
+    }
+
+    if (showWiki === true) {
+      if (!isObject(metrics.wiki) || metrics.wiki.enabled !== true) {
+        print(colorifyText("No wiki statistics available (usewiki=true required).", hintColor))
+      } else {
+        var wiki = metrics.wiki
+        var wikiRows = [
+          { category: "Status",   metric: "Enabled",  value: "true" },
+          { category: "Ops",      metric: "Total",    value: wiki.ops_total || 0 },
+          { category: "",         metric: "List",     value: wiki.ops_list  || 0 },
+          { category: "",         metric: "Read",     value: wiki.ops_read  || 0 },
+          { category: "",         metric: "Search",   value: wiki.ops_search || 0 },
+          { category: "",         metric: "Write",    value: wiki.ops_write || 0 },
+          { category: "",         metric: "Lint",     value: wiki.ops_lint  || 0 },
+          { category: "Errors",   metric: "Op Errors", value: wiki.ops_errors || 0 }
+        ]
+        print(colorifyText("Wiki Statistics:", accentColor))
+        print()
+        print(printTable(wikiRows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
+      }
+      if (!showDetailed && !showTools) {
+        exportPayload = { mode: "wiki", data: isObject(metrics.wiki) ? metrics.wiki : {} }
       }
     }
 
@@ -4585,7 +4863,7 @@ try {
       print(colorifyText("Detailed Statistics:", accentColor))
       print()
       print(printTree(metrics))
-      exportPayload = { mode: (showTools ? "detailed+tools" : (statsOptions.showMemory === true ? "detailed+memory" : "detailed")), data: metrics }
+      exportPayload = { mode: (showTools ? "detailed+tools" : (statsOptions.showMemory === true ? "detailed+memory" : (statsOptions.showWiki === true ? "detailed+wiki" : "detailed"))), data: metrics }
     }
 
     // Show per-tool stats
@@ -4747,7 +5025,7 @@ try {
       "",
       "Commands (prefix with '/'):"
     ]
-    appendAlignedHelpRows(lines, [
+    var helpCommands = [
       { command: "/help", description: "Show this help message" },
       { command: "/set <key> <value>", description: "Update a Mini-A parameter (use '\"\"\"' for multi-line values)" },
       { command: "/toggle <key>", description: "Toggle boolean parameter" },
@@ -4765,13 +5043,19 @@ try {
       { command: "/history [n]", description: "Show the last n user goals (one per line)" },
       { command: "/model [target]", description: "Choose a different model (target: model, modellc or modelval)" },
       { command: "/models", description: "List current main, low and validation models" },
-      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory)" },
-      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
+      { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
+      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
+    ]
+    if (toBoolean(sessionOptions.usewiki) === true) {
+      helpCommands.push({ command: "/wiki [list|read|search|delete|lint|write] [args]", description: "Interact with wiki" })
+    }
+    helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
       { command: "/subtasks", description: "List all subtasks and their status" },
       { command: "/subtask <id>", description: "Show details for a subtask" },
       { command: "/exit", description: "Leave the console" }
-    ])
+    )
+    appendAlignedHelpRows(lines, helpCommands)
     var commandNames = Object.keys(customSlashCommands).sort()
     if (commandNames.length > 0) {
       lines.push("")
@@ -4865,6 +5149,116 @@ try {
     print()
     print(printTable(rows, (__conAnsi ? isDef(__con) && __con.getTerminal().getWidth() : __), true, __conAnsi, (__conAnsi || isDef(this.__codepage) ? "utf" : __), __, true, false, true))
     print(colorifyText("Run a skill with /<name> ...args... or $<name> ...args...", hintColor))
+  }
+
+  function printWiki(subcmdRaw) {
+    var wm = getConsoleWikiManager()
+    if (!isObject(wm)) {
+      print(colorifyText("Wiki is not enabled. Start with usewiki=true and wikiroot=<path> (or wikibackend=s3).", hintColor))
+      return
+    }
+    var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
+    var sub   = parts.length > 0 ? parts[0].toLowerCase() : "list"
+    var rest  = parts.slice(1).join(" ").trim()
+
+    try {
+      if (sub === "list" || sub === "") {
+        var pages = wm.list(rest)
+        if (pages.length === 0) {
+          print(colorifyText("Wiki is empty.", hintColor))
+        } else {
+          print(colorifyText("Wiki pages (" + pages.length + "):", accentColor))
+          pages.forEach(function(p) { print("  " + colorifyText(p, promptColor)) })
+        }
+      } else if (sub === "read") {
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki read <path>", errorColor)); return }
+        var page = wm.read(rest)
+        if (!isObject(page)) { print(colorifyText("Page not found: " + rest, errorColor)); return }
+        print(colorifyText("── " + rest + " ──", accentColor))
+        if (isObject(page.meta) && isString(page.meta.title)) print(colorifyText(page.meta.title, "BOLD"))
+        print(page.body)
+      } else if (sub === "search") {
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki search <query>", errorColor)); return }
+        var hits = wm.search(rest)
+        if (hits.length === 0) {
+          print(colorifyText("No results for: " + rest, hintColor))
+        } else {
+          print(colorifyText("Results (" + hits.length + "):", accentColor))
+          hits.forEach(function(h) {
+            print("  " + colorifyText(h.path, promptColor) + (h.title && h.title !== h.path ? " — " + h.title : ""))
+            if (h.snippet) print("    " + colorifyText(h.snippet, hintColor))
+          })
+        }
+      } else if (sub === "lint") {
+        var lintResult = wm.lint(isObject(activeAgent) ? activeAgent._memoryManager : __)
+        var s = lintResult.summary
+        print(colorifyText("Wiki lint: " + s.pages + " pages, " + s.errors + " errors, " + s.warnings + " warnings, " + s.info + " info", accentColor))
+        if (lintResult.issues.length === 0) {
+          print(colorifyText("No issues found.", successColor))
+        } else {
+          lintResult.issues.forEach(function(iss) {
+            var sev   = iss.severity === "error" ? colorifyText("ERROR", errorColor) : (iss.severity === "warning" ? colorifyText("WARN ", "YELLOW") : colorifyText("INFO ", hintColor))
+            var label = "[" + sev + "] " + iss.type + " — " + iss.page
+            if (iss.target) label += " → " + iss.target
+            if (iss.similar) label += " ≈ " + iss.similar
+            if (iss.age_days) label += " (" + iss.age_days + "d)"
+            if (iss.field) label += " (missing: " + iss.field + ")"
+            if (iss.detail) label += " (" + iss.detail + ")"
+            print("  " + label)
+          })
+        }
+      } else if (sub === "write") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable writes.", errorColor))
+          return
+        }
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
+        var spacePos = rest.indexOf(" ")
+        var writePath = spacePos >= 0 ? rest.substring(0, spacePos).trim() : rest
+        var writeContent = spacePos >= 0 ? rest.substring(spacePos + 1) : ""
+        if (writePath.length === 0) { print(colorifyText("Usage: /wiki write <path> [content]", errorColor)); return }
+        if (writeContent.trim().length === 0) {
+          print(colorifyText("Enter wiki page content. Finish with a line containing only \"\"\".", hintColor))
+          writeContent = collectMultiline("")
+          if (isUnDef(writeContent)) return
+        }
+        var writeResult = wm.write(writePath, writeContent)
+        if (isObject(writeResult) && writeResult.ok === true) {
+          print(colorifyText("Wrote " + writePath, successColor))
+        } else {
+          print(colorifyText("Wiki write failed: " + (isObject(writeResult) ? writeResult.error : "unknown error"), errorColor))
+        }
+      } else if (sub === "delete" || sub === "remove" || sub === "rm") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable deletes.", errorColor))
+          return
+        }
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki delete <path>", errorColor)); return }
+        var deletePath = rest.trim()
+        var deleteResult = wm.delete(deletePath)
+        if (isObject(deleteResult) && deleteResult.ok === true) {
+          print(colorifyText("Deleted " + deletePath, successColor))
+        } else {
+          print(colorifyText("Wiki delete failed: " + (isObject(deleteResult) ? deleteResult.error : "unknown error"), errorColor))
+        }
+      } else if (sub === "init") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable init.", errorColor))
+          return
+        }
+        var initResult = wm.init()
+        if (isObject(initResult) && initResult.ok === true) {
+          if (initResult.created.length > 0) print(colorifyText("Created: " + initResult.created.join(", "), successColor))
+          if (initResult.skipped.length > 0) print(colorifyText("Already exists (skipped): " + initResult.skipped.join(", "), hintColor))
+        } else {
+          print(colorifyText("Wiki init failed: " + (isObject(initResult) ? initResult.error : "unknown error"), errorColor))
+        }
+      } else {
+        print(colorifyText("Usage: /wiki [list|read|search|delete|lint|write|init] [args]", errorColor))
+      }
+    } catch(wikiErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))
+    }
   }
 
   const miniaLogo = ` ._ _ ${colorifyText("o", promptColor)}._ ${colorifyText("o", promptColor)}   _ 
@@ -5192,6 +5586,14 @@ try {
       }
       if (commandLower.indexOf("skills ") === 0) {
         printSkills(command.substring(7))
+        continue
+      }
+      if (commandLower === "wiki") {
+        printWiki("list")
+        continue
+      }
+      if (commandLower.indexOf("wiki ") === 0) {
+        printWiki(command.substring(5))
         continue
       }
       if (commandLower.indexOf("delegate ") === 0) {

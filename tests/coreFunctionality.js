@@ -108,6 +108,144 @@
     ow.test.assert(missing === null, true, "Should ignore non-final embedded payloads")
   }
 
+  exports.testDisableStreamingOnlyForStructuredOllamaToolTurns = function() {
+    var agent = createAgent()
+    ow.test.assert(
+      agent._shouldDisableStreamingForOllamaToolCallTurn({ type: "ollama" }, true, true),
+      true,
+      "Should disable streaming for Ollama tool-calling turns that expect structured output"
+    )
+    ow.test.assert(
+      agent._shouldDisableStreamingForOllamaToolCallTurn({ type: "ollama" }, true, false),
+      false,
+      "Should keep streaming enabled for Ollama plain-text turns"
+    )
+    ow.test.assert(
+      agent._shouldDisableStreamingForOllamaToolCallTurn({ type: "openai" }, true, true),
+      false,
+      "Should not disable streaming for non-Ollama tool-calling turns"
+    )
+  }
+
+  exports.testToolCallingFailureFallbackEscalatesLowCostOnly = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() {
+      throw new Error("Low-cost fallback should not rebuild both models without tools")
+    }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromToolCallingFailure(runtime, {
+      stepLabel : 1,
+      reason    : "low-cost tool error",
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual, true, "Low-cost fallback should keep main-model function calling enabled")
+    ow.test.assert(runtime.forceMainModel, true, "Low-cost fallback should escalate to the main model")
+    ow.test.assert(runtime.forceNoStream, __, "Low-cost fallback should not force-disable streaming globally")
+  }
+
+  exports.testToolCallingFailureFallbackDisablesMainTools = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromToolCallingFailure(runtime, {
+      stepLabel : 2,
+      reason    : "main tool error",
+      useLowCost: false
+    })
+
+    ow.test.assert(agent._useToolsActual, false, "Main-model fallback should disable function calling")
+    ow.test.assert(runtime.forceMainModel, true, "Main-model fallback should remain on the main model")
+    ow.test.assert(runtime.forceNoStream, true, "Main-model fallback should disable streaming for action mode retry")
+    ow.test.assert(restoreCalls === 1, true, "Main-model fallback should rebuild no-tools models once")
+  }
+
+  exports.testToolCallingFailureFallbackDisablesToolsWhenMainHasNoToolInterface = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+    agent._useToolsActual = true
+    agent._useToolsActualMain = false
+
+    var runtime = { context: [] }
+    agent._fallbackFromToolCallingFailure(runtime, {
+      stepLabel : 2,
+      reason    : "low-cost tool error",
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual === false, true, "Low-cost fallback should disable function calling when main has no tool interface")
+    ow.test.assert(runtime.forceMainModel === true, true, "Low-cost fallback should still escalate to the main model")
+    ow.test.assert(runtime.forceNoStream === true, true, "Low-cost fallback should disable streaming when dropping to action mode on main")
+    ow.test.assert(restoreCalls === 1, true, "Low-cost fallback should rebuild no-tools models once when main has no tool interface")
+  }
+
+  exports.testMalformedToolCallFallbackEscalatesLowCostOnly = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() {
+      throw new Error("Low-cost malformed fallback should not rebuild both models without tools")
+    }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromMalformedToolCall(runtime, 3, "low-cost malformed tool call", {
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual, true, "Low-cost malformed fallback should keep main-model function calling enabled")
+    ow.test.assert(runtime.forceMainModel, true, "Low-cost malformed fallback should escalate to the main model")
+    ow.test.assert(runtime.forceNoStream, __, "Low-cost malformed fallback should not force-disable streaming globally")
+    ow.test.assert(runtime.actionModeFallbackActive, __, "Low-cost malformed fallback should not activate action-mode fallback")
+  }
+
+  exports.testMalformedToolCallFallbackDisablesMainTools = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+
+    var runtime = { context: [] }
+    agent._useToolsActual = true
+    agent._fallbackFromMalformedToolCall(runtime, 4, "main malformed tool call", {
+      useLowCost: false
+    })
+
+    ow.test.assert(agent._useToolsActual, false, "Main malformed fallback should disable function calling")
+    ow.test.assert(runtime.forceMainModel, true, "Main malformed fallback should remain on the main model")
+    ow.test.assert(runtime.forceNoStream, true, "Main malformed fallback should disable streaming for action mode retry")
+    ow.test.assert(runtime.actionModeFallbackActive, true, "Main malformed fallback should activate action-mode fallback")
+    ow.test.assert(restoreCalls === 1, true, "Main malformed fallback should rebuild no-tools models once")
+  }
+
+  exports.testMalformedToolCallFallbackDisablesToolsWhenMainHasNoToolInterface = function() {
+    var agent = createAgent()
+    var restoreCalls = 0
+    agent.fnI = function() {}
+    agent._restoreNoToolsModels = function() { restoreCalls++ }
+    agent._useToolsActual = true
+    agent._useToolsActualMain = false
+
+    var runtime = { context: [] }
+    agent._fallbackFromMalformedToolCall(runtime, 4, "low-cost malformed tool call", {
+      useLowCost: true
+    })
+
+    ow.test.assert(agent._useToolsActual === false, true, "Low-cost malformed fallback should disable function calling when main has no tool interface")
+    ow.test.assert(runtime.forceMainModel === true, true, "Low-cost malformed fallback should still escalate to the main model")
+    ow.test.assert(runtime.forceNoStream === true, true, "Low-cost malformed fallback should disable streaming when dropping to action mode on main")
+    ow.test.assert(runtime.actionModeFallbackActive === true, true, "Low-cost malformed fallback should activate action-mode fallback when main has no tool interface")
+    ow.test.assert(restoreCalls === 1, true, "Low-cost malformed fallback should rebuild no-tools models once when main has no tool interface")
+  }
+
   exports.testShellToolCallAliasFallsBackToShell = function() {
     var agent = createAgent()
     var payload = {
@@ -162,6 +300,59 @@
     ow.test.assert(isArray(extracted) && extracted.length === 1, true, "Proxy mode should still recover aliased shell tool calls")
     ow.test.assert(extracted[0].action === "shell", true, "sh should alias to shell even when proxy-dispatch is the only registered tool")
     ow.test.assert(extracted[0].params.command === "date", true, "Proxy mode aliasing should preserve command arguments")
+  }
+
+  exports.testRecoverToolCallPayloadFromEnvelope = function() {
+    var agent = createAgent()
+    var payload = {
+      response: {
+        message: {
+          tool_calls: [
+            {
+              function: {
+                name: "proxy-dispatch",
+                arguments: "{\"action\":\"call\",\"tool\":\"timeUtilities\",\"arguments\":{\"operation\":\"current-time\"}}"
+              }
+            }
+          ]
+        }
+      }
+    }
+
+    var recovered = agent._recoverToolCallPayload(payload, ["proxy-dispatch"], { useshell: true })
+    ow.test.assert(isArray(recovered) && recovered.length === 1, true, "Should recover tool call actions from nested provider envelopes")
+    ow.test.assert(recovered[0].action === "proxy-dispatch", true, "Recovered envelope tool call should preserve tool name")
+    ow.test.assert(recovered[0].params.tool === "timeUtilities", true, "Recovered envelope tool call should preserve nested tool target")
+  }
+
+  exports.testRecoverToolCallPayloadFromConversation = function() {
+    var agent = createAgent()
+    var llmStub = {
+      getGPT: function() {
+        return {
+          getConversation: function() {
+            return [
+              { role: "user", content: "what time is it?" },
+              {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    function: {
+                      name: "proxy-dispatch",
+                      arguments: "{\"action\":\"call\",\"tool\":\"showMessage\",\"arguments\":{\"message\":\"hi\"}}"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+
+    var recovered = agent._recoverToolCallPayloadFromConversation(llmStub, ["proxy-dispatch"], { useshell: true })
+    ow.test.assert(isArray(recovered) && recovered.length === 1, true, "Should recover tool calls from conversation history when top-level response is empty")
+    ow.test.assert(recovered[0].params.tool === "showMessage", true, "Conversation recovery should preserve downstream tool name")
   }
 
   exports.testProcessFinalAnswerUnwrapsFencedJson = function() {
@@ -1329,7 +1520,7 @@
     var agent = createAgent()
     agent._agentState = {}
     agent._initWorkingMemory({ usememory: true, memoryscope: "both", memorysessionid: "promote-1", memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
-    var entry = agent._memoryAppend("facts", "candidate for promotion")
+    var entry = agent._memoryAppend("facts", "candidate for promotion", { memoryScope: "session" })
     var promoted = agent.promoteSessionMemory("facts", [entry.id])
     ow.test.assert(promoted.promoted === 1, true, "Promotion should copy selected session entries to global memory")
     agent.clearSessionMemory("promote-1")
@@ -1346,6 +1537,26 @@
     var entry = agent._memoryAppend("facts", "default-memory-write")
     ow.test.assert(isMap(entry), true, "Legacy memory calls should continue to append without specifying scope")
     ow.test.assert(agent._memoryScope === "both", true, "Default memory scope should be both")
+  }
+
+  exports.testMemoryUserDefaults = function() {
+    var cfg = __miniAApplyMemoryUserDefaults({ memoryuser: true })
+    ow.test.assert(cfg.usememory === true, true, "memoryuser should enable memory")
+    ow.test.assert(isString(cfg.memorych) && cfg.memorych.length > 0, true, "memoryuser should configure global persistence")
+    ow.test.assert(isString(cfg.memorysessionch) && cfg.memorysessionch.length > 0, true, "memoryuser should configure session persistence")
+    ow.test.assert(isUnDef(cfg.memoryscope), true, "memoryuser should not override memory scope")
+    ow.test.assert(cfg.memorypromote === "facts,decisions,summaries", true, "memoryuser should auto-enable promotion")
+    ow.test.assert(cfg.memorystaledays === 30, true, "memoryuser should auto-enable stale tracking")
+  }
+
+  exports.testMemoryUserSessionDefaults = function() {
+    var cfg = __miniAApplyMemoryUserDefaults({ memoryusersession: true })
+    ow.test.assert(cfg.usememory === true, true, "memoryusersession should enable memory")
+    ow.test.assert(cfg.memoryscope === "session", true, "memoryusersession should default to session scope")
+    ow.test.assert(isString(cfg.memorysessionch) && cfg.memorysessionch.length > 0, true, "memoryusersession should configure session persistence")
+    ow.test.assert(isUnDef(cfg.memorych), true, "memoryusersession should not auto-configure global persistence")
+    ow.test.assert(isUnDef(cfg.memorypromote), true, "memoryusersession should not auto-enable promotion")
+    ow.test.assert(isUnDef(cfg.memorystaledays), true, "memoryusersession should not auto-enable stale tracking")
   }
 
   exports.testManagedMemoryDefaultBothWritesToSession = function() {
@@ -1491,13 +1702,13 @@
       verbose: false
     }, agent._agentState)
 
-    var entry = agent._memoryAppend("facts", "Primary fact")
-    agent._memoryAppend("facts", "primary fact")
+    var entry = agent._memoryAppend("facts", "Background context established")
+    agent._memoryAppend("facts", "background context established")
     agent._memoryUpdate("facts", entry.id, { stale: true })
     agent._memoryAttachEvidence("facts", entry.id, "ev-1")
     agent._memoryMarkStatus("facts", entry.id, "superseded", "fact-2")
-    agent._memoryAppend("facts", "Fact 2")
-    agent._memoryAppend("facts", "Fact 3")
+    agent._memoryAppend("facts", "Second analysis completed")
+    agent._memoryAppend("facts", "Third hypothesis validated")
     agent._memoryRemove("facts", entry.id)
     agent._memoryAppend("decisions", "Promote me", { memoryScope: "session" })
     var decisionEntry = agent._agentState.workingMemory.sections.decisions[0]
@@ -1505,6 +1716,12 @@
     agent._persistWorkingMemory("test")
     agent._persistSessionMemory("test")
     agent.clearSessionMemory("metrics-1")
+    // Re-init to trigger channel reads (global_reads and session_reads metrics)
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "metrics-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorymaxpersection: 2, memorycompactevery: 1, memorydedup: true, debug: false, verbose: false
+    }, agent._agentState)
 
     var metrics = agent.getMetrics()
     ow.test.assert(isMap(metrics.memory), true, "Memory metrics block should be present")
@@ -1590,6 +1807,7 @@
         "  - readwrite",
         "  - useutils",
         "  - usetools",
+        "  - usetoolslc",
         "---"
       ].join("\n")
     }
@@ -1600,6 +1818,7 @@
     ow.test.assert(args.readwrite === true, true, "Agent capabilities should enable readwrite when omitted")
     ow.test.assert(args.useutils === true, true, "Agent capabilities should enable useutils when omitted")
     ow.test.assert(args.usetools === true, true, "Agent capabilities should enable usetools when omitted")
+    ow.test.assert(args.usetoolslc === true, true, "Agent capabilities should enable usetoolslc when omitted")
   }
 
   exports.testAgentCapabilitiesRespectExplicitFalseFlags = function() {
@@ -1614,12 +1833,14 @@
         "  - readwrite",
         "  - useutils",
         "  - usetools",
+        "  - usetoolslc",
         "---"
       ].join("\n"),
       useshell: false,
       readwrite: false,
       useutils: false,
-      usetools: false
+      usetools: false,
+      usetoolslc: false
     }
 
     agent._applyAgentMetadata(args)
@@ -1628,6 +1849,7 @@
     ow.test.assert(args.readwrite === false, true, "Explicit readwrite=false should override agent capabilities")
     ow.test.assert(args.useutils === false, true, "Explicit useutils=false should override agent capabilities")
     ow.test.assert(args.usetools === false, true, "Explicit usetools=false should override agent capabilities")
+    ow.test.assert(args.usetoolslc === false, true, "Explicit usetoolslc=false should override agent capabilities")
   }
 
   exports.testAgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit = function() {
@@ -1691,10 +1913,9 @@
     agent.fnI = function() {}
 
     var originalHome = String(java.lang.System.getProperty("user.home", "") || "")
-    var tempHomeFile = io.createTempFile("mini-a-home-", "")
-    var tempHomePath = String(tempHomeFile.getAbsolutePath())
-    tempHomeFile.delete()
-    new java.io.File(tempHomePath).mkdirs()
+    var tempHomePath = String(io.createTempFile("mini-a-home-", ""))
+    io.rm(tempHomePath)
+    io.mkdir(tempHomePath)
 
     var agentsDir = tempHomePath + "/.openaf-mini-a/agents"
     new java.io.File(agentsDir).mkdirs()
@@ -1879,5 +2100,116 @@
     ow.test.assert(unknown.length, 1, "Misspelled parameters should still be reported as unknown")
     ow.test.assert(warnings.length, 1, "Misspelled parameters should emit one warning")
     ow.test.assert(warnings[0].indexOf("Did you mean 'useshell'?") >= 0, true, "Unknown parameter warning should suggest the closest valid parameter")
+  }
+
+  exports.testShouldWarnUnknownArgsOnlyForConsoleMode = function() {
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({}), true, "Plain console startup should keep unknown-arg warnings enabled")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ resume: true }), true, "Resume stays on the interactive console path")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ goal: "ship it", writeReport: "writeReport.yaml" }), false, "Goal execution should suppress console-only unknown-arg warnings")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ onport: 8888, writeReport: "writeReport.yaml" }), false, "Web mode should suppress console-only unknown-arg warnings")
+    ow.test.assert(MiniA.shouldWarnUnknownArgs({ exec: "/skill run", customflag: true }), false, "Template execution should suppress console-only unknown-arg warnings")
+  }
+
+  exports.testInitSkipsUnknownArgWarningsForNonConsoleRuns = function() {
+    var agent = createAgent()
+    var warned = false
+    agent._warnUnknownArgs = function() {
+      warned = true
+      return []
+    }
+    agent._normalizeMcpJobPaths = function() {
+      throw new Error("__stop_after_warning_check__")
+    }
+
+    try {
+      agent.init({
+        goal: "generate a report",
+        writeReport: "writeReport.yaml"
+      })
+    } catch(e) {
+      if (String(e.message || e) !== "__stop_after_warning_check__") throw e
+    }
+
+    ow.test.assert(warned, false, "Non-console runs should not invoke unknown-argument warnings during init")
+  }
+
+  exports.testInitKeepsUnknownArgWarningsForConsoleRuns = function() {
+    var agent = createAgent()
+    var warned = false
+    agent._warnUnknownArgs = function() {
+      warned = true
+      return []
+    }
+    agent._normalizeMcpJobPaths = function() {
+      throw new Error("__stop_after_warning_check__")
+    }
+
+    try {
+      agent.init({
+        oddflag: true
+      })
+    } catch(e) {
+      if (String(e.message || e) !== "__stop_after_warning_check__") throw e
+    }
+
+    ow.test.assert(warned, true, "Interactive console runs should still validate unknown arguments during init")
+  }
+
+  exports.testApplyLauncherEnvDefaultsSetsLibsAndModeFromEnvOverrides = function() {
+    var args = {
+      OAF_MINI_A_LIBS: " libA,libB ",
+      OAF_MINI_A_MODE: " research "
+    }
+    MiniA.applyLauncherEnvDefaults(args)
+
+    ow.test.assert(args.libs, "libA,libB", "Launcher env defaults should trim and apply OAF_MINI_A_LIBS")
+    ow.test.assert(args.mode, "research", "Launcher env defaults should trim and apply OAF_MINI_A_MODE")
+  }
+
+  exports.testApplyLibEnvDefaultSetsOnlyLibsFromEnvOverride = function() {
+    var args = {
+      OAF_MINI_A_LIBS: " shared-lib ",
+      OAF_MINI_A_MODE: "research"
+    }
+
+    MiniA.applyLibEnvDefault(args)
+
+    ow.test.assert(args.libs, "shared-lib", "Lib env defaults should trim and apply OAF_MINI_A_LIBS")
+    ow.test.assert(isUnDef(args.mode), true, "Lib env defaults should not apply OAF_MINI_A_MODE")
+  }
+
+  exports.testApplyLauncherEnvDefaultsPreservesExplicitLibsAndMode = function() {
+    var args = {
+      libs: "explicit-lib",
+      mode: "explicit-mode",
+      OAF_MINI_A_LIBS: "env-lib",
+      OAF_MINI_A_MODE: "env-mode"
+    }
+
+    MiniA.applyLauncherEnvDefaults(args)
+
+    ow.test.assert(args.libs, "explicit-lib", "Explicit libs should win over launcher env defaults")
+    ow.test.assert(args.mode, "explicit-mode", "Explicit mode should win over launcher env defaults")
+  }
+
+  exports.testApplyLauncherEnvDefaultsSupportsRoutedNonInteractiveLaunches = function() {
+    var goalArgs = {
+      goal: "generate report",
+      OAF_MINI_A_LIBS: "goal-lib",
+      OAF_MINI_A_MODE: "research"
+    }
+    var webArgs = {
+      onport: 8888,
+      OAF_MINI_A_LIBS: "web-lib",
+      OAF_MINI_A_MODE: "webmode"
+    }
+
+    MiniA.applyLauncherEnvDefaults(goalArgs)
+    MiniA.applyLauncherEnvDefaults(webArgs)
+
+    ow.test.assert(goalArgs.libs, "goal-lib", "Goal mode should inherit launcher env libs before dispatch")
+    ow.test.assert(goalArgs.mode, "research", "Goal mode should inherit launcher env mode before dispatch")
+    ow.test.assert(webArgs.libs, "web-lib", "Web mode should inherit launcher env libs before dispatch")
+    ow.test.assert(webArgs.mode, "webmode", "Web mode should inherit launcher env mode before dispatch")
   }
 })()

@@ -356,6 +356,36 @@ Key capabilities:
 The flag works with `opack exec mini-a`, the optional `mini-a` alias, and all
 oJob wrappers (for example `ojob mini-a.yaml modelman=true`).
 
+### Managing Working Memory Interactively
+
+Use the memory manager TUI to inspect and maintain session/global memory
+stores configured with `usememory`, `memorych`, and `memorysessionch`:
+
+```bash
+mini-a memoryman=true usememory=true memoryuser=true
+```
+
+You can also point directly to existing channels:
+
+```bash
+mini-a memoryman=true usememory=true \
+  memorych=\"{type:'file',options:{file:'/tmp/mini-a-global.json'}}\" \
+  memorysessionch=\"{type:'file',options:{file:'/tmp/mini-a-session.json'}}\" \
+  memorysessionid=\"demo-session\"
+```
+
+Key capabilities:
+
+- **Dual-scope visibility** — inspect both `global` and `session` stores with
+  per-section counts, stale totals, unresolved totals, and revision metadata.
+- **List + inspect workflow** — filter by section/stale/unresolved, then open
+  full entry payloads (including provenance/meta/evidence refs).
+- **Selective delete** — remove individual entries by `section/id`.
+- **Age-based pruning** — delete entries older than a relative time (`30d`,
+  `12h`, `90m`) or absolute timestamp (ISO date/epoch).
+- **Operational helpers** — keyword search, compaction, stale sweep, full
+  snapshot export, and optional full-store clear with confirmation.
+
 ## Mode Presets
 
 Mini-A ships with reusable argument bundles so you can switch behaviors without remembering every flag. Pass `mode=<name>` with `opack exec mini-a`, `mini-a`, `mini-a.sh`, `mini-a.yaml`, or `mini-a-main.yaml` and the runtime will merge the corresponding preset from [`mini-a-modes.yaml`](mini-a-modes.yaml) and optionally from `~/.openaf-mini-a_modes.yaml` and `~/.openaf-mini-a/modes.yaml` (custom modes override built-in ones, and `~/.openaf-mini-a/modes.yaml` overrides the legacy file when both exist) before applying any explicit flags you provide on the command line.
@@ -819,6 +849,7 @@ The `start()` method accepts various configuration options:
 - **`memorych`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs. Supports any channel type (e.g. `file`, `remote`, `mvs`, `simple`). Example: `memorych="{type:'file',options:{file:'/tmp/memory.json'}}"`. When combined with `memoryscope=both`, Mini-A now defaults runtime writes to the global store so they survive reloads; use `memoryScope: "session"` for ephemeral per-session entries. When omitted, memory is in-process only and not persisted between runs.
 - **`metricsch`** (string, optional): JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots. Supports any channel type accepted by `$ch().create(...)`. Example: `metricsch="{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}"`. By default Mini-A collects only the `mini-a` metric every `1000` ms; optional `period`, `some`, and `noDate` fields map directly to `ow.metrics.startCollecting(ch, period, some, noDate)`.
 - **`memoryuser`** (boolean, default: false): Convenience shorthand that activates `usememory`, pre-configures `memorych` and `memorysessionch` as file-backed channels under `~/.openaf-mini-a/`, and sets `memorypromote=facts,decisions,summaries` + `memorystaledays=30`. Only sets channels not already explicitly defined. The directory is auto-created if absent.
+- **`memoryusersession`** (boolean, default: false): Convenience shorthand that activates `usememory`, defaults `memoryscope=session`, and pre-configures `memorysessionch` as a file-backed channel under `~/.openaf-mini-a/`. Only sets the session channel when it is not already explicitly defined. The directory is auto-created if absent.
 - **`memorysessionch`** (string, optional): JSSLON definition for an OpenAF channel used to persist and reload session-scoped working memory. When both `memorych` and `memorysessionch` are set, default writes under `memoryscope=both` go to the session store; knowledge is promoted to global automatically at session end via `memorypromote`. Same format as `memorych`.
 - **`memorymaxpersection`** (number, default: 80): Max entries retained per memory section before compaction.
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
@@ -852,6 +883,7 @@ The `start()` method accepts various configuration options:
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
+- **`memoryman`** (boolean, default: false): Launch the interactive working-memory manager TUI (`mini-a-memoryman.js`) instead of the normal console. Designed for operators using `usememory=true` with `memorych`/`memorysessionch`.
 
 Advisor mode contract (internal-only, never user-facing):
 - Advisor responses must be strict JSON that must include: `assessment` (string), `recommended_next_step` (string), `risk_flags` (array), `escalate_to_main` (boolean), `confidence` (number), `stop_or_continue` (`"stop"` or `"continue"`).
@@ -896,6 +928,7 @@ Default behavior note:
 #### MCP (Model Context Protocol) Integration
 - **`mcp`** (string): MCP configuration in JSON format (single object or array for multiple connections)
 - **`usetools`** (boolean, default: false): Register MCP tools directly on the model instead of expanding the system prompt with tool schemas
+- **`usetoolslc`** (boolean, default: false): Register MCP tools directly only on the low-cost model (`OAF_LC_MODEL` / `modellc`). Useful when you want native tool calling on the cheaper tier without enabling it on the main model.
 - **`usejsontool`** (boolean, default: false): When `usetools=true`, registers an optional compatibility `json` tool. Useful for models that intermittently emit `json` tool calls instead of returning a plain JSON action object.
 - **`mcpdynamic`** (boolean, default: false): When `usetools=true`, analyze the goal and only register the MCP tools that appear relevant, consulting the available LLMs to pick a promising connection when heuristics fail and only falling back to all tools if no confident choice is produced
 - **`mcplazy`** (boolean, default: false): Defer MCP connection initialization until a tool is first executed; useful when configuring many optional integrations
@@ -984,6 +1017,9 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
 #### Knowledge and Context
 - **`knowledge`** (string): Additional context or knowledge for the agent (can be text or file path)
 - **`maxcontext`** (number): Approximate context budget in tokens; Mini-A auto-summarizes older history when the limit is exceeded
+- **`compressgoal`** (boolean, default: false): Compress oversized rendered goal text before execution; when disabled, Mini-A preserves the original goal verbatim
+- **`compressgoaltokens`** (number, default: 250): Estimated token threshold above which goal compression is considered when `compressgoal=true`
+- **`compressgoalchars`** (number, default: 1000): Character threshold above which goal compression is considered when `compressgoal=true`
 - **`maxcontent`** (number): Alias for `maxcontext`
 - **`rules`** (string): JSON/SLON array of additional numbered rules to append to the system prompt (can be text or file path)
 

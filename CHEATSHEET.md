@@ -16,8 +16,11 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Visual & Output](#visual--output)
 - [Knowledge & Context](#knowledge--context)
 - [Working Memory](#working-memory)
+- [Wiki Knowledge Base](#wiki-knowledge-base)
+- [Choosing Knowledge Features](#choosing-knowledge-features)
 - [Mode Presets](#mode-presets)
 - [Advanced Features](#advanced-features)
+  - [Web UI Parameters](#web-ui-parameters)
 - [Rate Limiting & Performance](#rate-limiting--performance)
 - [Security & Safety](#security--safety)
 - [Common Examples](#common-examples)
@@ -105,10 +108,13 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `modellc` | Override OAF_LC_MODEL for this session | `modellc="(type: openai, model: gpt-3.5-turbo, key: '...')"` |
 | `modelval` | Override OAF_VAL_MODEL for this session | `modelval="(type: openai, model: gpt-4o-mini, key: '...')"` |
 | `modelman` | Launch interactive model manager | `modelman=true` |
+| `memoryman` | Launch interactive memory manager (global/session memory ops) | `memoryman=true usememory=true memoryuser=true` |
 | `modellock` | Lock model tier: `"main"`, `"lc"`, or `"auto"` (default) | `modellock=lc` |
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
 | `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
 | `llmcomplexity` | Use LC model to validate "medium" complexity heuristic (default: `false`) | `llmcomplexity=true` |
+| `promptprofile` | System prompt verbosity profile: `minimal`, `balanced` (default), or `verbose` (auto when `debug=true`) | `promptprofile=minimal` |
+| `systempromptbudget` | Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority sections such as examples and detailed tool guidance | `systempromptbudget=4000` |
 
 ### Advisor Strategy Mode
 
@@ -253,10 +259,13 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 |-----------|------|---------|-------------|
 | `mcp` | string | - | MCP connection object (single or array) in SLON/JSON format |
 | `usetools` | boolean | `false` | Register MCP tools directly on the model instead of in prompt |
+| `usetoolslc` | boolean | `false` | Register MCP tools directly only on the low-cost model; the main model stays in prompt/action mode unless `usetools=true` |
 | `usejsontool` | boolean | `false` | Register compatibility `json` tool when `usetools=true` |
+| `toolfallback` | boolean | `false` | When `usetools=true`, automatically fall back to action-based mode for the current run if the model emits malformed pseudo tool-call JSON instead of real tool calls |
 | `mcpdynamic` | boolean | `false` | Analyze goal and only register relevant MCP tools |
 | `mcplazy` | boolean | `false` | Defer MCP connection initialization until first use |
 | `mcpproxy` | boolean | `false` | Aggregate all MCP connections (including Mini Utils Tool) behind a single `proxy-dispatch` tool to reduce context usage |
+| `mcpproxythreshold` | number | `0` | Global byte threshold for proxy auto-spill to temporary files (`0` disables). When the serialized result exceeds this size the result is written to a temp file and a reference is returned instead |
 | `mcpproxytoon` | boolean | `false` | Serialize proxy-spilled object/array results as TOON text when `mcpproxythreshold>0` |
 | `mcpprogcall` | boolean | `false` | Start a per-session localhost HTTP bridge so scripts can list/search/call MCP tools programmatically (requires `useshell=true` for script execution) |
 | `mcpprogcallport` | number | `0` | Port for programmatic tool-calling bridge (`0` auto-selects a free port) |
@@ -268,6 +277,8 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput`, `showMessage` (`mini-a-con`) |
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
+| `utilsroot` | string | - | Root path exposed to Mini Utils Tool file/document helpers (e.g. `markdownFiles`, `filesystemQuery`) |
+| `useskills` | boolean | `false` | Expose the `skills` utility tool within Mini Utils MCP (only effective when `useutils=true`) |
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
 | `miniadocs` | boolean | `false` | Alias for `mini-a-docs` |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
@@ -301,6 +312,22 @@ mini-a goal="query database" \
   mcp="[(cmd: 'ojob mcps/mcp-db.yaml ...'), (cmd: 'ojob mcps/mcp-net.yaml ...')]" \
   usetools=true mcpdynamic=true
 ```
+
+**Tool Calling Only On The Low-Cost Model:**
+```bash
+mini-a goal="scan docs, then escalate only if needed" \
+  modellc="(type: openai, model: gpt-5-mini, key: '...')" \
+  mcp="(cmd: 'ojob mcps/mcp-files.yaml', timeout: 5000)" \
+  usetoolslc=true
+```
+Use this when you want the low-cost model to call MCP tools directly, while escalations to the main model continue using prompt/action-based tool guidance.
+
+**Opt-in Tool Fallback:**
+```bash
+mini-a goal="what is the current time" \
+  usetools=true toolfallback=true
+```
+Use this when a model/provider sometimes describes tool usage as JSON text instead of emitting real tool calls. Mini-A will retry the current run in action-based mode only when that malformed tool-call pattern is detected.
 
 **Lazy Initialization:**
 ```bash
@@ -507,6 +534,9 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
 | `usevectors` | boolean | `false` | Enable vector guidance bundle (`usesvg=true` + `usediagrams=true`), preferring Mermaid for structural diagrams and SVG for infographics/custom visuals |
 | `format` | string | `md` | Output format (`md`, `json`, `yaml`, `toon` or `slon`) |
 | `usemath` | boolean | `false` | Encourage LaTeX math output (`$...$` / `$$...$$`) for KaTeX rendering |
+| `usestream` | boolean | `false` | Stream LLM tokens to the console in real-time as they arrive |
+| `showexecs` | boolean | `false` | Show shell/exec events as separate lines in the interaction stream |
+| `showseparator` | boolean | `true` | Show a subtle separator line between interaction events (disable for a more compact view) |
 | `outputfile` | string | - | Alternative key for `outfile`, used mainly during plan conversions |
 
 **Examples:**
@@ -548,8 +578,12 @@ mini-a goal="show meetup locations on a map" \
 | `state` | string/object | - | Initial state data as structured JSON/SLON |
 | `conversation` | string | - | Conversation history file to load/save |
 | `maxcontext` | number | `0` | Maximum context size in tokens (auto-summarize when exceeded) |
+| `compressgoal` | boolean | `false` | Automatically compress oversized goal text before execution |
+| `compressgoaltokens` | number | `250` | Estimated token threshold before goal compression is considered |
+| `compressgoalchars` | number | `1000` | Character threshold before goal compression is considered |
 | `maxcontent` | number | `0` | Alias for `maxcontext` |
 | `libs` | string | - | Comma-separated list of additional OJob libraries to load |
+| `goalprefix` | string | - | Optional prefix automatically prepended to every goal before the agent sees it |
 | `secpass` | string | - | Password for opening OpenAF sBucket model secrets |
 
 **Examples:**
@@ -626,6 +660,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `memorych` | string | - | SLON/JSON definition of an OpenAF channel used to **persist the global memory** store. Reloaded at startup and flushed on every significant event. |
 | `memorysessionch` | string | - | SLON/JSON definition of a dedicated OpenAF channel for the **session memory** store. Falls back to `memorych` when omitted. |
 | `memoryuser` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, sets `memorych` + `memorysessionch` to file channels, and defaults `memorypromote=facts,decisions,summaries` + `memorystaledays=30`. |
+| `memoryusersession` | boolean | `false` | Convenience shorthand: enables `usememory`, ensures `~/.openaf-mini-a/` exists, defaults `memoryscope=session`, and sets `memorysessionch` to a file channel. |
 | `memorysessionid` | string | `<agent-id>` | Session key used to namespace session memory in the channel (defaults to `conversation` arg if set, otherwise the internal agent ID). |
 | `memorymaxpersection` | number | `80` | Maximum entries kept per section before compaction drops stale/old ones. |
 | `memorymaxentries` | number | `500` | Hard cap on total entries across all sections (priority-ordered: decisions > evidence > risks > facts > summaries > hypotheses > openQuestions > artifacts). |
@@ -634,6 +669,7 @@ Mini-A maintains a structured **working memory** during each run — a scoped, d
 | `memorypromote` | string | `""` | Comma-separated list of sections to auto-promote from session → global at session end. `memoryuser=true` sets this to `facts,decisions,summaries`. Empty string disables auto-promotion. |
 | `memorystaledays` | number | `0` | Days without re-confirmation before a global entry is marked `stale`. `0` disables the sweep. `memoryuser=true` sets this to `30`. Stale entries are removed by compaction when a section overflows `memorymaxpersection`. |
 | `memoryinject` | string | `summary` | Controls how much memory is embedded in each step's context: `summary` (default) injects only section entry counts and enables the `memory_search` action; `full` injects the entire compact memory snapshot (old behaviour). |
+| `memorysessionheader` | string | - | HTTP request header name used to derive the memory session ID in web mode (e.g. `X-User-Id`) |
 
 ### Memory Sections
 
@@ -717,6 +753,29 @@ mini-a goal="..." memoryuser=true memorypromote=""
 mini-a goal="..." memoryuser=true memorystaledays=0
 ```
 
+### Memory Manager TUI Cheatsheet (`memoryman=true`)
+
+```bash
+# Open memory manager with default user-local channels
+mini-a memoryman=true usememory=true memoryuser=true
+
+# Open memory manager against explicit channels + session namespace
+mini-a memoryman=true usememory=true \
+  memorych="(name: global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))" \
+  memorysessionch="(name: session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))" \
+  memorysessionid="demo-session"
+```
+
+Common actions inside the TUI:
+- `📊 Summary` — totals, stale/unresolved counts, per-section table.
+- `📃 List entries` — filter by section and stale/unresolved flags.
+- `🔎 Inspect entry` — print full payload for a selected `section/id`.
+- `🧽 Delete by id` — selective removal of one entry.
+- `⏳ Delete older than...` — prune by relative age (`30d`, `12h`, `90m`) or absolute timestamp (ISO/epoch).
+- `🔍 Search entries` — keyword search across ids/values/tags.
+- `🧰 Maintenance` — run compaction, stale sweep, or full store clear.
+- `💾 Export snapshot` — print JSON snapshot for backup/audit.
+
 ### Programmatic API (embedding use)
 
 ```javascript
@@ -741,6 +800,127 @@ var marked = agent._globalMemoryManager.sweepStale(30)
 
 // Clear the session memory for a given session
 agent.clearSessionMemory("my-session-id")
+```
+
+---
+
+## Wiki Knowledge Base
+
+Mini-A can read from and write to a persistent Markdown wiki following Andrej Karpathy's LLM Wiki pattern: the agent distils knowledge from each session into structured pages, then retrieves that knowledge in future sessions.  The wiki is stored in a shared filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) sees the same pages.
+
+When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps two starter pages:
+- `AGENTS.md` for contribution rules and ingestion workflow
+- `index.md` for the main entrypoint and top-level table of contents
+
+### Wiki Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `usewiki` | boolean | `false` | Enable the wiki knowledge base |
+| `wikiaccess` | string | `ro` | Access mode: `ro` (read-only) or `rw` (read-write) |
+| `wikibackend` | string | `fs` | Backend: `fs` (filesystem) or `s3` |
+| `wikiroot` | string | `.` | Root directory for the `fs` backend |
+| `wikibucket` | string | - | S3 bucket name (`s3` backend) |
+| `wikiprefix` | string | - | S3 key prefix (`s3` backend) |
+| `wikiurl` | string | - | S3-compatible endpoint URL (`s3` backend) |
+| `wikiaccesskey` | string | - | S3 access key (`s3` backend) |
+| `wikisecret` | string | - | S3 secret key (`s3` backend) |
+| `wikiregion` | string | - | S3 region (`s3` backend) |
+| `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3` backend) |
+| `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3` backend) |
+| `wikilintstaleddays` | number | `90` | Days before a page without an `updated` update is marked stale in lint |
+
+### Wiki Actions (agent)
+
+The agent uses the `wiki` action:
+```json
+{ "action": "wiki", "params": { "op": "list|read|search|lint|write", "path": "page.md", "query": "...", "content": "..." } }
+```
+
+| Op | Description |
+|----|-------------|
+| `list` | List all pages; optional `path` prefix filters results |
+| `read` | Return full content + front-matter of `path` |
+| `search` | Full-text search; returns ranked hits for `query` |
+| `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates |
+| `write` | Write or update `path` with `content` (requires `wikiaccess=rw`) |
+
+### Console Commands
+
+| Command | Description |
+|---------|-------------|
+| `/wiki list [prefix]` | List all pages (optionally filtered by prefix) |
+| `/wiki read <page.md>` | Print a page's front-matter and body |
+| `/wiki search <query>` | Full-text search across all pages |
+| `/wiki lint` | Run the lint check and print a report |
+| `/stats wiki` | Show wiki operation statistics for the current session |
+
+### Examples
+
+```bash
+# Read-only wiki from a shared folder (agents can read, not write)
+mini-a goal="summarize our architecture decisions" \
+  usewiki=true wikiroot=/shared/wiki
+
+# Read-write wiki — agent can contribute new pages
+mini-a goal="research topic X and document findings in the wiki" \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+
+# S3-backed wiki (shared across machines or containers)
+mini-a goal="analyze and wiki" \
+  usewiki=true wikiaccess=rw wikibackend=s3 \
+  wikibucket=my-wiki-bucket wikiprefix=knowledge/ \
+  wikiurl=https://s3.amazonaws.com wikiaccesskey=AKI... wikisecret=xxx wikiregion=us-east-1
+
+# Wiki + memory for maximum knowledge retention
+mini-a goal="deep research with persistent knowledge" \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki \
+  usememory=true memoryuser=true
+
+# Lint the wiki from the console
+mini-a ➤ /wiki lint
+```
+
+---
+
+## Choosing Knowledge Features
+
+Mini-A has two complementary knowledge persistence mechanisms.  Choose based on the scope, structure, and lifetime of the knowledge.
+
+| Dimension | `usememory=true` | `usewiki=true` |
+|-----------|-----------------|----------------|
+| **Scope** | Single agent session (session store) or personal across sessions (global store) | Shared across all agents and users pointing to the same root/bucket |
+| **Structure** | Typed sections: facts, decisions, evidence, risks, hypotheses, artifacts, summaries | Free-form Markdown pages with YAML front-matter |
+| **Granularity** | Short entries (one fact / decision per entry) | Full articles (one concept per page) |
+| **Retrieval** | Keyword search via `memory_search` action | Full-text search + list + direct read via `wiki` action |
+| **Lifetime** | Session ends when conversation ends; global persists via channel | Persists as files/objects; survives agent restarts and machine changes |
+| **Authorship** | Fully automated (agent appends automatically) | Semi-automated (agent writes on demand; you control when) |
+| **Lint / QA** | Compaction + dedup | `/wiki lint` validates links, orphans, staleness, near-duplicates |
+| **Best for** | Tracking in-flight reasoning, decisions, and evidence during a task | Encyclopaedic knowledge that should outlive sessions and be shared |
+
+### Decision Guide
+
+**Use `usememory=true` when:**
+- The agent needs to track its own reasoning across many steps (hypotheses, evidence, risks).
+- You want automatic deduplication and compaction without managing files.
+- Knowledge is personal to one agent instance or one session.
+- You need the agent to recall decisions made earlier in the same run.
+
+**Use `usewiki=true` when:**
+- Knowledge must survive across agent restarts and be accessible to other agents or users.
+- You are building a shared team knowledge base (architecture decisions, runbooks, API docs).
+- Content is encyclopaedic — one well-named page per concept, with links between pages.
+- You want human-readable, versionable Markdown files.
+
+**Use both together when:**
+- The agent researches and reasons (memory tracks in-flight state), then distils durable findings into wiki pages at the end.
+- Multiple agents collaborate: each tracks its own working state in memory, but contributes shared conclusions to the wiki.
+
+```bash
+# Recommended combined setup for knowledge-building agents
+mini-a goal="research and document X" \
+  usememory=true memoryuser=true \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki
 ```
 
 ---
@@ -813,6 +993,9 @@ mini-a mode=mypreset goal="your goal here"
 | `shellworker` | boolean | `false` | Convenience flag: sets `useshell=true` and advertises the `shell` A2A skill automatically |
 | `workerskills` | string | - | Comma-separated skill IDs (or JSON array) advertised by this worker in its AgentCard |
 | `workerspecialties` | string | - | Comma-separated specialty tags injected into the `run-goal` A2A skill |
+| `workertags` | string | - | Comma-separated tags appended to the default workermode skill in the AgentCard |
+| `usea2a` | boolean | `false` | Use A2A HTTP+JSON/REST endpoints for remote worker delegation instead of the default Mini-A protocol |
+| `apitoken` | string | - | Bearer token required to authenticate requests to the worker API server (set on both worker and main) |
 | `extracommands` | string | | Comma-separated extra directories for custom slash commands |
 | `extraskills` | string | | Comma-separated extra directories for custom skills |
 | `extrahooks` | string | | Comma-separated extra directories for custom hooks |
@@ -896,6 +1079,7 @@ mini-a chatbotmode=true goal="draft a friendly release note"
 |-----------|-------------|
 | `auditch` | SLON/JSON definition of audit channel to record agent activity |
 | `toollog` | SLON/JSON definition of tool-log channel to record MCP tool call arguments/results |
+| `metricsch` | SLON/JSON definition of a metrics channel to collect per-run performance counters |
 | `showthinking` | Surface XML-tagged `<thinking>...</thinking>` blocks as thought logs |
 
 ```bash
@@ -912,6 +1096,49 @@ mini-a goal="perform audit" \
 ```bash
 # Use system default working directory for MCP commands
 mini-a goal="run command" nosetmcpwd=true
+```
+
+### Browser Context
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `browsercontext` | string/boolean | - | Browser context configuration (SLON/JSON) or `true` to auto-enable when needed. Used by MCP tools that control a browser session |
+
+### Web UI Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `onport` | number | - | Start the Mini-A web UI on the provided port |
+| `maxpromptchars` | number | `120000` | Maximum accepted prompt size in characters for web mode |
+| `ssequeuetimeout` | number | `120` | Web SSE queue timeout in seconds |
+| `logpromptheaders` | string | - | Comma-separated HTTP request header names to log alongside incoming web prompts |
+| `usehistory` | boolean | `false` | Enable conversation history persistence in web mode |
+| `historykeep` | boolean | `false` | Keep (persist) finished conversations instead of discarding them |
+| `historypath` | string | - | Directory path used to store web conversation history files |
+| `historyretention` | number | `600` | Web history retention window in seconds |
+| `historykeepperiod` | number | - | Delete kept conversation files older than this many minutes |
+| `historykeepcount` | number | - | Keep only the newest N kept conversation files |
+| `historys3bucket` | string | - | S3 bucket used to mirror history files |
+| `historys3prefix` | string | - | S3 key prefix for mirrored history files |
+| `historys3url` | string | - | S3 endpoint URL for history mirroring |
+| `historys3accesskey` | string | - | S3 access key for history mirroring |
+| `historys3secret` | string | - | S3 secret key for history mirroring |
+| `historys3region` | string | - | S3 region for history mirroring |
+| `historys3useversion1` | boolean | `false` | Use S3 path-style (v1) signing for history mirroring |
+| `historys3ignorecertcheck` | boolean | `false` | Disable TLS certificate checks for history S3 access |
+| `useattach` | boolean | `false` | Enable file attachment support in web mode |
+
+```bash
+# Web UI with history and file attachment support
+./mini-a-web.sh onport=8888 usehistory=true historykeep=true useattach=true
+
+# Limit prompt size and log User header
+./mini-a-web.sh onport=8888 maxpromptchars=40000 logpromptheaders=X-User-Id
+
+# Persist history to S3
+./mini-a-web.sh onport=8888 usehistory=true historykeep=true \
+  historys3bucket=my-hist-bucket historys3prefix=mini-a/ \
+  historys3url=https://s3.amazonaws.com historys3region=us-east-1
 ```
 
 ### Adaptive Tool Routing
@@ -1249,6 +1476,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/context llm` or `/context analyze` | Analyze conversation tokens using LLM (prefers low-cost model if configured) |
 | `/stats memory` | Show working-memory statistics and per-section counts for the active session |
 | `/stats detailed memory` | Show full metrics plus the focused memory view (`out=file.json` also supported) |
+| `/stats wiki` | Show wiki operation statistics (list/read/search/write/lint counts and errors) |
 | `/compact [n]` | Summarize older messages, keep last n exchanges (default: 6) |
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |

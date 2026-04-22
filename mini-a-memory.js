@@ -436,3 +436,66 @@ MiniAMemoryManager.prototype.loadFromChannel = function(channelName, namespace) 
     return false
   }
 }
+
+MiniAMemoryManager.parseChannelKey = function(rawKey) {
+  if (isMap(rawKey)) return rawKey
+  if (!isString(rawKey)) return __
+  var text = rawKey.trim()
+  if (text.length === 0) return __
+  var parsed = __
+  try { parsed = jsonParse(text, __, __, true) } catch(ignoreJsonParse) {}
+  if (!isMap(parsed)) {
+    try { parsed = af.fromJSSLON(text) } catch(ignoreJSSLONParse) {}
+  }
+  return isMap(parsed) ? parsed : __
+}
+
+MiniAMemoryManager.listChannelNamespaces = function(channelName) {
+  if (!isString(channelName) || channelName.length === 0) return []
+  var keys = []
+  try { keys = $ch(channelName).getKeys() } catch(ignoreGetKeys) { return [] }
+
+  var namespaces = {}
+  keys.forEach(function(rawKey) {
+    var key = MiniAMemoryManager.parseChannelKey(rawKey)
+    if (!isMap(key)) return
+    var ns = isString(key.ns) ? key.ns.trim() : ""
+    if (ns.length === 0) return
+    if (!isObject(namespaces[ns])) namespaces[ns] = { namespace: ns, sections: {} }
+    if (isString(key.section) && key.section.length > 0) namespaces[ns].sections[key.section] = true
+  })
+
+  return Object.keys(namespaces).sort().map(function(ns) {
+    var meta = __
+    try { meta = $ch(channelName).get({ section: "_meta", ns: ns }) } catch(ignoreMeta) {}
+    return {
+      namespace: ns,
+      sections: Object.keys(namespaces[ns].sections).sort(),
+      meta: isMap(meta) ? meta : __
+    }
+  })
+}
+
+MiniAMemoryManager.deleteChannelNamespace = function(channelName, namespace) {
+  if (!isString(channelName) || channelName.length === 0) return 0
+  var ns = isString(namespace) ? namespace.trim() : ""
+  if (ns.length === 0) return 0
+  var keys = []
+  try { keys = $ch(channelName).getKeys() } catch(ignoreGetKeys) { return 0 }
+
+  var deleted = 0
+  keys.forEach(function(rawKey) {
+    var key = MiniAMemoryManager.parseChannelKey(rawKey)
+    if (!isMap(key)) return
+    if ((isString(key.ns) ? key.ns.trim() : "") !== ns) return
+    try {
+      if (isFunction($ch(channelName).unset)) {
+        if ($ch(channelName).unset(key) === true) deleted++
+      } else if (isFunction($ch(channelName).set)) {
+        $ch(channelName).set(key, __)
+        deleted++
+      }
+    } catch(ignoreDelete) {}
+  })
+  return deleted
+}

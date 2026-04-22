@@ -11,6 +11,22 @@ function __miniAErrMsg(e) {
 }
 
 /**
+ * Normalizes `askChoose` results into a safe zero-based index.
+ * Returns -1 for blank, invalid, negative, or out-of-range values.
+ *
+ * @param {number|string} value - Raw choice index to normalize.
+ * @param {number} [maxExclusive] - Optional exclusive upper bound.
+ */
+function __miniANormalizeChoiceIndex(value, maxExclusive) {
+  var idx = isNumber(value) ? value : Number(value)
+  if (isNaN(idx)) return -1
+  idx = Math.floor(idx)
+  if (idx < 0) return -1
+  if (isNumber(maxExclusive) && idx >= maxExclusive) return -1
+  return idx
+}
+
+/**
  * Resolves the canonical path to a SKILL.md template within a folder.
  * Returns the path string if found, or undefined if not found.
  *
@@ -224,6 +240,33 @@ function __miniAReadSkillDescriptionFromTemplate(templatePath) {
   } catch (e) {
     return __
   }
+}
+
+function __miniAApplyMemoryUserDefaults(cfg) {
+  if (!isObject(cfg)) return cfg
+
+  cfg.memoryuser = toBoolean(cfg.memoryuser) === true
+  cfg.memoryusersession = toBoolean(cfg.memoryusersession) === true
+  if (cfg.memoryuser !== true && cfg.memoryusersession !== true) return cfg
+
+  var _memUserHome = isDef(__gHDir) ? __gHDir() : java.lang.System.getProperty("user.home")
+  var _memUserDir  = _memUserHome + "/.openaf-mini-a"
+  var _memUserMemDir = _memUserDir + "/memory"
+  io.mkdir(_memUserMemDir)
+
+  if (cfg.memoryuser === true && isUnDef(cfg.memorych)) {
+    cfg.memorych = stringify({ name: "mini_a_global_mem", type: "file", options: { file: _memUserMemDir + "/memory-global.json.gz", lock: _memUserMemDir + "/memory-global.lock", multifile: false, gzip: true, compact: true } }, __, "")
+  }
+  if (isUnDef(cfg.memorysessionch)) {
+    cfg.memorysessionch = stringify({ name: "mini_a_session_mem", type: "file", options: { file: _memUserMemDir + "/memory-session.json.gz", lock: _memUserMemDir + "/memory-session.lock", multifile: false, gzip: true, compact: true } }, __, "")
+  }
+  if (cfg.memoryusersession === true && isUnDef(cfg.memoryscope) && isUnDef(cfg.memoryScope)) cfg.memoryscope = "session"
+  cfg.usememory = true
+  if (cfg.memoryuser === true) {
+    if (isUnDef(cfg.memorypromote)) cfg.memorypromote = "facts,decisions,summaries"
+    if (isUnDef(cfg.memorystaledays)) cfg.memorystaledays = 30
+  }
+  return cfg
 }
 
 /**

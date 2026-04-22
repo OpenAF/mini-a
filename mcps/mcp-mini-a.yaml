@@ -171,6 +171,9 @@ jobs:
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
       maxcontext     : toNumber.isNumber.default(0)
+      compressgoal   : toBoolean.isBoolean.default(false)
+      compressgoaltokens: toNumber.isNumber.default(250)
+      compressgoalchars : toNumber.isNumber.default(1000)
       toolcachettl   : toNumber.isNumber.default(__)
       format         : isString.default(__)
       raw            : toBoolean.isBoolean.default(false)
@@ -238,7 +241,7 @@ jobs:
       }
     })
 
-    var numberKeys = [ "rpm", "rtm", "tpm", "maxsteps", "maxcontext", "toolcachettl" ]
+    var numberKeys = [ "rpm", "rtm", "tpm", "maxsteps", "maxcontext", "compressgoaltokens", "compressgoalchars", "toolcachettl" ]
     numberKeys.forEach(function(key) {
       if (isDef(preparedArgs[key])) {
         preparedArgs[key] = toNumber(preparedArgs[key])

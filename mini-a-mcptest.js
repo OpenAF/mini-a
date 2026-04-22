@@ -15,6 +15,15 @@ if (isDef(args.libs) && args.libs.length > 0) {
     __miniALoadLibraries(args.libs, log, logErr)
 }
 
+function normalizeChoiceIndex(value, maxExclusive) {
+    var idx = isNumber(value) ? value : Number(value)
+    if (isNaN(idx)) return -1
+    idx = Math.floor(idx)
+    if (idx < 0) return -1
+    if (isNumber(maxExclusive) && idx >= maxExclusive) return -1
+    return idx
+}
+
 function parseOptionalJSSLON(label, rawValue, expectedType) {
     if (isUnDef(rawValue) || String(rawValue).trim() == "") return __
 
@@ -56,8 +65,8 @@ function normalizeMCPConfigInput(rawConfig) {
         if (config.length == 1) return config[0]
 
         var choices = config.map((cfg, idx) => "[" + (idx + 1) + "] " + summarizeMCPConfig(cfg)).concat(["🔙 Cancel"])
-        var chosen = askChoose("Select which MCP configuration to test: ", choices, Math.min(choices.length, 10))
-        if (chosen >= config.length) return __
+        var chosen = normalizeChoiceIndex(askChoose("Select which MCP configuration to test: ", choices, Math.min(choices.length, 10)), config.length)
+        if (chosen < 0 || chosen >= config.length) return __
         return config[chosen]
     }
 
@@ -90,7 +99,7 @@ function buildMCPConfig(args) {
     var _config = {}
 
     print()
-    var _connectionType = askChoose("Choose MCP connection type: ", [
+    var _connectionType = normalizeChoiceIndex(askChoose("Choose MCP connection type: ", [
         "STDIO (local command)",
         "HTTP Remote",
         "HTTP SSE",
@@ -98,9 +107,9 @@ function buildMCPConfig(args) {
         "Dummy MCP",
         "Raw $mcp config",
         "🔙 Cancel"
-    ])
+    ]), 6)
 
-    if (_connectionType == 6) {
+    if (_connectionType < 0 || _connectionType == 6) {
         return null
     }
 
@@ -301,7 +310,7 @@ function buildToolParams(tool) {
     var params = {}
 
     if (isUnDef(tool.inputSchema) || isUnDef(tool.inputSchema.properties)) {
-        var _skipParams = askChoose("No parameters defined. Continue with empty parameters?", ["Yes", "No"])
+        var _skipParams = normalizeChoiceIndex(askChoose("No parameters defined. Continue with empty parameters?", ["Yes", "No"]), 2)
         if (_skipParams == 1) return null
         return params
     }
@@ -697,7 +706,8 @@ function mainMCPTest(args) {
             ? "Choose an action:"
             : "Connected. Choose an action:"
 
-        var _action = askChoose(statusMsg, _options, _options.length)
+        var _action = normalizeChoiceIndex(askChoose(statusMsg, _options, _options.length), _options.length - 1)
+        if (_action < 0) _action = _options.length - 1
 
         // Handle actions
         var optionText = _options[_action]
@@ -758,7 +768,7 @@ function mainMCPTest(args) {
                     } else {
                         tools = tools.tools
                         var toolNames = tools.map(t => t.name).sort().concat(["🔙 Cancel"])
-                        var toolIdx = askChoose("Choose a tool to call: ", toolNames, sessionOptions.toolchoosesize)
+                        var toolIdx = normalizeChoiceIndex(askChoose("Choose a tool to call: ", toolNames, sessionOptions.toolchoosesize), tools.length)
 
                         if (toolIdx < tools.length) {
                             var tool = tools.filter(t => t.name == toolNames[toolIdx])[0]
@@ -785,7 +795,7 @@ function mainMCPTest(args) {
                     } else {
                         tools = tools.tools
                         var toolNames = tools.map(t => t.name).sort().concat(["🔙 Cancel"])
-                        var toolIdx = askChoose("Choose a tool to inspect: ", toolNames, sessionOptions.toolchoosesize)
+                        var toolIdx = normalizeChoiceIndex(askChoose("Choose a tool to inspect: ", toolNames, sessionOptions.toolchoosesize), tools.length)
 
                         if (toolIdx < tools.length) {
                             showToolDetails(tools.filter(t => t.name == toolNames[toolIdx])[0])
@@ -821,7 +831,7 @@ function mainMCPTest(args) {
                         return key + repeat(maxOptionLength - key.length, " ") + " (currently: " + currentValue + ")"
                     }).sort().concat(["🔙 Cancel"])
 
-                    var optionIdx = askChoose("Choose an option to toggle: ", optionChoices)
+                    var optionIdx = normalizeChoiceIndex(askChoose("Choose an option to toggle: ", optionChoices), optionKeys.length)
 
                     if (optionIdx < optionKeys.length) {
                         toggleOption(optionKeys.filter((k) => optionChoices[optionIdx].startsWith(k))[0])
@@ -843,7 +853,7 @@ function mainMCPTest(args) {
                         return key + repeat(maxOptionLength - key.length, " ") + " (" + def.type + ", currently: " + currentValue + ")"
                     }).sort().concat(["🔙 Cancel"])
 
-                    var setOptionIdx = askChoose("Choose an option to set: ", allOptionChoices)
+                    var setOptionIdx = normalizeChoiceIndex(askChoose("Choose an option to set: ", allOptionChoices), allOptionKeys.length)
 
                     if (setOptionIdx < allOptionKeys.length) {
                         var selectedKey = allOptionKeys.filter((k) => allOptionChoices[setOptionIdx].startsWith(k))[0]

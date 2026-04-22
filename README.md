@@ -45,6 +45,13 @@ Two steps to use:
    The manager lets you create, import, rename, export, and delete reusable
    definitions that can then be exported as `OAF_MODEL`/`OAF_LC_MODEL` values or copied as raw SLON/JSON for sharing.
 
+   For working-memory operations, launch the memory manager:
+   ```bash
+   mini-a memoryman=true usememory=true memoryuser=true
+   ```
+   It provides global/session memory summaries, entry inspection, search,
+   selective delete, and age-based pruning.
+
 2. Run the console:
    ```bash
    opack exec mini-a
@@ -392,6 +399,7 @@ Mini-A ships with complementary components:
 - **`mini-a.yaml`** - Core oJob definition that implements the agent workflow
 - **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
+- **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
@@ -416,6 +424,7 @@ Mini-A ships with complementary components:
 | `mcp` | MCP server configuration (single or array) | - |
 | `agent` | Path (or inline markdown) containing YAML frontmatter metadata (`model`, `capabilities`, `tools`, `constraints`, `knowledge`, `youare`, `mini-a`). `mini-a` can set any Mini-A args from the file. | - |
 | `usetools` | Register MCP tools with the model | `false` |
+| `usetoolslc` | Register MCP tools only on the low-cost model | `false` |
 | `usejsontool` | Enable an optional compatibility `json` tool when `usetools=true` (helps with models that occasionally emit `json` tool calls instead of plain JSON action output) | `false` |
 | `useutils` | Auto-register Mini Utils Tool utilities as an MCP connection (`init`, `filesystemQuery`, `filesystemModify`, `markdownFiles`, plus console-only helpers like `userInput` when running `mini-a-con`) | `false` |
 | `utilsroot` | Root directory for Mini Utils Tool file operations (only when `useutils=true`) | `.` |
@@ -444,7 +453,8 @@ Mini-A ships with complementary components:
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |
 | `memorych` | JSSLON definition for an OpenAF channel used to persist and reload global working memory across runs (e.g. `{type:'file',options:{file:'/tmp/memory.json'}}`). With `memoryscope=both`, default writes go to global when a channel is configured; use explicit session scope for ephemeral entries. | - |
-| `memoryuser` | Convenience shorthand: enables `usememory` and sets `memorych`/`memorysessionch` to file channels backed by `~/.openaf-mini-a/memory.json` (only channels not already defined; directory auto-created). | `false` |
+| `memoryuser` | Convenience shorthand: enables `usememory` and sets `memorych`/`memorysessionch` to file channels under `~/.openaf-mini-a/` (only channels not already defined; directory auto-created). Also defaults `memorypromote=facts,decisions,summaries` and `memorystaledays=30`. | `false` |
+| `memoryusersession` | Convenience shorthand: enables `usememory`, defaults `memoryscope=session`, and sets `memorysessionch` to a file-backed store under `~/.openaf-mini-a/` (only when not already defined; directory auto-created). | `false` |
 | `metricsch` | JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots (for example `{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}`). By default Mini-A stores only the `mini-a` metric; optional `period`, `some`, and `noDate` fields mirror `ow.metrics.startCollecting`. | - |
 | `memorymaxpersection` | Per-section memory cap before compaction | `80` |
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
@@ -456,6 +466,7 @@ Mini-A ships with complementary components:
 | `usestream` | Enable real-time token streaming as LLM generates responses | `false` |
 | `mode` | Apply preset from `mini-a-modes.yaml`, `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` (supports `include` inheritance) | - |
 | `modelman` | Launch the interactive model definitions manager | `false` |
+| `memoryman` | Launch the interactive working-memory manager (inspect/list/search/delete/prune global+session stores) | `false` |
 | `workermode` | Launch the Worker API server (`mini-a-worker.yaml`) from the console entrypoint | `false` |
 | `workers` | Comma-separated list of worker URLs for remote delegation (`workers=http://host1:8080,http://host2:8080`) | - |
 | `usea2a` | Use A2A HTTP+JSON/REST binding (`/message:send`, `/tasks`, `/tasks:cancel`) for remote delegation | `false` |
@@ -470,6 +481,9 @@ Mini-A ships with complementary components:
 | `rpm` | Rate limit (requests per minute) | - |
 | `tpm` | Rate limit (tokens per minute across prompt + completion) | - |
 | `maxcontext` | Context budget in tokens before proactive summarization | `0` |
+| `compressgoal` | Automatically compress oversized goal text before execution | `false` |
+| `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
+| `compressgoalchars` | Character threshold before goal compression is considered | `1000` |
 | `maxcontent` | Alias for `maxcontext` | `0` |
 | `outfile` | Path to save final answer output | - |
 | `outfileall` | Deep-research-only path to save full cycle output (verdicts/learnings/history) | - |

@@ -17,13 +17,13 @@ Quick reference for Mini-A `agent=` files.
 | `name` | string | Metadata only (for your own labeling) |
 | `description` | string | Metadata only |
 | `model` | string/object | `model=` |
-| `capabilities` | array/string | `useshell`, `readwrite`, `useutils`, `usetools` |
+| `capabilities` | array/string | `useshell`, `readwrite`, `useutils`, `usetools`, `usetoolslc` |
 | `tools` | array | Merged into `mcp` |
 | `constraints` | array/string | Appended to `rules` as bullet list |
 | `rules` | array/string | `rules=` (used when not already provided) |
 | `knowledge` | array/string | `knowledge=` |
 | `youare` | array/string | `youare=` |
-| `mini-a` | map | Direct Mini-A arg overrides from the agent file |
+| `mini-a` | map | Direct Mini-A arg overrides from the agent file — supports all params including `usewiki`, `wikiaccess`, `wikibackend`, `wikiroot`, `wikibucket`, `usememory`, `memoryuser`, etc. |
 
 ## Tools entries
 
