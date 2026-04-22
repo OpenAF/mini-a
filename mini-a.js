@@ -281,7 +281,12 @@ var MiniA = function() {
 {{agentDirectiveLine}}
 
 ## RESPONSE FORMAT
+{{#if usetoolsActual}}
+When you do NOT need an MCP tool, respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
+When you DO need an MCP tool, call it directly via function calling instead of returning JSON that describes the intended tool call. Do not emit placeholder JSON or shell commands that merely narrate the tool call.
+{{else}}
 Always respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
+{{/if}}
 {
     "thought": "brief next step (1 sentence max, keep it minimal)",
     "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
@@ -321,7 +326,8 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
 ### How to call MCP tools:
@@ -382,7 +388,8 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 ## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
 • {{toolCount}} MCP tools are available via direct function calling
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• The JSON "action" field is ONLY for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Each tool has its own function signature - call tools directly by their name
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
@@ -502,9 +509,7 @@ REMAINING (do not work on these yet):
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
-**Step 1 - JSON Response**:
-{ "thought": "Search for CNN RSS feed", "action": "think" }
-**Step 1 - Function Call** (separate from JSON):
+**Step 1 - Function Call**:
 \`\`\`
 Function: "proxy-dispatch"
 Arguments: {
@@ -513,7 +518,7 @@ Arguments: {
   "arguments": { "query": "CNN" }
 }
 \`\`\`
-**Step 2 - After receiving tool result**:
+**Step 2 - After receiving tool result, return JSON**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
 
 ### Example 5: MCP Tool Usage (WRONG - Don't do this)
@@ -521,6 +526,12 @@ Arguments: {
 **Response** ❌:
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
 **Why wrong**: MCP tools cannot be invoked directly. You must use function calling with "proxy-dispatch".
+
+### Example 6: MCP Tool Usage (WRONG - Narrating a Tool Call)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response** ❌:
+{ "thought": "Calling proxy-dispatch now", "action": "shell", "command": "echo \"Calling proxy-dispatch now\"" }
+**Why wrong**: Narrating an MCP tool call is not executing it. Make the function call directly.
 {{else}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Action-Based)
@@ -535,16 +546,14 @@ Arguments: {
 
 ### Example 4: MCP Tool Usage (CORRECT - Direct Function Calling)
 **Prompt**: GOAL: check if CNN has an RSS feed
-**Step 1 - JSON Response**:
-{ "thought": "Search for CNN RSS feed", "action": "think" }
-**Step 1 - Function Call** (separate from JSON):
+**Step 1 - Function Call**:
 \`\`\`
 Function: "find-rss-url"
 Arguments: {
   "query": "CNN"
 }
 \`\`\`
-**Step 2 - After receiving tool result**:
+**Step 2 - After receiving tool result, return JSON**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
 
 ### Example 5: MCP Tool Usage (WRONG - Don't do this)
@@ -552,6 +561,12 @@ Arguments: {
 **Response** ❌:
 { "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
 **Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with the tool name.
+
+### Example 6: MCP Tool Usage (WRONG - Narrating a Tool Call)
+**Prompt**: GOAL: check if CNN has an RSS feed
+**Response** ❌:
+{ "thought": "Calling the tool", "action": "shell", "command": "echo \"Calling the tool\"" }
+**Why wrong**: Narrating a tool call is not executing it. Make the function call directly.
 {{else}}{{#if usetools}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Action-Based)
@@ -570,7 +585,11 @@ Arguments: {
 3. Use "think" action ONLY when you need to plan or reason about alternatives
 4. Use tools and shell commands directly when the task is clear
 5. Work incrementally - execute first, refine later
-6. Provide a valid JSON object in your response. You may include brief explanations before or after, but the JSON itself must be syntactically valid and contain no markdown code fences.{{#if markdown}}
+{{#if usetoolsActual}}
+6. When you are not calling an MCP tool, provide a valid JSON object in your response. When you are calling an MCP tool, do not emit a JSON wrapper; make the function call directly.
+{{else}}
+6. Provide a valid JSON object in your response. You may include brief explanations before or after, but the JSON itself must be syntactically valid and contain no markdown code fences.
+{{/if}}{{#if markdown}}
 7. The JSON response "answer" property should always be in markdown format{{/if}}{{#each rules}}
 {{{this}}}
 {{/each}}
@@ -14521,6 +14540,10 @@ MiniA.prototype.init = function(args) {
       this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
     }
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
+    if (this._useTools === true && toBoolean(args.mcpproxy) === true && toBoolean(args.usejsontool) !== true) {
+      args.usejsontool = true
+      this.fnI("info", "mcpproxy=true with usetools=true: forcing usejsontool=true compatibility mode.")
+    }
 
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
@@ -14811,6 +14834,9 @@ MiniA.prototype.init = function(args) {
       })
 
       this.fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+      if (args.usejsontool === true) {
+        this.fnI("info", `JSON compatibility tool active. Registered MCP tools: ${this.mcpToolNames.join(", ")}`)
+      }
     }
 
     // Provide system prompt instructions
@@ -14876,6 +14902,9 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Available tools and their descriptions are listed above — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one directly. Only use {\"action\":\"list\"} if you need to discover tools not shown above.")
+      if (toBoolean(args.usejsontool) !== true) {
+        baseRules.push("Do not call a tool named 'json' unless it is explicitly listed in the available tools for this request. If no MCP tool is needed, return the normal JSON response directly instead of trying to call a 'json' tool.")
+      }
       baseRules.push("'action=list' and 'action=search' default to format='compact' (name+description only, lowest token cost). Use format='detail' only when you need inputSchema, annotations, or serverInfo. Use action='status' to cheaply check if the tool catalog has changed (compare catalogHash) without re-listing.")
       var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
         ? args.mcpproxythreshold : 0
@@ -14905,6 +14934,9 @@ MiniA.prototype.init = function(args) {
     }
     if (args.useshell === true && this._useTools === true) {
       baseRules.push("When shell and tools are both enabled, always execute shell with action=\"shell\" and top-level command. Do not invoke shell as an MCP tool/function.")
+    }
+    if (this._useToolsActual === true && toBoolean(args.usejsontool) !== true) {
+      baseRules.push("If you need to respond without calling a tool, return the JSON response directly in the assistant message. Do not wrap that payload in a tool call to 'json'.")
     }
     if (this._supportsConsoleUserInput(args) === true) {
       baseRules.push(
@@ -17099,6 +17131,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats.response)
       }
+      if (!(isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope)) && isObject(responseWithStats)) {
+        recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats)
+      }
 
       if (args.debug) {
         var responseToPrint = responseWithStats
@@ -17184,6 +17219,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           rmsg = _mainThinkStrip.cleaned
         }
         msg = this._parseModelJsonResponse(rmsg)
+        if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && (isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope))) {
+          msg = recoveredMsgFromEnvelope
+          recoveredFromEnvelopeApplied = true
+        }
 
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {

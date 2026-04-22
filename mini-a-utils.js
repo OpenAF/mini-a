@@ -3519,17 +3519,17 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page, 'delete' to remove a page (both require wikiaccess=rw), 'lint' to validate wiki health, 'init' to create AGENTS.md and index.md if they don't exist (requires wikiaccess=rw).",
+      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page, 'delete' to remove a page (requires wikiaccess=rw), 'lint' to validate wiki health, and 'init' to create AGENTS.md and index.md if they don't exist (requires wikiaccess=rw).",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
-            description: "Operation: list, read, search, write, lint (aliases: get/view/cat for read; find for search; validate/check for lint; save/put/create/update for write).",
-            enum       : ["list", "read", "search", "write", "lint", "get", "view", "cat", "find", "validate", "check", "save", "put", "create", "update"],
+            description: "Operation: list, read, search, write, delete, lint, init (aliases: get/view/cat for read; find for search; validate/check for lint; save/put/create/update for write; remove/rm for delete).",
+            enum       : ["list", "read", "search", "write", "delete", "lint", "init", "get", "view", "cat", "find", "validate", "check", "save", "put", "create", "update", "remove", "rm"],
             default    : "list"
           },
-          path     : { type: "string", description: "Page path for read/write operations, or path prefix for list." },
+          path     : { type: "string", description: "Page path for read/write/delete operations, or path prefix for list." },
           query    : { type: "string", description: "Search query for operation=search." },
           content  : { type: "string", description: "Raw markdown content for operation=write." },
           limit    : { type: "number", description: "Maximum results for search." },
@@ -3548,6 +3548,10 @@ MiniUtilsTool._metadataByFn = (function() {
           {
             if  : { required: ["operation"], properties: { operation: { enum: ["write", "save", "put", "create", "update"] } } },
             then: { required: ["path", "content"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["delete", "remove", "rm"] } } },
+            then: { required: ["path"] }
           }
         ]
       }
