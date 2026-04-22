@@ -268,7 +268,7 @@ function mainOAFModel(args) {
         case _options.length - 3: // Rename existing definition
             print()
             var _oldName = __miniANormalizeChoiceIndex(askChoose("✏️ Choose a definition to rename: ", _lst.sort().concat([ "🔙 Go back" ]), 8), _lst.length)
-            if (_oldName < _lst.length) {
+            if (_oldName >= 0 && _oldName < _lst.length) {
             var _newName = ask("✨ New name for the definition '" + _lst[_oldName] + "': ")
                 if (isDef(_newName) && _newName.length > 0) {
                     print("💾 Renaming definition '" + _lst[_oldName] + "' to '" + _newName + "'...")
