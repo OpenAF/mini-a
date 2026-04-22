@@ -267,7 +267,7 @@ mini-a:
 - **LLM fallback** (`llm_calls.fallback_to_main`): counts how many times the low-cost model fell back to the main model (shown in summary only when > 0).
 - **Shell blocked** (`actions.shell_commands_blocked`): counts commands blocked by the ban-list (shown in summary only when > 0).
 - **Average step time** (`performance.avg_step_time_ms`): mean milliseconds per agent step.
-- **Token tracking** (`performance.llm_actual_tokens`, `performance.max_context_tokens`): actual tokens reported by the LLM API and peak context window size.
+- **Token tracking** (`performance.llm_actual_tokens`, `performance.max_context_tokens`): actual tokens reported by the LLM API and peak context window size. Tier counters (`performance.llm_normal_tokens`, `performance.llm_lc_tokens`) fall back to prompt-token estimates when the provider omits usage stats.
 
 **Impact**: More detailed runtime diagnostics for optimizing agent performance, cost, and safety without changing any configuration.
 
