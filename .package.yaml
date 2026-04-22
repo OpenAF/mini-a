@@ -65,6 +65,7 @@ files:
 - CODE_OF_CONDUCT.md
 - CONTRIBUTING.md
 - LICENSE
+- METRICS.md
 - README.md
 - USAGE.md
 - docs/ADAPTIVE-ROUTER.md
@@ -152,8 +153,9 @@ filesHash:
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
+  METRICS.md: 973108b7a1de5d24186508c731bcfde1092abf8f
   README.md: e252aee76b921fcdc1e9b3d18198d14279389dbb
-  USAGE.md: 95e4c598c1d0ea221cf1eef2819b89db7ebb292c
+  USAGE.md: b7ab78f16f9ed256af22989620031ec4e1e635b9
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: f61deadd3ac871db27ee292b840d72b95df2de7a
@@ -162,7 +164,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: 367a4f4a8d7ab736cb79ccf4af456e9b96f7e6bf
+  docs/WHATS-NEW.md: 3d3410ade5111f8ae1bbfd0a174f97dfce14fbd8
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -225,7 +227,7 @@ filesHash:
   mini-a-web.yaml: 5c0bda3725ce92f3e1e924efaf6e580fbb7f57d5
   mini-a-wiki.js: 64426700374d31055bb00f00943617a97b7a6ae9
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: 11f0611111ee6c4ea1a037e8fcc23c02b713dda3
+  mini-a.js: f47e1f26d05e6081f2884d42b24d7f4f149ebca6
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: e650d53bee328014fddb17a30efa1acd97c29912
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
