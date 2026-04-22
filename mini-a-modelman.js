@@ -258,7 +258,7 @@ function mainOAFModel(args) {
         case _options.length - 4: // Export definition
             print()
             var _exportName = __miniANormalizeChoiceIndex(askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]), 8), _lst.length)
-            if (_exportName < _lst.length) {
+            if (_exportName >= 0 && _exportName < _lst.length) {
               var _exportDef = _sec.get(_lst[_exportName], "models")
               print("\n" + ansiColor("FAINT", "─────"))
               print(af.toCSLON(_exportDef))
