@@ -585,7 +585,11 @@ Arguments: {
 3. Use "think" action ONLY when you need to plan or reason about alternatives
 4. Use tools and shell commands directly when the task is clear
 5. Work incrementally - execute first, refine later
-6. Provide a valid JSON object in your response. You may include brief explanations before or after, but the JSON itself must be syntactically valid and contain no markdown code fences.{{#if markdown}}
+{{#if usetoolsActual}}
+6. When you are not calling an MCP tool, provide a valid JSON object in your response. When you are calling an MCP tool, do not emit a JSON wrapper; make the function call directly.
+{{else}}
+6. Provide a valid JSON object in your response. You may include brief explanations before or after, but the JSON itself must be syntactically valid and contain no markdown code fences.
+{{/if}}{{#if markdown}}
 7. The JSON response "answer" property should always be in markdown format{{/if}}{{#each rules}}
 {{{this}}}
 {{/each}}
@@ -14536,6 +14540,10 @@ MiniA.prototype.init = function(args) {
       this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
     }
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
+    if (this._useTools === true && toBoolean(args.mcpproxy) === true && toBoolean(args.usejsontool) !== true) {
+      args.usejsontool = true
+      this.fnI("info", "mcpproxy=true with usetools=true: forcing usejsontool=true compatibility mode.")
+    }
 
     if (isMap(this._oaf_lc_model)) {
       this._use_lc = true
@@ -14826,6 +14834,9 @@ MiniA.prototype.init = function(args) {
       })
 
       this.fnI("done", `Total MCP tools available: ${this.mcpTools.length}`)
+      if (args.usejsontool === true) {
+        this.fnI("info", `JSON compatibility tool active. Registered MCP tools: ${this.mcpToolNames.join(", ")}`)
+      }
     }
 
     // Provide system prompt instructions
@@ -14891,6 +14902,9 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Available tools and their descriptions are listed above — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one directly. Only use {\"action\":\"list\"} if you need to discover tools not shown above.")
+      if (toBoolean(args.usejsontool) !== true) {
+        baseRules.push("Do not call a tool named 'json' unless it is explicitly listed in the available tools for this request. If no MCP tool is needed, return the normal JSON response directly instead of trying to call a 'json' tool.")
+      }
       baseRules.push("'action=list' and 'action=search' default to format='compact' (name+description only, lowest token cost). Use format='detail' only when you need inputSchema, annotations, or serverInfo. Use action='status' to cheaply check if the tool catalog has changed (compare catalogHash) without re-listing.")
       var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
         ? args.mcpproxythreshold : 0
@@ -14920,6 +14934,9 @@ MiniA.prototype.init = function(args) {
     }
     if (args.useshell === true && this._useTools === true) {
       baseRules.push("When shell and tools are both enabled, always execute shell with action=\"shell\" and top-level command. Do not invoke shell as an MCP tool/function.")
+    }
+    if (this._useToolsActual === true && toBoolean(args.usejsontool) !== true) {
+      baseRules.push("If you need to respond without calling a tool, return the JSON response directly in the assistant message. Do not wrap that payload in a tool call to 'json'.")
     }
     if (this._supportsConsoleUserInput(args) === true) {
       baseRules.push(
@@ -17114,6 +17131,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats.response)
       }
+      if (!(isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope)) && isObject(responseWithStats)) {
+        recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats)
+      }
 
       if (args.debug) {
         var responseToPrint = responseWithStats
@@ -17199,6 +17219,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           rmsg = _mainThinkStrip.cleaned
         }
         msg = this._parseModelJsonResponse(rmsg)
+        if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && (isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope))) {
+          msg = recoveredMsgFromEnvelope
+          recoveredFromEnvelopeApplied = true
+        }
 
         // If low-cost LLM produced invalid JSON, retry with main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
