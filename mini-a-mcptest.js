@@ -66,7 +66,7 @@ function normalizeMCPConfigInput(rawConfig) {
 
         var choices = config.map((cfg, idx) => "[" + (idx + 1) + "] " + summarizeMCPConfig(cfg)).concat(["🔙 Cancel"])
         var chosen = normalizeChoiceIndex(askChoose("Select which MCP configuration to test: ", choices, Math.min(choices.length, 10)), config.length)
-        if (chosen >= config.length) return __
+        if (chosen < 0 || chosen >= config.length) return __
         return config[chosen]
     }
 
