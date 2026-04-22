@@ -240,7 +240,7 @@ jobs:
       wikiuseversion1     : toBoolean.isBoolean.default(false)
       wikiignorecertcheck : toBoolean.isBoolean.default(false)
       wikilintstaleddays  : toNumber.isNumber.default(90)
-      label               : isString.default("")
+      label               : isString.default("wiki")
   exec : | #js
     loadLib("mini-a-wiki.js")
 
