@@ -1725,11 +1725,15 @@ try {
       if (isString(normalizedVirtualPath) && Object.prototype.hasOwnProperty.call(virtualFiles, normalizedVirtualPath)) {
         var virtualBody = virtualFiles[normalizedVirtualPath]
         if (!isString(virtualBody)) virtualBody = String(virtualBody || "")
+        logSkillTemplateAccess("accessing virtual skill reference '" + normalizedVirtualPath + "' from '" + templatePath + "'")
         replacement = "\n\n--- Skill reference from " + normalizedVirtualPath + " ---\n" + virtualBody + "\n--- End of " + normalizedVirtualPath + " ---\n"
       } else if (isString(filePath) && filePath.length > 0 && !isAbsoluteOrExternalPath(filePath)) {
         var resolved = canonicalizePath(templateDir + "/" + filePath)
         try {
-          if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) replacement = "@" + resolved
+          if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
+            logSkillTemplateAccess("accessing referenced file '" + resolved + "' from '" + templatePath + "'")
+            replacement = "@" + resolved
+          }
         } catch(ignoreResolvedSkillRefError) { }
       }
 
@@ -1760,6 +1764,7 @@ try {
         includedPaths["virtual:" + normalizedVirtualTarget] = true
         var virtualRefContent = virtualFiles[normalizedVirtualTarget]
         if (!isString(virtualRefContent)) virtualRefContent = String(virtualRefContent || "")
+        logSkillTemplateAccess("accessing virtual markdown reference '" + normalizedVirtualTarget + "' from '" + templatePath + "'")
         includeBlocks.push("\n\n--- Skill reference from " + normalizedVirtualTarget + " ---\n" + virtualRefContent + "\n--- End of " + normalizedVirtualTarget + " ---\n")
         return _
       }
@@ -1770,6 +1775,7 @@ try {
 
       try {
         if (!io.fileExists(resolvedPath) || io.fileInfo(resolvedPath).isFile !== true) return _
+        logSkillTemplateAccess("accessing markdown reference file '" + resolvedPath + "' from '" + templatePath + "'")
         var refContent = io.readFileString(resolvedPath)
         includeBlocks.push("\n\n--- Skill reference from " + cleanTarget + " ---\n" + refContent + "\n--- End of " + cleanTarget + " ---\n")
       } catch(ignoreSkillRefError) { }
@@ -1860,6 +1866,15 @@ try {
     return __miniARenderSkillTemplate(template, parsedArgs)
   }
 
+  function logSkillTemplateAccess(message) {
+    if (!isString(message) || message.trim().length === 0) return
+    try {
+      log("skill: " + message.trim())
+    } catch(ignoreSkillLogError) {
+      try { print("skill: " + message.trim()) } catch(ignoreSkillPrintError) {}
+    }
+  }
+
   function tryExpandInlineSkillInvocation(text) {
     if (!isString(text) || text.length === 0) return { changed: false, text: text }
 
@@ -1897,6 +1912,7 @@ try {
 
         var loadedSkillDoc = loadCustomTemplateDocument(matchedSkillDef)
         if (!isObject(loadedSkillDoc)) throw new Error("Failed to parse template")
+        logSkillTemplateAccess("using template file '" + matchedSkillDef.file + "' for $" + skillName)
         var skillTemplate = isString(loadedSkillDoc.bodyTemplate) ? loadedSkillDoc.bodyTemplate : ""
         var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
         goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, matchedSkillDef)
@@ -4344,6 +4360,7 @@ try {
     try {
       var loadedTemplateDoc = loadCustomTemplateDocument(matchedDef)
       if (!isObject(loadedTemplateDoc)) throw new Error("Failed to parse template")
+      logSkillTemplateAccess("using template file '" + matchedDef.file + "' for " + (inputPrefix === "$" ? "$" : "/") + parsedSlashCommand.name)
       var template = isString(loadedTemplateDoc.bodyTemplate) ? loadedTemplateDoc.bodyTemplate : ""
       var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
       goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
@@ -5336,6 +5353,7 @@ try {
           }
           var _loadedSkillDoc = loadCustomTemplateDocument(_matchedSkillDef)
           if (!isObject(_loadedSkillDoc)) throw new Error("Failed to parse template")
+          logSkillTemplateAccess("using template file '" + _matchedSkillDef.file + "' for $" + parsedSkillCommand.name)
           var skillTemplate = isString(_loadedSkillDoc.bodyTemplate) ? _loadedSkillDoc.bodyTemplate : ""
           var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
           goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, _matchedSkillDef)
@@ -5738,6 +5756,7 @@ try {
           }
           var _loadedTemplateDoc = loadCustomTemplateDocument(_matchedDef)
           if (!isObject(_loadedTemplateDoc)) throw new Error("Failed to parse template")
+          logSkillTemplateAccess("using template file '" + _matchedDef.file + "' for /" + parsedSlashCommand.name)
           var template = isString(_loadedTemplateDoc.bodyTemplate) ? _loadedTemplateDoc.bodyTemplate : ""
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
