@@ -385,6 +385,180 @@ MiniUtilsTool.prototype._renderSkillTemplate = function(template, parsedArgs) {
   return __miniARenderSkillTemplate(template, parsedArgs)
 }
 
+MiniUtilsTool.prototype._normalizeSkillReferencePath = function(rawPath) {
+  if (!isString(rawPath)) return __
+  var normalized = rawPath.trim()
+  if (normalized.length === 0) return __
+  if (normalized.charAt(0) === "<" && normalized.charAt(normalized.length - 1) === ">") {
+    normalized = normalized.substring(1, normalized.length - 1).trim()
+  }
+  return normalized.length > 0 ? normalized : __
+}
+
+MiniUtilsTool.prototype._isAbsoluteOrExternalSkillPath = function(pathValue) {
+  if (!isString(pathValue) || pathValue.length === 0) return false
+  if (pathValue.charAt(0) === "/" || pathValue.charAt(0) === "~") return true
+  if (/^[A-Za-z]:[\\/]/.test(pathValue)) return true
+  if (/^[a-z][a-z0-9+.-]*:/i.test(pathValue)) return true
+  if (pathValue.indexOf("//") === 0) return true
+  return false
+}
+
+MiniUtilsTool.prototype._normalizeSkillVirtualPath = function(rawPath) {
+  if (!isString(rawPath)) return __
+  var normalized = rawPath.trim().replace(/\\/g, "/")
+  if (normalized.length === 0) return __
+  if (normalized.charAt(0) === "<" && normalized.charAt(normalized.length - 1) === ">") normalized = normalized.substring(1, normalized.length - 1).trim()
+  if (normalized.indexOf("./") === 0) normalized = normalized.substring(2)
+  while (normalized.indexOf("//") >= 0) normalized = normalized.replace(/\/\//g, "/")
+  return normalized.length > 0 ? normalized : __
+}
+
+MiniUtilsTool.prototype._recordSkillReference = function(references, seen, ref) {
+  if (!isArray(references) || !isMap(ref)) return
+  var key = (isString(ref.type) ? ref.type : "file") + ":" + (isString(ref.path) ? ref.path : "")
+  if (key === "file:") return
+  if (seen[key]) return
+  seen[key] = true
+  references.push(ref)
+}
+
+MiniUtilsTool.prototype._preprocessSkillTemplateReferences = function(templateText, selected, loadedDoc) {
+  var result = {
+    text: isString(templateText) ? String(templateText) : "",
+    references: []
+  }
+  if (!isString(result.text) || result.text.length === 0) return result
+  if (!isMap(selected) || !isString(selected.templatePath) || selected.templatePath.trim().length === 0) return result
+
+  var templatePath = String(selected.templatePath)
+  var templateDir = templatePath.replace(/[\\\/][^\\\/]+$/, "")
+  if (!isString(templateDir) || templateDir.length === 0) return result
+
+  var virtualFiles = (isObject(loadedDoc) && isObject(loadedDoc.virtualFiles)) ? loadedDoc.virtualFiles : {}
+  var references = []
+  var seen = {}
+  var self = this
+
+  function splitAttachmentToken(rawToken) {
+    var token = isString(rawToken) ? rawToken : ""
+    var suffix = ""
+    while (token.length > 0) {
+      var lastChar = token.charAt(token.length - 1)
+      if (/[,.;:!?)\]}'"]/.test(lastChar)) {
+        suffix = lastChar + suffix
+        token = token.substring(0, token.length - 1)
+        continue
+      }
+      break
+    }
+    return { filePath: token, suffix: suffix }
+  }
+
+  function countImmediateBackslashes(text, position) {
+    if (!isString(text) || !isNumber(position) || position <= 0) return 0
+    var count = 0
+    for (var idx = position - 1; idx >= 0 && text.charAt(idx) === "\\"; idx--) count++
+    return count
+  }
+
+  function canStartInlineShortcut(text, markerPos) {
+    if (!isString(text) || !isNumber(markerPos) || markerPos < 0 || markerPos >= text.length) return false
+    if (markerPos === 0) return true
+    var prevChar = text.charAt(markerPos - 1)
+    if (/\s/.test(prevChar)) return true
+    if (/[\(\[\{<"'`,;:!?]/.test(prevChar)) return true
+    return false
+  }
+
+  var text = result.text
+  var chunks = []
+  var cursor = 0
+  var wsPattern = /\s/
+  while (cursor < text.length) {
+    var atPos = text.indexOf("@", cursor)
+    if (atPos < 0) {
+      chunks.push(text.substring(cursor))
+      break
+    }
+    if (countImmediateBackslashes(text, atPos) > 0 || !canStartInlineShortcut(text, atPos)) {
+      chunks.push(text.substring(cursor, atPos + 1))
+      cursor = atPos + 1
+      continue
+    }
+
+    var endPos = atPos + 1
+    while (endPos < text.length && !wsPattern.test(text.charAt(endPos))) endPos++
+    var rawToken = text.substring(atPos + 1, endPos)
+    var tokenParts = splitAttachmentToken(rawToken)
+    var filePath = self._normalizeSkillReferencePath(tokenParts.filePath)
+    var replacement = "@" + tokenParts.filePath
+    var normalizedVirtualPath = self._normalizeSkillVirtualPath(filePath)
+
+    if (isString(normalizedVirtualPath) && Object.prototype.hasOwnProperty.call(virtualFiles, normalizedVirtualPath)) {
+      var virtualBody = virtualFiles[normalizedVirtualPath]
+      if (!isString(virtualBody)) virtualBody = String(virtualBody || "")
+      self._recordSkillReference(references, seen, { type: "embedded", path: normalizedVirtualPath })
+      replacement = "\n\n--- Skill reference from " + normalizedVirtualPath + " ---\n" + virtualBody + "\n--- End of " + normalizedVirtualPath + " ---\n"
+    } else if (isString(filePath) && filePath.length > 0 && !self._isAbsoluteOrExternalSkillPath(filePath)) {
+      var resolved = String(new java.io.File(templateDir, filePath).getCanonicalPath())
+      try {
+        if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
+          self._recordSkillReference(references, seen, { type: "file", path: resolved, relativePath: filePath })
+          replacement = "@" + resolved
+        }
+      } catch(ignoreResolvedSkillRefError) { }
+    }
+
+    chunks.push(text.substring(cursor, atPos))
+    chunks.push(replacement)
+    if (tokenParts.suffix.length > 0) chunks.push(tokenParts.suffix)
+    cursor = endPos
+  }
+  text = chunks.join("")
+
+  var includedPaths = {}
+  var includeBlocks = []
+  text.replace(/\[[^\]]*\]\(([^)\n]+)\)/g, function(_, targetSpec) {
+    var spec = isString(targetSpec) ? targetSpec.trim() : ""
+    if (spec.length === 0) return _
+    var firstToken = spec.split(/\s+/)[0]
+    var normalizedTarget = self._normalizeSkillReferencePath(firstToken)
+    if (!isString(normalizedTarget) || normalizedTarget.length === 0) return _
+    if (normalizedTarget.charAt(0) === "#") return _
+    if (self._isAbsoluteOrExternalSkillPath(normalizedTarget)) return _
+
+    var cleanTarget = normalizedTarget.split("#")[0].split("?")[0]
+    if (!/\.md$/i.test(cleanTarget)) return _
+    var normalizedVirtualTarget = self._normalizeSkillVirtualPath(cleanTarget)
+    if (isString(normalizedVirtualTarget) && Object.prototype.hasOwnProperty.call(virtualFiles, normalizedVirtualTarget)) {
+      if (Object.prototype.hasOwnProperty.call(includedPaths, "virtual:" + normalizedVirtualTarget)) return _
+      includedPaths["virtual:" + normalizedVirtualTarget] = true
+      var virtualRefContent = virtualFiles[normalizedVirtualTarget]
+      if (!isString(virtualRefContent)) virtualRefContent = String(virtualRefContent || "")
+      self._recordSkillReference(references, seen, { type: "embedded", path: normalizedVirtualTarget })
+      includeBlocks.push("\n\n--- Skill reference from " + normalizedVirtualTarget + " ---\n" + virtualRefContent + "\n--- End of " + normalizedVirtualTarget + " ---\n")
+      return _
+    }
+
+    var resolvedPath = String(new java.io.File(templateDir, cleanTarget).getCanonicalPath())
+    if (Object.prototype.hasOwnProperty.call(includedPaths, resolvedPath)) return _
+    includedPaths[resolvedPath] = true
+    try {
+      if (!io.fileExists(resolvedPath) || io.fileInfo(resolvedPath).isFile !== true) return _
+      var refContent = io.readFileString(resolvedPath)
+      self._recordSkillReference(references, seen, { type: "file", path: resolvedPath, relativePath: cleanTarget })
+      includeBlocks.push("\n\n--- Skill reference from " + cleanTarget + " ---\n" + refContent + "\n--- End of " + cleanTarget + " ---\n")
+    } catch(ignoreSkillRefError) { }
+    return _
+  })
+
+  if (includeBlocks.length > 0) text += includeBlocks.join("")
+  result.text = text
+  result.references = references
+  return result
+}
+
 MiniUtilsTool.prototype._serializeSkillArgv = function(argv) {
   if (!isArray(argv) || argv.length === 0) return ""
   return argv.map(function(value) {
@@ -1254,11 +1428,15 @@ MiniUtilsTool.prototype.skills = function(params) {
       if (!isObject(loadedDoc)) return "[ERROR] Failed to parse skill template: " + selected.name
       var content = isString(loadedDoc.rawContent) ? loadedDoc.rawContent : io.readFileString(selected.templatePath)
       var processedContent = isString(loadedDoc.bodyTemplate) ? loadedDoc.bodyTemplate : ""
+      var referenced = this._preprocessSkillTemplateReferences(processedContent, selected, loadedDoc)
+      var referencedFiles = isMap(referenced) && isArray(referenced.references) ? referenced.references : []
       if (op === "read") {
         if (params.compact === true) {
           return {
             name  : selected.name,
             skillFormat: selected.skillFormat,
+            templatePath: selected.templatePath,
+            referencedFiles: referencedFiles,
             content: content
           }
         }
@@ -1268,6 +1446,8 @@ MiniUtilsTool.prototype.skills = function(params) {
           skillFormat : selected.skillFormat,
           description : selected.description,
           relativePath: selected.relativePath,
+          templatePath: selected.templatePath,
+          referencedFiles: referencedFiles,
           contentLength: isString(content) ? content.length : 0,
           content     : content
         }
@@ -1290,7 +1470,8 @@ MiniUtilsTool.prototype.skills = function(params) {
         return "[ERROR] " + (isMap(parsedArgs) && isString(parsedArgs.error) ? parsedArgs.error : "Invalid skill arguments")
       }
 
-      var rendered = this._renderSkillTemplate(processedContent, parsedArgs)
+      var renderedTemplate = isMap(referenced) && isString(referenced.text) ? referenced.text : processedContent
+      var rendered = this._renderSkillTemplate(renderedTemplate, parsedArgs)
       var invocationSuffix = isString(parsedArgs.raw) && parsedArgs.raw.length > 0 ? " " + parsedArgs.raw : ""
       var skillInvocation = "$" + selected.name + invocationSuffix
       var slashInvocation = "/" + selected.name + invocationSuffix
@@ -1299,12 +1480,16 @@ MiniUtilsTool.prototype.skills = function(params) {
           return {
             name      : selected.name,
             invocation: skillInvocation,
+            templatePath: selected.templatePath,
+            referencedFiles: referencedFiles,
             rendered  : rendered
           }
         }
         return {
-          name    : selected.name,
-          rendered: rendered
+          name           : selected.name,
+          templatePath   : selected.templatePath,
+          referencedFiles: referencedFiles,
+          rendered       : rendered
         }
       }
       return {
@@ -1313,6 +1498,8 @@ MiniUtilsTool.prototype.skills = function(params) {
         skillFormat : selected.skillFormat,
         description : selected.description,
         relativePath: selected.relativePath,
+        templatePath: selected.templatePath,
+        referencedFiles: referencedFiles,
         args        : {
           raw : parsedArgs.raw,
           argv: parsedArgs.argv,

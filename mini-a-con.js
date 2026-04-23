@@ -1669,6 +1669,7 @@ try {
   }
 
   function preprocessSkillTemplateReferences(templateText, templateDef) {
+    lastSkillReferenceFiles = []
     if (!isString(templateText) || templateText.length === 0) return templateText
     if (!isObject(templateDef) || templateDef.sourceCategory !== "skill") return templateText
     if (!isString(templateDef.file) || templateDef.file.trim().length === 0) return templateText
@@ -1725,11 +1726,15 @@ try {
       if (isString(normalizedVirtualPath) && Object.prototype.hasOwnProperty.call(virtualFiles, normalizedVirtualPath)) {
         var virtualBody = virtualFiles[normalizedVirtualPath]
         if (!isString(virtualBody)) virtualBody = String(virtualBody || "")
+        recordSkillReference({ type: "embedded", path: normalizedVirtualPath })
         replacement = "\n\n--- Skill reference from " + normalizedVirtualPath + " ---\n" + virtualBody + "\n--- End of " + normalizedVirtualPath + " ---\n"
       } else if (isString(filePath) && filePath.length > 0 && !isAbsoluteOrExternalPath(filePath)) {
         var resolved = canonicalizePath(templateDir + "/" + filePath)
         try {
-          if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) replacement = "@" + resolved
+          if (io.fileExists(resolved) && io.fileInfo(resolved).isFile === true) {
+            recordSkillReference({ type: "file", path: resolved, relativePath: filePath })
+            replacement = "@" + resolved
+          }
         } catch(ignoreResolvedSkillRefError) { }
       }
 
@@ -1760,6 +1765,7 @@ try {
         includedPaths["virtual:" + normalizedVirtualTarget] = true
         var virtualRefContent = virtualFiles[normalizedVirtualTarget]
         if (!isString(virtualRefContent)) virtualRefContent = String(virtualRefContent || "")
+        recordSkillReference({ type: "embedded", path: normalizedVirtualTarget })
         includeBlocks.push("\n\n--- Skill reference from " + normalizedVirtualTarget + " ---\n" + virtualRefContent + "\n--- End of " + normalizedVirtualTarget + " ---\n")
         return _
       }
@@ -1771,6 +1777,7 @@ try {
       try {
         if (!io.fileExists(resolvedPath) || io.fileInfo(resolvedPath).isFile !== true) return _
         var refContent = io.readFileString(resolvedPath)
+        recordSkillReference({ type: "file", path: resolvedPath, relativePath: cleanTarget })
         includeBlocks.push("\n\n--- Skill reference from " + cleanTarget + " ---\n" + refContent + "\n--- End of " + cleanTarget + " ---\n")
       } catch(ignoreSkillRefError) { }
       return _
@@ -1860,6 +1867,51 @@ try {
     return __miniARenderSkillTemplate(template, parsedArgs)
   }
 
+  var lastSkillReferenceFiles = []
+
+  function getLastSkillReferenceFiles() {
+    return isArray(lastSkillReferenceFiles) ? lastSkillReferenceFiles.slice() : []
+  }
+
+  function recordSkillReference(ref) {
+    if (!isMap(ref)) return
+    if (!isArray(lastSkillReferenceFiles)) lastSkillReferenceFiles = []
+    var key = (isString(ref.type) ? ref.type : "file") + ":" + (isString(ref.path) ? ref.path : "")
+    for (var i = 0; i < lastSkillReferenceFiles.length; i++) {
+      var existing = lastSkillReferenceFiles[i]
+      var existingKey = (isString(existing.type) ? existing.type : "file") + ":" + (isString(existing.path) ? existing.path : "")
+      if (existingKey === key) return
+    }
+    lastSkillReferenceFiles.push(ref)
+  }
+
+  function buildSkillUsage(templateDef, refs) {
+    if (!isMap(templateDef) || templateDef.sourceCategory !== "skill") return __
+    return {
+      name          : isString(templateDef.name) ? templateDef.name : "",
+      templatePath  : templateDef.file,
+      referencedFiles: isArray(refs) ? refs.slice() : []
+    }
+  }
+
+  function logSkillUsage(agent, usage) {
+    if (!isObject(agent) || !isFunction(agent.fnI) || !isMap(usage)) return
+    var skillName = isString(usage.name) && usage.name.length > 0 ? usage.name : "unknown"
+    if (isString(usage.templatePath) && usage.templatePath.length > 0) {
+      agent.fnI("skill", "Skill '" + skillName + "' loaded from " + usage.templatePath)
+    }
+    if (isArray(usage.referencedFiles)) {
+      usage.referencedFiles.forEach(function(ref) {
+        if (!isMap(ref)) return
+        if (ref.type === "embedded" && isString(ref.path)) {
+          agent.fnI("skill", "Skill '" + skillName + "' referenced embedded file " + ref.path)
+          return
+        }
+        if (isString(ref.path)) agent.fnI("skill", "Skill '" + skillName + "' referenced file " + ref.path)
+      })
+    }
+  }
+
   function tryExpandInlineSkillInvocation(text) {
     if (!isString(text) || text.length === 0) return { changed: false, text: text }
 
@@ -1900,11 +1952,12 @@ try {
         var skillTemplate = isString(loadedSkillDoc.bodyTemplate) ? loadedSkillDoc.bodyTemplate : ""
         var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
         goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, matchedSkillDef)
+        var skillUsage = buildSkillUsage(matchedSkillDef, getLastSkillReferenceFiles())
         var prefix = goalText.substring(0, tokenStart)
         var separator = ""
         if (prefix.length > 0 && !/\s$/.test(prefix)) separator = "\n\n"
         var combined = prefix + separator + goalFromSkillTemplate
-        return { changed: true, text: combined }
+        return { changed: true, text: combined, skillUsage: skillUsage }
       } catch (inlineSkillError) {
         printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '$" + skillName + "': " + inlineSkillError, errorColor))
         return { changed: false, text: goalText }
@@ -3624,6 +3677,7 @@ try {
     error  : errorColor,
     warn   : "FG(214)",
     info   : hintColor,
+    skill  : "FG(213)",
     plan   : "FG(135)",
     stream : "RESET",
     planner_stream: "FG(223)"
@@ -4153,7 +4207,7 @@ try {
     } catch(ignorePersistError) { }
   }
 
-  function runGoal(goalText) {
+  function runGoal(goalText, skillUsage) {
     _streamOutputStats.totalChars = 0
     _streamOutputStats.contentChars = 0
     _resetStreamRenderState()
@@ -4190,6 +4244,7 @@ try {
     var stopRequested = false
     try {
       agent.init(_args)
+      logSkillUsage(agent, skillUsage)
       _startActivityCueLoop()
       $tb(function() {
         agentResult = agent.start(_args)
@@ -4347,7 +4402,7 @@ try {
       var template = isString(loadedTemplateDoc.bodyTemplate) ? loadedTemplateDoc.bodyTemplate : ""
       var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
       goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, matchedDef)
-      return runGoal(goalFromTemplate) === true
+      return runGoal(goalFromTemplate, buildSkillUsage(matchedDef, getLastSkillReferenceFiles())) === true
     } catch (templateExecError) {
       var failurePrefix = inputPrefix === "$" ? "$" : "/"
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '" + failurePrefix + parsedSlashCommand.name + "': " + templateExecError, errorColor))
@@ -5339,7 +5394,7 @@ try {
           var skillTemplate = isString(_loadedSkillDoc.bodyTemplate) ? _loadedSkillDoc.bodyTemplate : ""
           var goalFromSkillTemplate = renderCustomSlashTemplate(skillTemplate, parsedSkillArgs)
           goalFromSkillTemplate = preprocessSkillTemplateReferences(goalFromSkillTemplate, _matchedSkillDef)
-          runGoal(goalFromSkillTemplate)
+          runGoal(goalFromSkillTemplate, buildSkillUsage(_matchedSkillDef, getLastSkillReferenceFiles()))
         } catch (skillTemplateExecError) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '$" + parsedSkillCommand.name + "': " + skillTemplateExecError, errorColor))
         }
@@ -5741,7 +5796,7 @@ try {
           var template = isString(_loadedTemplateDoc.bodyTemplate) ? _loadedTemplateDoc.bodyTemplate : ""
           var goalFromTemplate = renderCustomSlashTemplate(template, parsedArgs)
           goalFromTemplate = preprocessSkillTemplateReferences(goalFromTemplate, _matchedDef)
-          runGoal(goalFromTemplate)
+          runGoal(goalFromTemplate, buildSkillUsage(_matchedDef, getLastSkillReferenceFiles()))
         } catch (templateExecError) {
           printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to execute '/" + parsedSlashCommand.name + "': " + templateExecError, errorColor))
         }
@@ -5757,10 +5812,12 @@ try {
       if (more !== __) goalText = goalText + "\n" + more
     }
     var inlineSkillExpansion = tryExpandInlineSkillInvocation(goalText)
+    var inlineSkillUsage = __
     if (isObject(inlineSkillExpansion) && inlineSkillExpansion.changed === true && isString(inlineSkillExpansion.text)) {
       goalText = inlineSkillExpansion.text
+      inlineSkillUsage = inlineSkillExpansion.skillUsage
     }
-    runGoal(goalText)
+    runGoal(goalText, inlineSkillUsage)
   }
 
   finalizeSession("exit")

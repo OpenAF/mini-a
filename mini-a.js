@@ -1468,6 +1468,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "error"    : _e = "❌"; break
   case "libs"     : _e = "📚"; break
   case "info"     : _e = "ℹ️"; break
+  case "skill"    : _e = "🧩"; break
   case "load"     : _e = "📂"; break
   case "warn"     : _e = "⚠️  "; break
   case "stop"     : _e = "🛑"; break
@@ -9595,8 +9596,8 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (isString(args.utilsroot) && args.utilsroot.trim().length > 0) {
       toolOptions.root = args.utilsroot.trim()
     }
-    if (isString(args.extraskills) && args.extraskills.trim().length > 0) {
-      var extraSkillRoots = args.extraskills.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
+    if ((isString(args.extraskills) || args.extraskills instanceof java.lang.String) && String(args.extraskills).trim().length > 0) {
+      var extraSkillRoots = String(args.extraskills).split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
       if (extraSkillRoots.length > 0) toolOptions.skillsroots = extraSkillRoots
     }
     var fileTool = new MiniUtilsTool(toolOptions)
@@ -9900,6 +9901,31 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       return "Running tool '" + name + "'."
     }
 
+    var _logSkillSourceUsage = function(payload, result) {
+      if (!isMap(payload) || !isMap(result)) return
+      var op = _normalizeOp(isDef(payload.operation) ? payload.operation : payload.op)
+      if (op === "use" || op === "expand" || op === "apply") op = "render"
+      if (op === "run") op = "invoke"
+      if (["read", "get", "view", "cat", "render", "invoke"].indexOf(op) < 0) return
+
+      var skillName = isString(result.name) ? result.name : (isString(payload.name) ? payload.name : "")
+      if (isString(result.templatePath) && result.templatePath.length > 0) {
+        parent.fnI("skill", "Skill '" + skillName + "' loaded from " + result.templatePath)
+      }
+      if (isArray(result.referencedFiles)) {
+        result.referencedFiles.forEach(function(ref) {
+          if (!isMap(ref)) return
+          if (ref.type === "embedded" && isString(ref.path)) {
+            parent.fnI("skill", "Skill '" + skillName + "' referenced embedded file " + ref.path)
+            return
+          }
+          if (isString(ref.path)) {
+            parent.fnI("skill", "Skill '" + skillName + "' referenced file " + ref.path)
+          }
+        })
+      }
+    }
+
     methodNames.forEach(function(name) {
       var meta = metadataByFn[name] || {
         name       : name,
@@ -9913,6 +9939,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         try {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           var result = fileTool[name](payload)
+          if (name === "skills") _logSkillSourceUsage(payload, result)
           return formatResponse(result)
         } catch (err) {
           var message = "[ERROR] " + (err && err.message ? err.message : String(err))

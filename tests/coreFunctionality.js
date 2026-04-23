@@ -932,6 +932,43 @@
     ow.test.assert(isDef(enabled.options.fnsMeta.skills), true, "Should expose skills metadata when useskills=true")
   }
 
+  exports.testUtilsMcpSkillsLogsSourceFiles = function() {
+    var rootDir = java.io.File.createTempFile("mini-a-utils-root-", "").getCanonicalPath()
+    var skillsDir = java.io.File.createTempFile("mini-a-skills-", "").getCanonicalPath()
+    io.rm(rootDir)
+    io.rm(skillsDir)
+    io.mkdir(rootDir)
+    io.mkdir(skillsDir)
+    try {
+      var skillDir = skillsDir + java.io.File.separator + "planner"
+      io.mkdir(skillDir)
+      io.writeFileString(skillDir + java.io.File.separator + "context.md", "Context for {{arg1}}")
+      io.writeFileString(skillDir + java.io.File.separator + "SKILL.md", "---\ndescription: Planner\n---\nPlan {{arg1}}\n\n[context](context.md)")
+
+      var events = []
+      var agent = createAgent()
+      agent.fnI = function(event, message) {
+        events.push({ event: event, message: message })
+      }
+
+      var cfg = agent._createUtilsMcpConfig({
+        useutils: true,
+        useskills: true,
+        utilsroot: rootDir,
+        extraskills: skillsDir
+      })
+      ow.test.assert(isMap(cfg) && isMap(cfg.options) && isMap(cfg.options.fns), true, "Should build utils MCP config")
+
+      var response = cfg.options.fns.skills({ operation: "render", name: "planner", argv: ["launch"] })
+      ow.test.assert(isMap(response) && isArray(response.content), true, "Skills MCP render should return content")
+      ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("SKILL.md") >= 0 }), true, "Skills MCP render should log the skill template path")
+      ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("context.md") >= 0 }), true, "Skills MCP render should log referenced files")
+    } finally {
+      io.rm(rootDir)
+      io.rm(skillsDir)
+    }
+  }
+
   exports.testUtilsMcpConsoleOnlyToolsToggle = function() {
     var agent = createAgent()
 

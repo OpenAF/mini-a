@@ -182,6 +182,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testUtilsMcpConsoleOnlyToolsToggle
 
+- name: MiniA Core Tests::UtilsMcpSkillsLogsSourceFiles
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUtilsMcpSkillsLogsSourceFiles
+
 - name: MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -446,6 +451,7 @@ todo:
 - MiniA Core Tests::PromptSnapshotBudgetedPrompt
 - MiniA Core Tests::UtilsMcpSkillsToggle
 - MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle
+- MiniA Core Tests::UtilsMcpSkillsLogsSourceFiles
 - MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization

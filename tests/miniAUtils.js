@@ -644,8 +644,12 @@
       io.writeFileString(skillsDir + java.io.File.separator + "summarize.md", "Summarize {{arg1}} with {{args}}")
       io.mkdir(skillsDir + java.io.File.separator + "planner")
       io.writeFileString(
+        skillsDir + java.io.File.separator + "planner" + java.io.File.separator + "context.md",
+        "Planner reference for {{arg1}}"
+      )
+      io.writeFileString(
         skillsDir + java.io.File.separator + "planner" + java.io.File.separator + "SKILL.md",
-        "---\ndescription: Build a practical plan\n---\nPlan for {{arg1}}"
+        "---\ndescription: Build a practical plan\n---\nPlan for {{arg1}}\n\nSee [context](context.md)"
       )
       io.mkdir(skillsDir + java.io.File.separator + "archived.disabled")
       io.writeFileString(
@@ -669,6 +673,9 @@
       var readResult = tool.skills({ operation: "read", name: "planner" })
       ow.test.assert(isMap(readResult), true, "Skills read should return object")
       ow.test.assert(isString(readResult.content) && readResult.content.indexOf("Plan for") >= 0, true, "Skills read should include template content")
+      ow.test.assert(readResult.templatePath.indexOf("SKILL.md") >= 0, true, "Skills read should include source template path")
+      ow.test.assert(isArray(readResult.referencedFiles) && readResult.referencedFiles.length === 1, true, "Skills read should report referenced files")
+      ow.test.assert(readResult.referencedFiles[0].path.indexOf("context.md") >= 0, true, "Skills read should report referenced file path")
 
       var renderResult = tool.skills({ operation: "render", name: "summarize", args: "\"release notes\" quickly" })
       ow.test.assert(isMap(renderResult), true, "Skills render should return object")
@@ -677,6 +684,7 @@
 
       var useAliasResult = tool.skills({ operation: "use", name: "planner", argv: ["Q1 roadmap"] })
       ow.test.assert(useAliasResult.rendered.indexOf("Q1 roadmap") >= 0, true, "Skills use alias should render with argv")
+      ow.test.assert(useAliasResult.rendered.indexOf("Planner reference for Q1 roadmap") >= 0, true, "Skills render should include markdown references")
 
       var invokeResult = tool.skills({ operation: "invoke", name: "planner", argv: ["Q1 roadmap", "FY26"] })
       ow.test.assert(isMap(invokeResult), true, "Skills invoke should return object")

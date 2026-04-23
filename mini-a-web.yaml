@@ -992,6 +992,7 @@ todo:
               case "error"    : _e = "❌"; break
               case "libs"     : _e = "📚"; break
               case "info"     : _e = "ℹ️"; break
+              case "skill"    : _e = "🧩"; break
               case "load"     : _e = "📂"; break
               case "mcp"      : _e = "🤖"; break
               case "warn"     : _e = "⚠️"; break
@@ -1292,7 +1293,7 @@ todo:
             //break
           } else {
             // Exclude planning (🗺️) messages from the content log; plan panel remains driven by __planState
-            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳") {
+            if (r.event == "👤" || (r.event == "⚙️" && global.__showexecs) || (r.event == "🖥️" && global.__showexecs) || r.event == "🧩" || r.event == "💡" || r.event == "💭" || r.event == "🌀" || r.event == "🛑" || r.event == "⏳") {
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {
@@ -1934,6 +1935,7 @@ jobs:
           case "🖥️":
           case "📚":
           case "ℹ️":
+          case "🧩":
           case "📂":
           case "⚠️":
           case "🛑":
