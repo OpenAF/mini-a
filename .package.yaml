@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260422'
+version: '20260423'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -213,7 +213,7 @@ filesHash:
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
   mcps/mcp-wiki.yaml: 68a6e03368d4efe0276ec4e5d97b5c27a45c920f
   mini-a-common.js: 4401906dcdd3e819a1dd45484e919f985a4ef018
-  mini-a-con.js: 4f6de3ee4d195bc47c39a38bbad5dfedf9193c41
+  mini-a-con.js: 21ba222688762b5b1fdf85b054280ea065a8e556
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 14442f2e611546dc82d7946d910a692c5b4b2ca4
   mini-a-memoryman.js: 85824db86ab0979281affd096549c11a979386d8
@@ -222,12 +222,12 @@ filesHash:
   mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-subtask.js: 976976911a86659d8852992f88357245a1599307
-  mini-a-utils.js: ac8cf003536b40a182cba7cdbca92d3b8e1af3c0
+  mini-a-utils.js: f4ad434124e93b1dad9d60747c4a5d94098fe06e
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 5c0bda3725ce92f3e1e924efaf6e580fbb7f57d5
+  mini-a-web.yaml: 7724385c47e17cbf7bbbdc5fe3c037a13e516d18
   mini-a-wiki.js: 64426700374d31055bb00f00943617a97b7a6ae9
   mini-a-worker.yaml: ae3a2f63726d2502ecc6b3639b671533ae0e172a
-  mini-a.js: f47e1f26d05e6081f2884d42b24d7f4f149ebca6
+  mini-a.js: a7e8fab77eb8488374a0a0f7fe81e160168f3a0e
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: e650d53bee328014fddb17a30efa1acd97c29912
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
