@@ -534,6 +534,12 @@ Arguments: {
 **Response** ❌:
 { "thought": "Calling proxy-dispatch now", "action": "shell", "command": "echo \"Calling proxy-dispatch now\"" }
 **Why wrong**: Narrating an MCP tool call is not executing it. Make the function call directly.
+
+### Example 7: MCP Tool Usage (WRONG - Planning via Think)
+**Prompt**: GOAL: run the systemInfo tool
+**Response** ❌:
+{ "thought": "Invoking the systemInfo tool to retrieve system information.", "action": "think" }
+**Why wrong**: Never use action="think" to describe an MCP tool you intend to call. Make the proxy-dispatch function call immediately — do not think about it first.
 {{else}}
 
 ### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Action-Based)
@@ -542,6 +548,12 @@ Arguments: {
 { "thought": "Search for CNN RSS feed", "action": "proxy-dispatch", "params": {"action": "call", "tool": "find-rss-url", "arguments": {"query": "CNN"}} }
 **After receiving result**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
+
+### Example 5: MCP Tool Usage (WRONG - Planning via Think)
+**Prompt**: GOAL: run the systemInfo tool
+**Response** ❌:
+{ "thought": "Invoking the systemInfo tool to retrieve system information.", "action": "think" }
+**Why wrong**: Never use action="think" to describe an MCP tool you intend to call. Use action="proxy-dispatch" immediately — do not think about it first.
 {{/if}}
 {{else}}
 {{#if usetoolsActual}}
@@ -18252,6 +18264,32 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               runtime.recentSimilarThoughts = [thoughtStr]
             } else {
               global.__mini_a_metrics.similar_thoughts_detected.inc()
+              if (this._useMcpProxy === true) {
+                var _tl = thoughtStr.toLowerCase()
+                var _proxyState = global.__mcpProxyState__
+                var _mentionedTool = __
+                if (isObject(_proxyState) && isMap(_proxyState.toolToConnections)) {
+                  var _toolNames = Object.keys(_proxyState.toolToConnections).filter(function(n) { return n !== "proxy-dispatch" })
+                  for (var _ti = 0; _ti < _toolNames.length; _ti++) {
+                    if (_tl.indexOf(_toolNames[_ti].toLowerCase()) >= 0) {
+                      _mentionedTool = _toolNames[_ti]
+                      break
+                    }
+                  }
+                }
+                if (isDef(_mentionedTool)) {
+                  runtime.context.push(
+                    `[OBS ${stepLabel}] (hint) You are repeatedly planning to call '${_mentionedTool}' but not executing it. ` +
+                    `Stop thinking and make the proxy-dispatch function call now with action="call", tool="${_mentionedTool}".`
+                  )
+                } else {
+                  runtime.context.push(
+                    `[OBS ${stepLabel}] (hint) You are repeatedly thinking about calling an MCP tool without executing it. ` +
+                    `Stop using action="think" and make the proxy-dispatch function call directly.`
+                  )
+                }
+                runtime.stepsWithoutAction++
+              }
             }
           }
 
