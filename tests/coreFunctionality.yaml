@@ -147,6 +147,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSkillPromptEntriesUseHookContextForRanking
 
+- name: MiniA Core Tests::InitialSkillActivationPhrase
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitialSkillActivationMatchesPhraseName
+
+- name: MiniA Core Tests::InitialSkillActivationRuntimeContext
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitialSkillActivationLoadsMatchedSkillIntoRuntimeContext
+
+- name: MiniA Core Tests::InitialSkillActivationDisableModelInvocation
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitialSkillActivationRespectsDisableModelInvocation
+
+- name: MiniA Core Tests::InitialSkillActivationAmbiguous
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitialSkillActivationSkipsAmbiguousRankOnlyMatches
+
 - name: MiniA Core Tests::PromptSnapshotAgentMinimal
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -444,6 +464,10 @@ todo:
 - MiniA Core Tests::SystemPromptBudget
 - MiniA Core Tests::SkillRankingByGoal
 - MiniA Core Tests::SkillRankingByHookContext
+- MiniA Core Tests::InitialSkillActivationPhrase
+- MiniA Core Tests::InitialSkillActivationRuntimeContext
+- MiniA Core Tests::InitialSkillActivationDisableModelInvocation
+- MiniA Core Tests::InitialSkillActivationAmbiguous
 - MiniA Core Tests::PromptSnapshotAgentMinimal
 - MiniA Core Tests::PromptSnapshotAgentVerbose
 - MiniA Core Tests::PromptSnapshotChatbotBalanced

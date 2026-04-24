@@ -502,7 +502,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : useskills
-    desc     : Expose the skills utility tool within Mini Utils MCP
+    desc     : Expose the skills utility tool within Mini Utils MCP; when useutils=false this registers only the skills tool
     example  : "true"
     mandatory: false
     options  : ["true", "false"]

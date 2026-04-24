@@ -227,10 +227,22 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : useskills
-    desc     : Expose the Mini Utils Tool `skills` operation (only when useutils=true)
+    desc     : Expose the Mini Utils Tool `skills` operation; when useutils=false this registers only the skills tool
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : skillmaxautoload
+    desc     : Maximum number of high-confidence matching skills to auto-load into bounded runtime context
+    example  : "1"
+    mandatory: false
+  - name     : skillcontextchars
+    desc     : Maximum characters read from each auto-loaded SKILL.md for runtime context
+    example  : "8000"
+    mandatory: false
+  - name     : skillmanifestchars
+    desc     : Approximate character budget for skill descriptions in the system prompt manifest
+    example  : "1536"
+    mandatory: false
   - name     : utilsroot
     desc     : Root directory for Mini Utils Tool file operations (only when useutils=true)
     example  : "/path/to/project"
@@ -657,6 +669,9 @@ jobs:
         usejsontool    : usejsontool
         useutils       : useutils
         useskills      : useskills
+        skillmaxautoload: skillmaxautoload
+        skillcontextchars: skillcontextchars
+        skillmanifestchars: skillmanifestchars
         usediagrams    : usediagrams
         usemermaid     : usemermaid
         usecharts      : usecharts
@@ -785,6 +800,9 @@ jobs:
       usejsontool    : toBoolean.isBoolean.default(__)
       useutils       : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
+      skillmaxautoload: toNumber.isNumber.default(1)
+      skillcontextchars: toNumber.isNumber.default(8000)
+      skillmanifestchars: toNumber.isNumber.default(1536)
       usediagrams    : toBoolean.isBoolean.default(false)
       usemermaid     : toBoolean.isBoolean.default(false)
       usecharts      : toBoolean.isBoolean.default(false)

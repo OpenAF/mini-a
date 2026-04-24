@@ -102,6 +102,8 @@ var MiniA = function() {
   this._metricschCollecting = false
   this._metricschCreated = false
   this._metricschRegistered = false
+  this._initialSkillActivations = []
+  this._initialSkillActivationKeys = {}
 
   // Escalation history for outcome-based feedback loop (Issue 4)
   this._escalationHistory = []
@@ -9645,6 +9647,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (includeSkillsTool !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "skills" })
     }
+    if (includeSkillsTool === true && args.useutils !== true) {
+      methodNames = methodNames.filter(function(name) { return name === "skills" })
+    }
     if (this._supportsConsoleUserInput(args) !== true) {
       methodNames = methodNames.filter(function(name) { return name !== "userInput" })
       methodNames = methodNames.filter(function(name) { return name !== "showMessage" })
@@ -9670,6 +9675,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       })
     }
 
+    if (methodNames.indexOf("skills") < 0) this._availableSkills = []
     if (methodNames.length === 0) return __
 
     var formatResponse = function(result) {
@@ -11612,6 +11618,212 @@ MiniA.prototype._scoreSkillForPrompt = function(skill, goalText, hookContextText
   return score
 }
 
+MiniA.prototype._normalizeSkillLookupKey = function(text) {
+  if (!isString(text) || text.trim().length === 0) return ""
+  return text.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "")
+}
+
+MiniA.prototype._normalizeSkillLookupPhrase = function(text) {
+  if (!isString(text) || text.trim().length === 0) return ""
+  return text.toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+MiniA.prototype._scoreInitialSkillActivation = function(skill, goalText, hookContextText) {
+  if (!isMap(skill) || !isString(skill.name) || skill.name.length === 0) return { score: 0, reason: "" }
+  var haystack = ((goalText || "") + "\n" + (hookContextText || "")).toLowerCase()
+  if (haystack.trim().length === 0) return { score: 0, reason: "" }
+
+  var nameKey = this._normalizeSkillLookupKey(skill.name)
+  var namePhrase = this._normalizeSkillLookupPhrase(skill.name)
+  var lookupKey = this._normalizeSkillLookupKey(haystack)
+  var lookupPhrase = this._normalizeSkillLookupPhrase(haystack)
+
+  if (nameKey.length === 0) return { score: 0, reason: "" }
+
+  var explicitPatterns = [
+    "$" + nameKey,
+    "/" + nameKey,
+    "$" + namePhrase,
+    "/" + namePhrase
+  ]
+  for (var i = 0; i < explicitPatterns.length; i++) {
+    if (explicitPatterns[i].length > 1 && haystack.indexOf(explicitPatterns[i]) >= 0) {
+      return { score: 120, reason: "explicit" }
+    }
+  }
+
+  if (lookupKey === nameKey || lookupKey.indexOf("-" + nameKey + "-") >= 0 || lookupKey.indexOf(nameKey + "-") === 0 || lookupKey.lastIndexOf("-" + nameKey) === lookupKey.length - nameKey.length - 1) {
+    return { score: 95, reason: "name" }
+  }
+
+  if (namePhrase.length > 0 && (" " + lookupPhrase + " ").indexOf(" " + namePhrase + " ") >= 0) {
+    return { score: 90, reason: "phrase" }
+  }
+
+  return { score: this._scoreSkillForPrompt(skill, goalText, hookContextText), reason: "rank" }
+}
+
+MiniA.prototype._loadSkillFrontMatter = function(skill) {
+  if (!isMap(skill) || !isString(skill.templatePath) || skill.templatePath.length === 0) return {}
+  if (isMap(skill.__miniAFrontMatter)) return skill.__miniAFrontMatter
+  var frontMatter = {}
+  try {
+    var doc = __miniALoadSkillTemplateDocument(skill.templatePath)
+    if (isMap(doc)) {
+      if (isMap(doc.meta)) frontMatter = merge(frontMatter, doc.meta, true)
+      if (isMap(doc.skillData)) frontMatter = merge(frontMatter, doc.skillData, true)
+    }
+  } catch(e) {
+    frontMatter = {}
+  }
+  skill.__miniAFrontMatter = frontMatter
+  return frontMatter
+}
+
+MiniA.prototype._getSkillFrontMatterValue = function(skill, names) {
+  var frontMatter = this._loadSkillFrontMatter(skill)
+  if (!isMap(frontMatter)) return __
+  var keys = isArray(names) ? names : [ names ]
+  for (var i = 0; i < keys.length; i++) {
+    if (isDef(frontMatter[keys[i]])) return frontMatter[keys[i]]
+  }
+  return __
+}
+
+MiniA.prototype._skillDisablesModelInvocation = function(skill) {
+  var value = this._getSkillFrontMatterValue(skill, [ "disable-model-invocation", "disableModelInvocation", "disable_model_invocation" ])
+  if (isUnDef(value)) return false
+  return toBoolean(value) === true
+}
+
+MiniA.prototype._getSkillContextCharLimit = function(skill, fallback) {
+  var limit = isNumber(fallback) && fallback > 0 ? Math.floor(fallback) : 8000
+  var value = this._getSkillFrontMatterValue(skill, [ "max-context-chars", "maxContextChars", "max_context_chars" ])
+  if (isNumber(value) && value > 0) return Math.floor(value)
+  if (isString(value) && value.trim().length > 0) {
+    var parsed = Number(value)
+    if (!isNaN(parsed) && parsed > 0) return Math.floor(parsed)
+  }
+  return limit
+}
+
+MiniA.prototype._selectInitialSkillActivations = function(goalText, hookContextText, options) {
+  options = isMap(options) ? options : {}
+  if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
+  var maxSkills = isNumber(options.maxSkills) && options.maxSkills > 0 ? Math.floor(options.maxSkills) : 1
+  var self = this
+  var candidates = this._availableSkills.map((skill, index) => {
+    var scored = this._scoreInitialSkillActivation(skill, goalText, hookContextText)
+    return {
+      skill : skill,
+      score : scored.score,
+      reason: scored.reason,
+      index : index
+    }
+  }).filter(function(entry) {
+    if (entry.reason !== "explicit" && self._skillDisablesModelInvocation(entry.skill)) return false
+    return entry.score >= 80
+  }).sort(function(a, b) {
+    if (b.score !== a.score) return b.score - a.score
+    var aName = isString(a.skill && a.skill.name) ? a.skill.name : ""
+    var bName = isString(b.skill && b.skill.name) ? b.skill.name : ""
+    var cmp = aName.localeCompare(bName)
+    if (cmp !== 0) return cmp
+    return a.index - b.index
+  })
+
+  if (candidates.length === 0) return []
+  var selected = []
+  var best = candidates[0]
+  selected.push(best)
+  for (var i = 1; i < candidates.length && selected.length < maxSkills; i++) {
+    if (candidates[i].reason === "explicit" || (best.score - candidates[i].score) >= 15) {
+      selected.push(candidates[i])
+    }
+  }
+  if (selected.length > 1 && selected[0].reason !== "explicit") {
+    var second = selected[1]
+    if ((selected[0].score - second.score) < 15) selected = [selected[0]]
+  }
+  return selected
+}
+
+MiniA.prototype._loadInitialSkillActivation = function(entry, options) {
+  options = isMap(options) ? options : {}
+  if (!isMap(entry) || !isMap(entry.skill)) return __
+  var skill = entry.skill
+  if (!isString(skill.name) || skill.name.length === 0) return __
+  if (!isString(skill.templatePath) || skill.templatePath.length === 0 || !io.fileExists(skill.templatePath)) return __
+
+  var maxChars = isNumber(options.maxChars) && options.maxChars > 0 ? Math.floor(options.maxChars) : 8000
+  maxChars = this._getSkillContextCharLimit(skill, maxChars)
+  var content = io.readFileString(skill.templatePath)
+  var truncated = false
+  if (isString(content) && content.length > maxChars) {
+    content = content.substring(0, maxChars) + "\n\n[Skill content truncated after " + maxChars + " characters.]"
+    truncated = true
+  }
+
+  return {
+    name        : skill.name,
+    description : skill.description || "",
+    templatePath: skill.templatePath,
+    content     : content,
+    truncated   : truncated,
+    matchReason : entry.reason,
+    score       : entry.score
+  }
+}
+
+MiniA.prototype._buildInitialSkillsRuntimeContext = function(activations) {
+  if (!isArray(activations) || activations.length === 0) return ""
+  var sections = activations.map(function(skill) {
+    return [
+      "Skill: " + skill.name,
+      "Source: " + skill.templatePath,
+      isString(skill.description) && skill.description.length > 0 ? "Description: " + skill.description : "",
+      "",
+      skill.content
+    ].filter(function(line) { return isString(line) }).join("\n")
+  })
+  return "[SKILLS] Auto-loaded skill guidance for this run. Use this task guidance before guessing missing definitions.\n\n" + sections.join("\n\n---\n\n")
+}
+
+MiniA.prototype._activateInitialSkills = function(args) {
+  if (!isMap(args) || toBoolean(args.useskills) !== true) return []
+  if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
+
+  var maxAutoLoad = isNumber(args.skillmaxautoload) && args.skillmaxautoload > 0 ? Math.floor(args.skillmaxautoload) : 1
+  var contextChars = isNumber(args.skillcontextchars) && args.skillcontextchars > 0 ? Math.floor(args.skillcontextchars) : 8000
+  var selected = this._selectInitialSkillActivations(args.goal, args.hookcontext, { maxSkills: maxAutoLoad })
+  if (selected.length === 0) return []
+
+  if (!isObject(this._initialSkillActivationKeys)) this._initialSkillActivationKeys = {}
+  var loaded = []
+  for (var i = 0; i < selected.length; i++) {
+    var entry = selected[i]
+    var name = entry.skill.name
+    if (this._initialSkillActivationKeys[name] === true) continue
+    var loadedSkill = this._loadInitialSkillActivation(entry, { maxChars: contextChars })
+    if (isMap(loadedSkill)) {
+      this._initialSkillActivationKeys[name] = true
+      loaded.push(loadedSkill)
+      this.fnI("skill", "Skill '" + loadedSkill.name + "' auto-loaded from " + loadedSkill.templatePath + " (" + loadedSkill.matchReason + " match)")
+    }
+  }
+  if (loaded.length === 0) return []
+
+  if (!isArray(this._initialSkillActivations)) this._initialSkillActivations = []
+  this._initialSkillActivations = this._initialSkillActivations.concat(loaded)
+  return loaded
+}
+
 MiniA.prototype._rankSkillsForPrompt = function(goalText, hookContextText) {
   if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
   var self = this
@@ -11633,18 +11845,29 @@ MiniA.prototype._rankSkillsForPrompt = function(goalText, hookContextText) {
     })
 }
 
-MiniA.prototype._buildSkillPromptEntries = function(profile, goalText, hookContextText) {
+MiniA.prototype._truncateSkillManifestText = function(value, maxChars) {
+  if (!isString(value)) return ""
+  var text = value.replace(/\s+/g, " ").trim()
+  if (!isNumber(maxChars) || maxChars <= 0 || text.length <= maxChars) return text
+  return text.substring(0, Math.max(0, maxChars - 15)).replace(/\s+\S*$/, "") + " [truncated]"
+}
+
+MiniA.prototype._buildSkillPromptEntries = function(profile, goalText, hookContextText, options) {
   if (!isArray(this._availableSkills) || this._availableSkills.length === 0) return []
+  options = isMap(options) ? options : {}
   var normalized = this._normalizePromptProfile(profile)
   var includeDescription = normalized === "verbose"
   var maxSkills = normalized === "minimal" ? 8 : normalized === "balanced" ? 12 : this._availableSkills.length
+  var manifestChars = isNumber(options.manifestChars) && options.manifestChars > 0 ? Math.floor(options.manifestChars) : 1536
   var rankedSkills = this._rankSkillsForPrompt(goalText, hookContextText)
   var selected = rankedSkills.slice(0, maxSkills).map(function(entry) { return entry.skill })
   if (selected.length === 0) selected = this._availableSkills.slice(0, maxSkills)
+  var perDescriptionChars = Math.max(120, Math.floor(manifestChars / Math.max(1, selected.length)))
+  var self = this
   return selected.map(function(s) {
     return {
       name              : s.name,
-      description       : s.description,
+      description       : self._truncateSkillManifestText(s.description, perDescriptionChars),
       includeDescription: includeDescription
     }
   })
@@ -14165,6 +14388,9 @@ MiniA.prototype.init = function(args) {
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
+      { name: "skillmaxautoload", type: "number", default: 1 },
+      { name: "skillcontextchars", type: "number", default: 8000 },
+      { name: "skillmanifestchars", type: "number", default: 1536 },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
       { name: "usetoolslc", type: "boolean", default: false },
@@ -14208,7 +14434,9 @@ MiniA.prototype.init = function(args) {
     args.usetoolslc = _$(toBoolean(args.usetoolslc), "args.usetoolslc").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
-    if (args.useskills === true) args.useutils = true
+    args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
+    args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
+    args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
     args.usediagrams = _$(toBoolean(args.usediagrams), "args.usediagrams").isBoolean().default(false)
     args.usecharts = _$(toBoolean(args.usecharts), "args.usecharts").isBoolean().default(false)
     args.useascii = _$(toBoolean(args.useascii), "args.useascii").isBoolean().default(false)
@@ -14680,7 +14908,7 @@ MiniA.prototype.init = function(args) {
         aggregatedMcpConfigs = aggregatedMcpConfigs.concat(parsedMcpConfigs)
       }
 
-      if (args.useutils === true) {
+      if (args.useutils === true || args.useskills === true) {
         var utilsMcpConfig = this._createUtilsMcpConfig(args)
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
       }
@@ -14896,6 +15124,8 @@ MiniA.prototype.init = function(args) {
 
     if (this._isStructuredOutputFormat(args.format)) rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
+    this._activateInitialSkills(args)
+
     // Programmatic tool calling — start HTTP bridge server when mcpprogcall=true
     if (args.mcpprogcall === true && isUnDef(this._progCallServer)) {
       if (args.useshell !== true) {
@@ -15097,7 +15327,9 @@ MiniA.prototype.init = function(args) {
       }))
       var promptActionsList = this._useTools ? "" : this.mcpTools.map(r => r.name).join(" | ")
       var actionsWordNumber = this._numberInWords(1 + (this._useTools ? 0 : this.mcpTools.length))
-      var skillPromptEntries = this._buildSkillPromptEntries(promptProfile, args.goal, args.hookcontext)
+      var skillPromptEntries = this._buildSkillPromptEntries(promptProfile, args.goal, args.hookcontext, {
+        manifestChars: args.skillmanifestchars
+      })
 
       this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
@@ -15211,7 +15443,7 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * - usetools (boolean, default=false): Register MCP tools directly on the model instead of expanding the prompt with schemas.
  * - toolfallback (boolean, default=false): When usetools=true, automatically retry in action-based mode if the model emits malformed pseudo tool-call JSON instead of real tool calls.
  * - useutils (boolean, default=false): Auto-register the Mini Utils Tool utilities as an MCP dummy server.
- * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP (only when useutils=true).
+ * - useskills (boolean, default=false): Expose the `skills` utility tool within Mini Utils MCP; when useutils=false only the skills tool is registered.
  * - utilsroot (string, optional): Root directory for Mini Utils Tool file operations (only when useutils=true).
  * - utilsallow (string, optional): Comma-separated allowlist of Mini Utils MCP tool names to expose.
  * - utilsdeny (string, optional): Comma-separated denylist of Mini Utils MCP tool names to hide; applied after utilsallow.
@@ -15412,6 +15644,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
+      { name: "skillmaxautoload", type: "number", default: 1 },
+      { name: "skillcontextchars", type: "number", default: 8000 },
+      { name: "skillmanifestchars", type: "number", default: 1536 },
       { name: "mini-a-docs", type: "boolean", default: false },
       { name: "usemath", type: "boolean", default: false },
       { name: "usejsontool", type: "boolean", default: __ },
@@ -15464,6 +15699,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.toolfallback = _$(toBoolean(args.toolfallback), "args.toolfallback").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
+    args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
+    args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usemath = _$(toBoolean(args.usemath), "args.usemath").isBoolean().default(false)
     args.usesvg = _$(toBoolean(args.usesvg), "args.usesvg").isBoolean().default(false)
@@ -15892,10 +16130,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (oldContext.length > 0) {
+          var preservedSkillsContext = runtime.context.filter(function(entry) {
+            return isString(entry) && entry.indexOf("[SKILLS]") === 0
+          })
           this.fnI("summarize", `Summarizing conversation history...`)
           global.__mini_a_metrics.context_summarizations.inc()
           var summarizedOld = summarize(oldContext.join("\n"))
           runtime.context = [`[SUMMARY] Previous context: ${summarizedOld}`].concat(recentContext)
+          preservedSkillsContext.forEach(function(entry) {
+            if (runtime.context.indexOf(entry) < 0) runtime.context.splice(Math.min(1, runtime.context.length), 0, entry)
+          })
           var errorSummaryEntry = this._renderErrorHistory(runtime)
           if (isString(errorSummaryEntry) && errorSummaryEntry.length > 0) {
             if (runtime.context.length === 0 || runtime.context[0].indexOf("[ERROR HISTORY]") !== 0) {
@@ -15979,6 +16223,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (args.debug && isString(args.knowledge) && args.knowledge.length > 0) {
       this.fnI("debug", `Knowledge before init(): ${args.knowledge.substring(0, 100)}... (${args.knowledge.length} chars total)`)
     }
+    this._initialSkillActivations = []
+    this._initialSkillActivationKeys = {}
 
     // Reset initialization flag if knowledge was enriched with plan, to force re-init with updated knowledge
     if (args.knowledgeUpdated === true) {
@@ -16192,6 +16438,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isString(carryoverContext) && carryoverContext.length > 0) {
       runtime.context.push(carryoverContext)
     }
+    var initialSkillsContext = this._buildInitialSkillsRuntimeContext(this._initialSkillActivations)
+    if (isString(initialSkillsContext) && initialSkillsContext.length > 0) {
+      runtime.context.push(initialSkillsContext)
+    }
 
     var optimizeGoalBlock = () => {
       // Strategy: summarize long goals to reduce prompt size while preserving intent
@@ -16311,6 +16561,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return runtime.lastContextTokens
     }
 
+    var isPromptContextAnchor = function(entry) {
+      if (!isString(entry)) return false
+      return entry.indexOf("[SUMMARY]") === 0 || entry.indexOf("[ERROR HISTORY]") === 0 || entry.indexOf("[SKILLS]") === 0
+    }
+
     var selectPromptContext = (availableTokenBudget) => {
       // Strategy: include recent entries + key early entries, compress verbose output, stay within token budget
       availableTokenBudget = isNumber(availableTokenBudget) && availableTokenBudget > 0 ? availableTokenBudget : 2000
@@ -16327,16 +16582,29 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var selectedEntries = []
       var usedTokens = 0
       var compressionApplied = false
+      var includedIndexes = {}
 
-      // Include first entry if it frames the goal/summary
-      if (allEntries.length > 0 && (allEntries[0].indexOf("[SUMMARY]") === 0 || allEntries[0].indexOf("[ERROR HISTORY]") === 0)) {
-        selectedEntries.push(allEntries[0])
-        usedTokens += this._estimateTokens(allEntries[0])
+      var includeEntry = (index, prepend) => {
+        if (includedIndexes[index] === true) return false
+        var entry = allEntries[index]
+        var entryTokens = this._estimateTokens(entry)
+        if (usedTokens + entryTokens > availableTokenBudget) return false
+        if (prepend === true) selectedEntries.unshift(entry)
+        else selectedEntries.push(entry)
+        usedTokens += entryTokens
+        includedIndexes[index] = true
+        return true
+      }
+
+      // Include anchor entries that frame the run, including loaded skills.
+      for (var anchorIndex = 0; anchorIndex < allEntries.length; anchorIndex++) {
+        if (isPromptContextAnchor(allEntries[anchorIndex])) includeEntry(anchorIndex, false)
       }
 
       // Work backwards from end to include recent progress
-      var recentStart = Math.max(1, allEntries.length - keepRecent)
+      var recentStart = Math.max(0, allEntries.length - keepRecent)
       for (var i = allEntries.length - 1; i >= recentStart; i--) {
+        if (includedIndexes[i] === true) continue
         var entry = allEntries[i]
         var entryTokens = this._estimateTokens(entry)
         if (usedTokens + entryTokens <= availableTokenBudget) {

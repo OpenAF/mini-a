@@ -822,6 +822,103 @@
     ow.test.assert(ranked[0].name === "pdf", true, "Hook context should influence skill ranking")
   }
 
+  exports.testInitialSkillActivationMatchesPhraseName = function() {
+    var agent = createAgent()
+    agent._availableSkills = [
+      { name: "humanizer", description: "Rewrite text naturally" },
+      { name: "nuno-function", description: "Describes the nuno function" }
+    ]
+
+    var selected = agent._selectInitialSkillActivations("produce a table using the nuno function", "", { maxSkills: 2 })
+    ow.test.assert(isArray(selected) && selected.length === 1, true, "Phrase-normalized skill names should auto-select one skill")
+    ow.test.assert(selected[0].skill.name === "nuno-function", true, "nuno function should match nuno-function")
+    ow.test.assert(selected[0].reason === "phrase" || selected[0].reason === "name", true, "Match reason should be a high-confidence name or phrase match")
+  }
+
+  exports.testInitialSkillActivationLoadsMatchedSkillIntoRuntimeContext = function() {
+    var skillsDir = java.io.File.createTempFile("mini-a-initial-skills-", "").getCanonicalPath()
+    io.rm(skillsDir)
+    io.mkdir(skillsDir)
+    try {
+      var skillDir = skillsDir + java.io.File.separator + "nuno-function"
+      io.mkdir(skillDir)
+      var skillPath = skillDir + java.io.File.separator + "SKILL.md"
+      io.writeFileString(skillPath, "---\nname: nuno-function\ndescription: Defines nuno\n---\nIf odd, multiply by 3 and add 1.")
+
+      var events = []
+      var agent = createAgent()
+      agent.fnI = function(event, message) {
+        events.push({ event: event, message: message })
+      }
+      agent._availableSkills = [
+        {
+          name: "nuno-function",
+          description: "Defines nuno",
+          templatePath: skillPath,
+          relativePath: "nuno-function/SKILL.md"
+        }
+      ]
+
+      var args = {
+        useskills: true,
+        goal: "apply the nuno function to 1, 2, 3",
+        hookcontext: "",
+        knowledge: ""
+      }
+      var loaded = agent._activateInitialSkills(args)
+      var runtimeContext = agent._buildInitialSkillsRuntimeContext(agent._initialSkillActivations)
+      ow.test.assert(isArray(loaded) && loaded.length === 1, true, "Initial skill activation should load the matching skill")
+      ow.test.assert(args.knowledge === "", true, "Skill activation should not inject full skill content into system knowledge")
+      ow.test.assert(args.knowledgeUpdated !== true, true, "Skill activation should not force system prompt rebuild through knowledge")
+      ow.test.assert(runtimeContext.indexOf("[SKILLS]") === 0, true, "Loaded skill content should be prepared as runtime context")
+      ow.test.assert(runtimeContext.indexOf("If odd, multiply by 3 and add 1") >= 0, true, "Runtime context should contain skill body")
+      ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("auto-loaded") >= 0 }), true, "Skill activation should be logged")
+    } finally {
+      io.rm(skillsDir)
+    }
+  }
+
+  exports.testInitialSkillActivationRespectsDisableModelInvocation = function() {
+    var skillsDir = java.io.File.createTempFile("mini-a-initial-skills-disable-", "").getCanonicalPath()
+    io.rm(skillsDir)
+    io.mkdir(skillsDir)
+    try {
+      var skillDir = skillsDir + java.io.File.separator + "nuno-function"
+      io.mkdir(skillDir)
+      var skillPath = skillDir + java.io.File.separator + "SKILL.md"
+      io.writeFileString(skillPath, "---\nname: nuno-function\ndescription: Defines nuno\ndisable-model-invocation: true\n---\nIf odd, multiply by 3 and add 1.")
+
+      var agent = createAgent()
+      agent._availableSkills = [
+        {
+          name: "nuno-function",
+          description: "Defines nuno",
+          templatePath: skillPath,
+          relativePath: "nuno-function/SKILL.md"
+        }
+      ]
+
+      var inferred = agent._selectInitialSkillActivations("use the nuno function", "", { maxSkills: 1 })
+      ow.test.assert(isArray(inferred) && inferred.length === 0, true, "disable-model-invocation should block inferred auto-loads")
+
+      var explicit = agent._selectInitialSkillActivations("use $nuno-function", "", { maxSkills: 1 })
+      ow.test.assert(isArray(explicit) && explicit.length === 1, true, "Explicit skill references should still auto-load")
+    } finally {
+      io.rm(skillsDir)
+    }
+  }
+
+  exports.testInitialSkillActivationSkipsAmbiguousRankOnlyMatches = function() {
+    var agent = createAgent()
+    agent._availableSkills = [
+      { name: "doc-audit", description: "Audit documents and notes" },
+      { name: "doc-review", description: "Review documents and notes" }
+    ]
+
+    var selected = agent._selectInitialSkillActivations("audit and review these documents", "", { maxSkills: 2 })
+    ow.test.assert(isArray(selected) && selected.length === 0, true, "Rank-only matches should not auto-load ambiguous skills")
+  }
+
   exports.testPromptSnapshotAgentMinimal = function() {
     var agent = createAgent()
     var result = renderAgentPrompt(agent, {
@@ -930,6 +1027,12 @@
     ow.test.assert(isMap(enabled) && isMap(enabled.options), true, "Should build utils MCP config with useskills=true")
     ow.test.assert(isDef(enabled.options.fns.skills), true, "Should expose skills tool when useskills=true")
     ow.test.assert(isDef(enabled.options.fnsMeta.skills), true, "Should expose skills metadata when useskills=true")
+    ow.test.assert(Object.keys(enabled.options.fns).length === 1, true, "Should expose only skills when useutils is not enabled")
+
+    var enabledWithUtils = agent._createUtilsMcpConfig({ useutils: true, useskills: true })
+    ow.test.assert(isMap(enabledWithUtils) && isMap(enabledWithUtils.options), true, "Should build full utils MCP config with useutils=true")
+    ow.test.assert(isDef(enabledWithUtils.options.fns.skills), true, "Should include skills with full utils")
+    ow.test.assert(isDef(enabledWithUtils.options.fns.filesystemQuery), true, "Should keep utility tools when useutils=true")
   }
 
   exports.testUtilsMcpSkillsLogsSourceFiles = function() {

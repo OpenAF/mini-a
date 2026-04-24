@@ -86,7 +86,7 @@ For a full guide to the YAML skill format including schema reference, `refs` sty
 
 Both are invoked with `/<name> ...args...`, and skills also support `$<name> ...args...`. If both directories define the same slash name, the skill template in `~/.openaf-mini-a/skills/` takes precedence over `~/.openaf-mini-a/commands/`.
 
-To load skills from additional directories, pass `extraskills=<path1>,<path2>`. The default skills directory wins on name conflicts. When `useutils=true useskills=true`, the extra paths are also forwarded to the MiniUtilsTool skills operation:
+To load skills from additional directories, pass `extraskills=<path1>,<path2>`. The default skills directory wins on name conflicts. When `useskills=true`, the extra paths are also forwarded to the MiniUtilsTool skills operation:
 
 ```bash
 mini-a extraskills=/path/to/shared-skills,/path/to/project-skills
