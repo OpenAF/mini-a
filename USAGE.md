@@ -221,6 +221,16 @@ mini-a extrahooks=/path/to/my-hooks,/path/to/team-hooks
 
 Where `/path/to/my-hooks/kubectl-readonly.yaml` contains the definition above. Hooks from all directories are merged — the kubectl guard fires alongside any other hooks already loaded from `~/.openaf-mini-a/hooks/`.
 
+**Overriding the base home directory:**
+
+By default, Mini-A reads all configuration (commands, skills, hooks, modes, history, memory) from the `.openaf-mini-a` folder under the user home directory. Pass `homedir=<path>` to use a different base directory instead:
+
+```bash
+mini-a homedir=/opt/shared/mini-a-config goal="..."
+```
+
+This replaces `~` in all `.openaf-mini-a` lookups — custom commands, skills, hooks, modes, agent profiles, history, and memory files all resolve relative to the provided path. The `extracommands`, `extraskills`, and `extrahooks` parameters continue to work as additional directories on top of whichever base is active.
+
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
 - `/compact [n]` — Summarizes older user/assistant messages into a single "Context summary" entry while preserving up to the last `n` exchanges (defaults to 6). System and developer instructions stay untouched. When enough history exists, Mini-A always leaves at least one older entry eligible for summarization. Use this when you want to reclaim tokens but keep the high-level context available to the agent.

@@ -92,6 +92,7 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Skills: `~/.openaf-mini-a/skills/<name>/SKILL.md`, `~/.openaf-mini-a/skills/<name>/SKILL.yaml|yml|json`, or `~/.openaf-mini-a/skills/<name>.md|yaml|yml|json` (`extraskills=<path1>,<path2>`).
 - Hooks: `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` with events `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell` (`extrahooks=<path1>,<path2>`)
 - Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
+- Override the base home directory: `homedir=<path>` (reads `.openaf-mini-a` from `<path>` instead of `~`)
 
 See [USAGE.md](USAGE.md) for full template placeholders, precedence rules, and examples.
 

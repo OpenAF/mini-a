@@ -999,6 +999,7 @@ mini-a mode=mypreset goal="your goal here"
 | `extracommands` | string | | Comma-separated extra directories for custom slash commands |
 | `extraskills` | string | | Comma-separated extra directories for custom skills |
 | `extrahooks` | string | | Comma-separated extra directories for custom hooks |
+| `homedir` | string | | Override the home directory used to locate the `.openaf-mini-a` folder (default: user home) |
 
 **Examples:**
 
@@ -1513,6 +1514,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 - Hook runtime env vars include `MINI_A_GOAL`, `MINI_A_RESULT`, `MINI_A_TOOL`, `MINI_A_TOOL_PARAMS`, `MINI_A_TOOL_RESULT`, `MINI_A_SHELL_COMMAND`, `MINI_A_SHELL_OUTPUT`
 - `failBlocks=true` can stop the associated goal/tool/shell action when a hook fails
 - Use `extrahooks=<path1>,<path2>` to load hooks from additional directories (additive — hooks from all dirs are merged)
+- Use `homedir=<path>` to read the entire `.openaf-mini-a` folder from a different base directory instead of the user home
 
 Example template:
 

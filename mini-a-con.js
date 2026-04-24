@@ -79,6 +79,25 @@ try {
   // Init
   MiniA.applyLauncherEnvDefaults(args)
 
+  // Apply homedir override before any path resolution
+  ;(function() {
+    var _hdArg = ""
+    if (isObject(args)) {
+      Object.keys(args).some(function(key) {
+        if (String(key).toLowerCase() === "homedir") {
+          _hdArg = isString(args[key]) ? args[key].trim() : ""
+          return true
+        }
+        return false
+      })
+    }
+    if (_hdArg.length > 0) {
+      try { _hdArg = String(new java.io.File(_hdArg).getCanonicalPath()) } catch(ignoreHdErr) {}
+      var _hd = _hdArg
+      __gHDir = function() { return _hd }
+    }
+  })()
+
   if (!helpRequested && !cheatsheetRequested && isUnDef(requestedTemplateKind)) {
     (function(args, explicitKeys) {
       if (args.__modeApplied === true) return
@@ -764,7 +783,8 @@ try {
     secpass        : { type: "string", description: "Security password used for protected model config access." },
     extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
     extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
-    extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" }
+    extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" },
+    homedir        : { type: "string", description: "Override the home directory used to locate the .openaf-mini-a folder (default: user home)" }
   }
 
   if (isDef(parameterDefinitions.conversation) && !(io.fileExists(legacyConversationFilePath) && io.fileInfo(legacyConversationFilePath).isDirectory)) parameterDefinitions.conversation.default = legacyConversationFilePath
