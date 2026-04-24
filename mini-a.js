@@ -10093,6 +10093,47 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
         if (isObject(parent._runtime)) {
           parent._runtime.pendingJsonToolPayload = payload
         }
+
+        // In native function-calling mode the GPT library auto-iterates tool_calls
+        // without returning control to mini-a, so pendingJsonToolPayload is never
+        // consumed by the main loop.  Execute embedded shell actions immediately and
+        // return their output so the LLM actually receives the results.
+        if (parent._useToolsActual === true && isMap(payload)) {
+          var runShellEntry = function(entry) {
+            if (!isMap(entry) || entry.action !== "shell") return null
+            var cmd = (entry.command || "").trim()
+            if (!cmd) return null
+            try {
+              var r = parent._runCommand({ command: cmd, readwrite: toBoolean(args.readwrite) })
+              var out = (isObject(r) && isString(r.output)) ? r.output : String(r || "")
+              return "$ " + cmd + "\n" + (out.trim() || "(no output)")
+            } catch(e) {
+              return "$ " + cmd + "\n(error: " + __miniAErrMsg(e) + ")"
+            }
+          }
+
+          var outputs = []
+          if (isString(payload.action) && payload.action === "shell" && isString(payload.command)) {
+            var singleOut = runShellEntry(payload)
+            if (isString(singleOut)) outputs.push(singleOut)
+          } else if (isArray(payload.action)) {
+            var shellEntries = payload.action.filter(function(e) { return isMap(e) && e.action === "shell" })
+            if (payload.parallel === true && shellEntries.length > 1) {
+              var pRes = pForEach(shellEntries, runShellEntry, function(){}, false)
+              if (isArray(pRes)) pRes.forEach(function(r) { if (isString(r)) outputs.push(r) })
+            } else {
+              shellEntries.forEach(function(e) { var r = runShellEntry(e); if (isString(r)) outputs.push(r) })
+            }
+          }
+
+          if (outputs.length > 0) {
+            return {
+              content: [{ type: "text", text: outputs.join("\n\n") }],
+              accepted: true
+            }
+          }
+        }
+
         return {
           content: [{ type: "text", text: "JSON payload accepted." }],
           accepted: true
@@ -14041,7 +14082,7 @@ MiniA.prototype._applyExplicitExternalArgs = function(args, explicitExternalArgs
 MiniA._KNOWN_ARGUMENT_NAMES = (function() {
   var known = {}
   ;[
-    "rpm", "tpm", "rtm", "maxsteps", "knowledge", "chatyouare", "chatyouare", "youare", "youare",
+    "rpm", "tpm", "rtm", "maxsteps", "knowledge", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
     "conversation", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold",

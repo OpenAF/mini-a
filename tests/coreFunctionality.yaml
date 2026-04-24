@@ -422,6 +422,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWarnUnknownArgsAcceptsAdditionalValidParameters
 
+- name: MiniA Core Tests::WebYamlExposesHomeAndSkillParameters
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWebYamlExposesHomeAndSkillParameters
+
 - name: MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -519,4 +524,5 @@ todo:
 - MiniA Core Tests::WarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing
 - MiniA Core Tests::WarnUnknownArgsAcceptsValidRuntimeParameters
 - MiniA Core Tests::WarnUnknownArgsAcceptsAdditionalValidParameters
+- MiniA Core Tests::WebYamlExposesHomeAndSkillParameters
 - MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch

@@ -232,6 +232,10 @@ help:
     desc     : Override the chatbot persona line when chatbotmode=true
     example  : "You are a helpful support assistant."
     mandatory: false
+  - name     : homedir
+    desc     : Override the home directory used to locate the .openaf-mini-a folder
+    example  : "/tmp/mini-a-home"
+    mandatory: false
   - name     : goalprefix
     desc     : Optional prefix automatically added to every goal
     example  : "[web] "
@@ -251,6 +255,18 @@ help:
   - name     : modelval
     desc     : Override OAF_VAL_MODEL for this web server session
     example  : "(type: openai, model: gpt-5-mini, key: '...')"
+    mandatory: false
+  - name     : skillmaxautoload
+    desc     : Maximum number of matching skills to auto-load into runtime context
+    example  : "1"
+    mandatory: false
+  - name     : skillcontextchars
+    desc     : Maximum characters read from each auto-loaded SKILL.md
+    example  : "8000"
+    mandatory: false
+  - name     : skillmanifestchars
+    desc     : Approximate character budget for skill descriptions in the system prompt manifest
+    example  : "1536"
     mandatory: false
   - name     : modellock
     desc     : Lock model tier selection (auto, main or lc)
@@ -1543,11 +1559,15 @@ jobs:
       rules           : isString().default(__)
       youare          : isString().default(__)
       chatyouare      : isString().default(__)
+      homedir         : isString().default(__)
       goalprefix      : isString().default(__)
       libs            : isString().default(__)
       model           : isString().default(__)
       modellc         : isString().default(__)
       modelval        : isString().default(__)
+      skillmaxautoload: toNumber().isNumber().default(1)
+      skillcontextchars: toNumber().isNumber().default(8000)
+      skillmanifestchars: toNumber().isNumber().default(1536)
       modellock       : isString().default(__)
       modelstrategy   : isString().default(__)
       advisormaxuses  : toNumber().isNumber().default(__)
@@ -1711,6 +1731,12 @@ jobs:
     if (isDef(args.valgoal)) {
       if (isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
       delete args.valgoal
+    }
+    if (isString(args.homedir) && args.homedir.trim().length > 0) {
+      var _hdArg = args.homedir.trim()
+      try { _hdArg = String(new java.io.File(_hdArg).getCanonicalPath()) } catch(ignoreHdErr) {}
+      var _hd = _hdArg
+      __gHDir = function() { return _hd }
     }
     if (MiniA.shouldWarnUnknownArgs(args)) {
       MiniA.warnUnknownArgs(args, {

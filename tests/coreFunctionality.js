@@ -2205,6 +2205,7 @@
       planstyle: "legacy",
       state: "(foo: 'bar')",
       secpass: "secret",
+      homedir: "/tmp/mini-a-home",
       __explicitargkeys: {
         shellbatch: true,
         earlystopthreshold: true,
@@ -2212,7 +2213,8 @@
         plancontent: true,
         planstyle: true,
         state: true,
-        secpass: true
+        secpass: true,
+        homedir: true
       }
     }
 
@@ -2222,6 +2224,20 @@
 
     ow.test.assert(unknown.length, 0, "Additional valid runtime parameters should not be reported as unknown")
     ow.test.assert(warnings.length, 0, "Additional valid runtime parameters should not emit warnings")
+  }
+
+  exports.testWebYamlExposesHomeAndSkillParameters = function() {
+    var text = io.readFileString("mini-a-web.yaml")
+    ;[
+      "homedir",
+      "skillmaxautoload",
+      "skillcontextchars",
+      "skillmanifestchars"
+    ].forEach(function(name) {
+      ow.test.assert(text.indexOf("- name     : " + name) >= 0, true, "Web help should expose " + name)
+      ow.test.assert(new RegExp("(^|\\n)\\s+" + name + "\\s*:").test(text), true, "Web Init validation should accept " + name)
+    })
+    ow.test.assert(text.indexOf("__gHDir = function() { return _hd }") >= 0, true, "Web launcher should apply homedir before MiniA init")
   }
 
   exports.testWarnUnknownArgsSuggestsClosestMatch = function() {
