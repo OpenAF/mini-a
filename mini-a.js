@@ -275,7 +275,11 @@ var MiniA = function() {
     wiki_ops_delete: $atomic(0, "long"),
     wiki_ops_lint: $atomic(0, "long"),
     wiki_ops_errors: $atomic(0, "long"),
-    per_tool_stats: {}
+    per_tool_stats: {},
+    autodelegation_triggered: $atomic(0, "long"),
+    startup_subtasks_submitted: $atomic(0, "long"),
+    startup_subtasks_completed: $atomic(0, "long"),
+    startup_subtasks_failed: $atomic(0, "long")
   }
 
   this._SYSTEM_PROMPT = `
@@ -1488,6 +1492,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
   case "progcall" : _e = "📟"; break
+  case "subagent" : _e = "🤝"; break
   case "planner_stream": _e = "💡"; break
   default         : _e = e
   }
@@ -8460,6 +8465,28 @@ MiniA.prototype._persistSessionMemory = function(reason) {
   }
 }
 
+MiniA.prototype._captureForkedContext = function(maxEntries) {
+  var limit = isNumber(maxEntries) && maxEntries > 0 ? maxEntries : 50
+  if (!isObject(this._runtime) || !isArray(this._runtime.context)) return []
+  var ctx = this._runtime.context
+  return ctx.length <= limit ? ctx.slice() : ctx.slice(ctx.length - limit)
+}
+
+MiniA.prototype._buildForkState = function(forkScope) {
+  var scope = isArray(forkScope) ? forkScope : ["memory"]
+  var state = {}
+  if (isObject(this._agentState)) {
+    if (scope.indexOf("memory") >= 0) {
+      if (isObject(this._agentState.workingMemory)) state.workingMemory = jsonParse(stringify(this._agentState.workingMemory, __, ""), __, __, true) || {}
+      if (isObject(this._agentState.workingMemorySession)) state.workingMemorySession = jsonParse(stringify(this._agentState.workingMemorySession, __, ""), __, __, true) || {}
+    }
+    if (scope.indexOf("context") >= 0) {
+      state.forkedContext = this._captureForkedContext(50)
+    }
+  }
+  return state
+}
+
 MiniA.prototype._memoryAppend = function(section, value, meta) {
   if (this._memoryConfig.enabled !== true) return __
   var targetScope = isObject(meta) && isString(meta.memoryScope) ? String(meta.memoryScope).toLowerCase().trim() : __
@@ -8885,6 +8912,32 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
         answer = body
       }
     }
+  }
+
+  // Collect results from any completed startup sub-agents before finalizing
+  if (isArray(this._startupSubtaskIds) && this._startupSubtaskIds.length > 0 && isObject(this._subtaskManager)) {
+    var _harvestMgr = this._subtaskManager
+    var _harvestSelf = this
+    this._startupSubtaskIds.forEach(function(sid) {
+      try {
+        var s = _harvestMgr.status(sid)
+        if (!isMap(s)) return
+        if (s.status === "completed") {
+          var r = _harvestMgr.result(sid)
+          global.__mini_a_metrics.startup_subtasks_completed.inc()
+          if (isString(r.answer) && r.answer.trim().length > 0) {
+            _harvestSelf._memoryAppend("artifacts", "Startup sub-agent '" + (isString(s.goal) ? s.goal.substring(0, 60) : sid) + "' result: " + r.answer.substring(0, 500), {
+              provenance: { source: "startup-subtask", subtaskId: sid }
+            })
+          }
+        } else if (s.status === "failed") {
+          global.__mini_a_metrics.startup_subtasks_failed.inc()
+        } else if (!MiniA._terminalSubtaskStates[s.status]) {
+          try { _harvestMgr.cancel(sid, "Main agent completed") } catch(ignoreCancel) {}
+        }
+      } catch(ignoreHarvestErr) {}
+    })
+    this._startupSubtaskIds = []
   }
 
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
@@ -10351,8 +10404,11 @@ MiniA.prototype._buildDelegationToolDescription = function() {
   }
   var parent = this
   var workerLines = []
-  this._subtaskManager.workers.forEach(function(url) {
-    var profile = parent._subtaskManager._workerProfiles[url]
+  var mgr = parent._subtaskManager
+  if (!isObject(mgr._workerProfiles)) return base + " Workers registered but profiles not yet available."
+  
+  mgr.workers.forEach(function(url) {
+    var profile = mgr._workerProfiles[url]
     if (!isMap(profile) || profile.status !== "ok") return
     var line = "  - " + (isString(profile.name) && profile.name.length > 0 ? profile.name : url)
     if (isString(profile.description) && profile.description.length > 0) line += ": " + profile.description
@@ -10373,10 +10429,10 @@ MiniA.prototype._getDelegationToolDescription = function() {
   var mgr = this._subtaskManager
   var workers = isObject(mgr) && isArray(mgr.workers) ? mgr.workers : []
   var workerKey = workers.map(function(url) {
-    var sig = isObject(mgr._workerProfiles[url]) ? (mgr._workerProfiles[url].signature || "?") : "?"
+    var sig = isObject(mgr) && isObject(mgr._workerProfiles) && isObject(mgr._workerProfiles[url]) ? (mgr._workerProfiles[url].signature || "?") : "?"
     return url + ":" + sig
   }).sort().join("|")
-  var cache = this._delegationDescCache
+  var cache = this._delegationDescCache || {}
   if (isString(cache.description) && cache.description.length > 0 && (now - cache.builtAt) < TTL_MS && cache.workerKey === workerKey) {
     return cache.description
   }
@@ -10410,12 +10466,19 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
           if (isDef(p.maxsteps)) childArgs.maxsteps = Number(p.maxsteps)
           if (isString(p.worker) && p.worker.trim().length > 0) childArgs._workerHint = p.worker.trim()
           if (isArray(p.skills) && p.skills.length > 0) childArgs._requiredSkills = p.skills
-          
+
           var opts = {}
           if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
-          
+
+          var useFork = toBoolean(p.fork) === true
+          if (useFork) {
+            var forkScope = isArray(p.forkscope) ? p.forkscope : (isString(p.forkscope) ? [p.forkscope] : ["memory"])
+            opts.fork = true
+            opts.forkState = parent._buildForkState(forkScope)
+          }
+
           var waitForResult = isDef(p.waitForResult) ? toBoolean(p.waitForResult) : true
-          
+
           var subtaskId = parent._subtaskManager.submitAndRun(goal, childArgs, opts)
           
           // Update metrics
@@ -10535,7 +10598,13 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
     var fnsMeta = {
       "delegate-subtask": {
         name       : "delegate-subtask",
-        description: this._getDelegationToolDescription(),
+        description: (function() {
+          try {
+            return parent._getDelegationToolDescription()
+          } catch(err) {
+            return "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget. No remote workers registered; child agent runs locally."
+          }
+        })(),
         inputSchema: {
           type      : "object",
           properties: {
@@ -10544,7 +10613,9 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
             timeout       : { type: "integer", description: "Deadline in seconds (default 300)." },
             waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." },
             worker        : { type: "string", description: "Optional worker name hint (partial match on name/description/URL) to prefer a specific remote worker." },
-            skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." }
+            skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." },
+            fork          : { type: "boolean", description: "If true, spawn a forked sub-agent that inherits a snapshot of the parent's context. Default: false." },
+            forkscope     : { type: "array", items: { type: "string", enum: ["memory", "context"] }, description: "Which parts of parent context to inherit when fork=true. 'memory' copies working memory (default). 'context' also copies conversation history." }
           },
           required: ["goal"]
         }
@@ -14214,7 +14285,10 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
-    "delegationmaxdepth", "delegationtimeout", "delegationmaxretries", "mcpprogcall", "mcpprogcallport",
+    "delegationmaxdepth", "delegationtimeout", "delegationmaxretries",
+    "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
+    "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes",
+    "mcpprogcall", "mcpprogcallport",
     "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
     "verbose", "readwrite", "debug", "debugfile", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
     "shellbatch", "usetools", "usetoolslc", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
@@ -14251,6 +14325,7 @@ MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
     "exec", "mini-a", "__id", "init", "objid", "execid", "agent",
     "__format", "__interaction_source", "__explicitargkeys", "__unknownargsreported",
     "__modeapplied", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
+    "_autodelegate",
     "knowledgeupdated"
   ].forEach(function(name) {
     var normalized = String(name || "").trim().toLowerCase()
@@ -14580,6 +14655,14 @@ MiniA.prototype.init = function(args) {
       { name: "delegationmaxdepth", type: "number", default: 3 },
       { name: "delegationtimeout", type: "number", default: 300000 },
       { name: "delegationmaxretries", type: "number", default: 2 },
+      { name: "autodelegation", type: "boolean", default: false },
+      { name: "autodelegationthreshold", type: "number", default: 8192 },
+      { name: "autodelegationmaxperstep", type: "number", default: 2 },
+      { name: "noisytools", type: "string", default: "" },
+      { name: "subtasks", type: "string", default: "" },
+      { name: "subtasksfile", type: "string", default: "" },
+      { name: "subtaskssequential", type: "boolean", default: false },
+      { name: "forkstatemaxbytes", type: "number", default: 65536 },
       { name: "mcpprogcall", type: "boolean", default: false },
       { name: "mcpprogcallport", type: "number", default: 0 },
       { name: "mcpprogcallmaxbytes", type: "number", default: 4096 },
@@ -14656,6 +14739,27 @@ MiniA.prototype.init = function(args) {
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usedelegation = _$(toBoolean(args.usedelegation), "args.usedelegation").isBoolean().default(false)
+    args.autodelegation = _$(toBoolean(args.autodelegation), "args.autodelegation").isBoolean().default(false)
+    args.autodelegationthreshold = _$(args.autodelegationthreshold, "args.autodelegationthreshold").isNumber().default(8192)
+    if (args.autodelegationthreshold <= 0) args.autodelegationthreshold = 8192
+    args.autodelegationmaxperstep = _$(args.autodelegationmaxperstep, "args.autodelegationmaxperstep").isNumber().default(2)
+    if (args.autodelegationmaxperstep <= 0) args.autodelegationmaxperstep = 1
+    args.noisytools = _$(args.noisytools, "args.noisytools").isString().default("")
+    args._noisyToolSet = (function() {
+      var set = {}
+      if (isString(args.noisytools) && args.noisytools.trim().length > 0) {
+        args.noisytools.split(",").forEach(function(t) {
+          var n = t.trim().toLowerCase()
+          if (n.length > 0) set[n] = true
+        })
+      }
+      return set
+    })()
+    args.subtasks = _$(args.subtasks, "args.subtasks").isString().default("")
+    args.subtasksfile = _$(args.subtasksfile, "args.subtasksfile").isString().default("")
+    args.subtaskssequential = _$(toBoolean(args.subtaskssequential), "args.subtaskssequential").isBoolean().default(false)
+    args.forkstatemaxbytes = _$(args.forkstatemaxbytes, "args.forkstatemaxbytes").isNumber().default(65536)
+    if (args.forkstatemaxbytes <= 0) args.forkstatemaxbytes = 65536
     args.mcpprogcall = _$(toBoolean(args.mcpprogcall), "args.mcpprogcall").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -14734,8 +14838,9 @@ MiniA.prototype.init = function(args) {
         }
 
         var currentDepth = args._delegationDepth || 0
+        var effectiveMaxConcurrent = args.subtaskssequential === true ? 1 : args.maxconcurrent
         this._subtaskManager = new SubtaskManager(args, {
-          maxConcurrent: args.maxconcurrent,
+          maxConcurrent: effectiveMaxConcurrent,
           defaultDeadlineMs: args.delegationtimeout,
           defaultMaxAttempts: args.delegationmaxretries,
           maxDepth: args.delegationmaxdepth,
@@ -14757,6 +14862,73 @@ MiniA.prototype.init = function(args) {
 
     if (args.usedelegation === true && isNumber(args.workerreg)) {
       this._startWorkerRegistrationServer(args)
+    }
+
+    // Submit pre-specified startup sub-agent tasks
+    if (isObject(this._subtaskManager)) {
+      this._startupSubtaskIds = []
+      var _startupGoals = []
+      if (isString(args.subtasks) && args.subtasks.trim().length > 0) {
+        args.subtasks.split("|").forEach(function(g) {
+          var gt = g.trim()
+          if (gt.length > 0) _startupGoals.push({ goal: gt })
+        })
+      }
+      if (isString(args.subtasksfile) && args.subtasksfile.trim().length > 0) {
+        try {
+          var _sf = io.readFileString(args.subtasksfile.trim())
+          var _parsed = af.fromJSSLON(_sf)
+          if (!isArray(_parsed)) _parsed = af.fromYAML(_sf)
+          if (isArray(_parsed)) {
+            _parsed.forEach(function(entry) {
+              if (isString(entry)) { _startupGoals.push({ goal: entry.trim() }) }
+              else if (isMap(entry) && isString(entry.goal) && entry.goal.trim().length > 0) { _startupGoals.push(entry) }
+            })
+          }
+        } catch(e) {
+          this.fnI("warn", "Failed to load subtasksfile: " + __miniAErrMsg(e))
+        }
+      }
+      var _mgr = this._subtaskManager
+      var _self = this
+      var _startupArgs = args
+      _startupGoals.forEach(function(entry) {
+        try {
+          var childArgs = isMap(entry.args) ? entry.args : {}
+          var taskOpts = {}
+          if (isNumber(entry.timeout)) taskOpts.deadlineMs = entry.timeout * 1000
+          if (toBoolean(entry.fork) === true) {
+            taskOpts.fork = true
+            taskOpts.forkState = { workingMemory: (_startupArgs.usememory && isObject(_self._agentState) ? _self._agentState.workingMemory : __) || {} }
+          }
+          var sid = _mgr.submitAndRun(entry.goal, childArgs, taskOpts)
+          _self._startupSubtaskIds.push(sid)
+          global.__mini_a_metrics.startup_subtasks_submitted.inc()
+          _self.fnI("info", "Startup sub-agent submitted: " + entry.goal.substring(0, 80) + (toBoolean(entry.fork) ? " [fork]" : ""))
+        } catch(e) {
+          _self.fnI("warn", "Failed to submit startup sub-agent task '" + entry.goal.substring(0, 60) + "': " + __miniAErrMsg(e))
+        }
+      })
+      if (_startupGoals.length > 0 && args.subtaskssequential === true) {
+        this.fnI("info", "Waiting for " + _startupGoals.length + " sequential startup sub-agent(s) to complete...")
+        var _self2 = this
+        _startupGoals.forEach(function(entry, i) {
+          var sid = _self2._startupSubtaskIds[i]
+          if (!isString(sid)) return
+          try {
+            var r = _mgr.waitFor(sid, 300000)
+            global.__mini_a_metrics.startup_subtasks_completed.inc()
+            if (isString(r.answer) && r.answer.length > 0) {
+              _self2._memoryAppend("artifacts", "Startup sub-agent '" + entry.goal.substring(0, 60) + "' result: " + r.answer.substring(0, 500), {
+                provenance: { source: "startup-subtask", subtaskId: sid }
+              })
+            }
+          } catch(e) {
+            global.__mini_a_metrics.startup_subtasks_failed.inc()
+            _self2.fnI("warn", "Startup sub-agent task failed: " + __miniAErrMsg(e))
+          }
+        })
+      }
     }
 
     // Set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location by default
@@ -16607,7 +16779,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       lastDedupContextLength  : 0,
       advisorUses             : 0,
       advisorLastStep         : -999,
-      advisorLastReason       : ""
+      advisorLastReason       : "",
+      _autoDelegationThisStep : 0
+    }
+
+    // Restore forked conversation context when this agent is a forked sub-agent
+    if (isObject(this._agentState) && isArray(this._agentState.forkedContext) && this._agentState.forkedContext.length > 0) {
+      runtime.context = this._agentState.forkedContext.slice()
+      delete this._agentState.forkedContext
     }
 
     var carryoverContext = this._buildConversationCarryoverContext(args.goal)
@@ -17061,6 +17240,41 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           })
           if (Object.values(actionCounts).some(count => count >= 3)) {
             global.__mini_a_metrics.action_loops_detected.inc()
+          }
+        }
+
+        // Auto-delegation: if result is noisy, spawn a summarization sub-agent
+        if (!hasError && isObject(parent._subtaskManager) && args.autodelegation === true && args._autoDelegate !== false &&
+            isString(toolName) && toolName !== "delegate-subtask" && toolName !== "subtask-status") {
+          var _isNoisyTool = isMap(args._noisyToolSet) && args._noisyToolSet[toolName.toLowerCase()] === true
+          var _obsSize = isString(observation) ? observation.length : (isDef(rawResult) ? stringify(rawResult, __, "").length : 0)
+          var _autoDelegCap = isNumber(args.autodelegationmaxperstep) ? args.autodelegationmaxperstep : 2
+          if ((_isNoisyTool || _obsSize >= args.autodelegationthreshold) && runtime._autoDelegationThisStep < _autoDelegCap) {
+            runtime._autoDelegationThisStep = (runtime._autoDelegationThisStep || 0) + 1
+            try {
+              var _rawForSummary = isString(observation) ? observation : stringify(rawResult, __, "")
+              if (_rawForSummary.length > 32768) _rawForSummary = _rawForSummary.substring(0, 32768) + "\n...[truncated]"
+              var _goalShort = isString(args.goal) ? args.goal.substring(0, 120) : "the current goal"
+              var _summaryGoal = "Summarize the following tool output for the parent goal: " + _goalShort + ". Output only the key facts, findings, and important details in 2-5 sentences.\n\nTool: " + toolName + "\nOutput:\n" + _rawForSummary
+              var _summaryOpts = { deadlineMs: 30000, maxAttempts: 1 }
+              var _memoryMap = isObject(parent._agentState) ? parent._agentState.workingMemory : __
+              if (args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
+                _summaryOpts.fork = true
+                _summaryOpts.forkState = parent._buildForkState(["memory"])
+              }
+              var _summaryId = parent._subtaskManager.submitAndRun(_summaryGoal, { maxsteps: 5 }, _summaryOpts)
+              global.__mini_a_metrics.autodelegation_triggered.inc()
+              try {
+                var _summaryResult = parent._subtaskManager.waitFor(_summaryId, 30000)
+                if (isString(_summaryResult.answer) && _summaryResult.answer.trim().length > 0) {
+                  observation = "[auto-delegated summary] " + _summaryResult.answer.trim()
+                }
+              } catch(summaryWaitErr) {
+                parent.fnI("warn", "[auto-delegation] Summary sub-agent timeout or error: " + __miniAErrMsg(summaryWaitErr))
+              }
+            } catch(autoDelegErr) {
+              parent.fnI("warn", "[auto-delegation] Failed to spawn summary agent for tool '" + toolName + "': " + __miniAErrMsg(autoDelegErr))
+            }
           }
         }
 
@@ -18187,6 +18401,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       runtime.clearedConsecutiveErrors = false
       runtime.hadErrorThisStep = false
+      runtime._autoDelegationThisStep = 0
 
       // Helper function to check if thoughts are similar
       var isSimilarThought = (thought1, thought2) => {
