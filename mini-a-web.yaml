@@ -1115,6 +1115,11 @@ todo:
                   global._mini_a_web_sseClose(uuid, "stopped")
                 }
               }
+              // subagent start events: server log only, not surfaced in web UI or SSE
+              if (e == "subagent") {
+                log("[" + uuid + "] 🤝 " + m)
+                return
+              }
               global.__res[uuid].push({ event: _e, message: m })
               if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
                 global._mini_a_web_ssePush(uuid, "interaction", { event: _e })

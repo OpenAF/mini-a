@@ -4,10 +4,12 @@
 
 Mini-A supports **delegation** — the ability for a parent agent to spawn child Mini-A agents to handle sub-goals concurrently. This enables hierarchical problem decomposition, parallel execution, and distributed workloads across processes, containers, or hosts.
 
-There are two delegation modes:
+There are four delegation modes / features:
 
 1. **Local Delegation** — A parent Mini-A instance spawns child agents in the same process using async threads (`$doV`)
 2. **Remote Delegation via Worker API** — A headless HTTP API server (`mini-a-worker.yaml`) that accepts goal requests and returns results
+3. **Forked Sub-agents** — Child agents that inherit a snapshot of the parent's working memory and/or conversation history
+4. **Auto-delegation** — Automatic spawning of a summarization sub-agent when a tool result is "noisy" (exceeds a byte threshold or is in the explicit noisy-tool list)
 
 ---
 
@@ -72,7 +74,9 @@ When `usedelegation=true` and `usetools=true`:
   "timeout": 300,
   "waitForResult": true,
   "worker": "data-east",
-  "skills": ["data-analysis"]
+  "skills": ["data-analysis"],
+  "fork": false,
+  "forkscope": ["memory"]
 }
 ```
 
@@ -82,6 +86,8 @@ When `usedelegation=true` and `usetools=true`:
 - `waitForResult` (optional): Block until child completes (default: true)
 - `worker` (optional): Partial name hint to prefer a specific remote worker (matched against name, description, URL)
 - `skills` (optional): Array of required skill IDs or tags — only workers with **all** listed skills are considered (e.g. `["shell"]`, `["time"]`, `["network","tls"]`)
+- `fork` (optional, default `false`): When `true`, the child agent starts with a snapshot of the parent's context (see **Forked Sub-agents** below)
+- `forkscope` (optional, default `["memory"]`): Array controlling what parent state is passed to the fork. Values: `"memory"` (working memory + session memory), `"context"` (last 50 conversation history entries)
 
 > **Shell tasks**: use `skills: ["shell"]` to route to a shell-capable worker. Shell capability is declared by the worker via the `shell` A2A skill (set `shellworker=true` when starting the worker).
 
@@ -126,10 +132,13 @@ The tool description is dynamic — when remote workers are registered their nam
 When delegation is enabled, you can manually delegate tasks from the interactive console:
 
 ```bash
-# Delegate a sub-goal
+# Delegate a sub-goal (fresh context)
 /delegate Summarize the README.md file
 
-# List all subtasks
+# Delegate a forked sub-goal (inherits parent memory + conversation history)
+/delegate fork Summarize the README.md using what you already know about this project
+
+# List all subtasks (forked subtasks show a [fork] badge)
 /subtasks
 
 # Show subtask details
@@ -140,19 +149,27 @@ When delegation is enabled, you can manually delegate tasks from the interactive
 
 # Cancel a running subtask
 /subtask cancel a1b2c3d4
+
+# Undo last exchange and cancel any active subtasks
+/rewind
+
+# Undo last 3 exchanges and cancel active subtasks
+/rewind 3
 ```
 
 Set `showdelegate=true` to display child agent events as separate console lines instead of inline output.
 
 ### Key Behaviors
 
-- **Clean Slate**: Children start with no parent conversation history or state
+- **Clean Slate** (default): Children start with no parent conversation history or state
+- **Forked context** (`fork=true`): Children receive a snapshot of parent working memory and optionally conversation history — see **Part 4: Forked Sub-agents**
 - **Config Inheritance**: Children inherit model config (`OAF_MODEL`, `OAF_LC_MODEL`) but can override specific parameters
-- **Concurrency Control**: Limited by `maxconcurrent` (default 4)
+- **Concurrency Control**: Limited by `maxconcurrent` (default 4); set `subtaskssequential=true` for one-at-a-time execution
 - **Depth Tracking**: Maximum nesting depth enforced (default 3)
 - **Automatic Retry**: Failed subtasks retry up to `maxAttempts` times with knowledge of previous failures
 - **Deadline Enforcement**: Tasks exceeding `deadlineMs` are marked as `timeout`
 - **Event Forwarding**: Child interaction events forwarded to parent with `[subtask:id]` prefix
+- **Auto-delegation guard**: Children never trigger auto-delegation themselves, preventing cascades
 
 ### Example: Parallel Research
 
@@ -644,6 +661,174 @@ mini-a workermode=true onport=8080 apitoken=secret \
 
 ---
 
+## Part 4: Forked Sub-agents
+
+A **forked sub-agent** is a child agent that starts with a snapshot of the parent's context rather than a clean slate. This avoids re-doing research or re-establishing facts the parent has already gathered.
+
+### What is inherited
+
+| `forkscope` value | What is passed to the child |
+|-------------------|-----------------------------|
+| `"memory"` (default) | Working memory snapshot: all sections (`facts`, `decisions`, `evidence`, `risks`, etc.) from both global and session stores |
+| `"context"` | Last 50 `[OBS …]` / `[ACT …]` conversation history entries from the parent's runtime context |
+
+Both can be combined: `forkscope: ["memory", "context"]`.
+
+### How it works
+
+1. The parent captures `_agentState.workingMemory` and optionally `_runtime.context` at fork time
+2. The snapshot is serialized and passed as `args.state` to the child (reusing the existing `state=` deserialization path)
+3. The child's `_initWorkingMemory` seeds from the snapshot — facts, decisions, evidence, etc. are available from step 1
+4. If `forkedContext` was included, it pre-populates `runtime.context` before the child's first LLM call
+5. The child accumulates its own new entries on top of the seeded state
+
+### Payload size control
+
+For remote workers the fork state is transmitted as JSON. Large payloads are automatically trimmed:
+- Oldest conversation history entries (`forkedContext`) are dropped first
+- If still oversized, `workingMemorySession` is dropped
+- Controlled by `forkstatemaxbytes` (default 64 KB)
+
+### Requesting a fork
+
+**Via the `delegate-subtask` tool (LLM-driven):**
+```json
+{
+  "goal": "Summarize findings and write the wiki page",
+  "fork": true,
+  "forkscope": ["memory", "context"]
+}
+```
+
+**Via console:**
+```bash
+/delegate fork Write a summary of everything we have found so far
+```
+
+**Via CLI pre-specified tasks:**
+```yaml
+# scouts.yaml
+- goal: "Check for security issues using existing findings"
+  fork: true
+```
+```bash
+mini-a usedelegation=true subtasksfile=scouts.yaml goal="Security audit"
+```
+
+### Fork scope defaults per trigger
+
+| Trigger | Default `forkscope` | Rationale |
+|---------|---------------------|-----------|
+| Auto-delegation (noisy tool) | `["memory"]` | Narrow summarization task; context history wastes child tokens |
+| `delegate-subtask` with `fork=true` | `["memory"]` | Explicit; add `"context"` if needed |
+| `/delegate fork` console command | `["memory","context"]` | User explicitly wants full fork |
+| CLI `subtasks=` with `fork: true` | `["memory"]` | No live conversation yet at startup |
+
+---
+
+## Part 5: Auto-delegation (Noisy Tools)
+
+Auto-delegation automatically intercepts tool results that are too large or verbose for the parent's context window, replacing the raw observation with a focused summary produced by a sub-agent.
+
+### How it works
+
+1. A tool executes normally in the parent agent
+2. After execution, if the result size ≥ `autodelegationthreshold` **or** the tool name is in `noisytools`, a summarization sub-agent is spawned
+3. Whether the sub-agent is **forked** is decided automatically:
+   - **Forked** (`fork=true`, `["memory"]` scope) when `usememory=true` **and** the parent's working memory is non-empty — the sub-agent inherits what the parent has already learned so it can focus its summary on what is relevant
+   - **Clean slate** otherwise — no overhead from serializing empty state
+4. The sub-agent receives the raw tool output (up to 32 KB) and the parent goal; it answers in 2–5 sentences
+5. The parent's context records `[OBS …] [auto-delegated summary] …` instead of the raw output
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `autodelegation` | `false` | Master toggle. Also requires `usedelegation=true`. |
+| `autodelegationthreshold` | `8192` | Byte length of the observation that triggers auto-delegation. |
+| `autodelegationmaxperstep` | `2` | Cap on auto-delegations per agent step. |
+| `noisytools` | `""` | Comma-separated tool names always delegated regardless of size. |
+
+### Guards
+
+- **Recursion prevention**: `_autoDelegate=false` is set on every child agent; auto-delegation cannot cascade.
+- **Per-step cap**: `autodelegationmaxperstep` prevents a single step with many large tool calls from spawning too many sub-agents.
+- **Error skip**: Auto-delegation is skipped when the tool returned an error.
+- **Short deadline**: Summarization sub-agents get a 30-second deadline (`maxsteps=5`).
+- **Automatic fork decision**: The sub-agent is forked only when `usememory=true` and the parent's working memory is non-empty. When memory is disabled or empty, the sub-agent runs with a clean slate — no serialization overhead for zero benefit.
+
+### Example
+
+```bash
+# Shell output larger than 8KB is automatically summarized
+mini-a usedelegation=true usetools=true useshell=true \
+  autodelegation=true \
+  goal="Run diagnostics on this server and report issues"
+
+# Always summarize shell and web-search results regardless of size
+mini-a usedelegation=true usetools=true useshell=true \
+  autodelegation=true noisytools=shell,web-search \
+  goal="Research and report on cloud pricing"
+
+# Lower the threshold and raise the per-step cap
+mini-a usedelegation=true usetools=true \
+  autodelegation=true autodelegationthreshold=2048 autodelegationmaxperstep=4 \
+  goal="Process multiple large API responses"
+```
+
+---
+
+## Part 6: Pre-specified Startup Tasks
+
+You can register sub-agent goals at startup, before the main agent loop begins. These **parallel scouts** run alongside the main loop and their results are automatically appended to the parent's working memory as `artifacts`.
+
+### How it works
+
+1. At `init()` time, goals from `subtasks=` or `subtasksfile=` are submitted to the SubtaskManager
+2. If `subtaskssequential=false` (default), all scouts run in parallel alongside the main loop
+3. If `subtaskssequential=true`, scouts run one at a time **before** the main loop starts
+4. When the main agent produces its final answer, any completed scout results are harvested into working memory
+
+### Inline tasks
+
+```bash
+# Parallel scouts — pipe-separated goals
+mini-a usedelegation=true usetools=true useshell=true \
+  subtasks="List all TODO comments in src/|Count lines of code|Find all test files" \
+  goal="Give me a project health overview"
+```
+
+### Tasks from file
+
+```yaml
+# scouts.yaml
+- goal: "Count open GitHub issues"
+  timeout: 60
+- goal: "Summarize recent git commits"
+  fork: true
+- goal: "Check if CI is passing"
+  args:
+    maxsteps: 3
+```
+
+```bash
+mini-a usedelegation=true usetools=true \
+  subtasksfile=scouts.yaml \
+  goal="Give project status report"
+```
+
+### Sequential startup tasks
+
+```bash
+# Run scouts one at a time before the main loop
+mini-a usedelegation=true usetools=true \
+  subtaskssequential=true \
+  subtasks="Step 1: gather raw data|Step 2: validate data|Step 3: transform data" \
+  goal="Run the ETL pipeline and report results"
+```
+
+---
+
 ## Security Considerations
 
 ### Authentication
@@ -743,13 +928,13 @@ Check `maxconcurrent=` setting and ensure parent has available slots.
 
 ---
 
-## Limitations (v1)
+## Limitations
 
 - **No webhooks/callbacks**: Polling only for status/result
 - **No Docker isolation**: Future phase
-- **Result size limits**: Not enforced in v1 (may cause memory issues for very large results)
 - **No streaming**: Entire result returned when task completes
 - **In-memory task queue**: Task state does not survive worker restarts
+- **Fork state size**: Very large working memories or long conversation histories may be truncated when sent to remote workers (controlled by `forkstatemaxbytes`)
 
 ---
 
@@ -785,9 +970,13 @@ Mini-A delegation enables:
 
 ✅ **Hierarchical problem decomposition** — Break complex goals into manageable subtasks  
 ✅ **Parallel execution** — Run independent subtasks concurrently  
-✅ **Context isolation** — Each child starts with a clean slate  
+✅ **Context isolation** — Each child starts with a clean slate (default)  
+✅ **Context inheritance** — Forked sub-agents start with a snapshot of parent memory and/or conversation history  
+✅ **Auto-delegation** — Noisy tool results are automatically summarized by a sub-agent before entering the parent context  
+✅ **Startup scouts** — Pre-specified tasks run in parallel with the main loop; results fed into working memory  
 ✅ **Distributed workloads** — Scale across processes/containers/hosts via Worker API  
-✅ **Autonomous delegation** — LLM decides when to delegate  
-✅ **Manual delegation** — Use console commands for interactive control
+✅ **Autonomous delegation** — LLM decides when to delegate, fork, or both  
+✅ **Manual delegation** — Use `/delegate` and `/delegate fork` console commands for interactive control
+✅ **Rewind with cleanup** — `/rewind [n]` undoes the last n exchanges and automatically cancels any pending/running subtasks
 
-Combine local and remote delegation to build sophisticated multi-agent workflows!
+Combine local, remote, and forked delegation to build sophisticated multi-agent workflows!

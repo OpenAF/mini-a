@@ -19,6 +19,8 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Wiki Knowledge Base](#wiki-knowledge-base)
 - [Choosing Knowledge Features](#choosing-knowledge-features)
 - [Mode Presets](#mode-presets)
+- [Delegation](#delegation)
+  - [Sub-agents, Forked Sub-agents & Auto-delegation](#sub-agents-forked-sub-agents--auto-delegation)
 - [Advanced Features](#advanced-features)
   - [Web UI Parameters](#web-ui-parameters)
 - [Rate Limiting & Performance](#rate-limiting--performance)
@@ -1001,6 +1003,26 @@ mini-a mode=mypreset goal="your goal here"
 | `extrahooks` | string | | Comma-separated extra directories for custom hooks |
 | `homedir` | string | | Override the home directory used to locate the `.openaf-mini-a` folder (default: user home) |
 
+### Sub-agents, Forked Sub-agents & Auto-delegation
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `autodelegation` | boolean | `false` | Automatically delegate to a summarization sub-agent when a tool result exceeds `autodelegationthreshold`. Requires `usedelegation=true`. The sub-agent is forked (inherits working memory) only when `usememory=true` and memory is non-empty; otherwise it runs with a clean context. |
+| `autodelegationthreshold` | number | `8192` | Byte size of a tool result that triggers auto-delegation (ignored when `autodelegation=false`). |
+| `autodelegationmaxperstep` | number | `2` | Maximum auto-delegations per agent step; prevents runaway delegation on large result sets. |
+| `noisytools` | string | `""` | Comma-separated tool names always treated as noisy regardless of result size (e.g. `noisytools=shell,web-search`). Always triggers auto-delegation when `autodelegation=true`. |
+| `subtasks` | string | `""` | Pipe-separated (`\|`) goals for sub-agents launched at startup before the main loop. Results are fed into working memory as `artifacts`. Parallel by default. |
+| `subtasksfile` | string | `""` | Path to a YAML/JSON file containing an array of `{goal, fork, args, timeout}` task objects — alternative to inline `subtasks=`. |
+| `subtaskssequential` | boolean | `false` | When `true`, run startup sub-agents (and all delegated subtasks) one at a time instead of in parallel. Sets `maxConcurrent=1` on the SubtaskManager. |
+| `forkstatemaxbytes` | number | `65536` | Maximum bytes of serialized fork state transmitted to a remote worker. Oldest context entries are dropped first if the payload exceeds this limit. |
+
+**Sub-agent vs. Forked sub-agent:**
+
+| Type | Context inherited | When to use |
+|------|-------------------|-------------|
+| **Sub-agent** (default) | Config args only — fresh context | Independent parallel tasks, research scouts |
+| **Forked sub-agent** (`fork=true`) | Working memory + optionally conversation history | Tasks that need parent knowledge to avoid re-doing work |
+
 **Examples:**
 
 ```bash
@@ -1011,6 +1033,29 @@ mini-a usedelegation=true usetools=true goal="Coordinate multiple research tasks
 mini-a usedelegation=true usetools=true \
   workers="http://worker1:8080,http://worker2:8080" \
   apitoken=secret goal="Distribute analysis across workers"
+
+# Auto-delegation: summarize any tool result > 8KB
+mini-a usedelegation=true usetools=true \
+  autodelegation=true goal="Scan large log files and report errors"
+
+# Auto-delegation with explicit noisy tools
+mini-a usedelegation=true usetools=true useshell=true \
+  autodelegation=true noisytools=shell goal="Run diagnostics"
+
+# Pre-specified parallel scout tasks
+mini-a usedelegation=true usetools=true \
+  subtasks="Summarize README.md|List all open TODOs|Find largest source files" \
+  goal="Give an overview of this project"
+
+# Pre-specified tasks from a YAML file
+mini-a usedelegation=true usetools=true \
+  subtasksfile=scouts.yaml goal="Coordinate research"
+
+# Sequential sub-agents (one at a time)
+mini-a usedelegation=true usetools=true \
+  subtaskssequential=true \
+  subtasks="Step 1: gather data|Step 2: clean data|Step 3: analyze" \
+  goal="Run data pipeline"
 
 # Start a worker API server
 mini-a workermode=true onport=8080 apitoken=secret maxconcurrent=8
@@ -1024,13 +1069,6 @@ mini-a workermode=true onport=8080 apitoken=secret \
 
 # Shell-capable worker (auto-advertises "shell" A2A skill)
 mini-a workermode=true onport=8081 apitoken=secret shellworker=true
-
-# Route subtask only to shell-capable workers (LLM uses skills: ["shell"])
-# When the delegate-subtask tool call includes useshell=true, the routing
-# enforces that the selected worker must have declared shell capability.
-mini-a usedelegation=true usetools=true \
-  workers="http://worker1:8080,http://worker2:8081" \
-  apitoken=secret goal="Run shell commands and analyze output"
 ```
 
 ### Console Commands
@@ -1038,10 +1076,12 @@ mini-a usedelegation=true usetools=true \
 | Command | Description |
 |---------|-------------|
 | `/delegate <goal>` | Manually delegate a sub-goal to a child agent |
-| `/subtasks` | List all subtasks with status |
+| `/delegate fork <goal>` | Delegate a forked sub-goal — child inherits parent working memory and conversation history |
+| `/subtasks` | List all subtasks with status (shows `[fork]` badge for forked subtasks) |
 | `/subtask <id>` | Show subtask details |
 | `/subtask result <id>` | Show subtask result |
 | `/subtask cancel <id>` | Cancel a running subtask |
+| `/rewind [n]` | Undo the last n exchanges; automatically cancels any pending/running subtasks |
 
 ### Worker API Endpoints
 
@@ -1480,6 +1520,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/stats wiki` | Show wiki operation statistics (list/read/search/write/lint counts and errors) |
 | `/compact [n]` | Summarize older messages, keep last n exchanges (default: 6) |
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
+| `/rewind [n]` | Undo the last n exchanges and remove them from conversation history (default: 1); cancels any active subtasks |
 | `/last [md]` | Reprint the previous final answer (`md` emits raw Markdown) |
 | `/save <path>` | Save the last final answer to the provided file path |
 | `/cls` | Clear the console screen |

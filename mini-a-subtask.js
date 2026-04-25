@@ -125,6 +125,30 @@ SubtaskManager.prototype._buildChildArgs = function(subtask) {
   mergedArgs.goal = subtask.goal
   mergedArgs._delegationDepth = subtask.depth
   mergedArgs._parentSubtaskId = subtask.parentId
+  // Prevent auto-delegation cascades in child agents
+  mergedArgs._autoDelegate = false
+
+  if (subtask.fork === true && isMap(subtask.forkState)) {
+    var forkStateStr = stringify(subtask.forkState, __, "")
+    var maxBytes = isNumber(this.parentArgs.forkstatemaxbytes) ? this.parentArgs.forkstatemaxbytes : 65536
+    if (forkStateStr.length > maxBytes) {
+      // Truncate oldest forkedContext entries first, then workingMemorySession if still oversized
+      var trimmed = merge({}, subtask.forkState)
+      if (isArray(trimmed.forkedContext) && trimmed.forkedContext.length > 0) {
+        while (trimmed.forkedContext.length > 0) {
+          trimmed.forkedContext.shift()
+          forkStateStr = stringify(trimmed, __, "")
+          if (forkStateStr.length <= maxBytes) break
+        }
+      }
+      if (forkStateStr.length > maxBytes && isObject(trimmed.workingMemorySession)) {
+        delete trimmed.workingMemorySession
+        forkStateStr = stringify(trimmed, __, "")
+      }
+    }
+    mergedArgs.state = forkStateStr
+  }
+
   return mergedArgs
 }
 
@@ -970,19 +994,24 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           },
           contextId: isString(subtask.parentId) ? subtask.parentId : subtask.id,
           metadata: {
-            args: mergedArgs
+            args: mergedArgs,
+            forkState: (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) ? mergedArgs.state : __
           },
           configuration: {
             timeoutSeconds: timeoutSec
           }
         })
       } else {
-        taskResponse = parent._remoteRequest(workerUrl, "/task", {
+        var legacyPayload = {
           goal: subtask.goal,
           args: mergedArgs,
           timeout: timeoutSec,
           metadata: metadata
-        })
+        }
+        if (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) {
+          legacyPayload.forkState = mergedArgs.state
+        }
+        taskResponse = parent._remoteRequest(workerUrl, "/task", legacyPayload)
       }
 
       if (parent.useA2A) {
@@ -1145,7 +1174,9 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     attempt: 0,
     maxAttempts: _$(opts.maxAttempts, "opts.maxAttempts").isNumber().default(this.defaultMaxAttempts),
     depth: depth,
-    metadata: opts.metadata || {}
+    metadata: opts.metadata || {},
+    fork: toBoolean(opts.fork) === true,
+    forkState: (toBoolean(opts.fork) === true && isMap(opts.forkState)) ? opts.forkState : __
   }
   
   this.subtasks[subtaskId] = subtask
@@ -1196,7 +1227,8 @@ SubtaskManager.prototype.start = function(subtaskId) {
   
   // Emit delegation start event
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
-  try { this.interactionFn("delegate", prefix + " Starting sub-goal: " + subtask.goal) } catch(ignoreInteractionErr) {}
+  var _startLabel = subtask.fork === true ? "Starting forked sub-agent" : "Starting sub-agent"
+  try { this.interactionFn("subagent", prefix + " " + _startLabel + ": " + subtask.goal.substring(0, 100)) } catch(ignoreInteractionErr) {}
 
   if (this.remoteDelegation) {
     this._startRemoteSubtask(subtask, prefix)
