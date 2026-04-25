@@ -559,6 +559,23 @@
     ow.test.assert(streamOutput.indexOf("hidden reasoning") < 0, true, "Hidden thinking content should not leak into streamed answer output")
   }
 
+  exports.testRecoverJsonFromStreamChunksAfterIncompleteObjectError = function() {
+    var agent = createAgent()
+    var errorPayload = { error: "Value looks like object, but can't find closing '}' symbol" }
+    var chunks = [
+      "{\"thought\":\"use the tool\",",
+      "\"action\":\"mcp\",\"params\":{\"tool\":\"showMessage\",",
+      "\"arguments\":{\"message\":\"hello\"}}}"
+    ]
+
+    var recovered = agent._recoverJsonFromStreamChunks(chunks, { waitMs: 0 })
+
+    ow.test.assert(agent._isIncompleteJsonObjectErrorPayload(errorPayload), true, "Should recognize incomplete object error payloads")
+    ow.test.assert(isMap(recovered), true, "Should recover complete JSON from accumulated stream chunks")
+    ow.test.assert(recovered.action, "mcp", "Recovered JSON should preserve action")
+    ow.test.assert(recovered.params.tool, "showMessage", "Recovered JSON should preserve nested params")
+  }
+
   exports.testExtractThinkingBlocksReadsProviderThinkingFields = function() {
     var agent = createAgent()
     var blocks = agent._extractThinkingBlocksFromResponse({

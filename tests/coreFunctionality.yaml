@@ -72,6 +72,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testStreamThinkingTagsDoNotEmitCanonicalThoughtEvents
 
+- name: MiniA Core Tests::RecoverJsonFromStreamChunksAfterIncompleteObjectError
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRecoverJsonFromStreamChunksAfterIncompleteObjectError
+
 - name: MiniA Core Tests::ExtractThinkingBlocksReadsProviderThinkingFields
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -454,6 +459,7 @@ todo:
 - MiniA Core Tests::CanonicalThoughtEmitterSeparatesThoughtAndThink
 - MiniA Core Tests::CanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
 - MiniA Core Tests::StreamThinkingTagsDoNotEmitCanonicalThoughtEvents
+- MiniA Core Tests::RecoverJsonFromStreamChunksAfterIncompleteObjectError
 - MiniA Core Tests::ExtractThinkingBlocksReadsProviderThinkingFields
 - MiniA Core Tests::TaskLanePolicyProbeDetection
 - MiniA Core Tests::ConfigureDebugChannel

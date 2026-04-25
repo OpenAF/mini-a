@@ -2290,6 +2290,84 @@ MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jso
   throw new Error("Streaming with stats is not supported by this LLM instance")
 }
 
+MiniA.prototype._isIncompleteJsonObjectErrorPayload = function(payload) {
+  var text = ""
+  if (isString(payload)) {
+    text = payload
+  } else if (isMap(payload)) {
+    if (isString(payload.error)) text += payload.error
+    if (isString(payload.message)) text += (text.length > 0 ? " " : "") + payload.message
+  }
+  if (text.length === 0) return false
+  var lower = text.toLowerCase()
+  return lower.indexOf("value looks like object") >= 0 &&
+    lower.indexOf("can't find closing") >= 0 &&
+    lower.indexOf("}") >= 0
+}
+
+MiniA.prototype._recoverJsonFromStreamChunks = function(streamChunks, opts) {
+  opts = isMap(opts) ? opts : {}
+  var waitMs = isNumber(opts.waitMs) ? opts.waitMs : 0
+  var pollMs = isNumber(opts.pollMs) ? opts.pollMs : 50
+  var started = now()
+  var lastLength = -1
+  var stablePolls = 0
+  var self = this
+
+  var parseBuffered = function() {
+    if (!isArray(streamChunks) || streamChunks.length === 0) return __
+    var text = streamChunks.join("").trim()
+    if (text.length === 0) return __
+
+    var direct = self._parseModelJsonResponse(text)
+    if (isMap(direct) || isArray(direct)) return direct
+
+    var start = -1
+    var openCh = ""
+    var closeCh = ""
+    for (var i = 0; i < text.length; i++) {
+      var ch = text.charAt(i)
+      if (ch === "{") { start = i; openCh = "{"; closeCh = "}"; break }
+      if (ch === "[") { start = i; openCh = "["; closeCh = "]"; break }
+    }
+    if (start < 0) return __
+
+    var depth = 0
+    var inString = false
+    var escaped = false
+    for (var j = start; j < text.length; j++) {
+      var cur = text.charAt(j)
+      if (escaped) { escaped = false; continue }
+      if (cur === "\\") { escaped = true; continue }
+      if (cur === "\"") { inString = !inString; continue }
+      if (inString) continue
+      if (cur === openCh) depth++
+      if (cur === closeCh) depth--
+      if (depth === 0) {
+        var candidate = text.substring(start, j + 1)
+        var parsed = self._parseModelJsonResponse(candidate)
+        if (isMap(parsed) || isArray(parsed)) return parsed
+      }
+    }
+    return __
+  }
+
+  while (true) {
+    var parsed = parseBuffered()
+    if (isMap(parsed) || isArray(parsed)) return parsed
+    if (waitMs <= 0 || now() - started >= waitMs) break
+
+    var currentLength = isArray(streamChunks) ? streamChunks.join("").length : 0
+    if (currentLength === lastLength) stablePolls++
+    else stablePolls = 0
+    lastLength = currentLength
+    if (stablePolls >= 2) break
+    sleep(pollMs, true)
+  }
+
+  return __
+}
+
 MiniA.prototype._shouldDisableStreamingForOllamaToolCallTurn = function(modelConfig, functionCallingActive, structuredOutputExpected) {
   return functionCallingActive === true
     && structuredOutputExpected === true
@@ -8984,6 +9062,42 @@ MiniA.prototype._normalizeToolResult = function(original) {
     }
 }
 
+MiniA.prototype._processDirectDisplayToolResult = function(toolName, original) {
+    if (toolName !== "visualize" || isUnDef(original)) return original
+
+    var payload = __
+    var setCompactPayload = function(compact) {
+        if (isMap(original) && isArray(original.content) && isMap(original.content[0]) && isString(original.content[0].text)) {
+            original.content[0].text = stringify(compact, __, "")
+        } else if (isMap(original)) {
+            Object.keys(original).forEach(function(k) { delete original[k] })
+            Object.keys(compact).forEach(function(k) { original[k] = compact[k] })
+        }
+    }
+
+    if (isMap(original) && isArray(original.content) && isMap(original.content[0]) && isString(original.content[0].text)) {
+        payload = jsonParse(String(original.content[0].text).trim(), __, __, true)
+    } else if (isMap(original)) {
+        payload = original
+    }
+
+    if (!isMap(payload) || payload.operation !== "visualize" || !isString(payload.output)) return original
+
+    var out = payload.output
+    if (out.length > 0) {
+        print("")
+        print(out)
+        print("")
+    }
+
+    var compact = merge({}, payload)
+    delete compact.output
+    compact.displayed = true
+    compact.directDisplay = true
+    setCompactPayload(compact)
+    return original
+}
+
 MiniA.prototype._buildRoutingIntent = function(entry) {
   var e = isMap(entry) ? entry : {}
   var toolName = isString(e.toolName) ? e.toolName : ""
@@ -11460,9 +11574,15 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
     throw new Error(`MCP client for tool '${toolName}' not available.`)
   }
 
+  var callParams = params
+  if (toolName === "visualize" && isMap(params) && params.returnOutput !== true) {
+    callParams = merge({}, params)
+    callParams.returnOutput = true
+  }
+
   var cacheConfig = this._toolCacheSettings[toolName]
   var shouldCache = isObject(cacheConfig) && cacheConfig.enabled === true
-  var cacheKey = shouldCache ? this._buildToolCacheKey(toolName, params) : ""
+  var cacheKey = shouldCache ? this._buildToolCacheKey(toolName, callParams) : ""
 
   if (shouldCache) {
     var cached = this._getToolResultFromCache(cacheKey)
@@ -11500,7 +11620,7 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   try {
     result = this._withExponentialBackoff(function() {
       parent._ensureConnectionInitialized(connectionId)
-      return client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, params) : client.callTool(toolName, params)
+      return client.__miniAOriginalCallTool ? client.__miniAOriginalCallTool(toolName, callParams) : client.callTool(toolName, callParams)
     }, {
       maxAttempts : 3,
       initialDelay: 250,
@@ -11528,6 +11648,9 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
   }
 
   parent._recordCircuitSuccess(connectionId)
+  if (toolName === "visualize" && isMap(params) && params.returnOutput !== true) {
+    result = parent._processDirectDisplayToolResult(toolName, result)
+  }
 
   if (shouldCache) {
     this._storeToolResultInCache(cacheKey, result, cacheConfig.ttl)
@@ -17359,6 +17482,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       var _streamThinkingBuf = []
+      var _streamRawChunks = []
       if (args.usestream) {
         var _baseOnDelta = plannerStreaming && !noJsonPromptFlag
           ? this._createStreamDeltaHandler(args, {
@@ -17372,6 +17496,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             })
             : this._createPlainStreamDeltaHandler(streamIntent === "planner" ? "planner_stream" : "stream")
         onDelta = function(chunk, payload) {
+          if (isString(chunk) && chunk.length > 0) _streamRawChunks.push(chunk)
           _baseOnDelta(chunk, payload)
           // Collect thinking tokens from Ollama reasoning models (message.thinking field)
           if (isMap(payload) && isMap(payload.message) && isString(payload.message.thinking) && payload.message.thinking.length > 0) {
@@ -17539,6 +17664,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       // the accumulated thinking as the response text so JSON parsing can succeed.
       if (isString(rmsg) && rmsg.trim().length === 0 && _streamThinkingBuf.length > 0) {
         rmsg = _streamThinkingBuf.join("")
+      }
+      if (args.usestream === true && this._isIncompleteJsonObjectErrorPayload(rmsg) && _streamRawChunks.length > 0) {
+        var recoveredFromStream = this._recoverJsonFromStreamChunks(_streamRawChunks, { waitMs: 750, pollMs: 50 })
+        if (isMap(recoveredFromStream) || isArray(recoveredFromStream)) {
+          rmsg = recoveredFromStream
+          responseWithStats.response = recoveredFromStream
+          runtime.context.push(`[OBS ${step + 1}] (recover) recovered complete JSON from streaming buffer after incomplete object error payload.`)
+          if (args.debug || args.verbose) {
+            this.fnI("recover", `Step ${step + 1}: recovered complete JSON from streaming buffer after incomplete object error payload.`)
+          }
+        }
       }
       if (args.showthinking) {
         // Use raw field if available (promptJSONWithStatsRaw), else fall back to response (rawPromptWithStats)
