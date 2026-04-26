@@ -2095,8 +2095,8 @@ MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
 
 MiniA.prototype._resolveToolExecutionStepLabel = function(details, toolCtx, runtime) {
   var payload = isObject(details) ? details : {}
-  var context = isObject(toolCtx) ? toolCtx : {}
-  var activeRuntime = isObject(runtime) ? runtime : this._runtime
+  var context = isDef(toolCtx) && toolCtx !== null && isObject(toolCtx) ? toolCtx : {}
+  var activeRuntime = isDef(runtime) && runtime !== null && isObject(runtime) ? runtime : this._runtime
 
   if (isDef(payload.stepLabel) && String(payload.stepLabel).length > 0) return String(payload.stepLabel)
   if (isDef(context.stepLabel) && String(context.stepLabel).length > 0) return String(context.stepLabel)
@@ -2107,8 +2107,9 @@ MiniA.prototype._resolveToolExecutionStepLabel = function(details, toolCtx, runt
 }
 
 MiniA.prototype._shouldFinalizeToolExecutionInHook = function(runtime, currentCtx) {
-  if (!this._useTools || !isObject(runtime)) return false
-  if (isObject(currentCtx) && isDef(currentCtx.stepLabel) && String(currentCtx.stepLabel).length > 0) return false
+  if (!this._useTools || isUnDef(runtime) || runtime === null || !isObject(runtime)) return false
+  var hasCurrentCtx = isDef(currentCtx) && currentCtx !== null && isObject(currentCtx)
+  if (hasCurrentCtx && isDef(currentCtx.stepLabel) && String(currentCtx.stepLabel).length > 0) return false
   return true
 }
 
@@ -2279,8 +2280,8 @@ MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jso
 
   var gptInstance = isFunction(llmInstance.getGPT) ? llmInstance.getGPT() : __
   if (isObject(gptInstance)) {
-    if (isObject(gptInstance.model) && isFunction(gptInstance.model.promptStream) && isFunction(gptInstance.getLastStats)) {
-      var response = gptInstance.model.promptStream(prompt, void 0, void 0, jsonFlag === true, void 0, onDelta)
+    if (isObject(gptInstance.model) && isFunction(gptInstance.model.rawPromptStream) && isFunction(gptInstance.getLastStats)) {
+      var response = gptInstance.model.rawPromptStream(prompt, void 0, void 0, jsonFlag === true, void 0, onDelta)
       return { response: response, stats: gptInstance.getLastStats() }
     }
   }
@@ -15660,7 +15661,8 @@ MiniA.prototype.init = function(args) {
 
                 if (typeof parent._prepareToolExecution === "function") {
                   var currentCtx = parent._runtime && parent._runtime.currentTool
-                  var shouldPrepare = parent._useTools || isUnDef(currentCtx) || isUnDef(currentCtx.stepLabel)
+                  var hasCurrentCtx = isDef(currentCtx) && currentCtx !== null && isObject(currentCtx)
+                  var shouldPrepare = !hasCurrentCtx || isUnDef(currentCtx.stepLabel)
                   if (shouldPrepare) {
                     parent._prepareToolExecution({
                       action: t,
@@ -18279,6 +18281,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (isDef(args.conversation)) {
         // Always store the main LLM conversation for consistency
         this._writeConversationPayload(args.conversation)
+      }
+
+      if (this._useToolsActual === true && runtime.modelToolCallDetected === true) {
+        var nativeToolText = isString(rmsg) ? rmsg : this._extractPrimaryResponseText(rmsg)
+        var nativeToolFinish = isMap(rmsg) && isString(rmsg.finishReason) ? rmsg.finishReason : ""
+        var nativeToolCalls = isMap(rmsg) && isArray(rmsg.toolCalls) ? rmsg.toolCalls : []
+        if (isString(nativeToolText) && nativeToolText.trim().length > 0 && nativeToolCalls.length === 0 && (nativeToolFinish.length === 0 || nativeToolFinish === "stop")) {
+          var nativeToolAnswer = nativeToolText.trim()
+          var nativeToolParsed = nativeToolAnswer === "{}" ? {} : this._parseModelJsonResponse(nativeToolAnswer)
+          var nativeToolIsActionPayload = isArray(nativeToolParsed) || (isMap(nativeToolParsed) && isDef(nativeToolParsed.action))
+          if (!nativeToolIsActionPayload && nativeToolAnswer !== "{}") {
+            runtime.context.push(`[OBS ${step + 1}] (recover) treating native tool follow-up text as final answer.`)
+            global.__mini_a_metrics.finals_made.inc()
+            global.__mini_a_metrics.goals_achieved.inc()
+            global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
+            this._memoryAppend("decisions", "Final answer emitted after native tool call.", { provenance: { source: "synthesis", event: "native-tool-final", step: step + 1 } })
+            this._memoryAppend("summaries", nativeToolAnswer.substring(0, 500), { provenance: { source: "synthesis", event: "native-tool-final-preview" } })
+            this._persistWorkingMemory("native-tool-final")
+            if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("native-tool-final")
+            return this._processFinalAnswer(nativeToolAnswer, args)
+          }
+        }
       }
       
       var msg
