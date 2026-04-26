@@ -9867,6 +9867,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       methodNames = methodNames.filter(function(name) { return name !== "userInput" })
       methodNames = methodNames.filter(function(name) { return name !== "showMessage" })
     }
+    if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
+      methodNames = methodNames.filter(function(name) { return name !== "wiki" })
+    }
     var utilsAllow = this._parseUtilsToolList(args.utilsallow)
     if (utilsAllow.length > 0) {
       var allowMap = {}

@@ -462,6 +462,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWarnUnknownArgsSuggestsClosestMatch
 
+- name: MiniA Core Tests::WikiToolNotVisibleWhenDisabled
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWikiToolNotVisibleWhenDisabled
+
+- name: MiniA Core Tests::WikiToolVisibleWhenEnabled
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWikiToolVisibleWhenEnabled
+
 include:
 - oJobTest.yaml
 
@@ -562,3 +572,5 @@ todo:
 - MiniA Core Tests::WarnUnknownArgsAcceptsAdditionalValidParameters
 - MiniA Core Tests::WebYamlExposesHomeAndSkillParameters
 - MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
+- MiniA Core Tests::WikiToolNotVisibleWhenDisabled
+- MiniA Core Tests::WikiToolVisibleWhenEnabled

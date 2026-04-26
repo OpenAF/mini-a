@@ -2626,4 +2626,96 @@
     ow.test.assert(webArgs.libs, "web-lib", "Web mode should inherit launcher env libs before dispatch")
     ow.test.assert(webArgs.mode, "webmode", "Web mode should inherit launcher env mode before dispatch")
   }
+
+  exports.testWikiToolNotVisibleWhenDisabled = function() {
+    var agent = createAgent()
+    // Just verify that the template variable setup works correctly
+    // The actual filtering happens during _initMCPTools
+    var payload = {
+      agentPersonaLine: "You are a test agent.",
+      agentDirectiveLine: "Test directive.",
+      promptProfile: "balanced",
+      includeExamples: false,
+      actionsWordNumber: "three",
+      actionsList: "think | final",
+      useshell: false,
+      markdown: true,
+      rules: [],
+      knowledge: "",
+      actionsdesc: [],
+      isMachine: false,
+      usetools: false,
+      usetoolsActual: false,
+      useMcpProxy: false,
+      shellViaActionPreferred: false,
+      toolCount: 0,
+      proxyToolCount: 0,
+      proxyToolsList: "",
+      planning: false,
+      includePlanningDetails: false,
+      planningExecution: false,
+      simplePlanStyle: false,
+      currentStepContext: false,
+      currentStep: 0,
+      totalSteps: 0,
+      currentTask: "",
+      nextStep: 0,
+      completedSteps: "",
+      remainingSteps: "",
+      availableSkills: false,
+      availableSkillsList: [],
+      useMemorySearch: false,
+      useWiki: false,
+      wikiRw: false
+    }
+    
+    var result = agent._buildSystemPromptWithBudget("agent-test", payload, agent._SYSTEM_PROMPT, { args: {}, mode: "agent" })
+    ow.test.assert(isString(result.prompt), true, "System prompt should return a string")
+    ow.test.assert(result.prompt.indexOf('"wiki"') === -1, true, "Wiki tool should not appear in system prompt when useWiki=false")
+  }
+
+  exports.testWikiToolVisibleWhenEnabled = function() {
+    var agent = createAgent()
+    var payload = {
+      agentPersonaLine: "You are a test agent.",
+      agentDirectiveLine: "Test directive.",
+      promptProfile: "balanced",
+      includeExamples: false,
+      actionsWordNumber: "three",
+      actionsList: "think | final",
+      useshell: false,
+      markdown: true,
+      rules: [],
+      knowledge: "",
+      actionsdesc: [],
+      isMachine: false,
+      usetools: false,
+      usetoolsActual: false,
+      useMcpProxy: false,
+      shellViaActionPreferred: false,
+      toolCount: 0,
+      proxyToolCount: 0,
+      proxyToolsList: "",
+      planning: false,
+      includePlanningDetails: false,
+      planningExecution: false,
+      simplePlanStyle: false,
+      currentStepContext: false,
+      currentStep: 0,
+      totalSteps: 0,
+      currentTask: "",
+      nextStep: 0,
+      completedSteps: "",
+      remainingSteps: "",
+      availableSkills: false,
+      availableSkillsList: [],
+      useMemorySearch: false,
+      useWiki: true,
+      wikiRw: false
+    }
+    
+    var result = agent._buildSystemPromptWithBudget("agent-test", payload, agent._SYSTEM_PROMPT, { args: {}, mode: "agent" })
+    ow.test.assert(isString(result.prompt), true, "System prompt should return a string")
+    ow.test.assert(result.prompt.indexOf('"wiki"') >= 0, true, "Wiki tool should appear in system prompt when useWiki=true")
+  }
 })()
