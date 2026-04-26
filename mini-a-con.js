@@ -757,7 +757,7 @@ try {
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
-    usejsontool    : { type: "boolean", default: false, description: "Enable the compatibility json tool when usetools=true." },
+    usejsontool    : { type: "boolean", description: "Enable the compatibility json tool when usetools=true." },
     useskills      : { type: "boolean", default: false, description: "Expose the skills utility tool and auto-load high-confidence matching skills." },
     skillmaxautoload: { type: "number", default: 1, description: "Maximum number of matching skills to auto-load into runtime context." },
     skillcontextchars: { type: "number", default: 8000, description: "Maximum characters read from each auto-loaded SKILL.md." },

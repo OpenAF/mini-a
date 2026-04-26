@@ -162,6 +162,10 @@ help:
     desc     : Plan format override (md or json)
     example  : "json"
     mandatory: false
+  - name     : planstyle
+    desc     : Plan style hint passed to the planner (e.g. tree, flat)
+    example  : "tree"
+    mandatory: false
   - name     : plancontent
     desc     : Inline plan content (JSON or Markdown) to preload
     example  : "# Plan"
@@ -216,6 +220,10 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : browsercontext
+    desc     : SLON/JSON browser context injected into the agent (viewport, color scheme, server port, etc.)
+    example  : "(viewportWidth: 1280, colorScheme: dark)"
+    mandatory: false
   - name     : knowledge
     desc     : Extra knowledge or context injected into the agent
     example  : "This repository uses OpenAF jobs."
@@ -773,6 +781,40 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : subtasks
+    desc     : Inline subtask definitions (JSON or SLON array)
+    example  : "[{goal: 'research X'}, {goal: 'summarize Y'}]"
+    mandatory: false
+  - name     : subtasksfile
+    desc     : Path to a JSON/YAML file containing subtask definitions
+    example  : "subtasks.json"
+    mandatory: false
+  - name     : subtaskssequential
+    desc     : Run declared subtasks sequentially instead of in parallel
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : forkstatemaxbytes
+    desc     : Maximum bytes of parent context snapshot passed to a forked sub-agent
+    example  : "65536"
+    mandatory: false
+  - name     : autodelegation
+    desc     : Automatically delegate oversized tool results to a summary sub-agent
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : autodelegationthreshold
+    desc     : Byte threshold above which a tool result triggers auto-delegation
+    example  : "8192"
+    mandatory: false
+  - name     : autodelegationmaxperstep
+    desc     : Maximum number of auto-delegations allowed per agent step
+    example  : "2"
+    mandatory: false
+  - name     : noisytools
+    desc     : Comma-separated list of tool names that always trigger auto-delegation regardless of size
+    example  : "filesystemQuery,markdownFiles"
+    mandatory: false
   - name     : deepresearch
     desc     : Enable deep research mode with iterative validation
     example  : "true"
@@ -1595,6 +1637,7 @@ jobs:
       historykeep     : toBoolean().isBoolean().default(false)
       historykeepperiod: toNumber().isNumber().default(__)
       historykeepcount: toNumber().isNumber().default(__)
+      historyretention: toNumber().isNumber().default(600)
       useplanning     : toBoolean().isBoolean().default(false)
       updatefreq      : isString().default("auto")
       updateinterval  : toNumber().isNumber().default(3)
@@ -1603,6 +1646,7 @@ jobs:
       forceplanning   : toBoolean().isBoolean().default(false)
       planfile        : isString().default(__)
       planformat      : isString().default(__)
+      planstyle       : isString().default(__)
       plancontent     : isString().default(__)
       saveplannotes   : toBoolean().isBoolean().default(false)
       resumefailed    : toBoolean().isBoolean().default(false)
@@ -1715,6 +1759,14 @@ jobs:
       workerskills   : isString().default(__)
       workertags     : isString().default(__)
       showdelegate   : toBoolean().isBoolean().default(false)
+      subtasks       : isString().default(__)
+      subtasksfile   : isString().default(__)
+      subtaskssequential: toBoolean().isBoolean().default(false)
+      forkstatemaxbytes: toNumber().isNumber().default(65536)
+      autodelegation : toBoolean().isBoolean().default(false)
+      autodelegationthreshold: toNumber().isNumber().default(8192)
+      autodelegationmaxperstep: toNumber().isNumber().default(2)
+      noisytools     : isString().default(__)
       deepresearch   : toBoolean().isBoolean().default(false)
       maxcycles      : toNumber().isNumber().default(3)
       validationgoal : isString().default(__)

@@ -1178,6 +1178,247 @@
     manager.destroy()
   }
 
+  exports.testSubtaskManagerStripsParentOnlyChildArgs = function() {
+    var manager = new SubtaskManager({
+      goal: "parent goal",
+      validationgoal: "parent validation",
+      valgoal: "parent validation alias",
+      deepresearch: true,
+      maxcycles: 5,
+      subtasks: "startup child",
+      subtasksfile: "startup.yaml",
+      state: "(parent: true)",
+      conversation: "conversation.md",
+      resume: true,
+      resumefailed: true,
+      usehistory: true,
+      historypath: "history.json",
+      planfile: "plan.md",
+      plancontent: "parent plan",
+      planmode: true,
+      convertplan: true,
+      validateplan: true,
+      outfile: "oaf-report.md",
+      outfileall: "oaf-report-all.md",
+      outputfile: "deep-research.json",
+      mcp: "[(type: ojob, options: (job: 'mcps/mcp-web.yaml'))]",
+      mcpconfig: [{ type: "ojob", options: { job: "mcps/mcp-web.yaml" } }],
+      mcpdynamic: true,
+      mcpproxy: true,
+      mcpproxynative: true,
+      mcpproxythreshold: 51200,
+      mcpproxytoon: true,
+      mcpproxyallow: "http-request,current-time,timezone-tools",
+      mcpproxydeny: "get-url",
+      mcplazy: true,
+      nosetmcpwd: true,
+      usejsontool: true,
+      useutils: true,
+      useskills: true,
+      utilsroot: "/tmp",
+      utilsallow: "filesystemQuery",
+      utilsdeny: "filesystemModify",
+      miniadocs: true,
+      "mini-a-docs": true,
+      debugfile: "debug.log",
+      goalprefix: "prefix",
+      workerreg: 8888,
+      workerregtoken: "secret",
+      workerregurl: "http://registry",
+      workerreginterval: 1000,
+      mcpprogcall: true,
+      mcpprogcallport: 12345,
+      onport: 9999,
+      web: true,
+      useplanning: true,
+      usetools: true,
+      workers: ["http://worker"]
+    }, {})
+
+    var childArgs = manager._buildChildArgs({
+      goal: "child goal",
+      args: { maxsteps: 3 },
+      depth: 1,
+      parentId: "parent"
+    })
+
+    ow.test.assert(childArgs.goal === "child goal", true, "Child goal should replace parent goal")
+    ow.test.assert(childArgs.maxsteps === 3, true, "Explicit child args should be kept")
+    ow.test.assert(childArgs.useplanning === true, true, "Reusable execution capability should still be inherited")
+    ow.test.assert(childArgs.usetools === true, true, "Reusable tool capability should still be inherited")
+    ow.test.assert(isUnDef(childArgs.useutils), true, "Utility MCP should not be inherited without selective handoff")
+    ow.test.assert(isArray(childArgs.workers), true, "Delegation worker configuration should still be inherited")
+    ow.test.assert(childArgs._autoDelegate === false, true, "Child auto-delegation should be disabled")
+
+    ;[
+      "validationgoal", "valgoal", "deepresearch", "maxcycles", "subtasks", "subtasksfile",
+      "state", "conversation", "resume", "resumefailed", "usehistory", "historypath",
+      "planfile", "plancontent", "planmode", "convertplan", "validateplan",
+      "outfile", "outfileall", "outputfile",
+      "mcp", "mcpconfig", "mcpdynamic", "mcpproxy", "mcpproxynative", "mcpproxythreshold",
+      "mcpproxytoon", "mcpproxyallow", "mcpproxydeny", "mcplazy", "nosetmcpwd", "usejsontool",
+      "useutils", "useskills", "utilsroot", "utilsallow", "utilsdeny", "miniadocs", "mini-a-docs",
+      "debugfile", "goalprefix", "workerreg", "workerregtoken", "workerregurl", "workerreginterval",
+      "mcpprogcall", "mcpprogcallport", "onport", "web"
+    ].forEach(function(key) {
+      ow.test.assert(isUnDef(childArgs[key]), true, "Should strip inherited parent-only arg: " + key)
+    })
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerKeepsExplicitParentOnlyChildArgs = function() {
+    var manager = new SubtaskManager({
+      validationgoal: "parent validation",
+      state: "(parent: true)",
+      outfile: "parent.md",
+      outputfile: "parent.json",
+      mcp: "parent-mcp",
+      useutils: true,
+      workerreg: 8888
+    }, {})
+
+    var childArgs = manager._buildChildArgs({
+      goal: "child goal",
+      args: {
+        validationgoal: "child validation",
+        state: "(child: true)",
+        outfile: "child.md",
+        outputfile: "child.json",
+        mcp: "child-mcp",
+        useutils: true,
+        workerreg: 9999
+      },
+      depth: 1,
+      parentId: "parent"
+    })
+
+    ow.test.assert(childArgs.validationgoal === "child validation", true, "Explicit child validationgoal should be kept")
+    ow.test.assert(childArgs.state === "(child: true)", true, "Explicit child state should be kept")
+    ow.test.assert(childArgs.outfile === "child.md", true, "Explicit child outfile should be kept")
+    ow.test.assert(childArgs.outputfile === "child.json", true, "Explicit child outputfile should be kept")
+    ow.test.assert(childArgs.mcp === "child-mcp", true, "Explicit child mcp should be kept")
+    ow.test.assert(childArgs.useutils === true, true, "Explicit child useutils should be kept")
+    ow.test.assert(childArgs.workerreg === 9999, true, "Explicit child workerreg should be kept")
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerCancelStopsLocalChildAgent = function() {
+    var manager = new SubtaskManager({}, {})
+    var stoppedReason = __
+    var childAgent = {
+      requestStop: function(reason) {
+        stoppedReason = reason
+      }
+    }
+    var subtaskId = "localstoptest01"
+
+    manager.subtasks[subtaskId] = {
+      id: subtaskId,
+      status: "running",
+      childAgent: childAgent,
+      startedAt: new Date().getTime(),
+      deadlineMs: 300000
+    }
+    manager.runningCount = 1
+    manager.metrics.running = 1
+
+    var cancelled = manager.cancel(subtaskId, "Esc pressed")
+
+    ow.test.assert(cancelled, true, "Running local subtask should be cancelled")
+    ow.test.assert(stoppedReason, "Esc pressed", "Local child agent should receive stop request")
+    ow.test.assert(manager.subtasks[subtaskId].status, "cancelled", "Subtask should be marked cancelled")
+    ow.test.assert(manager.runningCount, 0, "Running count should be decremented")
+    ow.test.assert(manager.metrics.running, 0, "Running metric should be decremented")
+
+    manager.destroy()
+  }
+
+  exports.testMiniASelectiveMcpHandoffSharesLocalConnections = function() {
+    var parent = createAgent()
+    var child = createAgent()
+    var fakeClient = {
+      callTool: function() {},
+      listTools: function() { return { tools: [] } }
+    }
+    var connectionId = "conn-a"
+    parent._mcpConnections[connectionId] = fakeClient
+    parent._mcpConnectionInfo[connectionId] = { alias: "conn1", label: "test" }
+    parent._mcpConnectionAliases[connectionId] = "conn1"
+    parent._mcpConnectionAliasToId.conn1 = connectionId
+    parent._lazyMcpConnections[connectionId] = false
+    parent.mcpTools = [
+      { name: "http-request", description: "Executes HTTP REST requests" },
+      { name: "current-time", description: "Retrieves current time" }
+    ]
+    parent.mcpToolNames = ["http-request", "current-time"]
+    parent.mcpToolToConnection = {
+      "http-request": connectionId,
+      "current-time": connectionId
+    }
+    parent._toolInfoByName = {
+      "http-request": parent.mcpTools[0],
+      "current-time": parent.mcpTools[1]
+    }
+
+    var handoffArgs = parent._buildChildMcpHandoffArgs("Use http-request to check this URL", {}, { mcpproxy: false })
+    ow.test.assert(isArray(handoffArgs._mcpHandoffTools), true, "Should build handoff tool list")
+    ow.test.assert(handoffArgs._mcpHandoffTools.indexOf("http-request") >= 0, true, "Should select mentioned tool")
+
+    parent._prepareChildMcpHandoff(child, handoffArgs, { id: "subtask-test" })
+
+    ow.test.assert(child._mcpConnections[connectionId] === fakeClient, true, "Child should share parent MCP client object")
+    ow.test.assert(child.mcpToolNames.length === 1, true, "Child should only see selected MCP tools")
+    ow.test.assert(child.mcpToolNames[0] === "http-request", true, "Child should see selected tool")
+    ow.test.assert(child._isMcpHandoffToolAllowed("http-request", {}), true, "Selected tool should be allowed")
+    ow.test.assert(child._isMcpHandoffToolAllowed("current-time", {}) === false, true, "Unselected tool should be denied")
+  }
+
+  exports.testMiniASelectiveProxyMcpHandoffFiltersPromptAndCalls = function() {
+    var parent = createAgent()
+    var child = createAgent()
+    var savedProxyState = global.__mcpProxyState__
+    try {
+      global.__mcpProxyState__ = {
+        catalog: [
+          { tool: { name: "http-request", description: "Executes HTTP REST requests" } },
+          { tool: { name: "current-time", description: "Retrieves current time" } }
+        ],
+        toolToConnections: {
+          "http-request": ["conn1"],
+          "current-time": ["conn1"]
+        }
+      }
+
+      var proxyId = md5("mini-a-mcp-proxy")
+      var proxyClient = {
+        callTool: function() {},
+        listTools: function() { return { tools: [] } }
+      }
+      parent._useMcpProxy = true
+      parent._mcpConnections[proxyId] = proxyClient
+      parent._mcpConnectionInfo[proxyId] = { alias: "proxy", label: "proxy" }
+      parent._mcpConnectionAliases[proxyId] = "proxy"
+      parent._mcpConnectionAliasToId.proxy = proxyId
+      parent.mcpTools = [{ name: "proxy-dispatch", description: "Dispatch proxied MCP tools" }]
+      parent.mcpToolNames = ["proxy-dispatch"]
+      parent.mcpToolToConnection = { "proxy-dispatch": proxyId }
+
+      var handoffArgs = parent._buildChildMcpHandoffArgs("Fetch a URL using http-request", {}, { mcpproxy: true })
+      ow.test.assert(handoffArgs._mcpHandoffProxy === true, true, "Proxy handoff should be marked")
+      ow.test.assert(handoffArgs._mcpHandoffTools.indexOf("http-request") >= 0, true, "Proxy handoff should select target tool")
+
+      parent._prepareChildMcpHandoff(child, handoffArgs, { id: "subtask-proxy" })
+      ow.test.assert(child._mcpConnections[proxyId] === proxyClient, true, "Child should share proxy MCP client")
+      ow.test.assert(child.mcpToolNames.length === 1 && child.mcpToolNames[0] === "proxy-dispatch", true, "Child should only register proxy-dispatch")
+      ow.test.assert(child._isMcpHandoffToolAllowed("proxy-dispatch", { tool: "http-request" }), true, "Selected proxy target should be allowed")
+      ow.test.assert(child._isMcpHandoffToolAllowed("proxy-dispatch", { tool: "current-time" }) === false, true, "Unselected proxy target should be denied")
+    } finally {
+      global.__mcpProxyState__ = savedProxyState
+    }
+  }
+
   exports.testSubtaskManagerPrefersSpecializedWorkerSkills = function() {
     var manager = new SubtaskManager({}, {})
     manager.workers = ["http://network", "http://time"]

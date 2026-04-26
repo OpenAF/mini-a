@@ -8487,7 +8487,7 @@ MiniA.prototype._buildForkState = function(forkScope) {
   return state
 }
 
-MiniA.prototype._memoryAppend = function(section, value, meta) {
+MiniA.prototype._memoryAppend = function(section, value, meta, appendOpts) {
   if (this._memoryConfig.enabled !== true) return __
   var targetScope = isObject(meta) && isString(meta.memoryScope) ? String(meta.memoryScope).toLowerCase().trim() : __
   var baseEntry = isObject(value) && (isDef(value.value) || isDef(value.id) || isDef(value.provenance) || isDef(value.status))
@@ -8501,7 +8501,7 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
   else if (targetScope === "session") targetManager = this._sessionMemoryManager
   else targetManager = this._getDefaultMemoryWriteManager()
   if (!isObject(targetManager)) return __
-  var appended = targetManager.append(section, entry)
+  var appended = targetManager.append(section, entry, isObject(appendOpts) ? appendOpts : {})
   if (isObject(appended)) {
     var _wscope = targetManager === this._globalMemoryManager ? "global" : "session"
     this.fnI("info", `📝 [mem:write] ${_wscope}/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
@@ -8510,6 +8510,39 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
   if (targetManager === this._globalMemoryManager && isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
   if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
   return appended
+}
+
+MiniA.prototype._clearPendingFetchFlags = function(toolName, params, rawResult, observation) {
+  if (this._memoryConfig.enabled !== true) return
+  var managers = [this._sessionMemoryManager, this._globalMemoryManager].filter(isObject)
+  if (managers.length === 0) return
+
+  // Case 1: readresult call resolved a spilled file — clear pendingReadresult on matching entry
+  if (toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult" && isString(params.resultFile)) {
+    var targetFile = params.resultFile.trim()
+    managers.forEach(function(mgr) {
+      mgr.getSectionEntries("artifacts").forEach(function(e) {
+        if (e.pendingReadresult === true && isString(e.resultFile) && e.resultFile.trim() === targetFile) {
+          mgr.update("artifacts", e.id, { pendingReadresult: false, resultFile: __ })
+        }
+      })
+    })
+    return
+  }
+
+  // Case 2: successful full (non-truncated, non-spill) re-call — mark old truncated entries for same tool stale
+  var _isSpill = isMap(rawResult) && rawResult.autoSpilled === true
+  var _isTrunc = !_isSpill && isString(observation) && observation.length > 2000
+  if (!_isSpill && !_isTrunc) {
+    var effectiveTool = isMap(rawResult) && isString(rawResult.tool) ? rawResult.tool : toolName
+    managers.forEach(function(mgr) {
+      mgr.getSectionEntries("artifacts").forEach(function(e) {
+        if (e.truncated === true && isString(e.sourceTool) && e.sourceTool === effectiveTool) {
+          mgr.update("artifacts", e.id, { stale: true })
+        }
+      })
+    })
+  }
 }
 
 MiniA.prototype._memoryUpdate = function(section, id, patch) {
@@ -10268,7 +10301,8 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
         if (parent._useToolsActual === true && isMap(payload)) {
           var runShellEntry = function(entry) {
             if (!isMap(entry) || entry.action !== "shell") return null
-            var cmd = (entry.command || "").trim()
+            if (toBoolean(args.useshell) !== true) return "(shell disabled: useshell=false)"
+            var cmd = (entry.command || (isMap(entry.params) ? entry.params.command : "") || "").trim()
             if (!cmd) return null
             try {
               var r = parent._runCommand({ command: cmd, readwrite: toBoolean(args.readwrite) })
@@ -10280,7 +10314,7 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
           }
 
           var outputs = []
-          if (isString(payload.action) && payload.action === "shell" && isString(payload.command)) {
+          if (isString(payload.action) && payload.action === "shell") {
             var singleOut = runShellEntry(payload)
             if (isString(singleOut)) outputs.push(singleOut)
           } else if (isArray(payload.action)) {
@@ -10312,37 +10346,34 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
       json: {
         name       : "json",
         description: "Compatibility shim: accept a JSON action payload and pass it back to Mini-A for normal processing.",
-        inputSchema: {
-          type      : "object",
-          properties: {
+        inputSchema: (function() {
+          var itemProps = {
+            action : { type: "string" },
+            answer : { type: "string" },
+            state  : { type: "object" },
+            params : { type: "object" }
+          }
+          if (toBoolean(args.useshell) === true) itemProps.command = { type: "string" }
+          var topProps = {
             thought: { type: "string", description: "Reasoning/thought string for the step." },
             action : {
               oneOf: [
                 { type: "string" },
                 {
                   type : "array",
-                  items: {
-                    type      : "object",
-                    properties: {
-                      action : { type: "string" },
-                      command: { type: "string" },
-                      answer : { type: "string" },
-                      state  : { type: "object" },
-                      params : { type: "object" }
-                    },
-                    required: ["action"]
-                  }
+                  items: { type: "object", properties: itemProps, required: ["action"] }
                 }
               ],
               description: "Action name (string) or action batch (array) for compatibility payloads."
             },
-            command: { type: "string", description: "Shell command when action is shell." },
-            answer : { type: "string", description: "Final answer text when action is final." },
-            state    : { type: "object",  description: "Optional state object to persist." },
-            params   : { type: "object",  description: "Optional action parameters." },
-            parallel : { type: "boolean", description: "Run all actions in the array simultaneously. Default is sequential." }
+            answer  : { type: "string", description: "Final answer text when action is final." },
+            state   : { type: "object",  description: "Optional state object to persist." },
+            params  : { type: "object",  description: "Optional action parameters." },
+            parallel: { type: "boolean", description: "Run all actions in the array simultaneously. Default is sequential." }
           }
-        }
+          if (toBoolean(args.useshell) === true) topProps.command = { type: "string", description: "Shell command when action is shell." }
+          return { type: "object", properties: topProps }
+        })()
       }
     }
 
@@ -10384,6 +10415,33 @@ MiniA.prototype._getConfiguredModelName = function(modelConfig, defaultValue) {
   }
 
   return isDef(defaultValue) ? defaultValue : ""
+}
+
+MiniA.prototype._getModelConfigForTools = function(args, modelName) {
+  var cfg = modelName === "lc" ? this._oaf_lc_model : this._oaf_model
+  if (isMap(cfg)) return cfg
+
+  if (!isMap(args)) return cfg
+  var raw = modelName === "lc" ? args.modellc : args.model
+  if (isMap(raw)) return raw
+  if (isString(raw) && raw.trim().length > 0) {
+    try {
+      var parsed = af.fromJSSLON(raw)
+      if (isMap(parsed)) return parsed
+    } catch(ignoreParseError) {}
+  }
+  return cfg
+}
+
+MiniA.prototype._shouldUseNativeMcpProxyTools = function(args, modelName) {
+  if (!isMap(args) || toBoolean(args.mcpproxy) !== true) return true
+  if (toBoolean(args.mcpproxynative) === true) return true
+
+  var cfg = this._getModelConfigForTools(args, modelName)
+  var type = isMap(cfg) && isString(cfg.type) ? cfg.type.toLowerCase() : ""
+  if (type === "ollama") return false
+
+  return true
 }
 
 MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasDefined) {
@@ -10466,6 +10524,12 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
           if (isDef(p.maxsteps)) childArgs.maxsteps = Number(p.maxsteps)
           if (isString(p.worker) && p.worker.trim().length > 0) childArgs._workerHint = p.worker.trim()
           if (isArray(p.skills) && p.skills.length > 0) childArgs._requiredSkills = p.skills
+          var mcpHandoffArgs = parent._buildChildMcpHandoffArgs(goal, p, args)
+          if (isMap(mcpHandoffArgs)) {
+            Object.keys(mcpHandoffArgs).forEach(function(key) {
+              childArgs[key] = mcpHandoffArgs[key]
+            })
+          }
 
           var opts = {}
           if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
@@ -10614,6 +10678,9 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
             waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." },
             worker        : { type: "string", description: "Optional worker name hint (partial match on name/description/URL) to prefer a specific remote worker." },
             skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." },
+            tools         : { type: "array", items: { type: "string" }, description: "Optional MCP tool names to hand off to the child. If omitted, Mini-A may selectively hand off clearly relevant parent MCP tools based on the goal and skills." },
+            mcptools      : { type: "array", items: { type: "string" }, description: "Alias for tools." },
+            mcp           : { type: "boolean", description: "Set false to disable automatic MCP handoff for this child. Default: automatic selective handoff." },
             fork          : { type: "boolean", description: "If true, spawn a forked sub-agent that inherits a snapshot of the parent's context. Default: false." },
             forkscope     : { type: "array", items: { type: "string", enum: ["memory", "context"] }, description: "Which parts of parent context to inherit when fork=true. 'memory' copies working memory (default). 'context' also copies conversation history." }
           },
@@ -10885,6 +10952,33 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     helpers.rebuildIndexes()
     state.lastUpdated = now()
 
+    var proxyAllowTools = this._parseListOption(args.mcpproxyallow)
+    var proxyDenyTools  = this._parseListOption(args.mcpproxydeny)
+    var proxyAllowMap = {}
+    var proxyDenyMap = {}
+    proxyAllowTools.forEach(function(name) { proxyAllowMap[name] = true })
+    proxyDenyTools.forEach(function(name) { proxyDenyMap[name] = true })
+    var isProxyToolAllowed = function(toolName) {
+      var n = isString(toolName) ? toolName.toLowerCase().trim() : ""
+      if (n.length === 0) return false
+      if (proxyDenyMap[n] === true) return false
+      if (proxyAllowTools.length > 0 && proxyAllowMap[n] !== true) return false
+      return true
+    }
+
+    if (proxyAllowTools.length > 0 || proxyDenyTools.length > 0) {
+      Object.keys(state.connections || {}).forEach(function(id) {
+        var entry = state.connections[id]
+        if (!isObject(entry) || !isArray(entry.tools)) return
+        entry.tools = entry.tools.filter(function(tool) {
+          return isMap(tool) && isProxyToolAllowed(tool.name)
+        })
+      })
+      helpers.rebuildIndexes()
+      state.lastUpdated = now()
+      parent.fnI("info", "[mcp-proxy] Tool filter active. allow=" + (proxyAllowTools.join(",") || "*") + " deny=" + (proxyDenyTools.join(",") || "-"))
+    }
+
     // Capture auto-spill threshold (0 = disabled) from args at config creation time
     var globalSpillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
       ? Math.floor(args.mcpproxythreshold) : 0
@@ -11066,6 +11160,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             totalTools      : statusNames.length,
             catalogHash     : md5(statusNames.slice().sort().join(",")),
             lastUpdated     : state.lastUpdated,
+            toolFilter      : {
+              allow: proxyAllowTools,
+              deny : proxyDenyTools
+            },
             connections     : statusConns
           }
           return {
@@ -11160,6 +11258,14 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           if (toolName.length === 0) {
             return { error: "Call action requires a 'tool' name." }
           }
+          if (!isProxyToolAllowed(toolName)) {
+            return {
+              action: "call",
+              tool  : toolName,
+              error : "Tool '" + toolName + "' is not allowed by the MCP proxy tool filter.",
+              content: [{ type: "text", text: "Error: Tool '" + toolName + "' is not allowed by the MCP proxy tool filter." }]
+            }
+          }
 
           var connectionId
           if (isString(connectionRef) && connectionRef.length > 0) {
@@ -11253,7 +11359,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 : "Result written to temporary " + resultFormat.toUpperCase() + " file: "
               var previewLines = [
                 spillReason + resultFile + " (auto-deleted at shutdown).",
-                "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens)."
+                "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens).",
+                "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' as needed."
               ]
               previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
               if (isMap(resultPayload)) {
@@ -11635,6 +11742,17 @@ MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
 }
 
 MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params, callContext) {
+  if (!this._isMcpHandoffToolAllowed(toolName, params)) {
+    var deniedTool = toolName === "proxy-dispatch" && isMap(params) && isString(params.tool) ? params.tool : toolName
+    var deniedMsg = "Tool '" + deniedTool + "' was not handed off to this sub-agent."
+    this._logToolUsage(toolName, params, { error: deniedMsg }, {
+      connectionId: connectionId,
+      error       : true,
+      fromCache   : false
+    })
+    throw new Error(deniedMsg)
+  }
+
   var client = isObject(this._mcpConnections) ? this._mcpConnections[connectionId] : __
   if (isUnDef(client) || !isFunction(client.callTool)) {
     this._logToolUsage(toolName, params, { error: `MCP client for tool '${toolName}' not available.` }, {
@@ -12333,7 +12451,11 @@ MiniA.prototype._getToolSchemaSummary = function(tool, options) {
   }
 
   if (summary.name === "proxy-dispatch") {
-    summary.description = description + " Always use function calling (not the JSON action field) to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
+    if (this._useToolsActual === true) {
+      summary.description = description + " Always use function calling (not the JSON action field) to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
+    } else {
+      summary.description = description + " Use the proxy-dispatch JSON action with params to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
+    }
   }
 
   $cache(this._toolSchemaCacheName).set(cacheKey, { value: summary, expiresAt: now() + 3600000 })
@@ -13682,6 +13804,203 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   return allTools.map(t => t.name)
 }
 
+MiniA.prototype._normalizeToolNameList = function(value) {
+  var list = []
+  var add = function(v) {
+    if (!isString(v)) return
+    var trimmed = v.trim()
+    if (trimmed.length > 0 && list.indexOf(trimmed) < 0) list.push(trimmed)
+  }
+
+  if (isArray(value)) {
+    value.forEach(add)
+  } else if (isString(value) && value.trim().length > 0) {
+    value.split(",").forEach(add)
+  }
+
+  return list
+}
+
+MiniA.prototype._getProxyCatalogTools = function() {
+  var tools = []
+  var state = isObject(global.__mcpProxyState__) ? global.__mcpProxyState__ : __
+  if (!isObject(state) || !isArray(state.catalog)) return tools
+
+  state.catalog.forEach(function(entry) {
+    if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name.length > 0) {
+      tools.push(entry.tool)
+    }
+  })
+  return tools
+}
+
+MiniA.prototype._selectChildMcpHandoffTools = function(goal, request, availableTools) {
+  request = isMap(request) ? request : {}
+  if (!isArray(availableTools) || availableTools.length === 0) return []
+
+  var availableByName = {}
+  availableTools.forEach(function(tool) {
+    if (isMap(tool) && isString(tool.name) && tool.name.length > 0) availableByName[tool.name] = tool
+  })
+
+  var explicitTools = this._normalizeToolNameList(isDef(request.tools) ? request.tools : request.mcptools)
+  var selected = []
+  explicitTools.forEach(function(name) {
+    if (isDef(availableByName[name]) && selected.indexOf(name) < 0) selected.push(name)
+  })
+  if (selected.length > 0) return selected
+
+  var goalLower = isString(goal) ? goal.toLowerCase() : ""
+  availableTools.forEach(function(tool) {
+    if (!isMap(tool) || !isString(tool.name)) return
+    var nameLower = tool.name.toLowerCase()
+    var escaped = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    var re = new RegExp("(^|[^a-z0-9_-])" + escaped + "([^a-z0-9_-]|$)", "i")
+    if (re.test(goalLower) && selected.indexOf(tool.name) < 0) selected.push(tool.name)
+  })
+  if (selected.length > 0) return selected
+
+  var skills = isArray(request.skills) ? request.skills : []
+  if (skills.length > 0) {
+    var skillTokens = skills.map(function(skill) { return String(skill || "").toLowerCase().trim() }).filter(function(skill) { return skill.length > 0 })
+    availableTools.forEach(function(tool) {
+      if (!isMap(tool) || !isString(tool.name)) return
+      var text = (tool.name + " " + (tool.description || "")).toLowerCase()
+      var matched = skillTokens.some(function(skill) { return text.indexOf(skill) >= 0 || skill.indexOf(tool.name.toLowerCase()) >= 0 })
+      if (matched && selected.indexOf(tool.name) < 0) selected.push(tool.name)
+    })
+  }
+  if (selected.length > 0) return selected
+
+  var keywordSelected = this._selectToolsByKeywordMatch(goal, availableTools)
+  if (keywordSelected.length > 0) return keywordSelected.slice(0, 4)
+
+  return []
+}
+
+MiniA.prototype._buildChildMcpHandoffArgs = function(goal, request, parentArgs) {
+  request = isMap(request) ? request : {}
+  parentArgs = isMap(parentArgs) ? parentArgs : {}
+  if (request.mcp === false || String(request.mcp || "").toLowerCase() === "false") return {}
+
+  var usingProxy = this._useMcpProxy === true || toBoolean(parentArgs.mcpproxy) === true
+  var availableTools = usingProxy ? this._getProxyCatalogTools() : (isArray(this.mcpTools) ? this.mcpTools : [])
+  availableTools = availableTools.filter(function(tool) {
+    return isMap(tool) && isString(tool.name) && tool.name.length > 0 &&
+      tool.name !== "proxy-dispatch" && tool.name !== "delegate-subtask" && tool.name !== "subtask-status"
+  })
+  if (availableTools.length === 0) return {}
+
+  var selected = this._selectChildMcpHandoffTools(goal, request, availableTools)
+  if (selected.length === 0) return {}
+
+  var handoff = {
+    _mcpHandoffTools: selected,
+    _mcpHandoffProxy: usingProxy,
+    usetools        : true
+  }
+
+  if (usingProxy) {
+    handoff.mcpproxy = true
+    handoff.mcpproxyallow = selected.join(",")
+    if (isNumber(parentArgs.mcpproxythreshold)) handoff.mcpproxythreshold = parentArgs.mcpproxythreshold
+    if (toBoolean(parentArgs.mcpproxytoon) === true) handoff.mcpproxytoon = true
+  } else {
+    handoff.mcpdynamic = false
+  }
+
+  return handoff
+}
+
+MiniA.prototype._prepareChildMcpHandoff = function(childAgent, childArgs, subtask) {
+  if (!isObject(childAgent) || !isMap(childArgs) || !isArray(childArgs._mcpHandoffTools) || childArgs._mcpHandoffTools.length === 0) return
+  if (!isObject(this._mcpConnections) || !isArray(this.mcpTools) || !isObject(this.mcpToolToConnection)) return
+
+  var selectedMap = {}
+  childArgs._mcpHandoffTools.forEach(function(name) {
+    if (isString(name) && name.length > 0) selectedMap[name] = true
+  })
+
+  var proxyMode = childArgs._mcpHandoffProxy === true || toBoolean(childArgs.mcpproxy) === true
+  var childConnections = {}
+  var childTools = []
+  var childToolNames = []
+  var childToolToConnection = {}
+  var childInfo = {}
+  var childAliases = {}
+  var childAliasToId = {}
+  var childLazy = {}
+  var childToolInfo = {}
+  var childToolCacheSettings = {}
+  var parent = this
+
+  if (proxyMode) {
+    Object.keys(this._mcpConnections).forEach(function(connectionId) {
+      var isProxyConnection = connectionId === md5("mini-a-mcp-proxy") || connectionId.indexOf("mini-a-mcp-proxy") >= 0
+      if (!isProxyConnection) return
+      childConnections[connectionId] = parent._mcpConnections[connectionId]
+      childLazy[connectionId] = parent._lazyMcpConnections && parent._lazyMcpConnections[connectionId] === true
+      if (isObject(parent._mcpConnectionInfo[connectionId])) childInfo[connectionId] = merge({}, parent._mcpConnectionInfo[connectionId])
+      if (isString(parent._mcpConnectionAliases[connectionId])) childAliases[connectionId] = parent._mcpConnectionAliases[connectionId]
+      if (isString(childAliases[connectionId])) childAliasToId[childAliases[connectionId]] = connectionId
+    })
+    this.mcpTools.forEach(function(tool) {
+      if (!isMap(tool) || tool.name !== "proxy-dispatch") return
+      var connectionId = parent.mcpToolToConnection[tool.name]
+      if (!isString(connectionId) || isUnDef(childConnections[connectionId])) return
+      childTools.push(tool)
+      childToolNames.push(tool.name)
+      childToolToConnection[tool.name] = connectionId
+      childToolInfo[tool.name] = tool
+      if (isObject(parent._toolCacheSettings[tool.name])) childToolCacheSettings[tool.name] = parent._toolCacheSettings[tool.name]
+    })
+  } else {
+    this.mcpTools.forEach(function(tool) {
+      if (!isMap(tool) || !isString(tool.name) || selectedMap[tool.name] !== true) return
+      var connectionId = parent.mcpToolToConnection[tool.name]
+      if (!isString(connectionId) || isUnDef(parent._mcpConnections[connectionId])) return
+      childConnections[connectionId] = parent._mcpConnections[connectionId]
+      childLazy[connectionId] = parent._lazyMcpConnections && parent._lazyMcpConnections[connectionId] === true
+      if (isObject(parent._mcpConnectionInfo[connectionId])) childInfo[connectionId] = merge({}, parent._mcpConnectionInfo[connectionId])
+      if (isString(parent._mcpConnectionAliases[connectionId])) childAliases[connectionId] = parent._mcpConnectionAliases[connectionId]
+      if (isString(childAliases[connectionId])) childAliasToId[childAliases[connectionId]] = connectionId
+      childTools.push(tool)
+      childToolNames.push(tool.name)
+      childToolToConnection[tool.name] = connectionId
+      childToolInfo[tool.name] = tool
+      if (isObject(parent._toolCacheSettings[tool.name])) childToolCacheSettings[tool.name] = parent._toolCacheSettings[tool.name]
+    })
+  }
+
+  if (childTools.length === 0) return
+
+  childAgent._mcpConnections = childConnections
+  childAgent._mcpConnectionInfo = childInfo
+  childAgent._mcpConnectionAliases = childAliases
+  childAgent._mcpConnectionAliasToId = childAliasToId
+  childAgent._lazyMcpConnections = childLazy
+  childAgent.mcpTools = childTools
+  childAgent.mcpToolNames = childToolNames
+  childAgent.mcpToolToConnection = childToolToConnection
+  childAgent._toolInfoByName = childToolInfo
+  childAgent._toolCacheSettings = childToolCacheSettings
+  childAgent._mcpHandoffTools = childArgs._mcpHandoffTools.slice()
+
+  this.fnI("mcp", "Handed off " + childArgs._mcpHandoffTools.length + " MCP tool(s) to local sub-agent" + (isObject(subtask) && isString(subtask.id) ? " " + subtask.id.substring(0, 8) : "") + ": " + childArgs._mcpHandoffTools.join(", "))
+}
+
+MiniA.prototype._isMcpHandoffToolAllowed = function(toolName, params) {
+  if (!isArray(this._mcpHandoffTools) || this._mcpHandoffTools.length === 0) return true
+  var allowed = {}
+  this._mcpHandoffTools.forEach(function(name) {
+    if (isString(name) && name.length > 0) allowed[name] = true
+  })
+  if (toolName !== "proxy-dispatch") return allowed[toolName] === true
+  var targetTool = isMap(params) && isString(params.tool) ? params.tool : __
+  if (!isString(targetTool) || targetTool.length === 0) return true
+  return allowed[targetTool] === true
+}
+
 MiniA.prototype._applySystemInstructions = function(args) {
   args = _$(args, "args").isMap().default({})
 
@@ -13745,9 +14064,18 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       // Set proxy mode flag
       parent._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
 
-      // When mcpproxy=true, always use function calling mode regardless of LLM support
+      var useNativeMcpProxy = parent._shouldUseNativeMcpProxyTools(args, normalizedModel)
+
+      // When mcpproxy=true, use function calling mode where the provider's tool loop is reliable.
       // NOTE: _useToolsActual is already pre-set before init() to ensure correct prompt template
       if (usingMcpProxy && hasMcpProxyConnection) {
+        if (!useNativeMcpProxy) {
+          parent.fnI("info", "MCP proxy mode enabled on " + normalizedModel + " model; using Mini-A action-based proxy-dispatch instead of native function calling.")
+          if (normalizedModel === "lc") parent._useToolsActualLC = false
+          else parent._useToolsActualMain = false
+          return llmInstance
+        }
+
         parent.fnI("info", "MCP proxy mode enabled - using function calling for proxy-dispatch tool.")
         if (normalizedModel === "lc") parent._useToolsActualLC = true
         else parent._useToolsActualMain = true
@@ -14325,7 +14653,7 @@ MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
     "exec", "mini-a", "__id", "init", "objid", "execid", "agent",
     "__format", "__interaction_source", "__explicitargkeys", "__unknownargsreported",
     "__modeapplied", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
-    "_autodelegate",
+    "_autodelegate", "_mcphandofftools", "_mcphandoffproxy",
     "knowledgeupdated"
   ].forEach(function(name) {
     var normalized = String(name || "").trim().toLowerCase()
@@ -14845,6 +15173,7 @@ MiniA.prototype.init = function(args) {
           defaultMaxAttempts: args.delegationmaxretries,
           maxDepth: args.delegationmaxdepth,
           interactionFn: this.fnI.bind(this),
+          parentAgent: this,
           currentDepth: currentDepth,
           workers: args.workers,
           workerEvictionTTLMs: args.workerevictionttl
@@ -15150,9 +15479,11 @@ MiniA.prototype.init = function(args) {
       this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
     }
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
-    if (this._useTools === true && toBoolean(args.mcpproxy) === true && toBoolean(args.usejsontool) !== true) {
+    if (this._useTools === true && toBoolean(args.mcpproxy) === true && toBoolean(args.usejsontool) !== true && !useJsonToolWasDefined) {
       args.usejsontool = true
       this.fnI("info", "mcpproxy=true with usetools=true: forcing usejsontool=true compatibility mode.")
+    } else if (this._useTools === true && toBoolean(args.mcpproxy) === true && useJsonToolWasDefined && toBoolean(args.usejsontool) !== true) {
+      this.fnI("info", "mcpproxy=true with usetools=true: respecting explicit usejsontool=false.")
     }
 
     if (isMap(this._oaf_lc_model)) {
@@ -15585,6 +15916,13 @@ MiniA.prototype.init = function(args) {
       }
       proxyNames = proxyNames.filter(name => name !== "proxy-dispatch")
       if (shellViaActionPreferred) proxyNames = proxyNames.filter(name => name !== "shell")
+      if (isArray(args._mcpHandoffTools) && args._mcpHandoffTools.length > 0) {
+        var handoffToolMap = {}
+        args._mcpHandoffTools.forEach(function(name) {
+          if (isString(name) && name.length > 0) handoffToolMap[name] = true
+        })
+        proxyNames = proxyNames.filter(function(name) { return handoffToolMap[name] === true })
+      }
       proxyNames.sort()
       if (proxyNames.length > 0) {
         proxyToolCount = proxyNames.length
@@ -15592,7 +15930,7 @@ MiniA.prototype.init = function(args) {
         if (isArray(proxyState.catalog)) {
           proxyState.catalog.forEach(function(entry) {
             if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name !== "proxy-dispatch") {
-              if (!shellViaActionPreferred || entry.tool.name !== "shell") {
+              if ((!shellViaActionPreferred || entry.tool.name !== "shell") && proxyNames.indexOf(entry.tool.name) >= 0) {
                 proxyToolsWithDesc.push({ name: entry.tool.name, description: entry.tool.description || "" })
               }
             }
@@ -16001,8 +16339,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usetoolslc", type: "boolean", default: false },
       { name: "toolfallback", type: "boolean", default: false },
       { name: "mcpproxy", type: "boolean", default: false },
+      { name: "mcpproxynative", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
+      { name: "mcpproxyallow", type: "string", default: __ },
+      { name: "mcpproxydeny", type: "string", default: __ },
       { name: "adaptiverouting", type: "boolean", default: false },
       { name: "routerorder", type: "string", default: __ },
       { name: "routerallow", type: "string", default: __ },
@@ -16068,6 +16409,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
+    args.mcpproxynative = _$(toBoolean(args.mcpproxynative), "args.mcpproxynative").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -16082,6 +16424,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
+    args.mcpproxyallow = _$(args.mcpproxyallow, "args.mcpproxyallow").isString().default(__)
+    args.mcpproxydeny = _$(args.mcpproxydeny, "args.mcpproxydeny").isString().default(__)
     args.adaptiverouting = _$(toBoolean(args.adaptiverouting), "args.adaptiverouting").isBoolean().default(false)
     args.routerorder = _$(args.routerorder, "args.routerorder").isString().default(__)
     args.routerallow = _$(args.routerallow, "args.routerallow").isString().default(__)
@@ -16595,7 +16939,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     if (promptProxyMode) {
       // MCP proxy mode: pre-set prompt mode for the main model only.
-      this._useToolsActual = this._useToolsMain === true
+      var useNativeMcpProxy = this._shouldUseNativeMcpProxyTools(args, "main")
+      this._useToolsActual = this._useToolsMain === true && useNativeMcpProxy
       var proxyPresetSuffix = hasMcpProxyConnection ? " (connection already present)" : " (connection will be initialized)"
       this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()" + proxyPresetSuffix)
     } else if (this._useToolsMain && isArray(this.mcpTools) && this.mcpTools.length > 0) {
@@ -16882,9 +17227,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         Object.keys(this._agentState).forEach(function(k) {
           if (k !== "workingMemorySession" && k !== "workingMemoryGlobal") stateForLLM[k] = this._agentState[k]
         }.bind(this))
-        stateForLLM.workingMemory = args.memoryinject === "full"
-          ? this._buildCompactMemoryForLLM()
-          : this._buildMemorySummaryForLLM()
+        var _memCompact = args.memoryinject === "full" ? this._buildCompactMemoryForLLM() : null
+        stateForLLM.workingMemory = _memCompact !== null ? _memCompact : this._buildMemorySummaryForLLM()
+        var _pf = []
+        var _pfCompact = _memCompact !== null ? _memCompact : this._buildCompactMemoryForLLM()
+        Object.keys(_pfCompact).forEach(function(sec) {
+          (_pfCompact[sec] || []).forEach(function(e) {
+            if (e.pr === true)  _pf.push({ type: "readresult", tool: e.tn || "unknown", resultFile: e.rf, id: e.id, section: sec })
+            else if (e.tr === true) _pf.push({ type: "truncated", tool: e.tn || "unknown", params: e.tp, fullSize: e.fs, id: e.id, section: sec })
+          })
+        })
+        if (_pf.length > 0) stateForLLM.pendingFetches = _pf
         runtime.lastStateSnapshot = af.toTOON(stateForLLM)
       } else {
         runtime.lastStateSnapshot = stringify(this._agentState, __, "")
@@ -17210,11 +17563,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
         })
         if (isObject(evidenceEntry) && isString(evidenceEntry.id) && isString(observation) && observation.length > 0) {
-          this._memoryAppend("artifacts", observation.substring(0, 500), {
+          var _isSpill = isMap(rawResult) && rawResult.autoSpilled === true && isString(rawResult.resultFile)
+          var _isTrunc = !_isSpill && observation.length > 2000
+          var _storedVal = observation.substring(0, 2000)
+          var _artMeta = {
             evidenceRefs: [evidenceEntry.id],
             provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName }
-          })
+          }
+          if (_isSpill) {
+            _artMeta.pendingReadresult = true
+            _artMeta.resultFile        = rawResult.resultFile
+            _artMeta.sourceTool        = isString(rawResult.tool) ? rawResult.tool : toolName
+            _artMeta.sourceParams      = af.toSLON(params || {}).substring(0, 200)
+          } else if (_isTrunc) {
+            _storedVal += " [TRUNCATED: full output was " + observation.length + " bytes; re-call tool '" + toolName + "' with same params to get complete data]"
+            _artMeta.truncated    = true
+            _artMeta.fullSize     = observation.length
+            _artMeta.sourceTool   = toolName
+            _artMeta.sourceParams = af.toSLON(params || {}).substring(0, 200)
+          }
+          this._memoryAppend("artifacts", _storedVal, _artMeta, { noDedup: true })
         }
+        this._clearPendingFetchFlags(toolName, params, rawResult, observation)
       }
 
       runtime.consecutiveThoughts = 0

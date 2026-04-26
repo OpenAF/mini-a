@@ -227,6 +227,31 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerNormalizesWorkerSkills
 
+- name: MiniA Core Tests::SubtaskChildArgSanitization
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerStripsParentOnlyChildArgs
+
+- name: MiniA Core Tests::SubtaskExplicitChildArgs
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerKeepsExplicitParentOnlyChildArgs
+
+- name: MiniA Core Tests::SubtaskCancelStopsLocalChild
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerCancelStopsLocalChildAgent
+
+- name: MiniA Core Tests::SelectiveMcpHandoffLocal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMiniASelectiveMcpHandoffSharesLocalConnections
+
+- name: MiniA Core Tests::SelectiveMcpHandoffProxy
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMiniASelectiveProxyMcpHandoffFiltersPromptAndCalls
+
 - name: MiniA Core Tests::WorkerSkillRouting
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -490,6 +515,11 @@ todo:
 - MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization
+- MiniA Core Tests::SubtaskChildArgSanitization
+- MiniA Core Tests::SubtaskExplicitChildArgs
+- MiniA Core Tests::SubtaskCancelStopsLocalChild
+- MiniA Core Tests::SelectiveMcpHandoffLocal
+- MiniA Core Tests::SelectiveMcpHandoffProxy
 - MiniA Core Tests::WorkerSkillRouting
 - MiniA Core Tests::WorkerFallbackRouting
 - MiniA Core Tests::WorkerCompatibilityGates
