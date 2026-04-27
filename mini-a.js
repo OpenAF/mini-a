@@ -11547,7 +11547,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
         }
 
-        return { error: "Unsupported action '" + params.action + "'. Use list, search, call, or readresult." }
+        var actionStr = isString(params.action) ? params.action.toLowerCase().trim() : String(params.action || "")
+        if (actionStr === "shell" || actionStr === "exec" || actionStr === "run" || actionStr === "bash") {
+          return { error: "proxy-dispatch does not support action='" + actionStr + "'. Shell commands must use the JSON 'action':'shell' field (top-level), not proxy-dispatch. Use proxy-dispatch with action='call' to invoke MCP tools instead." }
+        }
+        return { error: "Unsupported proxy-dispatch action '" + actionStr + "'. Valid actions are: status, list, search, call, readresult." }
       }
     }
 
@@ -11560,8 +11564,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           properties: {
             action: {
               type       : "string",
-              description: "Operation to perform: status, list, search, call, or readresult. 'status' returns a lightweight catalog summary (totalTools, catalogHash) to check if tools have changed. Use 'readresult' to retrieve the content of a previously spilled result file (from resultFile) without triggering further auto-spill.",
-              enum       : [ "status", "list", "search", "call", "readresult" ]
+              description: "Operation to perform. MUST be one of: 'status' (catalog check), 'list' (list available tools), 'search' (search tool metadata), 'call' (invoke a downstream tool), or 'readresult' (retrieve a previously spilled result file). No other values are valid — never use 'shell', 'exec', 'bash', or any similar value here."
             },
             connection: {
               type       : "string",
@@ -12751,6 +12754,16 @@ MiniA.prototype._assessGoalComplexity = function(goal) {
     }
   })
 
+  // --- External lookup / research signals ---
+  // Goals that explicitly search the web, ask factual questions, or need up-to-date external
+  // data require web research. A weaker LC model handles these poorly, so mark them at least
+  // "medium" so the main model runs on step 0. Three distinct indicators; any one is sufficient.
+  var hasResearchVerb = /\bsearch\b|\blook up\b|\blookup\b/i.test(goal)
+  var hasFactualQuery = /\bwho is\b|\bwho are\b|\bwhat is\b|\bwhat are\b|\bwhere is\b|\bwhere are\b|\bwhen (is|was|did)\b|\bhow (much|many|do|does|did)\b/i.test(goal)
+  var hasCurrentIndicator = /\bcurrent\b|\blatest\b|\brecent\b|\btoday\b|\bthis (year|month|week)\b/i.test(goal)
+  var hasLookup = hasResearchVerb || hasFactualQuery || hasCurrentIndicator
+  if (hasLookup) { score += 1; signals.push("lookup") }
+
   // --- Entity / file count signals ---
   // Multiple file paths
   var filePaths = goal.match(/[\/\\][\w\-./\\]+/g)
@@ -12777,11 +12790,12 @@ MiniA.prototype._assessGoalComplexity = function(goal) {
   if (score >= 5 || tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
     level = "complex"
   }
-  // Medium: score >= 2, or classic medium conditions
-  else if (score >= 2 || tokens > 100 || hasMultiStep || hasMultipleTasks) {
+  // Medium: score >= 2, or classic medium conditions, or any lookup/research signal.
+  // Lookup goals require external web search which LC models handle poorly — always use main model on step 0.
+  else if (score >= 2 || tokens > 100 || hasMultiStep || hasMultipleTasks || hasLookup) {
     level = "medium"
   }
-  // Simple: Short, direct goals
+  // Simple: Short, direct goals with no external lookup requirement
   else {
     level = "simple"
   }
@@ -14057,6 +14071,14 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
     var registerMcpTools = function(llmInstance, modelName) {
       var normalizedModel = modelName === "lc" ? "lc" : "main"
       if (!parent._isToolInterfaceEnabledForModel(normalizedModel)) return llmInstance
+
+      // When usejsontool=true, don't register tools natively. The model responds with JSON actions instead.
+      if (toBoolean(args.usejsontool) === true) {
+        parent.fnI("info", `usejsontool=true: disabling native tool calling on ${normalizedModel} model. Tools will be handled via JSON responses.`)
+        if (normalizedModel === "lc") parent._useToolsActualLC = false
+        else parent._useToolsActualMain = false
+        return llmInstance
+      }
 
       // Check if we're using mcpproxy - if so, force function calling mode
       var usingMcpProxy = toBoolean(args.mcpproxy) === true
@@ -15644,8 +15666,13 @@ MiniA.prototype.init = function(args) {
           if (isExisting) {
             mcp = this._mcpConnections[id]
           } else {
+            // Dummy-type configs contain session-specific closures (fns, parent references).
+            // Sharing them across sessions via the $mcp cache would reuse a stale closure from
+            // a previous session, causing "_subtaskManager from undefined" errors. Only share
+            // external (stdio/remote) connections that are expensive to re-establish.
+            var _mcpIsSessionSpecific = mcpConfig.type === "dummy" || (isObject(mcpConfig.options) && (mcpConfig.options.type === "dummy" || mcpConfig.options.type === "ojob"))
             mcp = $mcp(merge(mcpConfig, {
-              shared: true,
+              shared: !_mcpIsSessionSpecific,
               preFn : (t, a) => {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
@@ -15850,6 +15877,7 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Available tools and their descriptions are listed above — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one directly. Only use {\"action\":\"list\"} if you need to discover tools not shown above.")
+      baseRules.push("The proxy-dispatch 'action' parameter only accepts: status, list, search, call, readresult. NEVER pass action='shell', 'exec', 'bash', 'run', or any other value to proxy-dispatch — those are not valid and will fail. Shell commands use the top-level JSON 'action':'shell' field, not the proxy-dispatch tool.")
       if (toBoolean(args.usejsontool) !== true) {
         baseRules.push("Do not call a tool named 'json' unless it is explicitly listed in the available tools for this request. If no MCP tool is needed, return the normal JSON response directly instead of trying to call a 'json' tool.")
       }
@@ -17631,7 +17659,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               if (_rawForSummary.length > 32768) _rawForSummary = _rawForSummary.substring(0, 32768) + "\n...[truncated]"
               var _goalShort = isString(args.goal) ? args.goal.substring(0, 120) : "the current goal"
               var _summaryGoal = "Summarize the following tool output for the parent goal: " + _goalShort + ". Output only the key facts, findings, and important details in 2-5 sentences.\n\nTool: " + toolName + "\nOutput:\n" + _rawForSummary
-              var _summaryOpts = { deadlineMs: 30000, maxAttempts: 1 }
+              // Use delegationtimeout (user-configured) capped to 120s so slow cloud models
+              // (e.g. kimi-k2.6 generating 2000+ tokens) don't hit the 30s hard wall.
+              var _summaryDeadlineMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0
+                ? Math.min(args.delegationtimeout, 120000) : 120000
+              var _summaryOpts = { deadlineMs: _summaryDeadlineMs, maxAttempts: 1 }
               var _memoryMap = isObject(parent._agentState) ? parent._agentState.workingMemory : __
               if (args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
                 _summaryOpts.fork = true
@@ -17640,7 +17672,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               var _summaryId = parent._subtaskManager.submitAndRun(_summaryGoal, { maxsteps: 5 }, _summaryOpts)
               global.__mini_a_metrics.autodelegation_triggered.inc()
               try {
-                var _summaryResult = parent._subtaskManager.waitFor(_summaryId, 30000)
+                var _summaryResult = parent._subtaskManager.waitFor(_summaryId, _summaryDeadlineMs)
                 if (isString(_summaryResult.answer) && _summaryResult.answer.trim().length > 0) {
                   observation = "[auto-delegated summary] " + _summaryResult.answer.trim()
                 }

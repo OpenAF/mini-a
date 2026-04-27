@@ -1,0 +1,3346 @@
+{
+  "{\"id\":\"6ae01684\",\"ts\":1777250224271}": {
+    "ts": 1777250224271,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Model is gpt-oss-120b/20b and usejsontool is not set: enabling usejsontool=true compatibility mode."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224286}": {
+    "ts": 1777250224286,
+    "id": "6ae01684",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224294}": {
+    "ts": 1777250224294,
+    "id": "6ae01684",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224323}": {
+    "ts": 1777250224323,
+    "id": "6ae01684",
+    "e": "mcp",
+    "m": "MCP proxy mode enabled. Aggregating 4 MCP connection(s) into a single proxy..."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224691}": {
+    "ts": 1777250224691,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #1 ready as 'c1' with 1 tool(s)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224721}": {
+    "ts": 1777250224721,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #2 ready as 'c2' with 16 tool(s)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224733}": {
+    "ts": 1777250224733,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #3 ready as 'c3' with 2 tool(s)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224744}": {
+    "ts": 1777250224744,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #4 ready as 'c4' with 1 tool(s)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224868}": {
+    "ts": 1777250224868,
+    "id": "6ae01684",
+    "e": "done",
+    "m": "MCP connection #1 established. Found #1 tools."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224989}": {
+    "ts": 1777250224989,
+    "id": "6ae01684",
+    "e": "done",
+    "m": "MCP connection #2 established. Found #1 tools."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250224995}": {
+    "ts": 1777250224995,
+    "id": "6ae01684",
+    "e": "done",
+    "m": "Total MCP tools available: 2"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225001}": {
+    "ts": 1777250225001,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "JSON compatibility tool active. Registered MCP tools: proxy-dispatch, json"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225023}": {
+    "ts": 1777250225023,
+    "id": "6ae01684",
+    "e": "user",
+    "m": "list me the current top executives on Camara Municipal da Batalha in Portugal for 2026"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225024}": {
+    "ts": 1777250225024,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Pre-setting _useToolsActual=true for MCP proxy mode before init() (connection already present)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225044}": {
+    "ts": 1777250225044,
+    "id": "6ae01684",
+    "e": "libs",
+    "m": "Loading library: @AWS/aws.js..."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225050}": {
+    "ts": 1777250225050,
+    "id": "6ae01684",
+    "e": "libs",
+    "m": "Loading library: @ghcopilot/ghcopilot.js..."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225062}": {
+    "ts": 1777250225062,
+    "id": "6ae01684",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225068}": {
+    "ts": 1777250225068,
+    "id": "6ae01684",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225383}": {
+    "ts": 1777250225383,
+    "id": "6ae01684",
+    "e": "args",
+    "m": "Execution arguments captured for audit.",
+    "meta": {
+      "args": {
+        "exec": "",
+        "mini-a": "",
+        "autodelegation": true,
+        "verbose": false,
+        "debug": false,
+        "raw": false,
+        "showthinking": false,
+        "useshell": true,
+        "sandboxnonetwork": false,
+        "readwrite": true,
+        "checkall": false,
+        "shellbatch": false,
+        "shellallowpipes": false,
+        "showexecs": false,
+        "showseparator": true,
+        "usetools": true,
+        "useutils": true,
+        "mini-a-docs": false,
+        "usediagrams": false,
+        "usecharts": false,
+        "useascii": true,
+        "usesvg": false,
+        "usevectors": false,
+        "usestream": true,
+        "useplanning": false,
+        "usememory": true,
+        "memoryuser": false,
+        "memoryusersession": true,
+        "memoryscope": "both",
+        "usewiki": false,
+        "wikiaccess": "ro",
+        "wikibackend": "fs",
+        "wikiprefix": "wiki/",
+        "wikiuseversion1": false,
+        "wikiignorecertcheck": false,
+        "wikilintstaleddays": 90,
+        "planmode": false,
+        "validateplan": false,
+        "convertplan": false,
+        "resumefailed": false,
+        "forceplanning": false,
+        "chatbotmode": false,
+        "modelstrategy": "advisor",
+        "advisormaxuses": 2,
+        "advisorenable": true,
+        "advisoronrisk": true,
+        "advisoronambiguity": true,
+        "advisoronharddecision": true,
+        "advisorcooldownsteps": 2,
+        "advisorbudgetratio": 0.2,
+        "emergencyreserve": 0.1,
+        "harddecision": "warn",
+        "evidencegate": false,
+        "evidencegatestrictness": "medium",
+        "lcescalatedefer": true,
+        "lcbudget": 0,
+        "llmcomplexity": false,
+        "mcplazy": false,
+        "mcpdynamic": false,
+        "mcpproxy": true,
+        "mcpproxythreshold": 51200,
+        "mcpproxytoon": true,
+        "mcpprogcall": false,
+        "mcpprogcallport": 0,
+        "mcpprogcallmaxbytes": 4096,
+        "mcpprogcallresultttl": 600,
+        "mcpprogcallbatchmax": 10,
+        "nosetmcpwd": false,
+        "compressgoal": false,
+        "compressgoaltokens": "[redacted]",
+        "compressgoalchars": 1000,
+        "toolcachettl": 5000,
+        "mcp": "[(type: ojob, options: (job: 'mcps/mcp-ollama-web-search.yaml'))]",
+        "mode": "ollama",
+        "libs": "@AWS/aws.js,@ghcopilot/ghcopilot.js",
+        "conversation": "/Users/nunoaguiar/.openaf-mini-a/history/conversation-20260427-013702.json",
+        "resume": false,
+        "useattach": false,
+        "historyretention": 600,
+        "historys3useversion1": false,
+        "historys3ignorecertcheck": false,
+        "ssequeuetimeout": 120,
+        "maxpromptchars": 120000,
+        "planstyle": "simple",
+        "updatefreq": "auto",
+        "updateinterval": 3,
+        "forceupdates": false,
+        "saveplannotes": false,
+        "deepresearch": false,
+        "maxcycles": 3,
+        "validationthreshold": "PASS",
+        "persistlearnings": true,
+        "adaptiverouting": false,
+        "usedelegation": true,
+        "usea2a": false,
+        "workerevictionttl": 60000,
+        "workerreginterval": 30000,
+        "maxconcurrent": 4,
+        "delegationmaxdepth": 3,
+        "delegationtimeout": 300000,
+        "delegationmaxretries": 2,
+        "showdelegate": false,
+        "toolfallback": false,
+        "useskills": true,
+        "skillmaxautoload": 1,
+        "skillcontextchars": 8000,
+        "skillmanifestchars": 1536,
+        "miniadocs": false,
+        "usemaps": false,
+        "usemath": false,
+        "memorymaxpersection": 80,
+        "memorymaxentries": 500,
+        "memorycompactevery": 8,
+        "memorydedup": true,
+        "memorystaledays": 0,
+        "web": false,
+        "modelman": false,
+        "mcptest": false,
+        "memoryman": false,
+        "workermode": false,
+        "goal": "list me the current top executives on Camara Municipal da Batalha in Portugal for 2026",
+        "format": "md",
+        "maxsteps": 50,
+        "knowledge": "",
+        "chatyouare": "",
+        "youare": "",
+        "shell": "",
+        "shellallow": "",
+        "shellbanextra": "",
+        "usejsontool": true,
+        "usetoolslc": false,
+        "workers": "[]",
+        "workerregtoken": "[redacted]",
+        "autodelegationthreshold": 8192,
+        "autodelegationmaxperstep": 2,
+        "noisytools": "",
+        "subtasks": "",
+        "subtasksfile": "",
+        "subtaskssequential": false,
+        "forkstatemaxbytes": 65536,
+        "mcpprogcalltools": "",
+        "debugfile": "",
+        "maxcontext": 0,
+        "rules": "",
+        "mcpproxynative": false,
+        "memorysessionch": "{\"name\":\"mini_a_session_mem\",\"type\":\"file\",\"options\":{\"file\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.json.gz\",\"lock\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.lock\",\"multifile\":false,\"gzip\":true,\"compact\":true}}",
+        "memorypromote": "",
+        "memoryinject": "summary",
+        "wikiurl": "https://s3.amazonaws.com",
+        "wikiaccesskey": "[redacted]",
+        "wikisecret": "[redacted]"
+      }
+    }
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225443}": {
+    "ts": 1777250225443,
+    "id": "6ae01684",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225450}": {
+    "ts": 1777250225450,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "MCP proxy mode enabled - using function calling for proxy-dispatch tool."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225456}": {
+    "ts": 1777250225456,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Registering MCP tools on main LLM via tool interface..."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225466}": {
+    "ts": 1777250225466,
+    "id": "6ae01684",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225472}": {
+    "ts": 1777250225472,
+    "id": "6ae01684",
+    "e": "mcp",
+    "m": "Registered 2 MCP tool(s) via LLM tool interface (main + low-cost)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225478}": {
+    "ts": 1777250225478,
+    "id": "6ae01684",
+    "e": "size",
+    "m": "System prompt ~2882 tokens"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225483}": {
+    "ts": 1777250225483,
+    "id": "6ae01684",
+    "e": "size",
+    "m": "System prompt profile=balanced budget=0 examples=off toolDetails=off planningDetails=off skills=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225490}": {
+    "ts": 1777250225490,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/facts: \"Runtime started for new execution loop\" (id=f23fec7e38a9b2f6)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225504}": {
+    "ts": 1777250225504,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250225513}": {
+    "ts": 1777250225513,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250226300}": {
+    "ts": 1777250226300,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Using model: openai/gpt-oss-120b (openai)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250226329}": {
+    "ts": 1777250226329,
+    "id": "6ae01684",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250226335}": {
+    "ts": 1777250226335,
+    "id": "6ae01684",
+    "e": "input",
+    "m": "Interacting with main model (context ~0 tokens)..."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250227358}": {
+    "ts": 1777250227358,
+    "id": "6ae01684",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: call, arguments: (query: Camara Municipal da Batalha top executives 2026), tool: web-search)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250228413}": {
+    "ts": 1777250228413,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (5063 bytes) for parameters: (action: call, arguments: (query: Camara Municipal da Batalha top executives 2026), tool: web-search)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250228453}": {
+    "ts": 1777250228453,
+    "id": "6ae01684",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (4.53 KB)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250228462}": {
+    "ts": 1777250228462,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=0135490d8dfd9c74)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250228471}": {
+    "ts": 1777250228471,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250228477}": {
+    "ts": 1777250228477,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250229179}": {
+    "ts": 1777250229179,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"results[3]{title,url,content}:\n  Organização e Governação,\"https://cm-batalha.pt\" (id=2498a686075e6fe8)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250229187}": {
+    "ts": 1777250229187,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250229193}": {
+    "ts": 1777250229193,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250230656}": {
+    "ts": 1777250230656,
+    "id": "6ae01684",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: call, arguments: (query: Camara Municipal da Batalha top executives 2026), connection: default, tool: web-search)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250231694}": {
+    "ts": 1777250231694,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (5063 bytes) for parameters: (action: call, arguments: (query: Camara Municipal da Batalha top executives 2026), connection: default, tool: web-search)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250231720}": {
+    "ts": 1777250231720,
+    "id": "6ae01684",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (4.53 KB)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250231729}": {
+    "ts": 1777250231729,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=0135490d8dfd9c74)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250231737}": {
+    "ts": 1777250231737,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250231744}": {
+    "ts": 1777250231744,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250232407}": {
+    "ts": 1777250232407,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"results[3]{title,url,content}:\n  Organização e Governação,\"https://cm-batalha.pt\" (id=b6ac4796e06cdc34)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250232414}": {
+    "ts": 1777250232414,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250232419}": {
+    "ts": 1777250232419,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250233865}": {
+    "ts": 1777250233865,
+    "id": "6ae01684",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: list, format: detail, includeTools: true)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250233912}": {
+    "ts": 1777250233912,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (9179 bytes) for parameters: (action: list, format: detail, includeTools: true)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250233919}": {
+    "ts": 1777250233919,
+    "id": "6ae01684",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (4.38 KB)."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250233926}": {
+    "ts": 1777250233926,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=0135490d8dfd9c74)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250233933}": {
+    "ts": 1777250233933,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250233940}": {
+    "ts": 1777250233940,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250234616}": {
+    "ts": 1777250234616,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"action: list\ntotalConnections: 4\nconnections[4]:\n  - alias: c1\n    serverInfo: n\" (id=636e269bc9c69728)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250234623}": {
+    "ts": 1777250234623,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250234630}": {
+    "ts": 1777250234630,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236141}": {
+    "ts": 1777250236141,
+    "id": "6ae01684",
+    "e": "output",
+    "m": "Main model responded. "
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236158}": {
+    "ts": 1777250236158,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/decisions: \"Final answer emitted after native tool call.\" (id=09eeda0f3c34a9d7)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236169}": {
+    "ts": 1777250236169,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=1, artifacts=3"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236178}": {
+    "ts": 1777250236178,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=1, artifacts=3"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236844}": {
+    "ts": 1777250236844,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/summaries: \"{\"error\":{\"message\":\"Tool call validation failed: tool call validation failed: a\" (id=f850f526adecebc0)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236851}": {
+    "ts": 1777250236851,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=1, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250236857}": {
+    "ts": 1777250236857,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=1, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250237513}": {
+    "ts": 1777250237513,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=1, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250237519}": {
+    "ts": 1777250237519,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=1, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238181}": {
+    "ts": 1777250238181,
+    "id": "6ae01684",
+    "e": "final",
+    "m": "Final answer determined (size: 373). Goal achieved."
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238187}": {
+    "ts": 1777250238187,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/decisions: \"Final answer synthesis completed.\" (id=ed9ea4b7e2bec7d1)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238193}": {
+    "ts": 1777250238193,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=2, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238199}": {
+    "ts": 1777250238199,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=2, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238857}": {
+    "ts": 1777250238857,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📝 [mem:write] session/summaries: \"{\"error\":{\"message\":\"Tool call validation failed: tool call validation failed: a\" (id=f850f526adecebc0)"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238864}": {
+    "ts": 1777250238864,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=2, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250238870}": {
+    "ts": 1777250238870,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=2, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250239530}": {
+    "ts": 1777250239530,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=2, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"6ae01684\",\"ts\":1777250239536}": {
+    "ts": 1777250239536,
+    "id": "6ae01684",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, decisions=2, artifacts=3, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450042}": {
+    "ts": 1777250450042,
+    "id": "be91c482",
+    "e": "info",
+    "m": "Model is gpt-oss-120b/20b and usejsontool is not set: enabling usejsontool=true compatibility mode."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450062}": {
+    "ts": 1777250450062,
+    "id": "be91c482",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450073}": {
+    "ts": 1777250450073,
+    "id": "be91c482",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450106}": {
+    "ts": 1777250450106,
+    "id": "be91c482",
+    "e": "mcp",
+    "m": "Initializing 5 MCP connection(s)..."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450587}": {
+    "ts": 1777250450587,
+    "id": "be91c482",
+    "e": "done",
+    "m": "MCP connection #1 established. Found #1 tools."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450735}": {
+    "ts": 1777250450735,
+    "id": "be91c482",
+    "e": "done",
+    "m": "MCP connection #2 established. Found #16 tools."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250450864}": {
+    "ts": 1777250450864,
+    "id": "be91c482",
+    "e": "done",
+    "m": "MCP connection #3 established. Found #2 tools."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451006}": {
+    "ts": 1777250451006,
+    "id": "be91c482",
+    "e": "done",
+    "m": "MCP connection #4 established. Found #1 tools."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451152}": {
+    "ts": 1777250451152,
+    "id": "be91c482",
+    "e": "done",
+    "m": "MCP connection #5 established. Found #1 tools."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451176}": {
+    "ts": 1777250451176,
+    "id": "be91c482",
+    "e": "done",
+    "m": "Total MCP tools available: 21"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451189}": {
+    "ts": 1777250451189,
+    "id": "be91c482",
+    "e": "info",
+    "m": "JSON compatibility tool active. Registered MCP tools: web-search, init, filesystemQuery, filesystemModify, mathematics, timeUtilities, textUtilities, pathUtilities, filesystemBatch, validationUtilities, systemInfo, memoryStore, todoList, userInput, showMessage, markdownFiles, skills, delegate-subtask, subtask-status, shell, json"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451238}": {
+    "ts": 1777250451238,
+    "id": "be91c482",
+    "e": "user",
+    "m": "list me the current top executives on Camara Municipal da Batalha in Portugal for 2026"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451240}": {
+    "ts": 1777250451240,
+    "id": "be91c482",
+    "e": "info",
+    "m": "Pre-setting _useToolsActual=true (LLM supports function calling)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451259}": {
+    "ts": 1777250451259,
+    "id": "be91c482",
+    "e": "libs",
+    "m": "Loading library: @AWS/aws.js..."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451266}": {
+    "ts": 1777250451266,
+    "id": "be91c482",
+    "e": "libs",
+    "m": "Loading library: @ghcopilot/ghcopilot.js..."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451279}": {
+    "ts": 1777250451279,
+    "id": "be91c482",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451285}": {
+    "ts": 1777250451285,
+    "id": "be91c482",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451490}": {
+    "ts": 1777250451490,
+    "id": "be91c482",
+    "e": "args",
+    "m": "Execution arguments captured for audit.",
+    "meta": {
+      "args": {
+        "exec": "",
+        "mini-a": "",
+        "autodelegation": true,
+        "verbose": false,
+        "debug": false,
+        "raw": false,
+        "showthinking": false,
+        "useshell": true,
+        "sandboxnonetwork": false,
+        "readwrite": true,
+        "checkall": false,
+        "shellbatch": false,
+        "shellallowpipes": false,
+        "showexecs": false,
+        "showseparator": true,
+        "usetools": true,
+        "useutils": true,
+        "mini-a-docs": false,
+        "usediagrams": false,
+        "usecharts": false,
+        "useascii": true,
+        "usesvg": false,
+        "usevectors": false,
+        "usestream": true,
+        "useplanning": false,
+        "usememory": true,
+        "memoryuser": false,
+        "memoryusersession": true,
+        "memoryscope": "both",
+        "usewiki": false,
+        "wikiaccess": "ro",
+        "wikibackend": "fs",
+        "wikiprefix": "wiki/",
+        "wikiuseversion1": false,
+        "wikiignorecertcheck": false,
+        "wikilintstaleddays": 90,
+        "planmode": false,
+        "validateplan": false,
+        "convertplan": false,
+        "resumefailed": false,
+        "forceplanning": false,
+        "chatbotmode": false,
+        "modelstrategy": "advisor",
+        "advisormaxuses": 2,
+        "advisorenable": true,
+        "advisoronrisk": true,
+        "advisoronambiguity": true,
+        "advisoronharddecision": true,
+        "advisorcooldownsteps": 2,
+        "advisorbudgetratio": 0.2,
+        "emergencyreserve": 0.1,
+        "harddecision": "warn",
+        "evidencegate": false,
+        "evidencegatestrictness": "medium",
+        "lcescalatedefer": true,
+        "lcbudget": 0,
+        "llmcomplexity": false,
+        "mcplazy": false,
+        "mcpdynamic": false,
+        "mcpproxy": false,
+        "mcpproxythreshold": 51200,
+        "mcpproxytoon": true,
+        "mcpprogcall": false,
+        "mcpprogcallport": 0,
+        "mcpprogcallmaxbytes": 4096,
+        "mcpprogcallresultttl": 600,
+        "mcpprogcallbatchmax": 10,
+        "nosetmcpwd": false,
+        "compressgoal": false,
+        "compressgoaltokens": "[redacted]",
+        "compressgoalchars": 1000,
+        "toolcachettl": 5000,
+        "mcp": "[(type: ojob, options: (job: 'mcps/mcp-ollama-web-search.yaml'))]",
+        "mode": "ollama",
+        "libs": "@AWS/aws.js,@ghcopilot/ghcopilot.js",
+        "conversation": "/Users/nunoaguiar/.openaf-mini-a/history/conversation-20260427-014048.json",
+        "resume": false,
+        "useattach": false,
+        "historyretention": 600,
+        "historys3useversion1": false,
+        "historys3ignorecertcheck": false,
+        "ssequeuetimeout": 120,
+        "maxpromptchars": 120000,
+        "planstyle": "simple",
+        "updatefreq": "auto",
+        "updateinterval": 3,
+        "forceupdates": false,
+        "saveplannotes": false,
+        "deepresearch": false,
+        "maxcycles": 3,
+        "validationthreshold": "PASS",
+        "persistlearnings": true,
+        "adaptiverouting": false,
+        "usedelegation": true,
+        "usea2a": false,
+        "workerevictionttl": 60000,
+        "workerreginterval": 30000,
+        "maxconcurrent": 4,
+        "delegationmaxdepth": 3,
+        "delegationtimeout": 300000,
+        "delegationmaxretries": 2,
+        "showdelegate": false,
+        "toolfallback": false,
+        "useskills": true,
+        "skillmaxautoload": 1,
+        "skillcontextchars": 8000,
+        "skillmanifestchars": 1536,
+        "miniadocs": false,
+        "usemaps": false,
+        "usemath": false,
+        "memorymaxpersection": 80,
+        "memorymaxentries": 500,
+        "memorycompactevery": 8,
+        "memorydedup": true,
+        "memorystaledays": 0,
+        "web": false,
+        "modelman": false,
+        "mcptest": false,
+        "memoryman": false,
+        "workermode": false,
+        "goal": "list me the current top executives on Camara Municipal da Batalha in Portugal for 2026",
+        "format": "md",
+        "maxsteps": 50,
+        "knowledge": "",
+        "chatyouare": "",
+        "youare": "",
+        "shell": "",
+        "shellallow": "",
+        "shellbanextra": "",
+        "usejsontool": true,
+        "usetoolslc": false,
+        "workers": "[]",
+        "workerregtoken": "[redacted]",
+        "autodelegationthreshold": 8192,
+        "autodelegationmaxperstep": 2,
+        "noisytools": "",
+        "subtasks": "",
+        "subtasksfile": "",
+        "subtaskssequential": false,
+        "forkstatemaxbytes": 65536,
+        "mcpprogcalltools": "",
+        "debugfile": "",
+        "maxcontext": 0,
+        "rules": "",
+        "mcpproxynative": false,
+        "memorysessionch": "{\"name\":\"mini_a_session_mem\",\"type\":\"file\",\"options\":{\"file\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.json.gz\",\"lock\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.lock\",\"multifile\":false,\"gzip\":true,\"compact\":true}}",
+        "memorypromote": "",
+        "memoryinject": "summary",
+        "wikiurl": "https://s3.amazonaws.com",
+        "wikiaccesskey": "[redacted]",
+        "wikisecret": "[redacted]"
+      }
+    }
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451543}": {
+    "ts": 1777250451543,
+    "id": "be91c482",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451549}": {
+    "ts": 1777250451549,
+    "id": "be91c482",
+    "e": "info",
+    "m": "Registering MCP tools on main LLM via tool interface..."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451561}": {
+    "ts": 1777250451561,
+    "id": "be91c482",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451567}": {
+    "ts": 1777250451567,
+    "id": "be91c482",
+    "e": "mcp",
+    "m": "Registered 21 MCP tool(s) via LLM tool interface (main + low-cost)."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451573}": {
+    "ts": 1777250451573,
+    "id": "be91c482",
+    "e": "size",
+    "m": "System prompt ~1056 tokens"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451578}": {
+    "ts": 1777250451578,
+    "id": "be91c482",
+    "e": "size",
+    "m": "System prompt profile=balanced budget=0 examples=off toolDetails=off planningDetails=off skills=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451585}": {
+    "ts": 1777250451585,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/facts: \"Runtime started for new execution loop\" (id=2ef9dce9814b4ab7)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451606}": {
+    "ts": 1777250451606,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250451615}": {
+    "ts": 1777250451615,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250452351}": {
+    "ts": 1777250452351,
+    "id": "be91c482",
+    "e": "info",
+    "m": "Using model: openai/gpt-oss-120b (openai)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250452478}": {
+    "ts": 1777250452478,
+    "id": "be91c482",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250452485}": {
+    "ts": 1777250452485,
+    "id": "be91c482",
+    "e": "input",
+    "m": "Interacting with main model (context ~0 tokens)..."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250453763}": {
+    "ts": 1777250453763,
+    "id": "be91c482",
+    "e": "exec",
+    "m": "Executing action 'web-search' with parameters: (query: Camara Municipal da Batalha top executives 2026)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250454905}": {
+    "ts": 1777250454905,
+    "id": "be91c482",
+    "e": "info",
+    "m": "Execution of action 'web-search' finished successfully (4695 bytes) for parameters: (query: Camara Municipal da Batalha top executives 2026)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250454943}": {
+    "ts": 1777250454943,
+    "id": "be91c482",
+    "e": "done",
+    "m": "Action 'web-search' completed (4.43 KB)."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250454952}": {
+    "ts": 1777250454952,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'web-search' completed at step 1.\" (id=ac167afaa8a4c2e4)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250454961}": {
+    "ts": 1777250454961,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250454967}": {
+    "ts": 1777250454967,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250455671}": {
+    "ts": 1777250455671,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"(results: [(title: Organização e Governação, url: 'https://cm-batalha.pt/municip\" (id=bf773e10537d8111)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250455678}": {
+    "ts": 1777250455678,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250455685}": {
+    "ts": 1777250455685,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250457894}": {
+    "ts": 1777250457894,
+    "id": "be91c482",
+    "e": "exec",
+    "m": "Executing action 'textUtilities' with parameters: (encoding: utf-8, maxBytes: 200000, method: GET, operation: webfetch, url: 'https://en.wikipedia.org/wiki/Batalha,_Portugal')"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250457911}": {
+    "ts": 1777250457911,
+    "id": "be91c482",
+    "e": "exec",
+    "m": "Running tool 'textUtilities' with operation 'webfetch'."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250458695}": {
+    "ts": 1777250458695,
+    "id": "be91c482",
+    "e": "info",
+    "m": "Execution of action 'textUtilities' finished successfully (155498 bytes) for parameters: (encoding: utf-8, maxBytes: 200000, method: GET, operation: webfetch, url: 'https://en.wikipedia.org/wiki/Batalha,_Portugal')"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250458721}": {
+    "ts": 1777250458721,
+    "id": "be91c482",
+    "e": "done",
+    "m": "Action 'textUtilities' completed (139 KB)."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250458729}": {
+    "ts": 1777250458729,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'textUtilities' completed at step 1.\" (id=86c6b3505085e134)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250458739}": {
+    "ts": 1777250458739,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250458747}": {
+    "ts": 1777250458747,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250459414}": {
+    "ts": 1777250459414,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"url\":\"https://en.wikipedia.org/wiki/Batalha,_Portugal\",\"status\":200,\"statusTex\" (id=d4e830af63a7d4ef)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250459421}": {
+    "ts": 1777250459421,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=2"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250459427}": {
+    "ts": 1777250459427,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=2"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250461388}": {
+    "ts": 1777250461388,
+    "id": "be91c482",
+    "e": "output",
+    "m": "Main model responded. "
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250461400}": {
+    "ts": 1777250461400,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/decisions: \"Final answer emitted after native tool call.\" (id=fc6577a0013f6d36)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250461412}": {
+    "ts": 1777250461412,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=2"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250461421}": {
+    "ts": 1777250461421,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=2"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250462108}": {
+    "ts": 1777250462108,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/summaries: \"{\"error\":{\"message\":\"Tool call validation failed: tool call validation failed: a\" (id=377cf053b964de9b)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250462114}": {
+    "ts": 1777250462114,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250462125}": {
+    "ts": 1777250462125,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250462799}": {
+    "ts": 1777250462799,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250462805}": {
+    "ts": 1777250462805,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250463466}": {
+    "ts": 1777250463466,
+    "id": "be91c482",
+    "e": "final",
+    "m": "Final answer determined (size: 562). Goal achieved."
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250463472}": {
+    "ts": 1777250463472,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/decisions: \"Final answer synthesis completed.\" (id=991910c3ef3413b3)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250463477}": {
+    "ts": 1777250463477,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250463483}": {
+    "ts": 1777250463483,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250464144}": {
+    "ts": 1777250464144,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📝 [mem:write] session/summaries: \"{\"error\":{\"message\":\"Tool call validation failed: tool call validation failed: a\" (id=377cf053b964de9b)"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250464150}": {
+    "ts": 1777250464150,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250464156}": {
+    "ts": 1777250464156,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250464819}": {
+    "ts": 1777250464819,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"be91c482\",\"ts\":1777250464824}": {
+    "ts": 1777250464824,
+    "id": "be91c482",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=2, summaries=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765128}": {
+    "ts": 1777250765128,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Model is gpt-oss-120b/20b and usejsontool is not set: enabling usejsontool=true compatibility mode."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765135}": {
+    "ts": 1777250765135,
+    "id": "e79ac967",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765140}": {
+    "ts": 1777250765140,
+    "id": "e79ac967",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765147}": {
+    "ts": 1777250765147,
+    "id": "e79ac967",
+    "e": "mcp",
+    "m": "Initializing 5 MCP connection(s)..."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765398}": {
+    "ts": 1777250765398,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "MCP connection #1 established. Found #1 tools."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765517}": {
+    "ts": 1777250765517,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "MCP connection #2 established. Found #16 tools."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765635}": {
+    "ts": 1777250765635,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "MCP connection #3 established. Found #2 tools."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765753}": {
+    "ts": 1777250765753,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "MCP connection #4 established. Found #1 tools."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765871}": {
+    "ts": 1777250765871,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "MCP connection #5 established. Found #1 tools."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765878}": {
+    "ts": 1777250765878,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Total MCP tools available: 21"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765885}": {
+    "ts": 1777250765885,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "JSON compatibility tool active. Registered MCP tools: web-search, init, filesystemQuery, filesystemModify, mathematics, timeUtilities, textUtilities, pathUtilities, filesystemBatch, validationUtilities, systemInfo, memoryStore, todoList, userInput, showMessage, markdownFiles, skills, delegate-subtask, subtask-status, shell, json"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765917}": {
+    "ts": 1777250765917,
+    "id": "e79ac967",
+    "e": "user",
+    "m": "call showMessage to say hi"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765918}": {
+    "ts": 1777250765918,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Pre-setting _useToolsActual=true (LLM supports function calling)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765933}": {
+    "ts": 1777250765933,
+    "id": "e79ac967",
+    "e": "libs",
+    "m": "Loading library: @AWS/aws.js..."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765940}": {
+    "ts": 1777250765940,
+    "id": "e79ac967",
+    "e": "libs",
+    "m": "Loading library: @ghcopilot/ghcopilot.js..."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765947}": {
+    "ts": 1777250765947,
+    "id": "e79ac967",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250765952}": {
+    "ts": 1777250765952,
+    "id": "e79ac967",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766047}": {
+    "ts": 1777250766047,
+    "id": "e79ac967",
+    "e": "args",
+    "m": "Execution arguments captured for audit.",
+    "meta": {
+      "args": {
+        "exec": "",
+        "mini-a": "",
+        "autodelegation": true,
+        "verbose": false,
+        "debug": false,
+        "raw": false,
+        "showthinking": false,
+        "useshell": true,
+        "sandboxnonetwork": false,
+        "readwrite": true,
+        "checkall": false,
+        "shellbatch": false,
+        "shellallowpipes": false,
+        "showexecs": false,
+        "showseparator": true,
+        "usetools": true,
+        "useutils": true,
+        "mini-a-docs": false,
+        "usediagrams": false,
+        "usecharts": false,
+        "useascii": true,
+        "usesvg": false,
+        "usevectors": false,
+        "usestream": true,
+        "useplanning": false,
+        "usememory": true,
+        "memoryuser": false,
+        "memoryusersession": true,
+        "memoryscope": "both",
+        "usewiki": false,
+        "wikiaccess": "ro",
+        "wikibackend": "fs",
+        "wikiprefix": "wiki/",
+        "wikiuseversion1": false,
+        "wikiignorecertcheck": false,
+        "wikilintstaleddays": 90,
+        "planmode": false,
+        "validateplan": false,
+        "convertplan": false,
+        "resumefailed": false,
+        "forceplanning": false,
+        "chatbotmode": false,
+        "modelstrategy": "advisor",
+        "advisormaxuses": 2,
+        "advisorenable": true,
+        "advisoronrisk": true,
+        "advisoronambiguity": true,
+        "advisoronharddecision": true,
+        "advisorcooldownsteps": 2,
+        "advisorbudgetratio": 0.2,
+        "emergencyreserve": 0.1,
+        "harddecision": "warn",
+        "evidencegate": false,
+        "evidencegatestrictness": "medium",
+        "lcescalatedefer": true,
+        "lcbudget": 0,
+        "llmcomplexity": false,
+        "mcplazy": false,
+        "mcpdynamic": false,
+        "mcpproxy": false,
+        "mcpproxythreshold": 51200,
+        "mcpproxytoon": true,
+        "mcpprogcall": false,
+        "mcpprogcallport": 0,
+        "mcpprogcallmaxbytes": 4096,
+        "mcpprogcallresultttl": 600,
+        "mcpprogcallbatchmax": 10,
+        "nosetmcpwd": false,
+        "compressgoal": false,
+        "compressgoaltokens": "[redacted]",
+        "compressgoalchars": 1000,
+        "toolcachettl": 5000,
+        "mcp": "[(type: ojob, options: (job: 'mcps/mcp-ollama-web-search.yaml'))]",
+        "mode": "ollama",
+        "libs": "@AWS/aws.js,@ghcopilot/ghcopilot.js",
+        "conversation": "/Users/nunoaguiar/.openaf-mini-a/history/conversation-20260427-014557.json",
+        "resume": false,
+        "useattach": false,
+        "historyretention": 600,
+        "historys3useversion1": false,
+        "historys3ignorecertcheck": false,
+        "ssequeuetimeout": 120,
+        "maxpromptchars": 120000,
+        "planstyle": "simple",
+        "updatefreq": "auto",
+        "updateinterval": 3,
+        "forceupdates": false,
+        "saveplannotes": false,
+        "deepresearch": false,
+        "maxcycles": 3,
+        "validationthreshold": "PASS",
+        "persistlearnings": true,
+        "adaptiverouting": false,
+        "usedelegation": true,
+        "usea2a": false,
+        "workerevictionttl": 60000,
+        "workerreginterval": 30000,
+        "maxconcurrent": 4,
+        "delegationmaxdepth": 3,
+        "delegationtimeout": 300000,
+        "delegationmaxretries": 2,
+        "showdelegate": false,
+        "toolfallback": false,
+        "useskills": true,
+        "skillmaxautoload": 1,
+        "skillcontextchars": 8000,
+        "skillmanifestchars": 1536,
+        "miniadocs": false,
+        "usemaps": false,
+        "usemath": false,
+        "memorymaxpersection": 80,
+        "memorymaxentries": 500,
+        "memorycompactevery": 8,
+        "memorydedup": true,
+        "memorystaledays": 0,
+        "web": false,
+        "modelman": false,
+        "mcptest": false,
+        "memoryman": false,
+        "workermode": false,
+        "goal": "call showMessage to say hi",
+        "format": "md",
+        "maxsteps": 50,
+        "knowledge": "",
+        "chatyouare": "",
+        "youare": "",
+        "shell": "",
+        "shellallow": "",
+        "shellbanextra": "",
+        "usejsontool": true,
+        "usetoolslc": false,
+        "workers": "[]",
+        "workerregtoken": "[redacted]",
+        "autodelegationthreshold": 8192,
+        "autodelegationmaxperstep": 2,
+        "noisytools": "",
+        "subtasks": "",
+        "subtasksfile": "",
+        "subtaskssequential": false,
+        "forkstatemaxbytes": 65536,
+        "mcpprogcalltools": "",
+        "debugfile": "",
+        "maxcontext": 0,
+        "rules": "",
+        "mcpproxynative": false,
+        "memorysessionch": "{\"name\":\"mini_a_session_mem\",\"type\":\"file\",\"options\":{\"file\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.json.gz\",\"lock\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.lock\",\"multifile\":false,\"gzip\":true,\"compact\":true}}",
+        "memorypromote": "",
+        "memoryinject": "summary",
+        "wikiurl": "https://s3.amazonaws.com",
+        "wikiaccesskey": "[redacted]",
+        "wikisecret": "[redacted]"
+      }
+    }
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766082}": {
+    "ts": 1777250766082,
+    "id": "e79ac967",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766087}": {
+    "ts": 1777250766087,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Registering MCP tools on main LLM via tool interface..."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766096}": {
+    "ts": 1777250766096,
+    "id": "e79ac967",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766100}": {
+    "ts": 1777250766100,
+    "id": "e79ac967",
+    "e": "mcp",
+    "m": "Registered 21 MCP tool(s) via LLM tool interface (main + low-cost)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766105}": {
+    "ts": 1777250766105,
+    "id": "e79ac967",
+    "e": "size",
+    "m": "System prompt ~1056 tokens"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766111}": {
+    "ts": 1777250766111,
+    "id": "e79ac967",
+    "e": "size",
+    "m": "System prompt profile=balanced budget=0 examples=off toolDetails=off planningDetails=off skills=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766116}": {
+    "ts": 1777250766116,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/facts: \"Runtime started for new execution loop\" (id=aa5a393b3010731b)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766122}": {
+    "ts": 1777250766122,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766128}": {
+    "ts": 1777250766128,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766840}": {
+    "ts": 1777250766840,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Using model: openai/gpt-oss-120b (openai)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766857}": {
+    "ts": 1777250766857,
+    "id": "e79ac967",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250766862}": {
+    "ts": 1777250766862,
+    "id": "e79ac967",
+    "e": "input",
+    "m": "Interacting with main model (context ~0 tokens)..."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767647}": {
+    "ts": 1777250767647,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767661}": {
+    "ts": 1777250767661,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767680}": {
+    "ts": 1777250767680,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767687}": {
+    "ts": 1777250767687,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767693}": {
+    "ts": 1777250767693,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767699}": {
+    "ts": 1777250767699,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250767708}": {
+    "ts": 1777250767708,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250768376}": {
+    "ts": 1777250768376,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=af3a7a28e2e54727)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250768381}": {
+    "ts": 1777250768381,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250768387}": {
+    "ts": 1777250768387,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770147}": {
+    "ts": 1777250770147,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (level: info, message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770153}": {
+    "ts": 1777250770153,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770162}": {
+    "ts": 1777250770162,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (level: info, message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770167}": {
+    "ts": 1777250770167,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770172}": {
+    "ts": 1777250770172,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770177}": {
+    "ts": 1777250770177,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770182}": {
+    "ts": 1777250770182,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770852}": {
+    "ts": 1777250770852,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=30428e77850a5149)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770859}": {
+    "ts": 1777250770859,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250770865}": {
+    "ts": 1777250770865,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772465}": {
+    "ts": 1777250772465,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (level: info, message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772471}": {
+    "ts": 1777250772471,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772480}": {
+    "ts": 1777250772480,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (level: info, message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772485}": {
+    "ts": 1777250772485,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772490}": {
+    "ts": 1777250772490,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772496}": {
+    "ts": 1777250772496,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250772502}": {
+    "ts": 1777250772502,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250773188}": {
+    "ts": 1777250773188,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=be1ffa9edf299db0)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250773195}": {
+    "ts": 1777250773195,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250773200}": {
+    "ts": 1777250773200,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775266}": {
+    "ts": 1777250775266,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (level: info, message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775274}": {
+    "ts": 1777250775274,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775285}": {
+    "ts": 1777250775285,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (level: info, message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775292}": {
+    "ts": 1777250775292,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775297}": {
+    "ts": 1777250775297,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775302}": {
+    "ts": 1777250775302,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775308}": {
+    "ts": 1777250775308,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775986}": {
+    "ts": 1777250775986,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=6556d5bd9310b556)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775992}": {
+    "ts": 1777250775992,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250775998}": {
+    "ts": 1777250775998,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777735}": {
+    "ts": 1777250777735,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777754}": {
+    "ts": 1777250777754,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777767}": {
+    "ts": 1777250777767,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777773}": {
+    "ts": 1777250777773,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777779}": {
+    "ts": 1777250777779,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777785}": {
+    "ts": 1777250777785,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250777791}": {
+    "ts": 1777250777791,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250778463}": {
+    "ts": 1777250778463,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=58f80fe99af22729)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250778470}": {
+    "ts": 1777250778470,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=5"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250778475}": {
+    "ts": 1777250778475,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=5"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250780646}": {
+    "ts": 1777250780646,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250780658}": {
+    "ts": 1777250780658,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250780667}": {
+    "ts": 1777250780667,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250780675}": {
+    "ts": 1777250780675,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250780682}": {
+    "ts": 1777250780682,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=5"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250780689}": {
+    "ts": 1777250780689,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=5"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250781363}": {
+    "ts": 1777250781363,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=498c76d6d3689d53)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250781369}": {
+    "ts": 1777250781369,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=6"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250781375}": {
+    "ts": 1777250781375,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=6"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783247}": {
+    "ts": 1777250783247,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783259}": {
+    "ts": 1777250783259,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783275}": {
+    "ts": 1777250783275,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783283}": {
+    "ts": 1777250783283,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783289}": {
+    "ts": 1777250783289,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783300}": {
+    "ts": 1777250783300,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=6"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783306}": {
+    "ts": 1777250783306,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=6"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783971}": {
+    "ts": 1777250783971,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=dfb199dc777883eb)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783978}": {
+    "ts": 1777250783978,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=7"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250783983}": {
+    "ts": 1777250783983,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=7"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785932}": {
+    "ts": 1777250785932,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (level: info, message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785937}": {
+    "ts": 1777250785937,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785948}": {
+    "ts": 1777250785948,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (level: info, message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785953}": {
+    "ts": 1777250785953,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785958}": {
+    "ts": 1777250785958,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785964}": {
+    "ts": 1777250785964,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=7"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250785969}": {
+    "ts": 1777250785969,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=7"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250786654}": {
+    "ts": 1777250786654,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=7d473b23df41f00d)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250786661}": {
+    "ts": 1777250786661,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=8"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250786667}": {
+    "ts": 1777250786667,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=8"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789162}": {
+    "ts": 1777250789162,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789173}": {
+    "ts": 1777250789173,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789187}": {
+    "ts": 1777250789187,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789194}": {
+    "ts": 1777250789194,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789200}": {
+    "ts": 1777250789200,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789207}": {
+    "ts": 1777250789207,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=8"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789213}": {
+    "ts": 1777250789213,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=8"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789881}": {
+    "ts": 1777250789881,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=319aeb55eea2114c)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789888}": {
+    "ts": 1777250789888,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=9"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250789894}": {
+    "ts": 1777250789894,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=9"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250792677}": {
+    "ts": 1777250792677,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250792683}": {
+    "ts": 1777250792683,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250792689}": {
+    "ts": 1777250792689,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250792694}": {
+    "ts": 1777250792694,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250792700}": {
+    "ts": 1777250792700,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=9"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250792705}": {
+    "ts": 1777250792705,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=9"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250793381}": {
+    "ts": 1777250793381,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=b7a911eba7cb5e10)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250793388}": {
+    "ts": 1777250793388,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=10"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250793394}": {
+    "ts": 1777250793394,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=10"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250795530}": {
+    "ts": 1777250795530,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250795542}": {
+    "ts": 1777250795542,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250795551}": {
+    "ts": 1777250795551,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250795557}": {
+    "ts": 1777250795557,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250795565}": {
+    "ts": 1777250795565,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=10"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250795572}": {
+    "ts": 1777250795572,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=10"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250796238}": {
+    "ts": 1777250796238,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=64496df039e58ef8)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250796245}": {
+    "ts": 1777250796245,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=11"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250796251}": {
+    "ts": 1777250796251,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=11"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798301}": {
+    "ts": 1777250798301,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798308}": {
+    "ts": 1777250798308,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798313}": {
+    "ts": 1777250798313,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798320}": {
+    "ts": 1777250798320,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798326}": {
+    "ts": 1777250798326,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=11"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798332}": {
+    "ts": 1777250798332,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=11"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250798999}": {
+    "ts": 1777250798999,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=d5ee60ddaa1d08e7)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250799006}": {
+    "ts": 1777250799006,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=12"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250799012}": {
+    "ts": 1777250799012,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=12"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801172}": {
+    "ts": 1777250801172,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801178}": {
+    "ts": 1777250801178,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801188}": {
+    "ts": 1777250801188,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (message: hi)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801195}": {
+    "ts": 1777250801195,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801200}": {
+    "ts": 1777250801200,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801206}": {
+    "ts": 1777250801206,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=12"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801212}": {
+    "ts": 1777250801212,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=12"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801880}": {
+    "ts": 1777250801880,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=c4a4e2c43f6c5044)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801887}": {
+    "ts": 1777250801887,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=13"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250801893}": {
+    "ts": 1777250801893,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=13"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803850}": {
+    "ts": 1777250803850,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'showMessage' with parameters: (level: info, message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803859}": {
+    "ts": 1777250803859,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803873}": {
+    "ts": 1777250803873,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'showMessage' finished successfully (127 bytes) for parameters: (level: info, message: hi, title: Greeting)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803879}": {
+    "ts": 1777250803879,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'showMessage' completed (74 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803885}": {
+    "ts": 1777250803885,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'showMessage' completed at step 1.\" (id=2ac881f5b1a02df2)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803892}": {
+    "ts": 1777250803892,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=13"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250803898}": {
+    "ts": 1777250803898,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=13"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250804565}": {
+    "ts": 1777250804565,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"operation\":\"showMessage\",\"displayed\":true,\"level\":\"info\",\"message\":\"hi\"}\" (id=48af65342b6a8657)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250804572}": {
+    "ts": 1777250804572,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=14"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250804578}": {
+    "ts": 1777250804578,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=14"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807050}": {
+    "ts": 1777250807050,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer since showMessage tool is unavailable)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807060}": {
+    "ts": 1777250807060,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer since showMessage tool is unavailable)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807070}": {
+    "ts": 1777250807070,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807076}": {
+    "ts": 1777250807076,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807083}": {
+    "ts": 1777250807083,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=14"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807090}": {
+    "ts": 1777250807090,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=14"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807759}": {
+    "ts": 1777250807759,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=23335a3c6ed24362)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807766}": {
+    "ts": 1777250807766,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=15"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250807772}": {
+    "ts": 1777250807772,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=15"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250809785}": {
+    "ts": 1777250809785,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250809796}": {
+    "ts": 1777250809796,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250809802}": {
+    "ts": 1777250809802,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250809807}": {
+    "ts": 1777250809807,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250809813}": {
+    "ts": 1777250809813,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=15"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250809819}": {
+    "ts": 1777250809819,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=15"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250810490}": {
+    "ts": 1777250810490,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=597cefeed9015b79)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250810497}": {
+    "ts": 1777250810497,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=16"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250810503}": {
+    "ts": 1777250810503,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=16"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813173}": {
+    "ts": 1777250813173,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer since showMessage tool cannot be invoked)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813183}": {
+    "ts": 1777250813183,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: Provide the greeting as final answer since showMessage tool cannot be invoked)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813191}": {
+    "ts": 1777250813191,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813197}": {
+    "ts": 1777250813197,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813203}": {
+    "ts": 1777250813203,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=16"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813209}": {
+    "ts": 1777250813209,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=16"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813877}": {
+    "ts": 1777250813877,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=d86ec77db7497f6e)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813884}": {
+    "ts": 1777250813884,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=17"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250813891}": {
+    "ts": 1777250813891,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=17"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816261}": {
+    "ts": 1777250816261,
+    "id": "e79ac967",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: # hi, thought: 'ShowMessage tool unavailable, provide final greeting')"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816269}": {
+    "ts": 1777250816269,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: # hi, thought: 'ShowMessage tool unavailable, provide final greeting')"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816277}": {
+    "ts": 1777250816277,
+    "id": "e79ac967",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816283}": {
+    "ts": 1777250816283,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=d121389676d71b90)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816291}": {
+    "ts": 1777250816291,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=17"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816298}": {
+    "ts": 1777250816298,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=17"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816968}": {
+    "ts": 1777250816968,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=c038822dd11fb916)"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816975}": {
+    "ts": 1777250816975,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=18"
+  },
+  "{\"id\":\"e79ac967\",\"ts\":1777250816981}": {
+    "ts": 1777250816981,
+    "id": "e79ac967",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=18"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250864778}": {
+    "ts": 1777250864778,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "mcpproxy=true with usetools=true: forcing usejsontool=true compatibility mode."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250864819}": {
+    "ts": 1777250864819,
+    "id": "cfe776fe",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250864840}": {
+    "ts": 1777250864840,
+    "id": "cfe776fe",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250864881}": {
+    "ts": 1777250864881,
+    "id": "cfe776fe",
+    "e": "mcp",
+    "m": "MCP proxy mode enabled. Aggregating 4 MCP connection(s) into a single proxy..."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865255}": {
+    "ts": 1777250865255,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #1 ready as 'c1' with 1 tool(s)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865301}": {
+    "ts": 1777250865301,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #2 ready as 'c2' with 16 tool(s)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865318}": {
+    "ts": 1777250865318,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #3 ready as 'c3' with 2 tool(s)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865333}": {
+    "ts": 1777250865333,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "[mcp-proxy] Connection #4 ready as 'c4' with 1 tool(s)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865461}": {
+    "ts": 1777250865461,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "MCP connection #1 established. Found #1 tools."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865585}": {
+    "ts": 1777250865585,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "MCP connection #2 established. Found #1 tools."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865594}": {
+    "ts": 1777250865594,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Total MCP tools available: 2"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865602}": {
+    "ts": 1777250865602,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "JSON compatibility tool active. Registered MCP tools: proxy-dispatch, json"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865630}": {
+    "ts": 1777250865630,
+    "id": "cfe776fe",
+    "e": "user",
+    "m": "call showMessage to say hi"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865634}": {
+    "ts": 1777250865634,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Pre-setting _useToolsActual=true for MCP proxy mode before init() (connection already present)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865662}": {
+    "ts": 1777250865662,
+    "id": "cfe776fe",
+    "e": "libs",
+    "m": "Loading library: @AWS/aws.js..."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865675}": {
+    "ts": 1777250865675,
+    "id": "cfe776fe",
+    "e": "libs",
+    "m": "Loading library: @ghcopilot/ghcopilot.js..."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865689}": {
+    "ts": 1777250865689,
+    "id": "cfe776fe",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250865699}": {
+    "ts": 1777250865699,
+    "id": "cfe776fe",
+    "e": "warn",
+    "m": "debuglcch specified but low-cost LLM is not enabled."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866032}": {
+    "ts": 1777250866032,
+    "id": "cfe776fe",
+    "e": "args",
+    "m": "Execution arguments captured for audit.",
+    "meta": {
+      "args": {
+        "exec": "",
+        "mini-a": "",
+        "autodelegation": true,
+        "verbose": false,
+        "debug": false,
+        "raw": false,
+        "showthinking": false,
+        "useshell": true,
+        "sandboxnonetwork": false,
+        "readwrite": true,
+        "checkall": false,
+        "shellbatch": false,
+        "shellallowpipes": false,
+        "showexecs": false,
+        "showseparator": true,
+        "usetools": true,
+        "useutils": true,
+        "mini-a-docs": false,
+        "usediagrams": false,
+        "usecharts": false,
+        "useascii": true,
+        "usesvg": false,
+        "usevectors": false,
+        "usestream": true,
+        "useplanning": false,
+        "usememory": true,
+        "memoryuser": false,
+        "memoryusersession": true,
+        "memoryscope": "both",
+        "usewiki": false,
+        "wikiaccess": "ro",
+        "wikibackend": "fs",
+        "wikiprefix": "wiki/",
+        "wikiuseversion1": false,
+        "wikiignorecertcheck": false,
+        "wikilintstaleddays": 90,
+        "planmode": false,
+        "validateplan": false,
+        "convertplan": false,
+        "resumefailed": false,
+        "forceplanning": false,
+        "chatbotmode": false,
+        "modelstrategy": "advisor",
+        "advisormaxuses": 2,
+        "advisorenable": true,
+        "advisoronrisk": true,
+        "advisoronambiguity": true,
+        "advisoronharddecision": true,
+        "advisorcooldownsteps": 2,
+        "advisorbudgetratio": 0.2,
+        "emergencyreserve": 0.1,
+        "harddecision": "warn",
+        "evidencegate": false,
+        "evidencegatestrictness": "medium",
+        "lcescalatedefer": true,
+        "lcbudget": 0,
+        "llmcomplexity": false,
+        "mcplazy": false,
+        "mcpdynamic": false,
+        "mcpproxy": true,
+        "mcpproxythreshold": 51200,
+        "mcpproxytoon": true,
+        "mcpprogcall": false,
+        "mcpprogcallport": 0,
+        "mcpprogcallmaxbytes": 4096,
+        "mcpprogcallresultttl": 600,
+        "mcpprogcallbatchmax": 10,
+        "nosetmcpwd": false,
+        "compressgoal": false,
+        "compressgoaltokens": "[redacted]",
+        "compressgoalchars": 1000,
+        "toolcachettl": 5000,
+        "mcp": "[(type: ojob, options: (job: 'mcps/mcp-ollama-web-search.yaml'))]",
+        "mode": "ollama",
+        "libs": "@AWS/aws.js,@ghcopilot/ghcopilot.js",
+        "conversation": "/Users/nunoaguiar/.openaf-mini-a/history/conversation-20260427-014742.json",
+        "resume": false,
+        "useattach": false,
+        "historyretention": 600,
+        "historys3useversion1": false,
+        "historys3ignorecertcheck": false,
+        "ssequeuetimeout": 120,
+        "maxpromptchars": 120000,
+        "planstyle": "simple",
+        "updatefreq": "auto",
+        "updateinterval": 3,
+        "forceupdates": false,
+        "saveplannotes": false,
+        "deepresearch": false,
+        "maxcycles": 3,
+        "validationthreshold": "PASS",
+        "persistlearnings": true,
+        "adaptiverouting": false,
+        "usedelegation": true,
+        "usea2a": false,
+        "workerevictionttl": 60000,
+        "workerreginterval": 30000,
+        "maxconcurrent": 4,
+        "delegationmaxdepth": 3,
+        "delegationtimeout": 300000,
+        "delegationmaxretries": 2,
+        "showdelegate": false,
+        "toolfallback": false,
+        "useskills": true,
+        "skillmaxautoload": 1,
+        "skillcontextchars": 8000,
+        "skillmanifestchars": 1536,
+        "miniadocs": false,
+        "usemaps": false,
+        "usemath": false,
+        "memorymaxpersection": 80,
+        "memorymaxentries": 500,
+        "memorycompactevery": 8,
+        "memorydedup": true,
+        "memorystaledays": 0,
+        "web": false,
+        "modelman": false,
+        "mcptest": false,
+        "memoryman": false,
+        "workermode": false,
+        "goal": "call showMessage to say hi",
+        "format": "md",
+        "maxsteps": 50,
+        "knowledge": "",
+        "chatyouare": "",
+        "youare": "",
+        "shell": "",
+        "shellallow": "",
+        "shellbanextra": "",
+        "usejsontool": true,
+        "usetoolslc": false,
+        "workers": "[]",
+        "workerregtoken": "[redacted]",
+        "autodelegationthreshold": 8192,
+        "autodelegationmaxperstep": 2,
+        "noisytools": "",
+        "subtasks": "",
+        "subtasksfile": "",
+        "subtaskssequential": false,
+        "forkstatemaxbytes": 65536,
+        "mcpprogcalltools": "",
+        "debugfile": "",
+        "maxcontext": 0,
+        "rules": "",
+        "mcpproxynative": false,
+        "memorysessionch": "{\"name\":\"mini_a_session_mem\",\"type\":\"file\",\"options\":{\"file\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.json.gz\",\"lock\":\"/Users/nunoaguiar/.openaf-mini-a/memory/memory-session.lock\",\"multifile\":false,\"gzip\":true,\"compact\":true}}",
+        "memorypromote": "",
+        "memoryinject": "summary",
+        "wikiurl": "https://s3.amazonaws.com",
+        "wikiaccesskey": "[redacted]",
+        "wikisecret": "[redacted]"
+      }
+    }
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866121}": {
+    "ts": 1777250866121,
+    "id": "cfe776fe",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866142}": {
+    "ts": 1777250866142,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "MCP proxy mode enabled - using function calling for proxy-dispatch tool."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866163}": {
+    "ts": 1777250866163,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Registering MCP tools on main LLM via tool interface..."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866193}": {
+    "ts": 1777250866193,
+    "id": "cfe776fe",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866213}": {
+    "ts": 1777250866213,
+    "id": "cfe776fe",
+    "e": "mcp",
+    "m": "Registered 2 MCP tool(s) via LLM tool interface (main + low-cost)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866234}": {
+    "ts": 1777250866234,
+    "id": "cfe776fe",
+    "e": "size",
+    "m": "System prompt ~2882 tokens"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866255}": {
+    "ts": 1777250866255,
+    "id": "cfe776fe",
+    "e": "size",
+    "m": "System prompt profile=balanced budget=0 examples=off toolDetails=off planningDetails=off skills=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866281}": {
+    "ts": 1777250866281,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/facts: \"Runtime started for new execution loop\" (id=e0d9496e7c28344f)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866299}": {
+    "ts": 1777250866299,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250866315}": {
+    "ts": 1777250866315,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250867155}": {
+    "ts": 1777250867155,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Using model: openai/gpt-oss-120b (openai)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250867197}": {
+    "ts": 1777250867197,
+    "id": "cfe776fe",
+    "e": "output",
+    "m": "LLM debug channel '__mini_a_llm_debug' created and configured."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250867204}": {
+    "ts": 1777250867204,
+    "id": "cfe776fe",
+    "e": "input",
+    "m": "Interacting with main model (context ~0 tokens)..."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870197}": {
+    "ts": 1777250870197,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: call, arguments: (level: info, message: hi), tool: showMessage)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870213}": {
+    "ts": 1777250870213,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Displaying message: 'hi'."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870236}": {
+    "ts": 1777250870236,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (276 bytes) for parameters: (action: call, arguments: (level: info, message: hi), tool: showMessage)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870250}": {
+    "ts": 1777250870250,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (62 bytes)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870258}": {
+    "ts": 1777250870258,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=425c5e38931c7654)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870266}": {
+    "ts": 1777250870266,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250870274}": {
+    "ts": 1777250870274,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250871034}": {
+    "ts": 1777250871034,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"operation: showMessage\ndisplayed: true\nlevel: info\nmessage: hi\" (id=bd93892d056d2b59)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250871047}": {
+    "ts": 1777250871047,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250871055}": {
+    "ts": 1777250871055,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873001}": {
+    "ts": 1777250873001,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: list, format: compact, includeTools: true)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873011}": {
+    "ts": 1777250873011,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (9101 bytes) for parameters: (action: list, format: compact, includeTools: true)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873020}": {
+    "ts": 1777250873020,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (4.32 KB)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873030}": {
+    "ts": 1777250873030,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=425c5e38931c7654)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873038}": {
+    "ts": 1777250873038,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873046}": {
+    "ts": 1777250873046,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873725}": {
+    "ts": 1777250873725,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"action\":\"list\",\"connections\":[{\"alias\":\"c1\",\"tools\":[{\"name\":\"web-search\",\"des\" (id=f04a6cc36dd62e1a)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873734}": {
+    "ts": 1777250873734,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250873741}": {
+    "ts": 1777250873741,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250875841}": {
+    "ts": 1777250875841,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: call, arguments: (level: info, message: hi), connection: default, tool: showMessage)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250875854}": {
+    "ts": 1777250875854,
+    "id": "cfe776fe",
+    "e": "error",
+    "m": "Execution of action 'proxy-dispatch' finished unsuccessfully: (action: call, connection: (id: b0a3f7a86bec67da0670b313c73f26e8, alias: c1), tool: showMessage, error: Cannot read property \"name\" from undefined, content: [(type: text, text: 'Error: Cannot read property \"name\" from undefined')])"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250875869}": {
+    "ts": 1777250875869,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (49 bytes)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250875877}": {
+    "ts": 1777250875877,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/risks: \"Tool 'proxy-dispatch' failed: Cannot read property \"name\" from undefined\" (id=e0cf7a0dc743480e)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250875885}": {
+    "ts": 1777250875885,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250875893}": {
+    "ts": 1777250875893,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250877459}": {
+    "ts": 1777250877459,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: list, format: detail, includeTools: true)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250877483}": {
+    "ts": 1777250877483,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (9179 bytes) for parameters: (action: list, format: detail, includeTools: true)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250877492}": {
+    "ts": 1777250877492,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (4.38 KB)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250877499}": {
+    "ts": 1777250877499,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=425c5e38931c7654)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250877507}": {
+    "ts": 1777250877507,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250877515}": {
+    "ts": 1777250877515,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=2, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250878219}": {
+    "ts": 1777250878219,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"action: list\ntotalConnections: 4\nconnections[4]:\n  - alias: c1\n    serverInfo: n\" (id=88b46de66132b847)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250878227}": {
+    "ts": 1777250878227,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250878235}": {
+    "ts": 1777250878235,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250879930}": {
+    "ts": 1777250879930,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: status)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250879937}": {
+    "ts": 1777250879937,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Execution of action 'proxy-dispatch' finished successfully (405 bytes) for parameters: (action: status)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250879944}": {
+    "ts": 1777250879944,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (302 bytes)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250879950}": {
+    "ts": 1777250879950,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'proxy-dispatch' completed at step 1.\" (id=425c5e38931c7654)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250879958}": {
+    "ts": 1777250879958,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250879967}": {
+    "ts": 1777250879967,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=3, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250880652}": {
+    "ts": 1777250880652,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"{\"action\":\"status\",\"totalConnections\":4,\"totalTools\":20,\"catalogHash\":\"e7fd1fb10\" (id=461c565b67306d55)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250880660}": {
+    "ts": 1777250880660,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250880667}": {
+    "ts": 1777250880667,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250883188}": {
+    "ts": 1777250883188,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'proxy-dispatch' with parameters: (action: call, arguments: (level: info, message: hi), connection: primary, tool: showMessage)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250883199}": {
+    "ts": 1777250883199,
+    "id": "cfe776fe",
+    "e": "error",
+    "m": "Execution of action 'proxy-dispatch' finished unsuccessfully: (action: call, connection: (id: b0a3f7a86bec67da0670b313c73f26e8, alias: c1), tool: showMessage, error: Cannot read property \"name\" from undefined, content: [(type: text, text: 'Error: Cannot read property \"name\" from undefined')])"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250883211}": {
+    "ts": 1777250883211,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'proxy-dispatch' completed (49 bytes)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250883218}": {
+    "ts": 1777250883218,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/risks: \"Tool 'proxy-dispatch' failed: Cannot read property \"name\" from undefined\" (id=e0cf7a0dc743480e)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250883226}": {
+    "ts": 1777250883226,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250883233}": {
+    "ts": 1777250883233,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=1, artifacts=4, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250886407}": {
+    "ts": 1777250886407,
+    "id": "cfe776fe",
+    "e": "exec",
+    "m": "Executing action 'json' with parameters: (action: final, answer: '# Result\n\nI attempted to call the **showMessage** tool to display a greeting, but the tool invocation resulted in an internal error and could not be executed.\n\nIf you need the message displayed, please try invoking the tool again or check the system configuration.', thought: Attempted to call showMessage but tool invocation failed)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250886425}": {
+    "ts": 1777250886425,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "Execution of action 'json' finished successfully (77 bytes) for parameters: (action: final, answer: '# Result\n\nI attempted to call the **showMessage** tool to display a greeting, but the tool invocation resulted in an internal error and could not be executed.\n\nIf you need the message displayed, please try invoking the tool again or check the system configuration.', thought: Attempted to call showMessage but tool invocation failed)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250886440}": {
+    "ts": 1777250886440,
+    "id": "cfe776fe",
+    "e": "done",
+    "m": "Action 'json' completed (22 bytes)."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250886447}": {
+    "ts": 1777250886447,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/evidence: \"Tool 'json' completed at step 1.\" (id=639608c199172f00)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250886455}": {
+    "ts": 1777250886455,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=4, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250886463}": {
+    "ts": 1777250886463,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=4, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250887133}": {
+    "ts": 1777250887133,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/artifacts: \"JSON payload accepted.\" (id=26df558c8d4b4db5)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250887140}": {
+    "ts": 1777250887140,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=5, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250887147}": {
+    "ts": 1777250887147,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, artifacts=5, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889160}": {
+    "ts": 1777250889160,
+    "id": "cfe776fe",
+    "e": "output",
+    "m": "Main model responded. "
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889170}": {
+    "ts": 1777250889170,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/decisions: \"Final answer emitted after native tool call.\" (id=b21c8ab40364f069)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889179}": {
+    "ts": 1777250889179,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=5, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889191}": {
+    "ts": 1777250889191,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=5, risks=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889871}": {
+    "ts": 1777250889871,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/summaries: \"{\"error\":{\"message\":\"Tool call validation failed: tool call validation failed: a\" (id=74287ff7849e5a4f)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889880}": {
+    "ts": 1777250889880,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250889887}": {
+    "ts": 1777250889887,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250890571}": {
+    "ts": 1777250890571,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250890580}": {
+    "ts": 1777250890580,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=1, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891263}": {
+    "ts": 1777250891263,
+    "id": "cfe776fe",
+    "e": "final",
+    "m": "Final answer determined (size: 359). Goal achieved."
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891271}": {
+    "ts": 1777250891271,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/decisions: \"Final answer synthesis completed.\" (id=b83050f4b948ec3a)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891279}": {
+    "ts": 1777250891279,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891287}": {
+    "ts": 1777250891287,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891966}": {
+    "ts": 1777250891966,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📝 [mem:write] session/summaries: \"{\"error\":{\"message\":\"Tool call validation failed: tool call validation failed: a\" (id=74287ff7849e5a4f)"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891975}": {
+    "ts": 1777250891975,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250891982}": {
+    "ts": 1777250891982,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250892669}": {
+    "ts": 1777250892669,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=5, risks=1, summaries=1"
+  },
+  "{\"id\":\"cfe776fe\",\"ts\":1777250892677}": {
+    "ts": 1777250892677,
+    "id": "cfe776fe",
+    "e": "info",
+    "m": "📋 [mem:list] facts=1, evidence=2, decisions=2, artifacts=5, risks=1, summaries=1"
+  }
+}
