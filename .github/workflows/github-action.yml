@@ -36,6 +36,7 @@ jobs:
           var pack = io.readFileYAML(".package.yaml")
           pack.version = ow.format.fromDate(new Date(), "yyyyMMdd")
           io.writeFileYAML(".package.yaml", pack)
+          oPack("pack . --exclude .github,tests")
         dist  : 't8'
         
     # --------------------------
