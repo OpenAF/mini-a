@@ -52,19 +52,12 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260425'
+version: '20260428'
 dependencies:
   openaf: '>=20250915'
 files:
-- .BUGS-CATALOG.md
 - .gitignore
 - .odoc.db
-- .openaf_precompiled/.t8-20260426
-- .openaf_precompiled/mini-a-common_js.class
-- .openaf_precompiled/mini-a-memory_js.class
-- .openaf_precompiled/mini-a-router_js.class
-- .openaf_precompiled/mini-a-utils_js.class
-- .openaf_precompiled/mini-a-wiki_js.class
 - .package.yaml
 - AGENT-CHEATSHEET.md
 - AGENTS.md
@@ -75,8 +68,6 @@ files:
 - METRICS.md
 - README.md
 - USAGE.md
-- audit.json
-- debug.json
 - docs/ADAPTIVE-ROUTER.md
 - docs/BACKEND-ENDPOINTS.md
 - docs/DELEGATION.md
@@ -154,15 +145,8 @@ files:
 - public/index.md
 - public/showdown.min.js
 filesHash:
-  .BUGS-CATALOG.md: 4029673cb4b695057fd2773a8420dcf4eaa3d5f5
   .gitignore: 46619c9101fb66935d0e0a0cca0128e706020ce5
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
-  .openaf_precompiled/.t8-20260426: da39a3ee5e6b4b0d3255bfef95601890afd80709
-  .openaf_precompiled/mini-a-common_js.class: 93a4d918cbe4a5f42fb4dcbf308cfc2a8d061e73
-  .openaf_precompiled/mini-a-memory_js.class: 4105e36fd90647f0dfc373b6f3d4ef030be6209e
-  .openaf_precompiled/mini-a-router_js.class: 55ea3a04ba99bfba1ee86e491658597cbe8125b0
-  .openaf_precompiled/mini-a-utils_js.class: ca184de5ec15f2a4bc887a67a5b6f6a84bef16c6
-  .openaf_precompiled/mini-a-wiki_js.class: f93682dc9da070f1da3683f703ae7d8de1fc6341
   AGENT-CHEATSHEET.md: f6d508033f71004e52cb22bdaa20f3dbdb53b7e2
   AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
   CHEATSHEET.md: 0c036e826c9bbd1ec7dfa8dfd84f077ffe4c720c
@@ -172,8 +156,6 @@ filesHash:
   METRICS.md: db9b007b919a4c98588b58579be5d209c6f29495
   README.md: d7cdea6f7dd93ebb4052cde0e8573e3ed36bb2b3
   USAGE.md: 35f47aca244560cf763fbecee00733ef0c9c6aee
-  audit.json: 0a6dd845014f183b9fdec081701c11a53b39eac6
-  debug.json: 9e4c5e25174706f50e0a2182e165cb67484ddd33
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 2c1d7e77905f72fff500961275cd7ed7f7d7e0e7
@@ -245,7 +227,7 @@ filesHash:
   mini-a-web.yaml: 55c5954eb13cd5db7c0eeecfb8601ee6b2d75165
   mini-a-wiki.js: 64426700374d31055bb00f00943617a97b7a6ae9
   mini-a-worker.yaml: b67463285d477dc30ccce3ec616b64de7a7d5589
-  mini-a.js: 91b2bb5a168f178c374a6d85f413ea84900d3990
+  mini-a.js: cae3167bef8a05d8907833894954cc53a389ea89
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 33ca30a6d52819ed2eaf443ed1cc853f4418eda8
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
