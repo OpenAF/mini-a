@@ -90,6 +90,8 @@ modes:
       historykeepperiod: 10080
       modelstrategy    : advisor
       memoryusersession: true
+      usedelegation    : true
+      autodelegation   : true
       mcp              : 
       - type   : ojob
         options:

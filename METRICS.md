@@ -333,6 +333,21 @@ Delegation metrics mirror the `SubtaskManager` internal counters, synced at `get
 
 **Nuance — sync timing:** Delegation metrics are pulled from the `SubtaskManager` at `getMetrics()` call time, not in real-time. The values represent the state of the manager at that snapshot moment.
 
+### Auto-delegation & Startup Scouts
+
+These counters are tracked directly on `__mini_a_metrics` (not via SubtaskManager) and reset on `/clear`.
+
+| Key | Internal counter | Description |
+|-----|-----------------|-------------|
+| `autodelegation_triggered` | `autodelegation_triggered` | Times a noisy tool result triggered an automatic summarization sub-agent (`autodelegation=true`). A high value relative to `mcp_actions_executed` indicates many tool results are exceeding the threshold. |
+| `startup_subtasks_submitted` | `startup_subtasks_submitted` | Startup scout tasks submitted from `subtasks=` or `subtasksfile=` at init time. |
+| `startup_subtasks_completed` | `startup_subtasks_completed` | Startup scouts that finished with a successful answer before the main agent returned its final answer. |
+| `startup_subtasks_failed` | `startup_subtasks_failed` | Startup scouts that ended in a failed or timed-out state. |
+
+**Nuance — autodelegation cost:** Each auto-delegation fires an LLM call in a child agent. Monitor `autodelegation_triggered` relative to `llm_normal_calls` or `llm_lc_calls` to assess the token overhead. If the ratio is high, consider raising `autodelegationthreshold` or lowering `autodelegationmaxperstep`.
+
+**Nuance — startup scouts and final answer:** `startup_subtasks_completed` is incremented at harvest time (when `_processFinalAnswer` runs), not when the scout finishes. Scouts still running at that point are cancelled; their results are not harvested.
+
 ---
 
 ## 17. Deep Research (`deep_research`)

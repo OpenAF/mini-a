@@ -154,7 +154,8 @@ todo:
         metadata: {
           a2aMessageId: isString(message.messageId) ? message.messageId : __,
           a2aContextId: isString(postData.contextId) ? postData.contextId : __
-        }
+        },
+        forkState: isMap(postData.metadata) && isString(postData.metadata.forkState) ? postData.metadata.forkState : __
       };
 
       var submission = global.__worker_submitTask(taskPayload, global.__worker_args);
@@ -819,6 +820,12 @@ jobs:
       Object.keys(taskArgs).forEach(function(key) {
         if (allowedRemoteKeys[key] === true) { mergedArgs[key] = taskArgs[key] }
       })
+      // Pass fork state to child agent via existing args.state deserialization path
+      var forkStatePayload = postData.forkState || (isMap(postData.metadata) ? postData.metadata.forkState : __)
+      if (isString(forkStatePayload) && forkStatePayload.length > 0) {
+        mergedArgs.state = forkStatePayload
+        mergedArgs._autoDelegate = false
+      }
       mergedArgs.goal = goalTrimmed
       var timeout = wargs.defaulttimeout
       if (isDef(postData.timeout)) {

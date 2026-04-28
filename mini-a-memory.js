@@ -66,20 +66,26 @@ MiniAMemoryManager.prototype._normalizeEntry = function(entry, defaults) {
 
   var id = isString(e.id) && e.id.trim().length > 0 ? e.id.trim() : sha1(val + "::" + nowNano()).substring(0, 16)
   return {
-    id         : id,
-    value      : val,
-    status     : isString(e.status) && e.status.length > 0 ? e.status : (defaults && defaults.status ? defaults.status : "active"),
-    provenance : isObject(e.provenance) ? e.provenance : (isObject(defaults && defaults.provenance) ? defaults.provenance : {}),
-    evidenceRefs: isArray(e.evidenceRefs) ? e.evidenceRefs.slice() : (isArray(defaults && defaults.evidenceRefs) ? defaults.evidenceRefs.slice() : []),
-    tags       : isArray(e.tags) ? e.tags.slice() : [],
-    createdAt   : isString(e.createdAt) ? e.createdAt : nowIso,
-    updatedAt   : nowIso,
-    confirmedAt : isString(e.confirmedAt) ? e.confirmedAt : nowIso,
-    confirmCount: isNumber(e.confirmCount) && e.confirmCount > 0 ? e.confirmCount : 1,
-    stale       : toBoolean(e.stale) === true,
-    supersededBy: isString(e.supersededBy) ? e.supersededBy : __,
-    unresolved  : toBoolean(e.unresolved) === true,
-    meta        : isObject(e.meta) ? merge({}, e.meta) : {}
+    id               : id,
+    value            : val,
+    status           : isString(e.status) && e.status.length > 0 ? e.status : (defaults && defaults.status ? defaults.status : "active"),
+    provenance       : isObject(e.provenance) ? e.provenance : (isObject(defaults && defaults.provenance) ? defaults.provenance : {}),
+    evidenceRefs     : isArray(e.evidenceRefs) ? e.evidenceRefs.slice() : (isArray(defaults && defaults.evidenceRefs) ? defaults.evidenceRefs.slice() : []),
+    tags             : isArray(e.tags) ? e.tags.slice() : [],
+    createdAt        : isString(e.createdAt) ? e.createdAt : nowIso,
+    updatedAt        : nowIso,
+    confirmedAt      : isString(e.confirmedAt) ? e.confirmedAt : nowIso,
+    confirmCount     : isNumber(e.confirmCount) && e.confirmCount > 0 ? e.confirmCount : 1,
+    stale            : toBoolean(e.stale) === true,
+    supersededBy     : isString(e.supersededBy) ? e.supersededBy : __,
+    unresolved       : toBoolean(e.unresolved) === true,
+    meta             : isObject(e.meta) ? merge({}, e.meta) : {},
+    truncated        : toBoolean(e.truncated) === true,
+    fullSize         : isNumber(e.fullSize) && e.fullSize > 0 ? e.fullSize : __,
+    sourceTool       : isString(e.sourceTool) && e.sourceTool.length > 0 ? e.sourceTool : __,
+    sourceParams     : isString(e.sourceParams) && e.sourceParams.length > 0 ? e.sourceParams : __,
+    pendingReadresult: toBoolean(e.pendingReadresult) === true,
+    resultFile       : isString(e.resultFile) && e.resultFile.length > 0 ? e.resultFile : __
   }
 }
 
@@ -153,9 +159,15 @@ MiniAMemoryManager.prototype.snapshotCompact = function() {
         if (e.provenance.event)  c.ev  = e.provenance.event
       }
       if (isArray(e.evidenceRefs) && e.evidenceRefs.length > 0) c.refs = e.evidenceRefs
-      if (e.unresolved === true) c.u    = true
-      if (e.stale      === true) c.stale = true
-      if (isString(e.supersededBy))                             c.sup  = e.supersededBy
+      if (e.unresolved === true)           c.u     = true
+      if (e.stale      === true)           c.stale = true
+      if (isString(e.supersededBy))        c.sup   = e.supersededBy
+      if (e.truncated         === true)    c.tr    = true
+      if (isNumber(e.fullSize))            c.fs    = e.fullSize
+      if (isString(e.sourceTool))          c.tn    = e.sourceTool
+      if (isString(e.sourceParams))        c.tp    = e.sourceParams
+      if (e.pendingReadresult === true)    c.pr    = true
+      if (isString(e.resultFile))          c.rf    = e.resultFile
       return c
     })
   })
@@ -182,7 +194,7 @@ MiniAMemoryManager.prototype.append = function(section, entry, options) {
   var beforeLength = list.length
   var normalized = this._normalizeEntry(entry, opts)
 
-  if (this._config.dedup === true) {
+  if (this._config.dedup === true && opts.noDedup !== true) {
     for (var i = list.length - 1; i >= 0; i--) {
       if (this._isNearDuplicate(list[i].value, normalized.value)) {
         list[i].updatedAt = new Date().toISOString()
@@ -338,6 +350,9 @@ MiniAMemoryManager.prototype.compact = function() {
     var list = self._getSection(section) || []
     if (list.length <= self._config.maxPerSection) return
     list.sort(function(a, b) {
+      var aPend = (a.truncated === true || a.pendingReadresult === true) ? 1 : 0
+      var bPend = (b.truncated === true || b.pendingReadresult === true) ? 1 : 0
+      if (aPend !== bPend) return bPend - aPend
       var ast = (a.status === "active" ? 1 : 0) + (a.stale === true ? -1 : 0)
       var bst = (b.status === "active" ? 1 : 0) + (b.stale === true ? -1 : 0)
       if (ast !== bst) return bst - ast
@@ -367,7 +382,9 @@ MiniAMemoryManager.prototype.compact = function() {
 
   if (all.length > this._config.maxTotalEntries) {
     all.sort(function(a, b) {
-      if (a.priority !== b.priority) return b.priority - a.priority
+      var ap = (a.item.truncated === true || a.item.pendingReadresult === true) ? 100 : a.priority
+      var bp = (b.item.truncated === true || b.item.pendingReadresult === true) ? 100 : b.priority
+      if (ap !== bp) return bp - ap
       return String(b.item.updatedAt).localeCompare(String(a.item.updatedAt))
     })
     var allowed = all.slice(0, this._config.maxTotalEntries)

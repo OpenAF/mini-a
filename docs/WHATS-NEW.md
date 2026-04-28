@@ -2,6 +2,90 @@
 
 ## Recent Updates
 
+### `/rewind` — Undo Last Exchanges
+
+**Change**: New `/rewind [n]` slash command that removes the last `n` user+assistant exchanges from the conversation history (default n=1), mirroring the same feature in Claude Code.
+
+- Works exactly like `/compact` for persistence: updates both the in-memory conversation (`setConversation`) and the on-disk JSON file
+- **Delegation-aware**: any pending or running subtasks are automatically cancelled with reason "Rewound by /rewind" when rewound; cancelled IDs are listed in the output
+- Token feedback: prints before/after estimated token counts so the user sees how much context was freed
+- Graceful edge cases: "No conversation to rewind." when history is empty; clamps `n` to the number of available user messages; clears `lastGoalPrompt`/`lastResult` when rewinding to an empty conversation
+
+**Usage:**
+
+```bash
+/rewind          # undo the last exchange
+/rewind 3        # undo the last 3 exchanges
+```
+
+---
+
+### Forked Sub-agents, Auto-delegation & Startup Scouts
+
+**Change**: The delegation system gains three major new capabilities that extend the existing `usedelegation` + `delegate-subtask` infrastructure without replacing it.
+
+#### Forked Sub-agents (`fork=true`)
+
+Child agents can now inherit a snapshot of the parent's context instead of starting from scratch.
+
+- **`fork: true`** on `delegate-subtask` (or `/delegate fork <goal>` in the console) creates a forked sub-agent
+- **`forkscope`** controls what is inherited: `["memory"]` (working memory, default) and/or `["context"]` (last 50 conversation history entries)
+- The snapshot is passed via the existing `args.state` deserialization path — no separate code paths
+- For remote workers, the state is serialized and transmitted inline in the task payload; `forkstatemaxbytes` (default 64 KB) caps the payload, dropping oldest history entries first if oversized
+- Fork scope defaults vary by trigger: `["memory","context"]` for `/delegate fork`, `["memory"]` for LLM-driven and CLI tasks
+
+#### Auto-delegation (`autodelegation=true`)
+
+Tool results that are too large for the parent's context window are automatically summarized by a short-lived sub-agent.
+
+- Enabled with `autodelegation=true` + `usedelegation=true`
+- Triggered when a tool result's byte size ≥ `autodelegationthreshold` (default 8192) **or** the tool name is in `noisytools=`
+- The summarization sub-agent receives the raw output (up to 32 KB) and the parent goal; it returns 2–5 sentences of key facts
+- **Automatic fork decision**: the sub-agent is forked (inherits working memory) only when `usememory=true` and the parent's working memory is non-empty — otherwise it runs clean, avoiding serialization overhead for empty state
+- The parent context records `[OBS …] [auto-delegated summary] …` instead of the raw blob
+- Recursion is prevented: all child agents receive `_autoDelegate=false` so they never cascade
+- Per-step cap via `autodelegationmaxperstep` (default 2) limits runaway delegation on steps with many tool calls
+- New metric: `autodelegation_triggered`
+
+#### Pre-specified Startup Scouts (`subtasks=` / `subtasksfile=`)
+
+Sub-agent goals can be registered at startup and run in parallel with (or before) the main loop.
+
+- `subtasks='goal1|goal2|goal3'` — pipe-separated goals; submitted before the main loop
+- `subtasksfile=path.yaml` — YAML/JSON array of `{goal, fork, args, timeout}` objects
+- Parallel by default (all scouts run concurrently); `subtaskssequential=true` serializes them and blocks until all complete before the main loop starts
+- Results are harvested into parent working memory as `artifacts` when the main agent finishes
+- New metrics: `startup_subtasks_submitted`, `startup_subtasks_completed`, `startup_subtasks_failed`
+
+**New parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `autodelegation` | `false` | Enable auto-delegation for noisy tool results |
+| `autodelegationthreshold` | `8192` | Byte threshold that triggers auto-delegation |
+| `autodelegationmaxperstep` | `2` | Max auto-delegations per step |
+| `noisytools` | `""` | Comma-separated tool names always auto-delegated |
+| `subtasks` | `""` | Pipe-separated startup scout goals |
+| `subtasksfile` | `""` | Path to YAML/JSON file of startup task objects |
+| `subtaskssequential` | `false` | Run scouts/all subtasks one at a time |
+| `forkstatemaxbytes` | `65536` | Max bytes of fork state sent to remote workers |
+
+**Updated `delegate-subtask` tool parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `fork` | `false` | Spawn a forked sub-agent with parent context |
+| `forkscope` | `["memory"]` | What to inherit: `"memory"` and/or `"context"` |
+
+**Updated console commands:**
+
+- `/delegate fork <goal>` — spawns a forked sub-agent with `["memory","context"]` scope
+- `/subtasks` — now shows `[fork]` badge on forked subtasks
+
+See [docs/DELEGATION.md](DELEGATION.md) for full documentation including examples and the remote-worker protocol extension.
+
+---
+
 ### Wiki Knowledge Base (`usewiki`)
 
 **Change**: Mini-A now supports a persistent, shared Markdown wiki following Andrej Karpathy's LLM Wiki pattern — agents distil knowledge into structured pages and retrieve it across sessions.

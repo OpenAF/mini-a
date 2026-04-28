@@ -2108,7 +2108,7 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
   var op = (params.operation || "current-time").toLowerCase()
 
   try {
-    if (op === "current-time" || op === "current") {
+    if (op === "current-time" || op === "current" || op === "now") {
       var ZoneId = java.time.ZoneId
       var ZonedDateTime = java.time.ZonedDateTime
       var DateTimeFormatter = java.time.format.DateTimeFormatter
@@ -2295,7 +2295,7 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
         throw e
       }
 
-    } else if (op === "webfetch" || op === "fetch") {
+    } else if (op === "webfetch" || op === "fetch" || op === "fetchurl") {
       var url = params.url
       if (isUnDef(url)) return "[ERROR] url is required"
 
@@ -3221,13 +3221,13 @@ MiniUtilsTool._metadataByFn = (function() {
   var modifyAllOps = modifyWriteOps.concat(modifyEditOps).concat(modifyDeleteOps)
 
   var mathOperationTypes = ["calculate", "statistics", "convert-unit", "convert", "random"]
-  var timeOperationTypes = ["current-time", "current", "timezone-convert", "sleep"]
+  var timeOperationTypes = ["current-time", "current", "now", "timezone-convert", "sleep"]
 
   // Text utilities operation types
   var textEncodeOps = ["encode", "decode"]
   var textHashOps = ["hash"]
   var textConvertOps = ["json-to-yaml", "json2yaml", "yaml-to-json", "yaml2json", "json-to-toon", "json2toon", "csv-to-json", "csv2json", "json-to-csv", "json2csv"]
-  var textFetchOps = ["webfetch", "fetch"]
+  var textFetchOps = ["webfetch", "fetch", "fetchurl"]
   var textManipOps = ["diff", "template", "templify", "replace", "extract", "split", "join", "trim", "line-count", "word-count"]
   var textAllOps = textEncodeOps.concat(textHashOps).concat(textConvertOps).concat(textFetchOps).concat(textManipOps)
 

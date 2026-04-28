@@ -275,7 +275,11 @@ var MiniA = function() {
     wiki_ops_delete: $atomic(0, "long"),
     wiki_ops_lint: $atomic(0, "long"),
     wiki_ops_errors: $atomic(0, "long"),
-    per_tool_stats: {}
+    per_tool_stats: {},
+    autodelegation_triggered: $atomic(0, "long"),
+    startup_subtasks_submitted: $atomic(0, "long"),
+    startup_subtasks_completed: $atomic(0, "long"),
+    startup_subtasks_failed: $atomic(0, "long")
   }
 
   this._SYSTEM_PROMPT = `
@@ -1488,6 +1492,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "stop"     : _e = "🛑"; break
   case "summarize": _e = "🌀"; break
   case "progcall" : _e = "📟"; break
+  case "subagent" : _e = "🤝"; break
   case "planner_stream": _e = "💡"; break
   default         : _e = e
   }
@@ -2090,8 +2095,8 @@ MiniA.prototype._syncConversationForModelSwitch = function(targetModelName) {
 
 MiniA.prototype._resolveToolExecutionStepLabel = function(details, toolCtx, runtime) {
   var payload = isObject(details) ? details : {}
-  var context = isObject(toolCtx) ? toolCtx : {}
-  var activeRuntime = isObject(runtime) ? runtime : this._runtime
+  var context = isDef(toolCtx) && toolCtx !== null && isObject(toolCtx) ? toolCtx : {}
+  var activeRuntime = isDef(runtime) && runtime !== null && isObject(runtime) ? runtime : this._runtime
 
   if (isDef(payload.stepLabel) && String(payload.stepLabel).length > 0) return String(payload.stepLabel)
   if (isDef(context.stepLabel) && String(context.stepLabel).length > 0) return String(context.stepLabel)
@@ -2102,8 +2107,9 @@ MiniA.prototype._resolveToolExecutionStepLabel = function(details, toolCtx, runt
 }
 
 MiniA.prototype._shouldFinalizeToolExecutionInHook = function(runtime, currentCtx) {
-  if (!this._useTools || !isObject(runtime)) return false
-  if (isObject(currentCtx) && isDef(currentCtx.stepLabel) && String(currentCtx.stepLabel).length > 0) return false
+  if (!this._useTools || isUnDef(runtime) || runtime === null || !isObject(runtime)) return false
+  var hasCurrentCtx = isDef(currentCtx) && currentCtx !== null && isObject(currentCtx)
+  if (hasCurrentCtx && isDef(currentCtx.stepLabel) && String(currentCtx.stepLabel).length > 0) return false
   return true
 }
 
@@ -2274,8 +2280,8 @@ MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jso
 
   var gptInstance = isFunction(llmInstance.getGPT) ? llmInstance.getGPT() : __
   if (isObject(gptInstance)) {
-    if (isObject(gptInstance.model) && isFunction(gptInstance.model.promptStream) && isFunction(gptInstance.getLastStats)) {
-      var response = gptInstance.model.promptStream(prompt, void 0, void 0, jsonFlag === true, void 0, onDelta)
+    if (isObject(gptInstance.model) && isFunction(gptInstance.model.rawPromptStream) && isFunction(gptInstance.getLastStats)) {
+      var response = gptInstance.model.rawPromptStream(prompt, void 0, void 0, jsonFlag === true, void 0, onDelta)
       return { response: response, stats: gptInstance.getLastStats() }
     }
   }
@@ -8460,7 +8466,29 @@ MiniA.prototype._persistSessionMemory = function(reason) {
   }
 }
 
-MiniA.prototype._memoryAppend = function(section, value, meta) {
+MiniA.prototype._captureForkedContext = function(maxEntries) {
+  var limit = isNumber(maxEntries) && maxEntries > 0 ? maxEntries : 50
+  if (!isObject(this._runtime) || !isArray(this._runtime.context)) return []
+  var ctx = this._runtime.context
+  return ctx.length <= limit ? ctx.slice() : ctx.slice(ctx.length - limit)
+}
+
+MiniA.prototype._buildForkState = function(forkScope) {
+  var scope = isArray(forkScope) ? forkScope : ["memory"]
+  var state = {}
+  if (isObject(this._agentState)) {
+    if (scope.indexOf("memory") >= 0) {
+      if (isObject(this._agentState.workingMemory)) state.workingMemory = jsonParse(stringify(this._agentState.workingMemory, __, ""), __, __, true) || {}
+      if (isObject(this._agentState.workingMemorySession)) state.workingMemorySession = jsonParse(stringify(this._agentState.workingMemorySession, __, ""), __, __, true) || {}
+    }
+    if (scope.indexOf("context") >= 0) {
+      state.forkedContext = this._captureForkedContext(50)
+    }
+  }
+  return state
+}
+
+MiniA.prototype._memoryAppend = function(section, value, meta, appendOpts) {
   if (this._memoryConfig.enabled !== true) return __
   var targetScope = isObject(meta) && isString(meta.memoryScope) ? String(meta.memoryScope).toLowerCase().trim() : __
   var baseEntry = isObject(value) && (isDef(value.value) || isDef(value.id) || isDef(value.provenance) || isDef(value.status))
@@ -8474,7 +8502,7 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
   else if (targetScope === "session") targetManager = this._sessionMemoryManager
   else targetManager = this._getDefaultMemoryWriteManager()
   if (!isObject(targetManager)) return __
-  var appended = targetManager.append(section, entry)
+  var appended = targetManager.append(section, entry, isObject(appendOpts) ? appendOpts : {})
   if (isObject(appended)) {
     var _wscope = targetManager === this._globalMemoryManager ? "global" : "session"
     this.fnI("info", `📝 [mem:write] ${_wscope}/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
@@ -8483,6 +8511,39 @@ MiniA.prototype._memoryAppend = function(section, value, meta) {
   if (targetManager === this._globalMemoryManager && isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
   if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
   return appended
+}
+
+MiniA.prototype._clearPendingFetchFlags = function(toolName, params, rawResult, observation) {
+  if (this._memoryConfig.enabled !== true) return
+  var managers = [this._sessionMemoryManager, this._globalMemoryManager].filter(isObject)
+  if (managers.length === 0) return
+
+  // Case 1: readresult call resolved a spilled file — clear pendingReadresult on matching entry
+  if (toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult" && isString(params.resultFile)) {
+    var targetFile = params.resultFile.trim()
+    managers.forEach(function(mgr) {
+      mgr.getSectionEntries("artifacts").forEach(function(e) {
+        if (e.pendingReadresult === true && isString(e.resultFile) && e.resultFile.trim() === targetFile) {
+          mgr.update("artifacts", e.id, { pendingReadresult: false, resultFile: __ })
+        }
+      })
+    })
+    return
+  }
+
+  // Case 2: successful full (non-truncated, non-spill) re-call — mark old truncated entries for same tool stale
+  var _isSpill = isMap(rawResult) && rawResult.autoSpilled === true
+  var _isTrunc = !_isSpill && isString(observation) && observation.length > 2000
+  if (!_isSpill && !_isTrunc) {
+    var effectiveTool = isMap(rawResult) && isString(rawResult.tool) ? rawResult.tool : toolName
+    managers.forEach(function(mgr) {
+      mgr.getSectionEntries("artifacts").forEach(function(e) {
+        if (e.truncated === true && isString(e.sourceTool) && e.sourceTool === effectiveTool) {
+          mgr.update("artifacts", e.id, { stale: true })
+        }
+      })
+    })
+  }
 }
 
 MiniA.prototype._memoryUpdate = function(section, id, patch) {
@@ -8885,6 +8946,32 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
         answer = body
       }
     }
+  }
+
+  // Collect results from any completed startup sub-agents before finalizing
+  if (isArray(this._startupSubtaskIds) && this._startupSubtaskIds.length > 0 && isObject(this._subtaskManager)) {
+    var _harvestMgr = this._subtaskManager
+    var _harvestSelf = this
+    this._startupSubtaskIds.forEach(function(sid) {
+      try {
+        var s = _harvestMgr.status(sid)
+        if (!isMap(s)) return
+        if (s.status === "completed") {
+          var r = _harvestMgr.result(sid)
+          global.__mini_a_metrics.startup_subtasks_completed.inc()
+          if (isString(r.answer) && r.answer.trim().length > 0) {
+            _harvestSelf._memoryAppend("artifacts", "Startup sub-agent '" + (isString(s.goal) ? s.goal.substring(0, 60) : sid) + "' result: " + r.answer.substring(0, 500), {
+              provenance: { source: "startup-subtask", subtaskId: sid }
+            })
+          }
+        } else if (s.status === "failed") {
+          global.__mini_a_metrics.startup_subtasks_failed.inc()
+        } else if (!MiniA._terminalSubtaskStates[s.status]) {
+          try { _harvestMgr.cancel(sid, "Main agent completed") } catch(ignoreCancel) {}
+        }
+      } catch(ignoreHarvestErr) {}
+    })
+    this._startupSubtaskIds = []
   }
 
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
@@ -9780,6 +9867,9 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       methodNames = methodNames.filter(function(name) { return name !== "userInput" })
       methodNames = methodNames.filter(function(name) { return name !== "showMessage" })
     }
+    if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
+      methodNames = methodNames.filter(function(name) { return name !== "wiki" })
+    }
     var utilsAllow = this._parseUtilsToolList(args.utilsallow)
     if (utilsAllow.length > 0) {
       var allowMap = {}
@@ -10215,7 +10305,8 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
         if (parent._useToolsActual === true && isMap(payload)) {
           var runShellEntry = function(entry) {
             if (!isMap(entry) || entry.action !== "shell") return null
-            var cmd = (entry.command || "").trim()
+            if (toBoolean(args.useshell) !== true) return "(shell disabled: useshell=false)"
+            var cmd = (entry.command || (isMap(entry.params) ? entry.params.command : "") || "").trim()
             if (!cmd) return null
             try {
               var r = parent._runCommand({ command: cmd, readwrite: toBoolean(args.readwrite) })
@@ -10227,7 +10318,7 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
           }
 
           var outputs = []
-          if (isString(payload.action) && payload.action === "shell" && isString(payload.command)) {
+          if (isString(payload.action) && payload.action === "shell") {
             var singleOut = runShellEntry(payload)
             if (isString(singleOut)) outputs.push(singleOut)
           } else if (isArray(payload.action)) {
@@ -10259,37 +10350,34 @@ MiniA.prototype._createJsonToolMcpConfig = function(args) {
       json: {
         name       : "json",
         description: "Compatibility shim: accept a JSON action payload and pass it back to Mini-A for normal processing.",
-        inputSchema: {
-          type      : "object",
-          properties: {
+        inputSchema: (function() {
+          var itemProps = {
+            action : { type: "string" },
+            answer : { type: "string" },
+            state  : { type: "object" },
+            params : { type: "object" }
+          }
+          if (toBoolean(args.useshell) === true) itemProps.command = { type: "string" }
+          var topProps = {
             thought: { type: "string", description: "Reasoning/thought string for the step." },
             action : {
               oneOf: [
                 { type: "string" },
                 {
                   type : "array",
-                  items: {
-                    type      : "object",
-                    properties: {
-                      action : { type: "string" },
-                      command: { type: "string" },
-                      answer : { type: "string" },
-                      state  : { type: "object" },
-                      params : { type: "object" }
-                    },
-                    required: ["action"]
-                  }
+                  items: { type: "object", properties: itemProps, required: ["action"] }
                 }
               ],
               description: "Action name (string) or action batch (array) for compatibility payloads."
             },
-            command: { type: "string", description: "Shell command when action is shell." },
-            answer : { type: "string", description: "Final answer text when action is final." },
-            state    : { type: "object",  description: "Optional state object to persist." },
-            params   : { type: "object",  description: "Optional action parameters." },
-            parallel : { type: "boolean", description: "Run all actions in the array simultaneously. Default is sequential." }
+            answer  : { type: "string", description: "Final answer text when action is final." },
+            state   : { type: "object",  description: "Optional state object to persist." },
+            params  : { type: "object",  description: "Optional action parameters." },
+            parallel: { type: "boolean", description: "Run all actions in the array simultaneously. Default is sequential." }
           }
-        }
+          if (toBoolean(args.useshell) === true) topProps.command = { type: "string", description: "Shell command when action is shell." }
+          return { type: "object", properties: topProps }
+        })()
       }
     }
 
@@ -10333,6 +10421,33 @@ MiniA.prototype._getConfiguredModelName = function(modelConfig, defaultValue) {
   return isDef(defaultValue) ? defaultValue : ""
 }
 
+MiniA.prototype._getModelConfigForTools = function(args, modelName) {
+  var cfg = modelName === "lc" ? this._oaf_lc_model : this._oaf_model
+  if (isMap(cfg)) return cfg
+
+  if (!isMap(args)) return cfg
+  var raw = modelName === "lc" ? args.modellc : args.model
+  if (isMap(raw)) return raw
+  if (isString(raw) && raw.trim().length > 0) {
+    try {
+      var parsed = af.fromJSSLON(raw)
+      if (isMap(parsed)) return parsed
+    } catch(ignoreParseError) {}
+  }
+  return cfg
+}
+
+MiniA.prototype._shouldUseNativeMcpProxyTools = function(args, modelName) {
+  if (!isMap(args) || toBoolean(args.mcpproxy) !== true) return true
+  if (toBoolean(args.mcpproxynative) === true) return true
+
+  var cfg = this._getModelConfigForTools(args, modelName)
+  var type = isMap(cfg) && isString(cfg.type) ? cfg.type.toLowerCase() : ""
+  if (type === "ollama") return false
+
+  return true
+}
+
 MiniA.prototype._autoEnableJsonToolForOssModels = function(args, useJsonToolWasDefined) {
   if (!isMap(args)) return
   if (toBoolean(useJsonToolWasDefined) === true) return
@@ -10351,8 +10466,11 @@ MiniA.prototype._buildDelegationToolDescription = function() {
   }
   var parent = this
   var workerLines = []
-  this._subtaskManager.workers.forEach(function(url) {
-    var profile = parent._subtaskManager._workerProfiles[url]
+  var mgr = parent._subtaskManager
+  if (!isObject(mgr._workerProfiles)) return base + " Workers registered but profiles not yet available."
+  
+  mgr.workers.forEach(function(url) {
+    var profile = mgr._workerProfiles[url]
     if (!isMap(profile) || profile.status !== "ok") return
     var line = "  - " + (isString(profile.name) && profile.name.length > 0 ? profile.name : url)
     if (isString(profile.description) && profile.description.length > 0) line += ": " + profile.description
@@ -10373,10 +10491,10 @@ MiniA.prototype._getDelegationToolDescription = function() {
   var mgr = this._subtaskManager
   var workers = isObject(mgr) && isArray(mgr.workers) ? mgr.workers : []
   var workerKey = workers.map(function(url) {
-    var sig = isObject(mgr._workerProfiles[url]) ? (mgr._workerProfiles[url].signature || "?") : "?"
+    var sig = isObject(mgr) && isObject(mgr._workerProfiles) && isObject(mgr._workerProfiles[url]) ? (mgr._workerProfiles[url].signature || "?") : "?"
     return url + ":" + sig
   }).sort().join("|")
-  var cache = this._delegationDescCache
+  var cache = this._delegationDescCache || {}
   if (isString(cache.description) && cache.description.length > 0 && (now - cache.builtAt) < TTL_MS && cache.workerKey === workerKey) {
     return cache.description
   }
@@ -10410,12 +10528,25 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
           if (isDef(p.maxsteps)) childArgs.maxsteps = Number(p.maxsteps)
           if (isString(p.worker) && p.worker.trim().length > 0) childArgs._workerHint = p.worker.trim()
           if (isArray(p.skills) && p.skills.length > 0) childArgs._requiredSkills = p.skills
-          
+          var mcpHandoffArgs = parent._buildChildMcpHandoffArgs(goal, p, args)
+          if (isMap(mcpHandoffArgs)) {
+            Object.keys(mcpHandoffArgs).forEach(function(key) {
+              childArgs[key] = mcpHandoffArgs[key]
+            })
+          }
+
           var opts = {}
           if (isDef(p.timeout)) opts.deadlineMs = Number(p.timeout) * 1000
-          
+
+          var useFork = toBoolean(p.fork) === true
+          if (useFork) {
+            var forkScope = isArray(p.forkscope) ? p.forkscope : (isString(p.forkscope) ? [p.forkscope] : ["memory"])
+            opts.fork = true
+            opts.forkState = parent._buildForkState(forkScope)
+          }
+
           var waitForResult = isDef(p.waitForResult) ? toBoolean(p.waitForResult) : true
-          
+
           var subtaskId = parent._subtaskManager.submitAndRun(goal, childArgs, opts)
           
           // Update metrics
@@ -10535,7 +10666,13 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
     var fnsMeta = {
       "delegate-subtask": {
         name       : "delegate-subtask",
-        description: this._getDelegationToolDescription(),
+        description: (function() {
+          try {
+            return parent._getDelegationToolDescription()
+          } catch(err) {
+            return "Delegate a sub-goal to an isolated child Mini-A agent that runs independently with its own context and step budget. No remote workers registered; child agent runs locally."
+          }
+        })(),
         inputSchema: {
           type      : "object",
           properties: {
@@ -10544,7 +10681,12 @@ MiniA.prototype._createDelegationMcpConfig = function(args) {
             timeout       : { type: "integer", description: "Deadline in seconds (default 300)." },
             waitForResult : { type: "boolean", description: "If true, block until the child completes (default: true)." },
             worker        : { type: "string", description: "Optional worker name hint (partial match on name/description/URL) to prefer a specific remote worker." },
-            skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." }
+            skills        : { type: "array", items: { type: "string" }, description: "Optional required skill IDs or tags. Only workers that have ALL listed skills will be selected (e.g. [\"shell\"], [\"time\"], [\"network\"])." },
+            tools         : { type: "array", items: { type: "string" }, description: "Optional MCP tool names to hand off to the child. If omitted, Mini-A may selectively hand off clearly relevant parent MCP tools based on the goal and skills." },
+            mcptools      : { type: "array", items: { type: "string" }, description: "Alias for tools." },
+            mcp           : { type: "boolean", description: "Set false to disable automatic MCP handoff for this child. Default: automatic selective handoff." },
+            fork          : { type: "boolean", description: "If true, spawn a forked sub-agent that inherits a snapshot of the parent's context. Default: false." },
+            forkscope     : { type: "array", items: { type: "string", enum: ["memory", "context"] }, description: "Which parts of parent context to inherit when fork=true. 'memory' copies working memory (default). 'context' also copies conversation history." }
           },
           required: ["goal"]
         }
@@ -10814,6 +10956,33 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
     helpers.rebuildIndexes()
     state.lastUpdated = now()
 
+    var proxyAllowTools = this._parseListOption(args.mcpproxyallow)
+    var proxyDenyTools  = this._parseListOption(args.mcpproxydeny)
+    var proxyAllowMap = {}
+    var proxyDenyMap = {}
+    proxyAllowTools.forEach(function(name) { proxyAllowMap[name] = true })
+    proxyDenyTools.forEach(function(name) { proxyDenyMap[name] = true })
+    var isProxyToolAllowed = function(toolName) {
+      var n = isString(toolName) ? toolName.toLowerCase().trim() : ""
+      if (n.length === 0) return false
+      if (proxyDenyMap[n] === true) return false
+      if (proxyAllowTools.length > 0 && proxyAllowMap[n] !== true) return false
+      return true
+    }
+
+    if (proxyAllowTools.length > 0 || proxyDenyTools.length > 0) {
+      Object.keys(state.connections || {}).forEach(function(id) {
+        var entry = state.connections[id]
+        if (!isObject(entry) || !isArray(entry.tools)) return
+        entry.tools = entry.tools.filter(function(tool) {
+          return isMap(tool) && isProxyToolAllowed(tool.name)
+        })
+      })
+      helpers.rebuildIndexes()
+      state.lastUpdated = now()
+      parent.fnI("info", "[mcp-proxy] Tool filter active. allow=" + (proxyAllowTools.join(",") || "*") + " deny=" + (proxyDenyTools.join(",") || "-"))
+    }
+
     // Capture auto-spill threshold (0 = disabled) from args at config creation time
     var globalSpillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
       ? Math.floor(args.mcpproxythreshold) : 0
@@ -10995,6 +11164,10 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             totalTools      : statusNames.length,
             catalogHash     : md5(statusNames.slice().sort().join(",")),
             lastUpdated     : state.lastUpdated,
+            toolFilter      : {
+              allow: proxyAllowTools,
+              deny : proxyDenyTools
+            },
             connections     : statusConns
           }
           return {
@@ -11089,6 +11262,14 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           if (toolName.length === 0) {
             return { error: "Call action requires a 'tool' name." }
           }
+          if (!isProxyToolAllowed(toolName)) {
+            return {
+              action: "call",
+              tool  : toolName,
+              error : "Tool '" + toolName + "' is not allowed by the MCP proxy tool filter.",
+              content: [{ type: "text", text: "Error: Tool '" + toolName + "' is not allowed by the MCP proxy tool filter." }]
+            }
+          }
 
           var connectionId
           if (isString(connectionRef) && connectionRef.length > 0) {
@@ -11182,7 +11363,8 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 : "Result written to temporary " + resultFormat.toUpperCase() + " file: "
               var previewLines = [
                 spillReason + resultFile + " (auto-deleted at shutdown).",
-                "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens)."
+                "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens).",
+                "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' as needed."
               ]
               previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
               if (isMap(resultPayload)) {
@@ -11365,7 +11547,11 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           }
         }
 
-        return { error: "Unsupported action '" + params.action + "'. Use list, search, call, or readresult." }
+        var actionStr = isString(params.action) ? params.action.toLowerCase().trim() : String(params.action || "")
+        if (actionStr === "shell" || actionStr === "exec" || actionStr === "run" || actionStr === "bash") {
+          return { error: "proxy-dispatch does not support action='" + actionStr + "'. Shell commands must use the JSON 'action':'shell' field (top-level), not proxy-dispatch. Use proxy-dispatch with action='call' to invoke MCP tools instead." }
+        }
+        return { error: "Unsupported proxy-dispatch action '" + actionStr + "'. Valid actions are: status, list, search, call, readresult." }
       }
     }
 
@@ -11378,8 +11564,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           properties: {
             action: {
               type       : "string",
-              description: "Operation to perform: status, list, search, call, or readresult. 'status' returns a lightweight catalog summary (totalTools, catalogHash) to check if tools have changed. Use 'readresult' to retrieve the content of a previously spilled result file (from resultFile) without triggering further auto-spill.",
-              enum       : [ "status", "list", "search", "call", "readresult" ]
+              description: "Operation to perform. MUST be one of: 'status' (catalog check), 'list' (list available tools), 'search' (search tool metadata), 'call' (invoke a downstream tool), or 'readresult' (retrieve a previously spilled result file). No other values are valid — never use 'shell', 'exec', 'bash', or any similar value here."
             },
             connection: {
               type       : "string",
@@ -11564,6 +11749,17 @@ MiniA.prototype._computeToolCacheSettings = function(tool, defaultTtl) {
 }
 
 MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params, callContext) {
+  if (!this._isMcpHandoffToolAllowed(toolName, params)) {
+    var deniedTool = toolName === "proxy-dispatch" && isMap(params) && isString(params.tool) ? params.tool : toolName
+    var deniedMsg = "Tool '" + deniedTool + "' was not handed off to this sub-agent."
+    this._logToolUsage(toolName, params, { error: deniedMsg }, {
+      connectionId: connectionId,
+      error       : true,
+      fromCache   : false
+    })
+    throw new Error(deniedMsg)
+  }
+
   var client = isObject(this._mcpConnections) ? this._mcpConnections[connectionId] : __
   if (isUnDef(client) || !isFunction(client.callTool)) {
     this._logToolUsage(toolName, params, { error: `MCP client for tool '${toolName}' not available.` }, {
@@ -12262,7 +12458,11 @@ MiniA.prototype._getToolSchemaSummary = function(tool, options) {
   }
 
   if (summary.name === "proxy-dispatch") {
-    summary.description = description + " Always use function calling (not the JSON action field) to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
+    if (this._useToolsActual === true) {
+      summary.description = description + " Always use function calling (not the JSON action field) to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
+    } else {
+      summary.description = description + " Use the proxy-dispatch JSON action with params to invoke this. In your thought field, describe what the downstream tool does (e.g., 'searching for RSS feeds', 'getting weather') rather than mentioning proxy-dispatch."
+    }
   }
 
   $cache(this._toolSchemaCacheName).set(cacheKey, { value: summary, expiresAt: now() + 3600000 })
@@ -12554,6 +12754,16 @@ MiniA.prototype._assessGoalComplexity = function(goal) {
     }
   })
 
+  // --- External lookup / research signals ---
+  // Goals that explicitly search the web, ask factual questions, or need up-to-date external
+  // data require web research. A weaker LC model handles these poorly, so mark them at least
+  // "medium" so the main model runs on step 0. Three distinct indicators; any one is sufficient.
+  var hasResearchVerb = /\bsearch\b|\blook up\b|\blookup\b/i.test(goal)
+  var hasFactualQuery = /\bwho is\b|\bwho are\b|\bwhat is\b|\bwhat are\b|\bwhere is\b|\bwhere are\b|\bwhen (is|was|did)\b|\bhow (much|many|do|does|did)\b/i.test(goal)
+  var hasCurrentIndicator = /\bcurrent\b|\blatest\b|\brecent\b|\btoday\b|\bthis (year|month|week)\b/i.test(goal)
+  var hasLookup = hasResearchVerb || hasFactualQuery || hasCurrentIndicator
+  if (hasLookup) { score += 1; signals.push("lookup") }
+
   // --- Entity / file count signals ---
   // Multiple file paths
   var filePaths = goal.match(/[\/\\][\w\-./\\]+/g)
@@ -12580,11 +12790,12 @@ MiniA.prototype._assessGoalComplexity = function(goal) {
   if (score >= 5 || tokens > 200 || (hasMultiStep && hasConditions) || (hasMultipleTasks && tokens > 150)) {
     level = "complex"
   }
-  // Medium: score >= 2, or classic medium conditions
-  else if (score >= 2 || tokens > 100 || hasMultiStep || hasMultipleTasks) {
+  // Medium: score >= 2, or classic medium conditions, or any lookup/research signal.
+  // Lookup goals require external web search which LC models handle poorly — always use main model on step 0.
+  else if (score >= 2 || tokens > 100 || hasMultiStep || hasMultipleTasks || hasLookup) {
     level = "medium"
   }
-  // Simple: Short, direct goals
+  // Simple: Short, direct goals with no external lookup requirement
   else {
     level = "simple"
   }
@@ -13611,6 +13822,203 @@ MiniA.prototype._selectMcpToolsDynamically = function(goal, allTools) {
   return allTools.map(t => t.name)
 }
 
+MiniA.prototype._normalizeToolNameList = function(value) {
+  var list = []
+  var add = function(v) {
+    if (!isString(v)) return
+    var trimmed = v.trim()
+    if (trimmed.length > 0 && list.indexOf(trimmed) < 0) list.push(trimmed)
+  }
+
+  if (isArray(value)) {
+    value.forEach(add)
+  } else if (isString(value) && value.trim().length > 0) {
+    value.split(",").forEach(add)
+  }
+
+  return list
+}
+
+MiniA.prototype._getProxyCatalogTools = function() {
+  var tools = []
+  var state = isObject(global.__mcpProxyState__) ? global.__mcpProxyState__ : __
+  if (!isObject(state) || !isArray(state.catalog)) return tools
+
+  state.catalog.forEach(function(entry) {
+    if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name.length > 0) {
+      tools.push(entry.tool)
+    }
+  })
+  return tools
+}
+
+MiniA.prototype._selectChildMcpHandoffTools = function(goal, request, availableTools) {
+  request = isMap(request) ? request : {}
+  if (!isArray(availableTools) || availableTools.length === 0) return []
+
+  var availableByName = {}
+  availableTools.forEach(function(tool) {
+    if (isMap(tool) && isString(tool.name) && tool.name.length > 0) availableByName[tool.name] = tool
+  })
+
+  var explicitTools = this._normalizeToolNameList(isDef(request.tools) ? request.tools : request.mcptools)
+  var selected = []
+  explicitTools.forEach(function(name) {
+    if (isDef(availableByName[name]) && selected.indexOf(name) < 0) selected.push(name)
+  })
+  if (selected.length > 0) return selected
+
+  var goalLower = isString(goal) ? goal.toLowerCase() : ""
+  availableTools.forEach(function(tool) {
+    if (!isMap(tool) || !isString(tool.name)) return
+    var nameLower = tool.name.toLowerCase()
+    var escaped = nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    var re = new RegExp("(^|[^a-z0-9_-])" + escaped + "([^a-z0-9_-]|$)", "i")
+    if (re.test(goalLower) && selected.indexOf(tool.name) < 0) selected.push(tool.name)
+  })
+  if (selected.length > 0) return selected
+
+  var skills = isArray(request.skills) ? request.skills : []
+  if (skills.length > 0) {
+    var skillTokens = skills.map(function(skill) { return String(skill || "").toLowerCase().trim() }).filter(function(skill) { return skill.length > 0 })
+    availableTools.forEach(function(tool) {
+      if (!isMap(tool) || !isString(tool.name)) return
+      var text = (tool.name + " " + (tool.description || "")).toLowerCase()
+      var matched = skillTokens.some(function(skill) { return text.indexOf(skill) >= 0 || skill.indexOf(tool.name.toLowerCase()) >= 0 })
+      if (matched && selected.indexOf(tool.name) < 0) selected.push(tool.name)
+    })
+  }
+  if (selected.length > 0) return selected
+
+  var keywordSelected = this._selectToolsByKeywordMatch(goal, availableTools)
+  if (keywordSelected.length > 0) return keywordSelected.slice(0, 4)
+
+  return []
+}
+
+MiniA.prototype._buildChildMcpHandoffArgs = function(goal, request, parentArgs) {
+  request = isMap(request) ? request : {}
+  parentArgs = isMap(parentArgs) ? parentArgs : {}
+  if (request.mcp === false || String(request.mcp || "").toLowerCase() === "false") return {}
+
+  var usingProxy = this._useMcpProxy === true || toBoolean(parentArgs.mcpproxy) === true
+  var availableTools = usingProxy ? this._getProxyCatalogTools() : (isArray(this.mcpTools) ? this.mcpTools : [])
+  availableTools = availableTools.filter(function(tool) {
+    return isMap(tool) && isString(tool.name) && tool.name.length > 0 &&
+      tool.name !== "proxy-dispatch" && tool.name !== "delegate-subtask" && tool.name !== "subtask-status"
+  })
+  if (availableTools.length === 0) return {}
+
+  var selected = this._selectChildMcpHandoffTools(goal, request, availableTools)
+  if (selected.length === 0) return {}
+
+  var handoff = {
+    _mcpHandoffTools: selected,
+    _mcpHandoffProxy: usingProxy,
+    usetools        : true
+  }
+
+  if (usingProxy) {
+    handoff.mcpproxy = true
+    handoff.mcpproxyallow = selected.join(",")
+    if (isNumber(parentArgs.mcpproxythreshold)) handoff.mcpproxythreshold = parentArgs.mcpproxythreshold
+    if (toBoolean(parentArgs.mcpproxytoon) === true) handoff.mcpproxytoon = true
+  } else {
+    handoff.mcpdynamic = false
+  }
+
+  return handoff
+}
+
+MiniA.prototype._prepareChildMcpHandoff = function(childAgent, childArgs, subtask) {
+  if (!isObject(childAgent) || !isMap(childArgs) || !isArray(childArgs._mcpHandoffTools) || childArgs._mcpHandoffTools.length === 0) return
+  if (!isObject(this._mcpConnections) || !isArray(this.mcpTools) || !isObject(this.mcpToolToConnection)) return
+
+  var selectedMap = {}
+  childArgs._mcpHandoffTools.forEach(function(name) {
+    if (isString(name) && name.length > 0) selectedMap[name] = true
+  })
+
+  var proxyMode = childArgs._mcpHandoffProxy === true || toBoolean(childArgs.mcpproxy) === true
+  var childConnections = {}
+  var childTools = []
+  var childToolNames = []
+  var childToolToConnection = {}
+  var childInfo = {}
+  var childAliases = {}
+  var childAliasToId = {}
+  var childLazy = {}
+  var childToolInfo = {}
+  var childToolCacheSettings = {}
+  var parent = this
+
+  if (proxyMode) {
+    Object.keys(this._mcpConnections).forEach(function(connectionId) {
+      var isProxyConnection = connectionId === md5("mini-a-mcp-proxy") || connectionId.indexOf("mini-a-mcp-proxy") >= 0
+      if (!isProxyConnection) return
+      childConnections[connectionId] = parent._mcpConnections[connectionId]
+      childLazy[connectionId] = parent._lazyMcpConnections && parent._lazyMcpConnections[connectionId] === true
+      if (isObject(parent._mcpConnectionInfo[connectionId])) childInfo[connectionId] = merge({}, parent._mcpConnectionInfo[connectionId])
+      if (isString(parent._mcpConnectionAliases[connectionId])) childAliases[connectionId] = parent._mcpConnectionAliases[connectionId]
+      if (isString(childAliases[connectionId])) childAliasToId[childAliases[connectionId]] = connectionId
+    })
+    this.mcpTools.forEach(function(tool) {
+      if (!isMap(tool) || tool.name !== "proxy-dispatch") return
+      var connectionId = parent.mcpToolToConnection[tool.name]
+      if (!isString(connectionId) || isUnDef(childConnections[connectionId])) return
+      childTools.push(tool)
+      childToolNames.push(tool.name)
+      childToolToConnection[tool.name] = connectionId
+      childToolInfo[tool.name] = tool
+      if (isObject(parent._toolCacheSettings[tool.name])) childToolCacheSettings[tool.name] = parent._toolCacheSettings[tool.name]
+    })
+  } else {
+    this.mcpTools.forEach(function(tool) {
+      if (!isMap(tool) || !isString(tool.name) || selectedMap[tool.name] !== true) return
+      var connectionId = parent.mcpToolToConnection[tool.name]
+      if (!isString(connectionId) || isUnDef(parent._mcpConnections[connectionId])) return
+      childConnections[connectionId] = parent._mcpConnections[connectionId]
+      childLazy[connectionId] = parent._lazyMcpConnections && parent._lazyMcpConnections[connectionId] === true
+      if (isObject(parent._mcpConnectionInfo[connectionId])) childInfo[connectionId] = merge({}, parent._mcpConnectionInfo[connectionId])
+      if (isString(parent._mcpConnectionAliases[connectionId])) childAliases[connectionId] = parent._mcpConnectionAliases[connectionId]
+      if (isString(childAliases[connectionId])) childAliasToId[childAliases[connectionId]] = connectionId
+      childTools.push(tool)
+      childToolNames.push(tool.name)
+      childToolToConnection[tool.name] = connectionId
+      childToolInfo[tool.name] = tool
+      if (isObject(parent._toolCacheSettings[tool.name])) childToolCacheSettings[tool.name] = parent._toolCacheSettings[tool.name]
+    })
+  }
+
+  if (childTools.length === 0) return
+
+  childAgent._mcpConnections = childConnections
+  childAgent._mcpConnectionInfo = childInfo
+  childAgent._mcpConnectionAliases = childAliases
+  childAgent._mcpConnectionAliasToId = childAliasToId
+  childAgent._lazyMcpConnections = childLazy
+  childAgent.mcpTools = childTools
+  childAgent.mcpToolNames = childToolNames
+  childAgent.mcpToolToConnection = childToolToConnection
+  childAgent._toolInfoByName = childToolInfo
+  childAgent._toolCacheSettings = childToolCacheSettings
+  childAgent._mcpHandoffTools = childArgs._mcpHandoffTools.slice()
+
+  this.fnI("mcp", "Handed off " + childArgs._mcpHandoffTools.length + " MCP tool(s) to local sub-agent" + (isObject(subtask) && isString(subtask.id) ? " " + subtask.id.substring(0, 8) : "") + ": " + childArgs._mcpHandoffTools.join(", "))
+}
+
+MiniA.prototype._isMcpHandoffToolAllowed = function(toolName, params) {
+  if (!isArray(this._mcpHandoffTools) || this._mcpHandoffTools.length === 0) return true
+  var allowed = {}
+  this._mcpHandoffTools.forEach(function(name) {
+    if (isString(name) && name.length > 0) allowed[name] = true
+  })
+  if (toolName !== "proxy-dispatch") return allowed[toolName] === true
+  var targetTool = isMap(params) && isString(params.tool) ? params.tool : __
+  if (!isString(targetTool) || targetTool.length === 0) return true
+  return allowed[targetTool] === true
+}
+
 MiniA.prototype._applySystemInstructions = function(args) {
   args = _$(args, "args").isMap().default({})
 
@@ -13664,6 +14072,14 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       var normalizedModel = modelName === "lc" ? "lc" : "main"
       if (!parent._isToolInterfaceEnabledForModel(normalizedModel)) return llmInstance
 
+      // When usejsontool=true, don't register tools natively. The model responds with JSON actions instead.
+      if (toBoolean(args.usejsontool) === true) {
+        parent.fnI("info", `usejsontool=true: disabling native tool calling on ${normalizedModel} model. Tools will be handled via JSON responses.`)
+        if (normalizedModel === "lc") parent._useToolsActualLC = false
+        else parent._useToolsActualMain = false
+        return llmInstance
+      }
+
       // Check if we're using mcpproxy - if so, force function calling mode
       var usingMcpProxy = toBoolean(args.mcpproxy) === true
       var hasMcpProxyConnection = Object.keys(parent._mcpConnections || {}).some(function(id) {
@@ -13674,9 +14090,18 @@ MiniA.prototype._registerMcpToolsForGoal = function(args) {
       // Set proxy mode flag
       parent._useMcpProxy = usingMcpProxy && hasMcpProxyConnection
 
-      // When mcpproxy=true, always use function calling mode regardless of LLM support
+      var useNativeMcpProxy = parent._shouldUseNativeMcpProxyTools(args, normalizedModel)
+
+      // When mcpproxy=true, use function calling mode where the provider's tool loop is reliable.
       // NOTE: _useToolsActual is already pre-set before init() to ensure correct prompt template
       if (usingMcpProxy && hasMcpProxyConnection) {
+        if (!useNativeMcpProxy) {
+          parent.fnI("info", "MCP proxy mode enabled on " + normalizedModel + " model; using Mini-A action-based proxy-dispatch instead of native function calling.")
+          if (normalizedModel === "lc") parent._useToolsActualLC = false
+          else parent._useToolsActualMain = false
+          return llmInstance
+        }
+
         parent.fnI("info", "MCP proxy mode enabled - using function calling for proxy-dispatch tool.")
         if (normalizedModel === "lc") parent._useToolsActualLC = true
         else parent._useToolsActualMain = true
@@ -14214,7 +14639,10 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
-    "delegationmaxdepth", "delegationtimeout", "delegationmaxretries", "mcpprogcall", "mcpprogcallport",
+    "delegationmaxdepth", "delegationtimeout", "delegationmaxretries",
+    "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
+    "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes",
+    "mcpprogcall", "mcpprogcallport",
     "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
     "verbose", "readwrite", "debug", "debugfile", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
     "shellbatch", "usetools", "usetoolslc", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
@@ -14251,6 +14679,7 @@ MiniA._IGNORED_INTERNAL_ARGUMENT_NAMES = (function() {
     "exec", "mini-a", "__id", "init", "objid", "execid", "agent",
     "__format", "__interaction_source", "__explicitargkeys", "__unknownargsreported",
     "__modeapplied", "_agentbasedir", "_mcpdefaultdir", "_delegationdepth", "_workerhint", "_requiredskills",
+    "_autodelegate", "_mcphandofftools", "_mcphandoffproxy",
     "knowledgeupdated"
   ].forEach(function(name) {
     var normalized = String(name || "").trim().toLowerCase()
@@ -14580,6 +15009,14 @@ MiniA.prototype.init = function(args) {
       { name: "delegationmaxdepth", type: "number", default: 3 },
       { name: "delegationtimeout", type: "number", default: 300000 },
       { name: "delegationmaxretries", type: "number", default: 2 },
+      { name: "autodelegation", type: "boolean", default: false },
+      { name: "autodelegationthreshold", type: "number", default: 8192 },
+      { name: "autodelegationmaxperstep", type: "number", default: 2 },
+      { name: "noisytools", type: "string", default: "" },
+      { name: "subtasks", type: "string", default: "" },
+      { name: "subtasksfile", type: "string", default: "" },
+      { name: "subtaskssequential", type: "boolean", default: false },
+      { name: "forkstatemaxbytes", type: "number", default: 65536 },
       { name: "mcpprogcall", type: "boolean", default: false },
       { name: "mcpprogcallport", type: "number", default: 0 },
       { name: "mcpprogcallmaxbytes", type: "number", default: 4096 },
@@ -14656,6 +15093,27 @@ MiniA.prototype.init = function(args) {
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
     args["mini-a-docs"] = _$(toBoolean(isDef(args["mini-a-docs"]) ? args["mini-a-docs"] : args.miniadocs), "args['mini-a-docs']").isBoolean().default(false)
     args.usedelegation = _$(toBoolean(args.usedelegation), "args.usedelegation").isBoolean().default(false)
+    args.autodelegation = _$(toBoolean(args.autodelegation), "args.autodelegation").isBoolean().default(false)
+    args.autodelegationthreshold = _$(args.autodelegationthreshold, "args.autodelegationthreshold").isNumber().default(8192)
+    if (args.autodelegationthreshold <= 0) args.autodelegationthreshold = 8192
+    args.autodelegationmaxperstep = _$(args.autodelegationmaxperstep, "args.autodelegationmaxperstep").isNumber().default(2)
+    if (args.autodelegationmaxperstep <= 0) args.autodelegationmaxperstep = 1
+    args.noisytools = _$(args.noisytools, "args.noisytools").isString().default("")
+    args._noisyToolSet = (function() {
+      var set = {}
+      if (isString(args.noisytools) && args.noisytools.trim().length > 0) {
+        args.noisytools.split(",").forEach(function(t) {
+          var n = t.trim().toLowerCase()
+          if (n.length > 0) set[n] = true
+        })
+      }
+      return set
+    })()
+    args.subtasks = _$(args.subtasks, "args.subtasks").isString().default("")
+    args.subtasksfile = _$(args.subtasksfile, "args.subtasksfile").isString().default("")
+    args.subtaskssequential = _$(toBoolean(args.subtaskssequential), "args.subtaskssequential").isBoolean().default(false)
+    args.forkstatemaxbytes = _$(args.forkstatemaxbytes, "args.forkstatemaxbytes").isNumber().default(65536)
+    if (args.forkstatemaxbytes <= 0) args.forkstatemaxbytes = 65536
     args.mcpprogcall = _$(toBoolean(args.mcpprogcall), "args.mcpprogcall").isBoolean().default(false)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -14734,12 +15192,14 @@ MiniA.prototype.init = function(args) {
         }
 
         var currentDepth = args._delegationDepth || 0
+        var effectiveMaxConcurrent = args.subtaskssequential === true ? 1 : args.maxconcurrent
         this._subtaskManager = new SubtaskManager(args, {
-          maxConcurrent: args.maxconcurrent,
+          maxConcurrent: effectiveMaxConcurrent,
           defaultDeadlineMs: args.delegationtimeout,
           defaultMaxAttempts: args.delegationmaxretries,
           maxDepth: args.delegationmaxdepth,
           interactionFn: this.fnI.bind(this),
+          parentAgent: this,
           currentDepth: currentDepth,
           workers: args.workers,
           workerEvictionTTLMs: args.workerevictionttl
@@ -14757,6 +15217,73 @@ MiniA.prototype.init = function(args) {
 
     if (args.usedelegation === true && isNumber(args.workerreg)) {
       this._startWorkerRegistrationServer(args)
+    }
+
+    // Submit pre-specified startup sub-agent tasks
+    if (isObject(this._subtaskManager)) {
+      this._startupSubtaskIds = []
+      var _startupGoals = []
+      if (isString(args.subtasks) && args.subtasks.trim().length > 0) {
+        args.subtasks.split("|").forEach(function(g) {
+          var gt = g.trim()
+          if (gt.length > 0) _startupGoals.push({ goal: gt })
+        })
+      }
+      if (isString(args.subtasksfile) && args.subtasksfile.trim().length > 0) {
+        try {
+          var _sf = io.readFileString(args.subtasksfile.trim())
+          var _parsed = af.fromJSSLON(_sf)
+          if (!isArray(_parsed)) _parsed = af.fromYAML(_sf)
+          if (isArray(_parsed)) {
+            _parsed.forEach(function(entry) {
+              if (isString(entry)) { _startupGoals.push({ goal: entry.trim() }) }
+              else if (isMap(entry) && isString(entry.goal) && entry.goal.trim().length > 0) { _startupGoals.push(entry) }
+            })
+          }
+        } catch(e) {
+          this.fnI("warn", "Failed to load subtasksfile: " + __miniAErrMsg(e))
+        }
+      }
+      var _mgr = this._subtaskManager
+      var _self = this
+      var _startupArgs = args
+      _startupGoals.forEach(function(entry) {
+        try {
+          var childArgs = isMap(entry.args) ? entry.args : {}
+          var taskOpts = {}
+          if (isNumber(entry.timeout)) taskOpts.deadlineMs = entry.timeout * 1000
+          if (toBoolean(entry.fork) === true) {
+            taskOpts.fork = true
+            taskOpts.forkState = { workingMemory: (_startupArgs.usememory && isObject(_self._agentState) ? _self._agentState.workingMemory : __) || {} }
+          }
+          var sid = _mgr.submitAndRun(entry.goal, childArgs, taskOpts)
+          _self._startupSubtaskIds.push(sid)
+          global.__mini_a_metrics.startup_subtasks_submitted.inc()
+          _self.fnI("info", "Startup sub-agent submitted: " + entry.goal.substring(0, 80) + (toBoolean(entry.fork) ? " [fork]" : ""))
+        } catch(e) {
+          _self.fnI("warn", "Failed to submit startup sub-agent task '" + entry.goal.substring(0, 60) + "': " + __miniAErrMsg(e))
+        }
+      })
+      if (_startupGoals.length > 0 && args.subtaskssequential === true) {
+        this.fnI("info", "Waiting for " + _startupGoals.length + " sequential startup sub-agent(s) to complete...")
+        var _self2 = this
+        _startupGoals.forEach(function(entry, i) {
+          var sid = _self2._startupSubtaskIds[i]
+          if (!isString(sid)) return
+          try {
+            var r = _mgr.waitFor(sid, 300000)
+            global.__mini_a_metrics.startup_subtasks_completed.inc()
+            if (isString(r.answer) && r.answer.length > 0) {
+              _self2._memoryAppend("artifacts", "Startup sub-agent '" + entry.goal.substring(0, 60) + "' result: " + r.answer.substring(0, 500), {
+                provenance: { source: "startup-subtask", subtaskId: sid }
+              })
+            }
+          } catch(e) {
+            global.__mini_a_metrics.startup_subtasks_failed.inc()
+            _self2.fnI("warn", "Startup sub-agent task failed: " + __miniAErrMsg(e))
+          }
+        })
+      }
     }
 
     // Set __flags.JSONRPC.cmd.defaultDir to mini-a oPack location by default
@@ -14978,9 +15505,11 @@ MiniA.prototype.init = function(args) {
       this.fnI("info", `Model is Gemini and OAF_MINI_A_NOJSONPROMPT is not set: forcing OAF_MINI_A_NOJSONPROMPT=true behavior`)
     }
     this._autoEnableJsonToolForOssModels(args, useJsonToolWasDefined)
-    if (this._useTools === true && toBoolean(args.mcpproxy) === true && toBoolean(args.usejsontool) !== true) {
+    if (this._useTools === true && toBoolean(args.mcpproxy) === true && toBoolean(args.usejsontool) !== true && !useJsonToolWasDefined) {
       args.usejsontool = true
       this.fnI("info", "mcpproxy=true with usetools=true: forcing usejsontool=true compatibility mode.")
+    } else if (this._useTools === true && toBoolean(args.mcpproxy) === true && useJsonToolWasDefined && toBoolean(args.usejsontool) !== true) {
+      this.fnI("info", "mcpproxy=true with usetools=true: respecting explicit usejsontool=false.")
     }
 
     if (isMap(this._oaf_lc_model)) {
@@ -15137,8 +15666,13 @@ MiniA.prototype.init = function(args) {
           if (isExisting) {
             mcp = this._mcpConnections[id]
           } else {
+            // Dummy-type configs contain session-specific closures (fns, parent references).
+            // Sharing them across sessions via the $mcp cache would reuse a stale closure from
+            // a previous session, causing "_subtaskManager from undefined" errors. Only share
+            // external (stdio/remote) connections that are expensive to re-establish.
+            var _mcpIsSessionSpecific = mcpConfig.type === "dummy" || (isObject(mcpConfig.options) && (mcpConfig.options.type === "dummy" || mcpConfig.options.type === "ojob"))
             mcp = $mcp(merge(mcpConfig, {
-              shared: true,
+              shared: !_mcpIsSessionSpecific,
               preFn : (t, a) => {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
@@ -15157,7 +15691,8 @@ MiniA.prototype.init = function(args) {
 
                 if (typeof parent._prepareToolExecution === "function") {
                   var currentCtx = parent._runtime && parent._runtime.currentTool
-                  var shouldPrepare = parent._useTools || isUnDef(currentCtx) || isUnDef(currentCtx.stepLabel)
+                  var hasCurrentCtx = isDef(currentCtx) && currentCtx !== null && isObject(currentCtx)
+                  var shouldPrepare = !hasCurrentCtx || isUnDef(currentCtx.stepLabel)
                   if (shouldPrepare) {
                     parent._prepareToolExecution({
                       action: t,
@@ -15342,6 +15877,7 @@ MiniA.prototype.init = function(args) {
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
       baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Available tools and their descriptions are listed above — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one directly. Only use {\"action\":\"list\"} if you need to discover tools not shown above.")
+      baseRules.push("The proxy-dispatch 'action' parameter only accepts: status, list, search, call, readresult. NEVER pass action='shell', 'exec', 'bash', 'run', or any other value to proxy-dispatch — those are not valid and will fail. Shell commands use the top-level JSON 'action':'shell' field, not the proxy-dispatch tool.")
       if (toBoolean(args.usejsontool) !== true) {
         baseRules.push("Do not call a tool named 'json' unless it is explicitly listed in the available tools for this request. If no MCP tool is needed, return the normal JSON response directly instead of trying to call a 'json' tool.")
       }
@@ -15413,6 +15949,13 @@ MiniA.prototype.init = function(args) {
       }
       proxyNames = proxyNames.filter(name => name !== "proxy-dispatch")
       if (shellViaActionPreferred) proxyNames = proxyNames.filter(name => name !== "shell")
+      if (isArray(args._mcpHandoffTools) && args._mcpHandoffTools.length > 0) {
+        var handoffToolMap = {}
+        args._mcpHandoffTools.forEach(function(name) {
+          if (isString(name) && name.length > 0) handoffToolMap[name] = true
+        })
+        proxyNames = proxyNames.filter(function(name) { return handoffToolMap[name] === true })
+      }
       proxyNames.sort()
       if (proxyNames.length > 0) {
         proxyToolCount = proxyNames.length
@@ -15420,7 +15963,7 @@ MiniA.prototype.init = function(args) {
         if (isArray(proxyState.catalog)) {
           proxyState.catalog.forEach(function(entry) {
             if (isMap(entry) && isMap(entry.tool) && isString(entry.tool.name) && entry.tool.name !== "proxy-dispatch") {
-              if (!shellViaActionPreferred || entry.tool.name !== "shell") {
+              if ((!shellViaActionPreferred || entry.tool.name !== "shell") && proxyNames.indexOf(entry.tool.name) >= 0) {
                 proxyToolsWithDesc.push({ name: entry.tool.name, description: entry.tool.description || "" })
               }
             }
@@ -15829,8 +16372,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usetoolslc", type: "boolean", default: false },
       { name: "toolfallback", type: "boolean", default: false },
       { name: "mcpproxy", type: "boolean", default: false },
+      { name: "mcpproxynative", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
+      { name: "mcpproxyallow", type: "string", default: __ },
+      { name: "mcpproxydeny", type: "string", default: __ },
       { name: "adaptiverouting", type: "boolean", default: false },
       { name: "routerorder", type: "string", default: __ },
       { name: "routerallow", type: "string", default: __ },
@@ -15896,6 +16442,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
+    args.mcpproxynative = _$(toBoolean(args.mcpproxynative), "args.mcpproxynative").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -15910,6 +16457,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
+    args.mcpproxyallow = _$(args.mcpproxyallow, "args.mcpproxyallow").isString().default(__)
+    args.mcpproxydeny = _$(args.mcpproxydeny, "args.mcpproxydeny").isString().default(__)
     args.adaptiverouting = _$(toBoolean(args.adaptiverouting), "args.adaptiverouting").isBoolean().default(false)
     args.routerorder = _$(args.routerorder, "args.routerorder").isString().default(__)
     args.routerallow = _$(args.routerallow, "args.routerallow").isString().default(__)
@@ -16423,7 +16972,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     if (promptProxyMode) {
       // MCP proxy mode: pre-set prompt mode for the main model only.
-      this._useToolsActual = this._useToolsMain === true
+      var useNativeMcpProxy = this._shouldUseNativeMcpProxyTools(args, "main")
+      this._useToolsActual = this._useToolsMain === true && useNativeMcpProxy
       var proxyPresetSuffix = hasMcpProxyConnection ? " (connection already present)" : " (connection will be initialized)"
       this.fnI("info", "Pre-setting _useToolsActual=" + this._useToolsActual + " for MCP proxy mode before init()" + proxyPresetSuffix)
     } else if (this._useToolsMain && isArray(this.mcpTools) && this.mcpTools.length > 0) {
@@ -16607,7 +17157,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       lastDedupContextLength  : 0,
       advisorUses             : 0,
       advisorLastStep         : -999,
-      advisorLastReason       : ""
+      advisorLastReason       : "",
+      _autoDelegationThisStep : 0
+    }
+
+    // Restore forked conversation context when this agent is a forked sub-agent
+    if (isObject(this._agentState) && isArray(this._agentState.forkedContext) && this._agentState.forkedContext.length > 0) {
+      runtime.context = this._agentState.forkedContext.slice()
+      delete this._agentState.forkedContext
     }
 
     var carryoverContext = this._buildConversationCarryoverContext(args.goal)
@@ -16703,9 +17260,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         Object.keys(this._agentState).forEach(function(k) {
           if (k !== "workingMemorySession" && k !== "workingMemoryGlobal") stateForLLM[k] = this._agentState[k]
         }.bind(this))
-        stateForLLM.workingMemory = args.memoryinject === "full"
-          ? this._buildCompactMemoryForLLM()
-          : this._buildMemorySummaryForLLM()
+        var _memCompact = args.memoryinject === "full" ? this._buildCompactMemoryForLLM() : null
+        stateForLLM.workingMemory = _memCompact !== null ? _memCompact : this._buildMemorySummaryForLLM()
+        var _pf = []
+        var _pfCompact = _memCompact !== null ? _memCompact : this._buildCompactMemoryForLLM()
+        Object.keys(_pfCompact).forEach(function(sec) {
+          (_pfCompact[sec] || []).forEach(function(e) {
+            if (e.pr === true)  _pf.push({ type: "readresult", tool: e.tn || "unknown", resultFile: e.rf, id: e.id, section: sec })
+            else if (e.tr === true) _pf.push({ type: "truncated", tool: e.tn || "unknown", params: e.tp, fullSize: e.fs, id: e.id, section: sec })
+          })
+        })
+        if (_pf.length > 0) stateForLLM.pendingFetches = _pf
         runtime.lastStateSnapshot = af.toTOON(stateForLLM)
       } else {
         runtime.lastStateSnapshot = stringify(this._agentState, __, "")
@@ -17031,11 +17596,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
         })
         if (isObject(evidenceEntry) && isString(evidenceEntry.id) && isString(observation) && observation.length > 0) {
-          this._memoryAppend("artifacts", observation.substring(0, 500), {
+          var _isSpill = isMap(rawResult) && rawResult.autoSpilled === true && isString(rawResult.resultFile)
+          var _isTrunc = !_isSpill && observation.length > 2000
+          var _storedVal = observation.substring(0, 2000)
+          var _artMeta = {
             evidenceRefs: [evidenceEntry.id],
             provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName }
-          })
+          }
+          if (_isSpill) {
+            _artMeta.pendingReadresult = true
+            _artMeta.resultFile        = rawResult.resultFile
+            _artMeta.sourceTool        = isString(rawResult.tool) ? rawResult.tool : toolName
+            _artMeta.sourceParams      = af.toSLON(params || {}).substring(0, 200)
+          } else if (_isTrunc) {
+            _storedVal += " [TRUNCATED: full output was " + observation.length + " bytes; re-call tool '" + toolName + "' with same params to get complete data]"
+            _artMeta.truncated    = true
+            _artMeta.fullSize     = observation.length
+            _artMeta.sourceTool   = toolName
+            _artMeta.sourceParams = af.toSLON(params || {}).substring(0, 200)
+          }
+          this._memoryAppend("artifacts", _storedVal, _artMeta, { noDedup: true })
         }
+        this._clearPendingFetchFlags(toolName, params, rawResult, observation)
       }
 
       runtime.consecutiveThoughts = 0
@@ -17061,6 +17643,45 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           })
           if (Object.values(actionCounts).some(count => count >= 3)) {
             global.__mini_a_metrics.action_loops_detected.inc()
+          }
+        }
+
+        // Auto-delegation: if result is noisy, spawn a summarization sub-agent
+        if (!hasError && isObject(parent._subtaskManager) && args.autodelegation === true && args._autoDelegate !== false &&
+            isString(toolName) && toolName !== "delegate-subtask" && toolName !== "subtask-status") {
+          var _isNoisyTool = isMap(args._noisyToolSet) && args._noisyToolSet[toolName.toLowerCase()] === true
+          var _obsSize = isString(observation) ? observation.length : (isDef(rawResult) ? stringify(rawResult, __, "").length : 0)
+          var _autoDelegCap = isNumber(args.autodelegationmaxperstep) ? args.autodelegationmaxperstep : 2
+          if ((_isNoisyTool || _obsSize >= args.autodelegationthreshold) && runtime._autoDelegationThisStep < _autoDelegCap) {
+            runtime._autoDelegationThisStep = (runtime._autoDelegationThisStep || 0) + 1
+            try {
+              var _rawForSummary = isString(observation) ? observation : stringify(rawResult, __, "")
+              if (_rawForSummary.length > 32768) _rawForSummary = _rawForSummary.substring(0, 32768) + "\n...[truncated]"
+              var _goalShort = isString(args.goal) ? args.goal.substring(0, 120) : "the current goal"
+              var _summaryGoal = "Summarize the following tool output for the parent goal: " + _goalShort + ". Output only the key facts, findings, and important details in 2-5 sentences.\n\nTool: " + toolName + "\nOutput:\n" + _rawForSummary
+              // Use delegationtimeout (user-configured) capped to 120s so slow cloud models
+              // (e.g. kimi-k2.6 generating 2000+ tokens) don't hit the 30s hard wall.
+              var _summaryDeadlineMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0
+                ? Math.min(args.delegationtimeout, 120000) : 120000
+              var _summaryOpts = { deadlineMs: _summaryDeadlineMs, maxAttempts: 1 }
+              var _memoryMap = isObject(parent._agentState) ? parent._agentState.workingMemory : __
+              if (args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
+                _summaryOpts.fork = true
+                _summaryOpts.forkState = parent._buildForkState(["memory"])
+              }
+              var _summaryId = parent._subtaskManager.submitAndRun(_summaryGoal, { maxsteps: 5 }, _summaryOpts)
+              global.__mini_a_metrics.autodelegation_triggered.inc()
+              try {
+                var _summaryResult = parent._subtaskManager.waitFor(_summaryId, _summaryDeadlineMs)
+                if (isString(_summaryResult.answer) && _summaryResult.answer.trim().length > 0) {
+                  observation = "[auto-delegated summary] " + _summaryResult.answer.trim()
+                }
+              } catch(summaryWaitErr) {
+                parent.fnI("warn", "[auto-delegation] Summary sub-agent timeout or error: " + __miniAErrMsg(summaryWaitErr))
+              }
+            } catch(autoDelegErr) {
+              parent.fnI("warn", "[auto-delegation] Failed to spawn summary agent for tool '" + toolName + "': " + __miniAErrMsg(autoDelegErr))
+            }
           }
         }
 
@@ -17696,6 +18317,28 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         // Always store the main LLM conversation for consistency
         this._writeConversationPayload(args.conversation)
       }
+
+      if (this._useToolsActual === true && runtime.modelToolCallDetected === true) {
+        var nativeToolText = isString(rmsg) ? rmsg : this._extractPrimaryResponseText(rmsg)
+        var nativeToolFinish = isMap(rmsg) && isString(rmsg.finishReason) ? rmsg.finishReason : ""
+        var nativeToolCalls = isMap(rmsg) && isArray(rmsg.toolCalls) ? rmsg.toolCalls : []
+        if (isString(nativeToolText) && nativeToolText.trim().length > 0 && nativeToolCalls.length === 0 && (nativeToolFinish.length === 0 || nativeToolFinish === "stop")) {
+          var nativeToolAnswer = nativeToolText.trim()
+          var nativeToolParsed = nativeToolAnswer === "{}" ? {} : this._parseModelJsonResponse(nativeToolAnswer)
+          var nativeToolIsActionPayload = isArray(nativeToolParsed) || (isMap(nativeToolParsed) && isDef(nativeToolParsed.action))
+          if (!nativeToolIsActionPayload && nativeToolAnswer !== "{}") {
+            runtime.context.push(`[OBS ${step + 1}] (recover) treating native tool follow-up text as final answer.`)
+            global.__mini_a_metrics.finals_made.inc()
+            global.__mini_a_metrics.goals_achieved.inc()
+            global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
+            this._memoryAppend("decisions", "Final answer emitted after native tool call.", { provenance: { source: "synthesis", event: "native-tool-final", step: step + 1 } })
+            this._memoryAppend("summaries", nativeToolAnswer.substring(0, 500), { provenance: { source: "synthesis", event: "native-tool-final-preview" } })
+            this._persistWorkingMemory("native-tool-final")
+            if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("native-tool-final")
+            return this._processFinalAnswer(nativeToolAnswer, args)
+          }
+        }
+      }
       
       var msg
       var recoveredFromEnvelopeApplied = false
@@ -18187,6 +18830,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       runtime.clearedConsecutiveErrors = false
       runtime.hadErrorThisStep = false
+      runtime._autoDelegationThisStep = 0
 
       // Helper function to check if thoughts are similar
       var isSimilarThought = (thought1, thought2) => {

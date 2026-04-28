@@ -319,6 +319,14 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : mcpproxyallow
+    desc     : Comma-separated allowlist of downstream tool names exposed through proxy-dispatch
+    example  : "http-request,current-time"
+    mandatory: false
+  - name     : mcpproxydeny
+    desc     : Comma-separated denylist of downstream tool names hidden from proxy-dispatch
+    example  : "get-url,web-search"
+    mandatory: false
   - name     : forceplanning
     desc     : Force planning even when heuristics would normally skip it
     example  : "true"
@@ -628,15 +636,23 @@ jobs:
         maxsteps       : maxsteps
         maxcontext     : maxcontext
         maxcontent     : maxcontent
+        compressgoal   : compressgoal
+        compressgoaltokens: compressgoaltokens
+        compressgoalchars: compressgoalchars
+        maxpromptchars : maxpromptchars
         readwrite      : readwrite
         checkall       : checkall
         debug          : debug
+        debugfile      : debugfile
         useshell       : useshell
         shell          : shell
         usesandbox     : usesandbox
         sandboxprofile : sandboxprofile
+        sandboxnonetwork: sandboxnonetwork
         extrahooks     : extrahooks
         knowledge      : knowledge
+        homedir        : homedir
+        goalprefix     : goalprefix
         youare         : youare
         chatyouare    : chatyouare
         outfile        : outfile
@@ -667,6 +683,7 @@ jobs:
         usetools       : usetools
         usetoolslc     : usetoolslc
         usejsontool    : usejsontool
+        toolfallback   : toolfallback
         useutils       : useutils
         useskills      : useskills
         skillmaxautoload: skillmaxautoload
@@ -680,12 +697,21 @@ jobs:
         usemath        : usemath
         usesvg         : usesvg
         usevectors     : usevectors
+        browsercontext : browsercontext
         usestream      : usestream
         mcpdynamic     : mcpdynamic
         mcpproxy       : mcpproxy
         mcpproxythreshold: mcpproxythreshold
         mcpproxytoon   : mcpproxytoon
+        mcpproxyallow  : mcpproxyallow
+        mcpproxydeny   : mcpproxydeny
         mcplazy        : mcplazy
+        mcpprogcall    : mcpprogcall
+        mcpprogcallport: mcpprogcallport
+        mcpprogcallmaxbytes: mcpprogcallmaxbytes
+        mcpprogcallresultttl: mcpprogcallresultttl
+        mcpprogcalltools: mcpprogcalltools
+        mcpprogcallbatchmax: mcpprogcallbatchmax
         useplanning    : useplanning
         forceplanning  : forceplanning
         planstyle      : planstyle
@@ -695,6 +721,11 @@ jobs:
         convertplan    : convertplan
         resumefailed   : resumefailed
         chatbotmode    : chatbotmode
+        adaptiverouting: adaptiverouting
+        routerorder    : routerorder
+        routerallow    : routerallow
+        routerdeny     : routerdeny
+        routerproxythreshold: routerproxythreshold
         promptprofile  : promptprofile
         systempromptbudget: systempromptbudget
         planfile       : planfile
@@ -715,6 +746,16 @@ jobs:
         delegationmaxdepth: delegationmaxdepth
         delegationtimeout: delegationtimeout
         delegationmaxretries: delegationmaxretries
+        usea2a         : usea2a
+        showdelegate   : showdelegate
+        subtasks       : subtasks
+        subtasksfile   : subtasksfile
+        subtaskssequential: subtaskssequential
+        forkstatemaxbytes: forkstatemaxbytes
+        workerregurl   : workerregurl
+        workerreginterval: workerreginterval
+        workerskills   : workerskills
+        workertags     : workertags
         auditch        : auditch
         toollog        : toollog
         metricsch      : metricsch
@@ -723,6 +764,9 @@ jobs:
         debugvalch     : debugvalch
         nosetmcpwd     : nosetmcpwd
         miniadocs      : miniadocs
+        "mini-a-docs"  : mini-a-docs
+        agent          : agent
+        agentfile      : agentfile
         extraskills    : extraskills
         secpass        : secpass
         utilsroot      : utilsroot
@@ -745,6 +789,37 @@ jobs:
         lcescalatedefer: lcescalatedefer
         lcbudget       : lcbudget
         llmcomplexity  : llmcomplexity
+        autodelegation : autodelegation
+        autodelegationthreshold: autodelegationthreshold
+        autodelegationmaxperstep: autodelegationmaxperstep
+        noisytools     : noisytools
+        usememory      : usememory
+        memoryscope    : memoryscope
+        memorysessionid: memorysessionid
+        memorych       : memorych
+        memorysessionch: memorysessionch
+        memoryuser     : memoryuser
+        memoryusersession: memoryusersession
+        memorymaxpersection: memorymaxpersection
+        memorymaxentries: memorymaxentries
+        memorycompactevery: memorycompactevery
+        memorydedup    : memorydedup
+        memorypromote  : memorypromote
+        memorystaledays: memorystaledays
+        memoryinject   : memoryinject
+        usewiki        : usewiki
+        wikiaccess     : wikiaccess
+        wikibackend    : wikibackend
+        wikiroot       : wikiroot
+        wikibucket     : wikibucket
+        wikiprefix     : wikiprefix
+        wikiurl        : wikiurl
+        wikiaccesskey  : wikiaccesskey
+        wikisecret     : wikisecret
+        wikiregion     : wikiregion
+        wikiuseversion1: wikiuseversion1
+        wikiignorecertcheck: wikiignorecertcheck
+        wikilintstaleddays: wikilintstaleddays
   check:
     in:
       goal           : isString
@@ -758,16 +833,21 @@ jobs:
       compressgoal   : toBoolean.isBoolean.default(false)
       compressgoaltokens: toNumber.isNumber.default(250)
       compressgoalchars : toNumber.isNumber.default(1000)
+      maxpromptchars : toNumber.isNumber.default(__)
       maxcontent     : toNumber.isNumber.default(__)
       readwrite      : toBoolean.isBoolean.default(__)
       checkall       : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
+      debugfile      : isString.default(__)
       useshell       : toBoolean.isBoolean.default(__)
       shell          : isString.default(__)
       usesandbox     : isString.default(__)
       sandboxprofile : isString.default(__)
+      sandboxnonetwork: toBoolean.isBoolean.default(false)
       extrahooks     : isString.default(__)
       knowledge      : isString.default(__)
+      homedir        : isString.default(__)
+      goalprefix     : isString.default(__)
       youare         : isString.default(__)
       chatyouare     : isString.default(__)
       outfile        : isString.default(__)
@@ -798,6 +878,7 @@ jobs:
       usetools       : toBoolean.isBoolean.default(__)
       usetoolslc     : toBoolean.isBoolean.default(__)
       usejsontool    : toBoolean.isBoolean.default(__)
+      toolfallback   : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
       skillmaxautoload: toNumber.isNumber.default(1)
@@ -811,12 +892,21 @@ jobs:
       usemath        : toBoolean.isBoolean.default(false)
       usesvg         : toBoolean.isBoolean.default(false)
       usevectors     : toBoolean.isBoolean.default(false)
+      browsercontext : default(__)
       usestream      : toBoolean.isBoolean.default(false)
       mcpdynamic     : toBoolean.isBoolean.default(false)
       mcpproxy       : toBoolean.isBoolean.default(__)
       mcpproxythreshold: toNumber.isNumber.default(__)
       mcpproxytoon   : toBoolean.isBoolean.default(false)
+      mcpproxyallow  : isString.default(__)
+      mcpproxydeny   : isString.default(__)
       mcplazy        : toBoolean.isBoolean.default(false)
+      mcpprogcall    : toBoolean.isBoolean.default(false)
+      mcpprogcallport: toNumber.isNumber.default(0)
+      mcpprogcallmaxbytes: toNumber.isNumber.default(4096)
+      mcpprogcallresultttl: toNumber.isNumber.default(600)
+      mcpprogcalltools: isString.default(__)
+      mcpprogcallbatchmax: toNumber.isNumber.default(10)
       useplanning    : toBoolean.isBoolean.default(false)
       forceplanning  : toBoolean.isBoolean.default(false)
       planstyle      : isString.default(__)
@@ -826,6 +916,11 @@ jobs:
       convertplan    : toBoolean.isBoolean.default(false)
       resumefailed   : toBoolean.isBoolean.default(false)
       chatbotmode    : toBoolean.isBoolean.default(false)
+      adaptiverouting: toBoolean.isBoolean.default(false)
+      routerorder    : isString.default(__)
+      routerallow    : isString.default(__)
+      routerdeny     : isString.default(__)
+      routerproxythreshold: toNumber.isNumber.default(__)
       promptprofile  : isString.default(__)
       systempromptbudget: toNumber.isNumber.default(__)
       planfile       : isString.default(__)
@@ -846,6 +941,16 @@ jobs:
       delegationmaxdepth: toNumber.isNumber.default(__)
       delegationtimeout: toNumber.isNumber.default(__)
       delegationmaxretries: toNumber.isNumber.default(__)
+      usea2a         : toBoolean.isBoolean.default(false)
+      showdelegate   : toBoolean.isBoolean.default(false)
+      subtasks       : isString.default(__)
+      subtasksfile   : isString.default(__)
+      subtaskssequential: toBoolean.isBoolean.default(false)
+      forkstatemaxbytes: toNumber.isNumber.default(__)
+      workerregurl   : isString.default(__)
+      workerreginterval: toNumber.isNumber.default(__)
+      workerskills   : isString.default(__)
+      workertags     : isString.default(__)
       auditch        : default(__)
       toollog        : default(__)
       metricsch      : default(__)
@@ -854,6 +959,9 @@ jobs:
       debugvalch     : default(__)
       nosetmcpwd     : toBoolean.isBoolean.default(false)
       miniadocs      : toBoolean.isBoolean.default(false)
+      "mini-a-docs"  : toBoolean.isBoolean.default(false)
+      agent          : isString.default(__)
+      agentfile      : isString.default(__)
       extraskills    : isString.default(__)
       secpass        : isString.default(__)
       utilsroot      : isString.default(__)
@@ -876,6 +984,37 @@ jobs:
       lcescalatedefer: toBoolean.isBoolean.default(true)
       lcbudget       : toNumber.isNumber.default(0)
       llmcomplexity  : toBoolean.isBoolean.default(false)
+      autodelegation : toBoolean.isBoolean.default(false)
+      autodelegationthreshold: toNumber.isNumber.default(__)
+      autodelegationmaxperstep: toNumber.isNumber.default(__)
+      noisytools     : isString.default(__)
+      usememory      : toBoolean.isBoolean.default(false)
+      memoryscope    : isString.default(__)
+      memorysessionid: isString.default(__)
+      memorych       : isString.default(__)
+      memorysessionch: isString.default(__)
+      memoryuser     : toBoolean.isBoolean.default(false)
+      memoryusersession: toBoolean.isBoolean.default(false)
+      memorymaxpersection: toNumber.isNumber.default(__)
+      memorymaxentries: toNumber.isNumber.default(__)
+      memorycompactevery: toNumber.isNumber.default(__)
+      memorydedup    : toBoolean.isBoolean.default(__)
+      memorypromote  : isString.default(__)
+      memorystaledays: toNumber.isNumber.default(__)
+      memoryinject   : isString.default(__)
+      usewiki        : toBoolean.isBoolean.default(false)
+      wikiaccess     : isString.default(__)
+      wikibackend    : isString.default(__)
+      wikiroot       : isString.default(__)
+      wikibucket     : isString.default(__)
+      wikiprefix     : isString.default(__)
+      wikiurl        : isString.default(__)
+      wikiaccesskey  : isString.default(__)
+      wikisecret     : isString.default(__)
+      wikiregion     : isString.default(__)
+      wikiuseversion1: toBoolean.isBoolean.default(false)
+      wikiignorecertcheck: toBoolean.isBoolean.default(false)
+      wikilintstaleddays: toNumber.isNumber.default(__)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     MiniA.applyLibEnvDefault(args)

@@ -43,6 +43,7 @@ var SubtaskManager = function(parentArgs, opts) {
   this.workerReviveProbeIntervalMs = _$(opts.workerReviveProbeIntervalMs, "opts.workerReviveProbeIntervalMs").isNumber().default(5000)
   this.workerEvictionTTLMs = _$(opts.workerEvictionTTLMs, "opts.workerEvictionTTLMs").isNumber().default(60000)
   this.onWorkerEvicted = isFunction(opts.onWorkerEvicted) ? opts.onWorkerEvicted : function() {}
+  this.parentAgent = isObject(opts.parentAgent) ? opts.parentAgent : __
   this._lastReviveProbeAt = 0
   
   this.subtasks = {}
@@ -113,18 +114,73 @@ SubtaskManager.prototype._normalizeWorkers = function(workers) {
   return list
 }
 
+SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES = [
+  "validationgoal", "valgoal", "deepresearch", "maxcycles", "validationthreshold", "persistlearnings",
+  "subtasks", "subtasksfile",
+  "state", "conversation", "resume", "resumefailed",
+  "usehistory", "historypath", "historykeep", "historykeepperiod", "historykeepcount", "historyretention",
+  "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey", "historys3secret",
+  "historys3region", "historys3useversion1", "historys3ignorecertcheck",
+  "planfile", "plancontent", "planmode", "convertplan", "validateplan", "forceplanning",
+  "saveplannotes", "planlog", "outfile", "outfileall", "outputfile",
+  "mcp", "mcpconfig", "mcpdynamic", "mcpproxy", "mcpproxynative", "mcpproxythreshold",
+  "mcpproxytoon", "mcpproxyallow", "mcpproxydeny", "mcplazy", "nosetmcpwd", "usejsontool",
+  "useutils", "useskills", "utilsroot", "utilsallow", "utilsdeny", "miniadocs", "mini-a-docs",
+  "debugfile", "goalprefix",
+  "workerreg", "workerregtoken", "workerregurl", "workerreginterval",
+  "mcpprogcall", "mcpprogcallport", "mcpprogcallmaxbytes", "mcpprogcallresultttl",
+  "mcpprogcalltools", "mcpprogcallbatchmax",
+  "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path"
+]
+
+SubtaskManager.prototype._stripInheritedParentOnlyArgs = function(mergedArgs, explicitArgs) {
+  if (!isMap(mergedArgs)) return mergedArgs
+  explicitArgs = isMap(explicitArgs) ? explicitArgs : {}
+
+  SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES.forEach(function(key) {
+    if (!isDef(explicitArgs[key])) delete mergedArgs[key]
+  })
+
+  return mergedArgs
+}
+
 SubtaskManager.prototype._buildChildArgs = function(subtask) {
   var mergedArgs = merge({}, this.parentArgs)
+  var explicitArgs = isMap(subtask.args) ? subtask.args : {}
 
-  if (isMap(subtask.args)) {
-    Object.keys(subtask.args).forEach(function(key) {
-      mergedArgs[key] = subtask.args[key]
-    })
-  }
+  Object.keys(explicitArgs).forEach(function(key) {
+    mergedArgs[key] = explicitArgs[key]
+  })
+
+  this._stripInheritedParentOnlyArgs(mergedArgs, explicitArgs)
 
   mergedArgs.goal = subtask.goal
   mergedArgs._delegationDepth = subtask.depth
   mergedArgs._parentSubtaskId = subtask.parentId
+  // Prevent auto-delegation cascades in child agents
+  mergedArgs._autoDelegate = false
+
+  if (subtask.fork === true && isMap(subtask.forkState)) {
+    var forkStateStr = stringify(subtask.forkState, __, "")
+    var maxBytes = isNumber(this.parentArgs.forkstatemaxbytes) ? this.parentArgs.forkstatemaxbytes : 65536
+    if (forkStateStr.length > maxBytes) {
+      // Truncate oldest forkedContext entries first, then workingMemorySession if still oversized
+      var trimmed = merge({}, subtask.forkState)
+      if (isArray(trimmed.forkedContext) && trimmed.forkedContext.length > 0) {
+        while (trimmed.forkedContext.length > 0) {
+          trimmed.forkedContext.shift()
+          forkStateStr = stringify(trimmed, __, "")
+          if (forkStateStr.length <= maxBytes) break
+        }
+      }
+      if (forkStateStr.length > maxBytes && isObject(trimmed.workingMemorySession)) {
+        delete trimmed.workingMemorySession
+        forkStateStr = stringify(trimmed, __, "")
+      }
+    }
+    mergedArgs.state = forkStateStr
+  }
+
   return mergedArgs
 }
 
@@ -907,15 +963,34 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
   var parent = this
 
   $doV(function() {
+    var childAgent = __
     try {
-      var childAgent = new MiniA()
+      if (subtask.status !== "running") return
+
+      childAgent = new MiniA()
+      subtask.childAgent = childAgent
+
       var mergedArgs = parent._buildChildArgs(subtask)
+
+      if (isObject(parent.parentAgent) && isFunction(parent.parentAgent._prepareChildMcpHandoff)) {
+        parent.parentAgent._prepareChildMcpHandoff(childAgent, mergedArgs, subtask)
+      }
 
       childAgent.setInteractionFn(function(event, message) {
         parent.interactionFn(event, prefix + " " + message)
       })
 
+      if (subtask.status !== "running") return
       childAgent.init(mergedArgs)
+      if (subtask.status !== "running") {
+        if (isFunction(childAgent.requestStop)) {
+          try { childAgent.requestStop(subtask.error || "Subtask cancelled before start", { quiet: true }) } catch(ignorePreStartStop) {}
+        } else {
+          childAgent.state = "stop"
+        }
+        return
+      }
+
       var answer = childAgent.start(mergedArgs)
       var childMetrics = childAgent.getMetrics()
       var childState = jsonParse(stringify(childAgent._agentState || {}, __, ""), __, __, true)
@@ -928,6 +1003,8 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
         var error = isDef(e) && isString(e.message) ? e.message : stringify(e, __, "")
         parent._failOrRetrySubtask(subtask, prefix, error)
       }
+    } finally {
+      if (subtask.childAgent === childAgent) subtask.childAgent = __
     }
 
     try {
@@ -970,19 +1047,24 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           },
           contextId: isString(subtask.parentId) ? subtask.parentId : subtask.id,
           metadata: {
-            args: mergedArgs
+            args: mergedArgs,
+            forkState: (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) ? mergedArgs.state : __
           },
           configuration: {
             timeoutSeconds: timeoutSec
           }
         })
       } else {
-        taskResponse = parent._remoteRequest(workerUrl, "/task", {
+        var legacyPayload = {
           goal: subtask.goal,
           args: mergedArgs,
           timeout: timeoutSec,
           metadata: metadata
-        })
+        }
+        if (subtask.fork === true && isString(mergedArgs.state) && mergedArgs.state.length > 0) {
+          legacyPayload.forkState = mergedArgs.state
+        }
+        taskResponse = parent._remoteRequest(workerUrl, "/task", legacyPayload)
       }
 
       if (parent.useA2A) {
@@ -1145,7 +1227,9 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     attempt: 0,
     maxAttempts: _$(opts.maxAttempts, "opts.maxAttempts").isNumber().default(this.defaultMaxAttempts),
     depth: depth,
-    metadata: opts.metadata || {}
+    metadata: opts.metadata || {},
+    fork: toBoolean(opts.fork) === true,
+    forkState: (toBoolean(opts.fork) === true && isMap(opts.forkState)) ? opts.forkState : __
   }
   
   this.subtasks[subtaskId] = subtask
@@ -1196,7 +1280,8 @@ SubtaskManager.prototype.start = function(subtaskId) {
   
   // Emit delegation start event
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
-  try { this.interactionFn("delegate", prefix + " Starting sub-goal: " + subtask.goal) } catch(ignoreInteractionErr) {}
+  var _startLabel = subtask.fork === true ? "Starting forked sub-agent" : "Starting sub-agent"
+  try { this.interactionFn("subagent", prefix + " " + _startLabel + ": " + subtask.goal.substring(0, 100)) } catch(ignoreInteractionErr) {}
 
   if (this.remoteDelegation) {
     this._startRemoteSubtask(subtask, prefix)
@@ -1293,6 +1378,18 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
         })
       }
     } catch(ignoreRemoteCancel) {}
+  }
+
+  if (wasRunning && isObject(subtask.childAgent)) {
+    subtask.status = "cancelled"
+    try {
+      if (isFunction(subtask.childAgent.requestStop)) {
+        subtask.childAgent.requestStop(reason || "Cancelled by user", { quiet: true })
+      } else {
+        subtask.childAgent.state = "stop"
+        if (isFunction(subtask.childAgent._stopAgentResources)) subtask.childAgent._stopAgentResources()
+      }
+    } catch(ignoreLocalCancel) {}
   }
   
   // Mark as cancelled
@@ -1536,6 +1633,17 @@ SubtaskManager.prototype._startWatchdog = function() {
                     })
                   }
                 } catch(ignoreRemoteCancel) {}
+              }
+
+              if (isObject(subtask.childAgent)) {
+                try {
+                  if (isFunction(subtask.childAgent.requestStop)) {
+                    subtask.childAgent.requestStop(subtask.error, { quiet: true })
+                  } else {
+                    subtask.childAgent.state = "stop"
+                    if (isFunction(subtask.childAgent._stopAgentResources)) subtask.childAgent._stopAgentResources()
+                  }
+                } catch(ignoreLocalTimeoutCancel) {}
               }
               
               var prefix = "[subtask:" + id.substring(0, 8) + "]"
