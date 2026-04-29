@@ -421,6 +421,14 @@ help:
     desc     : Default delegated subtask timeout in milliseconds
     example  : "300000"
     mandatory: false
+  - name     : delegationstalltimeout
+    desc     : Delegated subtask idle timeout in milliseconds; active subtasks are not stopped
+    example  : "300000"
+    mandatory: false
+  - name     : delegationhardtimeout
+    desc     : Optional absolute delegated subtask timeout in milliseconds regardless of activity
+    example  : "900000"
+    mandatory: false
   - name     : delegationmaxretries
     desc     : Maximum retries per delegated subtask
     example  : "2"
@@ -745,6 +753,8 @@ jobs:
         maxconcurrent  : maxconcurrent
         delegationmaxdepth: delegationmaxdepth
         delegationtimeout: delegationtimeout
+        delegationstalltimeout: delegationstalltimeout
+        delegationhardtimeout: delegationhardtimeout
         delegationmaxretries: delegationmaxretries
         usea2a         : usea2a
         showdelegate   : showdelegate
@@ -940,6 +950,8 @@ jobs:
       maxconcurrent  : toNumber.isNumber.default(__)
       delegationmaxdepth: toNumber.isNumber.default(__)
       delegationtimeout: toNumber.isNumber.default(__)
+      delegationstalltimeout: toNumber.isNumber.default(__)
+      delegationhardtimeout: toNumber.isNumber.default(__)
       delegationmaxretries: toNumber.isNumber.default(__)
       usea2a         : toBoolean.isBoolean.default(false)
       showdelegate   : toBoolean.isBoolean.default(false)

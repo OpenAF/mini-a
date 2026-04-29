@@ -547,27 +547,67 @@ MiniAWikiManager.prototype._serializeFrontmatter = function(meta, body) {
 
 // ── Link extraction ───────────────────────────────────────────────────────────
 
-MiniAWikiManager.prototype.extractLinks = function(body) {
+// Returns [{raw, type}] where type is "md" (page-relative) or "wiki" (root-relative).
+// External https?:// targets are excluded here since they are never wiki-internal.
+MiniAWikiManager.prototype._extractLinkEntries = function(body) {
   if (!isString(body)) return []
-  var links = []
-  var seen  = {}
-  // Markdown links: [text](path.md) — relative .md targets only
-  var mdRe  = /\[([^\]]*)\]\(([^)]+\.md[^)]*)\)/g
+  var entries = []
+  var seen    = {}
   var m
+  var mdRe = /\[([^\]]*)\]\(([^)]+\.md[^)]*)\)/g
   while ((m = mdRe.exec(body)) !== null) {
     var target = m[2].split("#")[0].trim()
-    if (target.length > 0 && !seen[target]) { seen[target] = true; links.push(target) }
+    if (target.length > 0 && !/^https?:\/\//i.test(target) && !seen[target]) {
+      seen[target] = true
+      entries.push({ raw: target, type: "md" })
+    }
   }
-  // Wiki-style links: [[Page Name]]
+  // Wiki-style links: [[Page Name]] — always root-relative slugs
   var wikiRe = /\[\[([^\]]+)\]\]/g
   while ((m = wikiRe.exec(body)) !== null) {
     var name = m[1].trim()
     if (name.length > 0) {
       var slug = name.toLowerCase().replace(/\s+/g, "-") + ".md"
-      if (!seen[slug]) { seen[slug] = true; links.push(slug) }
+      if (!seen[slug]) { seen[slug] = true; entries.push({ raw: slug, type: "wiki" }) }
     }
   }
-  return links
+  return entries
+}
+
+// Public: returns raw link targets for backward-compatibility.
+MiniAWikiManager.prototype.extractLinks = function(body) {
+  return this._extractLinkEntries(body).map(function(e) { return e.raw })
+}
+
+// Resolve a Markdown link target relative to the source page's directory.
+// Wiki-style ([[…]]) slugs are already root-relative — pass them directly without calling this.
+// Returns the resolved wiki-root-relative path, or null if the link is not a valid
+// internal wiki reference (external URL, absolute path, or escapes the wiki root).
+MiniAWikiManager.prototype.resolveLink = function(sourcePage, target) {
+  if (!isString(target) || target.length === 0) return null
+  if (/^https?:\/\//i.test(target)) return null   // external URL
+  if (target.startsWith("/")) return null          // absolute path — not wiki-internal
+
+  var pageDir = isString(sourcePage) && sourcePage.indexOf("/") > -1
+    ? sourcePage.substring(0, sourcePage.lastIndexOf("/") + 1)
+    : ""
+  var combined = pageDir + target
+  var parts = combined.split("/")
+  var normalized = []
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i]
+    if (part === "" || part === ".") continue
+    if (part === "..") {
+      if (normalized.length > 0) normalized.pop()
+      else return null  // would escape wiki root
+    } else {
+      normalized.push(part)
+    }
+  }
+  if (normalized.length === 0) return null
+  var resolved = normalized.join("/")
+  if (!resolved.toLowerCase().endsWith(".md")) return null
+  return resolved
 }
 
 // ── Fingerprint / near-duplicate (mirrors MiniAMemoryManager) ────────────────
@@ -663,7 +703,19 @@ MiniAWikiManager.prototype.read = function(path, options) {
     || (isString(opts.section)   && opts.section.trim().length > 0)
 
   if (!hasRangeOpts) {
-    return { path: path.trim(), meta: parsed.meta, body: parsed.body, raw: raw }
+    var self = this
+    var npath = path.trim()
+    var entries = self._extractLinkEntries(parsed.body)
+    var seenLinks = {}
+    var resolvedLinks = []
+    entries.forEach(function(e) {
+      var resolved = e.type === "wiki" ? e.raw : self.resolveLink(npath, e.raw)
+      if (isString(resolved) && resolved.length > 0 && !seenLinks[resolved]) {
+        seenLinks[resolved] = true
+        resolvedLinks.push(resolved)
+      }
+    })
+    return { path: npath, meta: parsed.meta, body: parsed.body, raw: raw, links: resolvedLinks }
   }
 
   var lines  = raw.split("\n")
@@ -875,22 +927,19 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
   var staleDays = isNumber(opts.staleDays) ? opts.staleDays : 90
   var pages     = this.list("").filter(p => p != "AGENTS.md") // skip AGENTS.md since it's more of a policy doc than a content page
   var issues    = []
-  var pageData  = {}   // path -> { meta, body, links }
+  var pageData  = {}   // path -> { meta, body, linkEntries }
   var incomingCount = {}
 
   pages.forEach(function(p) { incomingCount[p] = 0 })
 
-  // Pass 1: parse all pages and collect link graph
+  // Pass 1: parse all pages and collect link entries
   var self = this
   pages.forEach(function(p) {
     var raw = self._backend.read(p)
     if (!isString(raw)) return
     var parsed = self.parseFrontmatter(raw)
-    var links  = self.extractLinks(parsed.body)
-    pageData[p] = { meta: parsed.meta, body: parsed.body, links: links }
-    links.forEach(function(target) {
-      if (!isNumber(incomingCount[target])) incomingCount[target] = 0
-    })
+    var linkEntries = self._extractLinkEntries(parsed.body)
+    pageData[p] = { meta: parsed.meta, body: parsed.body, linkEntries: linkEntries }
   })
 
   // Pass 2: run checks
@@ -900,13 +949,16 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     if (!pd) return
 
     // Check 1: Broken internal links
-    pd.links.forEach(function(target) {
-      var exists = self._backend.exists(target)
+    // md links are page-relative; wiki-style links are always root-relative
+    pd.linkEntries.forEach(function(entry) {
+      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(p, entry.raw)
+      if (resolved === null) return  // external URL, absolute path, or escapes root — not wiki-internal
+      var exists = self._backend.exists(resolved)
       if (!exists) {
-        issues.push({ severity: "error", type: "broken_link", page: p, target: target })
+        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved })
       } else {
-        if (!isNumber(incomingCount[target])) incomingCount[target] = 0
-        incomingCount[target]++
+        if (!isNumber(incomingCount[resolved])) incomingCount[resolved] = 0
+        incomingCount[resolved]++
       }
     })
 

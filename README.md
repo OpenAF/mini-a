@@ -476,6 +476,8 @@ Mini-A ships with complementary components:
 | `workerregtoken` | Bearer token for dynamic worker registration endpoints | - |
 | `workerevictionttl` | Heartbeat TTL in milliseconds before dynamic worker eviction | `60000` |
 | `workerregurl` | Parent registration endpoint(s) for worker self-registration (`workermode=true`) | - |
+| `delegationstalltimeout` | Idle time before a delegated subtask is considered stalled; active subtasks keep running | `300000` |
+| `delegationhardtimeout` | Optional absolute delegated subtask timeout regardless of activity | - |
 | `workerskills` | JSON/SLON array of A2A-style worker skills exposed by `workermode=true` | - |
 | `workertags` | Comma-separated tags appended to the default worker skill in `workermode=true` | - |
 | `workerreginterval` | Worker registration heartbeat interval in milliseconds | `30000` |

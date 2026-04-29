@@ -18,6 +18,10 @@ var SubtaskManager = function(parentArgs, opts) {
   this.parentArgs = parentArgs || {}
   this.maxConcurrent = _$(opts.maxConcurrent, "opts.maxConcurrent").isNumber().default(4)
   this.defaultDeadlineMs = _$(opts.defaultDeadlineMs, "opts.defaultDeadlineMs").isNumber().default(300000)
+  this.defaultStallTimeoutMs = _$(opts.defaultStallTimeoutMs, "opts.defaultStallTimeoutMs").isNumber().default(this.defaultDeadlineMs)
+  if (this.defaultStallTimeoutMs <= 0) this.defaultStallTimeoutMs = this.defaultDeadlineMs
+  this.defaultHardTimeoutMs = _$(opts.defaultHardTimeoutMs, "opts.defaultHardTimeoutMs").isNumber().default(__)
+  if (isNumber(this.defaultHardTimeoutMs) && this.defaultHardTimeoutMs <= 0) this.defaultHardTimeoutMs = __
   this.defaultMaxAttempts = _$(opts.defaultMaxAttempts, "opts.defaultMaxAttempts").isNumber().default(2)
   this.maxDepth = _$(opts.maxDepth, "opts.maxDepth").isNumber().default(3)
   this.interactionFn = opts.interactionFn || function() {}
@@ -71,6 +75,45 @@ var SubtaskManager = function(parentArgs, opts) {
   
   // Start watchdog for deadlines
   this._startWatchdog()
+}
+
+SubtaskManager.prototype._touchSubtask = function(subtask, reason) {
+  if (!isMap(subtask)) return false
+  var now = new Date().getTime()
+  subtask.lastActivityAt = now
+  subtask.lastActivityReason = isString(reason) && reason.length > 0 ? reason : "activity"
+  return true
+}
+
+SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
+  if (!isMap(subtask) || subtask.status !== "running") return __
+  now = _$(now, "now").isNumber().default(new Date().getTime())
+
+  if (isNumber(subtask.hardTimeoutMs) && subtask.hardTimeoutMs > 0 && isDef(subtask.startedAt)) {
+    var elapsed = now - subtask.startedAt
+    if (elapsed >= subtask.hardTimeoutMs) {
+      return {
+        type: "hard",
+        elapsed: elapsed,
+        message: "Hard timeout exceeded (" + subtask.hardTimeoutMs + "ms)"
+      }
+    }
+  }
+
+  var lastActivityAt = isNumber(subtask.lastActivityAt) ? subtask.lastActivityAt : subtask.startedAt
+  var stallTimeoutMs = isNumber(subtask.stallTimeoutMs) ? subtask.stallTimeoutMs : this.defaultStallTimeoutMs
+  if (isNumber(lastActivityAt) && isNumber(stallTimeoutMs) && stallTimeoutMs > 0) {
+    var idleMs = now - lastActivityAt
+    if (idleMs >= stallTimeoutMs) {
+      return {
+        type: "stall",
+        idleMs: idleMs,
+        message: "Stalled for " + idleMs + "ms" + (isString(subtask.lastActivityReason) ? " after " + subtask.lastActivityReason : "")
+      }
+    }
+  }
+
+  return __
 }
 
 /**
@@ -913,6 +956,7 @@ SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
   if (subtask.status !== "running") return false  // guard against watchdog race
+  this._touchSubtask(subtask, "completed")
   subtask.status = "completed"
   subtask.completedAt = new Date().getTime()
   subtask.result = {
@@ -933,10 +977,12 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
 
 SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) {
   if (subtask.status !== "running") return "skipped"  // guard against watchdog race
+  this._touchSubtask(subtask, "failed")
   subtask.error = error
 
   if (subtask.attempt < subtask.maxAttempts) {
     subtask.status = "pending"
+    this._touchSubtask(subtask, "retry queued")
     subtask.metadata.previousError = error
     this.pendingQueue.push(subtask.id)
     this.metrics.retried++
@@ -977,10 +1023,12 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
       }
 
       childAgent.setInteractionFn(function(event, message) {
+        parent._touchSubtask(subtask, event)
         parent.interactionFn(event, prefix + " " + message)
       })
 
       if (subtask.status !== "running") return
+      parent._touchSubtask(subtask, "initializing child agent")
       childAgent.init(mergedArgs)
       if (subtask.status !== "running") {
         if (isFunction(childAgent.requestStop)) {
@@ -991,7 +1039,9 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
         return
       }
 
+      parent._touchSubtask(subtask, "running child agent")
       var answer = childAgent.start(mergedArgs)
+      parent._touchSubtask(subtask, "child agent returned")
       var childMetrics = childAgent.getMetrics()
       var childState = jsonParse(stringify(childAgent._agentState || {}, __, ""), __, __, true)
 
@@ -1026,6 +1076,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
 
       subtask.workerUrl = workerUrl
       subtask.remoteEventIndex = 0
+      parent._touchSubtask(subtask, "remote worker selected")
 
       var timeoutSec = Math.max(1, Math.ceil(subtask.deadlineMs / 1000))
       var metadata = merge({}, subtask.metadata || {})
@@ -1079,6 +1130,7 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
         subtask.remoteTaskId = taskResponse.taskId
       }
       parent.interactionFn("delegate", prefix + " Routed to worker: " + workerUrl)
+      parent._touchSubtask(subtask, "routed to remote worker")
       if (isMap(parent._lastWorkerSelectionDetails) && parent._lastWorkerSelectionDetails.workerUrl === workerUrl) {
         if (isMap(parent._lastWorkerSelectionDetails.matchedSkill) && isString(parent._lastWorkerSelectionDetails.matchedSkill.name) && parent._lastWorkerSelectionDetails.matchedSkill.name.length > 0) {
           parent.interactionFn("delegate", prefix + " Worker skill match: " + parent._lastWorkerSelectionDetails.matchedSkill.name)
@@ -1096,6 +1148,15 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
 
         if (parent.useA2A) {
           status = parent._remoteGet(workerUrl, "/tasks", { id: subtask.remoteTaskId })
+          if (isMap(status.task) && isMap(status.task.status) && isString(status.task.status.timestamp)) {
+            try {
+              var remoteTs = (new Date(status.task.status.timestamp)).getTime()
+              if (isNumber(remoteTs) && (!isNumber(subtask.remoteLastActivityAt) || remoteTs > subtask.remoteLastActivityAt)) {
+                subtask.remoteLastActivityAt = remoteTs
+                parent._touchSubtask(subtask, "remote status update")
+              }
+            } catch(ignoreRemoteTs) {}
+          }
           var remoteState = isMap(status.task) && isMap(status.task.status) && isString(status.task.status.state) ? status.task.status.state.toUpperCase() : "TASK_STATE_WORKING"
           if (remoteState === "TASK_STATE_COMPLETED") remoteStatus = "completed"
           if (remoteState === "TASK_STATE_FAILED") remoteStatus = "failed"
@@ -1104,11 +1165,18 @@ SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
           status = parent._remoteRequest(workerUrl, "/status", { taskId: subtask.remoteTaskId })
           remoteStatus = isString(status.status) ? status.status.toLowerCase() : "running"
 
+          if (isNumber(status.lastActivityAt) && (!isNumber(subtask.remoteLastActivityAt) || status.lastActivityAt > subtask.remoteLastActivityAt)) {
+            subtask.remoteLastActivityAt = status.lastActivityAt
+            parent._touchSubtask(subtask, isString(status.lastActivityReason) ? "remote " + status.lastActivityReason : "remote activity")
+          }
+
           if (isArray(status.events)) {
             var seenEvents = _$(subtask.remoteEventIndex, "subtask.remoteEventIndex").isNumber().default(0)
             for (var i = seenEvents; i < status.events.length; i++) {
               var evt = status.events[i]
               if (isMap(evt) && isString(evt.message) && evt.message.length > 0) {
+                if (isNumber(evt.ts)) subtask.remoteLastActivityAt = evt.ts
+                parent._touchSubtask(subtask, "remote event")
                 parent.interactionFn("delegate", prefix + " " + evt.message)
               }
             }
@@ -1224,6 +1292,10 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     startedAt: __,
     completedAt: __,
     deadlineMs: _$(opts.deadlineMs, "opts.deadlineMs").isNumber().default(this.defaultDeadlineMs),
+    stallTimeoutMs: _$(opts.stallTimeoutMs, "opts.stallTimeoutMs").isNumber().default(this.defaultStallTimeoutMs),
+    hardTimeoutMs: _$(opts.hardTimeoutMs, "opts.hardTimeoutMs").isNumber().default(this.defaultHardTimeoutMs),
+    lastActivityAt: now,
+    lastActivityReason: "created",
     attempt: 0,
     maxAttempts: _$(opts.maxAttempts, "opts.maxAttempts").isNumber().default(this.defaultMaxAttempts),
     depth: depth,
@@ -1268,6 +1340,7 @@ SubtaskManager.prototype.start = function(subtaskId) {
   
   subtask.status = "running"
   subtask.startedAt = new Date().getTime()
+  this._touchSubtask(subtask, "started")
   subtask.attempt++
   this.runningCount++
   this.metrics.running++
@@ -1454,6 +1527,50 @@ SubtaskManager.prototype.waitFor = function(subtaskId, timeoutMs) {
 
 /**
  * <odoc>
+ * <key>SubtaskManager.waitForActive(subtaskId, opts)</key>
+ * Waits for a bounded foreground budget. If the task is still running and has
+ * not stalled, returns { pending: true } instead of treating it as an error.
+ * </odoc>
+ */
+SubtaskManager.prototype.waitForActive = function(subtaskId, opts) {
+  var subtask = this.subtasks[subtaskId]
+  if (isUnDef(subtask)) {
+    throw new Error("Subtask " + subtaskId + " not found")
+  }
+
+  opts = _$(opts, "opts").isMap().default({})
+  var waitMs = _$(opts.waitMs, "opts.waitMs").isNumber().default(300000)
+  var pollInterval = _$(opts.pollIntervalMs, "opts.pollIntervalMs").isNumber().default(500)
+  var startTime = new Date().getTime()
+
+  while (true) {
+    if (__isTerminalSubtaskState(subtask.status)) {
+      return this.result(subtaskId)
+    }
+
+    var now = new Date().getTime()
+    var timeoutReason = this._getSubtaskTimeoutReason(subtask, now)
+    if (isMap(timeoutReason)) {
+      throw new Error(timeoutReason.message)
+    }
+
+    var elapsed = now - startTime
+    if (elapsed >= waitMs) {
+      return {
+        pending: true,
+        status: subtask.status,
+        active: subtask.status === "running",
+        lastActivityAt: subtask.lastActivityAt,
+        lastActivityReason: subtask.lastActivityReason
+      }
+    }
+
+    sleep(pollInterval, true)
+  }
+}
+
+/**
+ * <odoc>
  * <key>SubtaskManager.waitForAll(subtaskIds, timeoutMs)</key>
  * Wait for multiple subtasks to complete.
  * Returns an array of results in the same order as the input IDs.
@@ -1605,15 +1722,15 @@ SubtaskManager.prototype._startWatchdog = function() {
         subtaskIds.forEach(function(id) {
           var subtask = parent.subtasks[id]
           
-          // Check running tasks for timeout
+          // Check running tasks for hard timeout or stall timeout.
           if (subtask.status === "running" && isDef(subtask.startedAt)) {
-            var elapsed = now - subtask.startedAt
-            if (elapsed >= subtask.deadlineMs) {
+            var timeoutReason = parent._getSubtaskTimeoutReason(subtask, now)
+            if (isMap(timeoutReason)) {
               // Claim the status transition first so worker threads see it immediately
               // and bail out of their own completion paths.
               subtask.status = "timeout"
               subtask.completedAt = now
-              subtask.error = "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+              subtask.error = timeoutReason.message
               parent.metrics.timedout++
               parent.metrics.running--
               parent.runningCount--
@@ -1624,12 +1741,12 @@ SubtaskManager.prototype._startWatchdog = function() {
                   if (parent.useA2A) {
                     parent._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
                       id: subtask.remoteTaskId,
-                      reason: "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+                      reason: timeoutReason.message
                     })
                   } else {
                     parent._remoteRequest(subtask.workerUrl, "/cancel", {
                       taskId: subtask.remoteTaskId,
-                      reason: "Deadline exceeded (" + subtask.deadlineMs + "ms)"
+                      reason: timeoutReason.message
                     })
                   }
                 } catch(ignoreRemoteCancel) {}
@@ -1647,7 +1764,11 @@ SubtaskManager.prototype._startWatchdog = function() {
               }
               
               var prefix = "[subtask:" + id.substring(0, 8) + "]"
-              parent.interactionFn("delegate", prefix + " ⏱️ Timeout after " + Math.round(elapsed / 1000) + "s")
+              if (timeoutReason.type === "stall") {
+                parent.interactionFn("delegate", prefix + " ⏱️ Stalled after " + Math.round(timeoutReason.idleMs / 1000) + "s")
+              } else {
+                parent.interactionFn("delegate", prefix + " ⏱️ Timeout after " + Math.round(timeoutReason.elapsed / 1000) + "s")
+              }
               
               // Try to process queue
               try {

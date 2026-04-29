@@ -64,7 +64,45 @@
     ow.test.assert(links.length, 1, "duplicate links should be deduplicated")
   }
 
-  // ── NearDuplicate ────────────────────────────────────────────────────────────
+  // ── ResolveLink ──────────────────────────────────────────────────────────────
+
+  exports.testResolveLinkSameDir = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var resolved = wm.resolveLink("openaf-opencli/page.md", "concepts.md")
+    ow.test.assert(resolved, "openaf-opencli/concepts.md", "relative link should resolve to same directory")
+  }
+
+  exports.testResolveLinkDotDot = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var resolved = wm.resolveLink("openaf-opencli/page.md", "../root.md")
+    ow.test.assert(resolved, "root.md", "../ link should resolve to parent directory")
+  }
+
+  exports.testResolveLinkFromRoot = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var resolved = wm.resolveLink("index.md", "getting-started.md")
+    ow.test.assert(resolved, "getting-started.md", "root-level page link should stay at root")
+  }
+
+  exports.testResolveLinkAbsoluteReturnsNull = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var resolved = wm.resolveLink("page.md", "/absolute/page.md")
+    ow.test.assert(resolved, null, "absolute path links should return null")
+  }
+
+  exports.testResolveLinkExternalReturnsNull = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var resolved = wm.resolveLink("page.md", "https://github.com/OpenAF/openaf/blob/master/docs/ojob.md")
+    ow.test.assert(resolved, null, "external https links should return null")
+  }
+
+  exports.testResolveLinkEscapesRootReturnsNull = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var resolved = wm.resolveLink("sub/page.md", "../../outside.md")
+    ow.test.assert(resolved, null, "links that escape wiki root should return null")
+  }
+
+
 
   exports.testNearDuplicateIdentical = function() {
     var wm = new MiniAWikiManager({ backend: "fs", root: "." })
@@ -374,7 +412,90 @@
     }
   }
 
-  exports.testLintOrphan = function() {
+  exports.testLintExternalLinkNotBroken = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "---\ntitle: Index\n---\nSee [external](https://github.com/OpenAF/openaf/blob/master/docs/ojob.md).")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
+      ow.test.assert(brokenLinks.length, 0, "external https links should not be broken_link errors")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testLintAbsolutePathLinkNotBroken = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "---\ntitle: Index\n---\nSee [absolute](/wiki/page.md).")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
+      ow.test.assert(brokenLinks.length, 0, "absolute path links should not be broken_link errors")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testLintRelativeLinkInSubdirValid = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "section/index.md", "---\ntitle: Section Index\n---\nSee [concepts](concepts.md).")
+      writePage(dir, "section/concepts.md", "---\ntitle: Concepts\n---\nContent.")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
+      ow.test.assert(brokenLinks.length, 0, "relative link to sibling page in subdir should not be broken")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testLintRelativeLinkInSubdirBroken = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "section/index.md", "---\ntitle: Section Index\n---\nSee [missing](missing.md).")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
+      ow.test.assert(brokenLinks.length >= 1, true, "relative link to missing sibling in subdir should be broken")
+      ow.test.assert(brokenLinks[0].resolved, "section/missing.md", "resolved path should include subdir prefix")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testLintDotDotLinkValid = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "section/page.md", "---\ntitle: Page\n---\nSee [root](../index.md).")
+      writePage(dir, "index.md", "---\ntitle: Index\n---\nContent.")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
+      ow.test.assert(brokenLinks.length, 0, "../ link to existing page at wiki root should not be broken")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testReadIncludesResolvedLinks = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "section/page.md", "---\ntitle: Page\n---\nSee [concepts](concepts.md) and [root](../index.md) and [[Overview]].")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var page = wm.read("section/page.md")
+      ow.test.assert(isArray(page.links), true, "read() should include a links array")
+      ow.test.assert(page.links.indexOf("section/concepts.md") >= 0, true, "relative link should be resolved to section/concepts.md")
+      ow.test.assert(page.links.indexOf("index.md") >= 0, true, "../ link should be resolved to index.md")
+      ow.test.assert(page.links.indexOf("overview.md") >= 0, true, "wiki-style link should appear as root-relative slug")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+
     var dir = createTestDir()
     try {
       writePage(dir, "index.md", "---\ntitle: Index\n---\nNo links out.")

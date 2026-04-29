@@ -754,6 +754,8 @@ try {
     maxconcurrent  : { type: "number", default: 4, description: "Maximum concurrent child agents when delegation is enabled" },
     delegationmaxdepth: { type: "number", default: 3, description: "Maximum delegation nesting depth" },
     delegationtimeout: { type: "number", default: 300000, description: "Default subtask deadline in milliseconds" },
+    delegationstalltimeout: { type: "number", description: "Idle time in milliseconds before a delegated subtask is considered stalled" },
+    delegationhardtimeout: { type: "number", description: "Optional absolute delegated subtask timeout in milliseconds regardless of activity" },
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },

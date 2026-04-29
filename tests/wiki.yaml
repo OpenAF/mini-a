@@ -110,10 +110,70 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testFsBackendSearch
 
+- name: MiniA Wiki Tests::ResolveLinkSameDir
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLinkSameDir
+
+- name: MiniA Wiki Tests::ResolveLinkDotDot
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLinkDotDot
+
+- name: MiniA Wiki Tests::ResolveLinkFromRoot
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLinkFromRoot
+
+- name: MiniA Wiki Tests::ResolveLinkAbsoluteReturnsNull
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLinkAbsoluteReturnsNull
+
+- name: MiniA Wiki Tests::ResolveLinkExternalReturnsNull
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLinkExternalReturnsNull
+
+- name: MiniA Wiki Tests::ResolveLinkEscapesRootReturnsNull
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLinkEscapesRootReturnsNull
+
 - name: MiniA Wiki Tests::LintBrokenLink
   from: MiniA Wiki Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testLintBrokenLink
+
+- name: MiniA Wiki Tests::LintExternalLinkNotBroken
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintExternalLinkNotBroken
+
+- name: MiniA Wiki Tests::LintAbsolutePathLinkNotBroken
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintAbsolutePathLinkNotBroken
+
+- name: MiniA Wiki Tests::LintRelativeLinkInSubdirValid
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintRelativeLinkInSubdirValid
+
+- name: MiniA Wiki Tests::LintRelativeLinkInSubdirBroken
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintRelativeLinkInSubdirBroken
+
+- name: MiniA Wiki Tests::LintDotDotLinkValid
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintDotDotLinkValid
+
+- name: MiniA Wiki Tests::ReadIncludesResolvedLinks
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReadIncludesResolvedLinks
 
 - name: MiniA Wiki Tests::LintOrphan
   from: MiniA Wiki Tests::Init

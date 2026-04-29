@@ -744,6 +744,14 @@ help:
     desc     : Default subtask deadline in milliseconds
     example  : "300000"
     mandatory: false
+  - name     : delegationstalltimeout
+    desc     : Idle time in milliseconds before a delegated subtask is considered stalled
+    example  : "300000"
+    mandatory: false
+  - name     : delegationhardtimeout
+    desc     : Optional absolute delegated subtask timeout in milliseconds regardless of activity
+    example  : "900000"
+    mandatory: false
   - name     : delegationmaxretries
     desc     : Default retry count for failed subtasks
     example  : "2"
@@ -1750,6 +1758,8 @@ jobs:
       maxconcurrent  : toNumber().isNumber().default(4)
       delegationmaxdepth: toNumber().isNumber().default(3)
       delegationtimeout: toNumber().isNumber().default(300000)
+      delegationstalltimeout: toNumber().isNumber().default(__)
+      delegationhardtimeout: toNumber().isNumber().default(__)
       delegationmaxretries: toNumber().isNumber().default(2)
       workerreg      : toNumber().isNumber().default(__)
       workerregtoken : isString().default(__)

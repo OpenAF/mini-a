@@ -242,6 +242,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerCancelStopsLocalChildAgent
 
+- name: MiniA Core Tests::SubtaskActivePastDeadline
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerDoesNotTimeoutActiveSubtaskPastDeadline
+
+- name: MiniA Core Tests::SubtaskStallTimeout
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerTimesOutStalledSubtask
+
+- name: MiniA Core Tests::SubtaskWaitForActivePending
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerWaitForActiveReturnsPendingForActiveTask
+
 - name: MiniA Core Tests::SelectiveMcpHandoffLocal
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -528,6 +543,9 @@ todo:
 - MiniA Core Tests::SubtaskChildArgSanitization
 - MiniA Core Tests::SubtaskExplicitChildArgs
 - MiniA Core Tests::SubtaskCancelStopsLocalChild
+- MiniA Core Tests::SubtaskActivePastDeadline
+- MiniA Core Tests::SubtaskStallTimeout
+- MiniA Core Tests::SubtaskWaitForActivePending
 - MiniA Core Tests::SelectiveMcpHandoffLocal
 - MiniA Core Tests::SelectiveMcpHandoffProxy
 - MiniA Core Tests::WorkerSkillRouting

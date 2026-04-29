@@ -1342,7 +1342,9 @@ Mini-A supports **delegation** — the ability to spawn child Mini-A agents to h
 | `workerreginterval` | number | `30000` | Worker heartbeat interval (ms) |
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
-| `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
+| `delegationtimeout` | number | `300000` | Default foreground wait/delegation budget (ms) |
+| `delegationstalltimeout` | number | `300000` | Idle time before a running delegated subtask is considered stalled (ms) |
+| `delegationhardtimeout` | number | - | Optional absolute delegated subtask timeout regardless of activity (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 
 **Worker startup parameters** (used when starting a worker with `workermode=true`):

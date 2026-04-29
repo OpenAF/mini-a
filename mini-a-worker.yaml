@@ -193,12 +193,13 @@ todo:
         return "TASK_STATE_WORKING";
       };
       var asTask = function(task) {
+        var activityAt = task.lastActivityAt || task.completedAt || task.startedAt || task.createdAt;
         return {
           id: task.taskId,
           contextId: isMap(task.metadata) && isString(task.metadata.a2aContextId) ? task.metadata.a2aContextId : task.taskId,
           status: {
             state: toState(task.status),
-            timestamp: new Date((task.completedAt || task.startedAt || task.createdAt)).toISOString()
+            timestamp: new Date(activityAt).toISOString()
           }
         };
       };
@@ -212,9 +213,11 @@ todo:
         var task = global.__worker_tasks[taskId];
         if (isUnDef(task)) return ow.server.httpd.reply(stringify({ error: "Task not found" }, __, ""), 404, ow.server.httpd.mimes.JSON);
         try {
-          var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
-          task.status = subtaskStatus.status;
-          if (isDef(subtaskStatus.completedAt)) task.completedAt = subtaskStatus.completedAt;
+        var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
+        task.status = subtaskStatus.status;
+        if (isDef(subtaskStatus.lastActivityAt)) task.lastActivityAt = subtaskStatus.lastActivityAt;
+        if (isDef(subtaskStatus.lastActivityReason)) task.lastActivityReason = subtaskStatus.lastActivityReason;
+        if (isDef(subtaskStatus.completedAt)) task.completedAt = subtaskStatus.completedAt;
         } catch(ignoreStatusErr) {}
         return ow.server.httpd.reply(stringify({ task: asTask(task) }, __, ""), __, ow.server.httpd.mimes.JSON);
       }
@@ -224,6 +227,8 @@ todo:
         try {
           var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
           task.status = subtaskStatus.status;
+          if (isDef(subtaskStatus.lastActivityAt)) task.lastActivityAt = subtaskStatus.lastActivityAt;
+          if (isDef(subtaskStatus.lastActivityReason)) task.lastActivityReason = subtaskStatus.lastActivityReason;
           if (isDef(subtaskStatus.completedAt)) task.completedAt = subtaskStatus.completedAt;
         } catch(ignoreStatusErr) {}
         return asTask(task);
@@ -291,12 +296,16 @@ todo:
       try {
         var subtaskStatus = global.__worker_taskManager.status(task.subtaskId);
         task.status = subtaskStatus.status;
+        if (isDef(subtaskStatus.lastActivityAt)) task.lastActivityAt = subtaskStatus.lastActivityAt;
+        if (isDef(subtaskStatus.lastActivityReason)) task.lastActivityReason = subtaskStatus.lastActivityReason;
         if (isDef(subtaskStatus.completedAt)) { task.completedAt = subtaskStatus.completedAt; }
       } catch(statusErr) {}
       var response = {
         taskId: taskId, status: task.status, startedAt: task.startedAt,
         elapsed: task.startedAt ? (new Date().getTime() - task.startedAt) : 0,
-        events: task.events || []
+        events: task.events || [],
+        lastActivityAt: task.lastActivityAt,
+        lastActivityReason: task.lastActivityReason
       };
       if (task.status === "running" && isDef(task.args) && isDef(task.args.maxsteps)) {
         response.progress = { maxSteps: task.args.maxsteps };
@@ -460,10 +469,12 @@ jobs:
     global.__worker_appendTaskEvent = function(taskId, event, message) {
       if (!isString(taskId) || isUnDef(global.__worker_tasks[taskId])) return
       if (isUnDef(global.__worker_tasks[taskId].events)) global.__worker_tasks[taskId].events = []
+      global.__worker_tasks[taskId].lastActivityAt = new Date().getTime()
+      global.__worker_tasks[taskId].lastActivityReason = isString(event) ? event : "info"
       global.__worker_tasks[taskId].events.push({
         event: isString(event) ? event : "info",
         message: isString(message) ? message : String(message),
-        ts: new Date().getTime()
+        ts: global.__worker_tasks[taskId].lastActivityAt
       })
     }
 
@@ -842,6 +853,7 @@ jobs:
       global.__worker_tasks[taskId] = {
         taskId: taskId, subtaskId: subtaskId, status: "queued", goal: mergedArgs.goal,
         args: mergedArgs, createdAt: now, startedAt: __, completedAt: __,
+        lastActivityAt: now, lastActivityReason: "created",
         events: [], metadata: postData.metadata || {}
       }
       global.__worker_subtaskToTaskId[subtaskId] = taskId

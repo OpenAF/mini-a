@@ -1335,6 +1335,66 @@
     manager.destroy()
   }
 
+  exports.testSubtaskManagerDoesNotTimeoutActiveSubtaskPastDeadline = function() {
+    var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
+    var now = new Date().getTime()
+    var subtask = {
+      id: "activepastdeadline",
+      status: "running",
+      startedAt: now - 600000,
+      deadlineMs: 1000,
+      stallTimeoutMs: 300000,
+      lastActivityAt: now - 1000,
+      lastActivityReason: "model call"
+    }
+
+    var reason = manager._getSubtaskTimeoutReason(subtask, now)
+    ow.test.assert(isUnDef(reason), true, "Recent activity should prevent elapsed deadline from timing out a subtask")
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerTimesOutStalledSubtask = function() {
+    var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 1000 })
+    var now = new Date().getTime()
+    var subtask = {
+      id: "stalledsubtask",
+      status: "running",
+      startedAt: now - 600000,
+      deadlineMs: 1000,
+      stallTimeoutMs: 1000,
+      lastActivityAt: now - 5000,
+      lastActivityReason: "model call"
+    }
+
+    var reason = manager._getSubtaskTimeoutReason(subtask, now)
+    ow.test.assert(isMap(reason), true, "Stale activity should produce a timeout reason")
+    ow.test.assert(reason.type, "stall", "Stale activity should be categorized as a stall")
+
+    manager.destroy()
+  }
+
+  exports.testSubtaskManagerWaitForActiveReturnsPendingForActiveTask = function() {
+    var manager = new SubtaskManager({}, { defaultStallTimeoutMs: 300000 })
+    var now = new Date().getTime()
+    var subtaskId = "activewaitpending"
+    manager.subtasks[subtaskId] = {
+      id: subtaskId,
+      status: "running",
+      startedAt: now - 600000,
+      deadlineMs: 1000,
+      stallTimeoutMs: 300000,
+      lastActivityAt: now,
+      lastActivityReason: "remote event"
+    }
+
+    var result = manager.waitForActive(subtaskId, { waitMs: 1, pollIntervalMs: 1 })
+    ow.test.assert(isMap(result) && result.pending === true, true, "Active subtask should return pending after foreground wait budget")
+    ow.test.assert(result.active === true, true, "Pending active subtask should be reported as active")
+
+    manager.destroy()
+  }
+
   exports.testMiniASelectiveMcpHandoffSharesLocalConnections = function() {
     var parent = createAgent()
     var child = createAgent()

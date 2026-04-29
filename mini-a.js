@@ -14639,7 +14639,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
-    "delegationmaxdepth", "delegationtimeout", "delegationmaxretries",
+    "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
     "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
     "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes",
     "mcpprogcall", "mcpprogcallport",
@@ -15008,6 +15008,8 @@ MiniA.prototype.init = function(args) {
       { name: "maxconcurrent", type: "number", default: 4 },
       { name: "delegationmaxdepth", type: "number", default: 3 },
       { name: "delegationtimeout", type: "number", default: 300000 },
+      { name: "delegationstalltimeout", type: "number", default: __ },
+      { name: "delegationhardtimeout", type: "number", default: __ },
       { name: "delegationmaxretries", type: "number", default: 2 },
       { name: "autodelegation", type: "boolean", default: false },
       { name: "autodelegationthreshold", type: "number", default: 8192 },
@@ -15135,6 +15137,10 @@ MiniA.prototype.init = function(args) {
     args.maxconcurrent = _$(args.maxconcurrent, "args.maxconcurrent").isNumber().default(4)
     args.delegationmaxdepth = _$(args.delegationmaxdepth, "args.delegationmaxdepth").isNumber().default(3)
     args.delegationtimeout = _$(args.delegationtimeout, "args.delegationtimeout").isNumber().default(300000)
+    args.delegationstalltimeout = _$(args.delegationstalltimeout, "args.delegationstalltimeout").isNumber().default(args.delegationtimeout)
+    if (args.delegationstalltimeout <= 0) args.delegationstalltimeout = args.delegationtimeout
+    args.delegationhardtimeout = _$(args.delegationhardtimeout, "args.delegationhardtimeout").isNumber().default(__)
+    if (isNumber(args.delegationhardtimeout) && args.delegationhardtimeout <= 0) args.delegationhardtimeout = __
     args.delegationmaxretries = _$(args.delegationmaxretries, "args.delegationmaxretries").isNumber().default(2)
     args.workerreg = _$(args.workerreg, "args.workerreg").isNumber().default(__)
     args.workerregtoken = _$(args.workerregtoken, "args.workerregtoken").isString().default(__)
@@ -15196,6 +15202,8 @@ MiniA.prototype.init = function(args) {
         this._subtaskManager = new SubtaskManager(args, {
           maxConcurrent: effectiveMaxConcurrent,
           defaultDeadlineMs: args.delegationtimeout,
+          defaultStallTimeoutMs: args.delegationstalltimeout,
+          defaultHardTimeoutMs: args.delegationhardtimeout,
           defaultMaxAttempts: args.delegationmaxretries,
           maxDepth: args.delegationmaxdepth,
           interactionFn: this.fnI.bind(this),
@@ -17659,11 +17667,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               if (_rawForSummary.length > 32768) _rawForSummary = _rawForSummary.substring(0, 32768) + "\n...[truncated]"
               var _goalShort = isString(args.goal) ? args.goal.substring(0, 120) : "the current goal"
               var _summaryGoal = "Summarize the following tool output for the parent goal: " + _goalShort + ". Output only the key facts, findings, and important details in 2-5 sentences.\n\nTool: " + toolName + "\nOutput:\n" + _rawForSummary
-              // Use delegationtimeout (user-configured) capped to 120s so slow cloud models
-              // (e.g. kimi-k2.6 generating 2000+ tokens) don't hit the 30s hard wall.
-              var _summaryDeadlineMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0
+              // Bound the foreground wait, but let the sub-agent keep running
+              // as long as it continues to report activity.
+              var _summaryWaitMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0
                 ? Math.min(args.delegationtimeout, 120000) : 120000
+              var _summaryDeadlineMs = isNumber(args.delegationtimeout) && args.delegationtimeout > 0 ? args.delegationtimeout : 300000
               var _summaryOpts = { deadlineMs: _summaryDeadlineMs, maxAttempts: 1 }
+              if (isNumber(args.delegationstalltimeout) && args.delegationstalltimeout > 0) _summaryOpts.stallTimeoutMs = args.delegationstalltimeout
+              if (isNumber(args.delegationhardtimeout) && args.delegationhardtimeout > 0) _summaryOpts.hardTimeoutMs = args.delegationhardtimeout
               var _memoryMap = isObject(parent._agentState) ? parent._agentState.workingMemory : __
               if (args.usememory === true && isObject(_memoryMap) && Object.keys(_memoryMap).length > 0) {
                 _summaryOpts.fork = true
@@ -17672,9 +17683,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               var _summaryId = parent._subtaskManager.submitAndRun(_summaryGoal, { maxsteps: 5 }, _summaryOpts)
               global.__mini_a_metrics.autodelegation_triggered.inc()
               try {
-                var _summaryResult = parent._subtaskManager.waitFor(_summaryId, _summaryDeadlineMs)
+                var _summaryResult = isFunction(parent._subtaskManager.waitForActive)
+                  ? parent._subtaskManager.waitForActive(_summaryId, { waitMs: _summaryWaitMs })
+                  : parent._subtaskManager.waitFor(_summaryId, _summaryWaitMs)
                 if (isString(_summaryResult.answer) && _summaryResult.answer.trim().length > 0) {
                   observation = "[auto-delegated summary] " + _summaryResult.answer.trim()
+                } else if (isMap(_summaryResult) && _summaryResult.pending === true) {
+                  parent.fnI("info", "[auto-delegation] Summary sub-agent still active after foreground wait; using original tool output.")
                 }
               } catch(summaryWaitErr) {
                 parent.fnI("warn", "[auto-delegation] Summary sub-agent timeout or error: " + __miniAErrMsg(summaryWaitErr))
