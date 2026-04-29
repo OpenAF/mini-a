@@ -1245,7 +1245,7 @@ todo:
             _rma.answer = trimmedAnswer.replace(/^```markdown\s*\n?([\s\S]+?)\n?```$/g, "$1").trim()
           }
         }
-        global.__res[uuid].push( { event: "final", message: (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
+        global.__res[uuid].push( { event: "final", message: (isDef(_rma) && isString(_rma.answer) && _rma.answer.trim().length > 0) ? _rma.answer : (isObject(_rma) ? af.toSLON(_rma) : _rma) } )
         if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
           global._mini_a_web_ssePush(uuid, "interaction", { event: "final" })
         }

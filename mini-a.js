@@ -18301,6 +18301,23 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (isString(rmsg) && rmsg.trim().length === 0 && _streamThinkingBuf.length > 0) {
         rmsg = _streamThinkingBuf.join("")
       }
+      // When the Ollama (or other) streaming adapter returns a structured object
+      // (e.g. { content: "...", events: [...] }) instead of a plain string, the
+      // isString(rmsg) guard below skips JSON parsing entirely and the raw object
+      // is used as `msg`, causing a "missing action" failure every step.
+      // Extract the text now so the normal parsing path can handle it.
+      if (!isString(rmsg) && !isMap(rmsg) && !isArray(rmsg)) {
+        // non-string primitive (number, bool…) – convert to string for parsing
+        rmsg = String(rmsg)
+      } else if (!isString(rmsg) && (isMap(rmsg) || isArray(rmsg))) {
+        var _streamTextExtracted = this._extractPrimaryResponseText(rmsg)
+        if (isString(_streamTextExtracted) && _streamTextExtracted.trim().length > 0) {
+          rmsg = _streamTextExtracted
+        } else if (_streamRawChunks.length > 0) {
+          var _streamChunkedText = _streamRawChunks.join("")
+          if (_streamChunkedText.trim().length > 0) rmsg = _streamChunkedText
+        }
+      }
       if (args.usestream === true && this._isIncompleteJsonObjectErrorPayload(rmsg) && _streamRawChunks.length > 0) {
         var recoveredFromStream = this._recoverJsonFromStreamChunks(_streamRawChunks, { waitMs: 750, pollMs: 50 })
         if (isMap(recoveredFromStream) || isArray(recoveredFromStream)) {
