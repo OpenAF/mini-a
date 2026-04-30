@@ -7,7 +7,7 @@ help:
     example  : "8888"
     mandatory: false
   - name     : wikibackend
-    desc     : Wiki backend type (fs or s3)
+    desc     : Wiki backend type (fs, s3, s3fs or es)
     example  : "fs"
     mandatory: false
   - name     : wikiaccess
@@ -23,18 +23,18 @@ help:
     example  : "my-wiki-bucket"
     mandatory: false
   - name     : wikiprefix
-    desc     : S3 key prefix for s3 backend
+    desc     : S3 key prefix for s3/s3fs backend, or Elasticsearch index for es backend
     example  : "wiki/"
     mandatory: false
   - name     : wikiurl
-    desc     : S3 endpoint/base URL
+    desc     : S3 endpoint/base URL for s3/s3fs, or Elasticsearch/OpenSearch base URL for es (internal esurl)
     example  : "https://s3.amazonaws.com"
     mandatory: false
   - name     : wikiaccesskey
-    desc     : S3 access key
+    desc     : S3 access key, or Elasticsearch username for es backend
     mandatory: false
   - name     : wikisecret
-    desc     : S3 secret key
+    desc     : S3 secret key, or Elasticsearch password for es backend
     mandatory: false
   - name     : wikiregion
     desc     : S3 region
@@ -245,7 +245,7 @@ jobs:
     loadLib("mini-a-wiki.js")
 
     args.wikibackend = String(args.wikibackend).toLowerCase().trim()
-    if (["fs", "s3"].indexOf(args.wikibackend) < 0) args.wikibackend = "fs"
+    if (["fs", "s3", "es", "s3fs"].indexOf(args.wikibackend) < 0) args.wikibackend = "fs"
 
     args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
     if (["ro", "rw"].indexOf(args.wikiaccess) < 0) args.wikiaccess = "ro"
@@ -255,7 +255,7 @@ jobs:
       backend: args.wikibackend
     }
 
-    if (args.wikibackend === "s3") {
+    if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
       cfg.bucket          = args.wikibucket
       cfg.prefix          = args.wikiprefix
       cfg.url             = args.wikiurl
@@ -264,6 +264,11 @@ jobs:
       cfg.region          = args.wikiregion
       cfg.useVersion1     = args.wikiuseversion1
       cfg.ignoreCertCheck = args.wikiignorecertcheck
+    } else if (args.wikibackend === "es") {
+      cfg.esurl = args.wikiurl
+      cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
+      cfg.esuser = args.wikiaccesskey
+      cfg.espass = args.wikisecret
     } else {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
     }

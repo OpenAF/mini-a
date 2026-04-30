@@ -213,6 +213,19 @@
     }
   }
 
+  exports.testEsRowsToPathsSkipsUndefinedRows = function() {
+    var paths = __miniAWikiEsRowsToPaths([
+      __,
+      { path: "index.md" },
+      {},
+      { path: 42 },
+      { path: "docs/page.md" }
+    ])
+    ow.test.assert(paths.length, 2, "should keep only rows with string paths")
+    ow.test.assert(paths[0], "index.md", "should keep first valid path")
+    ow.test.assert(paths[1], "docs/page.md", "should keep second valid path")
+  }
+
   exports.testFsBackendReadWrite = function() {
     var dir = createTestDir()
     try {

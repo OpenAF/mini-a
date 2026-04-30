@@ -65,6 +65,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testFsBackendListHandlesIterableListFilesRecursiveShape
 
+- name: MiniA Wiki Tests::EsRowsToPathsSkipsUndefinedRows
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEsRowsToPathsSkipsUndefinedRows
+
 - name: MiniA Wiki Tests::FsBackendReadWrite
   from: MiniA Wiki Tests::Init
   to  : oJob Test

@@ -820,17 +820,28 @@ When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps two star
 |-----------|------|---------|-------------|
 | `usewiki` | boolean | `false` | Enable the wiki knowledge base |
 | `wikiaccess` | string | `ro` | Access mode: `ro` (read-only) or `rw` (read-write) |
-| `wikibackend` | string | `fs` | Backend: `fs` (filesystem) or `s3` |
+| `wikibackend` | string | `fs` | Backend: `fs` (filesystem), `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) |
 | `wikiroot` | string | `.` | Root directory for the `fs` backend |
-| `wikibucket` | string | - | S3 bucket name (`s3` backend) |
-| `wikiprefix` | string | - | S3 key prefix (`s3` backend) |
-| `wikiurl` | string | - | S3-compatible endpoint URL (`s3` backend) |
-| `wikiaccesskey` | string | - | S3 access key (`s3` backend) |
-| `wikisecret` | string | - | S3 secret key (`s3` backend) |
-| `wikiregion` | string | - | S3 region (`s3` backend) |
-| `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3` backend) |
-| `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3` backend) |
+| `wikibucket` | string | - | S3 bucket name (`s3`/`s3fs` backend) |
+| `wikiprefix` | string | - | S3 key prefix (`s3`/`s3fs`) or Elasticsearch index name (`es`, defaults to `mini_a_wiki`) |
+| `wikiurl` | string | - | S3-compatible endpoint URL (`s3`/`s3fs`) or Elasticsearch/OpenSearch base URL (`es`; this is the CLI-facing `esurl`) |
+| `wikiaccesskey` | string | - | S3 access key (`s3`/`s3fs`) or Elasticsearch username (`es`) |
+| `wikisecret` | string | - | S3 secret key (`s3`/`s3fs`) or Elasticsearch password (`es`) |
+| `wikiregion` | string | - | S3 region (`s3`/`s3fs` backend) |
+| `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3`/`s3fs` backend) |
+| `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
 | `wikilintstaleddays` | number | `90` | Days before a page without an `updated` update is marked stale in lint |
+
+Elasticsearch/OpenSearch backend mapping:
+
+| Mini-A parameter | Internal wiki config | Meaning |
+|------------------|----------------------|---------|
+| `wikiurl` | `esurl` | Elasticsearch/OpenSearch base URL |
+| `wikiprefix` | `esindex` | Index name; defaults to `mini_a_wiki` |
+| `wikiaccesskey` | `esuser` | Optional basic-auth username |
+| `wikisecret` | `espass` | Optional basic-auth password |
+
+If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
 
 ### Wiki Actions (agent)
 
@@ -873,6 +884,12 @@ mini-a goal="analyze and wiki" \
   usewiki=true wikiaccess=rw wikibackend=s3 \
   wikibucket=my-wiki-bucket wikiprefix=knowledge/ \
   wikiurl=https://s3.amazonaws.com wikiaccesskey=AKI... wikisecret=xxx wikiregion=us-east-1
+
+# Elasticsearch/OpenSearch-backed wiki
+mini-a goal="search and update the team wiki" \
+  usewiki=true wikiaccess=rw wikibackend=es \
+  wikiurl=http://localhost:9200 wikiprefix=mini_a_wiki \
+  wikiaccesskey=elastic wikisecret=xxx
 
 # Wiki + memory for maximum knowledge retention
 mini-a goal="deep research with persistent knowledge" \
