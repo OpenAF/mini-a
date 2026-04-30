@@ -9,16 +9,92 @@ var MiniAWikiManager = function(config, loggerFn) {
   this.configure(config)
 }
 
+
+MiniAWikiManager.prototype._indexMeta = function() {
+  return {
+    file: ".mini-a-wiki-lucene.json",
+    hiddenNames: [".mini-a-wiki-lucene.json", ".mini-a-wiki-lucene.lock"]
+  }
+}
+
+MiniAWikiManager.prototype._isHiddenPath = function(path) {
+  var p = isString(path) ? String(path).trim() : ""
+  if (p.length === 0) return false
+  var bn = p.split("/").pop()
+  var meta = this._indexMeta()
+  return meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
+}
+
+MiniAWikiManager.prototype._safeListPages = function(prefix) {
+  var self = this
+  return this._backend.list(prefix).filter(function(p) {
+    return isString(p) && p.endsWith('.md') && !self._isHiddenPath(p)
+  })
+}
+
+MiniAWikiManager.prototype._rebuildSearchIndex = function() {
+  if (this._access !== 'rw') return
+  try {
+    var pages = this._safeListPages("")
+    var docs = []
+    for (var i=0;i<pages.length;i++) {
+      var raw = this._backend.read(pages[i])
+      if (!isString(raw)) continue
+      var parsed = this.parseFrontmatter(raw)
+      docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
+    }
+    this._backend.write(this._indexMeta().file, stringify(docs, __, ""))
+    this._rebuildLuceneIndex(docs)
+  } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
+}
+
+MiniAWikiManager.prototype._getLuceneIndexPath = function() {
+  var root = "."
+  if (this._backendType === "fs" || this._backendType === "s3fs") root = this._backend.root
+  return root + "/.mini-a-wiki-lucene"
+}
+
+MiniAWikiManager.prototype._ensureLucene = function() {
+  if (this._luceneReady === true) return true
+  try {
+    var p = getOPackPath("lucene")
+    if (!isString(p) || p.length === 0) return false
+    loadLib(p + "/lucene.js")
+    this._luceneReady = true
+    return true
+  } catch(e) {
+    this._luceneReady = false
+    this._logFn("warn", "Lucene oPack not available: " + __miniAErrMsg(e))
+    return false
+  }
+}
+
+MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs) {
+  if (!this._ensureLucene()) return
+  try {
+    var idxPath = this._getLuceneIndexPath()
+    var chName = "__mini_a_wiki_searchdb"
+    $ch(chName).destroy()
+    $ch(chName).create("searchdb", { path: idxPath, idField: "id", contentField: "content" })
+    ;(isArray(docs) ? docs : []).forEach(function(d) {
+      $ch(chName).set({ id: d.path }, { content: d.raw, payload: { path: d.path, title: d.title } })
+    })
+    $ch(chName).destroy()
+  } catch(e) {
+    this._logFn("warn", "Failed to rebuild Lucene index: " + __miniAErrMsg(e))
+  }
+}
+
 MiniAWikiManager.prototype.list = function(prefix) {
   var pfx = isString(prefix) ? prefix : ""
   if (this._backendType === "fs" && isMap(this._backend) && isDef(this._backend.root)) {
     try {
-      return __miniAWikiFsList(io.fileInfo(String(this._backend.root)).isDirectory === true ? String(this._backend.root) : ".", pfx, String(java.io.File.separator))
+      return this._safeListPages(pfx)
     } catch(e) {
       return []
     }
   }
-  return this._backend.list(pfx)
+  return this._safeListPages(pfx)
 }
 
 MiniAWikiManager.prototype.configure = function(config) {
@@ -26,9 +102,9 @@ MiniAWikiManager.prototype.configure = function(config) {
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
-  this._backendType = backendRaw === "s3" ? "s3" : "fs"
+  this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
   this._config  = cfg
-  this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : this._makeFsBackend(cfg)
+  this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
   this._bootstrapWiki()
 }
 
@@ -186,6 +262,7 @@ MiniAWikiManager.prototype.init = function() {
   var created = []
   var skipped = []
   try {
+    this._rebuildSearchIndex()
     if (!hasAgents) {
       var agentsContent = [
         "---",
@@ -514,6 +591,47 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
   }
 }
 
+MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
+  loadLib(getOPackPath("ElasticSearch") + "/elasticsearch.js")
+  var esurl = isString(cfg.esurl) ? cfg.esurl : "http://127.0.0.1:9200"
+  var index = isString(cfg.esindex) && cfg.esindex.length > 0 ? cfg.esindex : "mini_a_wiki"
+  var es = new ElasticSearch(esurl, cfg.esuser, cfg.espass)
+  var chName = "__mini_a_wiki_es_" + sha1(index).substring(0, 8)
+  es.createCh(index, ["path"], chName)
+  return {
+    type: "es",
+    list: function(pfx) {
+      var prefix = isString(pfx) ? pfx : ""
+      return $ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 }).map(r => r.path).filter(isString)
+    },
+    read: function(path) {
+      var r = $ch(chName).get({ path: path })
+      return isMap(r) ? r.raw : __
+    },
+    write: function(path, content) { $ch(chName).set({ path: path }, { path: path, raw: content }) },
+    exists: function(path) { return isMap($ch(chName).get({ path: path })) },
+    delete: function(path) { $ch(chName).unset({ path: path }) },
+    close: function() { try { $ch(chName).destroy() } catch(e) {} }
+  }
+}
+
+MiniAWikiManager.prototype._makeS3FsBackend = function(cfg) {
+  var fsb = this._makeFsBackend(cfg)
+  var s3b = this._makeS3Backend(cfg)
+  try {
+    var pages = s3b.list("")
+    for (var i = 0; i < pages.length; i++) {
+      var raw = s3b.read(pages[i])
+      if (isString(raw)) fsb.write(pages[i], raw)
+    }
+  } catch(e) {
+    this._logFn("warn", "Failed to bootstrap s3fs wiki: " + __miniAErrMsg(e))
+  } finally {
+    try { s3b.close() } catch(ig) {}
+  }
+  return fsb
+}
+
 MiniAWikiManager.prototype.close = function() {
   if (isObject(this._backend) && isFunction(this._backend.close)) {
     this._backend.close()
@@ -800,6 +918,7 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
 
     try {
       this._backend.write(path, this._serializeFrontmatter(updatedMeta, reparsed.body))
+      this._rebuildSearchIndex()
       return { ok: true, path: path }
     } catch(e) {
       return { ok: false, error: __miniAErrMsg(e) }
@@ -834,6 +953,7 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   try {
     var content = this._serializeFrontmatter(meta, bodyText)
     this._backend.write(path, content)
+    this._rebuildSearchIndex()
     return { ok: true, path: path }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
@@ -850,9 +970,11 @@ MiniAWikiManager.prototype.delete = function(path) {
   }
 
   if (path === "AGENTS.md") return { ok: false, error: "cannot delete AGENTS.md (protected)" }
+  if (this._isHiddenPath(path)) return { ok: false, error: "cannot delete hidden wiki index files" }
 
   try {
     this._backend.delete(path)
+    this._rebuildSearchIndex()
     return { ok: true, path: path }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
@@ -882,7 +1004,29 @@ MiniAWikiManager.prototype.search = function(query, options) {
   }
 
   var pages   = scopedPath.length > 0 ? [scopedPath] : this.list("")
+  pages = pages.filter(p => !this._isHiddenPath(p))
   var results = []
+
+  if (!opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
+    try {
+      var chName = "__mini_a_wiki_searchdb"
+      $ch(chName).create("searchdb", { path: this._getLuceneIndexPath(), idField: "id", contentField: "content" })
+      var luceneHits = $ch(chName).getAll({ query: q, limit: limit })
+      $ch(chName).destroy()
+      if (isArray(luceneHits) && luceneHits.length > 0) {
+        return luceneHits.map(function(h) {
+          return {
+            path: h.id || (isMap(h.payload) ? h.payload.path : __),
+            title: isMap(h.payload) && isString(h.payload.title) ? h.payload.title : (h.id || ""),
+            line: isNumber(h.line) ? h.line : 1,
+            snippet: isString(h.content) ? h.content.substring(0, 180) : q
+          }
+        }).filter(r => isString(r.path) && r.path.length > 0)
+      }
+    } catch(le) {
+      this._logFn("warn", "Lucene search fallback to scan: " + __miniAErrMsg(le))
+    }
+  }
 
   for (var i = 0; i < pages.length && results.length < limit; i++) {
     var raw = this._backend.read(pages[i])
