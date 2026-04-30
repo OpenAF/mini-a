@@ -7,7 +7,7 @@ help:
     example  : "8888"
     mandatory: false
   - name     : wikibackend
-    desc     : Wiki backend type (fs or s3)
+    desc     : Wiki backend type (fs, s3, s3fs or es)
     example  : "fs"
     mandatory: false
   - name     : wikiaccess
@@ -23,18 +23,18 @@ help:
     example  : "my-wiki-bucket"
     mandatory: false
   - name     : wikiprefix
-    desc     : S3 key prefix for s3 backend
+    desc     : S3 key prefix for s3/s3fs backend, or Elasticsearch index for es backend
     example  : "wiki/"
     mandatory: false
   - name     : wikiurl
-    desc     : S3 endpoint/base URL
+    desc     : S3 endpoint/base URL for s3/s3fs, or Elasticsearch/OpenSearch base URL for es (internal esurl)
     example  : "https://s3.amazonaws.com"
     mandatory: false
   - name     : wikiaccesskey
-    desc     : S3 access key
+    desc     : S3 access key, or Elasticsearch username for es backend
     mandatory: false
   - name     : wikisecret
-    desc     : S3 secret key
+    desc     : S3 secret key, or Elasticsearch password for es backend
     mandatory: false
   - name     : wikiregion
     desc     : S3 region

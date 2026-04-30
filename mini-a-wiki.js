@@ -57,6 +57,7 @@ MiniAWikiManager.prototype._getLuceneIndexPath = function() {
 MiniAWikiManager.prototype._ensureLucene = function() {
   if (this._luceneReady === true) return true
   try {
+    includeOPack("lucene")
     var p = getOPackPath("lucene")
     if (!isString(p) || p.length === 0) return false
     loadLib(p + "/lucene.js")
@@ -411,32 +412,49 @@ MiniAWikiManager.prototype.init = function() {
 }
 
 var __miniAWikiFsList = function(dir, normalizedPrefix, sep) {
-  if (!isString(dir) || dir.length === 0) return []
-  if (!io.fileExists(dir) || io.fileInfo(dir).isDirectory !== true) return []
+  if (isUnDef(dir)) return []
+  dir = String(dir)
+  if (dir.length === 0) return []
+  if (!io.fileExists(dir) || io.fileInfo(dir).isDirectory != true) return []
 
   var dirPrefix = dir.endsWith(sep) ? dir : dir + sep
   var raw = listFilesRecursive(dir)
-  if (!isArray(raw)) raw = []
-
-  var selected = $from(raw)
-    .equals("isFile", true)
-    .ends("canonicalPath", ".md")
-    .match("canonicalPath", "^" + dirPrefix.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"))
-    .select(function(entry) {
-      return normalizedPrefix + String(entry.canonicalPath).substring(dirPrefix.length).replace(/\\/g, "/")
-    })
-
-  var results = isArray(selected) ? selected : (isDef(selected) && isDef(selected.length) && !isString(selected) ? af.fromJavaArray(selected) : [])
+  var entries = []
+  if (isArray(raw)) {
+    entries = raw
+  } else if (isMap(raw) && isArray(raw.files)) {
+    entries = raw.files
+  } else if (isDef(raw) && isFunction(raw.forEach)) {
+    raw.forEach(function(entry) { entries.push(entry) })
+  }
 
   var dedup = []
   var seen = {}
-  results.forEach(function(relPath) {
+  entries.forEach(function(entry) {
+    if (!isMap(entry) || entry.isFile != true) return
+    var entryPath = isString(entry.canonicalPath) ? entry.canonicalPath : ""
+    if (entryPath.length === 0 && isString(entry.filepath)) entryPath = entry.filepath
+    if (entryPath.length === 0 && isString(entry.path) && isString(entry.filename)) entryPath = entry.path + sep + entry.filename
+    if (entryPath.length === 0) return
+
+    try { entryPath = new java.io.File(entryPath).getCanonicalPath() } catch(e) {}
+    if (!entryPath.endsWith(".md")) return
+    if (!entryPath.startsWith(dirPrefix)) return
+
+    var relPath = normalizedPrefix + String(entryPath).substring(dirPrefix.length).replace(/\\/g, "/")
     if (!isString(relPath) || relPath.length === 0 || seen[relPath] === true) return
     seen[relPath] = true
     dedup.push(relPath)
   })
 
   return dedup.sort()
+}
+
+var __miniAWikiEsRowsToPaths = function(rows) {
+  if (!isArray(rows)) return []
+  return rows.map(function(r) {
+    return isMap(r) && isString(r.path) ? r.path : __
+  }).filter(isString)
 }
 
 var __miniAWikiNormalizePath = function(path, options) {
@@ -476,7 +494,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
   var sep  = String(java.io.File.separator)
   var rawRoot = isDef(cfg.root) ? String(cfg.root).trim() : ""
   var root = rawRoot.length > 0 ? rawRoot : "."
-  var canonicalRoot = new java.io.File(root).getCanonicalPath()
+  var canonicalRoot = String(new java.io.File(root).getCanonicalPath())
   var canonicalRootPrefix = canonicalRoot.endsWith(sep) ? canonicalRoot : canonicalRoot + sep
   var normalizePrefix = function(value) {
     var prefix = isDef(value) ? String(value).trim().replace(/\\/g, "/") : ""
@@ -488,7 +506,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
     return prefix
   }
   var resolvePath = function(relPath, allowMissingLeaf) {
-    var rel = isDef(relPath) ? __miniAWikiNormalizePath(relPath, {
+    var rel = (isDef(relPath) && String(relPath).length > 0) ? __miniAWikiNormalizePath(relPath, {
       allowDirectory  : allowMissingLeaf !== true,
       requireMarkdown : allowMissingLeaf !== true
     }) : ""
@@ -496,10 +514,10 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
     var canonical
     if (allowMissingLeaf === true && !candidate.exists()) {
       var parent = candidate.getParentFile()
-      var parentCanonical = isDef(parent) ? parent.getCanonicalPath() : canonicalRoot
+      var parentCanonical = isDef(parent) ? String(parent.getCanonicalPath()) : canonicalRoot
       canonical = parentCanonical + sep + candidate.getName()
     } else {
-      canonical = candidate.getCanonicalPath()
+      canonical = String(candidate.getCanonicalPath())
     }
     if (canonical !== canonicalRoot && !canonical.startsWith(canonicalRootPrefix)) {
       throw "path escapes wikiroot"
@@ -517,7 +535,10 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
       } catch(e) { return [] }
     },
     read: function(path) {
-      try { return io.readFileString(resolvePath(path, false)) } catch(e) { return __ }
+      try {
+        var content = io.readFileString(resolvePath(path, false))
+        return isDef(content) ? String(content) : __
+      } catch(e) { return __ }
     },
     write: function(path, content) {
       var full = resolvePath(path, true)
@@ -592,7 +613,8 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
 }
 
 MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
-  loadLib(getOPackPath("ElasticSearch") + "/elasticsearch.js")
+  includeOPack("ElasticSearch")
+  loadLib("/elasticsearch.js")
   var esurl = isString(cfg.esurl) ? cfg.esurl : "http://127.0.0.1:9200"
   var index = isString(cfg.esindex) && cfg.esindex.length > 0 ? cfg.esindex : "mini_a_wiki"
   var es = new ElasticSearch(esurl, cfg.esuser, cfg.espass)
@@ -602,7 +624,7 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
     type: "es",
     list: function(pfx) {
       var prefix = isString(pfx) ? pfx : ""
-      return $ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 }).map(r => r.path).filter(isString)
+      return __miniAWikiEsRowsToPaths($ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 }))
     },
     read: function(path) {
       var r = $ch(chName).get({ path: path })
@@ -1014,7 +1036,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
       var luceneHits = $ch(chName).getAll({ query: q, limit: limit })
       $ch(chName).destroy()
       if (isArray(luceneHits) && luceneHits.length > 0) {
-        return luceneHits.map(function(h) {
+        var validHits = luceneHits.map(function(h) {
           return {
             path: h.id || (isMap(h.payload) ? h.payload.path : __),
             title: isMap(h.payload) && isString(h.payload.title) ? h.payload.title : (h.id || ""),
@@ -1022,6 +1044,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
             snippet: isString(h.content) ? h.content.substring(0, 180) : q
           }
         }).filter(r => isString(r.path) && r.path.length > 0)
+        if (validHits.length > 0) return validHits
       }
     } catch(le) {
       this._logFn("warn", "Lucene search fallback to scan: " + __miniAErrMsg(le))

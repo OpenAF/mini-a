@@ -868,6 +868,21 @@ The `start()` method accepts various configuration options:
 - **`memorypromote`** (string, default: `""`): Comma-separated list of memory sections to auto-promote from the session store to the global store at session end. Uses a refresh-or-append strategy: near-duplicate global entries have their `confirmedAt` and `confirmCount` updated rather than duplicated; entirely new entries are appended. `memoryuser=true` sets this to `facts,decisions,summaries`. Set to `""` to disable promotion.
 - **`memorystaledays`** (number, default: `0`): Number of days after which a global memory entry that has not been re-confirmed by any session is marked `stale=true`. The sweep runs automatically after each auto-promotion pass. Stale entries are not deleted immediately — they are evicted by compaction when a section overflows `memorymaxpersection`, giving recently confirmed entries priority. Set to `0` to disable staleness tracking. `memoryuser=true` sets this to `30`.
 - **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
+- **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
+- **`wikiaccess`** (string, default: `ro`): Wiki access mode, `ro` or `rw`.
+- **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch).
+- **`wikiroot`** (string, default: `.`): Filesystem root for `wikibackend=fs`.
+- **`wikibucket`** (string, optional): S3 bucket for `wikibackend=s3` or `wikibackend=s3fs`.
+- **`wikiprefix`** (string, optional): S3 key prefix for `s3`/`s3fs`; Elasticsearch index name for `es` (defaults to `mini_a_wiki`).
+- **`wikiurl`** (string, optional): S3-compatible endpoint URL for `s3`/`s3fs`; Elasticsearch/OpenSearch base URL for `es` (this is the CLI-facing equivalent of the internal `esurl`).
+- **`wikiaccesskey`** (string, optional): S3 access key for `s3`/`s3fs`; Elasticsearch username for `es`.
+- **`wikisecret`** (string, optional): S3 secret key for `s3`/`s3fs`; Elasticsearch password for `es`.
+- **`wikiregion`** (string, optional): S3 region for `s3`/`s3fs`.
+- **`wikiuseversion1`** (boolean, default: `false`): Use S3 path-style/signature-v1 compatibility for `s3`/`s3fs`.
+- **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
+- **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
+
+For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `esurl=` runtime argument; use `wikiurl=` with `wikibackend=es`.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
 
