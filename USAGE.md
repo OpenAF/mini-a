@@ -1312,6 +1312,40 @@ agent.start({
 
 Enable `deepresearch=true` to run iterative research cycles where Mini-A refines its research through multiple attempts, each validated against specific quality criteria. This mode is ideal for comprehensive research tasks that benefit from progressive refinement.
 
+## Outer Loop Autonomous Coding (`outerloop=true`)
+
+Use `outerloop=true` to wrap the normal agent run in a durable multi-cycle coding loop. Each cycle runs with fresh context while persisting state in `~/.openaf-mini-a/sessions/<session-id>/` (for example: `instructions.md`, `state.json`, `plan.md`, `last-validation.txt`, `last-error.txt`, `cycle-000N-summary.md`, `changed-files.json`).
+
+Key options:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `outerloop` | boolean | `false` | Enable autonomous coding loop |
+| `outerloopinstructions` | string | session `instructions.md` | Durable instructions file |
+| `taskfile` / `specfile` | string | - | Aliases for `outerloopinstructions` |
+| `outerloopmaxcycles` | number | `5` | Max loop cycles |
+| `outerloopmaxtime` | number | `0` | Max runtime seconds (`0` disables) |
+| `outerloopstoponrepeat` | boolean | `false` | Stop on repeated validation failure |
+| `outerloopmaxnochange` | number | `2` | Stop when no meaningful change repeats |
+
+Examples:
+
+```bash
+mini-a "Implement the feature described in ./TASKS.md" \
+  outerloop=true \
+  useplanning=true \
+  outerloopinstructions=./TASKS.md \
+  valgoal="All implementation tasks are complete and the configured validation checks pass" \
+  outerloopmaxcycles=8
+```
+
+```bash
+mini-a "Refactor the parser and keep iterating until validation passes" \
+  outerloop=true \
+  valgoal="Parser tests pass and no regression is introduced" \
+  outerloopmaxcycles=6
+```
+
 You can set `OAF_VAL_MODEL` or pass `modelval=...` to route the validation step to a dedicated model; otherwise the main model is used.
 
 ### How It Works

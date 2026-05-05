@@ -451,6 +451,30 @@ Mini-A ships with complementary components:
 | `systempromptbudget` | Maximum estimated system-prompt token budget before low-priority sections are dropped | - |
 | `useplanning` | Enable task planning workflow with validation and dynamic replanning | `false` |
 | `planstyle` | Planning style (`simple` flat steps by default, or `legacy` phase-based) | `simple` |
+
+### Outer Loop Autonomous Coding
+
+Mini-A now supports an optional durable autonomous loop with `outerloop=true`. This keeps per-session state under `~/.openaf-mini-a/sessions/<session-id>/`, reruns fresh agent cycles, persists plan/validation artifacts, and stops only when completion + validation succeed (or safety limits are reached).
+
+Example with external instructions:
+
+```bash
+mini-a "Implement the feature described in ./TASKS.md" \
+  outerloop=true \
+  useplanning=true \
+  outerloopinstructions=./TASKS.md \
+  valgoal="All implementation tasks are complete and the configured validation checks pass" \
+  outerloopmaxcycles=8
+```
+
+Example without external instructions file:
+
+```bash
+mini-a "Refactor the parser and keep iterating until validation passes" \
+  outerloop=true \
+  valgoal="Parser tests pass and no regression is introduced" \
+  outerloopmaxcycles=6
+```
 | `usememory` | Enable structured working memory (`facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, `summaries`) maintained across the run | `false` |
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |
