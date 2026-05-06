@@ -174,6 +174,18 @@ help:
     desc     : Path to persistent outer loop instructions markdown file
     example  : "./TASKS.md"
     mandatory: false
+  - name     : taskfile
+    desc     : Alias for outerloopinstructions
+    example  : "./TASKS.md"
+    mandatory: false
+  - name     : specfile
+    desc     : Alias for outerloopinstructions
+    example  : "./TASKS.md"
+    mandatory: false
+  - name     : outerloopsessionid
+    desc     : Existing durable outer loop session identifier to resume or continue
+    example  : "mini-a-session-123"
+    mandatory: false
   - name     : outerloopmaxcycles
     desc     : Maximum autonomous outer loop cycles
     example  : "8"
