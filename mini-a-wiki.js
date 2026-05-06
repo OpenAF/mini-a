@@ -75,12 +75,19 @@ MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs) {
   try {
     var idxPath = this._getLuceneIndexPath()
     var chName = "__mini_a_wiki_searchdb"
-    $ch(chName).destroy()
-    $ch(chName).create("searchdb", { path: idxPath, idField: "id", contentField: "content" })
-    ;(isArray(docs) ? docs : []).forEach(function(d) {
-      $ch(chName).set({ id: d.path }, { content: d.raw, payload: { path: d.path, title: d.title } })
-    })
-    $ch(chName).destroy()
+    try {
+      $ch(chName).destroy()
+    } catch(ignore) {}
+    try {
+      $ch(chName).create("searchdb", { path: idxPath, idField: "id", contentField: "content" })
+      ;(isArray(docs) ? docs : []).forEach(function(d) {
+        $ch(chName).set({ id: d.path }, { content: d.raw, payload: { path: d.path, title: d.title } })
+      })
+    } finally {
+      try {
+        $ch(chName).destroy()
+      } catch(ignore2) {}
+    }
   } catch(e) {
     this._logFn("warn", "Failed to rebuild Lucene index: " + __miniAErrMsg(e))
   }
