@@ -20293,7 +20293,14 @@ MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
       "### Previous Error\n" + (io.fileExists(errorPath)?io.readFileString(errorPath):"")
     var cycleArgs = clone(args)
     cycleArgs.outerloop = false
-    cycleArgs.knowledge = (isString(args.knowledge)?args.knowledge+"\n\n":"") + k
+    var baseKnowledge = ""
+    if (isString(args.knowledge)) {
+      baseKnowledge = args.knowledge
+      if (baseKnowledge.indexOf("\n") < 0 && baseKnowledge.indexOf("\r") < 0 && io.fileExists(baseKnowledge)) {
+        baseKnowledge = io.readFileString(baseKnowledge)
+      }
+    }
+    cycleArgs.knowledge = baseKnowledge ? (baseKnowledge + "\n\n" + k) : k
     cycleArgs.deepresearch = false
     cycleArgs.validationgoal = __
     cycleArgs.valgoal = __
