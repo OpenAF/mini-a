@@ -20310,7 +20310,11 @@ MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
     state.last_cycle_summary_path = cycleSummaryPath
     state.changed_files = track.changed
     var v = { verdict: "PASS", feedback: "validation disabled" }
-    if (validationEnabled) v = this._validateResearchOutcome(String(out||""), args.validationgoal || args.valgoal, args)
+    var validationGoal = args.validationgoal || args.valgoal
+    if (isString(validationGoal) && validationGoal.indexOf("\n") < 0 && io.fileExists(validationGoal)) {
+      try { validationGoal = io.readFileString(validationGoal) } catch(_) {}
+    }
+    if (validationEnabled) v = this._validateResearchOutcome(String(out||""), validationGoal, args)
     io.writeFileString(validationPath, stringify(v, __, ""))
     state.latest_validation_status = v.verdict
     state.latest_validation_summary = v.feedback || ""
