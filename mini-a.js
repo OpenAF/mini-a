@@ -20317,7 +20317,8 @@ MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
     previousSnapshot = track.snapshot
     io.writeFileJSON(filesSnapshotPath, previousSnapshot)
     io.writeFileJSON(changedPath, track.changed)
-    var cycleSummary = "# Cycle " + cycle + "\n\n" + String(out||"")
+    var outStr = isString(out) ? out : (isObject(out) ? stringify(out, __, "") : String(out || ""))
+    var cycleSummary = "# Cycle " + cycle + "\n\n" + outStr
     io.writeFileString(cycleSummaryPath, cycleSummary)
     state.last_cycle_summary_path = cycleSummaryPath
     state.changed_files = track.changed
@@ -20326,7 +20327,7 @@ MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
     if (isString(validationGoal) && validationGoal.indexOf("\n") < 0 && io.fileExists(validationGoal)) {
       try { validationGoal = io.readFileString(validationGoal) } catch(_) {}
     }
-    if (validationEnabled) v = this._validateResearchOutcome(String(out||""), validationGoal, args)
+    if (validationEnabled) v = this._validateResearchOutcome(outStr, validationGoal, args)
     io.writeFileString(validationPath, stringify(v, __, ""))
     state.latest_validation_status = v.verdict
     state.latest_validation_summary = v.feedback || ""

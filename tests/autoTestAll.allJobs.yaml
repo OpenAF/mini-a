@@ -4,5 +4,6 @@ include:
 - tests/advancedPlanning.yaml
 - tests/coreFunctionality.yaml
 - tests/miniAUtils.yaml
+- tests/outerLoop.yaml
 - tests/progToolCall.yaml
 - tests/wiki.yaml
