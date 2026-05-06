@@ -1039,9 +1039,13 @@ MiniAWikiManager.prototype.search = function(query, options) {
   if (!opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
     try {
       var chName = "__mini_a_wiki_searchdb"
-      $ch(chName).create("searchdb", { path: this._getLuceneIndexPath(), idField: "id", contentField: "content" })
-      var luceneHits = $ch(chName).getAll({ query: q, limit: limit })
-      $ch(chName).destroy()
+      var luceneHits
+      try {
+        $ch(chName).create("searchdb", { path: this._getLuceneIndexPath(), idField: "id", contentField: "content" })
+        luceneHits = $ch(chName).getAll({ query: q, limit: limit })
+      } finally {
+        $ch(chName).destroy()
+      }
       if (isArray(luceneHits) && luceneHits.length > 0) {
         var validHits = luceneHits.map(function(h) {
           return {
