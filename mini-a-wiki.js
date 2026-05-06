@@ -58,9 +58,7 @@ MiniAWikiManager.prototype._ensureLucene = function() {
   if (this._luceneReady === true) return true
   try {
     includeOPack("lucene")
-    var p = getOPackPath("lucene")
-    if (!isString(p) || p.length === 0) return false
-    loadLib(p + "/lucene.js")
+    loadLib("lucene.js")
     this._luceneReady = true
     return true
   } catch(e) {
@@ -621,7 +619,7 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
 
 MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
   includeOPack("ElasticSearch")
-  loadLib("/elasticsearch.js")
+  loadLib("elasticsearch.js")
   var esurl = isString(cfg.esurl) ? cfg.esurl : "http://127.0.0.1:9200"
   var index = isString(cfg.esindex) && cfg.esindex.length > 0 ? cfg.esindex : "mini_a_wiki"
   var es = new ElasticSearch(esurl, cfg.esuser, cfg.espass)
