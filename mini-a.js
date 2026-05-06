@@ -20308,7 +20308,10 @@ MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
     this.state = "idle"
     var out = ""
     try { out = this._startInternal(cycleArgs, now()); io.writeFileString(errorPath, "") } catch(e) { io.writeFileString(errorPath, String(e)) }
-    var track = this._collectOuterLoopChangedFiles(String(java.lang.System.getProperty("user.dir")), previousSnapshot)
+    var shouldTrackChanges = (args.trackchanges === true) || (args.trackchanges !== false && st.maxNoChange > 0)
+    var trackRoot = String(args.changetrackroot || st.changeTrackRoot || java.lang.System.getProperty("user.dir"))
+    var track = { snapshot: previousSnapshot, changed: [] }
+    if (shouldTrackChanges) track = this._collectOuterLoopChangedFiles(trackRoot, previousSnapshot)
     previousSnapshot = track.snapshot
     io.writeFileJSON(filesSnapshotPath, previousSnapshot)
     io.writeFileJSON(changedPath, track.changed)
