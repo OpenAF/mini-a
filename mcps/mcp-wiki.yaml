@@ -264,6 +264,7 @@ jobs:
       cfg.region          = args.wikiregion
       cfg.useVersion1     = args.wikiuseversion1
       cfg.ignoreCertCheck = args.wikiignorecertcheck
+      if (args.wikibackend === "s3fs") cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
     } else if (args.wikibackend === "es") {
       cfg.esurl = args.wikiurl
       cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
