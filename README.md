@@ -475,6 +475,16 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
   valgoal="Parser tests pass and no regression is introduced" \
   outerloopmaxcycles=6
 ```
+
+To resume an interrupted session, pass the same `outerloopsessionid` used in the original run. Mini-A will reuse the existing session directory (under `~/.openaf-mini-a/sessions/`) and continue from where it left off:
+
+```bash
+mini-a "Refactor the parser and keep iterating until validation passes" \
+  outerloop=true \
+  outerloopsessionid=session-20240601-120000-abc123 \
+  valgoal="Parser tests pass and no regression is introduced" \
+  outerloopmaxcycles=6
+```
 | `usememory` | Enable structured working memory (`facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, `summaries`) maintained across the run | `false` |
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |

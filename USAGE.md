@@ -1323,6 +1323,7 @@ Key options:
 | `outerloop` | boolean | `false` | Enable autonomous coding loop |
 | `outerloopinstructions` | string | session `instructions.md` | Durable instructions file |
 | `taskfile` / `specfile` | string | - | Aliases for `outerloopinstructions` |
+| `outerloopsessionid` | string | auto-generated | Session ID used as the directory name under `~/.openaf-mini-a/sessions/`; pass the same ID to resume an interrupted run |
 | `outerloopmaxcycles` | number | `5` | Max loop cycles |
 | `outerloopmaxtime` | number | `0` | Max runtime seconds (`0` disables) |
 | `outerloopstoponrepeat` | boolean | `false` | Stop on repeated validation failure |
@@ -1345,6 +1346,18 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
   valgoal="Parser tests pass and no regression is introduced" \
   outerloopmaxcycles=6
 ```
+
+To resume an interrupted session, pass the same `outerloopsessionid` that was used (or auto-generated) in the previous run. The session directory already contains the persisted `instructions.md`, `state.json`, and previous cycle summaries, so the loop picks up where it left off:
+
+```bash
+mini-a "Refactor the parser and keep iterating until validation passes" \
+  outerloop=true \
+  outerloopsessionid=session-20240601-120000-abc123 \
+  valgoal="Parser tests pass and no regression is introduced" \
+  outerloopmaxcycles=6
+```
+
+The session ID (e.g. `session-20240601-120000-abc123`) is printed at the start of each outer loop run and matches the directory name under `~/.openaf-mini-a/sessions/`.
 
 You can set `OAF_VAL_MODEL` or pass `modelval=...` to route the validation step to a dedicated model; otherwise the main model is used.
 
