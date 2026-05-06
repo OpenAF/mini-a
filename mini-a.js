@@ -20262,7 +20262,7 @@ MiniA.prototype._initOuterLoop = function(args) {
     "## Current Objective\n\n## Constraints\n\n" +
     "## Validation Goal\n" + (args.validationgoal || args.valgoal || "") + "\n\n" +
     "## Known Blockers\n\n## Completion Criteria\n")
-  return { enabled:true, base:base, sessionsRoot:sessionsRoot, sessionId:sid, sessionDir:sessionDir, instructionPath:instructionPath, maxCycles:isNumber(args.outerloopmaxcycles)?Math.max(1,args.outerloopmaxcycles):5, maxTime:isNumber(args.outerloopmaxtime)?Math.max(1,args.outerloopmaxtime):0, stopOnRepeat:toBoolean(args.outerloopstoponrepeat)===true, maxNoChange:isNumber(args.outerloopmaxnochange)?Math.max(1,args.outerloopmaxnochange):2 }
+  return { enabled:true, base:base, sessionsRoot:sessionsRoot, sessionId:sid, sessionDir:sessionDir, instructionPath:instructionPath, maxCycles:isNumber(args.outerloopmaxcycles)?Math.max(1,args.outerloopmaxcycles):5, maxTime:isNumber(args.outerloopmaxtime)?Math.max(0,args.outerloopmaxtime):0, stopOnRepeat:toBoolean(args.outerloopstoponrepeat)===true, maxNoChange:isNumber(args.outerloopmaxnochange)?Math.max(1,args.outerloopmaxnochange):2 }
 }
 
 MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
