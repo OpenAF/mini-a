@@ -20211,10 +20211,12 @@ MiniA.prototype._runChatbotMode = function(options) {
  */
 
 MiniA.prototype._outerLoopHome = function(args) {
-  var baseHome = isString(args.homedir) && args.homedir.length > 0 ? args.homedir : String(java.lang.System.getProperty("user.home"))
-  var info = io.fileExists(baseHome) ? io.fileInfo(baseHome) : __
-  var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : baseHome
-  return resolved + "/.openaf-mini-a"
+  if (isString(args.homedir) && args.homedir.length > 0) {
+    var info = io.fileExists(args.homedir) ? io.fileInfo(args.homedir) : __
+    var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : args.homedir
+    return resolved + "/.openaf-mini-a"
+  }
+  return this._getMiniAHomeDir()
 }
 
 MiniA.prototype._padOuterLoopCycle = function(n) {
