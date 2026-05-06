@@ -646,18 +646,33 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
 
 MiniAWikiManager.prototype._makeS3FsBackend = function(cfg) {
   var fsb = this._makeFsBackend(cfg)
-  var s3b = this._makeS3Backend(cfg)
-  try {
-    var pages = s3b.list("")
-    for (var i = 0; i < pages.length; i++) {
-      var raw = s3b.read(pages[i])
-      if (isString(raw)) fsb.write(pages[i], raw)
+  var access = isString(cfg.wikiaccess) ? cfg.wikiaccess.toLowerCase() : "rw"
+
+  if (access !== "ro") {
+    var s3b = this._makeS3Backend(cfg)
+    try {
+      var pages = s3b.list("")
+      for (var i = 0; i < pages.length; i++) {
+        var raw = s3b.read(pages[i])
+        if (!isString(raw)) continue
+
+        var shouldWrite = true
+        try {
+          if (isFunction(fsb.exists) && fsb.exists(pages[i])) {
+            var current = isFunction(fsb.read) ? fsb.read(pages[i]) : __
+            shouldWrite = raw !== current
+          }
+        } catch(ig) {}
+
+        if (shouldWrite) fsb.write(pages[i], raw)
+      }
+    } catch(e) {
+      this._logFn("warn", "Failed to bootstrap s3fs wiki: " + __miniAErrMsg(e))
+    } finally {
+      try { s3b.close() } catch(ig) {}
     }
-  } catch(e) {
-    this._logFn("warn", "Failed to bootstrap s3fs wiki: " + __miniAErrMsg(e))
-  } finally {
-    try { s3b.close() } catch(ig) {}
   }
+
   return fsb
 }
 
