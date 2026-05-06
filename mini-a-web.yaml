@@ -648,7 +648,7 @@ help:
     example  : "rw"
     mandatory: false
   - name     : wikibackend
-    desc     : Wiki backend (fs or s3)
+    desc     : Wiki backend (fs, s3, s3fs or es)
     example  : "fs"
     mandatory: false
   - name     : wikiroot
@@ -660,19 +660,19 @@ help:
     example  : "mini-a-wiki"
     mandatory: false
   - name     : wikiprefix
-    desc     : Prefix path for the S3 wiki backend
+    desc     : Prefix path for S3/s3fs wiki backends, or index name for the es backend
     example  : "wiki/"
     mandatory: false
   - name     : wikiurl
-    desc     : S3 endpoint URL for the wiki backend
+    desc     : S3 endpoint URL for s3/s3fs, or Elasticsearch/OpenSearch base URL for es (internal esurl)
     example  : "https://s3.amazonaws.com"
     mandatory: false
   - name     : wikiaccesskey
-    desc     : S3 access key for the wiki backend
+    desc     : S3 access key for s3/s3fs, or Elasticsearch username for es
     example  : "AKIA..."
     mandatory: false
   - name     : wikisecret
-    desc     : S3 secret key for the wiki backend
+    desc     : S3 secret key for s3/s3fs, or Elasticsearch password for es
     example  : "secret"
     mandatory: false
   - name     : wikiregion

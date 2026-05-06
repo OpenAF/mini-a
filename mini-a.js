@@ -8254,7 +8254,7 @@ MiniA.prototype._initWiki = function(args) {
       access : args.wikiaccess,
       backend: args.wikibackend
     }
-    if (args.wikibackend === "s3") {
+    if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
       cfg.bucket          = args.wikibucket
       cfg.prefix          = args.wikiprefix
       cfg.url             = args.wikiurl
@@ -8263,6 +8263,11 @@ MiniA.prototype._initWiki = function(args) {
       cfg.region          = args.wikiregion
       cfg.useVersion1     = args.wikiuseversion1
       cfg.ignoreCertCheck = args.wikiignorecertcheck
+    } else if (args.wikibackend === "es") {
+      cfg.esurl = args.wikiurl
+      cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
+      cfg.esuser = args.wikiaccesskey
+      cfg.espass = args.wikisecret
     } else {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
     }
@@ -16498,7 +16503,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
     else args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
     args.wikibackend = _$(args.wikibackend, "args.wikibackend").isString().default("fs")
-    if (["fs", "s3"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
+    if (["fs", "s3", "es", "s3fs"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
     else args.wikibackend = String(args.wikibackend).toLowerCase().trim()
     args.wikiroot = _$(args.wikiroot, "args.wikiroot").isString().default(__)
     args.wikibucket = _$(args.wikibucket, "args.wikibucket").isString().default(__)

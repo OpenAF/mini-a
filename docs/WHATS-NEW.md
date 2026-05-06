@@ -115,13 +115,13 @@ See [docs/DELEGATION.md](DELEGATION.md) for full documentation including example
 |-----------|---------|-------------|
 | `usewiki` | `false` | Enable wiki knowledge base |
 | `wikiaccess` | `ro` | `ro` or `rw` |
-| `wikibackend` | `fs` | `fs` or `s3` |
+| `wikibackend` | `fs` | `fs`, `s3`, `s3fs`, or `es` |
 | `wikiroot` | `.` | Root directory (FS backend) |
-| `wikibucket` | — | S3 bucket |
-| `wikiprefix` | — | S3 key prefix |
-| `wikiurl` | — | S3 endpoint URL |
-| `wikiaccesskey` | — | S3 access key |
-| `wikisecret` | — | S3 secret key |
+| `wikibucket` | — | S3 bucket (`s3`/`s3fs`) |
+| `wikiprefix` | — | S3 key prefix (`s3`/`s3fs`) or Elasticsearch index (`es`) |
+| `wikiurl` | — | S3 endpoint URL or Elasticsearch/OpenSearch base URL (`esurl` internally) |
+| `wikiaccesskey` | — | S3 access key or Elasticsearch username |
+| `wikisecret` | — | S3 secret key or Elasticsearch password |
 | `wikiregion` | — | S3 region |
 | `wikiuseversion1` | `false` | S3 path-style signing |
 | `wikiignorecertcheck` | `false` | Skip TLS cert check |

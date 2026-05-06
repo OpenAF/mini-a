@@ -599,6 +599,63 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usewiki
+    desc     : Enable the wiki knowledge base
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikiaccess
+    desc     : Wiki access mode (ro or rw)
+    example  : "rw"
+    mandatory: false
+    options  : ["ro", "rw"]
+  - name     : wikibackend
+    desc     : Wiki backend (fs, s3, s3fs or es)
+    example  : "fs"
+    mandatory: false
+    options  : ["fs", "s3", "s3fs", "es"]
+  - name     : wikiroot
+    desc     : Root directory for the filesystem wiki backend
+    example  : "/shared/wiki"
+    mandatory: false
+  - name     : wikibucket
+    desc     : Bucket name for S3/s3fs wiki backends
+    example  : "mini-a-wiki"
+    mandatory: false
+  - name     : wikiprefix
+    desc     : Prefix path for S3/s3fs wiki backends, or index name for the es backend
+    example  : "wiki/"
+    mandatory: false
+  - name     : wikiurl
+    desc     : S3 endpoint URL for s3/s3fs, or Elasticsearch/OpenSearch base URL for es (internal esurl)
+    example  : "https://s3.amazonaws.com"
+    mandatory: false
+  - name     : wikiaccesskey
+    desc     : S3 access key for s3/s3fs, or Elasticsearch username for es
+    example  : "AKIA..."
+    mandatory: false
+  - name     : wikisecret
+    desc     : S3 secret key for s3/s3fs, or Elasticsearch password for es
+    example  : "secret"
+    mandatory: false
+  - name     : wikiregion
+    desc     : S3 region for s3/s3fs wiki backends
+    example  : "eu-west-1"
+    mandatory: false
+  - name     : wikiuseversion1
+    desc     : Use S3 signature v1/path-style compatibility for wiki access
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikiignorecertcheck
+    desc     : Disable TLS certificate checks for wiki S3 access
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikilintstaleddays
+    desc     : Default stale-days threshold for wiki lint
+    example  : "90"
+    mandatory: false
   - name     : saveplannotes
     desc     : Save execution notes back to the plan file after execution
     example  : "true"

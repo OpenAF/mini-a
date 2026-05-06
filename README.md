@@ -462,6 +462,19 @@ Mini-A ships with complementary components:
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
 | `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |
 | `memorydedup` | Deduplicate near-identical memory entries before append | `true` |
+| `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
+| `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
+| `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) | `fs` |
+| `wikiroot` | Filesystem wiki root when `wikibackend=fs` | `.` |
+| `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
+| `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
+| `wikiurl` | S3 endpoint URL, or Elasticsearch/OpenSearch base URL when `wikibackend=es` (internal `esurl`) | - |
+| `wikiaccesskey` | S3 access key, or Elasticsearch username when `wikibackend=es` | - |
+| `wikisecret` | S3 secret key, or Elasticsearch password when `wikibackend=es` | - |
+| `wikiregion` | S3 region for `s3`/`s3fs` wiki backends | - |
+| `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
+| `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
+| `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
