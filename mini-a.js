@@ -16204,6 +16204,9 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
 MiniA.prototype.start = function(args) {
     var sessionStartTime = now()
     try {
+        var outerLoopResult = this._runOuterLoop(args, sessionStartTime)
+        if (isDef(outerLoopResult) && outerLoopResult !== null) return outerLoopResult
+
         // Check if deep research mode is enabled
         var deepResearchState = this._initDeepResearch(args)
         
@@ -20206,6 +20209,145 @@ MiniA.prototype._runChatbotMode = function(options) {
 /**
  * Initialize deep research state from args
  */
+
+MiniA.prototype._outerLoopHome = function(args) {
+  if (isString(args.homedir) && args.homedir.length > 0) {
+    var info = io.fileExists(args.homedir) ? io.fileInfo(args.homedir) : __
+    var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : args.homedir
+    return resolved + "/.openaf-mini-a"
+  }
+  return this._getMiniAHomeDir()
+}
+
+MiniA.prototype._padOuterLoopCycle = function(n) {
+  var s = String(Math.max(0, n))
+  while (s.length < 4) s = "0" + s
+  return s
+}
+
+MiniA.prototype._collectOuterLoopChangedFiles = function(baseFolder, previousSnapshot) {
+  var snapshot = {}
+  var changed = []
+  if (!io.fileExists(baseFolder)) return { snapshot: snapshot, changed: changed }
+  var files = listFilesRecursive(baseFolder)
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i]
+    if (!isString(f.filepath) || f.isDirectory) continue
+    var fp = f.filepath
+    var stat = {
+      size: isNumber(f.size) ? f.size : 0,
+      mtime: isDef(f.lastModified) ? Number(f.lastModified) : 0
+    }
+    snapshot[fp] = stat
+    var prev = isMap(previousSnapshot) ? previousSnapshot[fp] : __
+    if (!isMap(prev) || prev.size !== stat.size || prev.mtime !== stat.mtime) changed.push(fp)
+  }
+  if (isMap(previousSnapshot)) Object.keys(previousSnapshot).forEach(function(fp) {
+    if (isUnDef(snapshot[fp])) changed.push(fp)
+  })
+  return { snapshot: snapshot, changed: changed }
+}
+
+MiniA.prototype._initOuterLoop = function(args) {
+  if (toBoolean(args.outerloop) !== true) return null
+  if (toBoolean(args.useplanning) !== false) args.useplanning = true
+  var base = this._outerLoopHome(args)
+  var sessionsRoot = base + "/sessions"
+  if (!io.fileExists(sessionsRoot)) io.mkdir(sessionsRoot)
+  var sid = isString(args.outerloopsessionid) && args.outerloopsessionid.length > 0 ? args.outerloopsessionid : "session-" + nowUTC("yyyyMMdd-HHmmss") + "-" + this._id
+  var sessionDir = sessionsRoot + "/" + sid
+  if (!io.fileExists(sessionDir)) io.mkdir(sessionDir)
+  var instructionPath = isString(args.outerloopinstructions) && args.outerloopinstructions.length > 0 ? args.outerloopinstructions : (isString(args.taskfile) && args.taskfile.length > 0 ? args.taskfile : (isString(args.specfile) && args.specfile.length > 0 ? args.specfile : sessionDir + "/instructions.md"))
+  if (!io.fileExists(instructionPath)) io.writeFileString(instructionPath,
+    "# Outer Loop Instructions\n\n" +
+    "## Original User Request\n" + (args.goal || "") + "\n\n" +
+    "## Current Objective\n\n## Constraints\n\n" +
+    "## Validation Goal\n" + (args.validationgoal || args.valgoal || "") + "\n\n" +
+    "## Known Blockers\n\n## Completion Criteria\n")
+  return { enabled:true, base:base, sessionsRoot:sessionsRoot, sessionId:sid, sessionDir:sessionDir, instructionPath:instructionPath, maxCycles:isNumber(args.outerloopmaxcycles)?Math.max(1,args.outerloopmaxcycles):5, maxTime:isNumber(args.outerloopmaxtime)?Math.max(0,args.outerloopmaxtime):0, stopOnRepeat:toBoolean(args.outerloopstoponrepeat)===true, maxNoChange:isNumber(args.outerloopmaxnochange)?Math.max(1,args.outerloopmaxnochange):2 }
+}
+
+MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
+  var st = this._initOuterLoop(args)
+  if (!isObject(st) || st.enabled !== true) return null
+  var statePath = st.sessionDir + "/state.json"
+  var changedPath = st.sessionDir + "/changed-files.json"
+  var planPath = st.sessionDir + "/plan.md"
+  if (isUnDef(args.planfile)) args.planfile = planPath
+  var state = io.fileExists(statePath) ? io.readFileJSON(statePath) : { session_id: st.sessionId, original_request: args.goal, current_objective: args.goal, cycle_number: 0, status: "running", pending_tasks: [], completed_tasks: [], latest_validation_status: "UNKNOWN", latest_validation_summary: "", repeated_failure_count: 0, no_change_count: 0, changed_files: [], last_cycle_summary_path: "", created_at: (new Date()).toISOString(), updated_at: (new Date()).toISOString() }
+  var filesSnapshotPath = st.sessionDir + "/files-snapshot.json"
+  var validationPath = st.sessionDir + "/last-validation.txt"
+  var errorPath = st.sessionDir + "/last-error.txt"
+  var previousSnapshot = io.fileExists(filesSnapshotPath) ? io.readFileJSON(filesSnapshotPath) : {}
+  var validationEnabled = isString(args.validationgoal) || isString(args.valgoal)
+  var startMs = now()
+  var prevVal = ""
+  for (var cycle=1; cycle<=st.maxCycles; cycle++) {
+    if (st.maxTime > 0 && ((now()-startMs)/1000) >= st.maxTime) { state.status = "stopped"; break }
+    state.cycle_number = cycle
+    var cycleSummaryPath = st.sessionDir + "/cycle-" + this._padOuterLoopCycle(cycle) + "-summary.md"
+    var instr = io.readFileString(st.instructionPath)
+    var k = "## OUTER LOOP CONTEXT\n" +
+      "Session: " + st.sessionId + "\nCycle: " + cycle + "\n\n" +
+      "### Instructions\n" + instr + "\n\n" +
+      "### Durable State\n" + stringify(state, __, "") + "\n\n" +
+      "### Previous Validation\n" + (io.fileExists(validationPath)?io.readFileString(validationPath):"") + "\n\n" +
+      "### Previous Error\n" + (io.fileExists(errorPath)?io.readFileString(errorPath):"")
+    var cycleArgs = clone(args)
+    cycleArgs.outerloop = false
+    var baseKnowledge = ""
+    if (isString(args.knowledge)) {
+      baseKnowledge = args.knowledge
+      if (baseKnowledge.indexOf("\n") < 0 && baseKnowledge.indexOf("\r") < 0 && io.fileExists(baseKnowledge)) {
+        baseKnowledge = io.readFileString(baseKnowledge)
+      }
+    }
+    cycleArgs.knowledge = baseKnowledge ? (baseKnowledge + "\n\n" + k) : k
+    cycleArgs.deepresearch = false
+    cycleArgs.validationgoal = __
+    cycleArgs.valgoal = __
+    this._isInitialized = false
+    this.state = "idle"
+    var out = ""
+    try { out = this._startInternal(cycleArgs, now()); io.writeFileString(errorPath, "") } catch(e) { io.writeFileString(errorPath, String(e)) }
+    var shouldTrackChanges = (args.trackchanges === true) || (args.trackchanges !== false && st.maxNoChange > 0)
+    var trackRoot = String(args.changetrackroot || st.changeTrackRoot || java.lang.System.getProperty("user.dir"))
+    var track = { snapshot: previousSnapshot, changed: [] }
+    if (shouldTrackChanges) track = this._collectOuterLoopChangedFiles(trackRoot, previousSnapshot)
+    previousSnapshot = track.snapshot
+    io.writeFileJSON(filesSnapshotPath, previousSnapshot)
+    io.writeFileJSON(changedPath, track.changed)
+    var outStr = isString(out) ? out : (isObject(out) ? stringify(out, __, "") : String(out || ""))
+    var cycleSummary = "# Cycle " + cycle + "\n\n" + outStr
+    io.writeFileString(cycleSummaryPath, cycleSummary)
+    state.last_cycle_summary_path = cycleSummaryPath
+    state.changed_files = track.changed
+    var v = { verdict: "PASS", feedback: "validation disabled" }
+    var validationGoal = args.validationgoal || args.valgoal
+    if (isString(validationGoal) && validationGoal.indexOf("\n") < 0 && io.fileExists(validationGoal)) {
+      try { validationGoal = io.readFileString(validationGoal) } catch(_) {}
+    }
+    if (validationEnabled) v = this._validateResearchOutcome(outStr, validationGoal, args)
+    io.writeFileString(validationPath, stringify(v, __, ""))
+    state.latest_validation_status = v.verdict
+    state.latest_validation_summary = v.feedback || ""
+    if (v.verdict !== "PASS") {
+      state.repeated_failure_count = (prevVal === stringify(v, __, "") ? state.repeated_failure_count + 1 : 1)
+      prevVal = stringify(v, __, "")
+    } else {
+      state.status = "complete"
+      state.updated_at = (new Date()).toISOString(); io.writeFileJSON(statePath, state)
+      return out
+    }
+    state.no_change_count = (track.changed.length > 0) ? 0 : state.no_change_count + 1
+    state.updated_at = (new Date()).toISOString()
+    io.writeFileJSON(statePath, state)
+    if (st.stopOnRepeat && state.repeated_failure_count >= 2) { state.status = "stopped"; break }
+    if (state.no_change_count >= st.maxNoChange) { state.status = "stopped"; break }
+  }
+  io.writeFileJSON(statePath, state)
+  return io.fileExists(state.last_cycle_summary_path) ? io.readFileString(state.last_cycle_summary_path) : "(outer loop stopped without output)"
+}
 MiniA.prototype._initDeepResearch = function(args) {
   if (isDef(args.valgoal) && isUnDef(args.validationgoal)) args.validationgoal = args.valgoal
   if (isString(args.validationgoal) && args.validationgoal.length > 0 && args.validationgoal.indexOf("\n") < 0 && io.fileExists(args.validationgoal) && io.fileInfo(args.validationgoal).isFile) {

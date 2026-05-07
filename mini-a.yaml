@@ -165,6 +165,44 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : outerloop
+    desc     : Enable autonomous multi-cycle coding loop with durable per-session state
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : outerloopinstructions
+    desc     : Path to persistent outer loop instructions markdown file
+    example  : "./TASKS.md"
+    mandatory: false
+  - name     : taskfile
+    desc     : Alias for outerloopinstructions
+    example  : "./TASKS.md"
+    mandatory: false
+  - name     : specfile
+    desc     : Alias for outerloopinstructions
+    example  : "./TASKS.md"
+    mandatory: false
+  - name     : outerloopsessionid
+    desc     : Existing durable outer loop session identifier to resume or continue
+    example  : "mini-a-session-123"
+    mandatory: false
+  - name     : outerloopmaxcycles
+    desc     : Maximum autonomous outer loop cycles
+    example  : "8"
+    mandatory: false
+  - name     : outerloopmaxtime
+    desc     : Maximum outer loop runtime in seconds
+    example  : "1800"
+    mandatory: false
+  - name     : outerloopstoponrepeat
+    desc     : Stop when the same validation failure repeats
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : outerloopmaxnochange
+    desc     : Stop after N cycles without meaningful change
+    example  : "2"
+    mandatory: false
   - name     : maxcycles
     desc     : "Maximum number of deep research cycles (default: 3)"
     example  : "3"
@@ -742,6 +780,14 @@ jobs:
         validationgoal : validationgoal
         valgoal        : valgoal
         deepresearch   : deepresearch
+        outerloop      : outerloop
+        outerloopinstructions: outerloopinstructions
+        taskfile       : taskfile
+        specfile       : specfile
+        outerloopmaxcycles: outerloopmaxcycles
+        outerloopmaxtime: outerloopmaxtime
+        outerloopstoponrepeat: outerloopstoponrepeat
+        outerloopmaxnochange: outerloopmaxnochange
         maxcycles      : maxcycles
         validationthreshold: validationthreshold
         persistlearnings: persistlearnings
@@ -939,6 +985,14 @@ jobs:
       validationgoal : isString.default(__)
       valgoal        : isString.default(__)
       deepresearch   : toBoolean.isBoolean.default(false)
+      outerloop      : toBoolean.isBoolean.default(false)
+      outerloopinstructions: isString.default(__)
+      taskfile       : isString.default(__)
+      specfile       : isString.default(__)
+      outerloopmaxcycles: toNumber.isNumber.default(__)
+      outerloopmaxtime: toNumber.isNumber.default(__)
+      outerloopstoponrepeat: toBoolean.isBoolean.default(false)
+      outerloopmaxnochange: toNumber.isNumber.default(__)
       maxcycles      : toNumber.isNumber.default(__)
       validationthreshold: isString.default(__)
       persistlearnings: toBoolean.isBoolean.default(__)

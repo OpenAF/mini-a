@@ -1,0 +1,108 @@
+jobs:
+- name: MiniA Outer Loop Tests::Init
+  exec: args.tests = require("tests/outerLoop.js")
+
+- name: MiniA Outer Loop Tests::InitDisabledWhenFlagFalse
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopInitDisabledWhenFlagFalse
+
+- name: MiniA Outer Loop Tests::InitMaxTimeZero
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopInitMaxTimeZeroDisablesLimit
+
+- name: MiniA Outer Loop Tests::InitMaxTimeNegative
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopInitMaxTimeNegativeClampedToZero
+
+- name: MiniA Outer Loop Tests::InitCustomSessionId
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopInitCustomSessionId
+
+- name: MiniA Outer Loop Tests::InitAutoSessionId
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopInitAutoSessionId
+
+- name: MiniA Outer Loop Tests::InitDefaultMaxCycles
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopInitDefaultMaxCycles
+
+- name: MiniA Outer Loop Tests::PadCycle
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopPadCycle
+
+- name: MiniA Outer Loop Tests::CollectChangedFilesDetectsNewFiles
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopCollectChangedFilesDetectsNewFiles
+
+- name: MiniA Outer Loop Tests::CollectChangedFilesDetectsDeletedFiles
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopCollectChangedFilesDetectsDeletedFiles
+
+- name: MiniA Outer Loop Tests::CollectChangedFilesUnchangedFilesOmitted
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopCollectChangedFilesUnchangedFilesOmitted
+
+- name: MiniA Outer Loop Tests::StructuredOutputSerialized
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopStructuredOutputSerialized
+
+- name: MiniA Outer Loop Tests::ValidationPassCompletesSession
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopValidationPassCompletesSession
+
+- name: MiniA Outer Loop Tests::StopOnNoChange
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopStopOnNoChange
+
+- name: MiniA Outer Loop Tests::StopOnRepeatValidationFailure
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopStopOnRepeatValidationFailure
+
+- name: MiniA Outer Loop Tests::ValidationGoalFilePathExpansion
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopValidationGoalFilePathExpansion
+
+- name: MiniA Outer Loop Tests::MaxTimeZeroNeverTimesOut
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopMaxTimeZeroNeverTimesOut
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Outer Loop Tests::InitDisabledWhenFlagFalse
+- MiniA Outer Loop Tests::InitMaxTimeZero
+- MiniA Outer Loop Tests::InitMaxTimeNegative
+- MiniA Outer Loop Tests::InitCustomSessionId
+- MiniA Outer Loop Tests::InitAutoSessionId
+- MiniA Outer Loop Tests::InitDefaultMaxCycles
+- MiniA Outer Loop Tests::PadCycle
+- MiniA Outer Loop Tests::CollectChangedFilesDetectsNewFiles
+- MiniA Outer Loop Tests::CollectChangedFilesDetectsDeletedFiles
+- MiniA Outer Loop Tests::CollectChangedFilesUnchangedFilesOmitted
+- MiniA Outer Loop Tests::StructuredOutputSerialized
+- MiniA Outer Loop Tests::ValidationPassCompletesSession
+- MiniA Outer Loop Tests::StopOnNoChange
+- MiniA Outer Loop Tests::StopOnRepeatValidationFailure
+- MiniA Outer Loop Tests::ValidationGoalFilePathExpansion
+- MiniA Outer Loop Tests::MaxTimeZeroNeverTimesOut
