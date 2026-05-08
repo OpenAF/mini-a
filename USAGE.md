@@ -2885,3 +2885,167 @@ Runtime helpers available in code:
 - `clearSessionMemory(sessionId)` (session cleanup hook)
 
 These wrappers keep state sync/persistence centralized (instead of ad-hoc direct writes).
+
+---
+
+## Dreams (Sleep Pass)
+
+The dream pass is an LLM-powered off-line consolidation step.  Given the same memory channels and wiki settings used during a regular goal, it reorganises what the agent learned: merging duplicates, marking superseded entries stale, surfacing new cross-cutting insights, and producing a lint-clean wiki — all without touching the live agent loop.
+
+Think of it as REM sleep for your agent: the active session ends, then the dream pass reorganises what was retained.
+
+### When to run a dream pass
+
+- After a long or iterative session where the agent appended many memory entries — the pass compacts redundancy without losing information.
+- When the wiki has accumulated near-duplicate pages, broken links, or missing front-matter that accumulated across several agent sessions.
+- On a nightly cron schedule to keep a shared team wiki clean.
+
+### Dream pass modes
+
+| Mode | Triggered by | What happens |
+|------|-------------|--------------|
+| Memory dream | `memorych` arg is set | Loads global (and optionally session) memory, calls the LLM to consolidate, writes back |
+| Wiki dream | `usewiki=true` | Spawns a full MiniA agent with `wikiaccess=rw` that lints and fixes the wiki |
+| Combined | Both args set | Both modes run in sequence |
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `memorych` | string | - | SLON/JSON global memory channel definition (required for memory dream) |
+| `memorysessionch` | string | - | SLON/JSON session memory channel |
+| `memorysessionid` | string | - | Session namespace string — use the same value as `conversation=` during the goal |
+| `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to help surface insights |
+| `maxauditrecords` | number | `200` | Maximum audit log entries included in the memory consolidation prompt |
+| `usewiki` | boolean | `false` | Enable the wiki dream (requires `wikiroot`, `wikibucket`, or equivalent) |
+| `wikiaccess` | string | `rw` | Always overridden to `rw` inside the dream pass |
+| `wikiroot` / `wikibucket` / `wikibackend` | string | - | Same wiki backend settings as the regular agent |
+| `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
+| `dryrun` | boolean | `false` | Preview what would change without writing anything back |
+| `libs` | string | - | Extra comma-separated libraries to load |
+
+### Memory dream internals
+
+1. Channels are opened using the provided SLON/JSON definitions.
+2. Global memory (and optionally session memory) is loaded via `MiniAMemoryManager.loadFromChannel`.
+3. If `auditch` is provided, the most recent `maxauditrecords` audit entries are loaded.
+4. The LLM receives a system prompt describing the consolidation rules, the full memory snapshot, and the audit events.
+5. Consolidation rules:
+   - **MERGE** near-duplicate entries in the same section (keep the most informative value; preserve the earlier `createdAt`).
+   - **MARK** superseded entries with `stale=true` and `supersededBy=<id-of-replacement>`.
+   - **DROP** entries that are both `stale=true` and have a `supersededBy` that exists in the output.
+   - **SURFACE** new cross-cutting insights as new `summaries` entries.
+   - **PRESERVE** all IDs of retained entries unchanged; assign new 16-char hex IDs to new entries.
+6. The consolidated snapshot is validated against the `MiniAMemoryManager` schema.
+7. Unless `dryrun=true`, the pre-dream state is backed up to a sibling namespace (`<ns>::predream-<ISO-timestamp>`), then the consolidated snapshot is written back.
+8. A summary is printed: entries before/after, dropped count, stale-marked count.
+
+### Wiki dream internals
+
+1. `usewiki=true` is required; `wikiaccess` is forced to `rw`.
+2. A `MiniAWikiManager` runs `lint()` to establish a baseline issue list.
+3. A full `MiniA` agent is spawned with `maxsteps=60` and the following goal:
+   - List all lint issues.
+   - For each near-duplicate pair: read both pages, merge content into the primary, delete the duplicate, fix links pointing to the deleted page.
+   - For each broken link: read and correct or remove the target.
+   - For each missing front-matter page: add inferred `title`, `description`, `created`, `updated`.
+   - For each heading hierarchy violation: fix heading levels.
+   - For orphan pages (excluding `index.md` and `AGENTS.md`): add a link from `AGENTS.md` or the most related existing page.
+   - Re-run lint and confirm zero errors and warnings remain.
+4. The agent's final answer summarises `pages_changed`, `pages_deleted`, `issues_fixed`.
+
+### Standalone usage (`mini-a dream=true`)
+
+Use `mini-a dream=true` with the same channel and model arguments used during the regular session:
+
+```bash
+# Memory dream — dry-run preview (no writes)
+mini-a dream=true dryrun=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Memory dream — write consolidated state back
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  auditch='(name: mini_a_audit, type: file, options: (file: /tmp/mini-a-audit.log))' \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Session memory dream (using memorysessionch + memorysessionid)
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))' \
+  memorysessionid='research-2026' \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Wiki dream
+mini-a dream=true \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Combined memory + wiki dream
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+```
+
+### Console command (`/dream`)
+
+The `/dream` slash command is available in interactive console sessions when at least one of `memorych` or `usewiki=true` was set at startup.  It is shown in `/help` whenever memory or wiki is configured.
+
+| Command | Description |
+|---------|-------------|
+| `/dream` | Run memory dream + wiki dream (whichever are configured) |
+| `/dream memory` | Run memory dream only |
+| `/dream wiki` | Run wiki dream only |
+| `/dream dryrun` | Dry-run both (no writes) |
+| `/dream memory dryrun` | Dry-run memory dream only |
+| `/dream wiki dryrun` | Dry-run wiki dream (runs lint, prints issues — no writes) |
+
+Sub-commands and `dryrun` complete with Tab.
+
+### Combining with regular sessions
+
+```bash
+# 1. Start a session with persistent memory and a shared wiki
+mini-a \
+  usememory=true memoryuser=true \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+
+# 2. Work on goals interactively...
+
+# 3. When done, consolidate from the console
+mini-a ➤ /dream
+
+# Or consolidate in a separate invocation (e.g. a nightly cron)
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: ~/.openaf-mini-a/memory-global.json))' \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+```
+
+### Programmatic API
+
+```javascript
+loadLib("mini-a-dreams.js")
+
+var runner = new MiniADreams({
+  memorych: '{"name":"my_memory","type":"file","options":{"file":"/tmp/memory.json"}}',
+  model:    '{"type":"anthropic","model":"claude-sonnet-4-6"}'
+}, log)
+
+// Run memory dream only
+var result = runner.dreamMemory()
+// result: { ok: true, results: { global: { ok, before, after, staleMarked } } }
+
+// Run wiki dream only
+var wikiResult = runner.dreamWiki()
+// wikiResult: { ok: true, result: "<final-answer-excerpt>" }
+
+// Run both
+var overall = runner.run()
+// overall: { ok: true, memory: {...}, wiki: {...} }
+
+// Inject a stub LLM for testing
+runner._setLlm(myStubLlm)
+```

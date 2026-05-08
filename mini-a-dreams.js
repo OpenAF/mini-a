@@ -386,7 +386,7 @@ MiniADreams.prototype.run = function() {
   var hasWiki   = toBoolean(self._args.usewiki) === true
 
   if (!hasMemory && !hasWiki) {
-    self._log("Usage: ojob mini-a-dreams.js [memorych=<JSSLON>] [auditch=<JSSLON>] [usewiki=true wikiroot=<path>] [model=<JSSLON>] [dryrun=true]")
+    self._log("Usage: mini-a dream=true [memorych=<JSSLON>] [auditch=<JSSLON>] [usewiki=true wikiroot=<path>] [model=<JSSLON>] [dryrun=true]")
     self._log("  memorych=       JSSLON global memory channel definition (required for memory dream)")
     self._log("  memorysessionch=JSSLON session memory channel")
     self._log("  memorysessionid=Session namespace string")

@@ -2,6 +2,41 @@
 
 ## Recent Updates
 
+### Dreams (Sleep Pass) — LLM-powered memory and wiki consolidation
+
+**Change**: New `mini-a-dreams.js` module and `/dream` console command that run an off-line consolidation pass over persistent memory and/or a wiki — without touching the live agent loop.
+
+**Memory dream** (`memorych` required):
+- Loads global and (optionally) session memory from the configured channels.
+- Reads recent audit records for extra context (`auditch=`).
+- Calls the LLM to merge near-duplicate entries, mark superseded ones stale, drop dropped-and-superseded entries, and surface new insights as `summaries` entries.
+- Backs up the pre-dream state to a sibling namespace before writing.
+
+**Wiki dream** (`usewiki=true` required):
+- Spawns a full MiniA agent with `wikiaccess=rw` and a fixed consolidation goal.
+- Agent merges near-duplicate pages, fixes broken links and missing front-matter, corrects heading hierarchy, links orphan pages, then re-runs lint and confirms zero errors/warnings remain.
+
+**`dryrun=true`**: both modes support a dry-run that reports what would change without writing anything.
+
+**Usage:**
+
+```bash
+# Standalone (memory + wiki)
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# From the interactive console
+mini-a ➤ /dream
+mini-a ➤ /dream memory dryrun
+mini-a ➤ /dream wiki
+```
+
+See [USAGE.md — Dreams](USAGE.md#dreams-sleep-pass) and [CHEATSHEET.md — Dreams](CHEATSHEET.md#dreams-sleep-pass) for full parameter reference.
+
+---
+
 ### `/rewind` — Undo Last Exchanges
 
 **Change**: New `/rewind [n]` slash command that removes the last `n` user+assistant exchanges from the conversation history (default n=1), mirroring the same feature in Claude Code.

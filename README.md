@@ -368,6 +368,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
 - **Math Formula Rendering** - Encourage LaTeX formulas rendered with KaTeX in the web UI (`usemath=true`)
+- **Dreams (Sleep Pass)** - LLM-powered off-line consolidation: merge duplicate memory entries, mark superseded ones stale, surface insights, and clean up the wiki — run via `/dream` in the console or `mini-a dream=true` standalone
 
 ## Documentation
 
@@ -401,6 +402,7 @@ Mini-A ships with complementary components:
 - **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
 - **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
 - **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories
+- **`mini-a-dreams.js`** - LLM-powered memory and wiki consolidation (dream pass): merges duplicates, marks stale entries, and produces a lint-clean wiki — launched via `mini-a dream=true` or `/dream` in the console
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
