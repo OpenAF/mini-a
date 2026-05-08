@@ -417,7 +417,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "skills", "wiki", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "skills", "wiki", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -5241,6 +5241,7 @@ try {
     ]
     if (toBoolean(sessionOptions.usewiki) === true) {
       helpCommands.push({ command: "/wiki [list|read|search|delete|lint|write] [args]", description: "Interact with wiki" })
+      helpCommands.push({ command: "/dream [memory|wiki] [dryrun]", description: "Consolidate memory and/or wiki (dream pass)" })
     }
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
@@ -5451,6 +5452,45 @@ try {
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))
+    }
+  }
+
+  function printDream(subcmdRaw) {
+    var parts  = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
+    var mode   = parts.length > 0 && parts[0].toLowerCase() !== "dryrun" ? parts[0].toLowerCase() : ""
+    var dryrun = parts.indexOf("dryrun") >= 0
+
+    var hasMemory = isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0
+    var hasWiki   = toBoolean(sessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
+
+    if (mode === "memory" && !hasMemory) {
+      print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
+    }
+    if (mode === "wiki" && !hasWiki) {
+      print(colorifyText("Wiki not enabled. Start with usewiki=true and wikiroot=...", errorColor)); return
+    }
+    if (mode === "" && !hasMemory && !hasWiki) {
+      print(colorifyText("Nothing to dream: no memory channel and no wiki configured.", hintColor)); return
+    }
+
+    try {
+      global.__mini_a_dreams_lib_mode = true
+      loadLib("mini-a-dreams.js")
+    } catch(dreamLoadErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to load mini-a-dreams.js: " + dreamLoadErr, errorColor))
+      return
+    }
+
+    var dreamArgs = merge({}, sessionOptions)
+    dreamArgs.dryrun = dryrun ? "true" : "false"
+
+    var runner = new MiniADreams(dreamArgs, function(msg) { print(colorifyText(msg, hintColor)) })
+
+    try {
+      if ((mode === "" || mode === "memory") && hasMemory) runner.dreamMemory()
+      if ((mode === "" || mode === "wiki")   && hasWiki)   runner.dreamWiki()
+    } catch(dreamErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }
   }
 
@@ -5801,6 +5841,14 @@ try {
       }
       if (commandLower.indexOf("wiki ") === 0) {
         printWiki(command.substring(5))
+        continue
+      }
+      if (commandLower === "dream") {
+        printDream("")
+        continue
+      }
+      if (commandLower.indexOf("dream ") === 0) {
+        printDream(command.substring(6))
         continue
       }
       if (commandLower.indexOf("delegate ") === 0) {

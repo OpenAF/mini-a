@@ -1,0 +1,56 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Dreams Tests::Init
+  exec: args.tests = require("tests/dreams.js")
+
+- name: MiniA Dreams Tests::MergesDuplicates
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamMemoryMergesDuplicates
+
+- name: MiniA Dreams Tests::MarksStale
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamMemoryMarksStale
+
+- name: MiniA Dreams Tests::PreservesIds
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamMemoryPreservesIds
+
+- name: MiniA Dreams Tests::DryRunDoesNotWrite
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamMemoryDryRunDoesNotWrite
+
+- name: MiniA Dreams Tests::RejectsInvalidSchema
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamMemoryRejectsInvalidSchema
+
+- name: MiniA Dreams Tests::RunRoutesMemoryOnly
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamRunRoutesMemoryOnly
+
+- name: MiniA Dreams Tests::RunRoutesWikiOnly
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamRunRoutesWikiOnly
+
+- name: MiniA Dreams Tests::CreateChannelInvalidInput
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCreateChannelFromDefInvalidInput
+
+- name: MiniA Dreams Tests::ValidateSchemaValid
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testValidateMemorySchemaValid
+
+- name: MiniA Dreams Tests::ValidateSchemaMissingSection
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testValidateMemorySchemaMissingSection
