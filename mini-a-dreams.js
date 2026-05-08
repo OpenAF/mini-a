@@ -374,6 +374,11 @@ MiniADreams.prototype._buildWikiConfig = function() {
     cfg.accessKey  = a.wikiaccesskey
     cfg.secret     = a.wikisecret
     cfg.region     = a.wikiregion
+  } else if (backend === "es") {
+    cfg.esurl   = a.wikiurl
+    cfg.esindex = isString(a.wikiprefix) && a.wikiprefix.trim().length > 0 ? a.wikiprefix.trim() : "mini_a_wiki"
+    cfg.esuser  = a.wikiaccesskey
+    cfg.espass  = a.wikisecret
   }
   return cfg
 }
