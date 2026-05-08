@@ -461,7 +461,7 @@ help:
     example  : "4096"
     mandatory: false
   - name     : promptprofile
-    desc     : Prompt verbosity profile for system instructions (minimal, balanced, verbose)
+    desc     : Prompt verbosity profile for system instructions (minimal, balanced, verbose). Defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced
     example  : "balanced"
     mandatory: false
     options  : ["minimal", "balanced", "verbose"]
@@ -470,7 +470,7 @@ help:
     example  : "1800"
     mandatory: false
   - name     : rules
-    desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
+    desc     : Custom rules or instructions for the agent (plain text, bullet list, or JSON/SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
     mandatory: false
   - name     : state

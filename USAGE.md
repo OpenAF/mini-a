@@ -850,7 +850,7 @@ The `start()` method accepts various configuration options:
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
-- **`promptprofile`** (string, default: `balanced`): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the default reduced prompt, or `verbose` to keep richer guidance and examples. When `debug=true`, Mini-A defaults to `verbose` unless you override it.
+- **`promptprofile`** (string): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the default reduced prompt, or `verbose` to keep richer guidance and examples. When unset, Mini-A defaults to `minimal` in chatbot mode, `verbose` with `debug=true` outside chatbot mode, and `balanced` otherwise.
 - **`systempromptbudget`** (number, optional): Maximum estimated system-prompt token budget. When the rendered prompt exceeds it, Mini-A automatically drops lower-priority sections in this order: examples, skill descriptions, detailed tool reference, extended planning guidance, then excess skill entries.
 - **`useplanning`** (boolean, default: false): Load (or maintain) a persistent task plan in agent mode. When no pre-generated plan is available Mini-A falls back to the adaptive in-session planner and disables the feature for trivial goals.
 - **`usememory`** (boolean, default: false): Enable Mini-A structured working memory during execution. Memory schema sections are: `facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, and `summaries`.
@@ -2582,7 +2582,7 @@ agent.start({
 
 ### Custom Rules and Guardrails
 
-Provide extra numbered rules to the system prompt using the `rules` parameter. Supply them as a JSON or SLON array so they are injected verbatim, or specify a file path to load the rules from.
+Provide extra numbered rules to the system prompt using the `rules` parameter. You can pass plain text (single rule), bullet-list text (one rule per list item), a JSON/SLON array, or a file path to load rules from.
 
 ```javascript
 // Inline rules

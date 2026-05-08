@@ -11902,7 +11902,7 @@ MiniA.prototype._normalizePromptProfile = function(profile, fallbackProfile) {
 
 MiniA.prototype._getPromptProfile = function(args) {
   var requested = isMap(args) ? args.promptprofile : __
-  var fallback = toBoolean(isMap(args) && args.debug) ? "verbose" : "balanced"
+  var fallback = toBoolean(isMap(args) && args.chatbotmode) ? "minimal" : (toBoolean(isMap(args) && args.debug) ? "verbose" : "balanced")
   return this._normalizePromptProfile(requested, fallback)
 }
 
@@ -14288,6 +14288,50 @@ MiniA.prototype._appendRulesFromConstraints = function(existingRules, constraint
   return existingRules + "\n" + formatted
 }
 
+MiniA.prototype._normalizeRulesList = function(value) {
+  if (!isArray(value)) return []
+  return value
+    .map(function(item) {
+      if (isUnDef(item) || item === null) return ""
+      return String(item).trim()
+    })
+    .filter(function(item) { return item.length > 0 })
+}
+
+MiniA.prototype._parseRulesArgument = function(rawRules) {
+  if (isArray(rawRules)) return this._normalizeRulesList(rawRules)
+
+  var text = ""
+  if (isString(rawRules)) {
+    text = rawRules.trim()
+  } else if (isDef(rawRules) && rawRules !== null) {
+    text = String(rawRules).trim()
+  }
+  if (text.length === 0) return []
+
+  if (/^[\[\{'"`]/.test(text)) {
+    try {
+      var parsed = af.fromJSSLON(text)
+      if (isArray(parsed)) return this._normalizeRulesList(parsed)
+      if (isString(parsed) || isNumber(parsed) || typeof parsed === "boolean") {
+        return this._normalizeRulesList([ parsed ])
+      }
+    } catch(ignoreRulesParse) {}
+  }
+
+  var lines = text.split(/\r?\n/).map(function(line) { return line.trim() }).filter(function(line) { return line.length > 0 })
+  if (lines.length > 1) {
+    var allListItems = lines.every(function(line) { return /^(-|\*|\d+[.)])\s+/.test(line) })
+    if (allListItems) {
+      return lines
+        .map(function(line) { return line.replace(/^(-|\*|\d+[.)])\s+/, "").trim() })
+        .filter(function(line) { return line.length > 0 })
+    }
+  }
+
+  return [ text ]
+}
+
 MiniA.prototype._resolveAgentRelativeFile = function(baseDir, value) {
   if (!isString(baseDir) || baseDir.trim().length === 0) return value
   if (!isString(value)) return value
@@ -15843,8 +15887,7 @@ MiniA.prototype.init = function(args) {
       this.fnI("load", `Loading rules from file: ${args.rules}...`)
       args.rules = io.readFileString(args.rules)
     }
-    var rules = af.fromJSSLON(args.rules)
-    if (!isArray(rules)) rules = [rules]
+    var rules = this._parseRulesArgument(args.rules)
 
     if (this._isStructuredOutputFormat(args.format)) rules.push("When you provide the final answer, it must be a valid JSON object or array.")
 
@@ -16190,9 +16233,9 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * - compressgoal (boolean, default=false): When true, Mini-A may summarize oversized goal text before execution.
  * - compressgoaltokens (number, default=250): Minimum estimated goal token count before goal compression is considered.
  * - compressgoalchars (number, default=1000): Minimum goal character count before goal compression is considered.
- * - rules (string): Custom rules or instructions for the agent (JSON or SLON array of strings).
+ * - rules (string|Array): Custom rules or instructions for the agent (plain string, bullet list text, or JSON/SLON array of strings).
  * - chatbotmode (boolean, default=false): If true, will to load any system instructions and act just like a chatbot.
- * - promptprofile (string, optional): System prompt verbosity profile ("minimal", "balanced", "verbose"). Defaults to "balanced" and switches to "verbose" when debug=true.
+ * - promptprofile (string, optional): System prompt verbosity profile ("minimal", "balanced", "verbose"). Defaults to "minimal" in chatbot mode, "verbose" when debug=true outside chatbot mode, otherwise "balanced".
  * - systempromptbudget (number, optional): Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority prompt sections such as examples and detailed tool/skill guidance.
  * - format (string, optional): Output format: "md", "json", "yaml", "toon", or "slon". If not set, defaults to "md" unless outfile is specified, then defaults to "json".
  * - usemath (boolean, default=false): Encourage LaTeX math output (`$...$` and `$$...$$`) for KaTeX rendering in the web UI.

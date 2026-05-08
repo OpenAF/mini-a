@@ -187,6 +187,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testPromptSnapshotChatbotBalanced
 
+- name: MiniA Core Tests::PromptSnapshotChatbotDefaultMinimal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotChatbotDefaultMinimal
+
+- name: MiniA Core Tests::PromptSnapshotChatbotExplicitBalancedToolDetails
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotChatbotExplicitBalancedToolDetails
+
 - name: MiniA Core Tests::PromptSnapshotPlanningExecution
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -532,6 +542,8 @@ todo:
 - MiniA Core Tests::PromptSnapshotAgentMinimal
 - MiniA Core Tests::PromptSnapshotAgentVerbose
 - MiniA Core Tests::PromptSnapshotChatbotBalanced
+- MiniA Core Tests::PromptSnapshotChatbotDefaultMinimal
+- MiniA Core Tests::PromptSnapshotChatbotExplicitBalancedToolDetails
 - MiniA Core Tests::PromptSnapshotPlanningExecution
 - MiniA Core Tests::PromptSnapshotBudgetedPrompt
 - MiniA Core Tests::UtilsMcpSkillsToggle

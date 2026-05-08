@@ -229,7 +229,7 @@ help:
     example  : "This repository uses OpenAF jobs."
     mandatory: false
   - name     : rules
-    desc     : Custom agent rules (string, JSON or SLON)
+    desc     : Custom agent rules (plain text, bullet list, or JSON/SLON array)
     example  : "Always explain tradeoffs briefly."
     mandatory: false
   - name     : youare
@@ -694,7 +694,7 @@ help:
     example  : "90"
     mandatory: false
   - name     : promptprofile
-    desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose)"
+    desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose). Defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced"
     example  : "balanced"
     mandatory: false
     options  : ["minimal", "balanced", "verbose"]
