@@ -278,9 +278,11 @@ MiniADreams.prototype.dreamMemory = function(opts) {
       if (!isArray(consolidated.sections[s])) return
       consolidated.sections[s].forEach(function(e) { if (e.stale === true) staleCount++ })
     })
+    var droppedCount = Math.max(totalBefore - totalAfter, 0)
+    var addedCount = Math.max(totalAfter - totalBefore, 0)
 
     self._log("[dreams:memory:" + label + "] Consolidated: " + totalAfter + " entries (" +
-      (totalBefore - totalAfter) + " dropped, " + staleCount + " stale-marked).")
+      droppedCount + " dropped, " + addedCount + " added, " + staleCount + " stale-marked).")
 
     if (isDryRun) {
       self._log("[dreams:memory:" + label + "] Dry-run — skipping write.")
