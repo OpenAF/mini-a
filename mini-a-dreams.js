@@ -316,12 +316,50 @@ MiniADreams.prototype.dreamMemory = function(opts) {
       self._log("[dreams:memory:" + label + "] WARNING: pre-dream backup failed — proceeding without backup.")
     }
 
-    // Restore consolidated state directly, bypassing dedup and compaction so the
-    // LLM's already-merged output is not re-processed and potentially corrupted.
+    // Rebuild the consolidated state through a fresh memory manager so entries are
+    // normalized/coerced before persistence, while still keeping dedup/compaction
+    // disabled to avoid re-processing the LLM's already-consolidated output.
     consolidated.updatedAt = new Date().toISOString()
     consolidated.revision  = isNumber(snap.revision) ? snap.revision + 1 : 1
-    mgr._memory = jsonParse(stringify(consolidated, __, ""), __, __, true)
-    var saved = mgr.saveToChannel(chName, ns)
+
+    var normalizedSnapshot = jsonParse(stringify(consolidated, __, ""), __, __, true)
+    var saveMgr = new MiniAMemoryManager({ dedup: false, compact: false })
+
+    if (isFunction(saveMgr.restoreSnapshot)) {
+      saveMgr.restoreSnapshot(normalizedSnapshot)
+    } else if (isFunction(saveMgr.loadSnapshot)) {
+      saveMgr.loadSnapshot(normalizedSnapshot)
+    } else if (isFunction(saveMgr.importSnapshot)) {
+      saveMgr.importSnapshot(normalizedSnapshot)
+    } else {
+      saveMgr._memory = {
+        entries   : [],
+        updatedAt : normalizedSnapshot.updatedAt,
+        revision  : normalizedSnapshot.revision
+      }
+
+      var entries = isArray(normalizedSnapshot.entries) ? normalizedSnapshot.entries : []
+      entries.forEach(function(entry) {
+        if (isFunction(saveMgr.setEntries)) {
+          saveMgr.setEntries([ entry ])
+        } else if (isFunction(saveMgr.addMemory)) {
+          saveMgr.addMemory(entry)
+        } else if (isFunction(saveMgr.remember)) {
+          saveMgr.remember(entry)
+        } else if (isFunction(saveMgr.upsert)) {
+          saveMgr.upsert(entry)
+        } else {
+          throw "MiniAMemoryManager does not expose a supported snapshot/entry import API for normalized persistence."
+        }
+      })
+
+      if (isDef(saveMgr._memory)) {
+        saveMgr._memory.updatedAt = normalizedSnapshot.updatedAt
+        saveMgr._memory.revision  = normalizedSnapshot.revision
+      }
+    }
+
+    var saved = saveMgr.saveToChannel(chName, ns)
     if (saved) {
       self._log("[dreams:memory:" + label + "] Written to channel '" + chName + "' (ns='" + ns + "').")
     } else {
