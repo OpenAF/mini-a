@@ -146,7 +146,6 @@ MiniADreams.prototype._validateMemorySchema = function(obj) {
 
 MiniADreams.prototype._backupMemoryToNamespace = function(manager, chName, ns, backupNs) {
   try {
-    var savedNs = manager._memorychNamespaceHack   // not an official field; we save/restore manually
     var snap = manager.snapshot()
     var tmpMgr = new MiniAMemoryManager({})
     tmpMgr.init(snap)
@@ -227,15 +226,24 @@ MiniADreams.prototype.dreamMemory = function(opts) {
       "- PRESERVE all IDs of entries you retain unchanged. New entries get new 16-char hex IDs.\n" +
       "- Keep updatedAt as current ISO timestamp; increment revision by 1."
 
-    var auditSection = auditRecords.length > 0
-      ? "\n\n## Recent Audit Events (for context — do not include in output)\n" +
-        stringify(auditRecords.slice(-50), __, "")
-      : ""
-
-    var prompt = systemPrompt +
+    var promptBase = systemPrompt +
       "\n\n## Current Memory State\n" +
-      stringify(snap, __, "") +
-      auditSection
+      stringify(snap, __, "")
+
+    var auditSection = ""
+    if (auditRecords.length > 0) {
+      var auditStr = stringify(auditRecords.slice(-50), __, "")
+      // Stay under ~100K chars (~25K tokens) to leave room for the response
+      if ((promptBase + auditStr).length <= 100000) {
+        auditSection = "\n\n## Recent Audit Events (for context — do not include in output)\n" + auditStr
+      } else {
+        self._log("[dreams:memory:" + label + "] Audit section dropped: prompt would exceed 100K chars.")
+      }
+    }
+    var prompt = promptBase + auditSection
+    if (prompt.length > 120000) {
+      self._log("[dreams:memory:" + label + "] WARNING: prompt is very large (" + prompt.length + " chars); LLM may truncate or refuse.")
+    }
 
     var consolidated = __
     try {
@@ -282,12 +290,17 @@ MiniADreams.prototype.dreamMemory = function(opts) {
     // Backup pre-dream state to a sibling namespace
     var backupNs = (ns.length > 0 ? ns : "_global") + "::predream-" + new Date().toISOString().replace(/[:.]/g, "-")
     var backedUp = self._backupMemoryToNamespace(mgr, chName, ns, backupNs)
-    if (backedUp) self._log("[dreams:memory:" + label + "] Pre-dream backup saved to namespace '" + backupNs + "'.")
+    if (backedUp) {
+      self._log("[dreams:memory:" + label + "] Pre-dream backup saved to namespace '" + backupNs + "'.")
+    } else {
+      self._log("[dreams:memory:" + label + "] WARNING: pre-dream backup failed — proceeding without backup.")
+    }
 
-    // Write consolidated state back
+    // Restore consolidated state directly, bypassing dedup and compaction so the
+    // LLM's already-merged output is not re-processed and potentially corrupted.
     consolidated.updatedAt = new Date().toISOString()
     consolidated.revision  = isNumber(snap.revision) ? snap.revision + 1 : 1
-    mgr.init(consolidated)
+    mgr._memory = jsonParse(stringify(consolidated, __, ""), __, __, true)
     var saved = mgr.saveToChannel(chName, ns)
     if (saved) {
       self._log("[dreams:memory:" + label + "] Written to channel '" + chName + "' (ns='" + ns + "').")
@@ -306,12 +319,12 @@ MiniADreams.prototype.dreamMemory = function(opts) {
     return { ok: false, results: results }
   }
 
-  // Session memory (independent)
+  // Session memory (independent — global has already been committed above)
   if (isObject(sessionMgr)) {
     results.session = consolidateOne(sessionMgr, "session:" + sessionId, sessionChDef.name, sessionId)
     if (!isObject(results.session) || results.session.ok !== true) {
-      self._log("💤 [dreams] Memory dream complete with errors.")
-      return { ok: false, results: results }
+      self._log("💤 [dreams] Memory dream complete with partial errors (global committed, session failed).")
+      return { ok: true, partial: true, results: results }
     }
   }
 
@@ -351,7 +364,9 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       return { ok: false, reason: "no-wiki-config" }
     }
     try {
-      var wm = new MiniAWikiManager(wikiCfg)
+      var wm = new MiniAWikiManager(wikiCfg, function(level, msg) {
+        self._log("[dreams:wiki:lint] " + msg)
+      })
       var staleDays = isNumber(self._args.wikilintstaleddays) ? self._args.wikilintstaleddays : Number(self._args.wikilintstaleddays)
       if (isNaN(staleDays)) staleDays = 90
       var lintResult = wm.lint(__, { staleDays: staleDays })
@@ -382,7 +397,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   dreamArgs.wikiaccess  = "rw"
   dreamArgs.usememory   = isDef(self._args.memorych) ? "true" : "false"
   dreamArgs.memoryscope = "global"
-  dreamArgs.maxsteps    = 60
+  dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 60
   dreamArgs.goal        = _WIKI_DREAM_GOAL
 
   try {
@@ -419,7 +434,7 @@ MiniADreams.prototype._buildWikiConfig = function() {
     cfg.useVersion1 = toBoolean(a.wikiuseversion1) === true
     cfg.ignoreCertCheck = toBoolean(a.wikiignorecertcheck) === true
   } else if (backend === "es") {
-    cfg.esurl   = isString(a.wikiurl) && a.wikiurl.trim().length > 0 ? a.wikiurl.trim() : "https://s3.amazonaws.com"
+    cfg.esurl   = isString(a.wikiurl) && a.wikiurl.trim().length > 0 ? a.wikiurl.trim() : "http://localhost:9200"
     cfg.esindex = isString(a.wikiprefix) && a.wikiprefix.trim().length > 0 ? a.wikiprefix.trim() : "mini_a_wiki"
     cfg.esuser  = a.wikiaccesskey
     cfg.espass  = a.wikisecret
@@ -444,6 +459,7 @@ MiniADreams.prototype.run = function() {
     self._log("  wikiroot=       Wiki filesystem root path")
     self._log("  model=          JSSLON model config e.g. '{\"type\":\"anthropic\",\"model\":\"claude-sonnet-4-6\"}'")
     self._log("  dryrun=true     Report what would change without writing")
+    self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
     java.lang.System.exit(1)
     return
   }
@@ -453,11 +469,13 @@ MiniADreams.prototype.run = function() {
     var memResult = self.dreamMemory()
     overall.memory = memResult
     if (!memResult.ok) overall.ok = false
+    if (memResult.partial === true) overall.partial = true
   }
   if (hasWiki) {
     var wikiResult = self.dreamWiki()
     overall.wiki = wikiResult
     if (!wikiResult.ok) overall.ok = false
+    if (wikiResult.partial === true) overall.partial = true
   }
   return overall
 }
