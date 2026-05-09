@@ -127,18 +127,18 @@ See [docs/DELEGATION.md](DELEGATION.md) for full documentation including example
 
 **What's New**:
 
-- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS and S3 backends, `parseFrontmatter`, `extractLinks`, `search`, `lint`, and `write` operations.
+- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `search`, `lint`, and `write` operations.
 
-- **New `wiki` agent action**: the agent can call `list`, `read`, `search`, `lint`, or `write` (when `wikiaccess=rw`) at any step:
+- **New `wiki` agent action**: the agent can call `list`, `read`, `search`, `grep`, `lint`, `write` (when `wikiaccess=rw`), or `delete` (when `wikiaccess=rw`) at any step:
   ```json
   { "action": "wiki", "params": { "op": "search", "query": "authentication decision" } }
   ```
 
-- **Lint checks**: `broken_link` (error), `missing_frontmatter` (warning), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
+- **Lint checks**: `broken_link` (error), `missing_frontmatter` (warning for missing title / info for missing description), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
 
 - **Auto-bootstrapping**: when a new empty wiki is opened in `rw` mode, Mini-A creates both `AGENTS.md` and `index.md`. `AGENTS.md` contains the ingestion workflow and contribution rules; `index.md` is the wiki entrypoint and starter table of contents.
 
-- **Console commands**: `/wiki list`, `/wiki read <page>`, `/wiki search <query>`, `/wiki lint`.
+- **Console commands**: `/wiki list`, `/wiki read <page>`, `/wiki search <query>`, `/wiki lint`, `/wiki write <page>`, `/wiki delete <page>`.
 
 - **`/stats wiki`**: new stats mode showing per-op counters and error counts for the current session.
 

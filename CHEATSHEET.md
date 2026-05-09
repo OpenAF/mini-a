@@ -847,7 +847,7 @@ If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
 
 The agent uses the `wiki` action:
 ```json
-{ "action": "wiki", "params": { "op": "list|read|search|lint|write", "path": "page.md", "query": "...", "content": "..." } }
+{ "action": "wiki", "params": { "op": "list|read|search|grep|lint|write|delete", "path": "page.md", "query": "...", "content": "..." } }
 ```
 
 | Op | Description |
@@ -855,8 +855,10 @@ The agent uses the `wiki` action:
 | `list` | List all pages; optional `path` prefix filters results |
 | `read` | Return full content + front-matter of `path` |
 | `search` | Full-text search; returns ranked hits for `query` |
+| `grep` | Line-level search with regex support, context lines, and line numbers |
 | `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates |
 | `write` | Write or update `path` with `content` (requires `wikiaccess=rw`) |
+| `delete` | Remove a page (requires `wikiaccess=rw`; `AGENTS.md` is protected) |
 
 ### Console Commands
 
@@ -866,6 +868,8 @@ The agent uses the `wiki` action:
 | `/wiki read <page.md>` | Print a page's front-matter and body |
 | `/wiki search <query>` | Full-text search across all pages |
 | `/wiki lint` | Run the lint check and print a report |
+| `/wiki write <page.md>` | Write or update a page (requires `wikiaccess=rw`) |
+| `/wiki delete <page.md>` | Delete a page (requires `wikiaccess=rw`) |
 | `/stats wiki` | Show wiki operation statistics for the current session |
 
 ### Examples
