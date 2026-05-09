@@ -232,11 +232,29 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
     var auditSection = ""
     if (auditRecords.length > 0) {
-      var auditStr = stringify(auditRecords.slice(-50), __, "")
-      // Stay under ~100K chars (~25K tokens) to leave room for the response
-      if ((promptBase + auditStr).length <= 100000) {
-        auditSection = "\n\n## Recent Audit Events (for context — do not include in output)\n" + auditStr
-      } else {
+      var auditLimit = 200
+      if (isDef(maxAudit) && Number(maxAudit) > 0) {
+        auditLimit = Math.floor(Number(maxAudit))
+      } else if (isDef(args.maxauditrecords) && Number(args.maxauditrecords) > 0) {
+        auditLimit = Math.floor(Number(args.maxauditrecords))
+      }
+
+      var auditCount = Math.min(auditRecords.length, auditLimit)
+      var auditStr = ""
+      while (auditCount > 0) {
+        auditStr = stringify(auditRecords.slice(-auditCount), __, "")
+        // Stay under ~100K chars (~25K tokens) to leave room for the response
+        if ((promptBase + auditStr).length <= 100000) {
+          auditSection = "\n\n## Recent Audit Events (for context — do not include in output)\n" + auditStr
+          if (auditCount < Math.min(auditRecords.length, auditLimit)) {
+            self._log("[dreams:memory:" + label + "] Audit section truncated to " + auditCount + " records to stay under 100K chars.")
+          }
+          break
+        }
+        auditCount--
+      }
+
+      if (auditCount === 0) {
         self._log("[dreams:memory:" + label + "] Audit section dropped: prompt would exceed 100K chars.")
       }
     }
