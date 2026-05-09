@@ -397,7 +397,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   })
   dreamArgs.usewiki     = "true"
   dreamArgs.wikiaccess  = "rw"
-  dreamArgs.usememory   = isDef(self._args.memorych) ? "true" : "false"
+  dreamArgs.usememory   = (isDef(self._args.memorych) && String(self._args.memorych).trim().length > 0) ? "true" : "false"
   dreamArgs.memoryscope = "global"
   dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 60
   dreamArgs.goal        = _WIKI_DREAM_GOAL
