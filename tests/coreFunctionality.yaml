@@ -7,6 +7,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testCleanCodeBlocks
 
+- name: MiniA Core Tests::ParseRulesArgumentSupportsPlainText
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseRulesArgumentSupportsPlainText
+
+- name: MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseRulesArgumentSupportsBulletLists
+
+- name: MiniA Core Tests::ParseRulesArgumentSupportsStructuredArrays
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseRulesArgumentSupportsStructuredArrays
+
 - name: MiniA Core Tests::ExtractFinalAction
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -506,6 +521,9 @@ ojob:
 
 todo:
 - MiniA Core Tests::CleanCodeBlocks
+- MiniA Core Tests::ParseRulesArgumentSupportsPlainText
+- MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
+- MiniA Core Tests::ParseRulesArgumentSupportsStructuredArrays
 - MiniA Core Tests::ExtractFinalAction
 - MiniA Core Tests::ShellToolCallAliasFallsBackToShell
 - MiniA Core Tests::ShellToolCallAliasPreservesRealBashTool

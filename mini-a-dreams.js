@@ -564,8 +564,7 @@ MiniADreams.prototype.run = function() {
     self._log("  model=          JSSLON model config e.g. '{\"type\":\"anthropic\",\"model\":\"claude-sonnet-4-6\"}'")
     self._log("  dryrun=true     Report what would change without writing")
     self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
-    java.lang.System.exit(1)
-    return
+    return { ok: false, reason: "no-mode" }
   }
 
   var overall = { ok: true }
@@ -591,5 +590,6 @@ MiniADreams.prototype.run = function() {
 
 if (!toBoolean(global.__mini_a_dreams_lib_mode)) {
   var _dreams = new MiniADreams(args, log)
-  _dreams.run()
+  var _dreamsResult = _dreams.run()
+  if (isMap(_dreamsResult) && _dreamsResult.ok === false && _dreamsResult.reason === "no-mode") java.lang.System.exit(1)
 }
