@@ -14329,6 +14329,10 @@ MiniA.prototype._parseRulesArgument = function(rawRules) {
     }
   }
 
+  if (lines.length === 1 && /^(-|\*|\d+[.)])\s+/.test(lines[0])) {
+    return [ lines[0].replace(/^(-|\*|\d+[.)])\s+/, "").trim() ]
+  }
+
   return [ text ]
 }
 
