@@ -57,17 +57,63 @@ MiniADreams.prototype._createChannelFromDef = function(rawDef, fallbackName, fal
   return { name: cName, type: cType, options: cOpts }
 }
 
-MiniADreams.prototype._readAuditRecords = function(chName, maxRecords) {
+MiniADreams.prototype._getRecentAuditKeys = function(chName, maxRecords) {
   var max = isNumber(maxRecords) && maxRecords > 0 ? maxRecords : 200
   var keys = []
-  try { keys = $ch(chName).getKeys() } catch(ignoreGetKeys) { return [] }
-  var records = []
+  try { keys = $ch(chName).getKeys() } catch(ignoreGetKeys) { return __ }
+  if (!isArray(keys) || keys.length <= max) return keys
+
+  var sortable = true
   for (var i = 0; i < keys.length; i++) {
-    try {
-      var rec = $ch(chName).get(keys[i])
-      if (isMap(rec)) records.push(rec)
-    } catch(ignoreGet) {}
+    var key = String(keys[i])
+    if (!/^\d+$/.test(key) && !/^\d{4}[-:]?\d{2}[-:]?\d{2}[T _-]?\d{2}[:.-]?\d{2}[:.-]?\d{2}(?:\.\d+)?(?:Z)?$/.test(key)) {
+      sortable = false
+      break
+    }
   }
+  if (!sortable) return __
+
+  keys.sort(function(a, b) {
+    var sa = String(a)
+    var sb = String(b)
+    if (/^\d+$/.test(sa) && /^\d+$/.test(sb)) {
+      var na = Number(sa)
+      var nb = Number(sb)
+      if (na < nb) return -1
+      if (na > nb) return 1
+      return 0
+    }
+    if (sa < sb) return -1
+    if (sa > sb) return 1
+    return 0
+  })
+
+  return keys.slice(-max)
+}
+
+MiniADreams.prototype._readAuditRecords = function(chName, maxRecords) {
+  var max = isNumber(maxRecords) && maxRecords > 0 ? maxRecords : 200
+  var records = []
+  var keys = this._getRecentAuditKeys(chName, max)
+
+  if (isArray(keys)) {
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var rec = $ch(chName).get(keys[i])
+        if (isMap(rec)) records.push(rec)
+      } catch(ignoreGetFast) {}
+    }
+  } else {
+    keys = []
+    try { keys = $ch(chName).getKeys() } catch(ignoreGetKeysFallback) { return [] }
+    for (var j = 0; j < keys.length; j++) {
+      try {
+        var fallbackRec = $ch(chName).get(keys[j])
+        if (isMap(fallbackRec)) records.push(fallbackRec)
+      } catch(ignoreGetFallback) {}
+    }
+  }
+
   records.sort(function(a, b) {
     var ta = isNumber(a.ts) ? a.ts : 0
     var tb = isNumber(b.ts) ? b.ts : 0
