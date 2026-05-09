@@ -3,6 +3,7 @@
 include:
 - tests/advancedPlanning.yaml
 - tests/coreFunctionality.yaml
+- tests/dreams.yaml
 - tests/miniAUtils.yaml
 - tests/outerLoop.yaml
 - tests/progToolCall.yaml

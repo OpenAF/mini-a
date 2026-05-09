@@ -7,6 +7,21 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testCleanCodeBlocks
 
+- name: MiniA Core Tests::ParseRulesArgumentSupportsPlainText
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseRulesArgumentSupportsPlainText
+
+- name: MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseRulesArgumentSupportsBulletLists
+
+- name: MiniA Core Tests::ParseRulesArgumentSupportsStructuredArrays
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParseRulesArgumentSupportsStructuredArrays
+
 - name: MiniA Core Tests::ExtractFinalAction
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -186,6 +201,16 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testPromptSnapshotChatbotBalanced
+
+- name: MiniA Core Tests::PromptSnapshotChatbotDefaultMinimal
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotChatbotDefaultMinimal
+
+- name: MiniA Core Tests::PromptSnapshotChatbotExplicitBalancedToolDetails
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotChatbotExplicitBalancedToolDetails
 
 - name: MiniA Core Tests::PromptSnapshotPlanningExecution
   from: MiniA Core Tests::Init
@@ -496,6 +521,9 @@ ojob:
 
 todo:
 - MiniA Core Tests::CleanCodeBlocks
+- MiniA Core Tests::ParseRulesArgumentSupportsPlainText
+- MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
+- MiniA Core Tests::ParseRulesArgumentSupportsStructuredArrays
 - MiniA Core Tests::ExtractFinalAction
 - MiniA Core Tests::ShellToolCallAliasFallsBackToShell
 - MiniA Core Tests::ShellToolCallAliasPreservesRealBashTool
@@ -532,6 +560,8 @@ todo:
 - MiniA Core Tests::PromptSnapshotAgentMinimal
 - MiniA Core Tests::PromptSnapshotAgentVerbose
 - MiniA Core Tests::PromptSnapshotChatbotBalanced
+- MiniA Core Tests::PromptSnapshotChatbotDefaultMinimal
+- MiniA Core Tests::PromptSnapshotChatbotExplicitBalancedToolDetails
 - MiniA Core Tests::PromptSnapshotPlanningExecution
 - MiniA Core Tests::PromptSnapshotBudgetedPrompt
 - MiniA Core Tests::UtilsMcpSkillsToggle

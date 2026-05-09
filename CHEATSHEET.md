@@ -847,7 +847,7 @@ If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
 
 The agent uses the `wiki` action:
 ```json
-{ "action": "wiki", "params": { "op": "list|read|search|lint|write", "path": "page.md", "query": "...", "content": "..." } }
+{ "action": "wiki", "params": { "op": "list|read|search|grep|lint|write|delete", "path": "page.md", "query": "...", "content": "..." } }
 ```
 
 | Op | Description |
@@ -855,8 +855,10 @@ The agent uses the `wiki` action:
 | `list` | List all pages; optional `path` prefix filters results |
 | `read` | Return full content + front-matter of `path` |
 | `search` | Full-text search; returns ranked hits for `query` |
+| `grep` | Line-level search with regex support, context lines, and line numbers |
 | `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates |
 | `write` | Write or update `path` with `content` (requires `wikiaccess=rw`) |
+| `delete` | Remove a page (requires `wikiaccess=rw`; `AGENTS.md` is protected) |
 
 ### Console Commands
 
@@ -866,6 +868,8 @@ The agent uses the `wiki` action:
 | `/wiki read <page.md>` | Print a page's front-matter and body |
 | `/wiki search <query>` | Full-text search across all pages |
 | `/wiki lint` | Run the lint check and print a report |
+| `/wiki write <page.md>` | Write or update a page (requires `wikiaccess=rw`) |
+| `/wiki delete <page.md>` | Delete a page (requires `wikiaccess=rw`) |
 | `/stats wiki` | Show wiki operation statistics for the current session |
 
 ### Examples
@@ -940,6 +944,102 @@ Mini-A has two complementary knowledge persistence mechanisms.  Choose based on 
 mini-a goal="research and document X" \
   usememory=true memoryuser=true \
   usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+```
+
+---
+
+## Dreams (Sleep Pass)
+
+The dream pass is an LLM-powered off-line consolidation step that runs against the same memory channels and wiki used during a regular session.  It merges duplicate memory entries, marks superseded ones as stale, surfaces cross-cutting insights into the `summaries` section, and produces a lint-clean wiki — without touching the live agent loop.
+
+Think of it as REM sleep for your agent: the active session ends, then the dream pass reorganises what was learned.
+
+### Dream Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `memorych` | string | - | SLON/JSON global memory channel (required for memory dream) |
+| `memorysessionch` | string | - | SLON/JSON session memory channel |
+| `memorysessionid` | string | - | Session namespace string (e.g. the `conversation=` value used during the goal) |
+| `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to surface new insights |
+| `usewiki` | boolean | `false` | Enable wiki dream (consolidates the wiki in a full read-write pass) |
+| `wikiroot` | string | `.` | Wiki filesystem root path |
+| `wikibackend` | string | `fs` | Wiki backend (`fs`, `s3`, `s3fs`, `es`) — same as regular wiki settings |
+| `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
+| `dryrun` | boolean | `false` | Report what would change without writing anything back |
+| `maxauditrecords` | number | `200` | Maximum audit log entries included in the memory consolidation prompt |
+| `libs` | string | - | Extra comma-separated libraries to load |
+
+### What each dream pass does
+
+**Memory dream** (`memorych` is set):
+1. Loads global (and optionally session) memory from the configured channels.
+2. Reads recent audit records for extra context (if `auditch` is set).
+3. Calls the LLM with the full memory snapshot.
+4. LLM merges near-duplicates, marks superseded entries `stale`, drops dropped-and-superseded entries, and surfaces new insights as `summaries` entries.
+5. Writes the consolidated snapshot back (pre-dream state is backed up to a sibling namespace).
+
+**Wiki dream** (`usewiki=true`):
+1. Runs `wiki lint` to baseline all issues.
+2. Spawns a full MiniA agent with `wikiaccess=rw` whose goal is to merge near-duplicate pages, fix broken links, add missing front-matter, correct heading hierarchy, link orphan pages, and confirm zero errors and warnings remain.
+
+### Console Command (interactive sessions)
+
+The `/dream` command is available in the interactive console when at least one of `memorych` or `usewiki=true` was set at startup.
+
+| Command | Description |
+|---------|-------------|
+| `/dream` | Run memory + wiki dream (whichever are configured) |
+| `/dream memory` | Run memory dream only |
+| `/dream wiki` | Run wiki dream only |
+| `/dream dryrun` | Report what would change without writing (both) |
+| `/dream memory dryrun` | Dry-run memory dream only |
+| `/dream wiki dryrun` | Dry-run wiki dream only (runs lint, prints issues) |
+
+### Standalone usage
+
+Use `mini-a dream=true` with the same channel and model arguments you used during the session:
+
+```bash
+# Memory dream only (dry-run preview)
+mini-a dream=true dryrun=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Full memory dream (writes back)
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  auditch='(name: mini_a_audit, type: file, options: (file: /tmp/mini-a-audit.log))' \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Wiki dream (requires rw wiki)
+mini-a dream=true \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Combined memory + wiki dream
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+```
+
+### Examples (interactive)
+
+```bash
+# Start a session with persistent memory and wiki
+mini-a usememory=true memoryuser=true usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+
+# ... work on goals ...
+
+# When done, run the dream pass from the console
+mini-a ➤ /dream
+
+# Or run it as a separate invocation (same channels as the session above)
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: ~/.openaf-mini-a/memory-global.json))' \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
 ```
 
 ---
@@ -1535,6 +1635,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/stats memory` | Show working-memory statistics and per-section counts for the active session |
 | `/stats detailed memory` | Show full metrics plus the focused memory view (`out=file.json` also supported) |
 | `/stats wiki` | Show wiki operation statistics (list/read/search/write/lint counts and errors) |
+| `/dream [memory\|wiki] [dryrun]` | Run memory and/or wiki dream consolidation pass (only shown when `memorych` or `usewiki=true` is set) |
 | `/compact [n]` | Summarize older messages, keep last n exchanges (default: 6) |
 | `/summarize [n]` | Generate full narrative summary, keep last n messages (default: 6) |
 | `/rewind [n]` | Undo the last n exchanges and remove them from conversation history (default: 1); cancels any active subtasks |

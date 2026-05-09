@@ -96,6 +96,29 @@
     ow.test.assert(agent._cleanCodeBlocks(plain) === plain, true, "Should leave plain text untouched")
   }
 
+  exports.testParseRulesArgumentSupportsPlainText = function() {
+    var agent = createAgent()
+    var parsed = agent._parseRulesArgument("Always include timezone: UTC")
+    ow.test.assert(parsed.length === 1, true, "Plain text rules should remain a single rule entry")
+    ow.test.assert(parsed[0] === "Always include timezone: UTC", true, "Plain text rule should preserve content")
+  }
+
+  exports.testParseRulesArgumentSupportsBulletLists = function() {
+    var agent = createAgent()
+    var parsed = agent._parseRulesArgument("- Be concise\n- Ask clarifying questions when blocked")
+    ow.test.assert(parsed.length === 2, true, "Bullet list rules should split into separate entries")
+    ow.test.assert(parsed[0] === "Be concise", true, "First bullet item should be normalized")
+    ow.test.assert(parsed[1] === "Ask clarifying questions when blocked", true, "Second bullet item should be normalized")
+  }
+
+  exports.testParseRulesArgumentSupportsStructuredArrays = function() {
+    var agent = createAgent()
+    var parsed = agent._parseRulesArgument('["Do not invent data", "Cite evidence when available"]')
+    ow.test.assert(parsed.length === 2, true, "Structured rule arrays should be parsed")
+    ow.test.assert(parsed[0] === "Do not invent data", true, "First array item should be preserved")
+    ow.test.assert(parsed[1] === "Cite evidence when available", true, "Second array item should be preserved")
+  }
+
   exports.testExtractEmbeddedFinalAction = function() {
     var agent = createAgent()
     var payload = "```json\n{\"action\":\"final\",\"answer\":\"done\",\"thought\":\"logic\"}\n```"
@@ -746,7 +769,10 @@
 
     ow.test.assert(agent._getPromptProfile({}) === "balanced", true, "Should default prompt profile to balanced")
     ow.test.assert(agent._getPromptProfile({ debug: true }) === "verbose", true, "Debug mode should default prompt profile to verbose")
+    ow.test.assert(agent._getPromptProfile({ chatbotmode: true }) === "minimal", true, "Chatbot mode should default prompt profile to minimal")
+    ow.test.assert(agent._getPromptProfile({ chatbotmode: true, debug: true }) === "minimal", true, "Chatbot mode should keep minimal default even with debug")
     ow.test.assert(agent._getPromptProfile({ promptprofile: "minimal" }) === "minimal", true, "Should honor explicit prompt profile")
+    ow.test.assert(agent._getPromptProfile({ chatbotmode: true, promptprofile: "balanced" }) === "balanced", true, "Should honor explicit chatbot prompt profile")
     ow.test.assert(agent._shouldIncludePromptExamples("balanced") === false, true, "Balanced profile should omit examples")
     ow.test.assert(agent._shouldIncludePromptExamples("verbose") === true, true, "Verbose profile should include examples")
     ow.test.assert(agent._shouldIncludeToolDetails("minimal", 3) === false, true, "Minimal profile should omit tool details")
@@ -977,6 +1003,40 @@
     ow.test.assert(result.prompt.indexOf("Engage in natural dialogue") >= 0, true, "Chatbot prompt should keep conversational directive")
     ow.test.assert(result.prompt.indexOf("## TOOL ACCESS") >= 0, true, "Chatbot prompt should include tool access section")
     ow.test.assert(result.prompt.indexOf("### TOOL REFERENCE") < 0, true, "Balanced chatbot prompt should omit detailed tool reference when disabled")
+  }
+
+  exports.testPromptSnapshotChatbotDefaultMinimal = function() {
+    var agent = createAgent()
+    var profile = agent._getPromptProfile({ chatbotmode: true })
+    var includeToolDetails = agent._shouldIncludeToolDetails(profile, 2)
+    var result = renderChatbotPrompt(agent, {
+      promptProfile: profile,
+      hasToolDetails: includeToolDetails,
+      toolDetails: [
+        { name: "search", description: "Search indexed content", params: [{ name: "query", type: "string", required: true, hasDescription: false }], hasParams: true },
+        { name: "read", description: "Read indexed content", params: [{ name: "id", type: "string", required: true, hasDescription: false }], hasParams: true }
+      ]
+    }, { chatbotmode: true })
+
+    ow.test.assert(profile === "minimal", true, "Default chatbot profile should resolve to minimal")
+    ow.test.assert(result.meta.profile === "minimal", true, "Chatbot prompt telemetry should record minimal profile")
+    ow.test.assert(result.prompt.indexOf("Engage in natural dialogue") >= 0, true, "Minimal chatbot prompt should keep conversational directive")
+    ow.test.assert(result.prompt.indexOf("### TOOL REFERENCE") < 0, true, "Default chatbot prompt should omit detailed tool reference")
+  }
+
+  exports.testPromptSnapshotChatbotExplicitBalancedToolDetails = function() {
+    var agent = createAgent()
+    var profile = agent._getPromptProfile({ chatbotmode: true, promptprofile: "balanced" })
+    var result = renderChatbotPrompt(agent, {
+      promptProfile: profile,
+      hasToolDetails: agent._shouldIncludeToolDetails(profile, 2),
+      toolDetails: [
+        { name: "search", description: "Search indexed content", params: [{ name: "query", type: "string", required: true, hasDescription: false }], hasParams: true }
+      ]
+    }, { chatbotmode: true, promptprofile: "balanced" })
+
+    ow.test.assert(profile === "balanced", true, "Explicit chatbot profile should resolve to balanced")
+    ow.test.assert(result.prompt.indexOf("### TOOL REFERENCE") >= 0, true, "Explicit balanced chatbot profile should allow detailed tool reference for small toolsets")
   }
 
   exports.testPromptSnapshotPlanningExecution = function() {

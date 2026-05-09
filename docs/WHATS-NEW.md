@@ -2,6 +2,41 @@
 
 ## Recent Updates
 
+### Dreams (Sleep Pass) — LLM-powered memory and wiki consolidation
+
+**Change**: New `mini-a-dreams.js` module and `/dream` console command that run an off-line consolidation pass over persistent memory and/or a wiki — without touching the live agent loop.
+
+**Memory dream** (`memorych` required):
+- Loads global and (optionally) session memory from the configured channels.
+- Reads recent audit records for extra context (`auditch=`).
+- Calls the LLM to merge near-duplicate entries, mark superseded ones stale, drop dropped-and-superseded entries, and surface new insights as `summaries` entries.
+- Backs up the pre-dream state to a sibling namespace before writing.
+
+**Wiki dream** (`usewiki=true` required):
+- Spawns a full MiniA agent with `wikiaccess=rw` and a fixed consolidation goal.
+- Agent merges near-duplicate pages, fixes broken links and missing front-matter, corrects heading hierarchy, links orphan pages, then re-runs lint and confirms zero errors/warnings remain.
+
+**`dryrun=true`**: both modes support a dry-run that reports what would change without writing anything.
+
+**Usage:**
+
+```bash
+# Standalone (memory + wiki)
+mini-a dream=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
+  usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# From the interactive console
+mini-a ➤ /dream
+mini-a ➤ /dream memory dryrun
+mini-a ➤ /dream wiki
+```
+
+See [USAGE.md — Dreams](USAGE.md#dreams-sleep-pass) and [CHEATSHEET.md — Dreams](CHEATSHEET.md#dreams-sleep-pass) for full parameter reference.
+
+---
+
 ### `/rewind` — Undo Last Exchanges
 
 **Change**: New `/rewind [n]` slash command that removes the last `n` user+assistant exchanges from the conversation history (default n=1), mirroring the same feature in Claude Code.
@@ -92,18 +127,18 @@ See [docs/DELEGATION.md](DELEGATION.md) for full documentation including example
 
 **What's New**:
 
-- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS and S3 backends, `parseFrontmatter`, `extractLinks`, `search`, `lint`, and `write` operations.
+- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `search`, `lint`, and `write` operations.
 
-- **New `wiki` agent action**: the agent can call `list`, `read`, `search`, `lint`, or `write` (when `wikiaccess=rw`) at any step:
+- **New `wiki` agent action**: the agent can call `list`, `read`, `search`, `grep`, `lint`, `write` (when `wikiaccess=rw`), or `delete` (when `wikiaccess=rw`) at any step:
   ```json
   { "action": "wiki", "params": { "op": "search", "query": "authentication decision" } }
   ```
 
-- **Lint checks**: `broken_link` (error), `missing_frontmatter` (warning), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
+- **Lint checks**: `broken_link` (error), `missing_frontmatter` (warning for missing title / info for missing description), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
 
 - **Auto-bootstrapping**: when a new empty wiki is opened in `rw` mode, Mini-A creates both `AGENTS.md` and `index.md`. `AGENTS.md` contains the ingestion workflow and contribution rules; `index.md` is the wiki entrypoint and starter table of contents.
 
-- **Console commands**: `/wiki list`, `/wiki read <page>`, `/wiki search <query>`, `/wiki lint`.
+- **Console commands**: `/wiki list`, `/wiki read <page>`, `/wiki search <query>`, `/wiki lint`, `/wiki write <page>`, `/wiki delete <page>`.
 
 - **`/stats wiki`**: new stats mode showing per-op counters and error counts for the current session.
 

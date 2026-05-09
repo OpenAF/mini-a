@@ -644,7 +644,7 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
 
 MiniAWikiManager.prototype._makeS3FsBackend = function(cfg) {
   var fsb = this._makeFsBackend(cfg)
-  var access = isString(cfg.wikiaccess) ? cfg.wikiaccess.toLowerCase() : "rw"
+  var access = isString(cfg.access) ? cfg.access.toLowerCase() : "rw"
 
   if (access !== "ro") {
     var s3b = this._makeS3Backend(cfg)

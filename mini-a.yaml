@@ -259,6 +259,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : toolfallback
+    desc     : Fallback to action mode when malformed pseudo tool calls are emitted
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useutils
     desc     : Automatically register Mini Utils Tool utilities as an MCP connection (includes console-only userInput when running mini-a-con)
     example  : "true"
@@ -365,6 +370,31 @@ help:
     desc     : Comma-separated denylist of downstream tool names hidden from proxy-dispatch
     example  : "get-url,web-search"
     mandatory: false
+  - name     : mcpprogcall
+    desc     : Start the per-session localhost bridge for programmatic MCP calls
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mcpprogcallport
+    desc     : Port for the programmatic MCP bridge (0 auto-selects)
+    example  : "0"
+    mandatory: false
+  - name     : mcpprogcallmaxbytes
+    desc     : Maximum inline JSON size before bridge results spill to /result/{id}
+    example  : "4096"
+    mandatory: false
+  - name     : mcpprogcallresultttl
+    desc     : TTL in seconds for spilled bridge results
+    example  : "600"
+    mandatory: false
+  - name     : mcpprogcalltools
+    desc     : Optional comma-separated allowlist of tools exposed by the bridge
+    example  : "filesystemQuery,markdownFiles"
+    mandatory: false
+  - name     : mcpprogcallbatchmax
+    desc     : Maximum calls accepted per bridge batch request
+    example  : "10"
+    mandatory: false
   - name     : forceplanning
     desc     : Force planning even when heuristics would normally skip it
     example  : "true"
@@ -409,8 +439,29 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : adaptiverouting
+    desc     : Enable rule-based route selection via mini-a-router.js
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : routerorder
+    desc     : Comma-separated preferred route order
+    example  : "mcp_direct_call,mcp_proxy_path,shell_execution"
+    mandatory: false
+  - name     : routerallow
+    desc     : Comma-separated allowlist of route types
+    example  : "mcp_direct_call,mcp_proxy_path"
+    mandatory: false
+  - name     : routerdeny
+    desc     : Comma-separated denylist of route types
+    example  : "shell_execution"
+    mandatory: false
+  - name     : routerproxythreshold
+    desc     : Payload size in bytes where proxy-style handling is preferred
+    example  : "4096"
+    mandatory: false
   - name     : promptprofile
-    desc     : Prompt verbosity profile for system instructions (minimal, balanced, verbose)
+    desc     : Prompt verbosity profile for system instructions (minimal, balanced, verbose). Defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced
     example  : "balanced"
     mandatory: false
     options  : ["minimal", "balanced", "verbose"]
@@ -419,7 +470,7 @@ help:
     example  : "1800"
     mandatory: false
   - name     : rules
-    desc     : Custom rules or instructions for the agent (JSON or SLON array of strings)
+    desc     : Custom rules or instructions for the agent (plain text, bullet list, or JSON/SLON array of strings)
     example  : '["Always provide detailed explanations", "Use concise language"]'
     mandatory: false
   - name     : state
@@ -471,6 +522,66 @@ help:
     desc     : Maximum retries per delegated subtask
     example  : "2"
     mandatory: false
+  - name     : usea2a
+    desc     : Use A2A HTTP+JSON/REST endpoints for remote worker delegation
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : showdelegate
+    desc     : Show delegate/subtask events as separate lines
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : subtasks
+    desc     : Inline subtask definitions (JSON or SLON array)
+    example  : "[{goal: 'research X'}, {goal: 'summarize Y'}]"
+    mandatory: false
+  - name     : subtasksfile
+    desc     : Path to a JSON/YAML file containing subtask definitions
+    example  : "subtasks.json"
+    mandatory: false
+  - name     : subtaskssequential
+    desc     : Run declared subtasks sequentially instead of in parallel
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : forkstatemaxbytes
+    desc     : Maximum bytes of parent context snapshot passed to a forked sub-agent
+    example  : "65536"
+    mandatory: false
+  - name     : workerregurl
+    desc     : Comma-separated registration URL(s) used by workers in workermode
+    example  : "http://main-host:12345"
+    mandatory: false
+  - name     : workerreginterval
+    desc     : Worker heartbeat interval in milliseconds for self-registration
+    example  : "30000"
+    mandatory: false
+  - name     : workerskills
+    desc     : JSON/SLON array of worker skills exposed by workermode
+    example  : "[(name: 'research')]"
+    mandatory: false
+  - name     : workertags
+    desc     : Comma-separated tags appended to the default workermode skill
+    example  : "web,analysis"
+    mandatory: false
+  - name     : autodelegation
+    desc     : Automatically delegate oversized tool results to a summary sub-agent
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : autodelegationthreshold
+    desc     : Byte threshold above which a tool result triggers auto-delegation
+    example  : "8192"
+    mandatory: false
+  - name     : autodelegationmaxperstep
+    desc     : Maximum number of auto-delegations allowed per agent step
+    example  : "2"
+    mandatory: false
+  - name     : noisytools
+    desc     : Comma-separated list of tool names that always trigger auto-delegation regardless of size
+    example  : "filesystemQuery,markdownFiles"
+    mandatory: false
   - name     : planfile
     desc     : Plan file path to load or save before execution
     example  : "/path/to/plan.md"
@@ -507,6 +618,11 @@ help:
   - name     : miniadocs
     desc     : Enable Mini-A docs shortcuts (alias for mini-a-docs)
     example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : mini-a-docs
+    desc     : Point utilsroot to the Mini-A opack path so docs can be navigated directly
+    example  : "true"
     mandatory: false
     options  : ["true", "false"]
   - name     : extraskills
@@ -637,6 +753,66 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usememory
+    desc     : Enable the structured working memory subsystem
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryuser
+    desc     : Enable usememory and auto-configure file-backed global and session memory
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryusersession
+    desc     : Enable usememory and auto-configure file-backed session memory only
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryscope
+    desc     : Memory read scope (session, global or both)
+    example  : "both"
+    mandatory: false
+  - name     : memorysessionid
+    desc     : Session key used to namespace session memory
+    example  : "research-2024"
+    mandatory: false
+  - name     : memorych
+    desc     : SLON/JSON channel definition for global memory persistence
+    example  : "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))"
+    mandatory: false
+  - name     : memorysessionch
+    desc     : SLON/JSON channel definition for session memory persistence
+    example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
+    mandatory: false
+  - name     : memorymaxpersection
+    desc     : Maximum memory entries kept per section
+    example  : "80"
+    mandatory: false
+  - name     : memorymaxentries
+    desc     : Maximum total memory entries
+    example  : "500"
+    mandatory: false
+  - name     : memorycompactevery
+    desc     : Compact memory every N updates
+    example  : "8"
+    mandatory: false
+  - name     : memorydedup
+    desc     : Enable memory deduplication
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memorypromote
+    desc     : Comma-separated memory sections to promote
+    example  : "facts,decisions,summaries"
+    mandatory: false
+  - name     : memorystaledays
+    desc     : Mark memory entries stale after this many days
+    example  : "30"
+    mandatory: false
+  - name     : memoryinject
+    desc     : Memory context injection mode (summary or full)
+    example  : "summary"
+    mandatory: false
   - name     : usewiki
     desc     : Enable the wiki knowledge base
     example  : "true"
@@ -782,6 +958,7 @@ jobs:
         deepresearch   : deepresearch
         outerloop      : outerloop
         outerloopinstructions: outerloopinstructions
+        outerloopsessionid: outerloopsessionid
         taskfile       : taskfile
         specfile       : specfile
         outerloopmaxcycles: outerloopmaxcycles
@@ -987,6 +1164,7 @@ jobs:
       deepresearch   : toBoolean.isBoolean.default(false)
       outerloop      : toBoolean.isBoolean.default(false)
       outerloopinstructions: isString.default(__)
+      outerloopsessionid: isString.default(__)
       taskfile       : isString.default(__)
       specfile       : isString.default(__)
       outerloopmaxcycles: toNumber.isNumber.default(__)
