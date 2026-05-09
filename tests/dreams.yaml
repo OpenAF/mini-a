@@ -54,3 +54,18 @@ jobs:
   from: MiniA Dreams Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testValidateMemorySchemaMissingSection
+
+- name: MiniA Dreams Tests::BuildLlmUsesOAFModelFallback
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBuildLlmUsesOAFModelFallback
+
+- name: MiniA Dreams Tests::BuildLlmPrefersModelArg
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBuildLlmPrefersModelArg
+
+- name: MiniA Dreams Tests::BuildWikiConfigMatchesRuntimeDefaults
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBuildWikiConfigMatchesRuntimeDefaults

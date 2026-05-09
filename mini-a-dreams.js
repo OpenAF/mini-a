@@ -24,7 +24,8 @@ if (isDef(args.libs) && String(args.libs).trim().length > 0) {
 // ─────────────────────────────────────────────────────────────
 
 var MiniADreams = function(dreamArgs, logFn) {
-  this._args  = isMap(dreamArgs) ? dreamArgs : {}
+  this._args  = isMap(dreamArgs) ? merge({}, dreamArgs) : {}
+  try { __miniAApplyMemoryUserDefaults(this._args) } catch(ignoreMemoryUserDefaults) {}
   this._logFn = isFunction(logFn) ? logFn : log
   this._llm   = __   // injectable for tests
 }
@@ -77,14 +78,45 @@ MiniADreams.prototype._readAuditRecords = function(chName, maxRecords) {
 
 // ── LLM helper ───────────────────────────────────────────────
 
+MiniADreams.prototype._parseModelConfig = function(rawValue, source, isOptional) {
+  if (isUnDef(rawValue)) return __
+  var parsed = rawValue
+  if (isString(parsed)) {
+    parsed = parsed.trim()
+    if (parsed.length === 0) return __
+    try {
+      parsed = af.fromJSSLON(parsed)
+    } catch(ignoreModelParse) {
+      parsed = rawValue.trim()
+    }
+  }
+
+  if (!isMap(parsed) && isString(parsed)) {
+    if (isDef(_sec)) {
+      try {
+        var secObj = _sec.get(parsed, "models")
+        if (isDef(secObj) && isMap(secObj)) return secObj
+      } catch(ignoreSecLookup) {}
+    }
+    if (isOptional) return __
+    throw new Error("Invalid " + source + " model configuration: '" + parsed + "' is not a valid model definition or reference.")
+  }
+
+  if (!isMap(parsed)) {
+    if (isOptional) return __
+    throw new Error("Invalid " + source + " model configuration: expected a map/object.")
+  }
+  return parsed
+}
+
+MiniADreams.prototype._getEnv = function(name) {
+  return getEnv(name)
+}
+
 MiniADreams.prototype._buildLlm = function() {
   if (isObject(this._llm)) return this._llm
-  var raw = this._args.model
-  if (!isString(raw) && !isMap(raw)) return __
-  var modelCfg = isMap(raw) ? raw : __
-  if (!isMap(modelCfg)) {
-    try { modelCfg = af.fromJSSLON(String(raw)) } catch(ignoreModelParse) {}
-  }
+  var modelCfg = this._parseModelConfig(this._args.model, "model parameter", true)
+  if (!isMap(modelCfg)) modelCfg = this._parseModelConfig(this._getEnv("OAF_MODEL"), "OAF_MODEL environment variable", true)
   if (!isMap(modelCfg)) return __
   try { return $llm(modelCfg) } catch(ignoreLlmCreate) { return __ }
 }
@@ -171,7 +203,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
   // ── 4. Build LLM ─────────────────────────────────────────
   var llm = self._buildLlm()
   if (!isObject(llm)) {
-    self._log("[dreams:memory] No LLM configured (model= arg required). Aborting.")
+    self._log("[dreams:memory] No LLM configured (set OAF_MODEL or pass model=). Aborting.")
     return { ok: false, reason: "no-llm" }
   }
 
@@ -269,10 +301,18 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
   // Global memory
   results.global = consolidateOne(globalMgr, "global", globalChDef.name, "")
+  if (!isObject(results.global) || results.global.ok !== true) {
+    self._log("💤 [dreams] Memory dream complete with errors.")
+    return { ok: false, results: results }
+  }
 
   // Session memory (independent)
   if (isObject(sessionMgr)) {
     results.session = consolidateOne(sessionMgr, "session:" + sessionId, sessionChDef.name, sessionId)
+    if (!isObject(results.session) || results.session.ok !== true) {
+      self._log("💤 [dreams] Memory dream complete with errors.")
+      return { ok: false, results: results }
+    }
   }
 
   self._log("💤 [dreams] Memory dream complete.")
@@ -312,7 +352,9 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     }
     try {
       var wm = new MiniAWikiManager(wikiCfg)
-      var lintResult = wm.lint()
+      var staleDays = isNumber(self._args.wikilintstaleddays) ? self._args.wikilintstaleddays : Number(self._args.wikilintstaleddays)
+      if (isNaN(staleDays)) staleDays = 90
+      var lintResult = wm.lint(__, { staleDays: staleDays })
       self._log("[dreams:wiki] Lint baseline: " + lintResult.summary.pages + " pages, " +
         lintResult.summary.errors + " errors, " + lintResult.summary.warnings + " warnings, " +
         lintResult.summary.info + " info.")
@@ -369,13 +411,15 @@ MiniADreams.prototype._buildWikiConfig = function() {
     cfg.root = isString(a.wikiroot) && a.wikiroot.trim().length > 0 ? a.wikiroot.trim() : "."
   } else if (backend === "s3" || backend === "s3fs") {
     cfg.bucket     = a.wikibucket
-    cfg.prefix     = a.wikiprefix
-    cfg.url        = a.wikiurl
+    cfg.prefix     = isString(a.wikiprefix) && a.wikiprefix.trim().length > 0 ? a.wikiprefix.trim() : "wiki/"
+    cfg.url        = isString(a.wikiurl) && a.wikiurl.trim().length > 0 ? a.wikiurl.trim() : "https://s3.amazonaws.com"
     cfg.accessKey  = a.wikiaccesskey
     cfg.secret     = a.wikisecret
     cfg.region     = a.wikiregion
+    cfg.useVersion1 = toBoolean(a.wikiuseversion1) === true
+    cfg.ignoreCertCheck = toBoolean(a.wikiignorecertcheck) === true
   } else if (backend === "es") {
-    cfg.esurl   = a.wikiurl
+    cfg.esurl   = isString(a.wikiurl) && a.wikiurl.trim().length > 0 ? a.wikiurl.trim() : "https://s3.amazonaws.com"
     cfg.esindex = isString(a.wikiprefix) && a.wikiprefix.trim().length > 0 ? a.wikiprefix.trim() : "mini_a_wiki"
     cfg.esuser  = a.wikiaccesskey
     cfg.espass  = a.wikisecret

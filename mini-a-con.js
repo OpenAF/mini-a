@@ -5506,8 +5506,11 @@ try {
     var mode   = parts.length > 0 && parts[0].toLowerCase() !== "dryrun" ? parts[0].toLowerCase() : ""
     var dryrun = parts.indexOf("dryrun") >= 0
 
-    var hasMemory = isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0
-    var hasWiki   = toBoolean(sessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
+    var dreamSessionOptions = merge({}, sessionOptions)
+    try { __miniAApplyMemoryUserDefaults(dreamSessionOptions) } catch(ignoreDreamMemoryUserDefaults) {}
+
+    var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
+    var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
@@ -5527,7 +5530,7 @@ try {
       return
     }
 
-    var dreamArgs = merge({}, sessionOptions)
+    var dreamArgs = merge({}, dreamSessionOptions)
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
     var runner = new MiniADreams(dreamArgs, function(msg) { print(colorifyText(msg, hintColor)) })

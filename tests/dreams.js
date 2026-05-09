@@ -157,6 +157,7 @@
     runner._setLlm(makeStubLlm({ schemaVersion: 1 }))   // missing sections
 
     var result = runner.dreamMemory()
+    ow.test.assert(result.ok, false, "dreamMemory should return ok=false when global consolidation fails")
     ow.test.assert(result.results.global.ok, false, "invalid schema should cause ok=false")
     ow.test.assert(result.results.global.reason, "invalid-schema", "reason should be invalid-schema")
 
@@ -213,6 +214,70 @@
     var runner = new MiniADreams({}, function() {})
     var bad = { schemaVersion: 1, sections: { facts: [] } }
     ow.test.assert(isString(runner._validateMemorySchema(bad)), true, "missing section → validation error string")
+  }
+
+  exports.testBuildLlmUsesOAFModelFallback = function() {
+    var runner = new MiniADreams({}, function() {})
+    runner._getEnv = function(name) {
+      return name === "OAF_MODEL" ? "(type: ollama, model: test-dream-model, url: 'http://localhost:11434')" : __
+    }
+
+    var captured = __
+    var origLlm = $llm
+    try {
+      $llm = function(cfg) {
+        captured = cfg
+        return { prompt: function() { return "{}" } }
+      }
+      var llm = runner._buildLlm()
+      ow.test.assert(isObject(llm), true, "_buildLlm should create an LLM from OAF_MODEL")
+      ow.test.assert(isMap(captured) && captured.type === "ollama", true, "OAF_MODEL type should be parsed")
+      ow.test.assert(isMap(captured) && captured.model === "test-dream-model", true, "OAF_MODEL model should be parsed")
+    } finally {
+      $llm = origLlm
+    }
+  }
+
+  exports.testBuildLlmPrefersModelArg = function() {
+    var runner = new MiniADreams({ model: "(type: openai, model: arg-model, key: test-key)" }, function() {})
+    runner._getEnv = function(name) {
+      return name === "OAF_MODEL" ? "(type: ollama, model: env-model)" : __
+    }
+
+    var captured = __
+    var origLlm = $llm
+    try {
+      $llm = function(cfg) {
+        captured = cfg
+        return { prompt: function() { return "{}" } }
+      }
+      var llm = runner._buildLlm()
+      ow.test.assert(isObject(llm), true, "_buildLlm should create an LLM from model=")
+      ow.test.assert(isMap(captured) && captured.type === "openai", true, "model= should override OAF_MODEL type")
+      ow.test.assert(isMap(captured) && captured.model === "arg-model", true, "model= should override OAF_MODEL model")
+    } finally {
+      $llm = origLlm
+    }
+  }
+
+  exports.testBuildWikiConfigMatchesRuntimeDefaults = function() {
+    var runner = new MiniADreams({
+      usewiki: "true",
+      wikibackend: "s3",
+      wikibucket: "bucket-a",
+      wikiaccesskey: "access-a",
+      wikisecret: "secret-a",
+      wikiregion: "eu-west-1",
+      wikiuseversion1: "true",
+      wikiignorecertcheck: "true"
+    }, function() {})
+    var cfg = runner._buildWikiConfig()
+    ow.test.assert(cfg.backend, "s3", "backend should be s3")
+    ow.test.assert(cfg.access, "rw", "dream wiki config should request write access")
+    ow.test.assert(cfg.prefix, "wiki/", "s3 prefix should use runtime default")
+    ow.test.assert(cfg.url, "https://s3.amazonaws.com", "s3 url should use runtime default")
+    ow.test.assert(cfg.useVersion1, true, "wikiuseversion1 should be forwarded")
+    ow.test.assert(cfg.ignoreCertCheck, true, "wikiignorecertcheck should be forwarded")
   }
 
   return exports
