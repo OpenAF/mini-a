@@ -115,7 +115,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
 | `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
 | `llmcomplexity` | Use LC model to validate "medium" complexity heuristic (default: `false`) | `llmcomplexity=true` |
-| `promptprofile` | System prompt verbosity profile: `minimal`, `balanced` (default), or `verbose` (auto when `debug=true`) | `promptprofile=minimal` |
+| `promptprofile` | System prompt verbosity profile: `minimal`, `balanced`, or `verbose` (default when unset: `minimal` in chatbot mode, `verbose` with `debug=true` outside chatbot mode, otherwise `balanced`) | `promptprofile=minimal` |
 | `systempromptbudget` | Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority sections such as examples and detailed tool guidance | `systempromptbudget=4000` |
 
 ### Advisor Strategy Mode
@@ -517,6 +517,44 @@ mini-a goal="Comprehensive analysis of renewable energy trends 2024" \
   maxcycles=3 \
   validationgoal="Validate: includes statistical data, covers solar/wind/hydro, has trend projections" \
   mcp="(cmd: 'docker run --rm -i mcp/wikipedia-mcp')"
+```
+
+---
+
+## Outer Loop Autonomous Coding
+
+Use `outerloop=true` to run a durable multi-cycle coding loop that persists session state under `~/.openaf-mini-a/sessions/<session-id>/`.
+
+### Outer Loop Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `outerloop` | boolean | `false` | Enable autonomous coding loop |
+| `outerloopinstructions` | string | session `instructions.md` | Durable instructions file used across cycles |
+| `taskfile` / `specfile` | string | - | Aliases for `outerloopinstructions` |
+| `outerloopsessionid` | string | auto-generated | Session ID used as directory name under `~/.openaf-mini-a/sessions/`; pass the same value to resume |
+| `outerloopmaxcycles` | number | `5` | Maximum number of outer loop cycles |
+| `outerloopmaxtime` | number | `0` | Maximum runtime in seconds (`0` disables) |
+| `outerloopstoponrepeat` | boolean | `false` | Stop on repeated validation failure |
+| `outerloopmaxnochange` | number | `2` | Stop when no meaningful change repeats |
+
+**Examples:**
+
+```bash
+# Basic outer loop run
+mini-a "Implement the feature described in ./TASKS.md" \
+  outerloop=true \
+  useplanning=true \
+  outerloopinstructions=./TASKS.md \
+  valgoal="All implementation tasks are complete and the configured validation checks pass" \
+  outerloopmaxcycles=8
+
+# Resume an interrupted outer loop session
+mini-a "Refactor the parser and keep iterating until validation passes" \
+  outerloop=true \
+  outerloopsessionid=session-20240601-120000-abc123 \
+  valgoal="Parser tests pass and no regression is introduced" \
+  outerloopmaxcycles=6
 ```
 
 ---
@@ -1106,6 +1144,8 @@ mini-a mode=mypreset goal="your goal here"
 | `maxconcurrent` | number | `4` | Maximum concurrent child agents |
 | `delegationmaxdepth` | number | `3` | Maximum delegation nesting depth |
 | `delegationtimeout` | number | `300000` | Default subtask deadline (ms) |
+| `delegationstalltimeout` | number | `300000` | Idle time before a running delegated subtask is considered stalled (ms) |
+| `delegationhardtimeout` | number | - | Optional absolute delegated subtask timeout regardless of activity (ms) |
 | `delegationmaxretries` | number | `2` | Default retry count for failed subtasks |
 | `showdelegate` | boolean | `false` | Show delegate events as separate console lines |
 | `workermode` | boolean | `false` | Launch the Worker API server instead of the console |
