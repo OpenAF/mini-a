@@ -78,7 +78,7 @@ todo:
     ((fnsMeta)): &MCPFNSMETA
       list:
         name       : list
-        description: "List pages available in {{label}} with an optional path prefix."
+        description: "List page paths available in {{label}} with an optional path prefix. Prefer tree or browse first when discovering structure."
         inputSchema:
           type      : object
           properties:
@@ -94,15 +94,61 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
+      tree:
+        name       : tree
+        description: "Discover the folder/page hierarchy in {{label}}. Start here to understand categories before reading full pages."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Optional folder path/prefix to scope the hierarchy.
+            depth:
+              type       : integer
+              description: Maximum child-section depth to return.
+              default    : 3
+            compact:
+              type       : boolean
+              description: Return compact hierarchy output.
+              default    : true
+        annotations:
+          title         : tree
+          readOnlyHint  : true
+          idempotentHint: true
+
+      browse:
+        name       : browse
+        description: "Browse a wiki section in {{label}}. Use this before read to see the nearest index, child sections, direct pages, and suggested next reads."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Optional section folder, section index, or page path.
+            compact:
+              type       : boolean
+              description: Return compact navigation output.
+              default    : true
+        annotations:
+          title         : browse
+          readOnlyHint  : true
+          idempotentHint: true
+
       read:
         name       : read
-        description: "Read a wiki page from {{label}} by path."
+        description: "Read a wiki page from {{label}} by path. Use browse or tree first unless you already know the exact page."
         inputSchema:
           type      : object
           properties:
             path:
               type       : string
               description: Wiki page path to read.
+            startLine:
+              type       : integer
+              description: Optional 1-based start line to read from.
+            endLine:
+              type       : integer
+              description: Optional 1-based end line to read to.
             compact:
               type       : boolean
               description: Return compact output (path/title/body only).
@@ -115,7 +161,7 @@ todo:
 
       search:
         name       : search
-        description: "Search {{label}} pages by keyword with optional result limits."
+        description: "Search {{label}} pages by keyword with optional result limits. Use browse/tree for navigation and search for keyword lookup."
         inputSchema:
           type      : object
           properties:
@@ -126,9 +172,43 @@ todo:
               type       : integer
               description: Maximum number of search results.
               default    : 20
+            caseSensitive:
+              type       : boolean
+              description: Enable case-sensitive matching.
+              default    : false
+            regex:
+              type       : boolean
+              description: Treat query as a regular expression.
+              default    : false
+            contextLines:
+              type       : integer
+              description: Number of context lines before/after each match.
+              default    : 0
+            path:
+              type       : string
+              description: Optional single page path to scope the search.
           required  : [ query ]
         annotations:
           title         : search
+          readOnlyHint  : true
+          idempotentHint: true
+
+      backlinks:
+        name       : backlinks
+        description: "Find pages in {{label}} that link to a target page. Use before moving or editing referenced pages."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Target wiki page path.
+            compact:
+              type       : boolean
+              description: Return compact backlink output.
+              default    : true
+          required  : [ path ]
+        annotations:
+          title         : backlinks
           readOnlyHint  : true
           idempotentHint: true
 
@@ -165,6 +245,32 @@ todo:
           readOnlyHint  : false
           idempotentHint: false
 
+      move:
+        name       : move
+        description: "Move or rename a wiki page in {{label}} and repair internal links (requires wikiaccess=rw)."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Existing wiki page path.
+            to:
+              type       : string
+              description: New wiki page path.
+            leaveRedirect:
+              type       : boolean
+              description: Leave a superseded redirect stub at the old path.
+              default    : false
+            overwrite:
+              type       : boolean
+              description: Allow replacing an existing target page.
+              default    : false
+          required  : [ path, to ]
+        annotations:
+          title         : move
+          readOnlyHint  : false
+          idempotentHint: false
+
       lint:
         name       : lint
         description: "Validate {{label}} health (links, stale pages, and wiki quality checks)."
@@ -185,9 +291,13 @@ todo:
 
       init:
         name       : init
-        description: "Create baseline wiki pages (AGENTS.md and index.md) when missing in {{label}} (requires wikiaccess=rw)."
+        description: "Create baseline wiki pages, or path/index.md for a section path, when missing in {{label}} (requires wikiaccess=rw)."
         inputSchema:
           type      : object
+          properties:
+            path:
+              type       : string
+              description: Optional folder path where a section index.md should be created.
         annotations:
           title         : init
           readOnlyHint  : false
@@ -195,9 +305,13 @@ todo:
 
     ((fns    )): &MCPFNS
       list  : Wiki list pages
+      tree  : Wiki tree
+      browse: Wiki browse section
       read  : Wiki read page
       search: Wiki search pages
+      backlinks: Wiki backlinks
       write : Wiki write page
+      move  : Wiki move page
       delete: Wiki delete page
       lint  : Wiki lint
       init  : Wiki init
@@ -291,27 +405,95 @@ jobs:
     var result = { count: pages.length, pages: pages }
     return args.compact ? result : result
 
+# ----------------
+- name : Wiki tree
+  check:
+    in:
+      path   : isString.default("")
+      depth  : toNumber.isNumber.default(3)
+      compact: toBoolean.isBoolean.default(true)
+  exec : | #js
+    var tree = global.__wikiManager.tree(args.path, args.depth)
+    if (args.compact !== true) return tree
+    return {
+      path: tree.path,
+      index: tree.index,
+      page_count: tree.page_count,
+      direct_pages: tree.pages,
+      child_sections: tree.sections.map(function(s) {
+        return { path: s.path, index: s.index, page_count: s.page_count, child_section_count: s.child_section_count }
+      })
+    }
+
+# ----------------
+- name : Wiki browse section
+  check:
+    in:
+      path   : isString.default("")
+      compact: toBoolean.isBoolean.default(true)
+  exec : | #js
+    return global.__wikiManager.browse(args.path)
+
 # ---------------
 - name : Wiki read page
   check:
     in:
       path   : isString
+      startLine: toNumber.isNumber.default(__)
+      endLine  : toNumber.isNumber.default(__)
       compact: toBoolean.isBoolean.default(false)
   exec : | #js
-    var page = global.__wikiManager.read(args.path)
+    var readOpts = {}
+    if (isNumber(args.startLine) && args.startLine > 0) readOpts.lineStart = args.startLine
+    if (isNumber(args.endLine) && args.endLine > 0) readOpts.lineEnd = args.endLine
+    var page = global.__wikiManager.read(args.path, readOpts)
     if (!isObject(page)) return "[ERROR] Page not found: " + args.path
-    if (args.compact === true) return { path: page.path, title: isString(page.meta.title) ? page.meta.title : page.path, body: page.body }
+    if (args.compact === true) {
+      var compactOut = { path: page.path, title: isString(page.meta.title) ? page.meta.title : page.path, body: page.body }
+      if (isNumber(page.lineStart)) compactOut.lineStart = page.lineStart
+      if (isNumber(page.lineEnd)) compactOut.lineEnd = page.lineEnd
+      if (isNumber(page.linesTotal)) compactOut.linesTotal = page.linesTotal
+      return compactOut
+    }
     return page
 
 # ------------------
 - name : Wiki search pages
   check:
     in:
-      query: isString
-      limit: toNumber.isNumber.default(20)
+      query        : isString
+      limit        : toNumber.isNumber.default(20)
+      caseSensitive: toBoolean.isBoolean.default(false)
+      regex        : toBoolean.isBoolean.default(false)
+      contextLines : toNumber.isNumber.default(0)
+      path         : isString.default("")
   exec : | #js
-    var hits = global.__wikiManager.search(args.query, { limit: args.limit })
-    return { count: hits.length, results: hits }
+    var hits = global.__wikiManager.search(args.query, {
+      limit        : args.limit,
+      caseSensitive: args.caseSensitive,
+      regex        : args.regex,
+      contextLines : args.contextLines,
+      path         : args.path,
+      forceScan    : true
+    })
+    return {
+      count  : hits.length,
+      matches: hits.map(function(h) { return { path: h.path, line: h.line, snippet: h.snippet, title: h.title } }),
+      results: hits
+    }
+
+# ------------------
+- name : Wiki backlinks
+  check:
+    in:
+      path   : isString
+      compact: toBoolean.isBoolean.default(true)
+  exec : | #js
+    var links = global.__wikiManager.backlinks(args.path)
+    if (args.compact === true) {
+      return { target: links.target, count: links.count, pages: links.backlinks.map(function(b) { return { path: b.path, title: b.title } }) }
+    }
+    return links
 
 # -----------------
 - name : Wiki write page
@@ -322,6 +504,18 @@ jobs:
   exec : | #js
     if (global.__wikiManager._access !== "rw") return "[ERROR] wiki write requires wikiaccess=rw"
     return global.__wikiManager.write(args.path, args.content)
+
+# -----------------
+- name : Wiki move page
+  check:
+    in:
+      path         : isString
+      to           : isString
+      leaveRedirect: toBoolean.isBoolean.default(false)
+      overwrite    : toBoolean.isBoolean.default(false)
+  exec : | #js
+    if (global.__wikiManager._access !== "rw") return "[ERROR] wiki move requires wikiaccess=rw"
+    return global.__wikiManager.move(args.path, args.to, { leaveRedirect: args.leaveRedirect, overwrite: args.overwrite })
 
 # ------------------
 - name : Wiki delete page
@@ -346,6 +540,9 @@ jobs:
 
 # -----------
 - name : Wiki init
+  check:
+    in:
+      path: isString.default("")
   exec : | #js
     if (global.__wikiManager._access !== "rw") return "[ERROR] wiki init requires wikiaccess=rw"
-    return global.__wikiManager.init()
+    return global.__wikiManager.init(args.path)
