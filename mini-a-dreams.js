@@ -441,14 +441,15 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 var _WIKI_DREAM_GOAL =
   "You are running a wiki dream consolidation pass. Your task is to produce a clean, well-organised wiki.\n\n" +
   "Follow these steps in order:\n" +
-  "1. Use wiki action with op=\"lint\" to get all current issues.\n" +
-  "2. For each near_duplicate pair: use wiki op=\"read\" on both pages, write a merged version to the primary page (keeping the richer content), then delete the duplicate. Fix any links in other pages that pointed to the deleted page.\n" +
-  "3. For each broken_link issue: use wiki op=\"read\" on the affected page, correct or remove the broken link target, use wiki op=\"write\" to save.\n" +
-  "4. For each missing_frontmatter issue: use wiki op=\"read\" on the page, add the missing field(s) (title, description, created, updated) with sensible inferred values, then write the page.\n" +
-  "5. For each heading_hierarchy violation: use wiki op=\"read\", fix the heading levels so they follow h1→h2→h3 order, write back.\n" +
-  "6. For each orphan page (excluding index.md and AGENTS.md): link it from AGENTS.md or the most related existing page.\n" +
-  "7. Re-run wiki op=\"lint\" to confirm zero errors and zero warnings remain. Info items are acceptable.\n" +
-  "8. Finish with action=\"final\" and include in your answer a summary with keys: pages_changed, pages_deleted, issues_fixed."
+  "1. Discovery phase: use wiki op=\"tree\", op=\"browse\", op=\"search\", op=\"backlinks\", and op=\"lint\" to understand the current hierarchy, section indexes, references, duplicates, broken links, orphans, and stale index pages.\n" +
+  "2. Produce a short reorganisation plan in your own context before writing. Folders with index.md are section sub-wikis. Keep existing flat and nested page paths valid unless you intentionally move them.\n" +
+  "3. Apply only high-confidence changes. Use wiki op=\"move\" for page relocations so links are repaired. Skip uncertain moves and record them as skipped_uncertain_moves.\n" +
+  "4. For missing_index issues, create the section index with wiki op=\"init\" and then add links to local pages and child section indexes with wiki op=\"write\".\n" +
+  "5. For index_missing_links and stale_index issues, update the local index.md to link direct pages and child section indexes. Keep indexes concise.\n" +
+  "6. For near_duplicate pairs: use wiki op=\"read\" on both pages, write a merged version to the primary page, then delete or move/supersede the duplicate only when confidence is high.\n" +
+  "7. For broken_link, missing_frontmatter, heading_hierarchy, and orphan issues: read the affected pages, make the minimal correction, and write back.\n" +
+  "8. Re-run wiki op=\"lint\" to confirm zero errors and no avoidable warnings remain. Info items are acceptable when deliberately skipped.\n" +
+  "9. Finish with action=\"final\" and include a summary with keys: pages_moved, pages_changed, pages_deleted, indexes_created, issues_fixed, skipped_uncertain_moves."
 
 MiniADreams.prototype.dreamWiki = function(opts) {
   var self = this
@@ -550,31 +551,43 @@ MiniADreams.prototype._buildWikiConfig = function() {
 
 MiniADreams.prototype.run = function() {
   var self = this
+  var dreamMode = isString(self._args.dreammode) ? self._args.dreammode.trim().toLowerCase() : ""
+  if (dreamMode !== "memory" && dreamMode !== "wiki" && dreamMode !== "both") dreamMode = ""
+  var forceWiki = toBoolean(self._args.dreamwiki) === true
   var hasMemory = isString(self._args.memorych) && self._args.memorych.trim().length > 0
   var hasWiki   = toBoolean(self._args.usewiki) === true
+  var runMemory = hasMemory && (dreamMode === "" || dreamMode === "memory" || dreamMode === "both")
+  var runWiki   = hasWiki && (
+    dreamMode === "wiki" ||
+    dreamMode === "both" ||
+    forceWiki === true ||
+    (dreamMode === "" && !hasMemory)
+  )
 
-  if (!hasMemory && !hasWiki) {
-    self._log("Usage: mini-a dream=true [memorych=<JSSLON>] [auditch=<JSSLON>] [usewiki=true wikiroot=<path>] [model=<JSSLON>] [dryrun=true]")
+  if (!runMemory && !runWiki) {
+    self._log("Usage: mini-a dream=true [memorych=<JSSLON>] [auditch=<JSSLON>] [usewiki=true wikiroot=<path>] [model=<JSSLON>] [dryrun=true] [dreammode=memory|wiki|both] [dreamwiki=true]")
     self._log("  memorych=       JSSLON global memory channel definition (required for memory dream)")
     self._log("  memorysessionch=JSSLON session memory channel")
     self._log("  memorysessionid=Session namespace string")
     self._log("  auditch=        JSSLON audit channel (optional, surfaces insights)")
-    self._log("  usewiki=true    Enable wiki dream")
+    self._log("  usewiki=true    Enable wiki dream configuration")
     self._log("  wikiroot=       Wiki filesystem root path")
     self._log("  model=          JSSLON model config e.g. '{\"type\":\"anthropic\",\"model\":\"claude-sonnet-4-6\"}'")
     self._log("  dryrun=true     Report what would change without writing")
     self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
+    self._log("  dreammode=      Explicit run mode: memory, wiki or both")
+    self._log("  dreamwiki=true  Force wiki dream when memorych is also configured")
     return { ok: false, reason: "no-mode" }
   }
 
   var overall = { ok: true }
-  if (hasMemory) {
+  if (runMemory) {
     var memResult = self.dreamMemory()
     overall.memory = memResult
     if (!memResult.ok) overall.ok = false
     if (memResult.partial === true) overall.partial = true
   }
-  if (hasWiki) {
+  if (runWiki) {
     var wikiResult = self.dreamWiki()
     overall.wiki = wikiResult
     if (!wikiResult.ok) overall.ok = false

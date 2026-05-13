@@ -313,7 +313,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"list|read|search|grep|lint{{#if wikiRw}}|write|delete{{/if}}","path":"page.md","query":"...","content":"...","lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all"{{#if wikiRw}} (write/delete require wikiaccess=rw){{/if}}"}); list returns all pages; search/grep finds matching lines with 1-based line numbers (supports regex, contextLines for surrounding lines, searchIn=body to skip front-matter, path to scope to one page); read supports partial reads via lineStart/lineEnd/maxLines/section/countLines; write supports append=true (add to end), lineInsert=N (insert before line N), lineStart+lineEnd (replace line range), section (replace named section); lint validates wiki health{{#if wikiRw}}; before any write or delete, read AGENTS.md for contribution rules{{/if}}{{/if}}{{#if actionsList}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"list|tree|browse|read|search|grep|backlinks|lint{{#if wikiRw}}|write|move|delete|init{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N{{#if wikiRw}} (write/move/delete/init require wikiaccess=rw){{/if}}"}); start broad wiki navigation with browse or tree, then read selectively; list returns all pages; search/grep finds matching lines with 1-based line numbers (supports regex, contextLines for surrounding lines, searchIn=body to skip front-matter, path to scope to one page); read supports partial reads via lineStart/lineEnd/maxLines/section/countLines; backlinks shows pages linking to a target; move relocates a page and repairs internal links; lint validates wiki health{{#if wikiRw}}; before any write, move, or delete, read AGENTS.md for contribution rules{{/if}}{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -10111,14 +10111,18 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
 
       if (name === "wiki") {
         if (op === "" || op === "list") return "Listing wiki pages" + pathPart + "."
+        if (op === "tree") return "Inspecting wiki hierarchy" + pathPart + "."
+        if (op === "browse") return "Browsing wiki section" + pathPart + "."
         if (op === "read") return "Reading wiki page" + pathPart + "."
-        if (op === "search") {
+        if (op === "search" || op === "grep") {
           if (isString(payload.query) && payload.query.trim().length > 0) {
             return "Searching wiki for " + _quoted(payload.query.trim()) + "."
           }
           return "Searching wiki."
         }
+        if (op === "backlinks") return "Checking wiki backlinks" + pathPart + "."
         if (op === "write") return "Writing wiki page" + pathPart + "."
+        if (op === "move") return "Moving wiki page" + pathPart + "."
         if (op === "lint") return "Checking wiki health."
       }
 
@@ -14717,7 +14721,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays"
+    "wikiignorecertcheck", "wikilintstaleddays", "dreammode", "dreamwiki"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -15984,7 +15988,7 @@ MiniA.prototype.init = function(args) {
     }
     if (args.usewiki && isObject(this._wikiManager)) {
       baseRules.push(
-        "Before answering questions that may involve domain knowledge, past decisions, or reusable facts, search the wiki first: use wiki op='search' with relevant keywords, or wiki op='list' to discover available pages, then wiki op='read' to retrieve specific pages."
+        "Before answering questions that may involve domain knowledge, past decisions, or reusable facts, inspect the wiki first: use wiki op='browse' or op='tree' to discover section indexes, use op='search' for relevant keywords, then wiki op='read' selectively for specific pages."
       )
       if (args.wikiaccess === "rw") {
         baseRules.push(
@@ -19482,6 +19486,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               global.__mini_a_metrics.wiki_ops_list.inc()
               var wkPages = this._wikiManager.list(wkPath)
               wkResult = "Wiki pages (" + wkPages.length + "):\n" + wkPages.join("\n")
+            } else if (wkOp === "tree") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              wkResult = af.toTOON(this._wikiManager.tree(wkPath, isNumber(wkParams.depth) ? wkParams.depth : 3))
+            } else if (wkOp === "browse") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              wkResult = af.toTOON(this._wikiManager.browse(wkPath))
             } else if (wkOp === "read") {
               global.__mini_a_metrics.wiki_ops_read.inc()
               if (wkPath.length === 0) {
@@ -19497,6 +19507,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               } else {
                 var wkHits = this._wikiManager.search(wkQuery, wkSearchOpts)
                 wkResult = wkHits.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
+              }
+            } else if (wkOp === "backlinks") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              if (wkPath.length === 0) {
+                wkResult = "[ERROR] wiki backlinks requires 'path'"
+              } else {
+                wkResult = af.toTOON(this._wikiManager.backlinks(wkPath))
               }
             } else if (wkOp === "lint") {
               global.__mini_a_metrics.wiki_ops_lint.inc()
@@ -19514,6 +19531,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 var wkWrite = this._wikiManager.write(wkPath, wkContent, __, wkWriteOpts)
                 wkResult = isObject(wkWrite) && wkWrite.ok ? "Wrote " + wkPath : "[ERROR] " + (isObject(wkWrite) ? wkWrite.error : "write failed")
               }
+            } else if (wkOp === "move") {
+              global.__mini_a_metrics.wiki_ops_write.inc()
+              var wkTo = isString(wkParams.to) ? wkParams.to.trim() : ""
+              if (args.wikiaccess !== "rw") {
+                wkResult = "[ERROR] wiki move requires wikiaccess=rw"
+              } else if (wkPath.length === 0 || wkTo.length === 0) {
+                wkResult = "[ERROR] wiki move requires 'path' and 'to'"
+              } else {
+                var wkMove = this._wikiManager.move(wkPath, wkTo, { leaveRedirect: wkParams.leaveRedirect === true || wkParams.redirect === true, overwrite: wkParams.overwrite === true })
+                wkResult = isObject(wkMove) && wkMove.ok ? af.toTOON(wkMove) : "[ERROR] " + (isObject(wkMove) ? wkMove.error : "move failed")
+              }
             } else if (wkOp === "delete") {
               global.__mini_a_metrics.wiki_ops_delete.inc()
               if (args.wikiaccess !== "rw") {
@@ -19524,8 +19552,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 var wkDelete = this._wikiManager.delete(wkPath)
                 wkResult = isObject(wkDelete) && wkDelete.ok ? "Deleted " + wkPath : "[ERROR] " + (isObject(wkDelete) ? wkDelete.error : "delete failed")
               }
+            } else if (wkOp === "init") {
+              global.__mini_a_metrics.wiki_ops_write.inc()
+              if (args.wikiaccess !== "rw") {
+                wkResult = "[ERROR] wiki init requires wikiaccess=rw"
+              } else {
+                wkResult = af.toTOON(this._wikiManager.init(wkPath))
+              }
             } else {
-              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use list, read, search, grep, lint" + (args.wikiaccess === "rw" ? ", write, delete" : "")
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use list, tree, browse, read, search, grep, backlinks, lint" + (args.wikiaccess === "rw" ? ", write, move, delete, init" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
             runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) ${wkResult}`)
@@ -20112,6 +20147,10 @@ MiniA.prototype._runChatbotMode = function(options) {
               if (cbWkOp === "list") {
                 var cbWkPages = this._wikiManager.list(cbWkPath)
                 cbWkResult = "Wiki pages (" + cbWkPages.length + "):\n" + cbWkPages.join("\n")
+              } else if (cbWkOp === "tree") {
+                cbWkResult = af.toTOON(this._wikiManager.tree(cbWkPath, isNumber(cbWkParams.depth) ? cbWkParams.depth : 3))
+              } else if (cbWkOp === "browse") {
+                cbWkResult = af.toTOON(this._wikiManager.browse(cbWkPath))
               } else if (cbWkOp === "read") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki read requires 'path'" }
                 else {
@@ -20124,6 +20163,9 @@ MiniA.prototype._runChatbotMode = function(options) {
                   var cbWkHits = this._wikiManager.search(cbWkQuery, cbWkSearchOpts)
                   cbWkResult = cbWkHits.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
                 }
+              } else if (cbWkOp === "backlinks") {
+                if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki backlinks requires 'path'" }
+                else cbWkResult = af.toTOON(this._wikiManager.backlinks(cbWkPath))
               } else if (cbWkOp === "lint") {
                 var cbWkLint = this._wikiManager.lint(this._memoryManager, { staleDays: this._wikiLintStaleDays })
                 cbWkResult = af.toTOON(cbWkLint)
@@ -20135,6 +20177,14 @@ MiniA.prototype._runChatbotMode = function(options) {
                   var cbWkWrite = this._wikiManager.write(cbWkPath, cbWkContent, __, cbWkWriteOpts)
                   cbWkResult = isObject(cbWkWrite) && cbWkWrite.ok ? "Wrote " + cbWkPath : "[ERROR] " + (isObject(cbWkWrite) ? cbWkWrite.error : "write failed")
                 }
+              } else if (cbWkOp === "move") {
+                var cbWkTo = isString(cbWkParams.to) ? cbWkParams.to.trim() : ""
+                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki move requires wikiaccess=rw" }
+                else if (cbWkPath.length === 0 || cbWkTo.length === 0) { cbWkResult = "[ERROR] wiki move requires 'path' and 'to'" }
+                else {
+                  var cbWkMove = this._wikiManager.move(cbWkPath, cbWkTo, { leaveRedirect: cbWkParams.leaveRedirect === true || cbWkParams.redirect === true, overwrite: cbWkParams.overwrite === true })
+                  cbWkResult = isObject(cbWkMove) && cbWkMove.ok ? af.toTOON(cbWkMove) : "[ERROR] " + (isObject(cbWkMove) ? cbWkMove.error : "move failed")
+                }
               } else if (cbWkOp === "delete") {
                 if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki delete requires wikiaccess=rw" }
                 else if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki delete requires 'path'" }
@@ -20142,6 +20192,9 @@ MiniA.prototype._runChatbotMode = function(options) {
                   var cbWkDelete = this._wikiManager.delete(cbWkPath)
                   cbWkResult = isObject(cbWkDelete) && cbWkDelete.ok ? "Deleted " + cbWkPath : "[ERROR] " + (isObject(cbWkDelete) ? cbWkDelete.error : "delete failed")
                 }
+              } else if (cbWkOp === "init") {
+                if (args.wikiaccess !== "rw") { cbWkResult = "[ERROR] wiki init requires wikiaccess=rw" }
+                else cbWkResult = af.toTOON(this._wikiManager.init(cbWkPath))
               } else {
                 cbWkResult = "[ERROR] Unknown wiki op: " + cbWkOp
               }

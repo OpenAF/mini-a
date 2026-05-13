@@ -786,6 +786,8 @@ try {
     mcptest        : { type: "boolean", default: false, description: "Start the MCP test mode instead of the console." },
     memoryman      : { type: "boolean", default: false, description: "Start the memory manager UI instead of the console." },
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
+    dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
+    dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
     path           : { type: "string", description: "Static asset path used by the web UI/worker modes." },
     secpass        : { type: "string", description: "Security password used for protected model config access." },
@@ -1388,8 +1390,8 @@ try {
   }
 
   function getWikiSubcommandCompletions() {
-    var completions = ["list", "read", "search", "lint"]
-    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "init")
+    var completions = ["list", "tree", "browse", "read", "search", "backlinks", "lint"]
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "init")
     return completions
   }
 
@@ -2033,7 +2035,7 @@ try {
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
-      var wikiReadPathCommands = { list: true, read: true, write: true }
+      var wikiReadPathCommands = { list: true, tree: true, browse: true, read: true, write: true, backlinks: true, move: true }
       consoleReader.addCompleter(
         new Packages.openaf.jline.OpenAFConsoleCompleter(function(buf, cursor, candidates) {
           if (isUnDef(buf)) return -1
@@ -5284,7 +5286,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
     ]
     if (toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/wiki [list|read|search|delete|lint|write] [args]", description: "Interact with wiki" })
+      helpCommands.push({ command: "/wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init] [args]", description: "Interact with wiki" })
     }
     if ((isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0) || toBoolean(sessionOptions.usewiki) === true) {
       helpCommands.push({ command: "/dream [memory|wiki] [dryrun]", description: "Consolidate memory and/or wiki (dream pass)" })
@@ -5410,6 +5412,21 @@ try {
           print(colorifyText("Wiki pages (" + pages.length + "):", accentColor))
           pages.forEach(function(p) { print("  " + colorifyText(p, promptColor)) })
         }
+      } else if (sub === "tree") {
+        var tree = wm.tree(rest, 3)
+        print(colorifyText("Wiki tree: " + (tree.path || "/") + " (" + tree.page_count + " pages)", accentColor))
+        if (isObject(tree.index)) print("  index: " + colorifyText(tree.index.path + (tree.index.exists ? "" : " (missing)"), tree.index.exists ? promptColor : errorColor))
+        tree.sections.forEach(function(s) {
+          print("  section: " + colorifyText(s.path, promptColor) + " pages=" + s.page_count + " index=" + (s.index.exists ? "yes" : "missing"))
+        })
+        tree.pages.forEach(function(p) { print("  page: " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "")) })
+      } else if (sub === "browse") {
+        var browse = wm.browse(rest)
+        print(colorifyText("Wiki browse: " + (browse.path || "/"), accentColor))
+        print("  index: " + colorifyText(browse.nearest_index.path + (browse.nearest_index.exists ? "" : " (missing)"), browse.nearest_index.exists ? promptColor : errorColor))
+        browse.child_sections.forEach(function(s) { print("  section: " + colorifyText(s.path, promptColor) + " pages=" + s.page_count) })
+        browse.direct_pages.forEach(function(p) { print("  page: " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "")) })
+        if (browse.suggested_next_reads.length > 0) print("  suggested: " + browse.suggested_next_reads.join(", "))
       } else if (sub === "read") {
         if (rest.length === 0) { print(colorifyText("Usage: /wiki read <path>", errorColor)); return }
         var page = wm.read(rest)
@@ -5429,6 +5446,11 @@ try {
             if (h.snippet) print("    " + colorifyText(h.snippet, hintColor))
           })
         }
+      } else if (sub === "backlinks") {
+        if (rest.length === 0) { print(colorifyText("Usage: /wiki backlinks <path>", errorColor)); return }
+        var refs = wm.backlinks(rest)
+        print(colorifyText("Backlinks to " + refs.target + " (" + refs.count + "):", accentColor))
+        refs.backlinks.forEach(function(b) { print("  " + colorifyText(b.path, promptColor) + (b.title ? " — " + b.title : "")) })
       } else if (sub === "lint") {
         var lintResult = wm.lint(isObject(activeAgent) ? activeAgent._memoryManager : __)
         var s = lintResult.summary
@@ -5468,6 +5490,19 @@ try {
         } else {
           print(colorifyText("Wiki write failed: " + (isObject(writeResult) ? writeResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "move" || sub === "mv") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable moves.", errorColor))
+          return
+        }
+        var moveParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
+        if (moveParts.length < 2) { print(colorifyText("Usage: /wiki move <from.md> <to.md>", errorColor)); return }
+        var moveResult = wm.move(moveParts[0], moveParts[1])
+        if (isObject(moveResult) && moveResult.ok === true) {
+          print(colorifyText("Moved " + moveResult.from + " -> " + moveResult.to + " (changed " + moveResult.pages_changed + " pages)", successColor))
+        } else {
+          print(colorifyText("Wiki move failed: " + (isObject(moveResult) ? moveResult.error : "unknown error"), errorColor))
+        }
       } else if (sub === "delete" || sub === "remove" || sub === "rm") {
         if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
           print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable deletes.", errorColor))
@@ -5486,7 +5521,7 @@ try {
           print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable init.", errorColor))
           return
         }
-        var initResult = wm.init()
+        var initResult = wm.init(rest)
         if (isObject(initResult) && initResult.ok === true) {
           if (initResult.created.length > 0) print(colorifyText("Created: " + initResult.created.join(", "), successColor))
           if (initResult.skipped.length > 0) print(colorifyText("Already exists (skipped): " + initResult.skipped.join(", "), hintColor))
@@ -5494,7 +5529,7 @@ try {
           print(colorifyText("Wiki init failed: " + (isObject(initResult) ? initResult.error : "unknown error"), errorColor))
         }
       } else {
-        print(colorifyText("Usage: /wiki [list|read|search|delete|lint|write|init] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init] [args]", errorColor))
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))

@@ -199,6 +199,39 @@
     ow.test.assert(calls.memory, 0, "dreamMemory should not be called when memorych not set")
   }
 
+  exports.testDreamRunPrefersMemoryWhenBothConfigured = function() {
+    var calls = { memory: 0, wiki: 0 }
+    var runner = new MiniADreams({
+      memorych: "{\"name\":\"dummy\",\"type\":\"simple\"}",
+      usewiki: "true",
+      wikiroot: "/tmp",
+      wikibackend: "fs"
+    }, function() {})
+    runner.dreamMemory = function() { calls.memory++; return { ok: true } }
+    runner.dreamWiki   = function() { calls.wiki++;   return { ok: true } }
+
+    runner.run()
+    ow.test.assert(calls.memory, 1, "dreamMemory should be called once by default")
+    ow.test.assert(calls.wiki,   0, "dreamWiki should not run by default when memory is configured")
+  }
+
+  exports.testDreamRunForceWikiWhenRequested = function() {
+    var calls = { memory: 0, wiki: 0 }
+    var runner = new MiniADreams({
+      memorych: "{\"name\":\"dummy\",\"type\":\"simple\"}",
+      usewiki: "true",
+      wikiroot: "/tmp",
+      wikibackend: "fs",
+      dreamwiki: "true"
+    }, function() {})
+    runner.dreamMemory = function() { calls.memory++; return { ok: true } }
+    runner.dreamWiki   = function() { calls.wiki++;   return { ok: true } }
+
+    runner.run()
+    ow.test.assert(calls.memory, 1, "dreamMemory should be called once")
+    ow.test.assert(calls.wiki,   1, "dreamWiki should run when dreamwiki=true")
+  }
+
   exports.testCreateChannelFromDefInvalidInput = function() {
     var runner = new MiniADreams({}, function() {})
     ow.test.assert(isUnDef(runner._createChannelFromDef("", "fallback", "simple")), true, "empty string → undefined")

@@ -18,6 +18,8 @@ Automated tests exist for utility modules under `tests/`. Run the mini-a-utils t
 
 For core agent behavior, validate by scripting representative goals (see `USAGE.md`) and capture the agent transcript with `debug=true`. When adding MCP integrations, run the corresponding `mcp-*.yaml` job standalone before wiring it into Mini-A. Document manual verification steps in the PR description, and note any scenarios not exercised.
 
+For wiki behavior, run `ojob tests/wiki.yaml`. Hierarchical wiki changes should preserve flat `.md` path compatibility while treating folders with `index.md` as browsable sub-wikis; validate `tree`, `browse`, `backlinks`, `move`, lint checks, and `mcps/mcp-wiki.yaml` metadata together.
+
 Current test coverage includes:
 - **File Operations**: init, readFile, writeFile, listDirectory, searchContent, getFileInfo, deleteFile, filesystemQuery, filesystemModify, path security
 - **Mathematical Operations**: calculate (add, subtract, multiply, divide, power, sqrt, abs, round), statistics (mean, median, min, max, sum, count), unit conversions, random generation (integer, sequence, choice, boolean, hex)

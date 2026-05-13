@@ -191,9 +191,10 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
       "",
       "## Retrieval Conventions",
       "",
-      "- Start with `wiki read index.md` for the wiki entrypoint and top-level navigation.",
+      "- Start with `wiki browse` or `wiki tree` to discover the wiki hierarchy and section indexes.",
+      "- Use `wiki read index.md` for the wiki entrypoint and top-level navigation.",
       "- Use `wiki search <query>` for keyword search across page bodies.",
-      "- Use `wiki list` to browse available pages when you need to discover structure.",
+      "- Use `wiki list` when you need a flat page list for compatibility or scripting.",
       "- Use `wiki read <path>` to load a specific page.",
       "- Prefer reading the most-recently-updated page when multiple pages cover similar ground.",
       "- Trust content marked `status: stable`; treat `status: draft` as provisional.",
@@ -221,6 +222,7 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
       "## Entry Point",
       "",
       "- The wiki entrypoint is [Wiki Home](index.md). Keep it updated with the top-level structure.",
+      "- Folders become browsable sub-wikis when they contain a local `index.md`.",
       "- Add new sections there when introducing a new major topic area.",
     ].join("\n")
 
@@ -237,7 +239,7 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
       "",
       "# Wiki Home",
       "",
-      "This is the main entrypoint for the wiki. Start here to discover the available knowledge.",
+      "This is the main entrypoint for the wiki. Start here to discover the available knowledge and section indexes.",
       "",
       "## Start Here",
       "",
@@ -245,7 +247,7 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
       "",
       "## Topics",
       "",
-      "- Add top-level topic pages here as the wiki grows.",
+      "- Add top-level topic pages and child section indexes here as the wiki grows.",
       "- Keep this page short; use it as a table of contents, not a dumping ground.",
       "",
       "## Recent Additions",
@@ -258,9 +260,84 @@ MiniAWikiManager.prototype._bootstrapWiki = function() {
   } catch(e) {}
 }
 
-MiniAWikiManager.prototype.init = function() {
+MiniAWikiManager.prototype._normalizeSectionPath = function(path) {
+  if (!isString(path) || path.trim().length === 0) return ""
+  var value = String(path).trim().replace(/\\/g, "/")
+  if (value.toLowerCase().endsWith("/index.md")) value = value.substring(0, value.length - "index.md".length)
+  if (value.toLowerCase().endsWith(".md")) value = value.substring(0, value.lastIndexOf("/") + 1)
+  if (value.length === 0) return ""
+  value = __miniAWikiNormalizePath(value, { allowDirectory: true })
+  if (value.length > 0 && !value.endsWith("/")) value = value + "/"
+  return value
+}
+
+MiniAWikiManager.prototype._pageDir = function(path) {
+  if (!isString(path) || path.indexOf("/") < 0) return ""
+  return path.substring(0, path.lastIndexOf("/") + 1)
+}
+
+MiniAWikiManager.prototype._pageTitle = function(path) {
+  var page = this.read(path)
+  if (isObject(page) && isObject(page.meta) && isString(page.meta.title) && page.meta.title.trim().length > 0) return page.meta.title.trim()
+  return path.replace(/\.md$/i, "").replace(/.*\//, "").replace(/[-_]/g, " ")
+}
+
+MiniAWikiManager.prototype._relativePath = function(fromPage, targetPage) {
+  var fromDir = this._pageDir(fromPage)
+  var fromParts = fromDir.length > 0 ? fromDir.replace(/\/$/, "").split("/") : []
+  var targetParts = targetPage.split("/")
+  while (fromParts.length > 0 && targetParts.length > 0 && fromParts[0] === targetParts[0]) {
+    fromParts.shift()
+    targetParts.shift()
+  }
+  var rel = []
+  for (var i = 0; i < fromParts.length; i++) rel.push("..")
+  rel = rel.concat(targetParts)
+  return rel.length > 0 ? rel.join("/") : targetPage.replace(/.*\//, "")
+}
+
+MiniAWikiManager.prototype._makeIndexContent = function(indexPath, title, description) {
+  var now = new Date().toISOString()
+  var sectionName = isString(title) && title.trim().length > 0 ? title.trim() : (indexPath === "index.md" ? "Wiki Home" : indexPath.replace(/\/index\.md$/i, "").replace(/[-_/]/g, " "))
+  return [
+    "---",
+    "title: " + sectionName,
+    "description: " + (isString(description) && description.trim().length > 0 ? description.trim() : "Navigation index for this wiki section."),
+    "created: " + now,
+    "updated: " + now,
+    "tags:",
+    "  - index",
+    "---",
+    "",
+    "# " + sectionName,
+    "",
+    "Use this page as the navigation index for this section.",
+    "",
+    "## Pages",
+    "",
+    "- Add links to pages in this section.",
+    "",
+    "## Sections",
+    "",
+    "- Add links to child section indexes.",
+  ].join("\n")
+}
+
+MiniAWikiManager.prototype.init = function(path) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
   var now = new Date().toISOString()
+  if (isString(path) && path.trim().length > 0) {
+    try {
+      var section = this._normalizeSectionPath(path)
+      var indexPath = section + "index.md"
+      if (this._backend.exists(indexPath)) return { ok: true, created: [], skipped: [ indexPath ] }
+      this._backend.write(indexPath, this._makeIndexContent(indexPath))
+      this._rebuildSearchIndex()
+      return { ok: true, created: [ indexPath ], skipped: [] }
+    } catch(sectionErr) {
+      return { ok: false, error: __miniAErrMsg(sectionErr) }
+    }
+  }
   var hasAgents = this._backend.exists("AGENTS.md")
   var hasIndex  = this._backend.exists("index.md")
   var bootstrapped = isArray(this._bootstrappedFiles) ? this._bootstrappedFiles : []
@@ -335,9 +412,10 @@ MiniAWikiManager.prototype.init = function() {
         "",
         "## Retrieval Conventions",
         "",
-        "- Start with `wiki read index.md` for the wiki entrypoint and top-level navigation.",
+        "- Start with `wiki browse` or `wiki tree` to discover the wiki hierarchy and section indexes.",
+        "- Use `wiki read index.md` for the wiki entrypoint and top-level navigation.",
         "- Use `wiki search <query>` for keyword search across page bodies.",
-        "- Use `wiki list` to browse available pages when you need to discover structure.",
+        "- Use `wiki list` when you need a flat page list for compatibility or scripting.",
         "- Use `wiki read <path>` to load a specific page.",
         "- Prefer reading the most-recently-updated page when multiple pages cover similar ground.",
         "- Trust content marked `status: stable`; treat `status: draft` as provisional.",
@@ -365,6 +443,7 @@ MiniAWikiManager.prototype.init = function() {
         "## Entry Point",
         "",
         "- The wiki entrypoint is [Wiki Home](index.md). Keep it updated with the top-level structure.",
+        "- Folders become browsable sub-wikis when they contain a local `index.md`.",
         "- Add new sections there when introducing a new major topic area.",
       ].join("\n")
       this._backend.write("AGENTS.md", agentsContent)
@@ -388,7 +467,7 @@ MiniAWikiManager.prototype.init = function() {
         "",
         "# Wiki Home",
         "",
-        "This is the main entrypoint for the wiki. Start here to discover the available knowledge.",
+        "This is the main entrypoint for the wiki. Start here to discover the available knowledge and section indexes.",
         "",
         "## Start Here",
         "",
@@ -396,7 +475,7 @@ MiniAWikiManager.prototype.init = function() {
         "",
         "## Topics",
         "",
-        "- Add top-level topic pages here as the wiki grows.",
+        "- Add top-level topic pages and child section indexes here as the wiki grows.",
         "- Keep this page short; use it as a table of contents, not a dumping ground.",
         "",
         "## Recent Additions",
@@ -470,6 +549,9 @@ var __miniAWikiNormalizePath = function(path, options) {
   if (value.length === 0) throw "path is required"
   if (/[\x00-\x1f]/.test(value)) throw "path contains control characters"
   if (value.startsWith("/") || value.startsWith("//") || /^[A-Za-z]:\//.test(value)) throw "absolute paths are not allowed"
+  if (opts.allowDirectory === true) {
+    while (value.length > 0 && value.endsWith("/")) value = value.substring(0, value.length - 1)
+  }
   if (!opts.allowDirectory && value.endsWith("/")) throw "path must target a file"
 
   var parts = value.split("/")
@@ -1029,6 +1111,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
   var limit      = isNumber(opts.limit)        && opts.limit        > 0 ? opts.limit        : 20
   var contextN   = isNumber(opts.contextLines) && opts.contextLines > 0 ? Math.min(opts.contextLines, 10) : 0
   var caseSens   = opts.caseSensitive === true
+  var forceScan  = opts.forceScan === true
   var searchIn   = isString(opts.searchIn) && opts.searchIn.toLowerCase() === "body" ? "body" : "all"
   var scopedPath = ""
   if (isString(opts.path) && opts.path.trim().length > 0) {
@@ -1049,7 +1132,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
   pages = pages.filter(p => !this._isHiddenPath(p))
   var results = []
 
-  if (!opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
+  if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
     try {
       var chName = "__mini_a_wiki_searchdb"
       var luceneHits
@@ -1109,6 +1192,229 @@ MiniAWikiManager.prototype.search = function(query, options) {
   }
 
   return results
+}
+
+MiniAWikiManager.prototype.tree = function(prefix, depth) {
+  var sectionPrefix = ""
+  try { sectionPrefix = this._normalizeSectionPath(prefix) } catch(e) { sectionPrefix = "" }
+  var maxDepth = isNumber(depth) && depth >= 0 ? depth : 3
+  var pages = this.list(sectionPrefix).filter(function(p) { return isString(p) && p.endsWith(".md") })
+  var self = this
+
+  var buildNode = function(dir, level) {
+    var indexPath = dir + "index.md"
+    var directPages = []
+    var childMap = {}
+    var totalPages = 0
+
+    pages.forEach(function(p) {
+      if (p.indexOf(dir) !== 0) return
+      var rest = p.substring(dir.length)
+      if (rest.length === 0) return
+      totalPages++
+      if (rest.indexOf("/") < 0) {
+        if (rest !== "index.md") directPages.push({
+          path: p,
+          title: self._pageTitle(p)
+        })
+      } else {
+        var childName = rest.substring(0, rest.indexOf("/"))
+        childMap[childName] = dir + childName + "/"
+      }
+    })
+
+    directPages.sort(function(a, b) { return a.path.localeCompare(b.path) })
+    var childNames = Object.keys(childMap).sort()
+    var sections = []
+    if (level < maxDepth) {
+      childNames.forEach(function(name) { sections.push(buildNode(childMap[name], level + 1)) })
+    } else {
+      childNames.forEach(function(name) {
+        var childDir = childMap[name]
+        var childIndex = childDir + "index.md"
+        var count = 0
+        pages.forEach(function(p) { if (p.indexOf(childDir) === 0) count++ })
+        sections.push({
+          path: childDir,
+          name: name,
+          index: { path: childIndex, exists: self._backend.exists(childIndex) },
+          page_count: count,
+          direct_page_count: 0,
+          child_section_count: 0,
+          pages: [],
+          sections: []
+        })
+      })
+    }
+
+    var idx = { path: indexPath, exists: self._backend.exists(indexPath) }
+    if (idx.exists) {
+      var idxPage = self.read(indexPath)
+      if (isObject(idxPage) && isObject(idxPage.meta)) {
+        idx.title = isString(idxPage.meta.title) ? idxPage.meta.title : indexPath
+        idx.updated = idxPage.meta.updated
+      }
+    }
+
+    return {
+      path: dir,
+      name: dir.length === 0 ? "" : dir.replace(/\/$/, "").replace(/.*\//, ""),
+      index: idx,
+      page_count: totalPages,
+      direct_page_count: directPages.length,
+      child_section_count: childNames.length,
+      pages: directPages,
+      sections: sections
+    }
+  }
+
+  var root = buildNode(sectionPrefix, 0)
+  root.prefix = sectionPrefix
+  root.depth = maxDepth
+  return root
+}
+
+MiniAWikiManager.prototype.browse = function(path) {
+  var section = ""
+  try { section = this._normalizeSectionPath(path) } catch(e) { section = "" }
+  var nearest = section
+  while (nearest.length > 0 && !this._backend.exists(nearest + "index.md")) {
+    nearest = nearest.replace(/\/$/, "")
+    nearest = nearest.indexOf("/") >= 0 ? nearest.substring(0, nearest.lastIndexOf("/") + 1) : ""
+  }
+  if (nearest.length === 0 && this._backend.exists("index.md")) nearest = ""
+  var node = this.tree(section, 1)
+  var indexPath = nearest + "index.md"
+  var suggested = []
+  if (this._backend.exists(indexPath)) suggested.push(indexPath)
+  node.pages.slice(0, 5).forEach(function(p) { suggested.push(p.path) })
+  node.sections.slice(0, 5).forEach(function(s) {
+    if (isObject(s.index) && s.index.exists) suggested.push(s.index.path)
+  })
+  return {
+    path: section,
+    nearest_index: {
+      path: indexPath,
+      exists: this._backend.exists(indexPath),
+      title: this._backend.exists(indexPath) ? this._pageTitle(indexPath) : __
+    },
+    child_sections: node.sections.map(function(s) {
+      return { path: s.path, name: s.name, index: s.index, page_count: s.page_count }
+    }),
+    direct_pages: node.pages,
+    suggested_next_reads: suggested
+  }
+}
+
+MiniAWikiManager.prototype.backlinks = function(path) {
+  var target
+  try { target = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return { target: path, count: 0, backlinks: [] } }
+  var self = this
+  var results = []
+  this.list("").forEach(function(p) {
+    var raw = self._backend.read(p)
+    if (!isString(raw)) return
+    var parsed = self.parseFrontmatter(raw)
+    var entries = self._extractLinkEntries(parsed.body)
+    var matches = []
+    entries.forEach(function(entry) {
+      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(p, entry.raw)
+      if (resolved === target) matches.push({ target: entry.raw, resolved: resolved })
+    })
+    if (matches.length > 0) {
+      results.push({
+        path: p,
+        title: isString(parsed.meta.title) ? parsed.meta.title : p,
+        links: matches
+      })
+    }
+  })
+  return { target: target, count: results.length, backlinks: results }
+}
+
+MiniAWikiManager.prototype._rewriteLinksForMove = function(raw, sourcePage, fromPath, toPath, rebaseOnly) {
+  if (!isString(raw)) return raw
+  var self = this
+  var body = raw
+  body = body.replace(/\[([^\]]*)\]\(([^)]+\.md([^)]*)?)\)/g, function(full, label, target) {
+    var parts = target.split("#")
+    var cleanTarget = parts[0].trim()
+    var anchor = parts.length > 1 ? "#" + parts.slice(1).join("#") : ""
+    if (/^https?:\/\//i.test(cleanTarget) || cleanTarget.startsWith("/")) return full
+    var resolved = self.resolveLink(sourcePage, cleanTarget)
+    if (!isString(resolved)) return full
+    if (resolved === fromPath) resolved = toPath
+    else if (rebaseOnly !== true) return full
+    return "[" + label + "](" + self._relativePath(rebaseOnly === true ? toPath : sourcePage, resolved) + anchor + ")"
+  })
+  body = body.replace(/\[\[([^\]]+)\]\]/g, function(full, label) {
+    var slug = String(label).trim().toLowerCase().replace(/\s+/g, "-") + ".md"
+    if (slug !== fromPath) return full
+    return "[" + label + "](" + self._relativePath(rebaseOnly === true ? toPath : sourcePage, toPath) + ")"
+  })
+  return body
+}
+
+MiniAWikiManager.prototype.move = function(from, to, options) {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
+  var opts = isObject(options) ? options : {}
+  var fromPath, toPath
+  try {
+    fromPath = __miniAWikiNormalizePath(from, { requireMarkdown: true })
+    toPath = __miniAWikiNormalizePath(to, { requireMarkdown: true })
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
+  if (fromPath === "AGENTS.md" || toPath === "AGENTS.md") return { ok: false, error: "cannot move AGENTS.md (protected)" }
+  if (this._isHiddenPath(fromPath) || this._isHiddenPath(toPath)) return { ok: false, error: "cannot move hidden wiki index files" }
+  if (!this._backend.exists(fromPath)) return { ok: false, error: "page not found: " + fromPath }
+  if (fromPath === toPath) return { ok: true, from: fromPath, to: toPath, pages_moved: 0, pages_changed: 0, redirect_created: false }
+  if (this._backend.exists(toPath) && opts.overwrite !== true) return { ok: false, error: "target exists: " + toPath }
+
+  var raw = this._backend.read(fromPath)
+  if (!isString(raw)) return { ok: false, error: "page not readable: " + fromPath }
+  var movedRaw = this._rewriteLinksForMove(raw, fromPath, fromPath, toPath, true)
+  var writeMoved = this.write(toPath, movedRaw)
+  if (!isObject(writeMoved) || writeMoved.ok !== true) return writeMoved
+
+  var pagesChanged = []
+  var self = this
+  this.list("").forEach(function(p) {
+    if (p === fromPath || p === toPath) return
+    var pageRaw = self._backend.read(p)
+    if (!isString(pageRaw)) return
+    var rewritten = self._rewriteLinksForMove(pageRaw, p, fromPath, toPath, false)
+    if (rewritten !== pageRaw) {
+      var res = self.write(p, rewritten)
+      if (isObject(res) && res.ok === true) pagesChanged.push(p)
+    }
+  })
+
+  var redirectCreated = false
+  if (opts.leaveRedirect === true || opts.redirect === true || opts.stub === true) {
+    var oldPage = this.parseFrontmatter(raw)
+    var meta = isObject(oldPage.meta) ? oldPage.meta : {}
+    meta.title = isString(meta.title) ? meta.title : fromPath
+    meta.superseded_by = toPath
+    var rel = this._relativePath(fromPath, toPath)
+    var stubBody = "> Superseded - this page moved to [" + toPath + "](" + rel + ").\n"
+    var stub = this.write(fromPath, meta, stubBody)
+    redirectCreated = isObject(stub) && stub.ok === true
+  } else {
+    var del = this.delete(fromPath)
+    if (!isObject(del) || del.ok !== true) return del
+  }
+
+  this._rebuildSearchIndex()
+  return {
+    ok: true,
+    from: fromPath,
+    to: toPath,
+    pages_moved: 1,
+    pages_changed: pagesChanged.length,
+    changed_pages: pagesChanged,
+    redirect_created: redirectCreated
+  }
 }
 
 // ── Lint ──────────────────────────────────────────────────────────────────────
@@ -1192,7 +1498,65 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   })
 
-  // Check 5: Orphaned pages (no incoming links — skip index-like files)
+  // Check 5: Hierarchy/index health
+  var folders = { "": true }
+  pages.forEach(function(p) {
+    var parts = p.split("/")
+    if (parts.length <= 1) return
+    var accum = ""
+    for (var i = 0; i < parts.length - 1; i++) {
+      accum += parts[i] + "/"
+      folders[accum] = true
+    }
+  })
+  Object.keys(folders).sort().forEach(function(dir) {
+    var directPages = []
+    var childIndexes = []
+    pages.forEach(function(p) {
+      if (p.indexOf(dir) !== 0) return
+      var rest = p.substring(dir.length)
+      if (rest.length === 0) return
+      if (rest.indexOf("/") < 0) {
+        if (rest !== "index.md") directPages.push(p)
+      } else {
+        var childIndex = dir + rest.substring(0, rest.indexOf("/")) + "/index.md"
+        if (pages.indexOf(childIndex) >= 0 && childIndexes.indexOf(childIndex) < 0) childIndexes.push(childIndex)
+      }
+    })
+    if (directPages.length === 0 && childIndexes.length === 0) return
+
+    var indexPath = dir + "index.md"
+    var indexData = pageData[indexPath]
+    if (!indexData) {
+      issues.push({ severity: "warning", type: "missing_index", section: dir, page: indexPath, direct_pages: directPages.length, child_indexes: childIndexes.length })
+      return
+    }
+
+    var linked = {}
+    indexData.linkEntries.forEach(function(entry) {
+      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(indexPath, entry.raw)
+      if (isString(resolved)) linked[resolved] = true
+    })
+    directPages.concat(childIndexes).forEach(function(required) {
+      if (!linked[required]) issues.push({ severity: "warning", type: "index_missing_links", section: dir, page: indexPath, target: required })
+    })
+
+    if (isDef(indexData.meta.updated)) {
+      var indexMs = new Date(String(indexData.meta.updated)).getTime()
+      if (!isNaN(indexMs)) {
+        directPages.concat(childIndexes).forEach(function(child) {
+          var childData = pageData[child]
+          if (!childData || isUnDef(childData.meta.updated)) return
+          var childMs = new Date(String(childData.meta.updated)).getTime()
+          if (!isNaN(childMs) && childMs > indexMs) {
+            issues.push({ severity: "info", type: "stale_index", section: dir, page: indexPath, newer_child: child })
+          }
+        })
+      }
+    }
+  })
+
+  // Check 6: Orphaned pages (no incoming links — skip index-like files)
   pages.forEach(function(p) {
     var name = p.replace(/.*\//, "").toLowerCase()
     if (name === "index.md" || name === "readme.md") return
@@ -1201,7 +1565,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   })
 
-  // Check 6: Near-duplicate page bodies
+  // Check 7: Near-duplicate page bodies
   var pageList = Object.keys(pageData)
   for (var i = 0; i < pageList.length; i++) {
     for (var j = i + 1; j < pageList.length; j++) {
@@ -1213,7 +1577,7 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   }
 
-  // Check 7: Memory cross-check (optional)
+  // Check 8: Memory cross-check (optional)
   if (isObject(memoryManager) && isFunction(memoryManager.getSectionEntries)) {
     var factSections = ["facts", "decisions"]
     factSections.forEach(function(section) {

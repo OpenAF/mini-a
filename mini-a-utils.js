@@ -1522,8 +1522,9 @@ MiniUtilsTool.prototype.skills = function(params) {
  * <key>MiniUtilsTool.wiki(params) : Object|String</key>
  * Interact with the wiki knowledge base configured in the agent.
  * The `params` object supports:
- * - `operation` (string): list, read, search, write, delete, lint.
+ * - `operation` (string): list, tree, browse, read, search, backlinks, write, move, delete, lint, init.
  * - `path` (string): Page path for read/write operations.
+ * - `to` (string): Target page path for operation=move.
  * - `query` (string): Search query for operation=search.
  * - `content` (string): Raw markdown content for operation=write.
  * - `compact` (boolean): Return compact output.
@@ -1541,12 +1542,36 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "find") op = "search"
     if (op === "validate" || op === "check") op = "lint"
     if (op === "save" || op === "put" || op === "create" || op === "update") op = "write"
+    if (op === "refs" || op === "references") op = "backlinks"
+    if (op === "mv" || op === "rename") op = "move"
 
     if (op === "list") {
       var prefix = isString(params.path) ? params.path : ""
       var pages = wm.list(prefix)
       if (params.compact === true) return { count: pages.length, pages: pages }
       return { count: pages.length, pages: pages }
+    }
+
+    if (op === "tree") {
+      var treePath = isString(params.path) ? params.path : ""
+      var treeDepth = isNumber(params.depth) ? params.depth : 3
+      var tree = wm.tree(treePath, treeDepth)
+      if (params.compact === true) {
+        return {
+          path: tree.path,
+          index: tree.index,
+          page_count: tree.page_count,
+          direct_pages: tree.pages,
+          child_sections: tree.sections.map(function(s) {
+            return { path: s.path, index: s.index, page_count: s.page_count, child_section_count: s.child_section_count }
+          })
+        }
+      }
+      return tree
+    }
+
+    if (op === "browse") {
+      return wm.browse(isString(params.path) ? params.path : "")
     }
 
     if (op === "read") {
@@ -1563,11 +1588,25 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return { count: hits.length, results: hits }
     }
 
+    if (op === "backlinks") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for backlinks"
+      var links = wm.backlinks(params.path.trim())
+      if (params.compact === true) return { target: links.target, count: links.count, pages: links.backlinks.map(function(b) { return { path: b.path, title: b.title } }) }
+      return links
+    }
+
     if (op === "write") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for write"
       if (!isString(params.content) || params.content.trim().length === 0) return "[ERROR] content is required for write"
       var wResult = wm.write(params.path.trim(), params.content)
       return isObject(wResult) ? wResult : { ok: false, error: String(wResult) }
+    }
+
+    if (op === "move") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for move"
+      if (!isString(params.to) || params.to.trim().length === 0) return "[ERROR] to is required for move"
+      var mResult = wm.move(params.path.trim(), params.to.trim(), { leaveRedirect: params.leaveRedirect === true || params.redirect === true, overwrite: params.overwrite === true })
+      return isObject(mResult) ? mResult : { ok: false, error: String(mResult) }
     }
 
     if (op === "lint") {
@@ -1585,11 +1624,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
     }
 
     if (op === "init") {
-      var iResult = wm.init()
+      var iResult = wm.init(isString(params.path) ? params.path : __)
       return isObject(iResult) ? iResult : { ok: false, error: String(iResult) }
     }
 
-    return "[ERROR] Unknown wiki operation: " + op + ". Use list, read, search, write, delete, lint, init."
+    return "[ERROR] Unknown wiki operation: " + op + ". Use list, tree, browse, read, search, backlinks, write, move, delete, lint, init."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -3706,20 +3745,24 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. Use operation='list' to browse pages, 'read' to get a page, 'search' to find pages by keyword, 'write' to create/update a page, 'delete' to remove a page (requires wikiaccess=rw), 'lint' to validate wiki health, and 'init' to create AGENTS.md and index.md if they don't exist (requires wikiaccess=rw).",
+      description: "Interact with the wiki knowledge base. Use operation='tree' or 'browse' to discover hierarchy, 'read' to get a page, 'search' to find pages by keyword, 'backlinks' to inspect references, 'write' to create/update a page, 'move' to relocate a page with link repair (requires wikiaccess=rw), 'delete' to remove a page (requires wikiaccess=rw), 'lint' to validate wiki health, and 'init' to create AGENTS.md/index.md or a section index.md (requires wikiaccess=rw).",
       inputSchema: {
         type      : "object",
         properties: {
           operation: {
             type       : "string",
-            description: "Operation: list, read, search, write, delete, lint, init (aliases: get/view/cat for read; find for search; validate/check for lint; save/put/create/update for write; remove/rm for delete).",
-            enum       : ["list", "read", "search", "write", "delete", "lint", "init", "get", "view", "cat", "find", "validate", "check", "save", "put", "create", "update", "remove", "rm"],
+            description: "Operation: list, tree, browse, read, search, backlinks, write, move, delete, lint, init (aliases: get/view/cat for read; find for search; refs/references for backlinks; validate/check for lint; save/put/create/update for write; mv/rename for move; remove/rm for delete).",
+            enum       : ["list", "tree", "browse", "read", "search", "backlinks", "write", "move", "delete", "lint", "init", "get", "view", "cat", "find", "refs", "references", "validate", "check", "save", "put", "create", "update", "mv", "rename", "remove", "rm"],
             default    : "list"
           },
-          path     : { type: "string", description: "Page path for read/write/delete operations, or path prefix for list." },
+          path     : { type: "string", description: "Page path for read/write/delete/backlinks/move operations, path prefix for list/tree, or folder path for browse/init." },
+          to       : { type: "string", description: "Target page path for operation=move." },
           query    : { type: "string", description: "Search query for operation=search." },
           content  : { type: "string", description: "Raw markdown content for operation=write." },
           limit    : { type: "number", description: "Maximum results for search." },
+          depth    : { type: "number", description: "Maximum child-section depth for operation=tree." },
+          leaveRedirect: { type: "boolean", description: "Leave a superseded redirect stub for operation=move." },
+          overwrite: { type: "boolean", description: "Allow replacing an existing target page for operation=move." },
           staleDays: { type: "number", description: "Override stale threshold in days for lint." },
           compact  : { type: "boolean", description: "Return compact responses to reduce token usage." }
         },
@@ -3733,8 +3776,16 @@ MiniUtilsTool._metadataByFn = (function() {
             then: { required: ["query"] }
           },
           {
+            if  : { required: ["operation"], properties: { operation: { enum: ["backlinks", "refs", "references"] } } },
+            then: { required: ["path"] }
+          },
+          {
             if  : { required: ["operation"], properties: { operation: { enum: ["write", "save", "put", "create", "update"] } } },
             then: { required: ["path", "content"] }
+          },
+          {
+            if  : { required: ["operation"], properties: { operation: { enum: ["move", "mv", "rename"] } } },
+            then: { required: ["path", "to"] }
           },
           {
             if  : { required: ["operation"], properties: { operation: { enum: ["delete", "remove", "rm"] } } },

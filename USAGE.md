@@ -882,6 +882,8 @@ The `start()` method accepts various configuration options:
 - **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
 
+Wiki folders become browsable sub-wikis when they contain a local `index.md`. Use `wiki` action ops `tree` or `browse` to discover section indexes before reading full pages. `backlinks` helps inspect references before edits, `move` relocates pages with link repair, and `init path=<folder/>` creates a section `index.md` in read-write mode.
+
 For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `esurl=` runtime argument; use `wikiurl=` with `wikibackend=es`.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
 - **`agent`** (string): Path to a markdown agent profile (or inline markdown text) with YAML frontmatter metadata. Supported keys include `model`, `capabilities` (`useshell`, `readwrite`, `useutils`, `usetools`), `tools` (MCP entries such as `type: ojob`, `type: stdio` + `cmd`, `type: remote`, or `type: sse`), `constraints` (appended to `rules`), `knowledge`, `youare`, and `mini-a` (map of direct Mini-A arg overrides). When the profile uses Markdown front matter, any text after the closing `---` is used as the default `goal=` input unless you pass `goal=` explicitly. (`agentfile` remains a backward-compatible alias.)
@@ -2943,16 +2945,18 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 ### Wiki dream internals
 
 1. `usewiki=true` is required; `wikiaccess` is forced to `rw`.
-2. A `MiniAWikiManager` runs `lint()` to establish a baseline issue list.
+2. A `MiniAWikiManager` exposes hierarchy-aware `tree`, `browse`, `backlinks`, `move`, and `lint()` operations.
 3. A full `MiniA` agent is spawned with `maxsteps=60` and the following goal:
-   - List all lint issues.
-   - For each near-duplicate pair: read both pages, merge content into the primary, delete the duplicate, fix links pointing to the deleted page.
+   - Discover the hierarchy with `tree`/`browse`, search related content, inspect backlinks, and list lint issues.
+   - Apply only high-confidence category moves with `move`; skip uncertain relocations.
+   - Create missing section indexes and fix index links for local pages and child sections.
+   - For each near-duplicate pair: read both pages, merge content into the primary, delete or supersede the duplicate when confidence is high.
    - For each broken link: read and correct or remove the target.
    - For each missing front-matter page: add inferred `title`, `description`, `created`, `updated`.
    - For each heading hierarchy violation: fix heading levels.
    - For orphan pages (excluding `index.md` and `AGENTS.md`): add a link from `AGENTS.md` or the most related existing page.
    - Re-run lint and confirm zero errors and warnings remain.
-4. The agent's final answer summarises `pages_changed`, `pages_deleted`, `issues_fixed`.
+4. The agent's final answer summarises `pages_moved`, `pages_changed`, `pages_deleted`, `indexes_created`, `issues_fixed`, and `skipped_uncertain_moves`.
 
 ### Standalone usage (`mini-a dream=true`)
 

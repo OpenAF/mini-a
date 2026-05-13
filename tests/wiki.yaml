@@ -220,6 +220,51 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testRawWritePreservesCreatedMetadata
 
+- name: MiniA Wiki Tests::TreeShowsNestedSectionIndex
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTreeShowsNestedSectionIndex
+
+- name: MiniA Wiki Tests::BrowseSuggestsSectionReads
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBrowseSuggestsSectionReads
+
+- name: MiniA Wiki Tests::LintMissingIndex
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintMissingIndex
+
+- name: MiniA Wiki Tests::LintIndexMissingLinks
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLintIndexMissingLinks
+
+- name: MiniA Wiki Tests::BacklinksFindsReferences
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBacklinksFindsReferences
+
+- name: MiniA Wiki Tests::MoveRewritesLinksAndPreservesCreated
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMoveRewritesLinksAndPreservesCreated
+
+- name: MiniA Wiki Tests::MoveRedirectStub
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMoveRedirectStub
+
+- name: MiniA Wiki Tests::InitCreatesSectionIndex
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitCreatesSectionIndex
+
+- name: MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMcpWikiMetadataIncludesHierarchyTools
+
 - name: MiniA Wiki Tests::FsBackendDelete
   from: MiniA Wiki Tests::Init
   to  : oJob Test

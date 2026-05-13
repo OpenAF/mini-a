@@ -127,6 +127,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMetadata
 
+- name: MiniA Utils Tests::WikiToolHierarchyOps
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWikiToolHierarchyOps
+
 - name: MiniA Utils Tests::MathOpsCalculate
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -210,6 +215,7 @@ todo:
 - MiniA Utils Tests::Skills
 - MiniA Utils Tests::SkillsDefaultRoots
 - MiniA Utils Tests::Metadata
+- MiniA Utils Tests::WikiToolHierarchyOps
 - MiniA Utils Tests::MathOpsCalculate
 - MiniA Utils Tests::MathOpsStatistics
 - MiniA Utils Tests::MathOpsConvert

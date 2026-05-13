@@ -127,14 +127,16 @@ See [docs/DELEGATION.md](DELEGATION.md) for full documentation including example
 
 **What's New**:
 
-- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `search`, `lint`, and `write` operations.
+- **`MiniAWikiManager`** class (`mini-a-wiki.js`): pluggable FS, S3, S3+FS (`s3fs`), and Elasticsearch/OpenSearch (`es`) backends, `parseFrontmatter`, `extractLinks`, `tree`, `browse`, `backlinks`, `move`, `search`, `lint`, and `write` operations.
 
-- **New `wiki` agent action**: the agent can call `list`, `read`, `search`, `grep`, `lint`, `write` (when `wikiaccess=rw`), or `delete` (when `wikiaccess=rw`) at any step:
+- **New `wiki` agent action**: the agent can call `list`, `tree`, `browse`, `read`, `search`, `grep`, `backlinks`, `lint`, `write` (when `wikiaccess=rw`), `move` (when `wikiaccess=rw`), `init` (when `wikiaccess=rw`), or `delete` (when `wikiaccess=rw`) at any step:
   ```json
   { "action": "wiki", "params": { "op": "search", "query": "authentication decision" } }
   ```
 
-- **Lint checks**: `broken_link` (error), `missing_frontmatter` (warning for missing title / info for missing description), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
+- **Hierarchical wiki navigation**: folders become browsable sub-wikis when they contain `index.md`. `tree` shows section/page structure, `browse` returns the nearest index plus direct pages and child sections, `backlinks` shows references before edits, and `move` relocates pages while repairing internal links.
+
+- **Lint checks**: `broken_link` (error), `missing_index` (warning), `index_missing_links` (warning), `stale_index` (info), `missing_frontmatter` (warning for missing title / info for missing description), `heading_hierarchy` (warning), `orphan` (warning), `near_duplicate` (info), `stale` (info), `memory_conflict` (warning).
 
 - **Auto-bootstrapping**: when a new empty wiki is opened in `rw` mode, Mini-A creates both `AGENTS.md` and `index.md`. `AGENTS.md` contains the ingestion workflow and contribution rules; `index.md` is the wiki entrypoint and starter table of contents.
 

@@ -1,5 +1,7 @@
 (function() {
   load("mini-a-utils.js")
+  load("mini-a-common.js")
+  load("mini-a-wiki.js")
 
   // Helper to create a test directory
   var createTestDir = function() {
@@ -771,6 +773,36 @@
     var skillOps = metadata.skills.inputSchema.properties.operation.enum || []
     ow.test.assert(skillOps.indexOf("render") >= 0, true, "Should include render operation in skills")
     ow.test.assert(skillOps.indexOf("invoke") >= 0, true, "Should include invoke operation in skills")
+    var wikiOps = metadata.wiki.inputSchema.properties.operation.enum || []
+    ow.test.assert(wikiOps.indexOf("tree") >= 0, true, "Should include tree operation in wiki")
+    ow.test.assert(wikiOps.indexOf("browse") >= 0, true, "Should include browse operation in wiki")
+    ow.test.assert(wikiOps.indexOf("backlinks") >= 0, true, "Should include backlinks operation in wiki")
+    ow.test.assert(wikiOps.indexOf("move") >= 0, true, "Should include move operation in wiki")
+  }
+
+  exports.testWikiToolHierarchyOps = function() {
+    var testDir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: testDir, access: "rw" })
+      wm.write("index.md", { title: "Home" }, "# Home\n\nSee [Guides](guides/index.md).")
+      wm.write("guides/index.md", { title: "Guides" }, "# Guides\n\nSee [Setup](setup.md).")
+      wm.write("guides/setup.md", { title: "Setup" }, "# Setup")
+
+      var tool = new MiniUtilsTool({ root: testDir, readwrite: true })
+      tool._wikiManager = wm
+
+      var tree = tool.wiki({ op: "tree", compact: true })
+      ow.test.assert(isObject(tree), true, "tree op should return an object")
+      ow.test.assert(tree.child_sections.some(function(s) { return s.path === "guides/" }), true, "tree should include child sections")
+
+      var browse = tool.wiki({ operation: "browse", path: "guides/" })
+      ow.test.assert(browse.nearest_index.path, "guides/index.md", "browse should return section index")
+
+      var backlinks = tool.wiki({ operation: "backlinks", path: "guides/setup.md", compact: true })
+      ow.test.assert(backlinks.count >= 1, true, "backlinks should find references")
+    } finally {
+      cleanupTestDir(testDir)
+    }
   }
 
   exports.testMathOpsCalculate = function() {

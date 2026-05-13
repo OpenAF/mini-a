@@ -511,6 +511,9 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |
+
+Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can use `wiki` ops `tree`, `browse`, and `backlinks` before selective `read`; read-write wikis also support `move` for link-repaired page relocation and `init path=<folder/>` for section indexes.
+
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |

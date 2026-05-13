@@ -852,6 +852,8 @@ When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps two star
 - `AGENTS.md` for contribution rules and ingestion workflow
 - `index.md` for the main entrypoint and top-level table of contents
 
+Folders become browsable sub-wikis when they contain a local `index.md`. Use `tree` or `browse` to inspect the hierarchy first, then read only the pages you need.
+
 ### Wiki Parameters
 
 | Parameter | Type | Default | Description |
@@ -885,17 +887,22 @@ If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
 
 The agent uses the `wiki` action:
 ```json
-{ "action": "wiki", "params": { "op": "list|read|search|grep|lint|write|delete", "path": "page.md", "query": "...", "content": "..." } }
+{ "action": "wiki", "params": { "op": "list|tree|browse|read|search|grep|backlinks|lint|write|move|delete|init", "path": "page.md", "to": "new/path.md", "query": "...", "content": "..." } }
 ```
 
 | Op | Description |
 |----|-------------|
 | `list` | List all pages; optional `path` prefix filters results |
+| `tree` | Return folder/page hierarchy, section indexes, page counts, and child sections |
+| `browse` | Return nearest section index, child sections, direct pages, and suggested next reads |
 | `read` | Return full content + front-matter of `path` |
 | `search` | Full-text search; returns ranked hits for `query` |
 | `grep` | Line-level search with regex support, context lines, and line numbers |
+| `backlinks` | Show pages linking to a target page |
 | `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates |
 | `write` | Write or update `path` with `content` (requires `wikiaccess=rw`) |
+| `move` | Move/rename a page with internal link repair (requires `wikiaccess=rw`) |
+| `init` | Create baseline pages, or `path/index.md` for a section (requires `wikiaccess=rw`) |
 | `delete` | Remove a page (requires `wikiaccess=rw`; `AGENTS.md` is protected) |
 
 ### Console Commands
@@ -1018,8 +1025,8 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 5. Writes the consolidated snapshot back (pre-dream state is backed up to a sibling namespace).
 
 **Wiki dream** (`usewiki=true`):
-1. Runs `wiki lint` to baseline all issues.
-2. Spawns a full MiniA agent with `wikiaccess=rw` whose goal is to merge near-duplicate pages, fix broken links, add missing front-matter, correct heading hierarchy, link orphan pages, and confirm zero errors and warnings remain.
+1. Runs `tree`, `browse`, `search`, `backlinks`, and `lint` to build a reorganisation plan.
+2. Spawns a full MiniA agent with `wikiaccess=rw` whose goal is to apply high-confidence moves with link repair, create missing section indexes, fix index links, merge near-duplicates, repair broken links/front-matter/headings/orphans, and rerun lint.
 
 ### Console Command (interactive sessions)
 

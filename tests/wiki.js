@@ -508,7 +508,7 @@
     }
   }
 
-
+  exports.testLintOrphan = function() {
     var dir = createTestDir()
     try {
       writePage(dir, "index.md", "---\ntitle: Index\n---\nNo links out.")
@@ -624,6 +624,139 @@
     } finally {
       cleanupTestDir(dir)
     }
+  }
+
+  // ── Hierarchy ────────────────────────────────────────────────────────────────
+
+  exports.testTreeShowsNestedSectionIndex = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "---\ntitle: Home\n---\n# Home")
+      writePage(dir, "guides/index.md", "---\ntitle: Guides\n---\n# Guides")
+      writePage(dir, "guides/setup.md", "---\ntitle: Setup\n---\n# Setup")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var tree = wm.tree("", 2)
+      var guides = tree.sections.filter(function(s) { return s.path === "guides/" })[0]
+      ow.test.assert(isObject(guides), true, "tree should include guides section")
+      ow.test.assert(guides.index.exists, true, "section index should be marked present")
+      ow.test.assert(guides.pages.some(function(p) { return p.path === "guides/setup.md" }), true, "section page should be listed")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testBrowseSuggestsSectionReads = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "---\ntitle: Home\n---\n# Home")
+      writePage(dir, "guides/index.md", "---\ntitle: Guides\n---\n# Guides")
+      writePage(dir, "guides/setup.md", "---\ntitle: Setup\n---\n# Setup")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var browse = wm.browse("guides/")
+      ow.test.assert(browse.nearest_index.path, "guides/index.md", "browse should point at section index")
+      ow.test.assert(browse.direct_pages.some(function(p) { return p.path === "guides/setup.md" }), true, "browse should include direct pages")
+      ow.test.assert(browse.suggested_next_reads.indexOf("guides/index.md") >= 0, true, "browse should suggest reading index")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testLintMissingIndex = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "section/page.md", "---\ntitle: Page\n---\n# Page")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var missing = report.issues.filter(function(i) { return i.type === "missing_index" && i.page === "section/index.md" })
+      ow.test.assert(missing.length >= 1, true, "folder with pages should require local index.md")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testLintIndexMissingLinks = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "section/index.md", "---\ntitle: Section\n---\n# Section")
+      writePage(dir, "section/page.md", "---\ntitle: Page\n---\n# Page")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var issues = report.issues.filter(function(i) { return i.type === "index_missing_links" && i.target === "section/page.md" })
+      ow.test.assert(issues.length >= 1, true, "section index should link direct pages")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testBacklinksFindsReferences = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "---\ntitle: Index\n---\nSee [setup](guides/setup.md).")
+      writePage(dir, "guides/setup.md", "---\ntitle: Setup\n---\n# Setup")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var links = wm.backlinks("guides/setup.md")
+      ow.test.assert(links.count, 1, "backlinks should count referring pages")
+      ow.test.assert(links.backlinks[0].path, "index.md", "backlink should identify source page")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testMoveRewritesLinksAndPreservesCreated = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("old.md", { title: "Old", created: "2024-01-01T00:00:00.000Z" }, "# Old\nSee [home](index.md).")
+      wm.write("index.md", { title: "Index" }, "# Index\nSee [old](old.md).")
+      var result = wm.move("old.md", "guides/new.md")
+      ow.test.assert(result.ok, true, "move should succeed")
+      ow.test.assert(wm.read("old.md"), __, "old page should be deleted by default")
+      var moved = wm.read("guides/new.md")
+      ow.test.assert(moved.meta.created, "2024-01-01T00:00:00.000Z", "move should preserve created metadata")
+      ow.test.assert(moved.body.indexOf("../index.md") >= 0, true, "moved page relative links should be rebased")
+      var index = wm.read("index.md")
+      ow.test.assert(index.body.indexOf("guides/new.md") >= 0, true, "incoming links should point to new page")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testMoveRedirectStub = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("old.md", { title: "Old" }, "# Old")
+      var result = wm.move("old.md", "new.md", { leaveRedirect: true })
+      ow.test.assert(result.ok, true, "move with redirect should succeed")
+      ow.test.assert(result.redirect_created, true, "redirect stub should be reported")
+      var old = wm.read("old.md")
+      ow.test.assert(isObject(old), true, "old page should remain as stub")
+      ow.test.assert(old.body.indexOf("new.md") >= 0, true, "stub should link to new page")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testInitCreatesSectionIndex = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.init("guides/")
+      ow.test.assert(result.ok, true, "section init should succeed")
+      ow.test.assert(result.created.indexOf("guides/index.md") >= 0, true, "section index should be created")
+      ow.test.assert(isObject(wm.read("guides/index.md")), true, "section index should be readable")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testMcpWikiMetadataIncludesHierarchyTools = function() {
+    var raw = io.readFileString("mcps/mcp-wiki.yaml")
+    ow.test.assert(raw.indexOf("tree:") >= 0, true, "MCP metadata should expose tree")
+    ow.test.assert(raw.indexOf("browse:") >= 0, true, "MCP metadata should expose browse")
+    ow.test.assert(raw.indexOf("backlinks:") >= 0, true, "MCP metadata should expose backlinks")
+    ow.test.assert(raw.indexOf("move:") >= 0, true, "MCP metadata should expose move")
+    ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────────
