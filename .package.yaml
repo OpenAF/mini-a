@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260511'
+version: '20260513'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -149,14 +149,14 @@ filesHash:
   .gitignore: 46619c9101fb66935d0e0a0cca0128e706020ce5
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: f6d508033f71004e52cb22bdaa20f3dbdb53b7e2
-  AGENTS.md: e0ab84ff91aaf2057fbbc3ceb8740a215b9002b5
-  CHEATSHEET.md: 7ba760e453d1d205e9c7627d33492646b1565aa9
+  AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
+  CHEATSHEET.md: f297a0e014cb7ada77d64aedd778587cb6b3bb44
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: db9b007b919a4c98588b58579be5d209c6f29495
-  README.md: 6151cc4f02eebbf043d5dc033c962b1cdddfd364
-  USAGE.md: 334dd532784c00e9ad5b00ba6a43841a9aadd859
+  README.md: 7b8694341f968abde031a4f6b931ab7f8c860dfd
+  USAGE.md: 5a6cc3457eb701e3e52321af9a8fbf114928d19a
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 2c1d7e77905f72fff500961275cd7ed7f7d7e0e7
@@ -165,7 +165,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: 85cd1f58def915db960664376b7715dd912f5ace
+  docs/WHATS-NEW.md: 0bbd033f1183a83461936fd5dabe4183941731f4
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -184,7 +184,7 @@ filesHash:
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 9d426fb29d822f8da53da1f3bd3580f7ba770671
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
-  mcps/README.md: 66a5241849350b6d3d094d544314dddc06866686
+  mcps/README.md: 6643c54f876dd86ac662fb2df6bc2d8cfcbe6168
   mcps/mcp-a2a.yaml: 9601fe0562cf9b0ead111d9e2d2c00764192e86a
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
@@ -212,10 +212,10 @@ filesHash:
   mcps/mcp-time.yaml: fd4e494a2d73d5579912ce8c66fcbb3204046917
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: b79a89e5c70d36de4cd7de7602d30a5ff59a598c
-  mcps/mcp-wiki.yaml: 87fcd7445254fa04fd1cd7afca3dffd6c113313b
+  mcps/mcp-wiki.yaml: 59b14c6e0f507fa8825d1141343b9682570fab1f
   mini-a-common.js: 4401906dcdd3e819a1dd45484e919f985a4ef018
-  mini-a-con.js: 8dce3a694b1c1ac199fcc6844330d2b7fde15781
-  mini-a-dreams.js: a7b00727e27fa90d6d1b99f0c2a6845732718aa7
+  mini-a-con.js: b03ff966298c6e2a55d3bafa1bb43a073a1f5452
+  mini-a-dreams.js: eab22800b163ac408c2d31255c3ced6e3c82e512
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 95ec52e03eddb2da1d89150d9c5346c2bbbc9f4e
   mini-a-memoryman.js: 85824db86ab0979281affd096549c11a979386d8
@@ -224,12 +224,12 @@ filesHash:
   mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-subtask.js: 74b60903a2c4df0fda3c3080160ebd2f0f315460
-  mini-a-utils.js: e4816bab5ceac523da2db43039b7a611c0d4ee19
+  mini-a-utils.js: f70fb9bdba480281013da9444d16aa0c74cce192
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 8d148c54a2b1e9d723ba3a53386efe6f789ec640
-  mini-a-wiki.js: 65b57584d02a98032c2f1a95d2fc4efa91bc4572
+  mini-a-wiki.js: 8a181e18822b3991e320241e79fd88906b4e7484
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: af960405249da62f006255c4f4b4aec3ea678ecf
+  mini-a.js: 40d71260dcbf22ec816e136b2ace8e0078cbe6af
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 342d6c1c76843b78373da680732d4df1e6e54ebd
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
