@@ -82,6 +82,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testOuterLoopMaxTimeZeroNeverTimesOut
 
+- name: MiniA Outer Loop Tests::StopsWhenMaxCyclesReached
+  from: MiniA Outer Loop Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testOuterLoopStopsWhenMaxCyclesReached
+
 include:
 - oJobTest.yaml
 
@@ -106,3 +111,4 @@ todo:
 - MiniA Outer Loop Tests::StopOnRepeatValidationFailure
 - MiniA Outer Loop Tests::ValidationGoalFilePathExpansion
 - MiniA Outer Loop Tests::MaxTimeZeroNeverTimesOut
+- MiniA Outer Loop Tests::StopsWhenMaxCyclesReached

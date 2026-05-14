@@ -272,4 +272,26 @@
     } finally { rmTempDir(tmpDir) }
   }
 
+  exports.testOuterLoopStopsWhenMaxCyclesReached = function() {
+    var a = createAgent()
+    var tmpDir = mkTempDir()
+    var cycles = 0
+    a._startInternal = function() { cycles++; return "output" }
+    a._validateResearchOutcome = function() { return { verdict: "REVISE", feedback: "still failing" } }
+    try {
+      a._runOuterLoop({
+        outerloop: true,
+        homedir: tmpDir,
+        outerloopsessionid: "test-maxcycles-stop",
+        outerloopmaxcycles: 2,
+        validationgoal: "check",
+        trackchanges: false
+      }, now())
+      var statePath = tmpDir + "/.openaf-mini-a/sessions/test-maxcycles-stop/state.json"
+      var state = io.readFileJSON(statePath)
+      ow.test.assert(cycles === 2, true, "Should run exactly max cycles, got: " + cycles)
+      ow.test.assert(state.status === "stopped", true, "State status should be 'stopped' after max-cycle exhaustion, got: " + state.status)
+    } finally { rmTempDir(tmpDir) }
+  }
+
 })()

@@ -12985,7 +12985,8 @@ MiniA.prototype._runCommand = function(args) {
         "userdel","groupadd","groupdel","shutdown","reboot","poweroff","halt",
         "systemctl","service","fdisk","sfdisk","parted","losetup","mkswap",
         "swapoff","swapon","iptables","nft","grub-install","update-grub",
-        "curl","wget","perl","python","python3","ruby","node","npm","yarn","pip","pip3","gem"
+        "curl","wget","perl","python","python3","ruby","node","npm","yarn","pip","pip3","gem",
+        "mkdir","rmdir","install","touch","tee","ed","ex"
     ]
 
     var allowlist = this._parseListOption(allowValue)
@@ -13006,6 +13007,7 @@ MiniA.prototype._runCommand = function(args) {
 
     // detect redirections, pipes or shell control operators which can perform write/replace operations
     var hasRedirectionOrPipe = !args.shellallowpipes && /[<>|&;]/.test(lcCmd)
+    var hasWriteFlag = !args.readwrite && /\b(sed|perl|awk)\s+-i(\b|$)/.test(lcCmd)
 
     // collect what was detected to show to user
     var detected = []
@@ -13013,8 +13015,16 @@ MiniA.prototype._runCommand = function(args) {
       detected = detected.concat(bannedTokens)
     }
     if (hasRedirectionOrPipe) detected.push("redirection/pipe")
+    if (hasWriteFlag) detected.push("write-flag")
 
-    if (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe || args.checkall)) {
+    // readwrite=false is a hard guard: never allow known write-capable commands/flags.
+    if (!args.readwrite && (hasBannedToken || hasRedirectionOrPipe || hasWriteFlag)) {
+      var hardNote = detected.length ? " Detected: " + detected.join(", ") : ""
+      args.output = `[blocked] Command requires readwrite=true${hardNote}: ${args.command}`
+      global.__mini_a_metrics.shell_commands_blocked.inc()
+      global.__mini_a_metrics.shell_commands_denied.inc()
+      exec = false
+    } else if (!this._alwaysExec && (hasBannedToken || hasRedirectionOrPipe || args.checkall)) {
       var note = detected.length ? " Detected: " + detected.join(", ") : ""
       var _r
       if (!this._shellBatch) {
@@ -20445,6 +20455,7 @@ MiniA.prototype._runOuterLoop = function(args, sessionStartTime) {
     if (st.stopOnRepeat && state.repeated_failure_count >= 2) { state.status = "stopped"; break }
     if (state.no_change_count >= st.maxNoChange) { state.status = "stopped"; break }
   }
+  if (state.status === "running") state.status = "stopped"
   io.writeFileJSON(statePath, state)
   return io.fileExists(state.last_cycle_summary_path) ? io.readFileString(state.last_cycle_summary_path) : "(outer loop stopped without output)"
 }
