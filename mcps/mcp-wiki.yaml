@@ -76,49 +76,9 @@ todo:
         title  : OpenAF mini-a MCP wiki server
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
-      list:
-        name       : list
-        description: "List page paths available in {{label}} with an optional path prefix. Prefer tree or browse first when discovering structure."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Optional prefix/path to scope listed pages.
-            compact:
-              type       : boolean
-              description: Return compact output.
-              default    : false
-        annotations:
-          title         : list
-          readOnlyHint  : true
-          idempotentHint: true
-
-      tree:
-        name       : tree
-        description: "Discover the folder/page hierarchy in {{label}}. Start here to understand categories before reading full pages."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Optional folder path/prefix to scope the hierarchy.
-            depth:
-              type       : integer
-              description: Maximum child-section depth to return.
-              default    : 3
-            compact:
-              type       : boolean
-              description: Return compact hierarchy output.
-              default    : true
-        annotations:
-          title         : tree
-          readOnlyHint  : true
-          idempotentHint: true
-
       browse:
         name       : browse
-        description: "Browse a wiki section in {{label}}. Use this before read to see the nearest index, child sections, direct pages, and suggested next reads."
+        description: "Browse section structure in {{label}} to discover relevant pages before reading."
         inputSchema:
           type      : object
           properties:
@@ -136,7 +96,7 @@ todo:
 
       read:
         name       : read
-        description: "Read a wiki page from {{label}} by path. Use browse or tree first unless you already know the exact page."
+        description: "Read a wiki page from {{label}} by path."
         inputSchema:
           type      : object
           properties:
@@ -161,7 +121,7 @@ todo:
 
       search:
         name       : search
-        description: "Search {{label}} pages by keyword with optional result limits. Use browse/tree for navigation and search for keyword lookup."
+        description: "Search {{label}} pages by keyword and then read the most relevant paths."
         inputSchema:
           type      : object
           properties:
@@ -193,128 +153,10 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
-      backlinks:
-        name       : backlinks
-        description: "Find pages in {{label}} that link to a target page. Use before moving or editing referenced pages."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Target wiki page path.
-            compact:
-              type       : boolean
-              description: Return compact backlink output.
-              default    : true
-          required  : [ path ]
-        annotations:
-          title         : backlinks
-          readOnlyHint  : true
-          idempotentHint: true
-
-      write:
-        name       : write
-        description: "Create or update a wiki page in {{label}} (requires wikiaccess=rw)."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Wiki page path to create/update.
-            content:
-              type       : string
-              description: Raw markdown content to persist.
-          required  : [ path, content ]
-        annotations:
-          title         : write
-          readOnlyHint  : false
-          idempotentHint: false
-
-      delete:
-        name       : delete
-        description: "Delete a wiki page from {{label}} (requires wikiaccess=rw)."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Wiki page path to delete.
-          required  : [ path ]
-        annotations:
-          title         : delete
-          readOnlyHint  : false
-          idempotentHint: false
-
-      move:
-        name       : move
-        description: "Move or rename a wiki page in {{label}} and repair internal links (requires wikiaccess=rw)."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Existing wiki page path.
-            to:
-              type       : string
-              description: New wiki page path.
-            leaveRedirect:
-              type       : boolean
-              description: Leave a superseded redirect stub at the old path.
-              default    : false
-            overwrite:
-              type       : boolean
-              description: Allow replacing an existing target page.
-              default    : false
-          required  : [ path, to ]
-        annotations:
-          title         : move
-          readOnlyHint  : false
-          idempotentHint: false
-
-      lint:
-        name       : lint
-        description: "Validate {{label}} health (links, stale pages, and wiki quality checks)."
-        inputSchema:
-          type      : object
-          properties:
-            staleDays:
-              type       : integer
-              description: Override stale-days threshold.
-            compact:
-              type       : boolean
-              description: Return only lint summary.
-              default    : false
-        annotations:
-          title         : lint
-          readOnlyHint  : true
-          idempotentHint: true
-
-      init:
-        name       : init
-        description: "Create baseline wiki pages, or path/index.md for a section path, when missing in {{label}} (requires wikiaccess=rw)."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Optional folder path where a section index.md should be created.
-        annotations:
-          title         : init
-          readOnlyHint  : false
-          idempotentHint: false
-
     ((fns    )): &MCPFNS
-      list  : Wiki list pages
-      tree  : Wiki tree
       browse: Wiki browse section
       read  : Wiki read page
       search: Wiki search pages
-      backlinks: Wiki backlinks
-      write : Wiki write page
-      move  : Wiki move page
-      delete: Wiki delete page
-      lint  : Wiki lint
-      init  : Wiki init
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
