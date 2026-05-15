@@ -10,10 +10,6 @@ help:
     desc     : Wiki backend type (fs, s3, s3fs or es)
     example  : "fs"
     mandatory: false
-  - name     : wikiaccess
-    desc     : Wiki access mode (ro or rw)
-    example  : "rw"
-    mandatory: false
   - name     : wikiroot
     desc     : "Base directory for fs backend (default: current directory)"
     example  : "./wiki"
@@ -46,10 +42,6 @@ help:
   - name     : wikiignorecertcheck
     desc     : Ignore TLS cert validation on S3 endpoint
     example  : "false"
-    mandatory: false
-  - name     : wikilintstaleddays
-    desc     : Default stale-days threshold for lint
-    example  : "90"
     mandatory: false
   - name     : toolPrefix
     desc     : Optional prefix prepended to all tool names (e.g. "docs-" -> docs-list, docs-read, ...)
@@ -185,7 +177,6 @@ jobs:
   check:
     in:
       wikibackend         : isString.default("fs")
-      wikiaccess          : isString.default("ro")
       wikiroot            : isString.default(__)
       wikibucket          : isString.default(__)
       wikiprefix          : isString.default("wiki/")
@@ -195,7 +186,6 @@ jobs:
       wikiregion          : isString.default(__)
       wikiuseversion1     : toBoolean.isBoolean.default(false)
       wikiignorecertcheck : toBoolean.isBoolean.default(false)
-      wikilintstaleddays  : toNumber.isNumber.default(90)
       label               : isString.default("wiki")
   exec : | #js
     // Standalone wiki manager for MCP wiki server (derived from mini-a-wiki.js)
@@ -824,13 +814,25 @@ jobs:
         }
         return canonical
       }
+      var resolveDir = function(relPath) {
+        var rel = (isDef(relPath) && String(relPath).length > 0) ? __miniAWikiNormalizePath(relPath, {
+          allowDirectory: true,
+          requireMarkdown: false
+        }) : ""
+        var candidate = rel.length > 0 ? new java.io.File(canonicalRoot, rel) : new java.io.File(canonicalRoot)
+        var canonical = String(candidate.getCanonicalPath())
+        if (canonical !== canonicalRoot && !canonical.startsWith(canonicalRootPrefix)) {
+          throw "path escapes wikiroot"
+        }
+        return canonical
+      }
       return {
         type: "fs",
         root: canonicalRoot,
         list: function(prefix) {
           try {
             var normalizedPrefix = normalizePrefix(prefix)
-            var dir = resolvePath(normalizedPrefix, false)
+            var dir = resolveDir(normalizedPrefix)
             return __miniAWikiFsList(dir, normalizedPrefix, sep)
           } catch(e) { return [] }
         },
@@ -1838,11 +1840,8 @@ jobs:
     args.wikibackend = String(args.wikibackend).toLowerCase().trim()
     if (["fs", "s3", "es", "s3fs"].indexOf(args.wikibackend) < 0) args.wikibackend = "fs"
 
-    args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
-    args.wikiaccess = "ro"
-
     var cfg = {
-      access : args.wikiaccess,
+      access : "ro",
       backend: args.wikibackend
     }
 
@@ -1866,7 +1865,6 @@ jobs:
     }
 
     global.__wikiManager = new MiniAWikiManager(cfg)
-    global.__wikiStaleDays = isNumber(args.wikilintstaleddays) ? Number(args.wikilintstaleddays) : 90
     args.label = isString(args.label) && args.label.trim().length > 0
       ? args.label.trim()
       : (args.wikibackend === "s3" ? (isString(args.wikibucket) && args.wikibucket.length > 0 ? ("s3://" + args.wikibucket + "/" + args.wikiprefix) : "S3 wiki") : (cfg.root || "wiki"))
