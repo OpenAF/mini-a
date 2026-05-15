@@ -10919,10 +10919,17 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
       var existing = state.connections[connectionId]
       var client
+      var descriptorType = isString(configObject.type) ? configObject.type.toLowerCase().trim() : ""
+      var optionsType = isObject(configObject.options) && isString(configObject.options.type) ? String(configObject.options.type).toLowerCase().trim() : ""
+      // Local ojob-backed MCPs should be recreated so code/arg changes are applied immediately.
+      var forceFreshClient = descriptorType === "ojob" || optionsType === "ojob"
 
-      if (isObject(existing) && isObject(existing.client)) {
+      if (isObject(existing) && isObject(existing.client) && forceFreshClient !== true) {
         client = existing.client
       } else {
+        if (forceFreshClient === true && isObject(existing) && isObject(existing.client) && typeof existing.client.destroy === "function") {
+          try { existing.client.destroy() } catch(ignoreDestroyExisting) {}
+        }
         client = $mcp(merge(configObject, { shared: true }))
         try {
           client.initialize()

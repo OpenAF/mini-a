@@ -90,7 +90,7 @@ It exposes a compact operations toolset:
 - `edit`: full page write plus partial edit modes (`append`, `lineInsert`, `lineStart/lineEnd`, `section`).
 - `maintain`: structural operations `init`, `move`, and `delete`; `move` repairs internal links and supports redirect stubs.
 
-`mcp-wiki-ops` defaults to `wikiaccess=rw`; set `wikiaccess=ro` for lint-only mode.
+`mcp-wiki-ops` defaults to writable mode. To force lint-only mode, set `wikiopsreadonly=true` (or `wikiaccess=ro` together with `wikiopsreadonly=true`).
 
 #### mcp-a2a
 
