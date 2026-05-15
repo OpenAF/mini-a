@@ -759,6 +759,15 @@
     ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
   }
 
+  exports.testMcpWikiOpsMetadataIncludesOpsTools = function() {
+    var raw = io.readFileString("mcps/mcp-wiki-ops.yaml")
+    ow.test.assert(raw.indexOf("name   : mcp-wiki-ops") >= 0, true, "MCP ops server metadata should expose mcp-wiki-ops name")
+    ow.test.assert(raw.indexOf("lint:") >= 0, true, "MCP ops metadata should expose lint")
+    ow.test.assert(raw.indexOf("edit:") >= 0, true, "MCP ops metadata should expose edit")
+    ow.test.assert(raw.indexOf("maintain:") >= 0, true, "MCP ops metadata should expose maintain")
+    ow.test.assert(raw.indexOf("Wiki maintain") >= 0, true, "MCP ops jobs should wire maintain")
+  }
+
   // ── Delete ────────────────────────────────────────────────────────────────────
 
   exports.testFsBackendDelete = function() {

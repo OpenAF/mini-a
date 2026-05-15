@@ -265,6 +265,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMcpWikiMetadataIncludesHierarchyTools
 
+- name: MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMcpWikiOpsMetadataIncludesOpsTools
+
 - name: MiniA Wiki Tests::FsBackendDelete
   from: MiniA Wiki Tests::Init
   to  : oJob Test

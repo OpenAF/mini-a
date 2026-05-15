@@ -18,7 +18,8 @@
 | mcp-ssh    | SSH execution MCP (secure exec) | STDIO/HTTP       | (included) | [mcp-ssh.yaml](mcp-ssh.yaml)       |
 | mcp-shell  | Local shell execution MCP       | STDIO/HTTP       | (included) | [mcp-shell.yaml](mcp-shell.yaml)   |
 | mcp-mini-a | Mini-A agent runner MCP         | STDIO/HTTP       | (included) | [mcp-mini-a.yaml](mcp-mini-a.yaml) |
-| mcp-wiki   | Mini-A wiki knowledge base MCP with hierarchy navigation | STDIO/HTTP | (included) | [mcp-wiki.yaml](mcp-wiki.yaml) |
+| mcp-wiki   | Mini-A wiki knowledge base MCP with hierarchy navigation (discovery/read) | STDIO/HTTP | (included) | [mcp-wiki.yaml](mcp-wiki.yaml) |
+| mcp-wiki-ops | Mini-A wiki maintenance MCP (lint and readwrite operations) | STDIO/HTTP | (included) | [mcp-wiki-ops.yaml](mcp-wiki-ops.yaml) |
 | mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
@@ -77,7 +78,19 @@ mini-a goal="..." \
 
 `mcp-wiki` exposes a Mini-A wiki through read-friendly tools. External clients should start with `tree` or `browse`, then call `read` only for specific pages. Folders with `index.md` act as section sub-wikis.
 
-Read tools are `tree`, `browse`, `backlinks`, `list`, `read`, `search`, and `lint`. Read-write tools require `wikiaccess=rw`: `write`, `move`, `delete`, and `init`. `move` repairs internal links; `init path=<folder/>` creates a section `index.md`.
+Read tools are optimized for retrieval: `browse`, `read`, and `search`.
+
+#### mcp-wiki-ops
+
+`mcp-wiki-ops` is a standalone companion server for wiki operations that are intentionally not part of the read-first `mcp-wiki` surface.
+
+It exposes a compact operations toolset:
+
+- `lint`: run wiki health checks (`broken_link`, `orphan`, `missing_index`, `index_missing_links`, `stale_index`, and related checks).
+- `edit`: full page write plus partial edit modes (`append`, `lineInsert`, `lineStart/lineEnd`, `section`).
+- `maintain`: structural operations `init`, `move`, and `delete`; `move` repairs internal links and supports redirect stubs.
+
+`mcp-wiki-ops` defaults to `wikiaccess=rw`; set `wikiaccess=ro` for lint-only mode.
 
 #### mcp-a2a
 
