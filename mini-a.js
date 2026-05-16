@@ -11438,6 +11438,16 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
         // Read back a previously spilled result file — bypasses auto-spill threshold
         if (action === "readresult") {
+          // Flatten any nested arguments:{} into top-level params — models frequently wrap
+          // op-specific params inside arguments:{} (e.g. op:'slice', arguments:{start:0,end:5000})
+          // which leaves params.start/params.end/params.pattern/params.lines undefined.
+          if (isMap(params.arguments)) {
+            var _rdArgKeys = Object.keys(params.arguments)
+            for (var _rdAi = 0; _rdAi < _rdArgKeys.length; _rdAi++) {
+              var _rdAk = _rdArgKeys[_rdAi]
+              if (isUnDef(params[_rdAk])) params[_rdAk] = params.arguments[_rdAk]
+            }
+          }
           var resultFilePath = isString(params.resultFile) ? params.resultFile.trim() : ""
           if (resultFilePath.length === 0) {
             return { error: "readresult requires 'resultFile' parameter with the path returned by a prior call." }
@@ -11465,42 +11475,61 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             var ropLines = spilledRaw.split("\n")
             var ropTotalLines = ropLines.length
 
-            // slice: lines fromLine..toLine (1-based, inclusive)
+            // Shared auto-cap threshold for all readresult ops — prevents obs-spill cascade
+            // (readresult response itself gets spilled → model tries to readresult again → infinite loop).
+            // Set below the empirical OBS retroactive-spill waterline (~20 KB) to leave wrapper headroom.
+            var _autoCapThreshold = 16000
+
+            // slice: lines fromLine..toLine (1-based, inclusive); start/end accepted as aliases
             if (rop === "slice") {
-              var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine) : 1
-              var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)   : ropTotalLines
+              var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine)
+                            : isNumber(params.start)   && params.start    > 0 ? Math.floor(params.start) : 1
+              var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)
+                            : isNumber(params.end)     && params.end      > 0 ? Math.floor(params.end) : ropTotalLines
               if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
               var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
-              return {
+              var sliceTruncated = sliceText.length > _autoCapThreshold
+              if (sliceTruncated) sliceText = sliceText.substring(0, _autoCapThreshold)
+              var sliceResp = {
                 action: "readresult", op: "slice", resultFile: resultFilePath,
                 fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
-                content: [{ type: "text", text: sliceText }],
+                content: [{ type: "text", text: sliceText + (sliceTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a smaller line range with fromLine/toLine.]" : "") }],
                 estimatedTokens: Math.ceil(sliceText.length / 4)
               }
+              if (sliceTruncated) sliceResp.truncated = true
+              return sliceResp
             }
 
             // head: first N lines
             if (rop === "head") {
               var headN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
               var headText = ropLines.slice(0, headN).join("\n")
-              return {
+              var headTruncated = headText.length > _autoCapThreshold
+              if (headTruncated) headText = headText.substring(0, _autoCapThreshold)
+              var headResp = {
                 action: "readresult", op: "head", resultFile: resultFilePath,
                 lines: headN, totalLines: ropTotalLines,
-                content: [{ type: "text", text: headText }],
+                content: [{ type: "text", text: headText + (headTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Reduce lines count.]" : "") }],
                 estimatedTokens: Math.ceil(headText.length / 4)
               }
+              if (headTruncated) headResp.truncated = true
+              return headResp
             }
 
             // tail: last N lines
             if (rop === "tail") {
               var tailN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
               var tailText = ropLines.slice(Math.max(0, ropTotalLines - tailN)).join("\n")
-              return {
+              var tailTruncated = tailText.length > _autoCapThreshold
+              if (tailTruncated) tailText = tailText.substring(0, _autoCapThreshold)
+              var tailResp = {
                 action: "readresult", op: "tail", resultFile: resultFilePath,
                 lines: tailN, totalLines: ropTotalLines,
-                content: [{ type: "text", text: tailText }],
+                content: [{ type: "text", text: tailText + (tailTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Reduce lines count.]" : "") }],
                 estimatedTokens: Math.ceil(tailText.length / 4)
               }
+              if (tailTruncated) tailResp.truncated = true
+              return tailResp
             }
 
             // grep: search for pattern, return matching lines with optional context
@@ -11534,15 +11563,22 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
                 }
               }
               var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
-              return {
+              var grepTruncated = grepText.length > _autoCapThreshold
+              if (grepTruncated) grepText = grepText.substring(0, _autoCapThreshold)
+              var grepResp = {
                 action: "readresult", op: "grep", resultFile: resultFilePath,
                 pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
-                content: [{ type: "text", text: grepText }],
+                content: [{ type: "text", text: grepText + (grepTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern.]" : "") }],
                 estimatedTokens: Math.ceil(grepText.length / 4)
               }
+              if (grepTruncated) grepResp.truncated = true
+              return grepResp
             }
 
             // read: full content inline (or truncated when maxBytes set and exceeded)
+            if (rop === "read" && ropMaxBytes === 0 && spilledByteSize > _autoCapThreshold) {
+              ropMaxBytes = _autoCapThreshold
+            }
             var readContent = spilledRaw
             var readTruncated = false
             if (ropMaxBytes > 0 && spilledByteSize > ropMaxBytes) {
@@ -16540,6 +16576,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (isNumber(args.shellmaxbytes) && args.shellmaxbytes <= 0) args.shellmaxbytes = __
     args.mcpproxythreshold = _$(args.mcpproxythreshold, "args.mcpproxythreshold").isNumber().default(0)
     if (isNumber(args.mcpproxythreshold) && args.mcpproxythreshold < 0) args.mcpproxythreshold = 0
+    // Prevent auto-delegation from summarizing content that the proxy already passes inline:
+    // if the proxy is configured to allow content up to N bytes through without spilling,
+    // auto-delegation should not compress it either.
+    if (args.mcpproxythreshold > 0 && args.autodelegation === true &&
+        args.autodelegationthreshold < args.mcpproxythreshold) {
+      args.autodelegationthreshold = args.mcpproxythreshold
+    }
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.mcpproxyallow = _$(args.mcpproxyallow, "args.mcpproxyallow").isString().default(__)
     args.mcpproxydeny = _$(args.mcpproxydeny, "args.mcpproxydeny").isString().default(__)
@@ -17442,9 +17485,55 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           compressed = compressed.replace(/Output: [\s\S]{500,}/g, (match) => {
             return "Output: " + match.substring(0, 150) + "... [truncated]"
           })
-          // Compress long tool responses
-          compressed = compressed.replace(/\[OBS [^\]]+\] ([\s\S]{400,})/g, (match) => {
-            return match.substring(0, 200) + "... [output truncated]"
+          // Compress long tool responses — retroactively spill to a temp file so
+          // the model can recover the full data via proxy-dispatch readresult.
+          compressed = compressed.replace(/(\[OBS [^\]]+\]) ([\s\S]{400,})/g, (match, label, obsContent) => {
+            // Don't retro-spill an entry that already references a spilled file —
+            // a proxy spill notice can exceed 400 chars and would otherwise cascade.
+            // Regex covers both YAML-style (action='readresult') and JSON-style ("action": "readresult").
+            // Also catches truncated readresult content: _normalizeToolResult strips the response wrapper
+            // and stores only content[0].text in the OBS entry, so "action: readresult" never appears
+            // there — but the [TRUNCATED] marker written by readresult always does.
+            if (/action\s*[=:]\s*['"]?readresult|auto-spilled to temporary|retroactively spilled|\[TRUNCATED at \d+/i.test(obsContent)) {
+              var _rfMatch = obsContent.match(/resultFile[=:\s]+['"]?([^\s,'"}\]]+)/)
+              var _rfHint = _rfMatch ? " Use proxy-dispatch action='readresult' resultFile='" + _rfMatch[1] + "' with op='grep' or op='slice' to access specific data." : ""
+              return match.substring(0, 200) + "... [output truncated — readresult response too large for context." + _rfHint + "]"
+            }
+            try {
+              // Try to convert TOON-encoded content to JSON so that op=grep works on
+              // human-readable key names. TOON encoding (used by mcpproxytoon) makes
+              // JSON keys opaque to text search, breaking the readresult grep workflow.
+              // Pretty-print the JSON (not minified) so that line-based ops (grep/slice)
+              // work correctly on minified sources like opacks/index.json which arrive
+              // as a single long line and make every line-based readresult op useless.
+              var _spillContent = obsContent
+              var _spillExt = ".toon"
+              try {
+                var _parsed = af.fromTOON(obsContent)
+                if (isDef(_parsed)) {
+                  _spillContent = stringify(_parsed)
+                  _spillExt = ".json"
+                }
+              } catch(_toonConvErr) { /* not TOON — write raw */ }
+              var retroTempFile = java.nio.file.Files.createTempFile("mini-a-obs-spill-", _spillExt)
+              var retroTempPath = String(retroTempFile.toAbsolutePath())
+              io.writeFileString(retroTempPath, _spillContent)
+              if (isFunction(MiniA._registerProxyTempFile)) MiniA._registerProxyTempFile(retroTempPath)
+              var estTokens = Math.ceil(obsContent.length / 4)
+              var spillNotice = label + " [Observation retroactively spilled to temporary file during context compression (auto-deleted at shutdown)." +
+                " File: " + retroTempPath +
+                " | Size: " + obsContent.length + " bytes (~" + estTokens + " tokens)." +
+                " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' as needed.]"
+              // Patch the live context entry so future selectPromptContext calls see
+              // the notice directly and do not retro-spill the same data again.
+              if (i >= 0 && i < runtime.context.length && runtime.context[i] === entry) {
+                runtime.context[i] = runtime.context[i].replace(match, spillNotice)
+              }
+              this.fnI("info", "📦 [obs-spill] " + label + " retroactively spilled to " + retroTempPath + " (" + obsContent.length + " bytes, ~" + estTokens + " tokens)")
+              return spillNotice
+            } catch(retroSpillError) {
+              return match.substring(0, 200) + "... [output truncated]"
+            }
           })
           var compressedTokens = this._estimateTokens(compressed)
           if (usedTokens + compressedTokens <= availableTokenBudget) {
