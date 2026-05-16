@@ -5280,7 +5280,7 @@ try {
       { command: "/compact [n]", description: "Summarize old context, keep last n messages" },
       { command: "/summarize [n]", description: "Compact and display an LLM-generated conversation summary" },
       { command: "/history [n]", description: "Show the last n user goals (one per line)" },
-      { command: "/model [target]", description: "Choose a different model (target: model, modellc or modelval)" },
+      { command: "/model [main|lc|val]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
       { command: "/models", description: "List current main, low and validation models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
@@ -5842,16 +5842,47 @@ try {
       }
       if (commandLower === "model" || commandLower.indexOf("model ") === 0) {
         var target = "model" // default to model
-        if (commandLower.indexOf("model ") === 0) {
+        if (commandLower === "model") {
+          // Interactive slot picker: show the current model name for each slot,
+          // checking sessionOptions first then the OAF_*_MODEL env vars.
+          var _envVarForSlot = { model: "OAF_MODEL", modellc: "OAF_LC_MODEL", modelval: "OAF_VAL_MODEL" }
+          var _slotLabel = function(slotKey) {
+            var raw = sessionOptions[slotKey]
+            var source = "session"
+            if (isUnDef(raw) || raw == null || raw == "") {
+              raw = getEnv(_envVarForSlot[slotKey])
+              source = _envVarForSlot[slotKey]
+            }
+            if (isUnDef(raw) || raw == null || raw == "") return "(not set)"
+            try {
+              var parsed = af.fromJSSLON(raw)
+              if (isMap(parsed)) {
+                var m = parsed.model || (isMap(parsed.options) ? parsed.options.model : "") || ""
+                var label = m.length > 0 ? m : (parsed.type || "(set)")
+                return source !== "session" ? label + " [" + source + "]" : label
+              }
+            } catch(e) {}
+            return "(set)"
+          }
+          var slotOptions = [
+            "🎯 main       (currently: " + _slotLabel("model") + ")",
+            "💸 low-cost   (currently: " + _slotLabel("modellc") + ")",
+            "✅ validation (currently: " + _slotLabel("modelval") + ")",
+            "🔙 Cancel"
+          ]
+          var slotIdx = __miniANormalizeChoiceIndex(askChoose("Choose target model slot: ", slotOptions, 8), 3)
+          if (slotIdx < 0 || slotIdx >= 3) continue
+          target = ["model", "modellc", "modelval"][slotIdx]
+        } else if (commandLower.indexOf("model ") === 0) {
           var targetArg = command.substring(6).trim().toLowerCase()
           if (targetArg === "modellc" || targetArg === "lc") {
             target = "modellc"
           } else if (targetArg === "modelval" || targetArg === "val") {
             target = "modelval"
-          } else if (targetArg === "model") {
+          } else if (targetArg === "model" || targetArg === "main") {
             target = "model"
           } else {
-            print(colorifyText("Invalid target. Use 'model', 'modellc' or 'modelval'.", errorColor))
+            print(colorifyText("Invalid target. Use 'main', 'lc' or 'val'.", errorColor))
             continue
           }
         }

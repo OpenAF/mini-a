@@ -15676,6 +15676,15 @@ MiniA.prototype.init = function(args) {
       loadLib("aws.js")
     }
 
+    var needsGhcopilot = function(modelConfig) {
+      return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "ghcopilot"
+    }
+
+    if (needsGhcopilot(this._oaf_model) || needsGhcopilot(this._oaf_lc_model) || needsGhcopilot(this._oaf_val_model)) {
+      includeOPack("ghcopilot")
+      loadLib("ghcopilot.js")
+    }
+
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
     if (this._use_val) this.val_llm = $llm(this._oaf_val_model)

@@ -25,7 +25,8 @@ function buildOAFModelInit(args) {
       "ollama",
       "anthropic",
       "gemini",
-      "bedrock"
+      "bedrock",
+      "ghcopilot"
     ],
     "options": {
       "openai": [
@@ -61,6 +62,12 @@ function buildOAFModelInit(args) {
         "timeout",
         "temperature",
         "url"
+      ],
+      "ghcopilot": [
+        "timeout",
+        "options.model",
+        "options.token",
+        "options.temperature"
       ]
     }
   }
@@ -153,6 +160,37 @@ function buildOAFModel(args) {
       }
     }
 
+    // GitHub Copilot uses nested options like Bedrock. Token stored encrypted;
+    // useStdio is always true (the recommended transport).
+    if (args.init.providers[iProvider] === "ghcopilot") {
+      if (isUnDef(_out.options)) _out.options = {}
+      _out.options.useStdio = true
+
+      if (args.init.options["ghcopilot"].includes("options.token")) {
+        _out.options.token = askEncrypt("Enter your GitHub token (stored encrypted): ")
+        if (_out.options.token == null || _out.options.token == "") delete _out.options.token
+      }
+
+      try {
+        var _gModels = $llm(clone(_out)).getModels()
+        if (_gModels != null && _gModels.length > 0) {
+          var _gm = _gModels.map(r => r.id).sort()
+          var _gid = __miniANormalizeChoiceIndex(askChoose("Choose a model: ", _gm, 8), _gm.length)
+          if (_gid >= 0) _out.options.model = _gm[_gid]
+        }
+      } catch(e) { $err(e) }
+
+      if (isUnDef(_out.options.model)) {
+        _out.options.model = ask("Enter the model to use (or leave blank for default): ")
+        if (_out.options.model == "") delete _out.options.model
+      }
+
+      if (args.init.options["ghcopilot"].includes("options.temperature")) {
+        var temp = ask("Enter the temperature (leave blank for default): ")
+        if (temp != "") _out.options.temperature = parseFloat(temp)
+      }
+    }
+
     // Timeout defaults to 15 minutes to keep parity with the rest of Mini-A.
     _out.timeout = 900000
 
@@ -195,6 +233,99 @@ function buildOAFModel(args) {
     return _out
 }
 
+function buildOAFModelEdit(name, existing, args) {
+    buildOAFModelInit(args)
+    var _out = clone(existing)
+    var provider = _out.type
+
+    print(ansiColor("FAINT", "Editing '" + name + "' (" + provider + "). Leave blank to keep current value."))
+
+    // API key (openai, anthropic, gemini)
+    if (args.init.options[provider] && args.init.options[provider].includes("key")) {
+      var newKey = askEncrypt("API key [keep existing / enter new]: ")
+      if (newKey != null && newKey != "") _out.key = newKey
+    }
+
+    // API base URL
+    if (args.init.options[provider] && args.init.options[provider].includes("url")) {
+      var newUrl = ask("API base URL [" + (_out.url || "default") + "]: ")
+      if (newUrl != "") _out.url = newUrl
+      else if (newUrl === "" && isDef(_out.url)) {} // keep existing
+    }
+
+    // Model (flat providers: openai, anthropic, ollama, gemini)
+    if (args.init.options[provider] && args.init.options[provider].includes("model")) {
+      var currentModel = _out.model || ""
+      var pickedFromList = false
+      try {
+        var _eModels = $llm(clone(_out)).getModels()
+        if (_eModels != null && _eModels.length > 0) {
+          var _em = (isDef(_eModels[0].id)
+            ? _eModels.map(r => r.id)
+            : _eModels.map(r => r.name).map(r => r.replace(/^models\//, ""))).sort()
+          var _eid = __miniANormalizeChoiceIndex(askChoose("Choose a model [current: " + (currentModel || "none") + "]: ", _em, 8), _em.length)
+          if (_eid >= 0) { _out.model = _em[_eid]; pickedFromList = true }
+        }
+      } catch(e) { $err(e) }
+      if (!pickedFromList) {
+        var manualModel = ask("Model [" + (currentModel || "default") + "]: ")
+        if (manualModel != "") _out.model = manualModel
+      }
+    }
+
+    // Bedrock nested fields
+    if (provider === "bedrock") {
+      if (isUnDef(_out.options)) _out.options = {}
+      var newRegion = ask("AWS region [" + (_out.options.region || "default") + "]: ")
+      if (newRegion != "") _out.options.region = newRegion
+
+      try {
+        var _bModels = $llm(clone(_out)).getModels()
+        if (_bModels != null && _bModels.length > 0 && isDef(_bModels[0].modelId)) {
+          var _bm = _bModels.map(r => r.modelId).sort()
+          var _bid = __miniANormalizeChoiceIndex(askChoose("Choose a model [current: " + (_out.options.model || "none") + "]: ", _bm, 8), _bm.length)
+          if (_bid >= 0) _out.options.model = _bm[_bid]
+        }
+      } catch(e) { $err(e) }
+
+      var newBTemp = ask("Temperature [" + (_out.options.temperature != null ? _out.options.temperature : "default") + "]: ")
+      if (newBTemp != "") _out.options.temperature = parseFloat(newBTemp)
+
+      var newMaxTok = ask("Max tokens [" + (isMap(_out.options.params) && isDef(_out.options.params.max_tokens) ? _out.options.params.max_tokens : "default") + "]: ")
+      if (newMaxTok != "") {
+        if (isUnDef(_out.options.params)) _out.options.params = {}
+        _out.options.params.max_tokens = parseInt(newMaxTok)
+      }
+    }
+
+    // ghcopilot nested fields
+    if (provider === "ghcopilot") {
+      if (isUnDef(_out.options)) _out.options = {}
+      var newToken = askEncrypt("GitHub token [keep existing / enter new]: ")
+      if (newToken != null && newToken != "") _out.options.token = newToken
+
+      try {
+        var _gModels = $llm(clone(_out)).getModels()
+        if (_gModels != null && _gModels.length > 0) {
+          var _gm = _gModels.map(r => r.id).sort()
+          var _gid = __miniANormalizeChoiceIndex(askChoose("Choose a model [current: " + (_out.options.model || "none") + "]: ", _gm, 8), _gm.length)
+          if (_gid >= 0) _out.options.model = _gm[_gid]
+        }
+      } catch(e) { $err(e) }
+
+      var newGTemp = ask("Temperature [" + (_out.options.temperature != null ? _out.options.temperature : "default") + "]: ")
+      if (newGTemp != "") _out.options.temperature = parseFloat(newGTemp)
+    }
+
+    // Temperature (flat providers only)
+    if (provider !== "bedrock" && provider !== "ghcopilot" && args.init.options[provider] && args.init.options[provider].includes("temperature")) {
+      var newTemp = ask("Temperature [" + (_out.temperature != null ? _out.temperature : "default") + "]: ")
+      if (newTemp != "") _out.temperature = parseFloat(newTemp)
+    }
+
+    return _out
+}
+
 function mainOAFModel(args) {
     var accentColor  = "FG(218)"
     var promptColor  = "FG(41)"
@@ -223,15 +354,15 @@ function mainOAFModel(args) {
         if (isUnDef(_lst)) _lst = []
         // Combine existing definitions with the available actions shown to the
         // user. The action ordering is mirrored later in the switch statement.
-        var _options = _lst.sort().map(r => "🤖 " + r).concat([ "───", "✨ New definition", "📥 Import definition", "📤 Export definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
+        var _options = _lst.sort().map(r => "🤖 " + r).concat([ "───", "✨ New definition", "📥 Import definition", "📤 Export definition", "✏️  Edit definition", "✏️  Rename definition", "🗑️  Delete definitions", "🔙 Go back" ])
         var _action = __miniANormalizeChoiceIndex(askChoose("Choose a definition or an action: ", _options, 8), _options.length - 1)
         if (_action < 0) _action = _options.length - 1
 
         switch(_action) {
-        case _options.length - 6 - 1: // Separator
+        case _options.length - 7 - 1: // Separator
             // Do nothing
             break
-        case _options.length - 6: // New definition
+        case _options.length - 7: // New definition
             print()
             var _name = ask("✨ Name of the new definition: ")
             if (isDef(_name) && _name.length > 0) {
@@ -242,7 +373,7 @@ function mainOAFModel(args) {
                 }
             }
             break
-        case _options.length - 5: // Import definition
+        case _options.length - 6: // Import definition
             print()
             var _name = ask("📥 Name of the definition to import: ")
             if (isUnDef(_name) || _name.length == 0) break
@@ -255,7 +386,7 @@ function mainOAFModel(args) {
               printErr("❌ Invalid definition format.")
             }
             break
-        case _options.length - 4: // Export definition
+        case _options.length - 5: // Export definition
             print()
             var _exportName = __miniANormalizeChoiceIndex(askChoose("📤 Choose a definition to export: ", _lst.sort().concat([ "🔙 Go back" ]), 8), _lst.length)
             if (_exportName >= 0 && _exportName < _lst.length) {
@@ -263,6 +394,19 @@ function mainOAFModel(args) {
               print("\n" + ansiColor("FAINT", "─────"))
               print(af.toCSLON(_exportDef))
               print(ansiColor("FAINT", "─────") + "\n")
+            }
+            break
+        case _options.length - 4: // Edit definition
+            print()
+            var _editChoiceList = _lst.sort().concat([ "🔙 Go back" ])
+            var _editName = __miniANormalizeChoiceIndex(askChoose("✏️ Choose a definition to edit: ", _editChoiceList, 8), _lst.length)
+            if (_editName >= 0 && _editName < _lst.length) {
+              var _existingDef = _sec.get(_lst[_editName], "models")
+              var _editedDef = buildOAFModelEdit(_lst[_editName], _existingDef, args)
+              if (isMap(_editedDef)) {
+                print("💾 Saving updated definition '" + _lst[_editName] + "'...")
+                _sec.set(_lst[_editName], _editedDef, "models")
+              }
             }
             break
         case _options.length - 3: // Rename existing definition
@@ -284,9 +428,13 @@ function mainOAFModel(args) {
             if (!isArray(selectedIndexes)) selectedIndexes = []
             if (selectedIndexes.length > 0) {
                 print("✖️ Deleting definitions...")
-                selectedIndexes.forEach(idx => {
-                    _sec.unset(_sortedLst[idx], "models")
-                    print("   definition '" + _sortedLst[idx] + "' deleted!")
+                selectedIndexes.forEach(function(entry) {
+                    // askChooseMultiple may return string values directly or numeric indices
+                    var defName = isNumber(entry) ? _sortedLst[entry] : entry
+                    if (isDef(defName)) {
+                        _sec.unset(defName, "models")
+                        print("   definition '" + defName + "' deleted!")
+                    }
                 })
             }
             
