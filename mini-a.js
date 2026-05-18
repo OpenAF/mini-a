@@ -284,7 +284,7 @@ var MiniA = function() {
 
   this._SYSTEM_PROMPT = `
 {{{agentPersonaLine}}}
-{{agentDirectiveLine}}
+{{{agentDirectiveLine}}}
 
 ## RESPONSE FORMAT
 {{#if usetoolsActual}}
@@ -295,10 +295,10 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 {{/if}}
 {
     "thought": "brief next step (1 sentence max, keep it minimal)",
-    "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
+    "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
     "command": "required when action=shell or action entry uses shell: POSIX command to execute",{{/if}}
     "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}{{#if actionsList}}",
-    "params": "required when action=({{actionsList}}) (or action entry uses these actions): JSON object with action parameters{{/if}}",
+    "params": "required when action=({{{actionsList}}}) (or action entry uses these actions): JSON object with action parameters{{/if}}",
     "state": {"optional": "persist structured data for future steps"}
 }
 
@@ -330,9 +330,9 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 {{#if usetoolsActual}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH FUNCTION CALLING):
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
-• Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
+• Available MCP tools via proxy-dispatch: {{{proxyToolsList}}}{{/if}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "final"
 • When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Tool schemas are provided via the tool interface, so keep prompts concise.
 
@@ -360,9 +360,9 @@ Arguments: {
 {{else}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH ACTION-BASED):
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
-• Available MCP tools via proxy-dispatch: {{proxyToolsList}}{{/if}}
+• Available MCP tools via proxy-dispatch: {{{proxyToolsList}}}{{/if}}
 • Call the proxy-dispatch tool through the JSON "action" field
-• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "proxy-dispatch" | "final"
+• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "proxy-dispatch" | "final"
 
 ### How to call MCP tools:
 Use the action field with "proxy-dispatch" and provide tool details in params:
@@ -394,7 +394,7 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 ## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
 • {{toolCount}} MCP tools are available via direct function calling
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "final"
 • When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Each tool has its own function signature - call tools directly by their name
 • Tool schemas are provided via the tool interface, so keep prompts concise.
@@ -412,7 +412,7 @@ Arguments: {
 ## MCP TOOL ACCESS (ACTION-BASED):
 • {{toolCount}} MCP tools are available as action types
 • Call MCP tools through the JSON "action" field, just like shell or custom actions
-• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{actionsList}}"{{/if}} | [MCP tool name] | "final"
+• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | [MCP tool name] | "final"
 
 ### How to call MCP tools:
 Use the action field with the tool name and provide parameters in the params field:
@@ -438,7 +438,7 @@ Use the action field with the tool name and provide parameters in the params fie
 {{#if simplePlanStyle}}
 {{#if currentStepContext}}
 ### CURRENT TASK
-You are executing step {{currentStep}} of {{totalSteps}}: "{{currentTask}}"
+You are executing step {{currentStep}} of {{totalSteps}}: "{{{currentTask}}}"
 
 RULES:
 1. Focus ONLY on completing step {{currentStep}}
@@ -448,11 +448,11 @@ RULES:
 
 {{#if completedSteps}}
 COMPLETED:
-{{completedSteps}}
+{{{completedSteps}}}
 {{/if}}
 {{#if remainingSteps}}
 REMAINING (do not work on these yet):
-{{remainingSteps}}
+{{{remainingSteps}}}
 {{/if}}
 {{else}}
 • A flat sequential plan will be generated. Execute tasks one at a time in order.
@@ -615,7 +615,7 @@ Arguments: {
 {{#if availableSkills}}
 ## AVAILABLE SKILLS:
 {{#each availableSkillsList}}
-• {{name}}{{#if includeDescription}}: {{description}}{{/if}}
+• {{name}}{{#if includeDescription}}: {{{description}}}{{/if}}
 {{/each}}
 Use the \`skills\` tool (operation="render" or "invoke") to use them.
 {{/if}}
@@ -630,7 +630,7 @@ Use the \`skills\` tool (operation="render" or "invoke") to use them.
 {{#if hasTools}}
 ## TOOL ACCESS
 You can call {{toolCount}} MCP tool{{#if toolsPlural}}s{{/if}} directly through the host runtime. Use tools only when they materially improve the answer and always summarize tool results for the user.
-• Available tools: {{toolsList}}
+• Available tools: {{{toolsList}}}
 
 {{#if hasToolDetails}}
 ### TOOL REFERENCE
@@ -16176,7 +16176,7 @@ MiniA.prototype.init = function(args) {
         manifestChars: args.skillmanifestchars
       })
 
-      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if actionsList}} | {{actionsList}}{{/if}} | final (string or array for chaining)", {
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
         useMemorySearch : args.usememory && args.memoryinject !== "full",
@@ -19500,7 +19500,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
           }
 
-          var answerToCheck = (args.format == 'raw') ? answerValue : answerValue.trim()
+          var answerToCheck = ""
+          if (args.format == "raw") {
+            answerToCheck = isUnDef(answerValue) ? "" : String(answerValue)
+          } else if (isString(answerValue)) {
+            answerToCheck = answerValue.trim()
+          } else if (isDef(answerValue)) {
+            answerToCheck = String(answerValue).trim()
+          }
           if (answerToCheck.length == 0) {
             var answerInfo = isUnDef(currentMsg.answer) ? "field is missing" : "field is empty"
             runtime.context.push(`[OBS ${stepLabel}] (error) missing top-level 'answer' string in the JSON object from model for final action. The 'answer' ${answerInfo}. For final actions, you must provide a non-empty 'answer' field.`)
