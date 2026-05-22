@@ -260,6 +260,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testInitCreatesSectionIndex
 
+- name: MiniA Wiki Tests::ReindexRequiresRwAndRebuildsIndex
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReindexRequiresRwAndRebuildsIndex
+
 - name: MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
   from: MiniA Wiki Tests::Init
   to  : oJob Test

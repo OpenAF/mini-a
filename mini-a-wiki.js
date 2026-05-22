@@ -48,6 +48,16 @@ MiniAWikiManager.prototype._rebuildSearchIndex = function() {
   } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
 }
 
+MiniAWikiManager.prototype.reindex = function() {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only (wikiaccess=ro)" }
+  try {
+    this._rebuildSearchIndex()
+    return { ok: true }
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
+}
+
 MiniAWikiManager.prototype._getLuceneIndexPath = function() {
   var root = "."
   if (this._backendType === "fs" || this._backendType === "s3fs") root = this._backend.root

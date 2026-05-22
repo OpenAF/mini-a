@@ -750,6 +750,25 @@
     }
   }
 
+  exports.testReindexRequiresRwAndRebuildsIndex = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("page.md", { title: "Page" }, "# Page\nReindex body")
+      var rwResult = wm.reindex()
+      ow.test.assert(isObject(rwResult) && rwResult.ok === true, true, "reindex should succeed in rw mode")
+      var idxRaw = io.readFileString(dir + "/.mini-a-wiki-lucene.json")
+      ow.test.assert(idxRaw.indexOf("page.md") >= 0, true, "reindex should rebuild json index")
+
+      var wmRo = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var roResult = wmRo.reindex()
+      ow.test.assert(roResult.ok, false, "reindex should fail in ro mode")
+      ow.test.assert(roResult.error.indexOf("read-only") >= 0, true, "ro reindex should report read-only")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testMcpWikiMetadataIncludesHierarchyTools = function() {
     var raw = io.readFileString("mcps/mcp-wiki.yaml")
     ow.test.assert(raw.indexOf("tree:") >= 0, true, "MCP metadata should expose tree")
@@ -765,7 +784,9 @@
     ow.test.assert(raw.indexOf("lint:") >= 0, true, "MCP ops metadata should expose lint")
     ow.test.assert(raw.indexOf("edit:") >= 0, true, "MCP ops metadata should expose edit")
     ow.test.assert(raw.indexOf("maintain:") >= 0, true, "MCP ops metadata should expose maintain")
+    ow.test.assert(raw.indexOf("reindex:") >= 0, true, "MCP ops metadata should expose reindex")
     ow.test.assert(raw.indexOf("Wiki maintain") >= 0, true, "MCP ops jobs should wire maintain")
+    ow.test.assert(raw.indexOf("Wiki reindex") >= 0, true, "MCP ops jobs should wire reindex")
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────────
