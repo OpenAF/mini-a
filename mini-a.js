@@ -275,6 +275,9 @@ var MiniA = function() {
     wiki_ops_delete: $atomic(0, "long"),
     wiki_ops_lint: $atomic(0, "long"),
     wiki_ops_errors: $atomic(0, "long"),
+    llm_cache_creation_tokens: $atomic(0, "long"),
+    llm_cache_read_tokens: $atomic(0, "long"),
+    llm_cached_tokens: $atomic(0, "long"),
     per_tool_stats: {},
     autodelegation_triggered: $atomic(0, "long"),
     startup_subtasks_submitted: $atomic(0, "long"),
@@ -1733,6 +1736,9 @@ MiniA.prototype.getMetrics = function() {
             llm_actual_tokens: global.__mini_a_metrics.llm_actual_tokens.get(),
             llm_normal_tokens: global.__mini_a_metrics.llm_normal_tokens.get(),
             llm_lc_tokens: global.__mini_a_metrics.llm_lc_tokens.get(),
+            llm_cache_creation_tokens: global.__mini_a_metrics.llm_cache_creation_tokens.get(),
+            llm_cache_read_tokens: global.__mini_a_metrics.llm_cache_read_tokens.get(),
+            llm_cached_tokens: global.__mini_a_metrics.llm_cached_tokens.get(),
             prompt_context_selections: global.__mini_a_metrics.prompt_context_selections.get(),
             prompt_context_compressed: global.__mini_a_metrics.prompt_context_compressed.get(),
             prompt_context_tokens_saved: global.__mini_a_metrics.prompt_context_tokens_saved.get(),
@@ -2593,9 +2599,16 @@ MiniA.prototype._estimateTokens = function(text) {
 MiniA.prototype._formatTokenStats = function(stats) {
     if (isUnDef(stats)) return ""
     var tokenInfo = []
-    if (isDef(stats.prompt_tokens)) tokenInfo.push(`prompt: ${stats.prompt_tokens}`)
-    if (isDef(stats.completion_tokens)) tokenInfo.push(`completion: ${stats.completion_tokens}`)
-    if (isDef(stats.total_tokens)) tokenInfo.push(`total: ${stats.total_tokens}`)
+    var tok = isObject(stats.tokens) ? stats.tokens : {}
+    var prompt = isDef(tok.prompt) ? tok.prompt : stats.prompt_tokens
+    var completion = isDef(tok.completion) ? tok.completion : stats.completion_tokens
+    var total = isDef(tok.total) ? tok.total : stats.total_tokens
+    if (isDef(prompt)) tokenInfo.push(`prompt: ${prompt}`)
+    if (isDef(completion)) tokenInfo.push(`completion: ${completion}`)
+    if (isDef(total)) tokenInfo.push(`total: ${total}`)
+    if (isDef(tok.cacheCreation) && tok.cacheCreation > 0) tokenInfo.push(`cache_write: ${tok.cacheCreation}`)
+    if (isDef(tok.cacheRead) && tok.cacheRead > 0) tokenInfo.push(`cache_read: ${tok.cacheRead}`)
+    if (isDef(tok.cached) && tok.cached > 0) tokenInfo.push(`cached: ${tok.cached}`)
     return tokenInfo.length > 0 ? "Tokens - " + tokenInfo.join(", ") : ""
 }
 
@@ -3408,6 +3421,19 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
         }
         if (isObject(global.__mini_a_metrics.llm_normal_calls)) {
             global.__mini_a_metrics.llm_normal_calls.inc()
+        }
+    }
+
+    if (isObject(stats) && isObject(stats.tokens)) {
+        var tokensObj = stats.tokens
+        if (isNumber(tokensObj.cacheCreation) && tokensObj.cacheCreation > 0 && isObject(global.__mini_a_metrics.llm_cache_creation_tokens)) {
+            global.__mini_a_metrics.llm_cache_creation_tokens.getAdd(tokensObj.cacheCreation)
+        }
+        if (isNumber(tokensObj.cacheRead) && tokensObj.cacheRead > 0 && isObject(global.__mini_a_metrics.llm_cache_read_tokens)) {
+            global.__mini_a_metrics.llm_cache_read_tokens.getAdd(tokensObj.cacheRead)
+        }
+        if (isNumber(tokensObj.cached) && tokensObj.cached > 0 && isObject(global.__mini_a_metrics.llm_cached_tokens)) {
+            global.__mini_a_metrics.llm_cached_tokens.getAdd(tokensObj.cached)
         }
     }
 
@@ -15685,6 +15711,21 @@ MiniA.prototype.init = function(args) {
       loadLib("ghcopilot.js")
     }
 
+    var applyPromptCachingDefault = function(modelConfig) {
+      if (!isMap(modelConfig)) return
+      var type = isString(modelConfig.type) ? modelConfig.type.toLowerCase() : ""
+      if (type === "bedrock") {
+        if (!isMap(modelConfig.options)) modelConfig.options = {}
+        if (isUnDef(modelConfig.options.promptCaching)) modelConfig.options.promptCaching = true
+      } else if (type === "anthropic") {
+        var modelName = isString(modelConfig.model) ? modelConfig.model.toLowerCase() : ""
+        if (modelName.indexOf("claude") >= 0 && isUnDef(modelConfig.promptCaching)) modelConfig.promptCaching = true
+      }
+    }
+    applyPromptCachingDefault(this._oaf_model)
+    applyPromptCachingDefault(this._oaf_lc_model)
+    applyPromptCachingDefault(this._oaf_val_model)
+
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
     if (this._use_val) this.val_llm = $llm(this._oaf_val_model)
@@ -16057,6 +16098,12 @@ MiniA.prototype.init = function(args) {
           "When you discover reusable knowledge — facts, decisions, patterns, how-tos, or lessons learned — record it in the wiki: search first to avoid duplicates, then write a focused page following the contribution rules in AGENTS.md. Prefer updating an existing page over creating a new one. Always use wiki op='write' to create or update wiki pages — never use shell or file tools to write wiki files directly."
         )
       }
+    }
+    if (args.useshell === true && toBoolean(args.readwrite) === true) {
+      baseRules.push("Think before coding: state your assumptions explicitly before taking any action; never guess.")
+      baseRules.push("Simplicity first: write the minimum code that solves the problem. No abstractions, helpers, or refactors that were not asked for.")
+      baseRules.push("Surgical changes: do not touch content or code unrelated to the request. Every changed line must trace back to what was asked.")
+      baseRules.push("Goal-driven execution: turn vague instructions into verifiable success criteria before writing a single line.")
     }
 
     var shellViaActionPreferred = args.useshell === true && this._useTools === true
@@ -18294,17 +18341,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var _streamThinkingBuf = []
       var _streamRawChunks = []
       if (args.usestream) {
-        var _baseOnDelta = plannerStreaming && !noJsonPromptFlag
+        // When JSON output is expected, always route streaming through the JSON-aware
+        // chunk processor. This prevents raw JSON deltas from being rendered directly.
+        var _baseOnDelta = !noJsonPromptFlag
           ? this._createStreamDeltaHandler(args, {
-              fieldName: "thought",
-              eventName: "planner_stream"
-            })
-          : canStreamJson && !noJsonPromptFlag
-            ? this._createStreamDeltaHandler(args, {
               fieldName: streamIntent === "planner" ? "thought" : "answer",
               eventName: streamIntent === "planner" ? "planner_stream" : "stream"
             })
-            : this._createPlainStreamDeltaHandler(streamIntent === "planner" ? "planner_stream" : "stream")
+          : this._createPlainStreamDeltaHandler(streamIntent === "planner" ? "planner_stream" : "stream")
         onDelta = function(chunk, payload) {
           if (isString(chunk) && chunk.length > 0) _streamRawChunks.push(chunk)
           _baseOnDelta(chunk, payload)
@@ -19950,7 +19994,9 @@ MiniA.prototype._runChatbotMode = function(options) {
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       if (args.usestream) {
-        onDelta = canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true
+        // Keep JSON-based chatbot output behind the chunk processor so we only render
+        // user-visible fields (e.g. "answer") instead of every raw JSON delta.
+        onDelta = chatbotStructuredOutput
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
       }
