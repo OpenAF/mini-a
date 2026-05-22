@@ -91,6 +91,16 @@ MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs) {
   }
 }
 
+MiniAWikiManager.prototype.reindex = function() {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  try {
+    this._rebuildSearchIndex()
+    return { ok: true }
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
+}
+
 MiniAWikiManager.prototype.list = function(prefix) {
   var pfx = isString(prefix) ? prefix : ""
   if (this._backendType === "fs" && isMap(this._backend) && isDef(this._backend.root)) {
