@@ -5535,10 +5535,15 @@ try {
         }
         print(colorifyText("Reindexing wiki search...", hintColor))
         var reindexResult
-        if (isFunction(wm.reindex)) reindexResult = wm.reindex()
-        else {
-          wm._rebuildSearchIndex()
-          reindexResult = { ok: true }
+        if (isFunction(wm.reindex)) {
+          reindexResult = wm.reindex()
+        } else {
+          try {
+            wm._rebuildSearchIndex()
+            reindexResult = { ok: true }
+          } catch(reindexErr) {
+            reindexResult = { ok: false, error: __miniAErrMsg(reindexErr) }
+          }
         }
         if (isObject(reindexResult) && reindexResult.ok === true) {
           print(colorifyText("Wiki reindex completed.", successColor))
