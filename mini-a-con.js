@@ -1391,7 +1391,7 @@ try {
 
   function getWikiSubcommandCompletions() {
     var completions = ["list", "tree", "browse", "read", "search", "backlinks", "lint"]
-    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "init")
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "init", "reindex")
     return completions
   }
 
@@ -5286,7 +5286,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
     ]
     if (toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init] [args]", description: "Interact with wiki" })
+      helpCommands.push({ command: "/wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", description: "Interact with wiki" })
     }
     if ((isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0) || toBoolean(sessionOptions.usewiki) === true) {
       helpCommands.push({ command: "/dream [memory|wiki] [dryrun]", description: "Consolidate memory and/or wiki (dream pass)" })
@@ -5528,8 +5528,28 @@ try {
         } else {
           print(colorifyText("Wiki init failed: " + (isObject(initResult) ? initResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "reindex") {
+        if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+          print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to enable reindex.", errorColor))
+          return
+        }
+        print(colorifyText("Reindexing wiki search (JSON + Lucene)...", hintColor))
+        var reindexResult = isFunction(wm.reindex) ? wm.reindex() : wm._rebuildSearchIndex()
+        if (isObject(reindexResult)) {
+          if (reindexResult.ok === true) {
+            print(colorifyText("Wiki reindex completed successfully.", successColor))
+          } else if (reindexResult.ok === false) {
+            print(colorifyText("Wiki reindex failed: " + (isString(reindexResult.error) ? reindexResult.error : "unknown error"), errorColor))
+          } else {
+            print(colorifyText("Wiki reindex result: " + stringify(reindexResult), hintColor))
+          }
+        } else if (reindexResult === false) {
+          print(colorifyText("Wiki reindex failed.", errorColor))
+        } else {
+          print(colorifyText("Wiki reindex completed successfully.", successColor))
+        }
       } else {
-        print(colorifyText("Usage: /wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", errorColor))
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))
