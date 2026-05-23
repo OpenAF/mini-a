@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260522'
+version: '20260523'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -151,7 +151,7 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: f6d508033f71004e52cb22bdaa20f3dbdb53b7e2
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: 505d3f022814e98889dd8299fcb6809e7d720483
+  CHEATSHEET.md: 41b5acb9d76c25acf758a731341839f92cd3deef
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
@@ -213,10 +213,10 @@ filesHash:
   mcps/mcp-time.yaml: 8df5af4746cfa16a7b4c6020d232adbc6d2f76c3
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: 9edd0937bf0b9d57e0ba92b6e73c67685370de12
-  mcps/mcp-wiki-ops.yaml: 6c10ca56bde60668dfee7dd414a86f54842b7004
-  mcps/mcp-wiki.yaml: 3ae92f349c1b5804447b514b898080b10dd1c549
+  mcps/mcp-wiki-ops.yaml: 95b2c861719652289235bbc248f352b846ac4c54
+  mcps/mcp-wiki.yaml: 9b6a34c7b7db56c1b9a741d7a35854f8c38bc77a
   mini-a-common.js: 4401906dcdd3e819a1dd45484e919f985a4ef018
-  mini-a-con.js: 5cd1d1b16cdc54a65f60078cd8a85ae82f72e788
+  mini-a-con.js: caff1733ff35748431601ef375c48b4c2a65dfda
   mini-a-dreams.js: eab22800b163ac408c2d31255c3ced6e3c82e512
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 95ec52e03eddb2da1d89150d9c5346c2bbbc9f4e
@@ -229,9 +229,9 @@ filesHash:
   mini-a-utils.js: f70fb9bdba480281013da9444d16aa0c74cce192
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 8d148c54a2b1e9d723ba3a53386efe6f789ec640
-  mini-a-wiki.js: 8a181e18822b3991e320241e79fd88906b4e7484
+  mini-a-wiki.js: 570b22034abb89e7e43a2f57398db7b0f7563636
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: 5cc99412a4d0bb04b73a74279ba001721d8f7930
+  mini-a.js: 2e71061d1d2a29d1dd183066a758c62f8c42bde4
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 342d6c1c76843b78373da680732d4df1e6e54ebd
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
