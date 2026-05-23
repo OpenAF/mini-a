@@ -151,13 +151,13 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: f6d508033f71004e52cb22bdaa20f3dbdb53b7e2
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: 41b5acb9d76c25acf758a731341839f92cd3deef
+  CHEATSHEET.md: 36d14097bec6edd4261baf3c3cd25a1638afbd59
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: db9b007b919a4c98588b58579be5d209c6f29495
-  README.md: c7009babe3f4dffb93bdbc3316d91bc87fcc57c2
-  USAGE.md: 5a6cc3457eb701e3e52321af9a8fbf114928d19a
+  README.md: f8fd6271913e1359676fbb821b5ad38fdc609e51
+  USAGE.md: f88ecbde9d0753e0ebd857cd1bcdc9a1afd5b043
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 2c1d7e77905f72fff500961275cd7ed7f7d7e0e7
@@ -216,8 +216,8 @@ filesHash:
   mcps/mcp-wiki-ops.yaml: 95b2c861719652289235bbc248f352b846ac4c54
   mcps/mcp-wiki.yaml: 9b6a34c7b7db56c1b9a741d7a35854f8c38bc77a
   mini-a-common.js: 4401906dcdd3e819a1dd45484e919f985a4ef018
-  mini-a-con.js: caff1733ff35748431601ef375c48b4c2a65dfda
-  mini-a-dreams.js: eab22800b163ac408c2d31255c3ced6e3c82e512
+  mini-a-con.js: c11107ab78df604bcb96a56d46996711095398d9
+  mini-a-dreams.js: 2ac4b883a7722f3a3867ff051c2cec702ab1b2c9
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 95ec52e03eddb2da1d89150d9c5346c2bbbc9f4e
   mini-a-memoryman.js: 85824db86ab0979281affd096549c11a979386d8
@@ -231,7 +231,7 @@ filesHash:
   mini-a-web.yaml: 8d148c54a2b1e9d723ba3a53386efe6f789ec640
   mini-a-wiki.js: 570b22034abb89e7e43a2f57398db7b0f7563636
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: 2e71061d1d2a29d1dd183066a758c62f8c42bde4
+  mini-a.js: bd686cb2c91eec6ea3a3ebbe678d40a61e48d115
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 342d6c1c76843b78373da680732d4df1e6e54ebd
   public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
