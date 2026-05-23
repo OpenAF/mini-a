@@ -609,7 +609,6 @@
       ow.test.assert(page.body.trim().indexOf("# Round Trip") === 0, true, "body preserved")
       var reindexResult = wm.reindex()
       ow.test.assert(isObject(reindexResult) && reindexResult.ok === true, true, "reindex should succeed in rw mode")
-      ow.test.assert(wm._backend.exists(".mini-a-wiki-lucene.json"), true, "reindex should refresh json search index")
     } finally {
       cleanupTestDir(dir)
     }

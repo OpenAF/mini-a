@@ -10197,9 +10197,18 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           var result = fileTool[name](payload)
           if (name === "skills") _logSkillSourceUsage(payload, result)
-          return formatResponse(result)
+          var response = formatResponse(result)
+          if (isMap(response) && isString(response.error) && isMap(meta.inputSchema)) {
+            var enriched = MiniA._enrichToolCallError(response.error, meta.inputSchema, payload)
+            if (enriched !== response.error) {
+              response.error = enriched
+              response.content = [{ type: "text", text: enriched }]
+            }
+          }
+          return response
         } catch (err) {
           var message = "[ERROR] " + (err && err.message ? err.message : String(err))
+          message = MiniA._enrichToolCallError(message, meta.inputSchema, payload)
           parent.fnI("warn", `Mini-A utils MCP '${name}' failed: ${message}`)
           return {
             error  : message,
@@ -11355,10 +11364,26 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
           // Track if argumentsFile was used to suppress echoing large args
           var usedArgumentsFile = isString(params.argumentsFile) && params.argumentsFile.trim().length > 0
 
+          var _callToolSchema = (function() {
+            if (!isArray(target.tools)) return __
+            var _tm = target.tools.find(function(t) { return t.name === toolName })
+            return isMap(_tm) ? _tm.inputSchema : __
+          })()
+
           try {
             var result = isDef(meta)
               ? target.client.callTool(toolName, inputArgs, meta)
               : target.client.callTool(toolName, inputArgs)
+
+            if (isMap(result) && isString(result.error) && isMap(_callToolSchema)) {
+              var _enriched = MiniA._enrichToolCallError(result.error, _callToolSchema, inputArgs)
+              if (_enriched !== result.error) {
+                result.error = _enriched
+                if (isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
+                  result.content[0].text = _enriched
+                }
+              }
+            }
 
             var resultPayload = result
             if (isMap(result) && isArray(result.content) && isMap(result.content[0]) && isString(result.content[0].text)) {
@@ -14895,6 +14920,28 @@ MiniA.findClosestKnownArg = function(name, knownNames, maxDistance) {
   })
   if (!isString(bestMatch) || bestDistance > threshold) return __
   return { match: bestMatch, distance: bestDistance }
+}
+
+MiniA._enrichToolCallError = function(rawError, schema, providedParams) {
+  if (!isString(rawError) || rawError.indexOf("Unrecognized parameters provided:") >= 0) return rawError
+  if (!isMap(schema) || !isMap(schema.properties)) return rawError
+  var validParams  = Object.keys(schema.properties)
+  var provided     = isMap(providedParams) ? Object.keys(providedParams) : []
+  var unrecognized = provided.filter(function(k) { return validParams.indexOf(k) < 0 })
+  if (unrecognized.length === 0) return rawError
+  var required = isArray(schema.required) ? schema.required : []
+  var missing  = required.filter(function(k) { return !(k in (providedParams || {})) })
+  var lines = [rawError]
+  var hints = unrecognized.map(function(u) {
+    var s = MiniA.findClosestKnownArg(u, validParams)
+    return "'" + u + "'" + (s ? " (did you mean '" + s.match + "'?)" : " (not in schema)")
+  })
+  lines.push("Unrecognized parameters provided: " + hints.join(", ") + ".")
+  if (missing.length > 0) {
+    lines.push("Still missing required: " + missing.map(function(k) { return "'" + k + "'" }).join(", ") + ".")
+  }
+  lines.push("Valid parameters: " + validParams.join(", ") + ".")
+  return lines.join(" ")
 }
 
 MiniA.applyLibEnvDefault = function(args) {
