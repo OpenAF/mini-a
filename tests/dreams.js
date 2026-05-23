@@ -232,6 +232,91 @@
     ow.test.assert(calls.wiki,   1, "dreamWiki should run when dreamwiki=true")
   }
 
+  exports.testDreamMemoryPlanModeReturnsDryRun = function() {
+    var chName = tempChName()
+    $ch(chName).create("simple", {})
+    var e1 = makeEntry("mm0001", "Fact one", "active")
+    var mgr = new MiniAMemoryManager({})
+    mgr.init(makeSnap({ facts: [e1] }))
+    mgr.saveToChannel(chName, "")
+
+    var runner = new MiniADreams({ memorych: '{"name":"' + chName + '","type":"simple"}', dreammemorymode: "plan" }, function() {})
+    runner._setLlm(makeStubLlm(makeSnap({ facts: [e1] })))
+    var result = runner.dreamMemory()
+    ow.test.assert(result.ok, true, "plan mode should succeed")
+    ow.test.assert(result.results.global.mode, "plan", "global result mode should be plan")
+    ow.test.assert(result.results.global.dryRun, true, "plan mode should be dry-run")
+    try { $ch(chName).destroy() } catch(e) {}
+  }
+
+  exports.testDreamWikiPlanModeProposalShape = function() {
+    var root = io.createTempDir("dreamwiki_plan_")
+    io.writeFileString(root + "/index.md", [
+      "---",
+      "title: Home",
+      "description: Home page",
+      "created: 2026-01-01T00:00:00.000Z",
+      "updated: 2026-01-01T00:00:00.000Z",
+      "---",
+      "",
+      "# Home",
+      "",
+      "No links yet."
+    ].join("\n"))
+    io.writeFileString(root + "/topic/page-a.md", [
+      "---",
+      "title: Page A",
+      "description: A",
+      "created: 2026-01-01T00:00:00.000Z",
+      "updated: 2026-01-01T00:00:00.000Z",
+      "---",
+      "",
+      "# Page A"
+    ].join("\n"))
+
+    var runner = new MiniADreams({
+      usewiki: "true",
+      wikibackend: "fs",
+      wikiroot: root,
+      dreamwikimode: "plan"
+    }, function() {})
+    var res = runner.dreamWiki()
+    ow.test.assert(res.ok, true, "plan mode should succeed")
+    ow.test.assert(isMap(res.proposal), true, "proposal should exist")
+    ow.test.assert(isArray(res.proposal.indexes_to_create), true, "proposal.indexes_to_create should exist")
+    ow.test.assert(isArray(res.proposal.move_table), true, "proposal.move_table should exist")
+    ow.test.assert(isMap(res.lint_before), true, "lint_before should exist")
+    ow.test.assert(isMap(res.lint_after), true, "lint_after should exist")
+  }
+
+  exports.testDreamWikiApplyGateRequired = function() {
+    var runner = new MiniADreams({
+      usewiki: "true",
+      wikibackend: "fs",
+      wikiroot: "/tmp",
+      dreamwikimode: "apply",
+      dreamwikiapply: "false"
+    }, function() {})
+    var res = runner.dreamWiki()
+    ow.test.assert(res.ok, false, "apply without gate should fail")
+    ow.test.assert(res.reason, "apply-gate-closed", "reason should be apply-gate-closed")
+  }
+
+  exports.testDreamWikiReorgApprovalGate = function() {
+    var runner = new MiniADreams({
+      usewiki: "true",
+      wikibackend: "fs",
+      wikiroot: "/tmp",
+      dreamwikimode: "reorg",
+      dreamwikiapply: "true",
+      dreamwikireorg: "true",
+      dreamwikiapproval: "ask"
+    }, function() {})
+    var res = runner.dreamWiki()
+    ow.test.assert(res.ok, false, "reorg with ask approval should require interaction")
+    ow.test.assert(res.reason, "approval-required", "reason should be approval-required")
+  }
+
   exports.testCreateChannelFromDefInvalidInput = function() {
     var runner = new MiniADreams({}, function() {})
     ow.test.assert(isUnDef(runner._createChannelFromDef("", "fallback", "simple")), true, "empty string → undefined")

@@ -788,6 +788,12 @@ try {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: lint, plan, apply, or reorg." },
+    dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
+    dreamwikiapply : { type: "boolean", default: false, description: "Write gate for wiki apply/reorg modes." },
+    dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
+    dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
+    dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
     path           : { type: "string", description: "Static asset path used by the web UI/worker modes." },
     secpass        : { type: "string", description: "Security password used for protected model config access." },
@@ -2204,7 +2210,8 @@ try {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "lint"]
+            var dreamWikiModes = ["plan", "lint", "apply", "reorg", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -2223,6 +2230,19 @@ try {
                 if (opt.indexOf(firstToken) === 0) candidates.add(opt)
               })
               return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            // /dream wiki <mode|dryrun>
+            if (firstToken === "wiki") {
+              var secondToken = String(dreamParts[1] || "").toLowerCase()
+              var secondTokenInsert = hasTrailingSpace ? cursor : (cursor - secondToken.length)
+              var secondPartial = hasTrailingSpace ? "" : secondToken
+              dreamWikiModes.forEach(function(opt) {
+                if (dreamParts.indexOf(opt) >= 0 && opt !== "dryrun") return
+                if ("dryrun" === opt && dreamParts.indexOf("dryrun") >= 0) return
+                if (opt.indexOf(secondPartial) === 0) candidates.add(opt)
+              })
+              return candidates.isEmpty() ? -1 : Number(secondTokenInsert)
             }
 
             var alreadyHasDryrun = dreamParts.some(function(p) { return p.toLowerCase() === "dryrun" })
@@ -5289,7 +5309,7 @@ try {
       helpCommands.push({ command: "/wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", description: "Interact with wiki" })
     }
     if ((isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0) || toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/dream [memory|wiki] [dryrun]", description: "Consolidate memory and/or wiki (dream pass)" })
+      helpCommands.push({ command: "/dream [memory|wiki] [dryrun|plan|apply|reorg|lint]", description: "Consolidate memory/wiki in dream mode" })
     }
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
@@ -5569,10 +5589,11 @@ try {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
+    var isWikiMode = ["wiki", "plan", "lint", "apply", "reorg"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
-    if (mode === "wiki" && !hasWiki) {
+    if (isWikiMode && !hasWiki) {
       print(colorifyText("Wiki not enabled. Start with usewiki=true and wikiroot=...", errorColor)); return
     }
     if (mode === "" && !hasMemory && !hasWiki) {
@@ -5590,11 +5611,22 @@ try {
     var dreamArgs = merge({}, dreamSessionOptions)
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
-    var runner = new MiniADreams(dreamArgs, function(msg) { print(colorifyText(msg, hintColor)) })
-
     try {
+      if (parts.indexOf("plan") >= 0 || parts.indexOf("lint") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
+        if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
+        if (parts.indexOf("lint") >= 0) dreamArgs.dreamwikimode = "lint"
+        if (parts.indexOf("apply") >= 0) { dreamArgs.dreamwikimode = "apply"; dreamArgs.dreamwikiapply = "true" }
+        if (parts.indexOf("reorg") >= 0) {
+          dreamArgs.dreamwikimode = "reorg"
+          dreamArgs.dreamwikiapply = "true"
+          dreamArgs.dreamwikireorg = "true"
+          dreamArgs.dreamwikiapproval = "auto"
+        }
+      }
+
+      var runner = new MiniADreams(dreamArgs, function(msg) { print(colorifyText(msg, hintColor)) })
       if ((mode === "" || mode === "memory") && hasMemory) runner.dreamMemory()
-      if ((mode === "" || mode === "wiki")   && hasWiki)   runner.dreamWiki()
+      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "lint" || mode === "apply" || mode === "reorg") && hasWiki) runner.dreamWiki()
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }

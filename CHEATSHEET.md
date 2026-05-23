@@ -1013,6 +1013,12 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `wikibackend` | string | `fs` | Wiki backend (`fs`, `s3`, `s3fs`, `es`) — same as regular wiki settings |
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Report what would change without writing anything back |
+| `dreamwikimode` | string | `apply` | Wiki mode: `lint`, `plan`, `apply`, `reorg` |
+| `dreammemorymode` | string | `apply` | Memory mode: `plan` or `apply` |
+| `dreamwikiapply` | boolean | `false` | Required write gate for wiki apply/reorg |
+| `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
+| `dreamwikireorg` | boolean | `false` | Allow structural wiki reorg |
+| `dreamreport` | string | - | Optional JSON output report path |
 | `maxauditrecords` | number | `200` | Maximum audit log entries included in the memory consolidation prompt |
 | `libs` | string | - | Extra comma-separated libraries to load |
 
@@ -1040,7 +1046,14 @@ The `/dream` command is available in the interactive console when at least one o
 | `/dream wiki` | Run wiki dream only |
 | `/dream dryrun` | Report what would change without writing (both) |
 | `/dream memory dryrun` | Dry-run memory dream only |
-| `/dream wiki dryrun` | Dry-run wiki dream only (runs lint, prints issues) |
+| `/dream wiki dryrun` | Dry-run wiki dream only (proposal package) |
+| `/dream wiki plan` | Explicit wiki proposal mode (same path as `dryrun` today) |
+| `/dream wiki apply` | Safe wiki apply mode (write gate on) |
+| `/dream wiki reorg` | Structural wiki reorg mode (gates on) |
+
+Notes:
+- For wiki dreams, `dreamwikimode=plan` and `dryrun=true` currently run the same no-write proposal flow.
+- Use `plan` for explicit wiki mode selection; use `dryrun` when you also want the generic dry-run flag semantics.
 
 ### Standalone usage
 
@@ -1067,6 +1080,20 @@ mini-a dream=true \
 mini-a dream=true \
   memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
   usewiki=true wikiroot=/shared/wiki \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Non-interactive nightly proposal (no writes) + JSON report
+mini-a dream=true \
+  usewiki=true wikiroot=/shared/wiki \
+  dreamwikimode=plan \
+  dreamreport=/var/log/mini-a/dream-wiki-plan.json \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Non-interactive safe apply + JSON report
+mini-a dream=true \
+  usewiki=true wikiroot=/shared/wiki \
+  dreamwikimode=apply dreamwikiapply=true \
+  dreamreport=/var/log/mini-a/dream-wiki-apply.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 ```
 

@@ -204,7 +204,9 @@ MiniADreams.prototype._backupMemoryToNamespace = function(manager, chName, ns, b
 
 MiniADreams.prototype.dreamMemory = function(opts) {
   var self = this
-  var isDryRun = toBoolean(self._args.dryrun) === true
+  var memoryMode = isString(self._args.dreammemorymode) ? self._args.dreammemorymode.trim().toLowerCase() : "apply"
+  if (memoryMode !== "plan" && memoryMode !== "apply") memoryMode = "apply"
+  var isDryRun = toBoolean(self._args.dryrun) === true || memoryMode === "plan"
   var maxAudit = isNumber(self._args.maxauditrecords) ? Number(self._args.maxauditrecords) : 200
 
   self._log("💤 [dreams] Starting memory dream pass" + (isDryRun ? " (dry-run)" : "") + "...")
@@ -350,7 +352,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
     if (isDryRun) {
       self._log("[dreams:memory:" + label + "] Dry-run — skipping write.")
-      return { ok: true, dryRun: true, before: totalBefore, after: totalAfter, staleMarked: staleCount }
+      return { ok: true, mode: "plan", dryRun: true, before: totalBefore, after: totalAfter, staleMarked: staleCount }
     }
 
     // Backup pre-dream state to a sibling namespace
@@ -411,7 +413,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
     } else {
       self._log("[dreams:memory:" + label + "] WARNING: saveToChannel returned false.")
     }
-    return { ok: saved, before: totalBefore, after: totalAfter, staleMarked: staleCount }
+    return { ok: saved, mode: "apply", before: totalBefore, after: totalAfter, staleMarked: staleCount }
   }
 
   var results = {}
@@ -433,7 +435,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
   }
 
   self._log("💤 [dreams] Memory dream complete.")
-  return { ok: true, results: results }
+  return { ok: true, mode: memoryMode, results: results }
 }
 
 // ── wiki dream ────────────────────────────────────────────────
@@ -453,39 +455,188 @@ var _WIKI_DREAM_GOAL =
 
 MiniADreams.prototype.dreamWiki = function(opts) {
   var self = this
+  var wikiMode = isString(self._args.dreamwikimode) ? self._args.dreamwikimode.trim().toLowerCase() : ""
+  if (wikiMode !== "lint" && wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg") wikiMode = ""
+  var effectiveMode = wikiMode.length > 0 ? wikiMode : "apply"
   var isDryRun = toBoolean(self._args.dryrun) === true
+  if (effectiveMode === "plan") isDryRun = true
+  if (effectiveMode === "lint") isDryRun = true
 
   if (!toBoolean(self._args.usewiki)) {
     self._log("[dreams:wiki] usewiki is not set. Skipping wiki dream.")
     return { ok: false, reason: "usewiki-not-set" }
   }
 
-  if (isDryRun) {
-    // For wiki dry-run, just run lint and report what would be fixed — no writes.
-    self._log("💤 [dreams] Wiki dream dry-run: running lint only...")
-    var wikiCfg = self._buildWikiConfig()
-    if (!isMap(wikiCfg)) {
-      self._log("[dreams:wiki] Cannot build wiki config. Skipping.")
-      return { ok: false, reason: "no-wiki-config" }
+  var defaultResult = {
+    ok: true,
+    mode: effectiveMode,
+    pages_moved: 0,
+    pages_changed: 0,
+    pages_deleted: 0,
+    indexes_created: 0,
+    indexes_updated: 0,
+    redirects_created: 0,
+    issues_fixed: [],
+    skipped_uncertain_moves: [],
+    lint_before: { errors: 0, warnings: 0, info: 0 },
+    lint_after: { errors: 0, warnings: 0, info: 0 }
+  }
+
+  var staleDays = isNumber(self._args.wikilintstaleddays) ? self._args.wikilintstaleddays : Number(self._args.wikilintstaleddays)
+  if (isNaN(staleDays)) staleDays = 90
+
+  var wikiCfg = self._buildWikiConfig()
+  if (!isMap(wikiCfg)) {
+    self._log("[dreams:wiki] Cannot build wiki config. Skipping.")
+    return { ok: false, reason: "no-wiki-config" }
+  }
+
+  var lintSummary = function(lintResult) {
+    var s = isMap(lintResult) && isMap(lintResult.summary) ? lintResult.summary : {}
+    return {
+      errors: isNumber(s.errors) ? s.errors : 0,
+      warnings: isNumber(s.warnings) ? s.warnings : 0,
+      info: isNumber(s.info) ? s.info : 0
     }
+  }
+
+  var _unique = function(arr) {
+    var out = []
+    var seen = {}
+    ;(isArray(arr) ? arr : []).forEach(function(v) {
+      var k = String(v)
+      if (seen[k]) return
+      seen[k] = true
+      out.push(v)
+    })
+    return out
+  }
+
+  var buildProposal = function(wm, lintResult) {
+    var missingIndexIssues = lintResult.issues.filter(function(iss) { return iss.type === "missing_index" })
+    var indexMissingLinks = lintResult.issues.filter(function(iss) { return iss.type === "index_missing_links" })
+    var staleIndexes = lintResult.issues.filter(function(iss) { return iss.type === "stale_index" })
+    return {
+      new_tree: wm.tree("", isNumber(self._args.dreamwikimaxdepth) ? self._args.dreamwikimaxdepth : Number(self._args.dreamwikimaxdepth) || 3),
+      move_table: [],
+      indexes_to_create: _unique(missingIndexIssues.map(function(iss) { return iss.page })),
+      indexes_to_update: _unique(indexMissingLinks.concat(staleIndexes).map(function(iss) { return iss.page })),
+      protected_pages: ["AGENTS.md", ".mini-a-wiki-lucene.lock"],
+      skipped_uncertain_moves: [],
+      lint_before: lintSummary(lintResult),
+      expected_lint_after: lintSummary(lintResult)
+    }
+  }
+
+  var updateIndexLinks = function(wm, indexPath, targets) {
+    var page = wm.read(indexPath)
+    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) return false
+    var body = page.body
+    var changed = false
+    ;(isArray(targets) ? targets : []).forEach(function(target) {
+      var rel = wm._relativePath(indexPath, target)
+      var label = target.replace(/\/index\.md$/i, "").replace(/\.md$/i, "").replace(/.*\//, "").replace(/[-_]/g, " ")
+      var link = "[" + label + "](" + rel + ")"
+      if (body.indexOf("(" + rel + ")") < 0 && body.indexOf("[" + label + "]") < 0) {
+        body += "\n- " + link
+        changed = true
+      }
+    })
+    if (!changed) return false
+    var wr = wm.write(indexPath, page.meta, body)
+    return isMap(wr) && wr.ok === true
+  }
+
+  if (isDryRun) {
+    self._log("💤 [dreams] Wiki dream dry-run: building proposal package...")
     try {
-      var wm = new MiniAWikiManager(wikiCfg, function(level, msg) {
-        self._log("[dreams:wiki:lint] " + msg)
-      })
-      var staleDays = isNumber(self._args.wikilintstaleddays) ? self._args.wikilintstaleddays : Number(self._args.wikilintstaleddays)
-      if (isNaN(staleDays)) staleDays = 90
-      var lintResult = wm.lint(__, { staleDays: staleDays })
-      self._log("[dreams:wiki] Lint baseline: " + lintResult.summary.pages + " pages, " +
-        lintResult.summary.errors + " errors, " + lintResult.summary.warnings + " warnings, " +
-        lintResult.summary.info + " info.")
-      lintResult.issues.forEach(function(iss) {
-        self._log("  [" + iss.severity.toUpperCase() + "] " + iss.type + " — " + iss.page)
-      })
-      self._log("[dreams:wiki] Dry-run complete — no changes applied.")
-      return { ok: true, dryRun: true, lint: lintResult.summary }
+      var wmDry = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:plan] " + msg) })
+      var lintBeforeDry = wmDry.lint(__, { staleDays: staleDays })
+      var proposal = buildProposal(wmDry, lintBeforeDry)
+      defaultResult.mode = effectiveMode === "lint" ? "lint" : "plan"
+      defaultResult.lint_before = lintSummary(lintBeforeDry)
+      defaultResult.lint_after = lintSummary(lintBeforeDry)
+      defaultResult.proposal = proposal
+      self._log("[dreams:wiki] Dry-run complete — proposal generated with " + proposal.indexes_to_create.length + " index creates and " + proposal.indexes_to_update.length + " index updates.")
+      return defaultResult
     } catch(wikiDryErr) {
-      self._log("[dreams:wiki] Lint error: " + __miniAErrMsg(wikiDryErr))
+      self._log("[dreams:wiki] Lint/plan error: " + __miniAErrMsg(wikiDryErr))
       return { ok: false, reason: "lint-error", error: __miniAErrMsg(wikiDryErr) }
+    }
+  }
+
+  // Guardrails for structural reorg mode
+  if (effectiveMode === "reorg") {
+    if (toBoolean(self._args.dreamwikireorg) !== true) return { ok: false, reason: "reorg-not-enabled" }
+    if (toBoolean(self._args.dreamwikiapply) !== true) return { ok: false, reason: "apply-gate-closed" }
+    var approvalMode = isString(self._args.dreamwikiapproval) ? self._args.dreamwikiapproval.trim().toLowerCase() : "ask"
+    if (approvalMode !== "auto" && approvalMode !== "ask" && approvalMode !== "never") approvalMode = "ask"
+    if (approvalMode === "never") return { ok: false, reason: "approval-denied" }
+    if (approvalMode === "ask") return { ok: false, reason: "approval-required" }
+  }
+
+  if (effectiveMode === "apply") {
+    if (toBoolean(self._args.dreamwikiapply) !== true) return { ok: false, reason: "apply-gate-closed" }
+  }
+
+  if (effectiveMode === "apply") {
+    self._log("💤 [dreams] Starting wiki dream apply pass...")
+    try {
+      var wmApply = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:apply] " + msg) })
+      var lintBefore = wmApply.lint(__, { staleDays: staleDays })
+      defaultResult.lint_before = lintSummary(lintBefore)
+
+      var issues = isArray(lintBefore.issues) ? lintBefore.issues : []
+      var missingIndexes = issues.filter(function(iss) { return iss.type === "missing_index" })
+      var missingLinks = issues.filter(function(iss) { return iss.type === "index_missing_links" })
+      var staleIdx = issues.filter(function(iss) { return iss.type === "stale_index" })
+      var pageCount = isArray(wmApply.list("")) ? wmApply.list("").length : 0
+      var minPages = isNumber(self._args.dreamwikiminpages) ? self._args.dreamwikiminpages : Number(self._args.dreamwikiminpages)
+      if (isNaN(minPages)) minPages = 5
+      if (pageCount < minPages) {
+        defaultResult.skipped_uncertain_moves.push("apply skipped: page count " + pageCount + " is below dreamwikiminpages " + minPages)
+      } else {
+        missingIndexes.forEach(function(iss) {
+          var r = wmApply.init(iss.section)
+          if (isMap(r) && r.ok === true && isArray(r.created) && r.created.length > 0) {
+            defaultResult.indexes_created += r.created.length
+            defaultResult.issues_fixed.push("missing_index:" + iss.page)
+          }
+        })
+
+        var targetsByIndex = {}
+        missingLinks.forEach(function(iss) {
+          if (!isString(iss.page) || !isString(iss.target)) return
+          if (!isArray(targetsByIndex[iss.page])) targetsByIndex[iss.page] = []
+          targetsByIndex[iss.page].push(iss.target)
+        })
+        Object.keys(targetsByIndex).forEach(function(indexPath) {
+          if (updateIndexLinks(wmApply, indexPath, targetsByIndex[indexPath])) {
+            defaultResult.indexes_updated++
+            defaultResult.pages_changed++
+            defaultResult.issues_fixed.push("index_missing_links:" + indexPath)
+          }
+        })
+
+        _unique(staleIdx.map(function(iss) { return iss.page })).forEach(function(indexPath) {
+          var page = wmApply.read(indexPath)
+          if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) return
+          var wr = wmApply.write(indexPath, page.meta, page.body)
+          if (isMap(wr) && wr.ok === true) {
+            defaultResult.indexes_updated++
+            defaultResult.pages_changed++
+            defaultResult.issues_fixed.push("stale_index:" + indexPath)
+          }
+        })
+      }
+
+      var lintAfter = wmApply.lint(__, { staleDays: staleDays })
+      defaultResult.lint_after = lintSummary(lintAfter)
+      self._log("💤 [dreams] Wiki dream apply complete.")
+      return defaultResult
+    } catch(applyErr) {
+      self._log("[dreams:wiki] Apply error: " + __miniAErrMsg(applyErr))
+      return { ok: false, reason: "apply-error", error: __miniAErrMsg(applyErr) }
     }
   }
 
@@ -506,6 +657,11 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   dreamArgs.goal        = _WIKI_DREAM_GOAL
 
   try {
+    // Safety gate: reorg mode requires AGENTS.md to be loaded first.
+    if (effectiveMode === "reorg") {
+      var wmCheck = new MiniAWikiManager(wikiCfg, function() {})
+      wmCheck.read("AGENTS.md")
+    }
     var agent = new MiniA()
     agent.setInteractionFn(function(event, message) {
       agent.defaultInteractionFn(event, message, function(icon, text) {
@@ -515,7 +671,12 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     agent.init(dreamArgs)
     var result = agent.start(dreamArgs)
     self._log("💤 [dreams] Wiki dream complete.")
-    return { ok: true, result: isString(result) ? result.substring(0, 500) : String(result || "").substring(0, 500) }
+    var out = merge(defaultResult, {
+      ok: true,
+      mode: "reorg",
+      result: isString(result) ? result.substring(0, 500) : String(result || "").substring(0, 500)
+    })
+    return out
   } catch(wikiErr) {
     self._log("[dreams:wiki] Agent error: " + __miniAErrMsg(wikiErr))
     return { ok: false, reason: "agent-error", error: __miniAErrMsg(wikiErr) }
@@ -577,6 +738,11 @@ MiniADreams.prototype.run = function() {
     self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
     self._log("  dreammode=      Explicit run mode: memory, wiki or both")
     self._log("  dreamwiki=true  Force wiki dream when memorych is also configured")
+    self._log("  dreamwikimode=  Wiki mode: lint, plan, apply, reorg")
+    self._log("  dreammemorymode=Memory mode: plan, apply")
+    self._log("  dreamwikiapply= Write gate for apply/reorg (true/false)")
+    self._log("  dreamwikiapproval= Approval mode for reorg: auto, ask, never")
+    self._log("  dreamreport=    Write JSON run report to a file path")
     return { ok: false, reason: "no-mode" }
   }
 
@@ -592,6 +758,14 @@ MiniADreams.prototype.run = function() {
     overall.wiki = wikiResult
     if (!wikiResult.ok) overall.ok = false
     if (wikiResult.partial === true) overall.partial = true
+  }
+  if (isString(self._args.dreamreport) && self._args.dreamreport.trim().length > 0) {
+    try {
+      io.writeFileString(self._args.dreamreport.trim(), stringify(overall, __, ""))
+    } catch(reportErr) {
+      overall.report_error = __miniAErrMsg(reportErr)
+      overall.ok = false
+    }
   }
   return overall
 }
