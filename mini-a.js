@@ -2652,7 +2652,7 @@ MiniA.prototype.getCostStats = function() {
 
 MiniA.prototype._normalizeModelStrategy = function(v) {
   var s = isString(v) ? v.trim().toLowerCase() : "default"
-  if (s !== "advisor") return "default"
+  if (s !== "advisor" && s !== "delegate") return "default"
   return s
 }
 
@@ -17733,7 +17733,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var lcBudgetExceeded = false
     var modelStrategy = this._normalizeModelStrategy(args.modelstrategy)
     this._modelStrategy = modelStrategy
-    var advisorEnabled = modelStrategy === "advisor" && this._use_lc && modelLock !== "main"
+    var advisorEnabled  = modelStrategy === "advisor"  && this._use_lc && modelLock !== "main"
+    var delegateEnabled = modelStrategy === "delegate" && this._use_lc && modelLock !== "main"
     var advisorMaxUses = isDef(args.advisormaxuses) ? parseInt(args.advisormaxuses) : 2
     if (!isNumber(advisorMaxUses) || isNaN(advisorMaxUses)) advisorMaxUses = 2
     advisorMaxUses = Math.max(0, advisorMaxUses)
@@ -17782,6 +17783,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
     if (advisorEnabled) {
       this.fnI("info", `Model strategy active: advisor (max uses=${advisorMaxUses}, cooldown=${advisorCooldownSteps} step(s))`)
+    } else if (delegateEnabled) {
+      this.fnI("info", "Model strategy active: delegate (lc executes all steps, escalation still active)")
     }
     runtime.advisorPolicy = {
       enabled           : advisorEnabled && advisorConfigEnabled,
@@ -18334,6 +18337,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         useLowCost = false
       } else if (modelLock === "lc" && this._use_lc) {
         useLowCost = true
+      } else if (delegateEnabled) {
+        useLowCost = this._use_lc && !shouldEscalate
       } else {
         useLowCost = this._use_lc && (step > 0 || goalComplexityLevel === "simple") && !shouldEscalate
       }

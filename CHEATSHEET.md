@@ -9,7 +9,7 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Quick Start](#quick-start)
 - [Core Parameters](#core-parameters)
 - [Model Configuration](#model-configuration)
-  - [Advisor Strategy Mode](#advisor-strategy-mode)
+  - [Model Strategy Modes](#model-strategy-modes)
 - [Shell & Execution](#shell--execution)
 - [MCP Integration](#mcp-integration)
 - [Planning Features](#planning-features)
@@ -118,13 +118,27 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `promptprofile` | System prompt verbosity profile: `minimal`, `balanced`, or `verbose` (default when unset: `minimal` in chatbot mode, `verbose` with `debug=true` outside chatbot mode, otherwise `balanced`) | `promptprofile=minimal` |
 | `systempromptbudget` | Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority sections such as examples and detailed tool guidance | `systempromptbudget=4000` |
 
-### Advisor Strategy Mode
+### Model Strategy Modes
 
-When `modelstrategy=advisor`, the LC model stays as executor and the main model is consulted selectively for difficult steps — combining cost efficiency with main-model quality on hard decisions.
+`modelstrategy` controls how Mini-A allocates work between the main model and the LC (low-cost) model when both `OAF_MODEL` and `OAF_LC_MODEL` are configured. All three modes require a dual-model setup; with only one model configured they behave identically.
+
+#### Choosing a mode
+
+| Mode | When to use |
+|------|-------------|
+| `default` | General-purpose work. Mini-A starts on the main model for the first step of complex goals, then switches to LC. Automatically escalates back to main when errors or stalled reasoning are detected. Best baseline — start here unless you have a specific reason to deviate. |
+| `advisor` | Long or risky tasks where LC cost savings matter but you still want main-model judgment on hard calls. LC executes every step; the main model is consulted (not executed) only on risk signals, ambiguity, or hard-decision checkpoints. Use when you want to cap spend but cannot afford a wrong decision mid-task. |
+| `delegate` | Batch / throughput scenarios where speed and cost matter more than best-first-step quality. LC executes all steps including step 0 (skips the `default` behavior of using main for the first step on complex goals). Escalation to main is still active when error/stall thresholds are hit. Use for repetitive, well-understood tasks. |
+
+**Quick decision guide:**
+- Single goal, unknown complexity → `default`
+- High-stakes or irreversible actions, dual-model setup → `advisor` (add `harddecision=require` for critical deployments)
+- Bulk/batch processing, cost is the primary concern → `delegate`
+- Only one model configured → mode has no effect; `modellock` is the relevant knob instead
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `modelstrategy` | string | `default` | Model orchestration profile: `"default"` (LC-first with escalation) or `"advisor"` (LC executor + main model as advisor) |
+| `modelstrategy` | string | `default` | Model orchestration profile: `"default"` (adaptive LC-first with escalation), `"advisor"` (LC executor + main model as selective advisor), or `"delegate"` (LC executes all steps including step 0, escalation still active) |
 | `advisormaxuses` | number | `2` | Maximum advisor consultations per run when `modelstrategy=advisor` |
 | `advisorenable` | boolean | `true` | Master toggle for advisor consultations when `modelstrategy=advisor` |
 | `advisoronrisk` | boolean | `true` | Allow advisor consults on risk signals |
@@ -140,26 +154,33 @@ When `modelstrategy=advisor`, the LC model stays as executor and the main model 
 **Examples:**
 
 ```bash
-# Advisor strategy: LC executes, main model advises on hard steps
+# default — adaptive escalation, good general-purpose starting point
+mini-a goal="summarize this repository" useshell=true
+
+# advisor — LC executes every step, main model consulted on hard decisions
 # Requires OAF_MODEL (main) and OAF_LC_MODEL (executor)
 mini-a goal="refactor authentication system" \
   modelstrategy=advisor useshell=true
 
-# Limit to 3 advisor consultations per run
-mini-a goal="complex analysis task" \
-  modelstrategy=advisor advisormaxuses=3
-
-# Require advisor approval for hard-decision actions
+# advisor — block execution until main model approves risky actions
 mini-a goal="deploy to production" \
   modelstrategy=advisor harddecision=require useshell=true
 
-# Advisor with evidence gating for higher-confidence final answers
+# advisor — cap consultations to control cost on long tasks
+mini-a goal="complex analysis task" \
+  modelstrategy=advisor advisormaxuses=3
+
+# advisor — add evidence gating for higher-confidence final answers
 mini-a goal="research topic and summarize" \
   modelstrategy=advisor evidencegate=true evidencegatestrictness=high
 
-# Increase budget fraction allowed for advisor calls
-mini-a goal="long complex task" \
-  modelstrategy=advisor advisorbudgetratio=0.35
+# delegate — LC handles all steps (including step 0), use for batch / throughput
+mini-a goal="process log files and extract errors" \
+  modelstrategy=delegate useshell=true
+
+# delegate — combine with lcbudget to cap total LC spend
+mini-a goal="generate summaries for 50 documents" \
+  modelstrategy=delegate lcbudget=100000
 ```
 
 ### Provider Examples

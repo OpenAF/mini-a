@@ -640,7 +640,7 @@ try {
     promptprofile  : { type: "string", description: "Prompt verbosity profile (minimal|balanced|verbose); defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced" },
     systempromptbudget: { type: "number", description: "Maximum system prompt size in estimated tokens before low-priority sections are dropped" },
     modellock      : { type: "string", description: "Lock model selection to main, lc, or auto." },
-    modelstrategy  : { type: "string", description: "Model orchestration profile (default|advisor)." },
+    modelstrategy  : { type: "string", description: "Model orchestration profile (default|advisor|delegate)." },
     advisormaxuses : { type: "number", default: 2, description: "Maximum advisor consultations per run when modelstrategy=advisor." },
     advisorenable  : { type: "boolean", default: true, description: "Master toggle for advisor consultations." },
     advisoronrisk  : { type: "boolean", default: true, description: "Allow advisor consults on risk signals." },
@@ -5637,6 +5637,12 @@ try {
   print(colorifyText(miniaLogo, "BOLD") + colorifyText(" console", accentColor))
   print()
   print(colorifyText("Type /help for available commands.", hintColor))
+  if (toBoolean(sessionOptions.readwrite) === true) {
+    print(ansiColor("ITALIC,FG(214)", "!!") + colorifyText(" readwrite=true is active — the agent may modify files on your filesystem.", "FG(214)"))
+  }
+  if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") {
+    print(ansiColor("ITALIC,FG(214)", "!!") + colorifyText(" wikiaccess=rw is active — the agent may write to the wiki.", "FG(214)"))
+  }
   if (resumeConversation === true) {
     print(colorifyText("Use /last to check the previous answer from this resumed conversation.", hintColor))
     if (toBoolean(sessionOptions.usehistory) === true && isUnDef(conversationArgValue)) {
