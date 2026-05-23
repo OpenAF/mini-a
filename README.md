@@ -487,6 +487,8 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
   valgoal="Parser tests pass and no regression is introduced" \
   outerloopmaxcycles=6
 ```
+| Option | Description | Default |
+|--------|-------------|---------|
 | `usememory` | Enable structured working memory (`facts`, `evidence`, `openQuestions`, `hypotheses`, `decisions`, `artifacts`, `risks`, `summaries`) maintained across the run | `false` |
 | `memoryscope` | Memory scope selector: `session`, `global`, or `both` (session-first lookup when combined) | `both` |
 | `memorysessionid` | Optional session id used to isolate ephemeral session memory (defaults to `conversation` or runtime id) | - |
@@ -514,6 +516,8 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 
 Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can use `wiki` ops `tree`, `browse`, and `backlinks` before selective `read`; read-write wikis also support `move` for link-repaired page relocation and `init path=<folder/>` for section indexes.
 
+| Option | Description | Default |
+|--------|-------------|---------|
 | `useascii` | Encourage ASCII sketch outputs in agent responses | `false` |
 | `usemaps` | Encourage Leaflet-based interactive map outputs for geographic data | `false` |
 | `usemath` | Encourage LaTeX-style math formulas (`$...$`, `$$...$$`) for KaTeX rendering in the web UI | `false` |
