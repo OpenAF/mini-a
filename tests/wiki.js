@@ -376,6 +376,8 @@
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
       var result = wm.write("test.md", "# Test")
       ow.test.assert(isObject(result) && result.ok === false, true, "write should fail in ro mode")
+      var reindexResult = wm.reindex()
+      ow.test.assert(isObject(reindexResult) && reindexResult.ok === false, true, "reindex should fail in ro mode")
     } finally {
       cleanupTestDir(dir)
     }
@@ -605,6 +607,8 @@
       ow.test.assert(page.meta.description, "Test page", "description preserved")
       ow.test.assert(isString(page.meta.updated), true, "updated timestamp set")
       ow.test.assert(page.body.trim().indexOf("# Round Trip") === 0, true, "body preserved")
+      var reindexResult = wm.reindex()
+      ow.test.assert(isObject(reindexResult) && reindexResult.ok === true, true, "reindex should succeed in rw mode")
     } finally {
       cleanupTestDir(dir)
     }
@@ -765,6 +769,8 @@
     ow.test.assert(raw.indexOf("lint:") >= 0, true, "MCP ops metadata should expose lint")
     ow.test.assert(raw.indexOf("edit:") >= 0, true, "MCP ops metadata should expose edit")
     ow.test.assert(raw.indexOf("maintain:") >= 0, true, "MCP ops metadata should expose maintain")
+    ow.test.assert(raw.indexOf("reindex:") >= 0, true, "MCP ops metadata should expose reindex")
+    ow.test.assert(raw.indexOf("Wiki reindex") >= 0, true, "MCP ops jobs should wire reindex")
     ow.test.assert(raw.indexOf("Wiki maintain") >= 0, true, "MCP ops jobs should wire maintain")
   }
 

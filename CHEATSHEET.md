@@ -915,6 +915,7 @@ The agent uses the `wiki` action:
 | `/wiki lint` | Run the lint check and print a report |
 | `/wiki write <page.md>` | Write or update a page (requires `wikiaccess=rw`) |
 | `/wiki delete <page.md>` | Delete a page (requires `wikiaccess=rw`) |
+| `/wiki reindex` | Rebuild wiki JSON/Lucene search indexes (requires `wikiaccess=rw`) |
 | `/stats wiki` | Show wiki operation statistics for the current session |
 
 ### Examples

@@ -12,8 +12,7 @@ var MiniAWikiManager = function(config, loggerFn) {
 
 MiniAWikiManager.prototype._indexMeta = function() {
   return {
-    file: ".mini-a-wiki-lucene.json",
-    hiddenNames: [".mini-a-wiki-lucene.json", ".mini-a-wiki-lucene.lock"]
+    hiddenNames: [".mini-a-wiki-lucene.lock"]
   }
 }
 
@@ -43,7 +42,6 @@ MiniAWikiManager.prototype._rebuildSearchIndex = function() {
       var parsed = this.parseFrontmatter(raw)
       docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
     }
-    this._backend.write(this._indexMeta().file, stringify(docs, __, ""))
     this._rebuildLuceneIndex(docs)
   } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
 }
@@ -88,6 +86,16 @@ MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs) {
     }
   } catch(e) {
     this._logFn("warn", "Failed to rebuild Lucene index: " + __miniAErrMsg(e))
+  }
+}
+
+MiniAWikiManager.prototype.reindex = function() {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  try {
+    this._rebuildSearchIndex()
+    return { ok: true }
+  } catch(e) {
+    return { ok: false, error: __miniAErrMsg(e) }
   }
 }
 
