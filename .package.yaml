@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260523'
+version: '20260525'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -228,11 +228,11 @@ filesHash:
   mini-a-subtask.js: 74b60903a2c4df0fda3c3080160ebd2f0f315460
   mini-a-utils.js: f70fb9bdba480281013da9444d16aa0c74cce192
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 8d148c54a2b1e9d723ba3a53386efe6f789ec640
+  mini-a-web.yaml: ab2a6c5f93eb02cad4023ba1ad4a93ef9d3e5e23
   mini-a-wiki.js: 570b22034abb89e7e43a2f57398db7b0f7563636
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
   mini-a.js: c1971a034db4d93cda5b41059d6fce834c7d04dc
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 342d6c1c76843b78373da680732d4df1e6e54ebd
-  public/index.md: 299cb553d7e953dd4a213d1d1f9a354843e7facc
+  public/index.md: 9b9bf9231db87c0a1f15d9011caeafc4cfcb08bd
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
