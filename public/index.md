@@ -1541,6 +1541,115 @@
         letter-spacing: 0.03em;
         font-weight: 600;
     }
+
+    .subagent-panel {
+        margin-top: 0.45rem;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        background: var(--panel-bg);
+        color: var(--text);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        overflow: hidden;
+        transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+
+    .subagent-panel[hidden] {
+        display: none;
+    }
+
+    .subagent-panel summary {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
+        padding: 0.55rem 0.7rem;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .subagent-panel summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .subagent-summary-text {
+        font-size: 0.84rem;
+        letter-spacing: 0.01em;
+        opacity: 0.9;
+    }
+
+    .subagent-summary-icon {
+        font-size: 0.9rem;
+        opacity: 0.75;
+    }
+
+    .subagent-list {
+        list-style: none;
+        margin: 0;
+        padding: 0.2rem 0.8rem 0.55rem 0.8rem;
+        border-top: 1px solid var(--border);
+        max-height: 190px;
+        overflow-y: auto;
+    }
+
+    .subagent-item {
+        padding: 0.34rem 0;
+        border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+
+    .subagent-item:last-child {
+        border-bottom: none;
+    }
+
+    .subagent-top {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.5rem;
+        align-items: center;
+    }
+
+    .subagent-title {
+        font-size: 0.82rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0.95;
+    }
+
+    .subagent-duration {
+        font-size: 0.72rem;
+        opacity: 0.65;
+    }
+
+    .subagent-status {
+        font-size: 0.68rem;
+        border-radius: 999px;
+        padding: 0.12rem 0.48rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: lowercase;
+        background: rgba(51,144,255,0.13);
+        color: var(--accent);
+    }
+
+    .subagent-status.done {
+        background: rgba(65, 166, 84, 0.16);
+        color: #2d8f42;
+    }
+
+    .subagent-status.failed, .subagent-status.timeout {
+        background: rgba(220,53,69,0.15);
+        color: #d64557;
+    }
+
+    .subagent-last {
+        margin-top: 0.18rem;
+        font-size: 0.74rem;
+        opacity: 0.65;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
 </style>
 <div class="chat-container">
     <div id="resultsDiv">
@@ -1603,6 +1712,13 @@
         <div class="plan-panel-body">
             <ol id="planList" class="plan-list"></ol>
         </div>
+    </details>
+    <details id="subagentPanel" class="subagent-panel" hidden>
+        <summary>
+            <span id="subagentSummaryText" class="subagent-summary-text">sub-agents idle</span>
+            <span class="subagent-summary-icon" aria-hidden="true">tasks</span>
+        </summary>
+        <ol id="subagentList" class="subagent-list"></ol>
     </details>
     <small style="font-size:0.8rem;"><em>Uses AI. Verify results.</em></small>
     <br>
@@ -1870,6 +1986,7 @@
     let attachments = [];
     let attachmentModalKeyListenerBound = false;
     let lastPlanDigest = '';
+    let lastSubagentDigest = '';
     let chartResizeTimer = null;
     let chartResizeHandlerBound = false;
     let planResizeHandlerBound = false;
@@ -1920,6 +2037,9 @@
     const planSummaryText = document.getElementById('planSummaryText');
     const planList = document.getElementById('planList');
     const planProgressValue = document.getElementById('planProgressValue');
+    const subagentPanel = document.getElementById('subagentPanel');
+    const subagentSummaryText = document.getElementById('subagentSummaryText');
+    const subagentList = document.getElementById('subagentList');
     const copyActions = document.getElementById('copyActions');
     const copyLastAnswerBtn = document.getElementById('copyLastAnswerBtn');
     const copyConversationBtn = document.getElementById('copyConversationBtn');
@@ -2658,6 +2778,7 @@
             if (typeof __mdcodeclip !== "undefined") __mdcodeclip();
             __refreshDarkMode();
             resetPlanPanel();
+            resetSubagentPanel();
             stopPing();
             startPing();
             updateCopyActionsVisibility();
@@ -2707,6 +2828,7 @@
             await renderRawContent(lastRawContent + retryMessage);
             forceRenderChartBlocks();
             resetPlanPanel();
+            resetSubagentPanel();
             try { hljs.highlightAll(); } catch (e) { /* ignore */ }
 
             const response = await fetch(resolveAppUrl('prompt'), {
@@ -4759,12 +4881,14 @@
             // Only update plan panel if conversation is not finished
             if (data && data.status !== 'finished' && !conversationFinished) {
                 updatePlanPanel(data.plan);
+                updateSubagentPanel(data.subagents);
             } else {
                 // Force hide plan panel for finished conversations
                 if (planPanel) {
                     planPanel.setAttribute('hidden', 'hidden');
                     planPanel.removeAttribute('open');
                 }
+                resetSubagentPanel(false);
             }
             const preprocessed = preprocessChartBlocks(preprocessSvgBlocks(data.content || ''));
             const htmlContent = converter.makeHtml(preprocessed);
@@ -4982,6 +5106,100 @@
         if (planProgressValue) planProgressValue.style.strokeDashoffset = '100';
     }
 
+    function formatSubagentDuration(durationMs, startedAt, updatedAt) {
+        let ms = Number(durationMs);
+        if (!Number.isFinite(ms) || ms < 0) {
+            const start = Number(startedAt);
+            const end = Number(updatedAt);
+            ms = (Number.isFinite(start) && Number.isFinite(end) && end >= start) ? (end - start) : 0;
+        }
+        const totalSec = Math.max(0, Math.round(ms / 1000));
+        const min = Math.floor(totalSec / 60);
+        const sec = totalSec % 60;
+        return `${min}:${String(sec).padStart(2, '0')}`;
+    }
+
+    function resetSubagentPanel(clearDigest = true) {
+        if (!subagentPanel) return;
+        if (clearDigest) lastSubagentDigest = '';
+        subagentPanel.setAttribute('hidden', 'hidden');
+        subagentPanel.removeAttribute('open');
+        if (subagentList) subagentList.innerHTML = '';
+        if (subagentSummaryText) subagentSummaryText.textContent = 'sub-agents idle';
+    }
+
+    function updateSubagentPanel(payload) {
+        if (!subagentPanel) return;
+        if (conversationFinished) {
+            resetSubagentPanel(false);
+            return;
+        }
+        const digest = JSON.stringify(payload || {});
+        if (digest === lastSubagentDigest) return;
+        lastSubagentDigest = digest;
+
+        const items = (payload && Array.isArray(payload.items)) ? payload.items : [];
+        if (items.length === 0) {
+            resetSubagentPanel(false);
+            return;
+        }
+
+        const summary = payload && payload.summary ? payload.summary : {};
+        const total = Number(summary.total) || items.length;
+        const running = Number(summary.running) || 0;
+        const done = Number(summary.completed) || 0;
+        const failed = (Number(summary.failed) || 0) + (Number(summary.timeout) || 0);
+
+        subagentPanel.removeAttribute('hidden');
+        if (subagentSummaryText) {
+            const parts = [`${total} sub-agents`];
+            if (running > 0) parts.push(`${running} running`);
+            if (done > 0) parts.push(`${done} done`);
+            if (failed > 0) parts.push(`${failed} issues`);
+            subagentSummaryText.textContent = parts.join(' · ');
+        }
+
+        if (subagentList) {
+            subagentList.innerHTML = '';
+            items.forEach(item => {
+                const li = document.createElement('li');
+                li.className = 'subagent-item';
+
+                const top = document.createElement('div');
+                top.className = 'subagent-top';
+
+                const title = document.createElement('span');
+                title.className = 'subagent-title';
+                title.textContent = item && item.title ? item.title : `subtask ${item && item.id ? item.id : ''}`.trim();
+                top.appendChild(title);
+
+                const duration = document.createElement('span');
+                duration.className = 'subagent-duration';
+                duration.textContent = formatSubagentDuration(item && item.durationMs, item && item.startedAt, item && item.updatedAt);
+                top.appendChild(duration);
+
+                const badge = document.createElement('span');
+                const statusLabel = item && item.label ? String(item.label) : (item && item.status ? String(item.status) : 'running');
+                badge.className = 'subagent-status';
+                if (statusLabel === 'done') badge.classList.add('done');
+                if (statusLabel === 'failed') badge.classList.add('failed');
+                if (statusLabel === 'timeout') badge.classList.add('timeout');
+                badge.textContent = statusLabel;
+                top.appendChild(badge);
+
+                li.appendChild(top);
+
+                if (item && item.lastEvent) {
+                    const last = document.createElement('div');
+                    last.className = 'subagent-last';
+                    last.textContent = String(item.lastEvent);
+                    li.appendChild(last);
+                }
+                subagentList.appendChild(li);
+            });
+        }
+    }
+
     function updatePlanPanel(planPayload) {
         if (!planPanel) return;
 
@@ -5110,6 +5328,7 @@
         addPreview();
         clearAttachments();
         resetPlanPanel();
+        resetSubagentPanel();
         updateCopyActionsVisibility();
     }
 
@@ -5148,6 +5367,7 @@
             planPanel.setAttribute('hidden', 'hidden');
             planPanel.removeAttribute('open');
         }
+        resetSubagentPanel(false);
 
         updateCopyActionsVisibility();
     }
@@ -5321,6 +5541,7 @@
                 // Only update plan panel if conversation is not finished and hasn't been marked as finished
                 if (data && data.status !== 'finished' && !conversationFinished) {
                     updatePlanPanel(data.plan);
+                    updateSubagentPanel(data.subagents);
                 }
 
                 // Only update content if it has actually changed to prevent chart flickering
@@ -5376,6 +5597,7 @@
                         planPanel.setAttribute('hidden', 'hidden');
                         planPanel.removeAttribute('open');
                     }
+                    resetSubagentPanel(false);
                     stopProcessing(false);
                 } else {
                     addPreview();
@@ -5552,6 +5774,13 @@
                 if (payload && payload.plan) updatePlanPanel(payload.plan);
             } catch (e) { /* ignore */ }
         });
+        streamSource.addEventListener('subagents', (event) => {
+            if (!event || !event.data) return;
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload && payload.subagents) updateSubagentPanel(payload.subagents);
+            } catch (e) { /* ignore */ }
+        });
         streamSource.addEventListener('interaction', () => {
             plannerStreamBuffer = '';
             syncPreviewText();
@@ -5647,6 +5876,7 @@
         await updateResultsContent('<p></p>');
         forceRenderChartBlocks();
         resetPlanPanel();
+        resetSubagentPanel();
         conversationFinished = false;
         removePreview();
         promptInput.value = '';

@@ -927,6 +927,9 @@ todo:
         if (isDef(global.__planState) && isDef(global.__planState[ postData.uuid ])) {
           delete global.__planState[ postData.uuid ]
         }
+        if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) {
+          delete global.__subagentState[ postData.uuid ]
+        }
         if (global.__usehistory && !global.__historykeep) {
           log("Deleting history file for session " + postData.uuid)
           if (isFunction(global._mini_a_web_deleteHistory)) {
@@ -998,6 +1001,9 @@ todo:
         }
         if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) {
           delete global.__planState[ uuid ]
+        }
+        if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) {
+          delete global.__subagentState[ uuid ]
         }
 
         // If history is enabled, set the history file
@@ -1165,10 +1171,24 @@ todo:
                   global._mini_a_web_sseClose(uuid, "stopped")
                 }
               }
-              // subagent start events: server log only, not surfaced in web UI or SSE
-              if (e == "subagent") {
-                log("[" + uuid + "] 🤝 " + m)
-                return
+              var _subtaskId = global._mini_a_web_extractSubtaskId(m)
+              if (e == "subagent" || isString(_subtaskId)) {
+                var _sid = isString(_subtaskId) ? _subtaskId : sha1(m || "").substring(0, 8)
+                var _title = "Sub-agent " + _sid
+                if (isString(m) && m.indexOf(":") >= 0) {
+                  var _parts = m.split(":")
+                  var _candidate = _parts.slice(1).join(":").trim()
+                  if (_candidate.length > 0) _title = _candidate.substring(0, 120)
+                }
+                var _status = global._mini_a_web_statusFromSubtaskMessage(m)
+                global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, m)
+                if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                  global._mini_a_web_ssePush(uuid, "subagents", { subagents: global.__subagentState[uuid] })
+                }
+                if (!global.__showdelegate) {
+                  log("[" + uuid + "] 🤝 " + m)
+                  return
+                }
               }
               global.__res[uuid].push({ event: _e, message: m })
               if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
@@ -1394,6 +1414,17 @@ todo:
             checkpoints: { reached: 0, total: 0 }
           }
         }
+        if (isDef(global.__subagentState) && isDef(global.__subagentState[postData.uuid])) {
+          _res.subagents = global.__subagentState[postData.uuid]
+        } else {
+          _res.subagents = {
+            byId: {},
+            items: [],
+            summary: { total: 0, running: 0, completed: 0, failed: 0, timeout: 0, retrying: 0 },
+            active: false,
+            updated: __
+          }
+        }
       }
 
       return ow.server.httpd.reply(_res)
@@ -1530,6 +1561,7 @@ todo:
 
       global.__res[ postData.uuid ] = sanitized
       delete global.__conversations[ postData.uuid ]
+      if (isDef(global.__subagentState) && isDef(global.__subagentState[ postData.uuid ])) delete global.__subagentState[ postData.uuid ]
       global.__lastActivity[ postData.uuid ] = Date.now()
       if (isFunction(global._mini_a_web_storeHistory)) {
         try {
@@ -1827,6 +1859,7 @@ jobs:
     global.__usevectors = args.usevectors
     global.__usemath = args.usemath
     global.__planState = {}
+    global.__subagentState = {}
     global.__sseQueues = {}
     if (isUnDef(global.__webMetrics)) {
       global.__webMetrics = { html_exports: $atomic(0, "long") }
@@ -1967,6 +2000,110 @@ jobs:
       global.__sseQueues[uuid].events.push({ event: "done", data: { status: status || "finished" } })
       global.__sseQueues[uuid].closed = true
       global.__sseQueues[uuid].updated = Date.now()
+    }
+
+    global._mini_a_web_extractSubtaskId = (message) => {
+      if (!isString(message) || message.length == 0) return __
+      var match = message.match(/\[subtask:([a-z0-9]+)\]/i)
+      if (!isArray(match) || !isString(match[1])) return __
+      return match[1].toLowerCase()
+    }
+
+    global._mini_a_web_summarizeSubtaskMessage = (message) => {
+      if (!isString(message)) return ""
+      var out = message.replace(/\s+/g, " ").trim()
+      if (out.length > 180) out = out.substring(0, 177) + "..."
+      return out
+    }
+
+    global._mini_a_web_statusFromSubtaskMessage = (message) => {
+      var m = isString(message) ? message : ""
+      var lower = m.toLowerCase()
+      if (m.indexOf("✅") >= 0 || lower.indexOf("completed in") >= 0) return "completed"
+      if (m.indexOf("❌") >= 0 || lower.indexOf("failed after") >= 0) return "failed"
+      if (m.indexOf("⏱️") >= 0 || lower.indexOf("timeout") >= 0 || lower.indexOf("stalled") >= 0) return "timeout"
+      if (m.indexOf("⚠️") >= 0 || lower.indexOf("will retry") >= 0) return "retrying"
+      return "running"
+    }
+
+    global._mini_a_web_statusLabel = (status) => {
+      var s = isString(status) ? status : "running"
+      if (s == "completed") return "done"
+      if (s == "failed") return "failed"
+      if (s == "timeout") return "timeout"
+      if (s == "retrying") return "retrying"
+      return "running"
+    }
+
+    global._mini_a_web_subagentSummary = (uuid) => {
+      var state = isDef(global.__subagentState) && isDef(global.__subagentState[uuid]) ? global.__subagentState[uuid] : __
+      if (isUnDef(state) || !isArray(state.items) || state.items.length == 0) {
+        return { total: 0, running: 0, completed: 0, failed: 0, timeout: 0, retrying: 0 }
+      }
+      var summary = { total: state.items.length, running: 0, completed: 0, failed: 0, timeout: 0, retrying: 0 }
+      state.items.forEach(item => {
+        if (!isMap(item) || !isString(item.status)) return
+        if (isNumber(summary[item.status])) summary[item.status]++
+      })
+      return summary
+    }
+
+    global._mini_a_web_upsertSubtaskEvent = (uuid, subtaskId, title, status, message) => {
+      if (isUnDef(uuid) || !isString(subtaskId) || subtaskId.length == 0) return
+      if (isUnDef(global.__subagentState)) global.__subagentState = {}
+      if (isUnDef(global.__subagentState[uuid])) {
+        global.__subagentState[uuid] = { byId: {}, items: [], updated: Date.now(), active: false }
+      }
+
+      var state = global.__subagentState[uuid]
+      var now = Date.now()
+      var entry = state.byId[subtaskId]
+      if (isUnDef(entry)) {
+        entry = {
+          id: subtaskId,
+          title: isString(title) && title.length > 0 ? title : ("Sub-agent " + subtaskId.substring(0, 8)),
+          status: "running",
+          label: "running",
+          startedAt: now,
+          updatedAt: now,
+          completedAt: __,
+          durationMs: 0,
+          lastEvent: "",
+          severity: "info",
+          events: []
+        }
+        state.byId[subtaskId] = entry
+        state.items.push(entry)
+      }
+
+      if (isString(title) && title.length > 0) entry.title = title
+      var nextStatus = isString(status) && status.length > 0 ? status : entry.status
+      entry.status = nextStatus
+      entry.label = global._mini_a_web_statusLabel(nextStatus)
+      entry.updatedAt = now
+      if (isNumber(entry.startedAt) && entry.startedAt > 0) entry.durationMs = Math.max(0, now - entry.startedAt)
+      if (nextStatus == "completed" || nextStatus == "failed" || nextStatus == "timeout") {
+        if (isUnDef(entry.completedAt)) entry.completedAt = now
+      }
+
+      var eventMsg = global._mini_a_web_summarizeSubtaskMessage(message)
+      entry.lastEvent = eventMsg
+      entry.severity = nextStatus == "failed" || nextStatus == "timeout" ? "error" : (nextStatus == "retrying" ? "warn" : "info")
+      if (eventMsg.length > 0) {
+        entry.events.push({ ts: now, message: eventMsg, status: nextStatus })
+        if (entry.events.length > 6) entry.events = entry.events.slice(entry.events.length - 6)
+      }
+
+      state.items = state.items.sort((a, b) => {
+        var aDone = a.status == "completed" || a.status == "failed" || a.status == "timeout"
+        var bDone = b.status == "completed" || b.status == "failed" || b.status == "timeout"
+        if (aDone != bDone) return aDone ? 1 : -1
+        return (b.updatedAt || 0) - (a.updatedAt || 0)
+      })
+
+      state.summary = global._mini_a_web_subagentSummary(uuid)
+      state.active = state.summary.running > 0 || state.summary.retrying > 0
+      state.updated = now
     }
 
     global._mini_a_web_buildHistoryPayload = (uuid) => {
@@ -2186,6 +2323,7 @@ jobs:
       delete global.__res[ uuid ]
       delete global.__conversations[ uuid ]
       if (isDef(global.__planState) && isDef(global.__planState[ uuid ])) delete global.__planState[ uuid ]
+      if (isDef(global.__subagentState) && isDef(global.__subagentState[ uuid ])) delete global.__subagentState[ uuid ]
       if (global.__usehistory && !global.__historykeep && isFunction(global._mini_a_web_deleteHistory)) {
         try {
           global._mini_a_web_deleteHistory(uuid)
