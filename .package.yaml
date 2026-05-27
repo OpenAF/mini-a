@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260525'
+version: '20260527'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -134,8 +134,11 @@ files:
 - mini-a-modelman.js
 - mini-a-modes.yaml
 - mini-a-progcall.js
+- mini-a-response.js
 - mini-a-router.js
+- mini-a-sandbox.js
 - mini-a-subtask.js
+- mini-a-tool-selection.js
 - mini-a-utils.js
 - mini-a-web.sh
 - mini-a-web.yaml
@@ -156,8 +159,8 @@ filesHash:
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: db9b007b919a4c98588b58579be5d209c6f29495
-  README.md: f8fd6271913e1359676fbb821b5ad38fdc609e51
-  USAGE.md: f88ecbde9d0753e0ebd857cd1bcdc9a1afd5b043
+  README.md: daea45b0e1ad74a7729473154892d968b6536cfc
+  USAGE.md: 0f1a5627aadcea2ff896a03b3e807170322402b0
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 2c1d7e77905f72fff500961275cd7ed7f7d7e0e7
@@ -215,7 +218,7 @@ filesHash:
   mcps/mcp-web.yaml: 9edd0937bf0b9d57e0ba92b6e73c67685370de12
   mcps/mcp-wiki-ops.yaml: 95b2c861719652289235bbc248f352b846ac4c54
   mcps/mcp-wiki.yaml: 9b6a34c7b7db56c1b9a741d7a35854f8c38bc77a
-  mini-a-common.js: 4401906dcdd3e819a1dd45484e919f985a4ef018
+  mini-a-common.js: b1ee5153750602fb6ed8078002d95f47e8a3fda7
   mini-a-con.js: 610073048d01eb6e63ffa80165f7ebcfb0bfd7c1
   mini-a-dreams.js: 2ac4b883a7722f3a3867ff051c2cec702ab1b2c9
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
@@ -224,14 +227,17 @@ filesHash:
   mini-a-modelman.js: 521d0a5f93e97d137d71c22617b15ea312beb7a2
   mini-a-modes.yaml: 112b89a725f49d2f01b8e8437cf1746fb438f585
   mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
+  mini-a-response.js: d052103d2ddb8df607a5d78b1e26851df2b1e4fd
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
+  mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
   mini-a-subtask.js: 74b60903a2c4df0fda3c3080160ebd2f0f315460
+  mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
   mini-a-utils.js: f70fb9bdba480281013da9444d16aa0c74cce192
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: ab2a6c5f93eb02cad4023ba1ad4a93ef9d3e5e23
   mini-a-wiki.js: 570b22034abb89e7e43a2f57398db7b0f7563636
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: c1971a034db4d93cda5b41059d6fce834c7d04dc
+  mini-a.js: 19e4e11ccee967620c2da1090b51054fa0a59b4b
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 342d6c1c76843b78373da680732d4df1e6e54ebd
   public/index.md: 9b9bf9231db87c0a1f15d9011caeafc4cfcb08bd
