@@ -2814,6 +2814,19 @@ Mini-A now maintains a managed memory model backed by `MiniAMemoryManager`:
 - `state.workingMemoryGlobal` (durable memory loaded/saved via `memorych`),
 - `state.workingMemory` (resolved view used by runtime prompts).
 
+### How The Parameters Map To Memory
+
+Mini-A exposes one structured working-memory system. The common memory types are implemented by combining that system with different scopes and persistence settings:
+
+| Memory type | What it means in Mini-A | Main parameters |
+|-------------|--------------------------|-----------------|
+| Working memory | The live structured store the agent reads and writes during a run | `usememory`, `memoryinject`, `memorymaxpersection`, `memorymaxentries`, `memorycompactevery`, `memorydedup` |
+| Episodic memory | Session-scoped state for a specific conversation or run | `memorysessionid`, `memoryscope=session|both`, `memorysessionch` |
+| Semantic memory | Durable knowledge the agent can reuse across runs | `memorych`, `memoryscope=global|both`, `memorypromote`, `memorystaledays` |
+| Procedural memory | Instructions and workflow rules that tell Mini-A how to behave | `agent`, `mode`, skills, AGENTS.md, prompts; not a dedicated memory store |
+
+`memoryuser=true` is the convenience preset for both global and session working memory. `memoryusersession=true` is the session-only version.
+
 ### Schema
 
 ```json

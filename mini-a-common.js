@@ -419,3 +419,358 @@ function __miniALoadLibraries(libsString, logFn, errFn) {
     }
   })
 }
+
+function __miniACleanCodeBlocks(text) {
+  if (!isString(text)) return text
+  var trimmed = String(text).trim()
+  var isVisualBlock = trimmed.startsWith("```chart") || trimmed.startsWith("```mermaid") || trimmed.startsWith("```leaflet")
+  if (trimmed.startsWith("```") && trimmed.endsWith("```") && !isVisualBlock) {
+    return trimmed.replace(/^```+[\w]*\n/, "").replace(/```+$/, "").trim()
+  }
+  return text
+}
+
+function __miniARepairJsonString(jsonString) {
+  if (!isString(jsonString)) return jsonString
+
+  var repaired = jsonString
+    .replace(/,(\s*[}\]])/g, "$1")
+    .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)(\s*:)/g, '$1"$2"$3')
+
+  var parsed = jsonParse(repaired, __, __, true)
+  if (isMap(parsed) || isArray(parsed)) return repaired
+
+  var _fixed = (function(s) {
+    var out = []
+    var inStr = false
+    var esc = false
+    for (var _i = 0; _i < s.length; _i++) {
+      var ch = s[_i]
+      if (esc) { out.push(ch); esc = false; continue }
+      if (ch === "\\") { out.push(ch); esc = true; continue }
+      if (ch === '"') {
+        if (!inStr) {
+          inStr = true; out.push(ch)
+        } else {
+          var pk = _i + 1
+          while (pk < s.length && (s[pk] === " " || s[pk] === "\t")) pk++
+          var nc = pk < s.length ? s[pk] : ""
+          if (nc === "" || nc === "," || nc === "}" || nc === "]" || nc === ":" || nc === "\n" || nc === "\r") {
+            inStr = false; out.push(ch)
+          } else {
+            out.push("\\"); out.push('"')
+          }
+        }
+      } else {
+        out.push(ch)
+      }
+    }
+    return out.join("")
+  })(repaired)
+  if (_fixed !== repaired) {
+    var _fixedParsed = jsonParse(_fixed, __, __, true)
+    if (isMap(_fixedParsed) || isArray(_fixedParsed)) return _fixed
+  }
+
+  return jsonString
+}
+
+function __miniAExtractResponseTextCandidates(rawResponse) {
+  var texts = []
+  var addText = function(value) {
+    if (isUnDef(value)) return
+    if (isString(value)) {
+      var cleaned = String(value)
+      if (cleaned.trim().length > 0) texts.push(cleaned)
+    }
+  }
+  var addFromParts = function(parts) {
+    if (!isArray(parts)) return
+    parts.forEach(function(part) {
+      if (isString(part)) {
+        addText(part)
+      } else if (isMap(part)) {
+        addText(part.text)
+        addText(part.content)
+      }
+    })
+  }
+
+  if (isString(rawResponse)) addText(rawResponse)
+  if (isMap(rawResponse)) {
+    addText(rawResponse.response)
+    addText(rawResponse.content)
+    addText(rawResponse.completion)
+    addText(rawResponse.text)
+    addText(rawResponse.output)
+    addText(rawResponse.output_text)
+    addText(rawResponse.reasoning)
+    addText(rawResponse.thinking)
+
+    if (isMap(rawResponse.message)) {
+      addText(rawResponse.message.content)
+      addText(rawResponse.message.thinking)
+      addText(rawResponse.message.reasoning)
+      addFromParts(rawResponse.message.content)
+    }
+    addFromParts(rawResponse.content)
+
+    if (isArray(rawResponse.choices)) {
+      rawResponse.choices.forEach(function(choice) {
+        if (isUnDef(choice)) return
+        addText(choice.text)
+        addText(choice.thinking)
+        addText(choice.reasoning)
+        if (isMap(choice.message)) {
+          addText(choice.message.content)
+          addText(choice.message.thinking)
+          addText(choice.message.reasoning)
+          addFromParts(choice.message.content)
+        }
+        if (isMap(choice.delta)) {
+          addText(choice.delta.content)
+          addText(choice.delta.thinking)
+          addText(choice.delta.reasoning)
+        }
+        addFromParts(choice.content)
+      })
+    }
+
+    if (isArray(rawResponse.candidates)) {
+      rawResponse.candidates.forEach(function(candidate) {
+        if (isUnDef(candidate)) return
+        if (isMap(candidate.content)) {
+          addText(candidate.content.text)
+          addFromParts(candidate.content.parts)
+        }
+        addText(candidate.output)
+        addText(candidate.text)
+      })
+    }
+
+    if (isArray(rawResponse.messages)) {
+      rawResponse.messages.forEach(function(message) {
+        if (isUnDef(message)) return
+        addText(message.content)
+        addFromParts(message.content)
+      })
+    }
+  }
+
+  if (texts.length === 0 && isMap(rawResponse)) addText(stringify(rawResponse, __, ""))
+  return texts
+}
+
+function __miniAExtractStructuredThinkingTexts(rawResponse) {
+  var texts = []
+  var addText = function(value) {
+    if (isString(value) && value.trim().length > 0) texts.push(value)
+  }
+  var scanParts = function(parts) {
+    if (!isArray(parts)) return
+    parts.forEach(function(part) {
+      if (!isMap(part)) return
+      var t = String(part.type || "").toLowerCase()
+      if (t === "thinking" || t === "reasoning") {
+        addText(part.thinking)
+        addText(part.text)
+      }
+    })
+  }
+
+  if (!isMap(rawResponse)) return texts
+  addText(rawResponse.reasoning)
+  addText(rawResponse.thinking)
+
+  if (isMap(rawResponse.message)) {
+    addText(rawResponse.message.thinking)
+    addText(rawResponse.message.reasoning)
+    scanParts(rawResponse.message.content)
+  }
+
+  scanParts(rawResponse.content)
+  if (isArray(rawResponse.choices)) {
+    rawResponse.choices.forEach(function(choice) {
+      if (isUnDef(choice)) return
+      addText(choice.thinking)
+      addText(choice.reasoning)
+      if (isMap(choice.message)) {
+        addText(choice.message.thinking)
+        addText(choice.message.reasoning)
+        scanParts(choice.message.content)
+      }
+      if (isMap(choice.delta)) {
+        addText(choice.delta.thinking)
+        addText(choice.delta.reasoning)
+      }
+    })
+  }
+
+  return texts
+}
+
+function __miniAParseJsonCandidate(rawText, repairFn) {
+  if (!isString(rawText)) return __
+  var text = rawText.trim()
+  if (text.length === 0) return __
+
+  var parsed = jsonParse(text, __, __, true)
+  if (isMap(parsed) || isArray(parsed)) return parsed
+
+  var firstObj = text.indexOf("{")
+  var lastObj = text.lastIndexOf("}")
+  if (firstObj >= 0 && lastObj > firstObj) {
+    var objCandidate = text.substring(firstObj, lastObj + 1)
+    parsed = jsonParse(objCandidate, __, __, true)
+    if (isMap(parsed) || isArray(parsed)) return parsed
+  }
+
+  var firstArr = text.indexOf("[")
+  var lastArr = text.lastIndexOf("]")
+  if (firstArr >= 0 && lastArr > firstArr) {
+    var arrCandidate = text.substring(firstArr, lastArr + 1)
+    parsed = jsonParse(arrCandidate, __, __, true)
+    if (isMap(parsed) || isArray(parsed)) return parsed
+  }
+
+  var extractBalancedJson = function(source) {
+    if (!isString(source)) return ""
+    var trimmed = source.trim()
+    if (trimmed.length === 0) return ""
+    var start = -1
+    var openCh = ""
+    var closeCh = ""
+    for (var i = 0; i < trimmed.length; i++) {
+      var ch = trimmed.charAt(i)
+      if (ch === "{") { start = i; openCh = "{"; closeCh = "}"; break }
+      if (ch === "[") { start = i; openCh = "["; closeCh = "]"; break }
+    }
+    if (start < 0) return ""
+
+    var depth = 0
+    var inString = false
+    var escaped = false
+    for (var j = start; j < trimmed.length; j++) {
+      var cur = trimmed.charAt(j)
+      if (escaped) { escaped = false; continue }
+      if (cur === "\\") { escaped = true; continue }
+      if (cur === "\"") { inString = !inString; continue }
+      if (inString) continue
+      if (cur === openCh) depth++
+      if (cur === closeCh) depth--
+      if (depth === 0) return trimmed.substring(start, j + 1)
+    }
+    return ""
+  }
+
+  var balancedCandidate = extractBalancedJson(text)
+  if (balancedCandidate.length > 0) {
+    parsed = jsonParse(balancedCandidate, __, __, true)
+    if (!(isMap(parsed) || isArray(parsed)) && isFunction(repairFn)) {
+      var repairedBalanced = repairFn(balancedCandidate)
+      if (repairedBalanced !== balancedCandidate) parsed = jsonParse(repairedBalanced, __, __, true)
+    }
+    if (isMap(parsed) || isArray(parsed)) return parsed
+  }
+
+  return __
+}
+
+function __miniAStripThinkingTagsFromString(text, allowedTags, tagNormalizer) {
+  if (!isString(text)) return { cleaned: text, blocks: [] }
+  var tagPattern = /<\s*([a-zA-Z0-9_-]+)(?:\s[^>]*)?>([\s\S]*?)<\/\s*\1\s*>/g
+  var blocks = []
+  var seen = {}
+  var cleaned = text.replace(tagPattern, function(match, tag, content) {
+    var normalized = isFunction(tagNormalizer) ? tagNormalizer(tag) : String(tag || "")
+    if (!isMap(allowedTags) || allowedTags[normalized] !== true) return match
+    var trimmed = (content || "").toString().trim()
+    if (trimmed.length > 0 && !seen[trimmed]) { seen[trimmed] = true; blocks.push(trimmed) }
+    return ""
+  }).trim()
+  return { cleaned: cleaned, blocks: blocks }
+}
+
+function __miniAExtractEmbeddedFinalAction(answerPayload, cleanCodeBlocksFn) {
+  if (isUnDef(answerPayload)) return null
+  var embedded = answerPayload
+  if (isString(embedded)) {
+    var cleaner = isFunction(cleanCodeBlocksFn) ? cleanCodeBlocksFn : __miniACleanCodeBlocks
+    var cleaned = cleaner(embedded).trim()
+    if (cleaned.length === 0) return null
+    if (!cleaned.match(/^(\{|\[)/)) return null
+    try {
+      embedded = jsonParse(cleaned, __, __, true)
+    } catch (e) {
+      return null
+    }
+  }
+  if (!isMap(embedded)) return null
+  var embeddedActionRaw = ((embedded.action || embedded.type || embedded.name || embedded.tool || embedded.think || "") + "").trim()
+  if (embeddedActionRaw.toLowerCase() !== "final") return null
+  if (isUnDef(embedded.answer)) return null
+  var hasEmbeddedThought = isDef(embedded.thought) || isDef(embedded.think)
+  if (!hasEmbeddedThought) return null
+
+  var normalized = { action: "final", answer: embedded.answer }
+  if (isDef(embedded.thought)) normalized.thought = embedded.thought
+  else if (isDef(embedded.think)) normalized.thought = embedded.think
+  if (isDef(embedded.state)) normalized.state = embedded.state
+  if (isDef(embedded.params)) normalized.params = embedded.params
+  if (isDef(embedded.command)) normalized.command = embedded.command
+  return normalized
+}
+
+function __miniAParseListOption(value) {
+  if (isUnDef(value) || value === null) return []
+  if (isArray(value)) {
+    return value
+      .map(function(v) { return (isString(v) ? v : stringify(v, __, "")).toLowerCase().trim() })
+      .filter(function(v) { return v.length > 0 })
+  }
+  if (!isString(value)) value = stringify(value, __, "")
+  return value.split(",").map(function(v) { return v.trim().toLowerCase() }).filter(function(v) { return v.length > 0 })
+}
+
+function __miniANormalizePromptProfile(profile, fallbackProfile) {
+  var normalized = isString(profile) ? profile.trim().toLowerCase() : ""
+  if (normalized === "minimal" || normalized === "balanced" || normalized === "verbose") return normalized
+  return isString(fallbackProfile) && fallbackProfile.length > 0 ? fallbackProfile : "balanced"
+}
+
+function __miniAStemWord(word) {
+  var suffixes = [
+    { pattern: /ness$/, replacement: "" },
+    { pattern: /ing$/, replacement: "" },
+    { pattern: /ed$/, replacement: "" },
+    { pattern: /es$/, replacement: "" },
+    { pattern: /s$/, replacement: "" },
+    { pattern: /ied$/, replacement: "y" },
+    { pattern: /ies$/, replacement: "y" },
+    { pattern: /ation$/, replacement: "ate" },
+    { pattern: /tion$/, replacement: "t" },
+    { pattern: /er$/, replacement: "" },
+    { pattern: /ly$/, replacement: "" },
+    { pattern: /able$/, replacement: "" },
+    { pattern: /ible$/, replacement: "" }
+  ]
+  for (var i = 0; i < suffixes.length; i++) {
+    if (suffixes[i].pattern.test(word) && word.length > 4) return word.replace(suffixes[i].pattern, suffixes[i].replacement)
+  }
+  return word
+}
+
+function __miniALevenshteinDistance(a, b) {
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+  var matrix = []
+  for (var i = 0; i <= b.length; i++) matrix[i] = [i]
+  for (var j = 0; j <= a.length; j++) matrix[0][j] = j
+  for (i = 1; i <= b.length; i++) {
+    for (j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) matrix[i][j] = matrix[i - 1][j - 1]
+      else matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+    }
+  }
+  return matrix[b.length][a.length]
+}
