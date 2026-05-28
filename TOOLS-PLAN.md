@@ -10,7 +10,7 @@ Add `usestdutils=` with default `true` for `useutils=true` sessions. When enable
 
 Pros:
 - Exact OpenCode names (`read`, `glob`, `grep`, `bash`, etc.) match what LLMs trained on coding-agent conventions expect, reducing tool-selection mistakes.
-- OpenCode-compatible schemas eliminate translation burden for agent profiles copied from OpenCode-style environments.
+- standard schemas eliminate translation burden for agent profiles copied from OpenCode-style environments.
 - Hiding legacy names by default lowers catalog noise while preserving full implementation coverage behind aliases.
 - Alias-aware filters keep existing Mini-A CLI and agent definitions usable.
 
@@ -46,7 +46,7 @@ Exact OpenCode names mapped to their mini-a backing. Every tool in this table mu
 ### Arguments
 
 Add to `mini-a.yaml`, both Mini-A argument parsers, known-argument validation, README/USAGE docs:
-- `usestdutils=true`: expose OpenCode-compatible aliases (default when `useutils=true`).
+- `usestdutils=true`: expose standard aliases (default when `useutils=true`).
 - `usestdutils=false`: expose current Mini Utils names and schemas unchanged.
 
 ### Centralized alias adapter
@@ -272,7 +272,7 @@ Extend `tests/miniAUtils.js` and `tests/miniAUtils.yaml`:
 
 - `usestdutils` controls the Mini Utils and shell-alias surface only; unrelated MCP tools keep their existing names.
 - `TOOLS.md` remains untracked and is not required at runtime.
-- OpenCode-compatible aliases prioritize correct semantic compatibility over perfect feature parity where mini-a has no exact match.
+- standard aliases prioritize correct semantic compatibility over perfect feature parity where mini-a has no exact match.
 - JSoup opack (`getOPackPath("Jsoup")`) is an optional runtime dependency for `webfetch format` conversion. When absent, a regex fallback is used. No hard load-time dependency.
 - `usestdutils` defaults to `true` when `useutils=true`. Revisit this default if agent breakage is observed in testing.
 - `task` is not exposed: mini-a delegation is driven by JSON `action` fields in LLM responses, not by MCP tools, and there is no clean bridge from an MCP tool call to the SubtaskManager.

@@ -269,6 +269,11 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : usestdutils
+    desc     : Expose standard Mini Utils aliases (read/glob/grep/webfetch/question/skill/todowrite/bash) when useutils=true
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : useskills
     desc     : Expose the Mini Utils Tool `skills` operation; when useutils=false this registers only the skills tool
     example  : "false"
@@ -973,6 +978,7 @@ jobs:
         usejsontool    : usejsontool
         toolfallback   : toolfallback
         useutils       : useutils
+        usestdutils    : usestdutils
         useskills      : useskills
         skillmaxautoload: skillmaxautoload
         skillcontextchars: skillcontextchars
@@ -1179,6 +1185,7 @@ jobs:
       usejsontool    : toBoolean.isBoolean.default(__)
       toolfallback   : toBoolean.isBoolean.default(false)
       useutils       : toBoolean.isBoolean.default(__)
+      usestdutils    : toBoolean.isBoolean.default(__)
       useskills      : toBoolean.isBoolean.default(false)
       skillmaxautoload: toNumber.isNumber.default(1)
       skillcontextchars: toNumber.isNumber.default(8000)

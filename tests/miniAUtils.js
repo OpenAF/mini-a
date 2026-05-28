@@ -346,6 +346,32 @@
     }
   }
 
+  exports.testAliasPassThrough = function() {
+    var testDir = createTestDir()
+    try {
+      io.mkdir(testDir + java.io.File.separator + "nested")
+      io.writeFileString(testDir + java.io.File.separator + "alpha.txt", "first line\nsecond line")
+      io.writeFileString(testDir + java.io.File.separator + "nested" + java.io.File.separator + "beta.txt", "beta needle line")
+
+      var tool = new MiniUtilsTool(testDir)
+
+      var readByPath = tool.read({ path: "alpha.txt", lineStart: 2, maxLines: 1 })
+      ow.test.assert(isMap(readByPath), true, "read alias should return map for path")
+      ow.test.assert(readByPath.content, "second line", "read alias should pass path and lineStart/maxLines")
+
+      var grepNonRecursive = tool.grep({ path: ".", pattern: "needle", include: "*.txt", recursive: false })
+      ow.test.assert(isArray(grepNonRecursive), true, "grep alias should return results array")
+      ow.test.assert(grepNonRecursive.length === 0, true, "grep alias should forward recursive=false")
+
+      var grepRecursive = tool.grep({ path: ".", pattern: "needle", include: "*.txt", recursive: true, compact: true })
+      ow.test.assert(isMap(grepRecursive), true, "grep alias should return compact result map when compact=true")
+      ow.test.assert(grepRecursive.count === 1, true, "grep alias should find nested match when recursive=true")
+      ow.test.assert(String(grepRecursive.matches[0].preview).length <= 100, true, "grep alias should forward compact=true")
+    } finally {
+      cleanupTestDir(testDir)
+    }
+  }
+
   exports.testEditFile = function() {
     var testDir = createTestDir()
     try {
@@ -736,6 +762,14 @@
     ow.test.assert(isDef(metadata.mathematics), true, "Should include mathematics metadata")
     ow.test.assert(isDef(metadata.timeUtilities), true, "Should include timeUtilities metadata")
     ow.test.assert(isDef(metadata.userInput), true, "Should include userInput metadata")
+    ow.test.assert(isDef(metadata.read), true, "Should include read alias metadata")
+    ow.test.assert(isDef(metadata.glob), true, "Should include glob alias metadata")
+    ow.test.assert(isDef(metadata.grep), true, "Should include grep alias metadata")
+    ow.test.assert(isDef(metadata.webfetch), true, "Should include webfetch alias metadata")
+    ow.test.assert(isDef(metadata.question), true, "Should include question alias metadata")
+    ow.test.assert(isDef(metadata.skill), true, "Should include skill alias metadata")
+    ow.test.assert(isDef(metadata.todowrite), true, "Should include todowrite alias metadata")
+    ow.test.assert(isDef(metadata.apply_patch), true, "Should include apply_patch metadata")
 
     var methods = MiniUtilsTool.getExposedMethodNames()
     ow.test.assert(isArray(methods), true, "Should return method names array")
@@ -747,6 +781,9 @@
     ow.test.assert(methods.indexOf("mathematics") >= 0, true, "Should include mathematics method")
     ow.test.assert(methods.indexOf("timeUtilities") >= 0, true, "Should include timeUtilities method")
     ow.test.assert(methods.indexOf("userInput") >= 0, true, "Should include userInput method")
+    ow.test.assert(methods.indexOf("read") >= 0, true, "Should include read alias method")
+    ow.test.assert(methods.indexOf("grep") >= 0, true, "Should include grep alias method")
+    ow.test.assert(methods.indexOf("webfetch") >= 0, true, "Should include webfetch alias method")
     ow.test.assert(methods.indexOf("memoryStore") >= 0, true, "Should include memoryStore method")
     ow.test.assert(methods.indexOf("todoList") >= 0, true, "Should include todoList method")
     ow.test.assert(methods.indexOf("kvStore") === -1, true, "Should not include kvStore method")

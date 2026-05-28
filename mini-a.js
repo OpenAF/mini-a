@@ -3524,6 +3524,35 @@ MiniA.prototype._parseUtilsToolList = function(value) {
     })
 }
 
+MiniA.prototype._normalizeUtilsToolList = function(value, useStd) {
+    var list = this._parseUtilsToolList(value)
+    if (useStd !== true) return list
+    var aliasMap = {
+      filesystemquery: ["read", "glob", "grep"],
+      userinput      : ["question"],
+      skills         : ["skill"],
+      todolist       : ["todowrite"],
+      textutilities  : ["webfetch"]
+    }
+    var normalized = []
+    var seen = {}
+    var self = this
+    list.forEach(function(entry) {
+      var key = String(entry || "").toLowerCase()
+      var mapped = aliasMap[key] || [key]
+      mapped.forEach(function(name) {
+        if (!seen[name]) {
+          seen[name] = true
+          normalized.push(name)
+        }
+      })
+      if (aliasMap[key] && aliasMap[key].length > 0) {
+        self.fnI("warn", "Translated legacy utils filter '" + key + "' to " + aliasMap[key].join(", "))
+      }
+    })
+    return normalized
+}
+
 MiniA.prototype._normalizePlanItems = function(plan) {
   if (!this._enablePlanning) return []
   if (isUnDef(plan)) return []
@@ -8893,6 +8922,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     var includeSkillsTool = toBoolean(args.useskills) === true
+    var useStdUtils = toBoolean(args.usestdutils) === true
     if (includeSkillsTool) {
       try {
         this._availableSkills = fileTool._listSkills({})
@@ -8916,7 +8946,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "wiki" })
     }
-    var utilsAllow = this._parseUtilsToolList(args.utilsallow)
+    var utilsAllow = this._normalizeUtilsToolList(args.utilsallow, useStdUtils)
     if (utilsAllow.length > 0) {
       var allowMap = {}
       utilsAllow.forEach(function(name) {
@@ -8926,7 +8956,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         return allowMap[String(name).toLowerCase()] === true
       })
     }
-    var utilsDeny = this._parseUtilsToolList(args.utilsdeny)
+    var utilsDeny = this._normalizeUtilsToolList(args.utilsdeny, useStdUtils)
     if (utilsDeny.length > 0) {
       var denyMap = {}
       utilsDeny.forEach(function(name) {
@@ -8938,6 +8968,12 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     if (methodNames.indexOf("skills") < 0) this._availableSkills = []
+    if (useStdUtils) {
+      var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
+      var stdMap = {}
+      stdVisible.forEach(function(n) { stdMap[n] = true })
+      methodNames = methodNames.filter(function(name) { return stdMap[name] === true })
+    }
     if (methodNames.length === 0) return __
 
     var formatResponse = function(result) {
@@ -9270,8 +9306,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
 
     var parent = this
 
-    var fns = {
-      shell: function(params) {
+    var toolName = toBoolean(args.usestdutils) === true ? "bash" : "shell"
+    var fns = {}
+    fns[toolName] = function(params) {
         var p = isObject(params) ? params : {}
         var cmd = isString(p.command) ? p.command : ""
         if (cmd.length === 0) {
@@ -9280,6 +9317,14 @@ MiniA.prototype._createShellMcpConfig = function(args) {
           return { error: msg, content: [{ type: "text", text: msg }] }
         }
         try {
+          if (isString(p.workdir) && p.workdir.trim().length > 0) {
+            var wd = p.workdir.trim()
+            if (!io.fileExists(wd) || io.fileInfo(wd).isDirectory !== true) {
+              var wdErr = "[ERROR] bash: workdir not found: " + wd
+              return { error: wdErr, content: [{ type: "text", text: wdErr }] }
+            }
+            cmd = "cd " + wd + " && " + cmd
+          }
           var result = parent._runCommand({
             command        : cmd,
             readwrite      : toBoolean(p.readwrite) || toBoolean(args.readwrite),
@@ -9288,7 +9333,7 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
             shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
             shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix,
-            shelltimeout   : isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout,
+            shelltimeout   : isDef(p.timeout) ? (Number(p.timeout) * 1000) : (isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout),
             usesandbox     : isDef(p.usesandbox) ? p.usesandbox : args.usesandbox,
             sandboxprofile : isDef(p.sandboxprofile) ? p.sandboxprofile : args.sandboxprofile,
             sandboxnonetwork: isDef(p.sandboxnonetwork) ? p.sandboxnonetwork : args.sandboxnonetwork
@@ -9302,16 +9347,18 @@ MiniA.prototype._createShellMcpConfig = function(args) {
           return { error: msg, content: [{ type: "text", text: msg }] }
         }
       }
-    }
 
-    var fnsMeta = {
-      shell: {
-        name       : "shell",
+    var fnsMeta = {}
+    fnsMeta[toolName] = {
+        name       : toolName,
         description: "Execute a POSIX shell command under Mini-A's safety checks and allowlists.",
         inputSchema: {
           type      : "object",
           properties: {
             command        : { type: "string", description: "POSIX command to execute." },
+            description    : { type: "string", description: "Tool compatibility audit description." },
+            workdir        : { type: "string", description: "Optional working directory (must exist)." },
+            timeout        : { type: "number", description: "Timeout in seconds." },
             readwrite      : { type: "boolean", description: "Allow write operations (inherits global when omitted)." },
             checkall       : { type: "boolean", description: "Ask approval even when not risky (inherits global)." },
             shellallow     : { type: "string", description: "Comma-separated allowlist to override bans." },
@@ -9323,10 +9370,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             sandboxprofile : { type: "string", description: "Optional macOS sandbox profile path; otherwise Mini-A generates a restrictive temporary .sb profile." },
             sandboxnonetwork: { type: "boolean", description: "Disable network inside the built-in sandbox when supported; Windows remains best-effort." }
           },
-          required: ["command"]
+          required: toolName === "bash" ? ["command", "description"] : ["command"]
         }
       }
-    }
 
     return {
       id     : "mini-a-shell",
@@ -13072,7 +13118,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "mcpproxytoon", "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "utilsroot", "utilsallow", "utilsdeny",
-    "useskills", "mini-a-docs", "miniadocs",
+    "useskills", "usestdutils", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
     "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
     "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
@@ -13453,6 +13499,7 @@ MiniA.prototype.init = function(args) {
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
+      { name: "usestdutils", type: "boolean", default: __ },
       { name: "skillmaxautoload", type: "number", default: 1 },
       { name: "skillcontextchars", type: "number", default: 8000 },
       { name: "skillmanifestchars", type: "number", default: 1536 },
@@ -13509,6 +13556,7 @@ MiniA.prototype.init = function(args) {
     args.usetoolslc = _$(toBoolean(args.usetoolslc), "args.usetoolslc").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(args.useutils === true)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
@@ -14863,6 +14911,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
+      { name: "usestdutils", type: "boolean", default: __ },
       { name: "skillmaxautoload", type: "number", default: 1 },
       { name: "skillcontextchars", type: "number", default: 8000 },
       { name: "skillmanifestchars", type: "number", default: 1536 },
@@ -14921,6 +14970,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.toolfallback = _$(toBoolean(args.toolfallback), "args.toolfallback").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(args.useutils === true)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
