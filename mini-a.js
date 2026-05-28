@@ -132,6 +132,7 @@ var MiniA = function() {
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
     llm_lc_calls: $atomic(0, "long"),
+    llm_val_calls: $atomic(0, "long"),
     goals_achieved: $atomic(0, "long"),
     goals_failed: $atomic(0, "long"),
     thoughts_made: $atomic(0, "long"),
@@ -173,6 +174,13 @@ var MiniA = function() {
     unknown_actions: $atomic(0, "long"),
     llm_normal_tokens: $atomic(0, "long"),
     llm_lc_tokens: $atomic(0, "long"),
+    llm_val_tokens: $atomic(0, "long"),
+    llm_normal_input_tokens: $atomic(0, "long"),
+    llm_normal_output_tokens: $atomic(0, "long"),
+    llm_lc_input_tokens: $atomic(0, "long"),
+    llm_lc_output_tokens: $atomic(0, "long"),
+    llm_val_input_tokens: $atomic(0, "long"),
+    llm_val_output_tokens: $atomic(0, "long"),
     plans_generated: $atomic(0, "long"),
     plans_validated: $atomic(0, "long"),
     plans_validation_failed: $atomic(0, "long"),
@@ -1689,6 +1697,7 @@ MiniA.prototype.getMetrics = function() {
 
     var llmNormalCalls = global.__mini_a_metrics.llm_normal_calls.get()
     var llmLcCalls = global.__mini_a_metrics.llm_lc_calls.get()
+    var llmValCalls = global.__mini_a_metrics.llm_val_calls.get()
     var advisorCalls = global.__mini_a_metrics.advisor_calls.get()
     var memorySnapshot = this._getMemoryMetricsSnapshot()
 
@@ -1696,7 +1705,8 @@ MiniA.prototype.getMetrics = function() {
         llm_calls: {
             normal: llmNormalCalls,
             low_cost: llmLcCalls,
-            total: llmNormalCalls + llmLcCalls + advisorCalls,
+            validation: llmValCalls,
+            total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls,
             fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get()
         },
         goals: {
@@ -1740,6 +1750,13 @@ MiniA.prototype.getMetrics = function() {
             llm_actual_tokens: global.__mini_a_metrics.llm_actual_tokens.get(),
             llm_normal_tokens: global.__mini_a_metrics.llm_normal_tokens.get(),
             llm_lc_tokens: global.__mini_a_metrics.llm_lc_tokens.get(),
+            llm_val_tokens: global.__mini_a_metrics.llm_val_tokens.get(),
+            llm_normal_input_tokens: global.__mini_a_metrics.llm_normal_input_tokens.get(),
+            llm_normal_output_tokens: global.__mini_a_metrics.llm_normal_output_tokens.get(),
+            llm_lc_input_tokens: global.__mini_a_metrics.llm_lc_input_tokens.get(),
+            llm_lc_output_tokens: global.__mini_a_metrics.llm_lc_output_tokens.get(),
+            llm_val_input_tokens: global.__mini_a_metrics.llm_val_input_tokens.get(),
+            llm_val_output_tokens: global.__mini_a_metrics.llm_val_output_tokens.get(),
             llm_cache_creation_tokens: global.__mini_a_metrics.llm_cache_creation_tokens.get(),
             llm_cache_read_tokens: global.__mini_a_metrics.llm_cache_read_tokens.get(),
             llm_cached_tokens: global.__mini_a_metrics.llm_cached_tokens.get(),
@@ -2620,13 +2637,26 @@ MiniA.prototype._formatTokenStats = function(stats) {
  * Print a one-line LC cost summary if dual-model is enabled and both token buckets are non-zero.
  */
 MiniA.prototype._logLcCostSummary = function() {
-  if (!this._use_lc) return
   var mainTokens = global.__mini_a_metrics.llm_normal_tokens.get()
-  var lcTokens   = global.__mini_a_metrics.llm_lc_tokens.get()
+  var mainIn     = global.__mini_a_metrics.llm_normal_input_tokens.get()
+  var mainOut    = global.__mini_a_metrics.llm_normal_output_tokens.get()
+  var valTokens  = this._use_val ? global.__mini_a_metrics.llm_val_tokens.get() : 0
+  var valIn      = this._use_val ? global.__mini_a_metrics.llm_val_input_tokens.get() : 0
+  var valOut     = this._use_val ? global.__mini_a_metrics.llm_val_output_tokens.get() : 0
+  var valPart    = valTokens > 0 ? ` | Val: ${valTokens} tokens (in: ${valIn}, out: ${valOut})` : ""
+  if (!this._use_lc) {
+    if (mainTokens > 0) {
+      this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut})${valPart}`)
+    }
+    return
+  }
+  var lcTokens = global.__mini_a_metrics.llm_lc_tokens.get()
   if (mainTokens > 0 && lcTokens > 0) {
-    var total = mainTokens + lcTokens
+    var total   = mainTokens + lcTokens
     var lcShare = Math.round(lcTokens / total * 100)
-    this.fnI("info", `[cost] Main: ${mainTokens} tokens | LC: ${lcTokens} tokens | LC share: ${lcShare}%`)
+    var lcIn    = global.__mini_a_metrics.llm_lc_input_tokens.get()
+    var lcOut   = global.__mini_a_metrics.llm_lc_output_tokens.get()
+    this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}) | LC: ${lcTokens} tokens (in: ${lcIn}, out: ${lcOut}) | LC share: ${lcShare}%${valPart}`)
   }
 }
 
@@ -3403,8 +3433,12 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
     if (isString(tier)) {
         var tierKey = tier.toLowerCase()
         if (tierKey === "lc") normalizedTier = "lc"
+        if (tierKey === "val" || tierKey === "validation") normalizedTier = "val"
         if (tierKey === "advisor") normalizedTier = "advisor"
     }
+    var statsTokens = isObject(stats) && isObject(stats.tokens) ? stats.tokens : {}
+    var promptTokens = isNumber(stats.prompt_tokens) ? stats.prompt_tokens : (isNumber(statsTokens.prompt) ? statsTokens.prompt : 0)
+    var completionTokens = isNumber(stats.completion_tokens) ? stats.completion_tokens : (isNumber(statsTokens.completion) ? statsTokens.completion : 0)
     var actualTokens = this._getTotalTokens(stats)
     var trackedTokens = this._resolveTrackedTokenTotal(stats, fallbackTokens)
 
@@ -3416,12 +3450,37 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
         if (isObject(global.__mini_a_metrics.llm_lc_tokens)) {
             global.__mini_a_metrics.llm_lc_tokens.getAdd(trackedTokens)
         }
+        if (isObject(global.__mini_a_metrics.llm_lc_input_tokens)) {
+            global.__mini_a_metrics.llm_lc_input_tokens.getAdd(promptTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_lc_output_tokens)) {
+            global.__mini_a_metrics.llm_lc_output_tokens.getAdd(completionTokens)
+        }
         if (isObject(global.__mini_a_metrics.llm_lc_calls)) {
             global.__mini_a_metrics.llm_lc_calls.inc()
+        }
+    } else if (normalizedTier === "val") {
+        if (isObject(global.__mini_a_metrics.llm_val_tokens)) {
+            global.__mini_a_metrics.llm_val_tokens.getAdd(trackedTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_val_input_tokens)) {
+            global.__mini_a_metrics.llm_val_input_tokens.getAdd(promptTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_val_output_tokens)) {
+            global.__mini_a_metrics.llm_val_output_tokens.getAdd(completionTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_val_calls)) {
+            global.__mini_a_metrics.llm_val_calls.inc()
         }
     } else if (normalizedTier === "main") {
         if (isObject(global.__mini_a_metrics.llm_normal_tokens)) {
             global.__mini_a_metrics.llm_normal_tokens.getAdd(trackedTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_normal_input_tokens)) {
+            global.__mini_a_metrics.llm_normal_input_tokens.getAdd(promptTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_normal_output_tokens)) {
+            global.__mini_a_metrics.llm_normal_output_tokens.getAdd(completionTokens)
         }
         if (isObject(global.__mini_a_metrics.llm_normal_calls)) {
             global.__mini_a_metrics.llm_normal_calls.inc()
@@ -19070,7 +19129,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
-    var totalTokens = this._recordLlmStatsMetrics(stats, "main", this._estimateTokens(validationPrompt))
+    var totalTokens = this._recordLlmStatsMetrics(stats, "val", this._estimateTokens(validationPrompt))
 
     var validationContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
     if (isObject(validationContent) && isString(validationContent.response)) {

@@ -4842,7 +4842,8 @@ try {
         summaryExport.llm_calls = {
           total: metrics.llm_calls.total || 0,
           normal: metrics.llm_calls.normal || 0,
-          low_cost: metrics.llm_calls.low_cost || 0
+          low_cost: metrics.llm_calls.low_cost || 0,
+          validation: metrics.llm_calls.validation || 0
         }
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) summaryExport.llm_calls.fallback_to_main = metrics.llm_calls.fallback_to_main || 0
         summaryRows.push({
@@ -4859,6 +4860,11 @@ try {
           category: "",
           metric: "Low Cost",
           value: metrics.llm_calls.low_cost || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Validation",
+          value: metrics.llm_calls.validation || 0
         })
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) {
           summaryRows.push({
@@ -4909,6 +4915,15 @@ try {
 
       // Performance
       if (isObject(metrics.performance)) {
+        var mainInputTokens = metrics.performance.llm_normal_input_tokens || 0
+        var mainOutputTokens = metrics.performance.llm_normal_output_tokens || 0
+        var lcInputTokens = metrics.performance.llm_lc_input_tokens || 0
+        var lcOutputTokens = metrics.performance.llm_lc_output_tokens || 0
+        var mainTotalTokens = mainInputTokens + mainOutputTokens
+        var lcTotalTokens = lcInputTokens + lcOutputTokens
+        var mainAndLcTotalTokens = mainTotalTokens + lcTotalTokens
+        var lcSharePct = mainAndLcTotalTokens > 0 ? ((lcTotalTokens / mainAndLcTotalTokens) * 100).toFixed(1) : "0.0"
+
         summaryExport.performance = {
           steps_taken: metrics.performance.steps_taken || 0
         }
@@ -4917,6 +4932,15 @@ try {
           summaryExport.performance.total_session_time_seconds = Number((metrics.performance.total_session_time_ms / 1000).toFixed(2))
         }
         if ((metrics.performance.llm_actual_tokens || 0) > 0) summaryExport.performance.llm_actual_tokens = metrics.performance.llm_actual_tokens || 0
+        if ((metrics.performance.llm_normal_input_tokens || 0) > 0) summaryExport.performance.llm_normal_input_tokens = metrics.performance.llm_normal_input_tokens || 0
+        if ((metrics.performance.llm_normal_output_tokens || 0) > 0) summaryExport.performance.llm_normal_output_tokens = metrics.performance.llm_normal_output_tokens || 0
+        if ((metrics.performance.llm_lc_input_tokens || 0) > 0) summaryExport.performance.llm_lc_input_tokens = metrics.performance.llm_lc_input_tokens || 0
+        if ((metrics.performance.llm_lc_output_tokens || 0) > 0) summaryExport.performance.llm_lc_output_tokens = metrics.performance.llm_lc_output_tokens || 0
+        if (mainTotalTokens > 0) summaryExport.performance.llm_main_total_tokens = mainTotalTokens
+        if (lcTotalTokens > 0) summaryExport.performance.llm_lc_total_tokens = lcTotalTokens
+        if (mainAndLcTotalTokens > 0) summaryExport.performance.llm_lc_share_pct = Number(lcSharePct)
+        if ((metrics.performance.llm_val_input_tokens || 0) > 0) summaryExport.performance.llm_val_input_tokens = metrics.performance.llm_val_input_tokens || 0
+        if ((metrics.performance.llm_val_output_tokens || 0) > 0) summaryExport.performance.llm_val_output_tokens = metrics.performance.llm_val_output_tokens || 0
         if ((metrics.performance.max_context_tokens || 0) > 0) summaryExport.performance.max_context_tokens = metrics.performance.max_context_tokens || 0
         if ((metrics.performance.avg_step_time_ms || 0) > 0) summaryExport.performance.avg_step_time_ms = metrics.performance.avg_step_time_ms || 0
         summaryRows.push({
@@ -4943,6 +4967,65 @@ try {
             category: "",
             metric: "LLM Actual Tokens",
             value: metrics.performance.llm_actual_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_normal_input_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Main Input Tokens",
+            value: metrics.performance.llm_normal_input_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_normal_output_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Main Output Tokens",
+            value: metrics.performance.llm_normal_output_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_lc_input_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "LC Input Tokens",
+            value: metrics.performance.llm_lc_input_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_lc_output_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "LC Output Tokens",
+            value: metrics.performance.llm_lc_output_tokens || 0
+          })
+        }
+        if (mainAndLcTotalTokens > 0) {
+          summaryRows.push({
+            category: "Model Tokens",
+            metric: "Main Total (In+Out)",
+            value: mainTotalTokens
+          })
+          summaryRows.push({
+            category: "",
+            metric: "LC Total (In+Out)",
+            value: lcTotalTokens
+          })
+          summaryRows.push({
+            category: "",
+            metric: "LC Share (%)",
+            value: lcSharePct
+          })
+        }
+        if ((metrics.performance.llm_val_input_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Validation Input Tokens",
+            value: metrics.performance.llm_val_input_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_val_output_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Validation Output Tokens",
+            value: metrics.performance.llm_val_output_tokens || 0
           })
         }
         if ((metrics.performance.max_context_tokens || 0) > 0) {
