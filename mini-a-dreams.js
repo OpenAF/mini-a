@@ -31,7 +31,12 @@ var MiniADreams = function(dreamArgs, logFn) {
 }
 
 MiniADreams.prototype._log = function(msg) {
-  try { this._logFn(msg) } catch(ignoreLogErr) {}
+  var out = isDef(msg) ? String(msg) : ""
+  if (out.indexOf("[dreams") >= 0) {
+    if (out.indexOf("💤 ") === 0) out = "zzz " + out.substring(2).trim()
+    if (out.indexOf("zzz ") !== 0) out = "zzz " + out
+  }
+  try { this._logFn(out) } catch(ignoreLogErr) {}
 }
 
 // Allow tests (and callers) to inject a stub LLM so no real API keys are needed.
