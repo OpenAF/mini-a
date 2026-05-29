@@ -1579,9 +1579,38 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "refs" || op === "references") op = "backlinks"
     if (op === "mv" || op === "rename") op = "move"
 
+    if (op === "context") {
+      return wm.context()
+    }
+
+    if (op === "mounts") {
+      return wm.mounts()
+    }
+
+    if (op === "attach") {
+      if (!isString(params.name) || params.name.trim().length === 0) return "[ERROR] name is required for attach"
+      var attachCfg = { access: "ro", backend: isString(params.backend) ? params.backend : "fs" }
+      if (isString(params.root))      attachCfg.root      = params.root
+      if (isString(params.bucket))    attachCfg.bucket    = params.bucket
+      if (isString(params.prefix))    attachCfg.prefix    = params.prefix
+      if (isString(params.url))       attachCfg.url       = params.url
+      if (isString(params.accessKey)) attachCfg.accessKey = params.accessKey
+      if (isString(params.secret))    attachCfg.secret    = params.secret
+      if (isString(params.region))    attachCfg.region    = params.region
+      return wm.attach(params.name.trim(), attachCfg)
+    }
+
+    if (op === "detach") {
+      var detachName = isString(params.name) ? params.name.trim() : (isString(params.path) ? params.path.trim() : "")
+      if (detachName.length === 0) return "[ERROR] name is required for detach"
+      return wm.detach(detachName)
+    }
+
     if (op === "list") {
       var prefix = isString(params.path) ? params.path : ""
-      var pages = wm.list(prefix)
+      var listOpts = { withMeta: params.withMeta === true || params.withMeta === "true", limit: isNumber(params.limit) ? params.limit : 1000 }
+      var pages = wm.list(prefix, listOpts)
+      if (listOpts.withMeta) return { count: pages.length, pages: pages }
       if (params.compact === true) return { count: pages.length, pages: pages }
       return { count: pages.length, pages: pages }
     }
@@ -1610,15 +1639,30 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     if (op === "read") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for read"
-      var page = wm.read(params.path.trim())
+      var readOpts = {
+        lineStart : isNumber(params.lineStart) ? params.lineStart : __,
+        lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : __,
+        maxLines  : isNumber(params.maxLines)  ? params.maxLines  : __,
+        countLines: params.countLines === true,
+        section   : isString(params.section)   ? params.section   : __
+      }
+      var page = wm.read(params.path.trim(), readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
-      if (params.compact === true) return { path: page.path, title: isString(page.meta.title) ? page.meta.title : page.path, body: page.body }
+      if (params.compact === true) return { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
       return page
     }
 
     if (op === "search") {
       if (!isString(params.query) || params.query.trim().length === 0) return "[ERROR] query is required for search"
-      var hits = wm.search(params.query.trim(), { limit: isNumber(params.limit) ? params.limit : 20 })
+      var searchOpts = {
+        limit       : isNumber(params.limit) ? params.limit : 20,
+        contextLines: isNumber(params.contextLines) ? params.contextLines : 0,
+        regex       : params.regex === true,
+        caseSensitive: params.caseSensitive === true,
+        searchIn    : isString(params.searchIn) ? params.searchIn : "all",
+        compact     : params.compact !== false
+      }
+      var hits = wm.search(params.query.trim(), searchOpts)
       return { count: hits.length, results: hits }
     }
 
@@ -1662,7 +1706,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return isObject(iResult) ? iResult : { ok: false, error: String(iResult) }
     }
 
-    return "[ERROR] Unknown wiki operation: " + op + ". Use list, tree, browse, read, search, backlinks, write, move, delete, lint, init."
+    if (op === "reindex") {
+      return wm.reindex()
+    }
+
+    return "[ERROR] Unknown wiki operation: " + op + ". Use context, list, tree, browse, read, search, backlinks, write, move, delete, lint, init, mounts, attach, detach, reindex."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -4240,7 +4288,7 @@ MiniUtilsTool._metadataByFn = (function() {
     },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. Use operation='tree' or 'browse' to discover hierarchy, 'read' to get a page, 'search' to find pages by keyword, 'backlinks' to inspect references, 'write' to create/update a page, 'move' to relocate a page with link repair (requires wikiaccess=rw), 'delete' to remove a page (requires wikiaccess=rw), 'lint' to validate wiki health, and 'init' to create AGENTS.md/index.md or a section index.md (requires wikiaccess=rw).",
+      description: "Interact with the wiki knowledge base. ALWAYS start with operation='context' for a compact overview. Use 'search' to find pages (returns path+title+description by default; add contextLines>0 for snippets), 'read' to get a page (use section= to read one heading only), 'list' with withMeta=true for metadata, 'tree'/'browse' for structure including mounts, 'mounts'/'attach'/'detach' for federated read-only wikis (@name/path.md), 'write'/'move'/'delete' to update (requires wikiaccess=rw), 'lint' to validate health, 'init' for section index creation.",
       inputSchema: {
         type      : "object",
         properties: {

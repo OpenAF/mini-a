@@ -1124,4 +1124,44 @@
     var result = tool.mathematics({ operation: "unknown-op" })
     ow.test.assert(isString(result) && result.indexOf("[ERROR]") === 0, true, "Should error with unknown operation")
   }
+
+  exports.testStdUtilsCatalog = function() {
+    var STD_ALIASES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
+    var all = MiniUtilsTool.getExposedMethodNames()
+
+    STD_ALIASES.forEach(function(name) {
+      ow.test.assert(all.indexOf(name) >= 0, true, "Alias '" + name + "' must be in exposed method names")
+    })
+
+    var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki"].concat(STD_ALIASES)
+    var stdMap = {}
+    stdVisible.forEach(function(n) { stdMap[n] = true })
+    var stdCatalog = all.filter(function(name) { return stdMap[name] === true })
+
+    STD_ALIASES.forEach(function(name) {
+      ow.test.assert(stdCatalog.indexOf(name) >= 0, true, "Std catalog must include alias '" + name + "'")
+    })
+    ow.test.assert(stdCatalog.indexOf("filesystemQuery") < 0, true, "Std catalog must not include filesystemQuery")
+    ow.test.assert(stdCatalog.indexOf("userInput") < 0, true, "Std catalog must not include userInput")
+    ow.test.assert(stdCatalog.indexOf("skills") < 0, true, "Std catalog must not include skills")
+    ow.test.assert(stdCatalog.indexOf("todoList") < 0, true, "Std catalog must not include todoList")
+  }
+
+  exports.testLegacyCatalog = function() {
+    var STD_ALIASES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
+    var all = MiniUtilsTool.getExposedMethodNames()
+
+    var aliasSet = {}
+    STD_ALIASES.forEach(function(n) { aliasSet[n] = true })
+    var legacyCatalog = all.filter(function(name) { return aliasSet[name] !== true })
+
+    ow.test.assert(legacyCatalog.indexOf("filesystemQuery") >= 0, true, "Legacy catalog must include filesystemQuery")
+    ow.test.assert(legacyCatalog.indexOf("userInput") >= 0, true, "Legacy catalog must include userInput")
+    ow.test.assert(legacyCatalog.indexOf("skills") >= 0, true, "Legacy catalog must include skills")
+    ow.test.assert(legacyCatalog.indexOf("todoList") >= 0, true, "Legacy catalog must include todoList")
+
+    STD_ALIASES.forEach(function(name) {
+      ow.test.assert(legacyCatalog.indexOf(name) < 0, true, "Legacy catalog must not include alias '" + name + "'")
+    })
+  }
 })()

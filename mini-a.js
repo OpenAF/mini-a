@@ -324,7 +324,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"list|tree|browse|read|search|grep|backlinks|lint{{#if wikiRw}}|write|move|delete|init{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N{{#if wikiRw}} (write/move/delete/init require wikiaccess=rw){{/if}}"}); start broad wiki navigation with browse or tree, then read selectively; list returns all pages; search/grep finds matching lines with 1-based line numbers (supports regex, contextLines for surrounding lines, searchIn=body to skip front-matter, path to scope to one page); read supports partial reads via lineStart/lineEnd/maxLines/section/countLines; backlinks shows pages linking to a target; move relocates a page and repairs internal links; lint validates wiki health{{#if wikiRw}}; before any write, move, or delete, read AGENTS.md for contribution rules{{/if}}{{/if}}{{#if actionsList}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact wiki overview; search returns path+title+description by default (add contextLines>0 for snippets); list withMeta=true returns metadata per page; read uses section= to fetch one heading; browse and tree show structure including mounts; mounts/attach/detach manage read-only federated wikis (@name/path.md); lint validates wiki health{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -7404,6 +7404,30 @@ MiniA.prototype._initWiki = function(args) {
       this.fnI(level || "info", "[wiki] " + msg)
     }.bind(this))
     this._wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : 90
+    // Parse wikimounts: SLON/JSON array of {name, backend, root|bucket|...}
+    var wikiMountsRaw = args.wikimounts
+    if (isString(wikiMountsRaw) && wikiMountsRaw.trim().length > 0) {
+      try {
+        var wikiMountsList = af.fromSLON(wikiMountsRaw)
+        if (!isArray(wikiMountsList)) wikiMountsList = [wikiMountsList]
+        var self = this
+        wikiMountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          var mr = self._wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+          if (isMap(mr) && mr.ok) self.fnI("info", "📎 [wiki] mounted @" + mc.name + " (" + mr.pages + " pages)")
+          else self.fnI("warn", "[wiki] mount failed for @" + mc.name + ": " + (isMap(mr) ? mr.error : "unknown"))
+        })
+      } catch(mountErr) {
+        this.fnI("warn", "[wiki] wikimounts parse error: " + __miniAErrMsg(mountErr))
+      }
+    } else if (isArray(wikiMountsRaw)) {
+      var self2 = this
+      wikiMountsRaw.forEach(function(mc) {
+        if (!isMap(mc) || !isString(mc.name)) return
+        var mr = self2._wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+        if (isMap(mr) && mr.ok) self2.fnI("info", "📎 [wiki] mounted @" + mc.name + " (" + mr.pages + " pages)")
+      })
+    }
     this.fnI("info", `📖 [wiki] enabled (backend=${args.wikibackend}, access=${args.wikiaccess})`)
   } catch(e) {
     this.fnI("warn", `[wiki] failed to initialize: ${__miniAErrMsg(e)}`)
@@ -9027,11 +9051,16 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     if (methodNames.indexOf("skills") < 0) this._availableSkills = []
+    var _STD_ALIAS_NAMES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
     if (useStdUtils) {
-      var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki", "read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
+      var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki"].concat(_STD_ALIAS_NAMES)
       var stdMap = {}
       stdVisible.forEach(function(n) { stdMap[n] = true })
       methodNames = methodNames.filter(function(name) { return stdMap[name] === true })
+    } else {
+      var _aliasSet = {}
+      _STD_ALIAS_NAMES.forEach(function(n) { _aliasSet[n] = true })
+      methodNames = methodNames.filter(function(name) { return _aliasSet[name] !== true })
     }
     if (methodNames.length === 0) return __
 
@@ -13204,7 +13233,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikiapply", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiredirects", "dreamwikiminpages", "dreamwikiflatthreshold", "dreamwikimaxdepth",
     "dreamwikipreservebodies", "dreammemoryminconfidence", "dreammemorytowiki", "dreamreport"
@@ -13615,7 +13644,7 @@ MiniA.prototype.init = function(args) {
     args.usetoolslc = _$(toBoolean(args.usetoolslc), "args.usetoolslc").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
-    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(args.useutils === true)
+    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(false)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
@@ -14496,7 +14525,7 @@ MiniA.prototype.init = function(args) {
         "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
         "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
         "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
-        "Do NOT use a downstream tool (e.g. filesystemQuery) to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
+        "Do NOT use a downstream tool (e.g. " + (toBoolean(args.usestdutils) === true ? "read" : "filesystemQuery") + ") to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
         "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
         "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
       )
@@ -14513,8 +14542,9 @@ MiniA.prototype.init = function(args) {
       baseRules.push("If you need to respond without calling a tool, return the JSON response directly in the assistant message. Do not wrap that payload in a tool call to 'json'.")
     }
     if (this._supportsConsoleUserInput(args) === true) {
+      var _uiToolName = toBoolean(args.usestdutils) === true ? "question" : "userInput"
       baseRules.push(
-        "When you need information, clarification, or a decision from the user — such as a missing value, a choice between options, sensitive input, or a confirmation — call the 'userInput' tool instead of asking in your final answer or pausing execution."
+        "When you need information, clarification, or a decision from the user — such as a missing value, a choice between options, sensitive input, or a confirmation — call the '" + _uiToolName + "' tool instead of asking in your final answer or pausing execution."
       )
       baseRules.push(
         "When you want to show the user a progress update, status notification, or important finding during execution (not as a final answer), call the 'showMessage' tool. This prints directly to the console in real time."
@@ -15029,7 +15059,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.toolfallback = _$(toBoolean(args.toolfallback), "args.toolfallback").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
-    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(args.useutils === true)
+    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(false)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
@@ -15120,6 +15150,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
     if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
     args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
+    // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
+    if (isUnDef(args.wikimounts)) args.wikimounts = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -18088,8 +18120,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             var wkResult
             if (wkOp === "list") {
               global.__mini_a_metrics.wiki_ops_list.inc()
-              var wkPages = this._wikiManager.list(wkPath)
-              wkResult = "Wiki pages (" + wkPages.length + "):\n" + wkPages.join("\n")
+              var wkListOpts = { withMeta: wkParams.withMeta === true || wkParams.withMeta === "true", limit: isNumber(wkParams.limit) ? wkParams.limit : 1000 }
+              var wkPages = this._wikiManager.list(wkPath, wkListOpts)
+              if (wkListOpts.withMeta) {
+                wkResult = "Wiki pages with metadata (" + wkPages.length + "):\n" + af.toTOON(wkPages)
+              } else {
+                wkResult = "Wiki pages (" + wkPages.length + "):\n" + wkPages.join("\n")
+              }
             } else if (wkOp === "tree") {
               global.__mini_a_metrics.wiki_ops_list.inc()
               wkResult = af.toTOON(this._wikiManager.tree(wkPath, isNumber(wkParams.depth) ? wkParams.depth : 3))
@@ -18163,8 +18200,41 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               } else {
                 wkResult = af.toTOON(this._wikiManager.init(wkPath))
               }
+            } else if (wkOp === "context") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              wkResult = af.toTOON(this._wikiManager.context())
+            } else if (wkOp === "mounts") {
+              wkResult = af.toTOON(this._wikiManager.mounts())
+            } else if (wkOp === "attach") {
+              if (args.wikiaccess !== "rw" && isString(wkParams.name)) {
+                // attach is allowed even on ro agents so they can browse mounts
+              }
+              var wkMountName = isString(wkParams.name) ? wkParams.name.trim() : ""
+              if (wkMountName.length === 0) {
+                wkResult = "[ERROR] wiki attach requires 'name'"
+              } else {
+                var wkMountCfg = { access: "ro", backend: isString(wkParams.backend) ? wkParams.backend : "fs" }
+                if (isString(wkParams.root))        wkMountCfg.root        = wkParams.root
+                if (isString(wkParams.bucket))      wkMountCfg.bucket      = wkParams.bucket
+                if (isString(wkParams.prefix))      wkMountCfg.prefix      = wkParams.prefix
+                if (isString(wkParams.url))         wkMountCfg.url         = wkParams.url
+                if (isString(wkParams.accessKey))   wkMountCfg.accessKey   = wkParams.accessKey
+                if (isString(wkParams.secret))      wkMountCfg.secret      = wkParams.secret
+                if (isString(wkParams.region))      wkMountCfg.region      = wkParams.region
+                wkResult = af.toTOON(this._wikiManager.attach(wkMountName, wkMountCfg))
+              }
+            } else if (wkOp === "detach") {
+              var wkDetachName = isString(wkParams.name) ? wkParams.name.trim() : wkPath
+              if (wkDetachName.length === 0) {
+                wkResult = "[ERROR] wiki detach requires 'name'"
+              } else {
+                wkResult = af.toTOON(this._wikiManager.detach(wkDetachName))
+              }
+            } else if (wkOp === "reindex") {
+              global.__mini_a_metrics.wiki_ops_write.inc()
+              wkResult = af.toTOON(this._wikiManager.reindex())
             } else {
-              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use list, tree, browse, read, search, grep, backlinks, lint" + (args.wikiaccess === "rw" ? ", write, move, delete, init" : "")
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use context, list, tree, browse, read, search, grep, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
             runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) ${wkResult}`)

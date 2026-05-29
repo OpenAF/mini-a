@@ -59,6 +59,10 @@ help:
     desc     : If true, disable write operations in this MCP server.
     example  : "false"
     mandatory: false
+  - name     : wikimounts
+    desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
+    example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
+    mandatory: false
 
 todo:
 - Init
@@ -76,9 +80,20 @@ todo:
         title  : OpenAF standalone MCP wiki ops server
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
+      context:
+        name       : context
+        description: "[ORIENTATION] Get a compact overview of {{label}}: page count, sections, mounts, and recent changes. Call this once at the start of any wiki task."
+        inputSchema:
+          type      : object
+          properties: {}
+        annotations:
+          title         : context
+          readOnlyHint  : true
+          idempotentHint: true
+
       lint:
         name       : lint
-        description: "Run wiki health checks for {{label}} and return issues with summaries."
+        description: "Run health checks on {{label}}. Fix all error-severity results before finishing. Warning and info items are advisory."
         inputSchema:
           type      : object
           properties:
@@ -106,13 +121,13 @@ todo:
 
       edit:
         name       : edit
-        description: "Edit wiki pages in {{label}} using full-write or partial-write modes."
+        description: "Write or partially edit a page in {{label}}. Provide full frontmatter+body for new pages; use section= to replace only one heading's content on existing pages. Rejects writes to @mount/ paths (read-only mounts)."
         inputSchema:
           type      : object
           properties:
             path:
               type       : string
-              description: Target markdown page path.
+              description: "Target markdown page path. Must not start with @mount/ (mounts are read-only)."
             content:
               type       : string
               description: Page content or partial content for edit modes.
@@ -131,7 +146,7 @@ todo:
               description: Replace range end line (1-based).
             section:
               type       : string
-              description: Replace section body under matching heading.
+              description: Replace section body under matching heading (efficient for targeted updates).
             raw:
               type       : boolean
               description: Content already contains frontmatter/body raw text.
@@ -144,7 +159,7 @@ todo:
 
       maintain:
         name       : maintain
-        description: "Run structural wiki maintenance operations in {{label}}: init, move, delete."
+        description: "Run structural wiki maintenance in {{label}}: init (create section index), move (relocate + repair links), delete. All writes go to primary wiki only."
         inputSchema:
           type      : object
           properties:
@@ -182,6 +197,7 @@ todo:
           idempotentHint: true
 
     ((fns    )): &MCPFNS
+      context : Wiki context overview
       lint    : Wiki lint
       edit    : Wiki edit page
       maintain: Wiki maintain
@@ -226,6 +242,7 @@ jobs:
       label               : isString.default("wiki")
       wikiaccess          : isString.default("rw")
       wikiopsreadonly     : toBoolean.isBoolean.default(false)
+      wikimounts          : isString.default(__)
   exec : | #js
     // Standalone wiki manager for MCP wiki server (derived from mini-a-wiki.js)
     if (typeof __miniAErrMsg !== "function") {
@@ -240,6 +257,77 @@ jobs:
       }
     }
     
+    // ── Template version & helpers ────────────────────────────────────────────────
+    var __MINI_A_WIKI_AGENTS_VERSION = 2
+    var __MINI_A_WIKI_V1_STOCK_PHRASE = "This file defines how agents should read, distil, and contribute knowledge to this wiki."
+    var __miniAWikiAgentsTemplate = function(now) {
+      return [
+        "---","title: Wiki Contribution Guidelines","description: Rules and workflow for agents reading from and writing to this wiki.",
+        "agentsVersion: " + __MINI_A_WIKI_AGENTS_VERSION,"created: " + now,"updated: " + now,"---","",
+        "<!-- mini-a:agents managed:start — content inside is overwritten on template upgrade -->","",
+        "# Wiki Contribution Guidelines","","## Quick start","",
+        "1. **`context`** — call once to get a compact wiki overview before anything else.",
+        "2. **`search`** — find candidates first, always. Call before read or write.",
+        "3. **`read`** — read the best match. For long pages: `countLines=true` first, then `section=` for the heading you need.",
+        "4. **`write`** / **`edit`** — distil and save knowledge. Fill all required frontmatter fields.",
+        "5. **`lint`** — fix all error-severity issues before finishing.",
+        "6. Never edit AGENTS.md, index.md, or log.md directly. Do NOT write to @mount/ paths.","",
+        "## Operations in this surface","",
+        "Available MCP tools (read-write ops server):",
+        "`context` · `lint` · `edit` · `maintain` (init/move/delete) · `reindex`","",
+        "- `context` — compact wiki overview (page count, sections, mounts, recent changes).",
+        "- `lint(staleDays)` — health checks; fix error-severity before finishing.",
+        "- `edit(path, content, section=)` — write or partially update a page. Rejects @mount/ paths.",
+        "- `maintain(op, path, to=)` — op=init (create section index), op=move (relocate + repair links), op=delete.",
+        "- `reindex()` — rebuild the search index.","",
+        "## Page schema","","Every page is a Markdown file with a YAML front-matter block.","",
+        "### Required front-matter fields","","```yaml","---","title: Human-readable title (string)","description: One-sentence summary of the page (string)","created: <ISO 8601 timestamp>","updated: <ISO 8601 timestamp>   # refresh on every write","---","```","",
+        "### Optional front-matter fields","","```yaml","type: concept | entity | comparison | summary | overview   # groups pages in indexes","tags: [tag1, tag2]              # lowercase slugs","aliases: [alt-name]             # alternative names for search","supersedes: path/to/old.md      # when this page replaces another","status: draft | review | stable # omit for stable","```","",
+        "### Body conventions","","- Start with a single `# Title` heading matching `front-matter.title`.","- Use `## Section` headings; never skip levels (h1 → h3 is wrong).","- One concept per page. Split when a section exceeds ~300 words.","- End with `## See also` listing related pages when relevant.","",
+        "## Ingestion workflow","",
+        "1. **Search first** — call search before creating anything. If a relevant page exists, update it.",
+        "2. **Distil, do not dump** — extract the essential fact. Strip conversation context and ephemeral details.",
+        "3. **One concept per page** — if knowledge spans multiple concepts, create one page per concept and link them.",
+        "4. **Write or update:** New page: set `created` and `updated` to now. Existing page: update `updated`, preserve `created`.",
+        "5. **Link** — add links from related pages. Use relative Markdown links or `[[Page Name]]` wiki-style links.",
+        "6. **Lint** — run lint and fix all error-severity issues.","",
+        "## Retrieval conventions","",
+        "- Start with `context` to get a compact wiki overview before doing anything else.",
+        "- For long pages: call `read(path, countLines=true)` first, then `read(path, section=\"heading name\")` to fetch only what you need.","",
+        "## Folder structure (recommended, never enforced)","",
+        "Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`.  ",
+        "Use them when they fit; create others freely; never move pages just to match.","",
+        "## Attached wikis (read-only mounts)","",
+        "Other wikis may be mounted read-only. Mounted pages appear as `@name/path.md`.",
+        "- Search, browse, read span all mounts automatically.",
+        "- Writes always go to the primary wiki. Do NOT use edit/maintain on @mount/ paths.","",
+        "## log.md","","`log.md` is an append-only journal. Never write to it directly.","",
+        "## Content rules","",
+        "- Write concise, factual, durable content. State the fact once; link rather than restate.",
+        "- Do not contradict existing pages without marking the old content as superseded.",
+        "- Do not duplicate information — link instead.","- Neutral, encyclopaedic tone. No first-person.","",
+        "## Writing style — write like a plain reference, not an AI","",
+        "- Use plain verbs: `is` / `has`, not \"serves as\", \"stands as\", \"boasts\", \"features\".",
+        "- Cut puffery: no \"pivotal\", \"crucial\", \"rich tapestry\", \"groundbreaking\", \"marks a turning point\", \"underscores\".",
+        "- Drop trailing \"-ing\" significance clauses (\"…, highlighting its importance\").",
+        "- No negative parallelism: avoid \"not only X but also Y\" / \"not X, but Y\".",
+        "- Attribute specifically or not at all — no \"experts say\", \"some critics\", \"studies show\".",
+        "- Avoid rule-of-three padding and forced synonym-swapping; repeat the plain term.",
+        "- No editorialising wrap-ups or future speculation without sources.",
+        "- Formatting: sentence-case headings; bold only for first-use definitions; straight quotes; minimal em dashes; no emoji; never skip heading levels.","",
+        "## Lint","",
+        "- Run lint before finishing. Fix all error-severity issues. Address warning-severity where possible.",
+        "- info-severity issues (near-duplicates, stale pages) are advisory; use judgement.","",
+        "<!-- mini-a:agents managed:end -->",
+      ].join("\n")
+    }
+    var __miniAWikiIndexRootTemplate = function(now) {
+      return ["---","title: Wiki Home","description: Main entrypoint and catalog for this wiki.","created: " + now,"updated: " + now,"tags:","  - home","  - index","---","","# Wiki Home","","Main entrypoint for this wiki. Start with `context` or search, then read the most relevant page.","","## Start here","","- [AGENTS.md](AGENTS.md) — contribution rules, page schema, and workflow for agents.","- [log.md](log.md) — append-only journal of recent writes and moves.","","## Sections","","- Add section index links here as the wiki grows.","","## Pages","","- Add top-level page links here.","","## Recent","","- See [log.md](log.md) for recent changes."].join("\n")
+    }
+    var __miniAWikiLogTemplate = function(now) {
+      return ["---","title: Wiki Log","description: Append-only journal of wiki write, delete, and move operations.","created: " + now,"updated: " + now,"tags:","  - log","---","","# Wiki Log","","Append-only. Do not edit this file directly."].join("\n")
+    }
+
     // Author: Nuno Aguiar
     // License: Apache 2.0
     // Description: Wiki manager for Mini-A. Supports filesystem and S3 backends.
@@ -331,24 +419,112 @@ jobs:
       }
     }
     
-    MiniAWikiManager.prototype.list = function(prefix) {
-      var pfx = isString(prefix) ? prefix : ""
-      if (this._backendType === "fs" && isMap(this._backend) && isDef(this._backend.root)) {
-        try {
-          return this._safeListPages(pfx)
-        } catch(e) {
-          return []
-        }
-      }
-      return this._safeListPages(pfx)
+    MiniAWikiManager.prototype._resolveMountPath = function(path) {
+      if (!isString(path) || !path.startsWith("@")) return null
+      var withoutAt = path.substring(1), slashIdx = withoutAt.indexOf("/")
+      var name = slashIdx >= 0 ? withoutAt.substring(0, slashIdx) : withoutAt
+      var localPath = slashIdx >= 0 ? withoutAt.substring(slashIdx + 1) : ""
+      var mounts = isArray(this._mounts) ? this._mounts : []
+      for (var i = 0; i < mounts.length; i++) { if (mounts[i].name === name) return { mount: mounts[i], localPath: localPath, name: name } }
+      return { mount: null, localPath: localPath, name: name }
     }
-    
+
+    MiniAWikiManager.prototype.list = function(prefix, options) {
+      var pfx  = isString(prefix) ? prefix : ""
+      var opts = isObject(options) ? options : {}
+      if (pfx.startsWith("@")) {
+        var mres = this._resolveMountPath(pfx.endsWith("/") ? pfx + "_dummy.md" : pfx)
+        if (mres && mres.mount) return mres.mount.manager.list(mres.localPath.replace(/_dummy\.md$/, ""), options)
+        return []
+      }
+      var pages; try { pages = this._safeListPages(pfx) } catch(e) { pages = [] }
+      if (opts.withMeta !== true) return pages
+      var self = this, limit = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : 1000
+      return pages.slice(0, limit).map(function(p) {
+        var raw = self._backend.read(p)
+        if (!isString(raw)) return { path: p, title: p, description: "", type: "", updated: "" }
+        var parsed = self.parseFrontmatter(raw), m = isObject(parsed.meta) ? parsed.meta : {}
+        return { path: p, title: isString(m.title) ? m.title : p.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
+          description: isString(m.description) ? m.description : "", type: isString(m.type) ? m.type : "",
+          updated: isDef(m.updated) ? String(m.updated).substring(0, 10) : "" }
+      })
+    }
+
+    MiniAWikiManager.prototype.attach = function(name, config) {
+      if (!isString(name) || name.trim().length === 0) return { ok: false, error: "name is required" }
+      name = name.trim().replace(/^@/, ""); this._mounts = isArray(this._mounts) ? this._mounts : []
+      this._mounts = this._mounts.filter(function(m) { return m.name !== name })
+      var cfg = isMap(config) ? config : {}; cfg.access = "ro"
+      try {
+        var manager = new MiniAWikiManager(cfg, function() {}); var count = manager._safeListPages("").length
+        this._mounts.push({ name: name, manager: manager, prefix: "@" + name + "/" })
+        return { ok: true, name: name, pages: count }
+      } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
+    }
+    MiniAWikiManager.prototype.detach = function(name) {
+      if (!isString(name) || name.trim().length === 0) return { ok: false, error: "name is required" }
+      name = name.trim().replace(/^@/, ""); this._mounts = isArray(this._mounts) ? this._mounts : []
+      var found = false
+      this._mounts = this._mounts.filter(function(m) { if (m.name !== name) return true; found = true; try { if (isFunction(m.manager.close)) m.manager.close() } catch(e) {} return false })
+      return found ? { ok: true, name: name } : { ok: false, error: "no mount named '" + name + "'" }
+    }
+    MiniAWikiManager.prototype.mounts = function() {
+      this._mounts = isArray(this._mounts) ? this._mounts : []
+      return this._mounts.map(function(m) { var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {} return { name: m.name, prefix: m.prefix, pages: count } })
+    }
+    MiniAWikiManager.prototype.appendLog = function(op, title, path) {
+      if (this._access !== "rw") return
+      try {
+        var dateStr = new Date().toISOString().substring(0, 10)
+        var entry = "## [" + dateStr + "] " + String(op) + " | " + (isString(title) ? title : path) + " — " + path
+        var existing = this._backend.read("log.md")
+        var content = isString(existing) ? existing.replace(/\s+$/, "") + "\n\n" + entry : __miniAWikiLogTemplate(new Date().toISOString()) + "\n\n" + entry
+        this._backend.write("log.md", content)
+      } catch(e) {}
+    }
+    MiniAWikiManager.prototype.context = function() {
+      var pages = this._safeListPages(""), sectionSet = {}
+      pages.forEach(function(p) { var parts = p.split("/"); if (parts.length > 1) sectionSet[parts[0] + "/"] = true })
+      var sections = Object.keys(sectionSet).sort().slice(0, 10)
+      var recent = []; try { var lr = this._backend.read("log.md"); if (isString(lr)) { lr.split("\n").forEach(function(l) { if (/^## \[/.test(l)) recent.push(l.replace(/^## /, "").trim()) }); recent = recent.reverse().slice(0, 5) } } catch(e) {}
+      var mounts = isArray(this._mounts) ? this._mounts : []
+      var mountList = mounts.slice(0, 10).map(function(m) { var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {} var desc = ""; try { var idx = m.manager.read("index.md"); if (isObject(idx) && isObject(idx.meta) && isString(idx.meta.description)) desc = idx.meta.description } catch(e) {} return { name: m.name, pages: count, description: desc } })
+      return { pages: pages.length, sections: sections, mounts: mountList, recent: recent, hint: "Call search() first, then read() the best match by path. For long pages use section= to read only the heading you need." }
+    }
+    MiniAWikiManager.prototype.upgradeAgents = function() {
+      if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+      var CURRENT = __MINI_A_WIKI_AGENTS_VERSION, MANAGED_START = "<!-- mini-a:agents managed:start", MANAGED_END = "<!-- mini-a:agents managed:end -->"
+      var now = new Date().toISOString()
+      if (!this._backend.exists("AGENTS.md")) { this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now)); return { ok: true, action: "created", agentsVersion: CURRENT } }
+      var raw = this._backend.read("AGENTS.md"); if (!isString(raw)) return { ok: false, error: "could not read AGENTS.md" }
+      var parsed = this.parseFrontmatter(raw), curVer = isNumber(parsed.meta.agentsVersion) ? parsed.meta.agentsVersion : 0
+      if (curVer >= CURRENT) return { ok: true, action: "noop", agentsVersion: curVer }
+      var body = isString(parsed.body) ? parsed.body : ""
+      var startIdx = body.indexOf(MANAGED_START), endIdx = body.indexOf(MANAGED_END)
+      if (startIdx >= 0 && endIdx > startIdx) {
+        var newTpl = __miniAWikiAgentsTemplate(now), newParsed = this.parseFrontmatter(newTpl), newBody = isString(newParsed.body) ? newParsed.body : ""
+        var ns = newBody.indexOf(MANAGED_START), ne = newBody.indexOf(MANAGED_END)
+        var newManaged = newBody.substring(ns, ne + MANAGED_END.length)
+        var meta = merge({}, isObject(parsed.meta) ? parsed.meta : {}); meta.agentsVersion = CURRENT; meta.updated = now
+        this._backend.write("AGENTS.md", this._serializeFrontmatter(meta, body.substring(0, startIdx) + newManaged + body.substring(endIdx + MANAGED_END.length)))
+        return { ok: true, action: "upgraded", agentsVersion: CURRENT }
+      }
+      if (body.indexOf(__MINI_A_WIKI_V1_STOCK_PHRASE) >= 0) { this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now)); return { ok: true, action: "upgraded", agentsVersion: CURRENT } }
+      var newTpl2 = __miniAWikiAgentsTemplate(now), newParsed2 = this.parseFrontmatter(newTpl2), newBody2 = isString(newParsed2.body) ? newParsed2.body : ""
+      var ns2 = newBody2.indexOf(MANAGED_START), ne2 = newBody2.indexOf(MANAGED_END)
+      var managedBlock = newBody2.substring(ns2, ne2 + MANAGED_END.length)
+      var meta2 = merge({}, isObject(parsed.meta) ? parsed.meta : {}); meta2.agentsVersion = CURRENT; meta2.updated = now
+      this._backend.write("AGENTS.md", this._serializeFrontmatter(meta2, "\n" + managedBlock + "\n\n<!-- Your customizations below are never overwritten -->\n\n" + body.trim() + "\n"))
+      return { ok: true, action: "preserved", agentsVersion: CURRENT }
+    }
+
     MiniAWikiManager.prototype.configure = function(config) {
       var cfg = isMap(config) ? config : {}
       var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
       this._access      = "rw"
       this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
       this._config  = cfg
+      this._mounts  = isArray(this._mounts) ? this._mounts : []
       this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
       this._bootstrapWiki()
     }
@@ -360,142 +536,11 @@ jobs:
         var hasAgents = this._backend.exists("AGENTS.md")
         var hasIndex  = this._backend.exists("index.md")
         if (this._access !== "rw") return
-    
-        // Bootstrap a brand-new wiki, or upgrade the legacy AGENTS-only bootstrap.
         if (pages.length > 0 && !(pages.length === 1 && hasAgents && !hasIndex)) return
-    
         var now = new Date().toISOString()
-        var agentsContent = [
-          "---",
-          "title: Wiki Contribution Guidelines",
-          "description: Rules and workflow for agents reading from and writing to this wiki.",
-          "created: " + now,
-          "updated: " + now,
-          "---",
-          "",
-          "# Wiki Contribution Guidelines",
-          "",
-          "This file defines how agents should read, distil, and contribute knowledge to this wiki.",
-          "All agents that use this wiki **must** read this file before performing any write operation.",
-          "",
-          "## Page Schema",
-          "",
-          "Every page is a Markdown file with a YAML front-matter block.",
-          "",
-          "### Required front-matter fields",
-          "",
-          "```yaml",
-          "---",
-          "title: Human-readable title (string)",
-          "description: One-sentence summary of the page (string)",
-          "created: <ISO 8601 timestamp>",
-          "updated: <ISO 8601 timestamp>   # must be refreshed on every write",
-          "---",
-          "```",
-          "",
-          "### Optional front-matter fields",
-          "",
-          "```yaml",
-          "tags: [tag1, tag2]              # lowercase slugs",
-          "aliases: [alt-name]             # alternative page names for search",
-          "supersedes: path/to/old.md      # when this page replaces another",
-          "status: draft | review | stable # omit for stable",
-          "```",
-          "",
-          "### Body conventions",
-          "",
-          "- Start with a single `# Title` heading that matches `front-matter.title`.",
-          "- Use `## Section` headings to organise content; never skip levels (e.g. h1 → h3).",
-          "- Keep pages focused on one concept. Split into sub-pages when a section exceeds ~300 words.",
-          "- End with a `## See Also` section listing related pages when relevant.",
-          "",
-          "## Ingestion Workflow",
-          "",
-          "Follow these steps **in order** whenever you want to add knowledge to the wiki:",
-          "",
-          "1. **Search first** — call `wiki search <keywords>` before creating anything.",
-          "   If a relevant page exists, update it rather than creating a duplicate.",
-          "2. **Distil, do not dump** — extract the essential, reusable fact or concept.",
-          "   Strip conversation context, ephemeral details, and task-specific phrasing.",
-          "3. **Choose the right page** — one concept per page.",
-          "   If the knowledge spans multiple concepts, create one page per concept and link them.",
-          "4. **Write or update** — use `wiki write <path> <meta> <body>`.",
-          "   - New page: set `created` and `updated` to now.",
-          "   - Existing page: update `updated` to now; preserve `created`.",
-          "   - If you are superseding stale content, set `supersedes` in the new page's front-matter",
-          "     and mark the old page's body with `> **Superseded** — see [[New Page]]` at the top.",
-          "5. **Link** — add relative Markdown links from related pages to the new page.",
-          "   Use `[[Page Title]]` wiki-style links or `[Page Title](path/to/page.md)` links.",
-          "6. **Lint** — call `wiki lint` and fix all `error`-severity issues before finishing.",
-          "",
-          "## Retrieval Conventions",
-          "",
-          "- Start with `wiki browse` or `wiki tree` to discover the wiki hierarchy and section indexes.",
-          "- Use `wiki read index.md` for the wiki entrypoint and top-level navigation.",
-          "- Use `wiki search <query>` for keyword search across page bodies.",
-          "- Use `wiki list` when you need a flat page list for compatibility or scripting.",
-          "- Use `wiki read <path>` to load a specific page.",
-          "- Prefer reading the most-recently-updated page when multiple pages cover similar ground.",
-          "- Trust content marked `status: stable`; treat `status: draft` as provisional.",
-          "",
-          "## Linking",
-          "",
-          "- Use relative Markdown links: `[Page Title](path/to/page.md)`.",
-          "- Wiki-style links are also supported: `[[Page Title]]` (auto-slugified).",
-          "- Always link back to this `AGENTS.md` from any page that documents wiki-wide conventions.",
-          "",
-          "## Content Rules",
-          "",
-          "- Write concise, factual, durable content. Avoid task-specific or ephemeral phrasing.",
-          "- Do not contradict existing pages without first marking the old content as superseded.",
-          "- Do not duplicate information that already exists on another page — link instead.",
-          "- Use neutral, encyclopaedic tone. Avoid first-person ('I found...', 'we decided...').",
-          "",
-          "## Lint",
-          "",
-          "- Run `wiki lint` before finishing to check for broken links, orphan pages, and stale content.",
-          "- Fix all `error`-severity issues.",
-          "- Address `warning`-severity issues where possible.",
-          "- `info`-severity issues (near-duplicates, stale pages) are advisory; use judgement.",
-          "",
-          "## Entry Point",
-          "",
-          "- The wiki entrypoint is [Wiki Home](index.md). Keep it updated with the top-level structure.",
-          "- Folders become browsable sub-wikis when they contain a local `index.md`.",
-          "- Add new sections there when introducing a new major topic area.",
-        ].join("\n")
-    
-        var indexContent = [
-          "---",
-          "title: Wiki Home",
-          "description: Main entrypoint and table of contents for this wiki.",
-          "created: " + now,
-          "updated: " + now,
-          "tags:",
-          "  - home",
-          "  - index",
-          "---",
-          "",
-          "# Wiki Home",
-          "",
-          "This is the main entrypoint for the wiki. Start here to discover the available knowledge and section indexes.",
-          "",
-          "## Start Here",
-          "",
-          "- [AGENTS.md](AGENTS.md) — contribution rules, page schema, and ingestion workflow for agents.",
-          "",
-          "## Topics",
-          "",
-          "- Add top-level topic pages and child section indexes here as the wiki grows.",
-          "- Keep this page short; use it as a table of contents, not a dumping ground.",
-          "",
-          "## Recent Additions",
-          "",
-          "- Add links to newly created or important pages here until the topic structure is stable.",
-        ].join("\n")
-    
-        if (!hasAgents) { this._backend.write("AGENTS.md", agentsContent); this._bootstrappedFiles.push("AGENTS.md") }
-        if (!hasIndex)  { this._backend.write("index.md", indexContent);   this._bootstrappedFiles.push("index.md")  }
+        if (!hasAgents) { this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now)); this._bootstrappedFiles.push("AGENTS.md") }
+        if (!hasIndex)  { this._backend.write("index.md",  __miniAWikiIndexRootTemplate(now)); this._bootstrappedFiles.push("index.md") }
+        if (!this._backend.exists("log.md")) { this._backend.write("log.md", __miniAWikiLogTemplate(now)); this._bootstrappedFiles.push("log.md") }
       } catch(e) {}
     }
     
@@ -801,11 +846,12 @@ jobs:
         if (part.length === 0) throw "path contains empty segments"
         if (part === ".") continue
         if (part === "..") throw "path traversal is not allowed"
+        if (part.startsWith("@")) throw "paths starting with @ are reserved for mounted wikis"
         normalized.push(part)
       }
-    
+
       if (normalized.length === 0) throw "path is required"
-    
+
       var finalPath = normalized.join("/")
       if (opts.requireMarkdown === true && !finalPath.toLowerCase().endsWith(".md")) {
         throw "path must end with .md"
@@ -1183,6 +1229,12 @@ jobs:
     
     MiniAWikiManager.prototype.read = function(path, options) {
       if (!isString(path) || path.trim().length === 0) return __
+      var trimmed = path.trim()
+      if (trimmed.startsWith("@")) {
+        var mres = this._resolveMountPath(trimmed)
+        if (!mres || !mres.mount) return __
+        return mres.mount.manager.read(mres.localPath, options)
+      }
       try { path = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return __ }
       var raw = this._backend.read(path)
       if (isUnDef(raw)) return __
@@ -1233,6 +1285,7 @@ jobs:
     MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
       if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
       if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
+      if (path.trim().startsWith("@")) return { ok: false, error: "mounted wikis are read-only; cannot write to " + path.trim() }
       try {
         path = __miniAWikiNormalizePath(path, { requireMarkdown: true })
       } catch(e) {
@@ -1338,13 +1391,15 @@ jobs:
     MiniAWikiManager.prototype.delete = function(path) {
       if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
       if (!isString(path) || path.trim().length === 0) return { ok: false, error: "path is required" }
+      if (path.trim().startsWith("@")) return { ok: false, error: "mounted wikis are read-only; cannot delete " + path.trim() }
       try {
         path = __miniAWikiNormalizePath(path, { requireMarkdown: true })
       } catch(e) {
         return { ok: false, error: __miniAErrMsg(e) }
       }
-    
+
       if (path === "AGENTS.md") return { ok: false, error: "cannot delete AGENTS.md (protected)" }
+      if (path === "log.md") return { ok: false, error: "cannot delete log.md (protected)" }
       if (this._isHiddenPath(path)) return { ok: false, error: "cannot delete hidden wiki index files" }
     
       try {
@@ -1904,6 +1959,25 @@ jobs:
     args.label = isString(args.label) && args.label.trim().length > 0
       ? args.label.trim()
       : (args.wikibackend === "s3" ? (isString(args.wikibucket) && args.wikibucket.length > 0 ? ("s3://" + args.wikibucket + "/" + args.wikiprefix) : "S3 wiki") : (cfg.root || "wiki"))
+
+    // Initialize read-only mounts from wikimounts SLON/JSON arg
+    if (isString(args.wikimounts) && args.wikimounts.trim().length > 0) {
+      try {
+        var mountsList = af.fromSLON(args.wikimounts)
+        if (!isArray(mountsList)) mountsList = [mountsList]
+        mountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          global.__wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+        })
+      } catch(mErr) { printErrnl("[mcp-wiki-ops] wikimounts parse error: " + String(mErr)) }
+    }
+
+# ---------------
+- name : Wiki context overview
+  check:
+    in: {}
+  exec : | #js
+    return global.__wikiManager.context()
 
 # ----------------
 - name : Wiki lint

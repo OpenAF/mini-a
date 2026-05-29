@@ -1081,5 +1081,288 @@
     }
   }
 
+  // ── New v2 features ──────────────────────────────────────────────────────────
+
+  exports.testBootstrapCreatesLogMd = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      ow.test.assert(io.fileExists(dir + "/log.md"), true, "bootstrap should create log.md")
+      var logRaw = io.readFileString(dir + "/log.md")
+      ow.test.assert(logRaw.indexOf("Wiki Log") >= 0, true, "log.md should contain 'Wiki Log' heading")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testBootstrapAgentsMdV2HasManagedMarkers = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var raw = io.readFileString(dir + "/AGENTS.md")
+      ow.test.assert(raw.indexOf("mini-a:agents managed:start") >= 0, true, "AGENTS.md should have managed:start marker")
+      ow.test.assert(raw.indexOf("mini-a:agents managed:end") >= 0, true, "AGENTS.md should have managed:end marker")
+      ow.test.assert(raw.indexOf("agentsVersion: 2") >= 0, true, "AGENTS.md frontmatter should have agentsVersion: 2")
+      ow.test.assert(raw.indexOf("## Quick start") >= 0, true, "AGENTS.md should have Quick start section")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testUpgradeAgentsNoopWhenCurrent = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.upgradeAgents()
+      ow.test.assert(result.ok, true, "upgradeAgents should return ok")
+      ow.test.assert(result.action, "noop", "already v2 should be noop")
+      ow.test.assert(result.agentsVersion, 2, "agentsVersion should be 2")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testUpgradeAgentsWholesaleReplacesStockV1 = function() {
+    var dir = createTestDir()
+    try {
+      // Write a synthetic v1 AGENTS.md (no markers, contains v1 stock phrase)
+      var v1Content = "---\ntitle: Wiki Contribution Guidelines\ndescription: desc.\ncreated: 2024-01-01T00:00:00.000Z\nupdated: 2024-01-01T00:00:00.000Z\n---\n\n# Wiki Contribution Guidelines\n\nThis file defines how agents should read, distil, and contribute knowledge to this wiki.\nAll agents that use this wiki **must** read this file before performing any write operation.\n"
+      io.writeFileString(dir + "/AGENTS.md", v1Content)
+      io.writeFileString(dir + "/index.md", "---\ntitle: x\n---\n# x")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.upgradeAgents()
+      ow.test.assert(result.ok, true, "upgradeAgents v1→v2 should succeed")
+      ow.test.assert(result.action, "upgraded", "action should be upgraded")
+      var newRaw = io.readFileString(dir + "/AGENTS.md")
+      ow.test.assert(newRaw.indexOf("mini-a:agents managed:start") >= 0, true, "upgraded AGENTS.md should have markers")
+      ow.test.assert(newRaw.indexOf("agentsVersion: 2") >= 0, true, "upgraded AGENTS.md should have v2")
+      // Should NOT have the v1 stock phrase still active (wholesale replaced)
+      ow.test.assert(newRaw.indexOf("This file defines how agents") < 0, true, "v1 stock phrase should be gone after wholesale replace")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testUpgradeAgentsPreservesUserEdits = function() {
+    var dir = createTestDir()
+    try {
+      // Write a marker-less AGENTS.md that differs from v1 stock — user-edited
+      var userContent = "---\ntitle: Wiki Contribution Guidelines\ndescription: desc.\ncreated: 2024-01-01T00:00:00.000Z\nupdated: 2024-01-01T00:00:00.000Z\n---\n\n# My Custom Rules\n\nWe do things differently here.\n"
+      io.writeFileString(dir + "/AGENTS.md", userContent)
+      io.writeFileString(dir + "/index.md", "---\ntitle: x\n---\n# x")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.upgradeAgents()
+      ow.test.assert(result.ok, true, "upgradeAgents user-edited should succeed")
+      ow.test.assert(result.action, "preserved", "action should be preserved")
+      var newRaw = io.readFileString(dir + "/AGENTS.md")
+      ow.test.assert(newRaw.indexOf("My Custom Rules") >= 0, true, "user content should be preserved")
+      ow.test.assert(newRaw.indexOf("mini-a:agents managed:start") >= 0, true, "managed block should be prepended")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testAppendLogWritesToLogMd = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.appendLog("write", "Test Page", "test.md")
+      var logRaw = io.readFileString(dir + "/log.md")
+      ow.test.assert(logRaw.indexOf("write | Test Page — test.md") >= 0, true, "log entry should appear in log.md")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWriteContentPageAppendsToLog = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("concepts/foo.md", { title: "Foo", description: "foo page" }, "# Foo\nContent here.")
+      var logRaw = io.readFileString(dir + "/log.md")
+      ow.test.assert(logRaw.indexOf("foo.md") >= 0, true, "write to content page should append to log.md")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWriteToIndexMdDoesNotAppendToLog = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var logBefore = io.readFileString(dir + "/log.md")
+      wm.write("index.md", { title: "Home", description: "home" }, "# Home")
+      var logAfter = io.readFileString(dir + "/log.md")
+      ow.test.assert(logBefore, logAfter, "writing index.md should not change log.md")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testLogMdExemptFromLintOrphan = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.lint()
+      var orphanIssues = result.issues.filter(function(i) { return i.type === "orphan" && i.page === "log.md" })
+      ow.test.assert(orphanIssues.length, 0, "log.md should not appear as orphan in lint")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testContextOpReturnsSummary = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "concepts/foo.md", "---\ntitle: Foo\n---\n# Foo")
+      var ctx = wm.context()
+      ow.test.assert(isObject(ctx), true, "context should return an object")
+      ow.test.assert(isNumber(ctx.pages), true, "context.pages should be a number")
+      ow.test.assert(isArray(ctx.sections), true, "context.sections should be an array")
+      ow.test.assert(ctx.sections.indexOf("concepts/") >= 0, true, "context.sections should include concepts/")
+      ow.test.assert(isArray(ctx.mounts), true, "context.mounts should be an array")
+      ow.test.assert(isString(ctx.hint), true, "context.hint should be a string")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testListWithMeta = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "foo.md", "---\ntitle: Foo Page\ndescription: A foo.\ntype: concept\n---\n# Foo")
+      var pages = wm.list("", { withMeta: true })
+      ow.test.assert(isArray(pages), true, "list withMeta should return array")
+      var fooEntry = pages.filter(function(p) { return p.path === "foo.md" })[0]
+      ow.test.assert(isDef(fooEntry), true, "foo.md should appear in withMeta list")
+      ow.test.assert(fooEntry.title, "Foo Page", "title should be parsed")
+      ow.test.assert(fooEntry.description, "A foo.", "description should be parsed")
+      ow.test.assert(fooEntry.type, "concept", "type should be parsed")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testSearchCompactByDefault = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "bar.md", "---\ntitle: Bar\ndescription: A bar.\n---\n# Bar\nHello world search term here.")
+      var hits = wm.search("hello world", { forceScan: true })
+      ow.test.assert(isArray(hits), true, "search should return array")
+      ow.test.assert(hits.length > 0, true, "search should find bar.md")
+      var hit = hits[0]
+      ow.test.assert(isDef(hit.path), true, "compact hit should have path")
+      ow.test.assert(isDef(hit.title), true, "compact hit should have title")
+      ow.test.assert(isDef(hit.description), true, "compact hit should have description")
+      ow.test.assert(isUnDef(hit.snippet), true, "compact hit should NOT have snippet")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testSearchWithContextLinesReturnsSnippets = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "baz.md", "---\ntitle: Baz\n---\n# Baz\nHello world here.")
+      var hits = wm.search("hello world", { forceScan: true, contextLines: 1 })
+      ow.test.assert(hits.length > 0, true, "search with contextLines should find results")
+      ow.test.assert(isDef(hits[0].snippet), true, "contextLines hit should have snippet")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testMountWriteRejected = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir()
+    try {
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw" })
+      var secondary = new MiniAWikiManager({ backend: "fs", root: dir2, access: "rw" })
+      writePage(dir2, "mounted.md", "---\ntitle: Mounted\n---\n# Mounted")
+      primary.attach("team", { backend: "fs", root: dir2 })
+      var result = primary.write("@team/foo.md", { title: "Foo" }, "# Foo")
+      ow.test.assert(result.ok, false, "write to @mount/ path should fail")
+      ow.test.assert(isString(result.error), true, "write failure should have error message")
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  exports.testMountReadRouted = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir()
+    try {
+      writePage(dir2, "mounted.md", "---\ntitle: From Mount\ndescription: mounted page\n---\n# From Mount")
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw" })
+      primary.attach("team", { backend: "fs", root: dir2 })
+      var page = primary.read("@team/mounted.md")
+      ow.test.assert(isObject(page), true, "@team/mounted.md should be readable via mount")
+      ow.test.assert(page.meta.title, "From Mount", "mounted page title should be read")
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  exports.testMountSearchFanout = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir()
+    try {
+      writePage(dir1, "primary.md", "---\ntitle: Primary Page\ndescription: primary\n---\n# Primary\nunique-primary-keyword")
+      writePage(dir2, "mounted.md", "---\ntitle: Mounted Page\ndescription: mounted\n---\n# Mounted\nunique-mounted-keyword")
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw" })
+      primary.attach("ext", { backend: "fs", root: dir2 })
+      var hits = primary.search("unique-mounted-keyword", { forceScan: true })
+      ow.test.assert(isArray(hits), true, "search should return array")
+      var mountedHit = hits.filter(function(h) { return String(h.path).startsWith("@ext/") })[0]
+      ow.test.assert(isDef(mountedHit), true, "mounted page should appear in federated search with @ext/ prefix")
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  exports.testAtPrefixRejectedByNormalizePath = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var result = wm.write("@team/foo.md", { title: "Foo" }, "# Foo")
+      ow.test.assert(result.ok, false, "@-prefixed primary paths should be rejected")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testDetachRemovesMount = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir()
+    try {
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw" })
+      primary.attach("team", { backend: "fs", root: dir2 })
+      ow.test.assert(primary.mounts().length, 1, "should have 1 mount after attach")
+      primary.detach("team")
+      ow.test.assert(primary.mounts().length, 0, "should have 0 mounts after detach")
+      var result = primary.read("@team/anything.md")
+      ow.test.assert(isUnDef(result), true, "read on detached mount should return undefined")
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  // ── Drift guard ──────────────────────────────────────────────────────────────
+
+  exports.testDriftGuard = function() {
+    // Extract invariant core from each file: the AGENTS.md managed block content minus the "Operations" section
+    var fs = java.nio.file.Files
+    var stripOpsSection = function(text) {
+      // Remove the "## Operations in this surface" section (legitimately differs per surface)
+      return text.replace(/## Operations in this surface[\s\S]*?(?=## Page schema|## Ingestion|## Retrieval|$)/, "")
+    }
+    var extractManagedBlock = function(text) {
+      var start = text.indexOf("<!-- mini-a:agents managed:start")
+      var end   = text.indexOf("<!-- mini-a:agents managed:end -->")
+      if (start < 0 || end < 0 || end <= start) return null
+      return text.substring(start, end + "<!-- mini-a:agents managed:end -->".length)
+    }
+    var normalize = function(text) {
+      return text.replace(/created: \d{4}-\d{2}-\d{2}T.*?Z/g, "TIMESTAMP")
+               .replace(/updated: \d{4}-\d{2}-\d{2}T.*?Z/g, "TIMESTAMP")
+               .replace(/agentsVersion: \d+/g, "AGENTSVER")
+               .replace(/\r\n/g, "\n").trim()
+    }
+
+    // Extract the template from each source
+    var wikiJs    = io.readFileString("mini-a-wiki.js")
+    var mcpWiki   = io.readFileString("mcps/mcp-wiki.yaml")
+    var mcpOps    = io.readFileString("mcps/mcp-wiki-ops.yaml")
+
+    // Get managed blocks from each (using the template helper output)
+    var wm = new MiniAWikiManager({ backend: "fs", root: ".", access: "ro" })
+    var tplText   = __miniAWikiAgentsTemplate("2000-01-01T00:00:00.000Z")
+    var managed   = extractManagedBlock(tplText)
+    ow.test.assert(isDef(managed), true, "AGENTS.md template should contain managed block")
+
+    // Verify managed block exists and contains invariant sections
+    var stripped = stripOpsSection(managed)
+    ow.test.assert(stripped.indexOf("## Quick start") >= 0, true, "managed block should have Quick start")
+    ow.test.assert(stripped.indexOf("## Page schema") >= 0, true, "managed block should have Page schema")
+    ow.test.assert(stripped.indexOf("## Writing style") >= 0, true, "managed block should have Writing style")
+    ow.test.assert(stripped.indexOf("## Ingestion workflow") >= 0, true, "managed block should have Ingestion workflow")
+
+    // Verify __miniAWikiAgentsTemplate is defined consistently in all three files
+    ow.test.assert(wikiJs.indexOf("__miniAWikiAgentsTemplate") >= 0,  true, "mini-a-wiki.js should define __miniAWikiAgentsTemplate")
+    ow.test.assert(mcpWiki.indexOf("__miniAWikiAgentsTemplate") >= 0, true, "mcp-wiki.yaml should define __miniAWikiAgentsTemplate")
+    ow.test.assert(mcpOps.indexOf("__miniAWikiAgentsTemplate") >= 0,  true, "mcp-wiki-ops.yaml should define __miniAWikiAgentsTemplate")
+    ow.test.assert(wikiJs.indexOf("__miniAWikiLogTemplate") >= 0,  true, "mini-a-wiki.js should define __miniAWikiLogTemplate")
+    ow.test.assert(mcpWiki.indexOf("__miniAWikiLogTemplate") >= 0, true, "mcp-wiki.yaml should define __miniAWikiLogTemplate")
+    ow.test.assert(mcpOps.indexOf("__miniAWikiLogTemplate") >= 0,  true, "mcp-wiki-ops.yaml should define __miniAWikiLogTemplate")
+    // Verify all three share the v1 stock phrase constant (used for migration detection)
+    ow.test.assert(wikiJs.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,  true, "mini-a-wiki.js should define V1_STOCK_PHRASE")
+    ow.test.assert(mcpWiki.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0, true, "mcp-wiki.yaml should define V1_STOCK_PHRASE")
+    ow.test.assert(mcpOps.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,  true, "mcp-wiki-ops.yaml should define V1_STOCK_PHRASE")
+  }
+
   return exports
 })()

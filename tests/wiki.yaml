@@ -364,3 +364,100 @@ jobs:
   from: MiniA Wiki Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testWritePartialModesRequireExistingPage
+
+# ── v2 new feature tests ──────────────────────────────────────────────────────
+
+- name: MiniA Wiki Tests::BootstrapCreatesLogMd
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBootstrapCreatesLogMd
+
+- name: MiniA Wiki Tests::BootstrapAgentsMdV2HasManagedMarkers
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBootstrapAgentsMdV2HasManagedMarkers
+
+- name: MiniA Wiki Tests::UpgradeAgentsNoopWhenCurrent
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUpgradeAgentsNoopWhenCurrent
+
+- name: MiniA Wiki Tests::UpgradeAgentsWholesaleReplacesStockV1
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUpgradeAgentsWholesaleReplacesStockV1
+
+- name: MiniA Wiki Tests::UpgradeAgentsPreservesUserEdits
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testUpgradeAgentsPreservesUserEdits
+
+- name: MiniA Wiki Tests::AppendLogWritesToLogMd
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAppendLogWritesToLogMd
+
+- name: MiniA Wiki Tests::WriteContentPageAppendsToLog
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteContentPageAppendsToLog
+
+- name: MiniA Wiki Tests::WriteToIndexMdDoesNotAppendToLog
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWriteToIndexMdDoesNotAppendToLog
+
+- name: MiniA Wiki Tests::LogMdExemptFromLintOrphan
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLogMdExemptFromLintOrphan
+
+- name: MiniA Wiki Tests::ContextOpReturnsSummary
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testContextOpReturnsSummary
+
+- name: MiniA Wiki Tests::ListWithMeta
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testListWithMeta
+
+- name: MiniA Wiki Tests::SearchCompactByDefault
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchCompactByDefault
+
+- name: MiniA Wiki Tests::SearchWithContextLinesReturnsSnippets
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSearchWithContextLinesReturnsSnippets
+
+- name: MiniA Wiki Tests::MountWriteRejected
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMountWriteRejected
+
+- name: MiniA Wiki Tests::MountReadRouted
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMountReadRouted
+
+- name: MiniA Wiki Tests::MountSearchFanout
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMountSearchFanout
+
+- name: MiniA Wiki Tests::AtPrefixRejectedByNormalizePath
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAtPrefixRejectedByNormalizePath
+
+- name: MiniA Wiki Tests::DetachRemovesMount
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDetachRemovesMount
+
+- name: MiniA Wiki Tests::DriftGuard
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDriftGuard

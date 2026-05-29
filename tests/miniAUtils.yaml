@@ -187,6 +187,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testShowMessageAcceptsPromptAlias
 
+- name: MiniA Utils Tests::StdUtilsCatalog
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStdUtilsCatalog
+
+- name: MiniA Utils Tests::LegacyCatalog
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLegacyCatalog
+
 include:
 - oJobTest.yaml
 
@@ -232,3 +242,5 @@ todo:
 - MiniA Utils Tests::TimeOpsSleep
 - MiniA Utils Tests::EncodingAndAdvancedParams
 - MiniA Utils Tests::ShowMessageAcceptsPromptAlias
+- MiniA Utils Tests::StdUtilsCatalog
+- MiniA Utils Tests::LegacyCatalog

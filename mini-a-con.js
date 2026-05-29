@@ -5389,7 +5389,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
     ]
     if (toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", description: "Interact with wiki" })
+      helpCommands.push({ command: "/wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", description: "Interact with wiki (start with context)" })
     }
     if ((isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0) || toBoolean(sessionOptions.usewiki) === true) {
       helpCommands.push({ command: "/dream [memory|wiki] [dryrun|plan|apply|reorg|lint]", description: "Consolidate memory/wiki in dream mode" })
@@ -5653,8 +5653,62 @@ try {
         } else {
           print(colorifyText("Wiki reindex failed: " + (isObject(reindexResult) ? reindexResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "context") {
+        var ctx = wm.context()
+        print(colorifyText("Wiki context: " + ctx.pages + " pages, " + ctx.sections.length + " sections", accentColor))
+        if (ctx.sections.length > 0) print("  sections: " + ctx.sections.join(", "))
+        if (ctx.mounts.length > 0) {
+          print("  mounts:")
+          ctx.mounts.forEach(function(m) { print("    @" + m.name + " — " + (m.description || "") + " (" + m.pages + " pages)") })
+        }
+        if (ctx.recent.length > 0) {
+          print("  recent:")
+          ctx.recent.forEach(function(e) { print("    " + colorifyText(e, hintColor)) })
+        }
+      } else if (sub === "mounts") {
+        var mountList = wm.mounts()
+        if (mountList.length === 0) {
+          print(colorifyText("No mounts attached.", hintColor))
+        } else {
+          print(colorifyText("Attached wikis (" + mountList.length + "):", accentColor))
+          mountList.forEach(function(m) { print("  @" + m.name + " — " + m.pages + " pages (" + m.prefix + ")") })
+        }
+      } else if (sub === "attach") {
+        // Usage: /wiki attach <name> [backend=fs] [root=path]
+        var attachParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
+        if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=path] [bucket=...] ...", errorColor)); return }
+        var attachName = attachParts[0]
+        var attachCfg = { access: "ro", backend: "fs" }
+        attachParts.slice(1).forEach(function(kv) {
+          var eq = kv.indexOf("="); if (eq < 0) return
+          attachCfg[kv.substring(0, eq)] = kv.substring(eq + 1)
+        })
+        var attachResult = wm.attach(attachName, attachCfg)
+        if (isObject(attachResult) && attachResult.ok) {
+          print(colorifyText("Attached @" + attachName + " (" + attachResult.pages + " pages)", successColor))
+        } else {
+          print(colorifyText("Attach failed: " + (isObject(attachResult) ? attachResult.error : "unknown error"), errorColor))
+        }
+      } else if (sub === "detach") {
+        if (rest.trim().length === 0) { print(colorifyText("Usage: /wiki detach <name>", errorColor)); return }
+        var detachResult = wm.detach(rest.trim())
+        if (isObject(detachResult) && detachResult.ok) {
+          print(colorifyText("Detached @" + detachResult.name, successColor))
+        } else {
+          print(colorifyText("Detach failed: " + (isObject(detachResult) ? detachResult.error : "unknown error"), errorColor))
+        }
+      } else if (sub === "list" && rest.indexOf("--meta") >= 0) {
+        var metaPath = rest.replace("--meta", "").trim()
+        var metaPages = wm.list(metaPath, { withMeta: true })
+        print(colorifyText("Wiki pages with metadata (" + metaPages.length + "):", accentColor))
+        metaPages.forEach(function(p) {
+          print("  " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "") + (p.description ? "\n    " + colorifyText(p.description, hintColor) : ""))
+        })
       } else {
-        print(colorifyText("Usage: /wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", errorColor))
+        print(colorifyText("  list --meta   show pages with title+description", hintColor))
+        print(colorifyText("  attach <name> [backend=fs] [root=path]", hintColor))
+        print(colorifyText("  detach <name>", hintColor))
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))
