@@ -67,7 +67,6 @@ files:
 - LICENSE
 - METRICS.md
 - README.md
-- TOOLS-PLAN.md
 - USAGE.md
 - docs/ADAPTIVE-ROUTER.md
 - docs/BACKEND-ENDPOINTS.md
@@ -161,7 +160,6 @@ filesHash:
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: db9b007b919a4c98588b58579be5d209c6f29495
   README.md: c0977d27bb791350dd932701d1677ce915805849
-  TOOLS-PLAN.md: 931c140d5516eae2fd186831c5e4ef90cacd8b44
   USAGE.md: f2e6243dc5f289d2d4895c7663d9932d1c845adc
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
@@ -221,7 +219,7 @@ filesHash:
   mcps/mcp-wiki-ops.yaml: a0082047b5533ac1b83d4c085d663d14635111ce
   mcps/mcp-wiki.yaml: 2ac3af991bcc7a60fcb46538bf1055b933190255
   mini-a-common.js: b1ee5153750602fb6ed8078002d95f47e8a3fda7
-  mini-a-con.js: dff5ae2c03664575d8466e6c7deb28389304f9a9
+  mini-a-con.js: c78c2289c462670a8d8d0f75502c703d6186d3b5
   mini-a-dreams.js: d0c4ab8f48b57da48e087140b562397c06116b1b
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 95ec52e03eddb2da1d89150d9c5346c2bbbc9f4e
