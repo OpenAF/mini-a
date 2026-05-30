@@ -735,6 +735,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this.setInteractionFn(this.defaultInteractionFn)
   this.state = "idle"
   this._agentState = {}
+  this._useAnsiLogging = false
   this._useTools = false
   this._lastThoughtMessage = ""
   this._lastThinkMessage = ""
@@ -1537,6 +1538,10 @@ MiniA.prototype.setInteractionFn = function(afn) {
   this._fnI = afn
 }
 
+MiniA.prototype.setAnsiLogging = function(val) {
+  this._useAnsiLogging = !!val
+}
+
 MiniA.prototype._debugOut = function(label, text) {
   try {
     var rec = stringify({ ts: new Date().toISOString(), type: "block", label: label, content: text }, __, "")
@@ -1600,7 +1605,7 @@ MiniA.prototype._truncateAuditValue = function(value, maxLen) {
   if (isUnDef(value) || value === null) return value
   if (isString(value)) {
     if (this._nologtrunc === true || value.length <= maxLen) return value
-    return value.substring(0, maxLen) + "... " + ansiColor("italic,FAINT", "[truncated]")
+    return value.substring(0, maxLen) + "... " + (this._useAnsiLogging ? ansiColor("italic,FAINT", "[truncated]") : "[truncated]")
   }
   return value
 }
@@ -12269,7 +12274,8 @@ MiniA.prototype._runCommand = function(args) {
       var note = detected.length ? " Detected: " + detected.join(", ") : ""
       var _r
       if (!this._shellBatch) {
-        _r = askChoose("Can I execute '" + ansiColor("italic,red,bold", args.command) + "'? " + (note.length > 0 ? ansiColor("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
+        var _ac = this._useAnsiLogging ? ansiColor : function(_, t) { return t }
+        _r = askChoose("Can I execute '" + _ac("italic,red,bold", args.command) + "'? " + (note.length > 0 ? _ac("faint","(" + note + " )") : ""), ["No", "Yes", "Always"])
       } else {
         _r = 0 // No prompt in batch mode; default to "No"
       }
@@ -12331,9 +12337,10 @@ MiniA.prototype._runCommand = function(args) {
         args.executedCommand = finalCommand
         global.__mini_a_metrics.shell_commands_blocked.inc()
       } else {
+        var _ac2 = this._useAnsiLogging ? ansiColor : function(_, t) { return t }
         this.fnI("shell", shellPrefix.length > 0
-          ? `Executing ${ansiColor("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")} (original: ${ansiColor("FG(218)", "'" + this._truncateAuditValue(originalCommand, 800) + "'")}).`
-          : `Executing ${ansiColor("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")}...`
+          ? `Executing ${_ac2("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")} (original: ${_ac2("FG(218)", "'" + this._truncateAuditValue(originalCommand, 800) + "'")}).`
+          : `Executing ${_ac2("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")}...`
         )
         var shellExec = $sh(shInput)
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
@@ -19426,6 +19433,9 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   
   if (isString(validationResult.feedback) && validationResult.feedback.length > 0) {
     this.fnI("deepresearch", `Feedback: ${validationResult.feedback}`)
+  }
+  if (validationResult.verdict !== "PASS" && isArray(validationResult.specificIssues) && validationResult.specificIssues.length > 0) {
+    this.fnI("deepresearch", `Reason: ${validationResult.specificIssues.join("; ")}`)
   }
 
   // Check if validation passes

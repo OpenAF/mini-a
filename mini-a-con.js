@@ -4542,6 +4542,7 @@ try {
         printEvent(event, icon, text, id)
       })
     })
+    if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
     if (isFunction(agent.setHookFn)) {
       agent.setHookFn(function(event, contextVars) {
         return runHooks(event, contextVars)
@@ -4736,6 +4737,7 @@ try {
           printEvent(event, icon, text, id)
         })
       })
+      if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
       agent.init(initArgs)
       if (isDef(agent._subtaskManager)) return true
       print(colorifyText("Delegation could not be initialized with current settings.", errorColor))
@@ -4765,6 +4767,7 @@ try {
           printEvent(event, icon, text, id)
         })
       })
+      if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
       agent.init(initArgs)
     } catch (e) {
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
