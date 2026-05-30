@@ -597,6 +597,7 @@ try {
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
+    nologtrunc     : { type: "boolean", default: false, description: "Disable truncation of long log output lines (show full content)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
     usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
@@ -4223,11 +4224,32 @@ try {
   }
 
   function _renderEventMessage(iconPart, messageText, extraPrefix) {
+    function _carryAnsiState(lines) {
+      if (!isArray(lines) || lines.length === 0) return lines
+      var sgrRE = /\u001b\[([0-9;]*)m/g
+      var active = []
+      return lines.map(function(rawLine) {
+        var line = isString(rawLine) ? rawLine : String(rawLine || "")
+        var prefixed = (active.length > 0 ? active.join("") : "") + line
+        var match
+        while ((match = sgrRE.exec(line)) !== null) {
+          var params = isString(match[1]) ? match[1] : ""
+          if (params.length === 0 || params === "0") {
+            active = []
+          } else {
+            active.push("\u001b[" + params + "m")
+          }
+        }
+        return prefixed
+      })
+    }
+
     var termWidth = _getConsoleRenderWidth()
     var contentWidth = Math.max(8, termWidth - 3)
     var safeMessage = isString(messageText) ? messageText : String(messageText || "")
     var extra = isString(extraPrefix) ? extraPrefix : ""
     safeMessage = safeMessage.replace(/\n/g, "↵").trim()
+    safeMessage = safeMessage.replace(/↵/g, colorifyText("↵", "FG(238)"))
     var textStyle = hintColor + ",ITALIC"
     var separatorStyle = "FG(240)"
     var separatorChar = "╌"
@@ -4238,7 +4260,7 @@ try {
     var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + iconPlain))
     var continuationWidth = Math.max(8, contentWidth - visibleLength(extra + iconIndent))
     var separatorWidth = Math.max(8, contentWidth - visibleLength(extra + separatorIndent))
-    var wrappedLines = format.string.wordWrap(safeMessage, firstLineWidth).split("\n")
+    var wrappedLines = _carryAnsiState(format.string.wordWrap(safeMessage, firstLineWidth).split("\n"))
     var renderedLines = []
 
     if (wrappedLines.length > 0) {
@@ -4250,7 +4272,7 @@ try {
     for (var wi = 1; wi < wrappedLines.length; wi++) {
       var continuationText = format.string.wordWrap(wrappedLines[wi], continuationWidth)
       continuationText.split("\n").forEach(function(line) {
-        renderedLines.push(extra + iconIndent + line)
+        renderedLines.push(extra + iconIndent + colorifyText(line, textStyle))
       })
     }
 

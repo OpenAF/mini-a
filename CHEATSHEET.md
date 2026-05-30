@@ -83,6 +83,7 @@ mini-a goal="summarize this repository"
 | `debuglcch` | string | - | SLON/JSON debug channel for low-cost LLM |
 | `debugvalch` | string | - | SLON/JSON debug channel for validation LLM (used when `llmcomplexity=true`) |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
+| `nologtrunc` | boolean | `false` | Disable truncation of long log output lines (show full content) |
 | `outfile` | string | - | Path to save final answer (if not provided, prints to console) |
 
 **Examples:**

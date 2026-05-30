@@ -848,6 +848,7 @@ The `start()` method accepts various configuration options:
 - **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
 - **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM (used when `llmcomplexity=true`). Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. Logs a warning if the validation LLM is not configured.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
+- **`nologtrunc`** (boolean, default: false): Disable truncation of long log output lines (show full content)
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`promptprofile`** (string): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the reduced default profile, or `verbose` to keep richer guidance and examples. When unset, Mini-A defaults to `minimal` in chatbot mode, `verbose` with `debug=true` outside chatbot mode, and `balanced` otherwise.

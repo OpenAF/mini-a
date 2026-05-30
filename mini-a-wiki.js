@@ -1237,10 +1237,11 @@ MiniAWikiManager.prototype.search = function(query, options) {
   if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
     try {
       var chName = "__mini_a_wiki_searchdb"
+      var luceneQuery = q.replace(/(&&|\|\||[+\-!(){}\[\]^"~*?:\\/])/g, "\\$1")
       var luceneHits
       try {
         $ch(chName).create("searchdb", { path: this._getLuceneIndexPath(), idField: "id", contentField: "content" })
-        luceneHits = $ch(chName).getAll({ query: q, limit: limit })
+        luceneHits = $ch(chName).getAll({ query: luceneQuery, limit: limit })
       } finally {
         $ch(chName).destroy()
       }

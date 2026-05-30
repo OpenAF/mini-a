@@ -1599,8 +1599,8 @@ MiniA.prototype._truncateAuditValue = function(value, maxLen) {
   maxLen = isNumber(maxLen) && maxLen > 0 ? maxLen : 500
   if (isUnDef(value) || value === null) return value
   if (isString(value)) {
-    if (value.length <= maxLen) return value
-    return value.substring(0, maxLen) + "... [truncated]"
+    if (this._nologtrunc === true || value.length <= maxLen) return value
+    return value.substring(0, maxLen) + "... " + ansiColor("italic,FAINT", "[truncated]")
   }
   return value
 }
@@ -12332,8 +12332,8 @@ MiniA.prototype._runCommand = function(args) {
         global.__mini_a_metrics.shell_commands_blocked.inc()
       } else {
         this.fnI("shell", shellPrefix.length > 0
-          ? `Executing '${finalCommand}' (original: '${originalCommand}').`
-          : `Executing '${finalCommand}'...`
+          ? `Executing ${ansiColor("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")} (original: ${ansiColor("FG(218)", "'" + this._truncateAuditValue(originalCommand, 800) + "'")}).`
+          : `Executing ${ansiColor("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")}...`
         )
         var shellExec = $sh(shInput)
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
@@ -14305,7 +14305,7 @@ MiniA.prototype.init = function(args) {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
                 }
-                parent.fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+                parent.fnI("exec", `Executing action '${t}' with parameters: ${parent._truncateAuditValue(af.toCSLON(a), 800)}`)
 
                 // Track per-tool call count
                 if (!isObject(global.__mini_a_metrics.per_tool_stats[t])) {
@@ -14339,7 +14339,7 @@ MiniA.prototype.init = function(args) {
                     global.__mini_a_metrics.per_tool_stats[t].failures.inc()
                   }
                 } else {
-                  parent.fnI("info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${af.toSLON(a)}`)
+                  parent.fnI("info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${parent._truncateAuditValue(af.toCSLON(a), 800)}`)
                   global.__mini_a_metrics.mcp_actions_executed.inc()
                   // Track per-tool successes
                   if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
@@ -15082,6 +15082,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
     args.mcpproxynative = _$(toBoolean(args.mcpproxynative), "args.mcpproxynative").isBoolean().default(false)
+    args.nologtrunc = _$(toBoolean(args.nologtrunc), "args.nologtrunc").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -15212,6 +15213,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._routeHistory = {}
     this._configurePlanUpdates(args)
     this._sessionArgs = args
+    this._nologtrunc = args.nologtrunc === true
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
     if (isDef(args.rtm) && isUnDef(args.rpm)) {

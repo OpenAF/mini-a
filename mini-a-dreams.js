@@ -33,8 +33,8 @@ var MiniADreams = function(dreamArgs, logFn) {
 MiniADreams.prototype._log = function(msg) {
   var out = isDef(msg) ? String(msg) : ""
   if (out.indexOf("[dreams") >= 0) {
-    if (out.indexOf("💤 ") === 0) out = "zzz " + out.substring(2).trim()
-    if (out.indexOf("zzz ") !== 0) out = "zzz " + out
+    if (out.indexOf("zzz ") === 0) out = "💤 " + out.substring(4).trim()
+    if (out.indexOf("💤 ") !== 0) out = "💤 " + out
   }
   try { this._logFn(out) } catch(ignoreLogErr) {}
 }
