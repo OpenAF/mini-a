@@ -3981,14 +3981,44 @@ try {
     return true
   }
 
+  function _looksLikeXmlOrHtmlSnippet(text) {
+    if (!isString(text) || text.length === 0) return false
+    if (/<\?xml\b/i.test(text)) return true
+    // Match any XML/HTML-like tag, including opening-only lines such as "<catalog>".
+    return /<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?\s*>/.test(text)
+  }
+
+  function renderMarkdownPreservingTags(text) {
+    if (String(text || "").indexOf("<") < 0 && String(text || "").indexOf("```") < 0) return ow.format.withMD(text)
+    if (!isObject(__flags) || !isObject(__flags.WITHMD)) return ow.format.withMD(text)
+    var oldHtmlFilter = __flags.WITHMD.htmlFilter
+    try {
+      __flags.WITHMD.htmlFilter = false
+      return ow.format.withMD(text)
+    } finally {
+      __flags.WITHMD.htmlFilter = oldHtmlFilter
+    }
+  }
+
   function _printStreamMarkdown(text) {
     if (!isString(text) || text.length === 0) return
     _streamHasRendered = true
+    var unwrappedCode = unwrapSingleMarkdownCodeBlock(text)
+    if (unwrappedCode !== text) {
+      // Preserve literal code content (e.g. XML/HTML tags) in console output.
+      print(unwrappedCode)
+      return
+    }
+    if (_looksLikeXmlOrHtmlSnippet(text)) {
+      // Avoid markdown rendering swallowing XML/HTML tags in console output.
+      print(text)
+      return
+    }
     if (_containsStreamTableSyntax(text) && !_isStreamValidMarkdownTableText(text)) {
       print(text)
       return
     }
-    printnl(ow.format.withMD(text))
+    printnl(renderMarkdownPreservingTags(text))
   }
 
   function _flushStreamTableBuffer() {
