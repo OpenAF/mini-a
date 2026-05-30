@@ -1874,7 +1874,7 @@ jobs:
     // Initialize read-only mounts from wikimounts SLON/JSON arg
     if (isString(args.wikimounts) && args.wikimounts.trim().length > 0) {
       try {
-        var mountsList = af.fromSLON(args.wikimounts)
+        var mountsList = af.fromJSSLON(args.wikimounts)
         if (!isArray(mountsList)) mountsList = [mountsList]
         mountsList.forEach(function(mc) {
           if (!isMap(mc) || !isString(mc.name)) return

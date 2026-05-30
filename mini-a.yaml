@@ -875,6 +875,95 @@ help:
     desc     : Default stale-days threshold for wiki lint
     example  : "90"
     mandatory: false
+  - name     : wikimounts
+    desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
+    example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
+    mandatory: false
+  - name     : mode
+    desc     : Apply one of the presets defined in mini-a-modes
+    example  : "ollama"
+    mandatory: false
+  - name     : resume
+    desc     : Resume the last console conversation/history entry on startup
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : usehistory
+    desc     : Keep/list console conversations from ~/.openaf-mini-a/history
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historykeep
+    desc     : Keep console conversations under ~/.openaf-mini-a/history
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : historykeepperiod
+    desc     : Delete kept conversation files older than this many minutes
+    example  : "1440"
+    mandatory: false
+  - name     : historykeepcount
+    desc     : Keep only the newest N kept conversation files
+    example  : "200"
+    mandatory: false
+  - name     : historypath
+    desc     : Directory path used to store web conversation history
+    example  : "./history"
+    mandatory: false
+  - name     : historyretention
+    desc     : Web history retention window in seconds
+    example  : "600"
+    mandatory: false
+  - name     : showseparator
+    desc     : Show a subtle separator line between interaction events
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : showexecs
+    desc     : Show shell/exec events in the interaction stream
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : dream
+    desc     : Run a dream (sleep) pass instead of the console
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : dreammode
+    desc     : Dream mode selector (memory, wiki, both)
+    example  : "wiki"
+    mandatory: false
+  - name     : dreamwiki
+    desc     : Force wiki dream when memory is also configured
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : dreamwikimode
+    desc     : Wiki dream mode (lint, plan, apply, reorg)
+    example  : "plan"
+    mandatory: false
+  - name     : dreammemorymode
+    desc     : Memory dream mode (plan or apply)
+    example  : "plan"
+    mandatory: false
+  - name     : dreamwikiapply
+    desc     : Write gate for wiki apply/reorg modes
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : dreamwikiapproval
+    desc     : Wiki reorg approval mode (auto, ask, never)
+    example  : "ask"
+    mandatory: false
+  - name     : dreamwikireorg
+    desc     : Allow structural wiki reorg operations
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : dreamreport
+    desc     : Optional file path to write dream JSON report output
+    example  : "/tmp/mini-a-dream.json"
+    mandatory: false
   - name     : saveplannotes
     desc     : Save execution notes back to the plan file after execution
     example  : "true"
@@ -1116,6 +1205,26 @@ jobs:
         wikiuseversion1: wikiuseversion1
         wikiignorecertcheck: wikiignorecertcheck
         wikilintstaleddays: wikilintstaleddays
+        wikimounts     : wikimounts
+        mode           : mode
+        resume         : resume
+        usehistory     : usehistory
+        historykeep    : historykeep
+        historykeepperiod: historykeepperiod
+        historykeepcount: historykeepcount
+        historypath    : historypath
+        historyretention: historyretention
+        showseparator  : showseparator
+        showexecs      : showexecs
+        dream          : dream
+        dreammode      : dreammode
+        dreamwiki      : dreamwiki
+        dreamwikimode  : dreamwikimode
+        dreammemorymode: dreammemorymode
+        dreamwikiapply : dreamwikiapply
+        dreamwikiapproval: dreamwikiapproval
+        dreamwikireorg : dreamwikireorg
+        dreamreport    : dreamreport
   check:
     in:
       goal           : isString
@@ -1323,6 +1432,26 @@ jobs:
       wikiuseversion1: toBoolean.isBoolean.default(false)
       wikiignorecertcheck: toBoolean.isBoolean.default(false)
       wikilintstaleddays: toNumber.isNumber.default(__)
+      wikimounts     : isString.default(__)
+      mode           : isString.default(__)
+      resume         : toBoolean.isBoolean.default(false)
+      usehistory     : toBoolean.isBoolean.default(false)
+      historykeep    : toBoolean.isBoolean.default(false)
+      historykeepperiod: toNumber.isNumber.default(__)
+      historykeepcount: toNumber.isNumber.default(__)
+      historypath    : isString.default(__)
+      historyretention: toNumber.isNumber.default(__)
+      showseparator  : toBoolean.isBoolean.default(true)
+      showexecs      : toBoolean.isBoolean.default(false)
+      dream          : toBoolean.isBoolean.default(false)
+      dreammode      : isString.default(__)
+      dreamwiki      : toBoolean.isBoolean.default(false)
+      dreamwikimode  : isString.default(__)
+      dreammemorymode: isString.default(__)
+      dreamwikiapply : toBoolean.isBoolean.default(false)
+      dreamwikiapproval: isString.default(__)
+      dreamwikireorg : toBoolean.isBoolean.default(false)
+      dreamreport    : isString.default(__)
   exec : | #js
     log(`🎯 goal: ${args.goal}`)
     MiniA.applyLibEnvDefault(args)

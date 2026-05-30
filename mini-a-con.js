@@ -632,6 +632,7 @@ try {
     wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
+    wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -763,10 +764,19 @@ try {
     delegationstalltimeout: { type: "number", description: "Idle time in milliseconds before a delegated subtask is considered stalled" },
     delegationhardtimeout: { type: "number", description: "Optional absolute delegated subtask timeout in milliseconds regardless of activity" },
     delegationmaxretries: { type: "number", default: 2, description: "Default retry count for failed subtasks" },
+    autodelegation : { type: "boolean", default: false, description: "Enable automatic delegation based on context size and complexity." },
+    autodelegationthreshold: { type: "number", default: 8192, description: "Token threshold that triggers auto-delegation when enabled." },
+    autodelegationmaxperstep: { type: "number", default: 2, description: "Maximum number of auto-delegations per step." },
+    noisytools     : { type: "string", description: "Comma-separated list of tool names that should be logged with full verbosity." },
+    subtasks       : { type: "string", description: "Inline subtasks definition (JSON/SLON) for startup delegation." },
+    subtasksfile   : { type: "string", description: "Path to a subtasks file for startup delegation." },
+    subtaskssequential: { type: "boolean", default: false, description: "Run startup subtasks sequentially instead of in parallel." },
+    forkstatemaxbytes: { type: "number", default: 65536, description: "Maximum serialized state size shared with delegated subtasks." },
     showdelegate   : { type: "boolean", default: false, description: "Show delegate/subtask events as separate lines (default keeps them inline)" },
     toolfallback   : { type: "boolean", default: false, description: "Retry in action mode when tool-calling output is malformed." },
     usejsontool    : { type: "boolean", description: "Enable the compatibility json tool when usetools=true." },
     useskills      : { type: "boolean", default: false, description: "Expose the skills utility tool and auto-load high-confidence matching skills." },
+    usestdutils    : { type: "boolean", default: false, description: "Enable standard-utils compatibility aliases (question, skill, todowrite, etc.)." },
     skillmaxautoload: { type: "number", default: 1, description: "Maximum number of matching skills to auto-load into runtime context." },
     skillcontextchars: { type: "number", default: 8000, description: "Maximum characters read from each auto-loaded SKILL.md." },
     skillmanifestchars: { type: "number", default: 1536, description: "Approximate character budget for skill descriptions in the system prompt manifest." },
@@ -791,9 +801,16 @@ try {
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
     dreamwikimode  : { type: "string", description: "Wiki dream mode: lint, plan, apply, or reorg." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
+    dreammemoryminconfidence: { type: "number", description: "Minimum confidence for memory entries written during dream memory apply." },
+    dreammemorytowiki: { type: "boolean", default: false, description: "Allow memory dream to emit curated wiki-ready notes." },
     dreamwikiapply : { type: "boolean", default: false, description: "Write gate for wiki apply/reorg modes." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
+    dreamwikiredirects: { type: "boolean", default: false, description: "Generate redirect stubs during wiki reorg operations." },
+    dreamwikiminpages: { type: "number", description: "Minimum page count required before structural wiki reorg runs." },
+    dreamwikiflatthreshold: { type: "number", description: "Flatness threshold used to decide wiki reorg opportunities." },
+    dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
+    dreamwikipreservebodies: { type: "boolean", default: false, description: "Preserve page body content when creating index-focused wiki reorg proposals." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
     path           : { type: "string", description: "Static asset path used by the web UI/worker modes." },
@@ -1390,15 +1407,35 @@ try {
       } else {
         wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
       }
-      return new MiniAWikiManager(wikiCfg)
+      var wm = new MiniAWikiManager(wikiCfg)
+      try {
+        var mountsRaw = __
+        if (isDef(sessionOptions.wikimounts)) mountsRaw = sessionOptions.wikimounts
+        else if (isObject(extraCLIArgs) && isDef(extraCLIArgs.wikimounts)) mountsRaw = extraCLIArgs.wikimounts
+
+        if (isString(mountsRaw) && mountsRaw.trim().length > 0) {
+          var mountsList = af.fromJSSLON(mountsRaw)
+          if (!isArray(mountsList)) mountsList = [mountsList]
+          mountsList.forEach(function(mc) {
+            if (!isMap(mc) || !isString(mc.name)) return
+            wm.attach(mc.name, merge({ access: "ro" }, mc))
+          })
+        } else if (isArray(mountsRaw)) {
+          mountsRaw.forEach(function(mc) {
+            if (!isMap(mc) || !isString(mc.name)) return
+            wm.attach(mc.name, merge({ access: "ro" }, mc))
+          })
+        }
+      } catch(ignoreWikiMountInitError) {}
+      return wm
     } catch(ignoreWikiInitError) {
       return __
     }
   }
 
   function getWikiSubcommandCompletions() {
-    var completions = ["list", "tree", "browse", "read", "search", "backlinks", "lint"]
-    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "init", "reindex")
+    var completions = ["context", "list", "tree", "browse", "read", "search", "backlinks", "lint", "mounts", "attach", "detach"]
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() === "rw") completions.push("write", "move", "delete", "init", "reindex")
     return completions
   }
 
@@ -2204,6 +2241,21 @@ try {
                 candidates.add(path)
               })
               return candidates.isEmpty() ? -1 : Number(pathInsertionPoint)
+            }
+
+            if (wikiSubcmd === "detach") {
+              var mountPrefix = wikiParts.slice(1).join(" ").trim()
+              var mountInsertionPoint = insertionPoint + trimmedRemainder.indexOf(wikiParts.slice(1).join(" "))
+              try {
+                var wm = getConsoleWikiManager()
+                if (isObject(wm)) {
+                  wm.mounts().forEach(function(m) {
+                    var name = isMap(m) && isString(m.name) ? m.name : ""
+                    if (name.length > 0 && (mountPrefix.length === 0 || name.indexOf(mountPrefix) === 0)) candidates.add(name)
+                  })
+                }
+              } catch(ignoreWikiDetachCompletionError) {}
+              return candidates.isEmpty() ? -1 : Number(mountInsertionPoint)
             }
 
             return -1

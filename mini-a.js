@@ -7408,7 +7408,7 @@ MiniA.prototype._initWiki = function(args) {
     var wikiMountsRaw = args.wikimounts
     if (isString(wikiMountsRaw) && wikiMountsRaw.trim().length > 0) {
       try {
-        var wikiMountsList = af.fromSLON(wikiMountsRaw)
+        var wikiMountsList = af.fromJSSLON(wikiMountsRaw)
         if (!isArray(wikiMountsList)) wikiMountsList = [wikiMountsList]
         var self = this
         wikiMountsList.forEach(function(mc) {

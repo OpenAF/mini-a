@@ -693,6 +693,10 @@ help:
     desc     : Default stale-page threshold in days for wiki lint
     example  : "90"
     mandatory: false
+  - name     : wikimounts
+    desc     : SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]
+    example  : "[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"
+    mandatory: false
   - name     : promptprofile
     desc     : "Prompt verbosity profile for system instructions (minimal, balanced, verbose). Defaults to minimal in chatbot mode, verbose with debug=true outside chatbot mode, otherwise balanced"
     example  : "balanced"
@@ -1778,6 +1782,7 @@ jobs:
       wikiuseversion1: toBoolean().isBoolean().default(false)
       wikiignorecertcheck: toBoolean().isBoolean().default(false)
       wikilintstaleddays: toNumber().isNumber().default(__)
+      wikimounts     : isString().default(__)
       promptprofile  : isString().default(__)
       systempromptbudget: toNumber().isNumber().default(__)
       format         : isString().default(__)
