@@ -57,6 +57,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testGlobQuery
 
+- name: MiniA Utils Tests::AliasPassThrough
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAliasPassThrough
+
 - name: MiniA Utils Tests::EditFile
   from: MiniA Utils Tests::Init
   to  : oJob Test
@@ -182,6 +187,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testShowMessageAcceptsPromptAlias
 
+- name: MiniA Utils Tests::StdUtilsCatalog
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStdUtilsCatalog
+
+- name: MiniA Utils Tests::LegacyCatalog
+  from: MiniA Utils Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testLegacyCatalog
+
 include:
 - oJobTest.yaml
 
@@ -201,6 +216,7 @@ todo:
 - MiniA Utils Tests::FileOps
 - MiniA Utils Tests::FileModify
 - MiniA Utils Tests::GlobQuery
+- MiniA Utils Tests::AliasPassThrough
 - MiniA Utils Tests::EditFile
 - MiniA Utils Tests::WebFetch
 - MiniA Utils Tests::TextAndValidationToon
@@ -226,3 +242,5 @@ todo:
 - MiniA Utils Tests::TimeOpsSleep
 - MiniA Utils Tests::EncodingAndAdvancedParams
 - MiniA Utils Tests::ShowMessageAcceptsPromptAlias
+- MiniA Utils Tests::StdUtilsCatalog
+- MiniA Utils Tests::LegacyCatalog

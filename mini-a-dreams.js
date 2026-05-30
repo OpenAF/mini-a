@@ -31,7 +31,12 @@ var MiniADreams = function(dreamArgs, logFn) {
 }
 
 MiniADreams.prototype._log = function(msg) {
-  try { this._logFn(msg) } catch(ignoreLogErr) {}
+  var out = isDef(msg) ? String(msg) : ""
+  if (out.indexOf("[dreams") >= 0) {
+    if (out.indexOf("zzz ") === 0) out = "💤 " + out.substring(4).trim()
+    if (out.indexOf("💤 ") !== 0) out = "💤 " + out
+  }
+  try { this._logFn(out) } catch(ignoreLogErr) {}
 }
 
 // Allow tests (and callers) to inject a stub LLM so no real API keys are needed.
@@ -442,16 +447,17 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
 var _WIKI_DREAM_GOAL =
   "You are running a wiki dream consolidation pass. Your task is to produce a clean, well-organised wiki.\n\n" +
+  "IMPORTANT CONSTRAINTS:\n" +
+  "- Do NOT edit AGENTS.md, index.md, or log.md. These are regenerated deterministically by the apply pass.\n" +
+  "- Do NOT write to mounted wikis (@name/... paths). They are read-only.\n\n" +
   "Follow these steps in order:\n" +
-  "1. Discovery phase: use wiki op=\"tree\", op=\"browse\", op=\"search\", op=\"backlinks\", and op=\"lint\" to understand the current hierarchy, section indexes, references, duplicates, broken links, orphans, and stale index pages.\n" +
-  "2. Produce a short reorganisation plan in your own context before writing. Folders with index.md are section sub-wikis. Keep existing flat and nested page paths valid unless you intentionally move them.\n" +
-  "3. Apply only high-confidence changes. Use wiki op=\"move\" for page relocations so links are repaired. Skip uncertain moves and record them as skipped_uncertain_moves.\n" +
-  "4. For missing_index issues, create the section index with wiki op=\"init\" and then add links to local pages and child section indexes with wiki op=\"write\".\n" +
-  "5. For index_missing_links and stale_index issues, update the local index.md to link direct pages and child section indexes. Keep indexes concise.\n" +
-  "6. For near_duplicate pairs: use wiki op=\"read\" on both pages, write a merged version to the primary page, then delete or move/supersede the duplicate only when confidence is high.\n" +
-  "7. For broken_link, missing_frontmatter, heading_hierarchy, and orphan issues: read the affected pages, make the minimal correction, and write back.\n" +
-  "8. Re-run wiki op=\"lint\" to confirm zero errors and no avoidable warnings remain. Info items are acceptable when deliberately skipped.\n" +
-  "9. Finish with action=\"final\" and include a summary with keys: pages_moved, pages_changed, pages_deleted, indexes_created, issues_fixed, skipped_uncertain_moves."
+  "1. Discovery: use wiki op=\"context\" for a compact overview, then op=\"lint\" for all issues, op=\"tree\" and op=\"browse\" for structure, op=\"backlinks\" for cross-references.\n" +
+  "2. Plan: produce a short reorganisation plan in your context before writing. Folders with index.md are section sub-wikis. Keep existing paths valid unless you intentionally move them.\n" +
+  "3. Apply only high-confidence changes. Use wiki op=\"move\" for relocations so links are repaired. Skip uncertain moves, record them as skipped_uncertain_moves.\n" +
+  "4. For near_duplicate pairs: use wiki op=\"read\" on both, write a merged version to the primary, then delete or supersede the duplicate only when confidence is high.\n" +
+  "5. For broken_link, missing_frontmatter, heading_hierarchy, and orphan issues: read the affected pages, make the minimal correction, write back.\n" +
+  "6. Re-run wiki op=\"lint\" to confirm zero errors and no avoidable warnings remain. Info items are acceptable when deliberately skipped.\n" +
+  "7. Finish with action=\"final\" and include a summary with keys: pages_moved, pages_changed, pages_deleted, issues_fixed, skipped_uncertain_moves."
 
 MiniADreams.prototype.dreamWiki = function(opts) {
   var self = this
@@ -521,7 +527,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       move_table: [],
       indexes_to_create: _unique(missingIndexIssues.map(function(iss) { return iss.page })),
       indexes_to_update: _unique(indexMissingLinks.concat(staleIndexes).map(function(iss) { return iss.page })),
-      protected_pages: ["AGENTS.md", ".mini-a-wiki-lucene.lock"],
+      protected_pages: ["AGENTS.md", "log.md", "index.md", ".mini-a-wiki-lucene.lock"],
       skipped_uncertain_moves: [],
       lint_before: lintSummary(lintResult),
       expected_lint_after: lintSummary(lintResult)
@@ -583,6 +589,17 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Starting wiki dream apply pass...")
     try {
       var wmApply = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:apply] " + msg) })
+      // Upgrade AGENTS.md to current template version (deterministic, preserves user customizations)
+      try {
+        var upgradeResult = wmApply.upgradeAgents()
+        if (isMap(upgradeResult) && upgradeResult.action && upgradeResult.action !== "noop") {
+          self._log("[dreams:wiki] AGENTS.md " + upgradeResult.action + " to v" + upgradeResult.agentsVersion)
+          defaultResult.issues_fixed.push("agents_upgraded:" + upgradeResult.action)
+        }
+      } catch(upgradeErr) {
+        self._log("[dreams:wiki] AGENTS.md upgrade error (non-fatal): " + __miniAErrMsg(upgradeErr))
+      }
+
       var lintBefore = wmApply.lint(__, { staleDays: staleDays })
       defaultResult.lint_before = lintSummary(lintBefore)
 

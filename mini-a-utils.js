@@ -128,6 +128,39 @@ MiniUtilsTool.prototype._createGlobMatcher = function(pattern) {
   }
 }
 
+MiniUtilsTool.prototype._globToRegExp = function(pattern) {
+  if (!isString(pattern) || pattern.length === 0) return /.*/
+  var p = String(pattern)
+  p = p.replace(/\./g, "\\.")
+  p = p.replace(/\*\*/g, "§§DOUBLESTAR§§")
+  p = p.replace(/\*/g, "[^/]*")
+  p = p.replace(/\?/g, ".")
+  p = p.replace(/§§DOUBLESTAR§§/g, ".*")
+  p = p.replace(/\{([^}]+)\}/g, function(_, inner) {
+    var parts = String(inner).split(",").map(function(v) { return v.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&") })
+    return "(" + parts.join("|") + ")"
+  })
+  return new RegExp("^" + p + "$")
+}
+
+MiniUtilsTool.prototype._matchesInclude = function(includePattern, relPath) {
+  if (!isString(includePattern) || includePattern.trim().length === 0) return true
+  var include = includePattern.trim()
+  var target = isString(relPath) ? relPath : ""
+  try {
+    if (isDef(ow) && isDef(ow.format) && isFunction(ow.format.toFilenameFilter)) {
+      var fn = ow.format.toFilenameFilter(include)
+      if (isFunction(fn)) return fn(target) === true
+    }
+  } catch(ignoreFilterErr) {}
+  try {
+    var base = target.replace(/^.*[\/\\]/, "")
+    return this._globToRegExp(include).test(target) || this._globToRegExp(include).test(base)
+  } catch(ignoreRegexErr) {
+    return true
+  }
+}
+
 MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
   options = isMap(options) ? options : {}
   var roots = []
@@ -1201,6 +1234,7 @@ MiniUtilsTool.prototype.searchContent = function(params) {
     var results = []
     var self = this
     files.some(function(entry) {
+      if (!self._matchesInclude(params.include, entry.relativePath)) return false
       if (maxResults > 0 && collected >= maxResults) return true
       try {
         var content = io.readFileString(entry.filepath)
@@ -1545,9 +1579,38 @@ MiniUtilsTool.prototype.wiki = function(params) {
     if (op === "refs" || op === "references") op = "backlinks"
     if (op === "mv" || op === "rename") op = "move"
 
+    if (op === "context") {
+      return wm.context()
+    }
+
+    if (op === "mounts") {
+      return wm.mounts()
+    }
+
+    if (op === "attach") {
+      if (!isString(params.name) || params.name.trim().length === 0) return "[ERROR] name is required for attach"
+      var attachCfg = { access: "ro", backend: isString(params.backend) ? params.backend : "fs" }
+      if (isString(params.root))      attachCfg.root      = params.root
+      if (isString(params.bucket))    attachCfg.bucket    = params.bucket
+      if (isString(params.prefix))    attachCfg.prefix    = params.prefix
+      if (isString(params.url))       attachCfg.url       = params.url
+      if (isString(params.accessKey)) attachCfg.accessKey = params.accessKey
+      if (isString(params.secret))    attachCfg.secret    = params.secret
+      if (isString(params.region))    attachCfg.region    = params.region
+      return wm.attach(params.name.trim(), attachCfg)
+    }
+
+    if (op === "detach") {
+      var detachName = isString(params.name) ? params.name.trim() : (isString(params.path) ? params.path.trim() : "")
+      if (detachName.length === 0) return "[ERROR] name is required for detach"
+      return wm.detach(detachName)
+    }
+
     if (op === "list") {
       var prefix = isString(params.path) ? params.path : ""
-      var pages = wm.list(prefix)
+      var listOpts = { withMeta: params.withMeta === true || params.withMeta === "true", limit: isNumber(params.limit) ? params.limit : 1000 }
+      var pages = wm.list(prefix, listOpts)
+      if (listOpts.withMeta) return { count: pages.length, pages: pages }
       if (params.compact === true) return { count: pages.length, pages: pages }
       return { count: pages.length, pages: pages }
     }
@@ -1576,15 +1639,30 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
     if (op === "read") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for read"
-      var page = wm.read(params.path.trim())
+      var readOpts = {
+        lineStart : isNumber(params.lineStart) ? params.lineStart : __,
+        lineEnd   : isNumber(params.lineEnd)   ? params.lineEnd   : __,
+        maxLines  : isNumber(params.maxLines)  ? params.maxLines  : __,
+        countLines: params.countLines === true,
+        section   : isString(params.section)   ? params.section   : __
+      }
+      var page = wm.read(params.path.trim(), readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
-      if (params.compact === true) return { path: page.path, title: isString(page.meta.title) ? page.meta.title : page.path, body: page.body }
+      if (params.compact === true) return { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
       return page
     }
 
     if (op === "search") {
       if (!isString(params.query) || params.query.trim().length === 0) return "[ERROR] query is required for search"
-      var hits = wm.search(params.query.trim(), { limit: isNumber(params.limit) ? params.limit : 20 })
+      var searchOpts = {
+        limit       : isNumber(params.limit) ? params.limit : 20,
+        contextLines: isNumber(params.contextLines) ? params.contextLines : 0,
+        regex       : params.regex === true,
+        caseSensitive: params.caseSensitive === true,
+        searchIn    : isString(params.searchIn) ? params.searchIn : "all",
+        compact     : params.compact !== false
+      }
+      var hits = wm.search(params.query.trim(), searchOpts)
       return { count: hits.length, results: hits }
     }
 
@@ -1628,7 +1706,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return isObject(iResult) ? iResult : { ok: false, error: String(iResult) }
     }
 
-    return "[ERROR] Unknown wiki operation: " + op + ". Use list, tree, browse, read, search, backlinks, write, move, delete, lint, init."
+    if (op === "reindex") {
+      return wm.reindex()
+    }
+
+    return "[ERROR] Unknown wiki operation: " + op + ". Use context, list, tree, browse, read, search, backlinks, write, move, delete, lint, init, mounts, attach, detach, reindex."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }
@@ -2202,6 +2284,56 @@ MiniUtilsTool.prototype.timeUtilities = function(params) {
   }
 }
 
+MiniUtilsTool.prototype._htmlUnescapeBasic = function(text) {
+  var out = isString(text) ? text : String(text || "")
+  return out
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+}
+
+MiniUtilsTool.prototype._htmlToTextFallback = function(body) {
+  var stripped = String(body || "").replace(/<[^>]+>/g, " ")
+  return this._htmlUnescapeBasic(stripped).replace(/[ \t]+/g, " ").replace(/\n\s+/g, "\n").trim()
+}
+
+MiniUtilsTool.prototype._htmlToMarkdownFallback = function(body) {
+  var html = String(body || "")
+  html = html.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, function(_, lvl, text) {
+    var n = Math.max(1, Math.min(6, Number(lvl)))
+    return "\n" + Array(n + 1).join("#") + " " + String(text).replace(/<[^>]+>/g, "").trim() + "\n"
+  })
+  html = html.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, function(_, href, text) {
+    return "[" + String(text).replace(/<[^>]+>/g, "").trim() + "](" + href + ")"
+  })
+  html = html.replace(/<(strong|b)>([\s\S]*?)<\/\1>/gi, "**$2**")
+  html = html.replace(/<(em|i)>([\s\S]*?)<\/\1>/gi, "_$2_")
+  html = html.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, "\n- $1")
+  html = html.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, function(_, code) { return "\n```\n" + String(code).replace(/<[^>]+>/g, "") + "\n```\n" })
+  html = html.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, "`$1`")
+  return this._htmlToTextFallback(html)
+}
+
+MiniUtilsTool.prototype._renderWebfetchBody = function(body, format) {
+  var requested = isString(format) ? format.toLowerCase().trim() : "markdown"
+  if (requested !== "html" && requested !== "text" && requested !== "markdown") requested = "markdown"
+  if (requested === "html") return String(body || "")
+  var jsoupPath = getOPackPath("Jsoup")
+  if (isString(jsoupPath) && jsoupPath.length > 0) {
+    try {
+      loadExternalJars(jsoupPath)
+      var doc = Packages.org.jsoup.Jsoup.parse(String(body || ""))
+      if (requested === "text") return String(doc.body().text())
+      return this._htmlToMarkdownFallback(String(doc.body().html()))
+    } catch(ignoreJsoupErr) {}
+  }
+  if (requested === "text") return this._htmlToTextFallback(body)
+  return this._htmlToMarkdownFallback(body)
+}
+
 /**
  * <odoc>
  * <key>MiniUtilsTool.textUtilities(params) : Object</key>
@@ -2422,6 +2554,7 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
       } catch (e) {
       }
 
+      var outputFormat = isString(params.format) ? params.format : "html"
       return {
         url: String(url),
         status: status,
@@ -2429,7 +2562,8 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
         headers: headers,
         bytes: total,
         truncated: truncated,
-        body: body
+        format: outputFormat,
+        body: this._renderWebfetchBody(body, outputFormat)
       }
 
     } else if (op === "diff") {
@@ -3243,6 +3377,300 @@ MiniUtilsTool.prototype.userInput = function(params) {
   }
 }
 
+MiniUtilsTool.prototype.read = function(params) {
+  var p = isMap(params) ? params : {}
+  return this.filesystemQuery({
+    operation    : "read",
+    path         : isDef(p.path) ? p.path : p.filePath,
+    maxLines     : isDef(p.maxLines) ? p.maxLines : p.limit,
+    lineStart    : isDef(p.lineStart) ? p.lineStart : p.offset,
+    lineEnd      : p.lineEnd,
+    encoding     : p.encoding,
+    byteStart    : p.byteStart,
+    byteEnd      : p.byteEnd,
+    byteLength   : p.byteLength,
+    lineSeparator: p.lineSeparator,
+    countLines   : p.countLines
+  })
+}
+
+MiniUtilsTool.prototype.glob = function(params) {
+  var p = isMap(params) ? params : {}
+  return this.filesystemQuery({
+    operation    : "glob",
+    path         : p.path,
+    pattern      : p.pattern,
+    includeHidden: p.includeHidden === true || p.dot === true
+  })
+}
+
+MiniUtilsTool.prototype.grep = function(params) {
+  var p = isMap(params) ? params : {}
+  return this.filesystemQuery({
+    operation    : "search",
+    path         : p.path,
+    pattern      : p.pattern,
+    include      : p.include,
+    regex        : p.regex,
+    caseSensitive: p.caseSensitive,
+    maxResults   : p.maxResults,
+    recursive    : p.recursive,
+    compact      : p.compact
+  })
+}
+
+MiniUtilsTool.prototype.webfetch = function(params) {
+  var p = isMap(params) ? params : {}
+  return this.textUtilities({
+    operation: "webfetch",
+    url      : p.url,
+    format   : p.format,
+    timeout  : isNumber(p.timeout) ? (p.timeout * 1000) : p.timeout,
+    method   : p.method,
+    headers  : p.headers,
+    body     : p.body
+  })
+}
+
+MiniUtilsTool.prototype.question = function(params) {
+  var p = isMap(params) ? params : {}
+  if (!isArray(p.questions) || p.questions.length === 0) return "[ERROR] questions array is required"
+  var answers = {}
+  for (var i = 0; i < p.questions.length; i++) {
+    var q = p.questions[i]
+    if (!isMap(q)) continue
+    var key = isString(q.header) && q.header.trim().length > 0 ? q.header.trim() : ("q" + (i + 1))
+    var labels = isArray(q.options) ? q.options.map(function(opt) { return isMap(opt) ? opt.label : opt }).filter(function(v) { return isString(v) && v.length > 0 }) : []
+    var res = this.userInput({
+      operation: q.multiple === true ? "multiple" : "choose",
+      prompt   : isString(q.question) ? q.question : key,
+      options  : labels
+    })
+    if (isString(res) && res.indexOf("[ERROR]") === 0) return res
+    answers[key] = isMap(res) ? res.answer : res
+  }
+  return { answers: answers }
+}
+
+MiniUtilsTool.prototype.skill = function(params) {
+  var p = isMap(params) ? params : {}
+  return this.skills({ operation: "invoke", name: p.name })
+}
+
+MiniUtilsTool.prototype.todowrite = function(params) {
+  var p = isMap(params) ? params : {}
+  return this.todoList({ operation: "write", items: p.todos })
+}
+
+MiniUtilsTool.prototype.apply_patch = function(params) {
+  var p = isMap(params) ? params : {}
+  if (this._readWrite !== true) return "[ERROR] readwrite=true required for apply_patch"
+  if (!isString(p.patchText) || p.patchText.trim().length === 0) return "[ERROR] patchText is required"
+
+  var text = String(p.patchText)
+  var lines = text.split(/\r?\n/)
+  var beginIdx = lines.indexOf("*** Begin Patch")
+  var endIdx = lines.lastIndexOf("*** End Patch")
+  if (beginIdx < 0 || endIdx < 0 || endIdx <= beginIdx) return "[ERROR] apply_patch: invalid patch envelope"
+
+  var eq = function(a, b, fuzzy) {
+    if (!fuzzy) return String(a) === String(b)
+    return String(a).trim() === String(b).trim()
+  }
+
+  var parseUpdateHunks = function(contentLines) {
+    var hunks = []
+    var current = __
+    for (var i = 0; i < contentLines.length; i++) {
+      var line = contentLines[i]
+      if (line.indexOf("@@") === 0) {
+        if (isMap(current)) hunks.push(current)
+        current = { header: line, lines: [] }
+        continue
+      }
+      if (!isMap(current)) continue
+      if (line === "\\ No newline at end of file") {
+        if (current.lines.length > 0) current.lines[current.lines.length - 1].noNl = true
+        continue
+      }
+      if (line === "...") {
+        current.lines.push({ type: "ellipsis", text: "..." })
+        continue
+      }
+      var ch = line.charAt(0)
+      var body = line.substring(1)
+      if (ch === " " || ch === "+" || ch === "-") current.lines.push({ type: ch, text: body, noNl: false })
+    }
+    if (isMap(current)) hunks.push(current)
+    return hunks
+  }
+
+  var simulateHunkAt = function(src, start, hunkLines, fuzzy) {
+    var si = start
+    var hasEllipsis = false
+    for (var i = 0; i < hunkLines.length; i++) {
+      var e = hunkLines[i]
+      if (e.type === "ellipsis") {
+        hasEllipsis = true
+        continue
+      }
+      if (e.type === "+") continue
+      if (hasEllipsis) {
+        var found = -1
+        for (var j = si; j < src.length; j++) {
+          if (eq(src[j], e.text, fuzzy)) { found = j; break }
+        }
+        if (found < 0) return { ok: false }
+        si = found
+        hasEllipsis = false
+      }
+      if (si >= src.length || !eq(src[si], e.text, fuzzy)) return { ok: false }
+      si++
+    }
+    return { ok: true }
+  }
+
+  var findHunkStart = function(src, fromIdx, hunkLines, fuzzy) {
+    for (var i = fromIdx; i <= src.length; i++) {
+      var sim = simulateHunkAt(src, i, hunkLines, fuzzy)
+      if (sim.ok) return i
+    }
+    return -1
+  }
+
+  var applyHunk = function(src, srcPos, start, hunkLines, fuzzy) {
+    var out = []
+    for (var i = srcPos; i < start; i++) out.push(src[i])
+    var si = start
+    var hasEllipsis = false
+    var noNl = false
+    for (var k = 0; k < hunkLines.length; k++) {
+      var e = hunkLines[k]
+      if (e.type === "ellipsis") {
+        hasEllipsis = true
+        continue
+      }
+      if (e.type === "+") {
+        out.push(e.text)
+        noNl = e.noNl === true
+        continue
+      }
+      if (hasEllipsis) {
+        var found = -1
+        for (var j = si; j < src.length; j++) {
+          if (eq(src[j], e.text, fuzzy)) { found = j; break }
+        }
+        for (var x = si; x < found; x++) out.push(src[x])
+        si = found
+        hasEllipsis = false
+      }
+      if (e.type === " ") {
+        out.push(src[si]); si++
+        noNl = e.noNl === true
+      } else if (e.type === "-") {
+        si++
+      }
+    }
+    return { built: out, nextPos: si, noNl: noNl }
+  }
+
+  var ops = []
+  var cur = __
+  for (var li = beginIdx + 1; li < endIdx; li++) {
+    var l = lines[li]
+    if (l.indexOf("*** Add File: ") === 0 || l.indexOf("*** Update File: ") === 0 || l.indexOf("*** Delete File: ") === 0 || l.indexOf("*** Move File: ") === 0) {
+      if (isMap(cur)) ops.push(cur)
+      if (l.indexOf("*** Add File: ") === 0) cur = { type: "add", raw: l, path: l.substring(14).trim(), content: [] }
+      else if (l.indexOf("*** Update File: ") === 0) cur = { type: "update", raw: l, path: l.substring(17).trim(), content: [] }
+      else if (l.indexOf("*** Delete File: ") === 0) cur = { type: "delete", raw: l, path: l.substring(17).trim(), content: [] }
+      else cur = { type: "move", raw: l, spec: l.substring(14).trim(), content: [] }
+      continue
+    }
+    if (isMap(cur)) cur.content.push(l)
+  }
+  if (isMap(cur)) ops.push(cur)
+  if (ops.length === 0) return "[ERROR] apply_patch: no operations found"
+
+  var staged = {}
+  var existsInStaged = function(absPath) {
+    if (Object.prototype.hasOwnProperty.call(staged, absPath)) return staged[absPath] !== null
+    return io.fileExists(absPath)
+  }
+  var readInStaged = function(absPath) {
+    if (Object.prototype.hasOwnProperty.call(staged, absPath)) return staged[absPath]
+    return io.readFileString(absPath)
+  }
+
+  for (var oi = 0; oi < ops.length; oi++) {
+    var op = ops[oi], idx = oi + 1
+    if (op.type === "add") {
+      var addAbs = this._resolve(op.path)
+      var addContent = op.content.join("\n")
+      if (existsInStaged(addAbs) && addContent.length > 0) return "[ERROR] apply_patch: operation " + idx + " (Add File: " + op.path + "): file already exists"
+      staged[addAbs] = addContent
+      continue
+    }
+
+    if (op.type === "delete") {
+      var delAbs = this._resolve(op.path)
+      if (!existsInStaged(delAbs)) return "[ERROR] apply_patch: operation " + idx + " (Delete File: " + op.path + "): file not found"
+      staged[delAbs] = null
+      continue
+    }
+
+    if (op.type === "move") {
+      var parts = op.spec.split("->")
+      if (parts.length !== 2) return "[ERROR] apply_patch: operation " + idx + " (Move File): invalid syntax"
+      var fromRel = parts[0].trim(), toRel = parts[1].trim()
+      var fromAbs = this._resolve(fromRel), toAbs = this._resolve(toRel)
+      if (!existsInStaged(fromAbs)) return "[ERROR] apply_patch: operation " + idx + " (Move File: " + op.spec + "): source not found"
+      if (existsInStaged(toAbs)) return "[ERROR] apply_patch: operation " + idx + " (Move File: " + op.spec + "): destination exists"
+      staged[toAbs] = readInStaged(fromAbs)
+      staged[fromAbs] = null
+      continue
+    }
+
+    if (op.type === "update") {
+      var updAbs = this._resolve(op.path)
+      if (!existsInStaged(updAbs)) return "[ERROR] apply_patch: operation " + idx + " (Update File: " + op.path + "): file not found"
+      var srcText = String(readInStaged(updAbs) || "")
+      var src = srcText.length > 0 ? srcText.split(/\r?\n/) : []
+      var hunks = parseUpdateHunks(op.content)
+      var out = []
+      var srcPos = 0
+      var finalNoNl = false
+      for (var hi = 0; hi < hunks.length; hi++) {
+        var h = hunks[hi]
+        var start = findHunkStart(src, srcPos, h.lines, false)
+        var fuzzy = false
+        if (start < 0) {
+          start = findHunkStart(src, srcPos, h.lines, true)
+          fuzzy = true
+        }
+        if (start < 0) return "[ERROR] apply_patch: operation " + idx + " (Update File: " + op.path + "): could not locate hunk context"
+        var applied = applyHunk(src, srcPos, start, h.lines, fuzzy)
+        out = out.concat(applied.built)
+        srcPos = applied.nextPos
+        finalNoNl = applied.noNl === true
+      }
+      for (var rest = srcPos; rest < src.length; rest++) out.push(src[rest])
+      var rebuilt = out.join("\n")
+      if (finalNoNl !== true && src.length > 0 && /(?:\n)$/.test(srcText)) rebuilt += "\n"
+      staged[updAbs] = rebuilt
+      continue
+    }
+  }
+
+  for (var path in staged) {
+    if (!Object.prototype.hasOwnProperty.call(staged, path)) continue
+    var rel = this._toRelative(path)
+    var content = staged[path]
+    if (content === null) this.filesystemModify({ operation: "delete", path: rel, confirm: true, recursive: true })
+    else this.filesystemModify({ operation: "write", path: rel, content: String(content), createMissingDirs: true })
+  }
+  return { ok: true, operations: ops.length }
+}
+
 MiniUtilsTool._metadataByFn = (function() {
   var queryReadOps = ["read", "readfile", "get", "view"]
   var queryListOps = ["list", "ls", "listdirectory", "dir"]
@@ -3324,6 +3752,7 @@ MiniUtilsTool._metadataByFn = (function() {
           includeHidden: { type: "boolean", description: "Include hidden files in list operations when true." },
           recursive    : { type: "boolean", description: "Traverse directories recursively when supported." },
           pattern      : { type: "string", description: "Pattern to search for when operation is set to search or glob (glob uses filesystem-style patterns)." },
+          include      : { type: "string", description: "Optional file glob filter for search operation (e.g. *.js, *.{ts,tsx})." },
           regex        : { type: "boolean", description: "Treat pattern as a regular expression when operation is search (ignored for glob)." },
           caseSensitive: { type: "boolean", description: "Perform case-sensitive searches when operation is search." },
           maxResults   : { type: "number", description: "Maximum number of search matches to return (0 means no limit)." },
@@ -3456,13 +3885,13 @@ MiniUtilsTool._metadataByFn = (function() {
             enum       : textAllOps
           },
           data       : { type: "string", description: "Data to process (text, JSON, YAML, CSV, etc.)." },
-          format     : { type: "string", description: "Encoding format for encode/decode: base64, hex, url, html." },
+          format     : { type: "string", description: "For encode/decode: base64, hex, url, html. For webfetch: html, text, markdown." },
           algorithm  : { type: "string", description: "Hash algorithm: md5, sha1, sha256, sha384, sha512." },
           url        : { type: "string", description: "URL to fetch when operation is webfetch." },
           method     : { type: "string", description: "HTTP method for webfetch (default GET)." },
           headers    : { type: "object", description: "HTTP headers for webfetch." },
           body       : { type: "string", description: "Request body for webfetch." },
-          timeout    : { type: "number", description: "Timeout in milliseconds for webfetch." },
+          timeout    : { type: "number", description: "Timeout in milliseconds for webfetch (webfetch alias accepts seconds)." },
           maxBytes   : { type: "number", description: "Maximum bytes to read for webfetch (prevents huge responses)." },
           encoding   : { type: "string", description: "Response encoding for webfetch." },
           text       : { type: "string", description: "Text input for text operations." },
@@ -3743,9 +4172,123 @@ MiniUtilsTool._metadataByFn = (function() {
         ]
       }
     },
+    read: {
+      name       : "read",
+      description: "standard file reader alias over filesystemQuery read/list.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          path         : { type: "string", description: "Path to file or directory." },
+          filePath     : { type: "string", description: "Compatibility alias for path." },
+          maxLines     : { type: "number", description: "Maximum lines to read." },
+          limit        : { type: "number", description: "Compatibility alias for maxLines." },
+          lineStart    : { type: "number", description: "1-based starting line." },
+          offset       : { type: "number", description: "Compatibility alias for lineStart." },
+          lineEnd      : { type: "number", description: "1-based ending line (inclusive)." },
+          encoding     : { type: "string", description: "Character encoding (default utf-8)." },
+          byteStart    : { type: "number", description: "Zero-based byte offset to start reading from." },
+          byteEnd      : { type: "number", description: "Zero-based byte offset to stop reading (inclusive)." },
+          byteLength   : { type: "number", description: "Number of bytes to read from byteStart." },
+          lineSeparator: { type: "string", description: "Line separator when returning line slices." },
+          countLines   : { type: "boolean", description: "Return total line count without full content loading." }
+        },
+        anyOf: [
+          { required: ["path"] },
+          { required: ["filePath"] }
+        ]
+      }
+    },
+    glob: {
+      name       : "glob",
+      description: "standard glob alias over filesystemQuery glob.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          pattern      : { type: "string", description: "Glob pattern." },
+          path         : { type: "string", description: "Start path (defaults to root)." },
+          includeHidden: { type: "boolean", description: "Include hidden files/directories when true." },
+          dot          : { type: "boolean", description: "Alias for includeHidden to mimic common glob tooling." }
+        },
+        required : ["pattern"]
+      }
+    },
+    grep: {
+      name       : "grep",
+      description: "standard grep alias over filesystemQuery search.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          pattern      : { type: "string", description: "Pattern to match." },
+          include      : { type: "string", description: "Optional file glob filter like *.js or *.{ts,tsx}." },
+          path         : { type: "string", description: "Start path." },
+          regex        : { type: "boolean", description: "Treat pattern as regular expression." },
+          caseSensitive: { type: "boolean", description: "Use case-sensitive matching." },
+          maxResults   : { type: "number", description: "Maximum number of matched files to return (0 means unlimited)." },
+          recursive    : { type: "boolean", description: "Traverse subdirectories recursively (default true)." },
+          compact      : { type: "boolean", description: "Return compact previews for matches." }
+        },
+        required : ["pattern"]
+      }
+    },
+    webfetch: {
+      name       : "webfetch",
+      description: "standard webfetch alias over textUtilities webfetch.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          url    : { type: "string", description: "URL to fetch." },
+          format : { type: "string", description: "Response format: markdown, text, html." },
+          timeout: { type: "number", description: "Timeout in seconds." },
+          method : { type: "string", description: "HTTP method (GET by default)." },
+          headers: { type: "object", description: "HTTP headers map." },
+          body   : { type: "string", description: "HTTP request body." }
+        },
+        required : ["url"]
+      }
+    },
+    question: {
+      name       : "question",
+      description: "standard interactive question adapter over userInput.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          questions: { type: "array", description: "Array of question objects with header, question, options and optional multiple." }
+        },
+        required : ["questions"]
+      }
+    },
+    skill: {
+      name       : "skill",
+      description: "standard alias over skills invoke.",
+      inputSchema: {
+        type      : "object",
+        properties: { name: { type: "string", description: "Skill name to invoke." } },
+        required : ["name"]
+      }
+    },
+    todowrite: {
+      name       : "todowrite",
+      description: "standard alias over todoList write.",
+      inputSchema: {
+        type      : "object",
+        properties: { todos: { type: "array", description: "Todo items." } },
+        required : ["todos"]
+      }
+    },
+    apply_patch: {
+      name       : "apply_patch",
+      description: "standard patch applicator for add/update/delete/move file operations.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          patchText: { type: "string", description: "Full patch text with *** Begin Patch / *** End Patch envelope." }
+        },
+        required : ["patchText"]
+      }
+    },
     wiki: {
       name       : "wiki",
-      description: "Interact with the wiki knowledge base. Use operation='tree' or 'browse' to discover hierarchy, 'read' to get a page, 'search' to find pages by keyword, 'backlinks' to inspect references, 'write' to create/update a page, 'move' to relocate a page with link repair (requires wikiaccess=rw), 'delete' to remove a page (requires wikiaccess=rw), 'lint' to validate wiki health, and 'init' to create AGENTS.md/index.md or a section index.md (requires wikiaccess=rw).",
+      description: "Interact with the wiki knowledge base. ALWAYS start with operation='context' for a compact overview. Use 'search' to find pages (returns path+title+description by default; add contextLines>0 for snippets), 'read' to get a page (use section= to read one heading only), 'list' with withMeta=true for metadata, 'tree'/'browse' for structure including mounts, 'mounts'/'attach'/'detach' for federated read-only wikis (@name/path.md), 'write'/'move'/'delete' to update (requires wikiaccess=rw), 'lint' to validate health, 'init' for section index creation.",
       inputSchema: {
         type      : "object",
         properties: {

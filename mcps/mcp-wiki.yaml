@@ -51,6 +51,10 @@ help:
     desc     : Human-readable wiki label injected into templated tool descriptions
     example  : "Team wiki"
     mandatory: true
+  - name     : wikimounts
+    desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
+    example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
+    mandatory: false
 
 todo:
 - Init
@@ -68,52 +72,20 @@ todo:
         title  : OpenAF standalone MCP wiki server
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
-      browse:
-        name       : browse
-        description: "Browse section structure in {{label}} to discover relevant pages before reading."
+      context:
+        name       : context
+        description: "[ORIENTATION] Get a compact overview of {{label}}: page count, sections, mounts, and recent changes. Call this once at the start of any wiki task before searching or reading."
         inputSchema:
           type      : object
-          properties:
-            path:
-              type       : string
-              description: Optional section folder, section index, or page path.
-            compact:
-              type       : boolean
-              description: Return compact navigation output.
-              default    : true
+          properties: {}
         annotations:
-          title         : browse
-          readOnlyHint  : true
-          idempotentHint: true
-
-      read:
-        name       : read
-        description: "Read a wiki page from {{label}} by path."
-        inputSchema:
-          type      : object
-          properties:
-            path:
-              type       : string
-              description: Wiki page path to read.
-            startLine:
-              type       : integer
-              description: Optional 1-based start line to read from.
-            endLine:
-              type       : integer
-              description: Optional 1-based end line to read to.
-            compact:
-              type       : boolean
-              description: Return compact output (path/title/body only).
-              default    : false
-          required  : [ path ]
-        annotations:
-          title         : read
+          title         : context
           readOnlyHint  : true
           idempotentHint: true
 
       search:
         name       : search
-        description: "Search {{label}} pages by keyword and then read the most relevant paths."
+        description: "[START HERE] Search {{label}} pages. Always call this before read. Returns path+title+description per match (no full page content). Then call read() with the most relevant path."
         inputSchema:
           type      : object
           properties:
@@ -134,7 +106,7 @@ todo:
               default    : false
             contextLines:
               type       : integer
-              description: Number of context lines before/after each match.
+              description: "Number of context lines before/after each match (>0 enables full per-line snippet mode)."
               default    : 0
             path:
               type       : string
@@ -145,10 +117,84 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
+      read:
+        name       : read
+        description: "Read a page from {{label}} by path. For long pages: call with countLines=true first, then with section= to read only the relevant heading. Never read a full page when a section read suffices."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: "Wiki page path to read. Use @name/path.md for mounted wikis."
+            startLine:
+              type       : integer
+              description: Optional 1-based start line to read from.
+            endLine:
+              type       : integer
+              description: Optional 1-based end line to read to.
+            section:
+              type       : string
+              description: Read only the body under this heading name (faster for long pages).
+            countLines:
+              type       : boolean
+              description: Return only the total line count without body content.
+              default    : false
+            compact:
+              type       : boolean
+              description: Return compact output (path/title/body only).
+              default    : false
+          required  : [ path ]
+        annotations:
+          title         : read
+          readOnlyHint  : true
+          idempotentHint: true
+
+      browse:
+        name       : browse
+        description: "Explore the section structure of {{label}}. Use after search() fails or for navigation. Less efficient than search for targeted lookup. Shows mounts as virtual top-level sections."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: "Optional section folder or @name/ mount prefix."
+            compact:
+              type       : boolean
+              description: Return compact navigation output.
+              default    : true
+        annotations:
+          title         : browse
+          readOnlyHint  : true
+          idempotentHint: true
+
+      list:
+        name       : list
+        description: "List pages in {{label}}. Use withMeta=true to get path+title+description+type+updated per page — efficient for scanning the full page inventory in one call."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Optional path prefix to filter pages.
+            withMeta:
+              type       : boolean
+              description: Return metadata (title, description, type, updated) per page.
+              default    : false
+            limit:
+              type       : integer
+              description: Maximum pages to return when withMeta=true.
+              default    : 200
+        annotations:
+          title         : list
+          readOnlyHint  : true
+          idempotentHint: true
+
     ((fns    )): &MCPFNS
-      browse: Wiki browse section
-      read  : Wiki read page
-      search: Wiki search pages
+      context: Wiki context overview
+      search : Wiki search pages
+      read   : Wiki read page
+      browse : Wiki browse section
+      list   : Wiki list pages
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
@@ -187,6 +233,7 @@ jobs:
       wikiuseversion1     : toBoolean.isBoolean.default(false)
       wikiignorecertcheck : toBoolean.isBoolean.default(false)
       label               : isString.default("wiki")
+      wikimounts          : isString.default(__)
   exec : | #js
     // Standalone wiki manager for MCP wiki server (derived from mini-a-wiki.js)
     if (typeof __miniAErrMsg !== "function") {
@@ -201,6 +248,87 @@ jobs:
       }
     }
     
+    // ── Template version & helpers ────────────────────────────────────────────────
+    var __MINI_A_WIKI_AGENTS_VERSION = 2
+    var __MINI_A_WIKI_V1_STOCK_PHRASE = "This file defines how agents should read, distil, and contribute knowledge to this wiki."
+    var __miniAWikiAgentsTemplate = function(now) {
+      return [
+        "---","title: Wiki Contribution Guidelines","description: Rules and workflow for agents reading from and writing to this wiki.",
+        "agentsVersion: " + __MINI_A_WIKI_AGENTS_VERSION,"created: " + now,"updated: " + now,"---","",
+        "<!-- mini-a:agents managed:start — content inside is overwritten on template upgrade -->","",
+        "# Wiki Contribution Guidelines","","## Quick start","",
+        "1. **`context`** — call once to get a compact wiki overview before anything else.",
+        "2. **`search`** — find candidates first, always. Call before read or write.",
+        "3. **`read`** — read the best match. For long pages: `countLines=true` first, then `section=` for the heading you need.",
+        "4. **`write`** — distil and save knowledge. Fill all required frontmatter fields.",
+        "5. **`lint`** — fix all error-severity issues before finishing.",
+        "6. Never edit AGENTS.md, index.md, or log.md directly.","",
+        "## Operations in this surface","",
+        "Available MCP tools (read-only surface):",
+        "`context` · `search` · `read` · `browse` · `list`","",
+        "- `context` — compact wiki overview (page count, sections, mounts, recent changes).",
+        "- `search(query)` — search pages; returns path+title+description by default.",
+        "- `read(path)` — read a page; add `section=` for one heading only.",
+        "- `list(path, withMeta=true)` — list pages; withMeta adds title+description+type+updated.",
+        "- `browse(path)` — navigate section structure including mounted wikis.","",
+        "## Page schema","","Every page is a Markdown file with a YAML front-matter block.","",
+        "### Required front-matter fields","","```yaml","---","title: Human-readable title (string)","description: One-sentence summary of the page (string)","created: <ISO 8601 timestamp>","updated: <ISO 8601 timestamp>   # refresh on every write","---","```","",
+        "### Optional front-matter fields","","```yaml","type: concept | entity | comparison | summary | overview   # groups pages in indexes","tags: [tag1, tag2]              # lowercase slugs","aliases: [alt-name]             # alternative names for search","supersedes: path/to/old.md      # when this page replaces another","status: draft | review | stable # omit for stable","```","",
+        "### Body conventions","","- Start with a single `# Title` heading matching `front-matter.title`.","- Use `## Section` headings; never skip levels (h1 → h3 is wrong).","- One concept per page. Split when a section exceeds ~300 words.","- End with `## See also` listing related pages when relevant.","",
+        "## Ingestion workflow","",
+        "1. **Search first** — call search before creating anything. If a relevant page exists, update it.",
+        "2. **Distil, do not dump** — extract the essential fact. Strip conversation context and ephemeral details.",
+        "3. **One concept per page** — if knowledge spans multiple concepts, create one page per concept and link them.",
+        "4. **Write or update:** New page: set `created` and `updated` to now. Existing page: update `updated`, preserve `created`.",
+        "5. **Link** — add links from related pages. Use relative Markdown links or `[[Page Name]]` wiki-style links.",
+        "6. **Lint** — run lint and fix all error-severity issues.","",
+        "## Retrieval conventions","",
+        "- Start with `context` to get a compact wiki overview before doing anything else.",
+        "- Use `search` to find candidates; then `read` the most relevant result.",
+        "- For long pages: call `read(path, countLines=true)` first, then `read(path, section=\"heading name\")` to fetch only what you need.",
+        "- Use `browse` to navigate folder structure when search does not surface results.",
+        "- Use `read index.md` for the wiki entrypoint and catalog.","",
+        "## Folder structure (recommended, never enforced)","",
+        "Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`.  ",
+        "Use them when they fit; create others freely; never move pages just to match.","",
+        "## Attached wikis (read-only mounts)","",
+        "Other wikis may be mounted read-only. Mounted pages appear as `@name/path.md`.",
+        "- Search, read, browse span all mounts automatically.",
+        "- See `## Attached wikis` in `index.md` for active mounts.","",
+        "## Linking","",
+        "- Use relative Markdown links: `[Page Title](path/to/page.md)`.",
+        "- Wiki-style links: `[[Page Title]]` (auto-slugified, root-relative).",
+        "- Cross-wiki links: `@name/path.md` — resolved against the named mount.","",
+        "## log.md","","`log.md` is an append-only journal of write/delete/move operations. Read it to see recent changes.","",
+        "## index.md","","`index.md` is a catalog of pages with summaries and section links.","",
+        "## Content rules","",
+        "- Write concise, factual, durable content. State the fact once; link rather than restate.",
+        "- Do not contradict existing pages without first marking the old content as superseded.",
+        "- Do not duplicate information that already exists on another page — link instead.",
+        "- Use neutral, encyclopaedic tone. No first-person ('I found…', 'we decided…').","",
+        "## Writing style — write like a plain reference, not an AI","",
+        "- Use plain verbs: `is` / `has`, not \"serves as\", \"stands as\", \"boasts\", \"features\".",
+        "- Cut puffery: no \"pivotal\", \"crucial\", \"rich tapestry\", \"groundbreaking\", \"marks a turning point\", \"underscores\".",
+        "- Drop trailing \"-ing\" significance clauses (\"…, highlighting its importance\").",
+        "- No negative parallelism: avoid \"not only X but also Y\" / \"not X, but Y\".",
+        "- Attribute specifically or not at all — no \"experts say\", \"some critics\", \"studies show\".",
+        "- Avoid rule-of-three padding and forced synonym-swapping; repeat the plain term.",
+        "- No editorialising wrap-ups or future speculation without sources.",
+        "- Formatting: sentence-case headings; bold only for first-use definitions; straight quotes; minimal em dashes; no emoji; never skip heading levels.","",
+        "## Lint","",
+        "- Run lint before finishing to check for broken links, orphan pages, and stale content.",
+        "- Fix all error-severity issues. Address warning-severity issues where possible.",
+        "- info-severity issues (near-duplicates, stale pages) are advisory; use judgement.","",
+        "<!-- mini-a:agents managed:end -->",
+      ].join("\n")
+    }
+    var __miniAWikiIndexRootTemplate = function(now) {
+      return ["---","title: Wiki Home","description: Main entrypoint and catalog for this wiki.","created: " + now,"updated: " + now,"tags:","  - home","  - index","---","","# Wiki Home","","Main entrypoint for this wiki. Start with `context` or search, then read the most relevant page.","","## Start here","","- [AGENTS.md](AGENTS.md) — contribution rules, page schema, and workflow for agents.","- [log.md](log.md) — append-only journal of recent writes and moves.","","## Sections","","- Add section index links here as the wiki grows.","","## Pages","","- Add top-level page links here.","","## Recent","","- See [log.md](log.md) for recent changes."].join("\n")
+    }
+    var __miniAWikiLogTemplate = function(now) {
+      return ["---","title: Wiki Log","description: Append-only journal of wiki write, delete, and move operations.","created: " + now,"updated: " + now,"tags:","  - log","---","","# Wiki Log","","Append-only. Do not edit this file directly."].join("\n")
+    }
+
     // Author: Nuno Aguiar
     // License: Apache 2.0
     // Description: Wiki manager for Mini-A. Supports filesystem and S3 backends.
@@ -292,24 +420,118 @@ jobs:
       }
     }
     
-    MiniAWikiManager.prototype.list = function(prefix) {
-      var pfx = isString(prefix) ? prefix : ""
-      if (this._backendType === "fs" && isMap(this._backend) && isDef(this._backend.root)) {
-        try {
-          return this._safeListPages(pfx)
-        } catch(e) {
-          return []
-        }
+    MiniAWikiManager.prototype._resolveMountPath = function(path) {
+      if (!isString(path) || !path.startsWith("@")) return null
+      var withoutAt = path.substring(1)
+      var slashIdx  = withoutAt.indexOf("/")
+      var name      = slashIdx >= 0 ? withoutAt.substring(0, slashIdx) : withoutAt
+      var localPath = slashIdx >= 0 ? withoutAt.substring(slashIdx + 1) : ""
+      var mounts    = isArray(this._mounts) ? this._mounts : []
+      for (var i = 0; i < mounts.length; i++) {
+        if (mounts[i].name === name) return { mount: mounts[i], localPath: localPath, name: name }
       }
-      return this._safeListPages(pfx)
+      return { mount: null, localPath: localPath, name: name }
     }
-    
+
+    MiniAWikiManager.prototype.list = function(prefix, options) {
+      var pfx  = isString(prefix) ? prefix : ""
+      var opts = isObject(options) ? options : {}
+      if (pfx.startsWith("@")) {
+        var mres = this._resolveMountPath(pfx.endsWith("/") ? pfx + "_dummy.md" : pfx)
+        if (mres && mres.mount) return mres.mount.manager.list(mres.localPath.replace(/_dummy\.md$/, ""), options)
+        return []
+      }
+      var pages; try { pages = this._safeListPages(pfx) } catch(e) { pages = [] }
+      if (opts.withMeta !== true) return pages
+      var self = this
+      var limit = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : 1000
+      return pages.slice(0, limit).map(function(p) {
+        var raw = self._backend.read(p)
+        if (!isString(raw)) return { path: p, title: p, description: "", type: "", updated: "" }
+        var parsed = self.parseFrontmatter(raw)
+        var m = isObject(parsed.meta) ? parsed.meta : {}
+        return { path: p, title: isString(m.title) ? m.title : p.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
+          description: isString(m.description) ? m.description : "", type: isString(m.type) ? m.type : "",
+          updated: isDef(m.updated) ? String(m.updated).substring(0, 10) : "" }
+      })
+    }
+
+    MiniAWikiManager.prototype.attach = function(name, config) {
+      if (!isString(name) || name.trim().length === 0) return { ok: false, error: "name is required" }
+      name = name.trim().replace(/^@/, "")
+      this._mounts = isArray(this._mounts) ? this._mounts : []
+      this._mounts = this._mounts.filter(function(m) { return m.name !== name })
+      var cfg = isMap(config) ? config : {}; cfg.access = "ro"
+      try {
+        var manager = new MiniAWikiManager(cfg, function() {})
+        var count = manager._safeListPages("").length
+        this._mounts.push({ name: name, manager: manager, prefix: "@" + name + "/" })
+        return { ok: true, name: name, pages: count }
+      } catch(e) { return { ok: false, error: __miniAErrMsg(e) } }
+    }
+
+    MiniAWikiManager.prototype.detach = function(name) {
+      if (!isString(name) || name.trim().length === 0) return { ok: false, error: "name is required" }
+      name = name.trim().replace(/^@/, "")
+      this._mounts = isArray(this._mounts) ? this._mounts : []
+      var found = false
+      this._mounts = this._mounts.filter(function(m) {
+        if (m.name !== name) return true
+        found = true; try { if (isFunction(m.manager.close)) m.manager.close() } catch(e) {} return false
+      })
+      return found ? { ok: true, name: name } : { ok: false, error: "no mount named '" + name + "'" }
+    }
+
+    MiniAWikiManager.prototype.mounts = function() {
+      this._mounts = isArray(this._mounts) ? this._mounts : []
+      return this._mounts.map(function(m) {
+        var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {}
+        return { name: m.name, prefix: m.prefix, pages: count }
+      })
+    }
+
+    MiniAWikiManager.prototype.appendLog = function(op, title, path) {
+      if (this._access !== "rw") return
+      try {
+        var dateStr = new Date().toISOString().substring(0, 10)
+        var entry   = "## [" + dateStr + "] " + String(op) + " | " + (isString(title) ? title : path) + " — " + path
+        var existing = this._backend.read("log.md")
+        var content = isString(existing) ? existing.replace(/\s+$/, "") + "\n\n" + entry : __miniAWikiLogTemplate(new Date().toISOString()) + "\n\n" + entry
+        this._backend.write("log.md", content)
+      } catch(e) {}
+    }
+
+    MiniAWikiManager.prototype.context = function() {
+      var pages = this._safeListPages("")
+      var sectionSet = {}
+      pages.forEach(function(p) { var parts = p.split("/"); if (parts.length > 1) sectionSet[parts[0] + "/"] = true })
+      var sections = Object.keys(sectionSet).sort().slice(0, 10)
+      var recent = []
+      try {
+        var logRaw = this._backend.read("log.md")
+        if (isString(logRaw)) {
+          logRaw.split("\n").forEach(function(line) { if (/^## \[/.test(line)) recent.push(line.replace(/^## /, "").trim()) })
+          recent = recent.reverse().slice(0, 5)
+        }
+      } catch(e) {}
+      var mounts = isArray(this._mounts) ? this._mounts : []
+      var mountList = mounts.slice(0, 10).map(function(m) {
+        var count = 0; try { count = m.manager._safeListPages("").length } catch(e) {}
+        var desc = ""
+        try { var idx = m.manager.read("index.md"); if (isObject(idx) && isObject(idx.meta) && isString(idx.meta.description)) desc = idx.meta.description } catch(e) {}
+        return { name: m.name, pages: count, description: desc }
+      })
+      return { pages: pages.length, sections: sections, mounts: mountList, recent: recent,
+        hint: "Call search() first, then read() the best match by path. For long pages use section= to read only the heading you need." }
+    }
+
     MiniAWikiManager.prototype.configure = function(config) {
       var cfg = isMap(config) ? config : {}
       var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
       this._access      = "ro"
       this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
       this._config  = cfg
+      this._mounts  = isArray(this._mounts) ? this._mounts : []
       this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
       this._bootstrapWiki()
     }
@@ -321,142 +543,11 @@ jobs:
         var hasAgents = this._backend.exists("AGENTS.md")
         var hasIndex  = this._backend.exists("index.md")
         if (this._access !== "rw") return
-    
-        // Bootstrap a brand-new wiki, or upgrade the legacy AGENTS-only bootstrap.
         if (pages.length > 0 && !(pages.length === 1 && hasAgents && !hasIndex)) return
-    
         var now = new Date().toISOString()
-        var agentsContent = [
-          "---",
-          "title: Wiki Contribution Guidelines",
-          "description: Rules and workflow for agents reading from and writing to this wiki.",
-          "created: " + now,
-          "updated: " + now,
-          "---",
-          "",
-          "# Wiki Contribution Guidelines",
-          "",
-          "This file defines how agents should read, distil, and contribute knowledge to this wiki.",
-          "All agents that use this wiki **must** read this file before performing any write operation.",
-          "",
-          "## Page Schema",
-          "",
-          "Every page is a Markdown file with a YAML front-matter block.",
-          "",
-          "### Required front-matter fields",
-          "",
-          "```yaml",
-          "---",
-          "title: Human-readable title (string)",
-          "description: One-sentence summary of the page (string)",
-          "created: <ISO 8601 timestamp>",
-          "updated: <ISO 8601 timestamp>   # must be refreshed on every write",
-          "---",
-          "```",
-          "",
-          "### Optional front-matter fields",
-          "",
-          "```yaml",
-          "tags: [tag1, tag2]              # lowercase slugs",
-          "aliases: [alt-name]             # alternative page names for search",
-          "supersedes: path/to/old.md      # when this page replaces another",
-          "status: draft | review | stable # omit for stable",
-          "```",
-          "",
-          "### Body conventions",
-          "",
-          "- Start with a single `# Title` heading that matches `front-matter.title`.",
-          "- Use `## Section` headings to organise content; never skip levels (e.g. h1 → h3).",
-          "- Keep pages focused on one concept. Split into sub-pages when a section exceeds ~300 words.",
-          "- End with a `## See Also` section listing related pages when relevant.",
-          "",
-          "## Ingestion Workflow",
-          "",
-          "Follow these steps **in order** whenever you want to add knowledge to the wiki:",
-          "",
-          "1. **Search first** — call `wiki search <keywords>` before creating anything.",
-          "   If a relevant page exists, update it rather than creating a duplicate.",
-          "2. **Distil, do not dump** — extract the essential, reusable fact or concept.",
-          "   Strip conversation context, ephemeral details, and task-specific phrasing.",
-          "3. **Choose the right page** — one concept per page.",
-          "   If the knowledge spans multiple concepts, create one page per concept and link them.",
-          "4. **Write or update** — use `wiki write <path> <meta> <body>`.",
-          "   - New page: set `created` and `updated` to now.",
-          "   - Existing page: update `updated` to now; preserve `created`.",
-          "   - If you are superseding stale content, set `supersedes` in the new page's front-matter",
-          "     and mark the old page's body with `> **Superseded** — see [[New Page]]` at the top.",
-          "5. **Link** — add relative Markdown links from related pages to the new page.",
-          "   Use `[[Page Title]]` wiki-style links or `[Page Title](path/to/page.md)` links.",
-          "6. **Lint** — call `wiki lint` and fix all `error`-severity issues before finishing.",
-          "",
-          "## Retrieval Conventions",
-          "",
-          "- Start with `wiki browse` or `wiki tree` to discover the wiki hierarchy and section indexes.",
-          "- Use `wiki read index.md` for the wiki entrypoint and top-level navigation.",
-          "- Use `wiki search <query>` for keyword search across page bodies.",
-          "- Use `wiki list` when you need a flat page list for compatibility or scripting.",
-          "- Use `wiki read <path>` to load a specific page.",
-          "- Prefer reading the most-recently-updated page when multiple pages cover similar ground.",
-          "- Trust content marked `status: stable`; treat `status: draft` as provisional.",
-          "",
-          "## Linking",
-          "",
-          "- Use relative Markdown links: `[Page Title](path/to/page.md)`.",
-          "- Wiki-style links are also supported: `[[Page Title]]` (auto-slugified).",
-          "- Always link back to this `AGENTS.md` from any page that documents wiki-wide conventions.",
-          "",
-          "## Content Rules",
-          "",
-          "- Write concise, factual, durable content. Avoid task-specific or ephemeral phrasing.",
-          "- Do not contradict existing pages without first marking the old content as superseded.",
-          "- Do not duplicate information that already exists on another page — link instead.",
-          "- Use neutral, encyclopaedic tone. Avoid first-person ('I found...', 'we decided...').",
-          "",
-          "## Lint",
-          "",
-          "- Run `wiki lint` before finishing to check for broken links, orphan pages, and stale content.",
-          "- Fix all `error`-severity issues.",
-          "- Address `warning`-severity issues where possible.",
-          "- `info`-severity issues (near-duplicates, stale pages) are advisory; use judgement.",
-          "",
-          "## Entry Point",
-          "",
-          "- The wiki entrypoint is [Wiki Home](index.md). Keep it updated with the top-level structure.",
-          "- Folders become browsable sub-wikis when they contain a local `index.md`.",
-          "- Add new sections there when introducing a new major topic area.",
-        ].join("\n")
-    
-        var indexContent = [
-          "---",
-          "title: Wiki Home",
-          "description: Main entrypoint and table of contents for this wiki.",
-          "created: " + now,
-          "updated: " + now,
-          "tags:",
-          "  - home",
-          "  - index",
-          "---",
-          "",
-          "# Wiki Home",
-          "",
-          "This is the main entrypoint for the wiki. Start here to discover the available knowledge and section indexes.",
-          "",
-          "## Start Here",
-          "",
-          "- [AGENTS.md](AGENTS.md) — contribution rules, page schema, and ingestion workflow for agents.",
-          "",
-          "## Topics",
-          "",
-          "- Add top-level topic pages and child section indexes here as the wiki grows.",
-          "- Keep this page short; use it as a table of contents, not a dumping ground.",
-          "",
-          "## Recent Additions",
-          "",
-          "- Add links to newly created or important pages here until the topic structure is stable.",
-        ].join("\n")
-    
-        if (!hasAgents) { this._backend.write("AGENTS.md", agentsContent); this._bootstrappedFiles.push("AGENTS.md") }
-        if (!hasIndex)  { this._backend.write("index.md", indexContent);   this._bootstrappedFiles.push("index.md")  }
+        if (!hasAgents) { this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now)); this._bootstrappedFiles.push("AGENTS.md") }
+        if (!hasIndex)  { this._backend.write("index.md",  __miniAWikiIndexRootTemplate(now)); this._bootstrappedFiles.push("index.md") }
+        if (!this._backend.exists("log.md")) { this._backend.write("log.md", __miniAWikiLogTemplate(now)); this._bootstrappedFiles.push("log.md") }
       } catch(e) {}
     }
     
@@ -540,6 +631,7 @@ jobs:
       }
       var hasAgents = this._backend.exists("AGENTS.md")
       var hasIndex  = this._backend.exists("index.md")
+      var hasLog    = this._backend.exists("log.md")
       var bootstrapped = isArray(this._bootstrappedFiles) ? this._bootstrappedFiles : []
       this._bootstrappedFiles = []
       var created = []
@@ -547,7 +639,10 @@ jobs:
       try {
         this._rebuildSearchIndex()
         if (!hasAgents) {
-          var agentsContent = [
+          // AGENTS.md TEMPLATE FOLLOWS — kept inline for MCP yaml standalone portability.
+          // Sync with mini-a-wiki.js __miniAWikiAgentsTemplate when updating.
+          var agentsContent = __miniAWikiAgentsTemplate(now)
+          /* SYNC-MARKER-AGENTS-START
             "---",
             "title: Wiki Contribution Guidelines",
             "description: Rules and workflow for agents reading from and writing to this wiki.",
@@ -559,93 +654,7 @@ jobs:
             "",
             "This file defines how agents should read, distil, and contribute knowledge to this wiki.",
             "All agents that use this wiki **must** read this file before performing any write operation.",
-            "",
-            "## Page Schema",
-            "",
-            "Every page is a Markdown file with a YAML front-matter block.",
-            "",
-            "### Required front-matter fields",
-            "",
-            "```yaml",
-            "---",
-            "title: Human-readable title (string)",
-            "description: One-sentence summary of the page (string)",
-            "created: <ISO 8601 timestamp>",
-            "updated: <ISO 8601 timestamp>   # must be refreshed on every write",
-            "---",
-            "```",
-            "",
-            "### Optional front-matter fields",
-            "",
-            "```yaml",
-            "tags: [tag1, tag2]              # lowercase slugs",
-            "aliases: [alt-name]             # alternative page names for search",
-            "supersedes: path/to/old.md      # when this page replaces another",
-            "status: draft | review | stable # omit for stable",
-            "```",
-            "",
-            "### Body conventions",
-            "",
-            "- Start with a single `# Title` heading that matches `front-matter.title`.",
-            "- Use `## Section` headings to organise content; never skip levels (e.g. h1 → h3).",
-            "- Keep pages focused on one concept. Split into sub-pages when a section exceeds ~300 words.",
-            "- End with a `## See Also` section listing related pages when relevant.",
-            "",
-            "## Ingestion Workflow",
-            "",
-            "Follow these steps **in order** whenever you want to add knowledge to the wiki:",
-            "",
-            "1. **Search first** — call `wiki search <keywords>` before creating anything.",
-            "   If a relevant page exists, update it rather than creating a duplicate.",
-            "2. **Distil, do not dump** — extract the essential, reusable fact or concept.",
-            "   Strip conversation context, ephemeral details, and task-specific phrasing.",
-            "3. **Choose the right page** — one concept per page.",
-            "   If the knowledge spans multiple concepts, create one page per concept and link them.",
-            "4. **Write or update** — use `wiki write <path> <meta> <body>`.",
-            "   - New page: set `created` and `updated` to now.",
-            "   - Existing page: update `updated` to now; preserve `created`.",
-            "   - If you are superseding stale content, set `supersedes` in the new page's front-matter",
-            "     and mark the old page's body with `> **Superseded** — see [[New Page]]` at the top.",
-            "5. **Link** — add relative Markdown links from related pages to the new page.",
-            "   Use `[[Page Title]]` wiki-style links or `[Page Title](path/to/page.md)` links.",
-            "6. **Lint** — call `wiki lint` and fix all `error`-severity issues before finishing.",
-            "",
-            "## Retrieval Conventions",
-            "",
-            "- Start with `wiki browse` or `wiki tree` to discover the wiki hierarchy and section indexes.",
-            "- Use `wiki read index.md` for the wiki entrypoint and top-level navigation.",
-            "- Use `wiki search <query>` for keyword search across page bodies.",
-            "- Use `wiki list` when you need a flat page list for compatibility or scripting.",
-            "- Use `wiki read <path>` to load a specific page.",
-            "- Prefer reading the most-recently-updated page when multiple pages cover similar ground.",
-            "- Trust content marked `status: stable`; treat `status: draft` as provisional.",
-            "",
-            "## Linking",
-            "",
-            "- Use relative Markdown links: `[Page Title](path/to/page.md)`.",
-            "- Wiki-style links are also supported: `[[Page Title]]` (auto-slugified).",
-            "- Always link back to this `AGENTS.md` from any page that documents wiki-wide conventions.",
-            "",
-            "## Content Rules",
-            "",
-            "- Write concise, factual, durable content. Avoid task-specific or ephemeral phrasing.",
-            "- Do not contradict existing pages without first marking the old content as superseded.",
-            "- Do not duplicate information that already exists on another page — link instead.",
-            "- Use neutral, encyclopaedic tone. Avoid first-person ('I found...', 'we decided...').",
-            "",
-            "## Lint",
-            "",
-            "- Run `wiki lint` before finishing to check for broken links, orphan pages, and stale content.",
-            "- Fix all `error`-severity issues.",
-            "- Address `warning`-severity issues where possible.",
-            "- `info`-severity issues (near-duplicates, stale pages) are advisory; use judgement.",
-            "",
-            "## Entry Point",
-            "",
-            "- The wiki entrypoint is [Wiki Home](index.md). Keep it updated with the top-level structure.",
-            "- Folders become browsable sub-wikis when they contain a local `index.md`.",
-            "- Add new sections there when introducing a new major topic area.",
-          ].join("\n")
+          SYNC-MARKER-AGENTS-END */
           this._backend.write("AGENTS.md", agentsContent)
           created.push("AGENTS.md")
         } else if (bootstrapped.indexOf("AGENTS.md") >= 0) {
@@ -654,40 +663,20 @@ jobs:
           skipped.push("AGENTS.md")
         }
         if (!hasIndex) {
-          var indexContent = [
-            "---",
-            "title: Wiki Home",
-            "description: Main entrypoint and table of contents for this wiki.",
-            "created: " + now,
-            "updated: " + now,
-            "tags:",
-            "  - home",
-            "  - index",
-            "---",
-            "",
-            "# Wiki Home",
-            "",
-            "This is the main entrypoint for the wiki. Start here to discover the available knowledge and section indexes.",
-            "",
-            "## Start Here",
-            "",
-            "- [AGENTS.md](AGENTS.md) — contribution rules, page schema, and ingestion workflow for agents.",
-            "",
-            "## Topics",
-            "",
-            "- Add top-level topic pages and child section indexes here as the wiki grows.",
-            "- Keep this page short; use it as a table of contents, not a dumping ground.",
-            "",
-            "## Recent Additions",
-            "",
-            "- Add links to newly created or important pages here until the topic structure is stable.",
-          ].join("\n")
-          this._backend.write("index.md", indexContent)
+          this._backend.write("index.md", __miniAWikiIndexRootTemplate(now))
           created.push("index.md")
         } else if (bootstrapped.indexOf("index.md") >= 0) {
           created.push("index.md")
         } else {
           skipped.push("index.md")
+        }
+        if (!hasLog) {
+          this._backend.write("log.md", __miniAWikiLogTemplate(now))
+          created.push("log.md")
+        } else if (bootstrapped.indexOf("log.md") >= 0) {
+          created.push("log.md")
+        } else {
+          skipped.push("log.md")
         }
         return { ok: true, created: created, skipped: skipped }
       } catch(e) {
@@ -744,7 +733,7 @@ jobs:
     var __miniAWikiNormalizePath = function(path, options) {
       var opts = isMap(options) ? options : {}
       if (!isString(path)) throw "path is required"
-    
+
       var value = String(path).trim().replace(/\\/g, "/")
       if (value.length === 0) throw "path is required"
       if (/[\x00-\x1f]/.test(value)) throw "path contains control characters"
@@ -753,25 +742,26 @@ jobs:
         while (value.length > 0 && value.endsWith("/")) value = value.substring(0, value.length - 1)
       }
       if (!opts.allowDirectory && value.endsWith("/")) throw "path must target a file"
-    
+
       var parts = value.split("/")
       var normalized = []
-    
+
       for (var i = 0; i < parts.length; i++) {
         var part = String(parts[i] || "").trim()
         if (part.length === 0) throw "path contains empty segments"
         if (part === ".") continue
         if (part === "..") throw "path traversal is not allowed"
+        if (part.startsWith("@")) throw "paths starting with @ are reserved for mounted wikis"
         normalized.push(part)
       }
-    
+
       if (normalized.length === 0) throw "path is required"
-    
+
       var finalPath = normalized.join("/")
       if (opts.requireMarkdown === true && !finalPath.toLowerCase().endsWith(".md")) {
         throw "path must end with .md"
       }
-    
+
       return finalPath
     }
     
@@ -1144,6 +1134,12 @@ jobs:
     
     MiniAWikiManager.prototype.read = function(path, options) {
       if (!isString(path) || path.trim().length === 0) return __
+      var trimmed = path.trim()
+      if (trimmed.startsWith("@")) {
+        var mres = this._resolveMountPath(trimmed)
+        if (!mres || !mres.mount) return __
+        return mres.mount.manager.read(mres.localPath, options)
+      }
       try { path = __miniAWikiNormalizePath(path, { requireMarkdown: true }) } catch(e) { return __ }
       var raw = this._backend.read(path)
       if (isUnDef(raw)) return __
@@ -1322,6 +1318,7 @@ jobs:
       var opts       = isObject(options) ? options : {}
       var limit      = isNumber(opts.limit)        && opts.limit        > 0 ? opts.limit        : 20
       var contextN   = isNumber(opts.contextLines) && opts.contextLines > 0 ? Math.min(opts.contextLines, 10) : 0
+      var compact    = opts.compact !== false && contextN === 0
       var caseSens   = opts.caseSensitive === true
       var forceScan  = opts.forceScan === true
       var searchIn   = isString(opts.searchIn) && opts.searchIn.toLowerCase() === "body" ? "body" : "all"
@@ -1347,10 +1344,11 @@ jobs:
       if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
         try {
           var chName = "__mini_a_wiki_searchdb"
+          var luceneQuery = q.replace(/(&&|\|\||[+\-!(){}\[\]^"~*?:\\/])/g, "\\$1")
           var luceneHits
           try {
             $ch(chName).create("searchdb", { path: this._getLuceneIndexPath(), idField: "id", contentField: "content" })
-            luceneHits = $ch(chName).getAll({ query: q, limit: limit })
+            luceneHits = $ch(chName).getAll({ query: luceneQuery, limit: limit })
           } finally {
             $ch(chName).destroy()
           }
@@ -1385,24 +1383,31 @@ jobs:
           }
         }
     
-        for (var li = bodyStartLine; li < lines.length && results.length < limit; li++) {
+        var matched = false
+        for (var li = bodyStartLine; li < lines.length && (compact ? !matched : results.length < limit); li++) {
           pattern.lastIndex = 0
           var m = pattern.exec(lines[li])
           if (!m) continue
-    
-          var matchIdx = m.index
-          var snippet  = lines[li].substring(Math.max(0, matchIdx - 60), matchIdx + 120).replace(/\n/g, " ").trim()
-          if (snippet.length === 0) snippet = lines[li].substring(0, 180).trim()
-    
-          var result = { path: pages[i], title: title, line: li + 1, snippet: snippet }
-          if (contextN > 0) {
-            result.contextBefore = lines.slice(Math.max(0, li - contextN), li)
-            result.contextAfter  = lines.slice(li + 1, Math.min(lines.length, li + 1 + contextN))
+
+          if (compact) {
+            if (!matched) {
+              results.push({ path: pages[i], title: title, description: isString(parsed.meta.description) ? parsed.meta.description : "" })
+              matched = true
+            }
+          } else {
+            var matchIdx = m.index
+            var snippet  = lines[li].substring(Math.max(0, matchIdx - 60), matchIdx + 120).replace(/\n/g, " ").trim()
+            if (snippet.length === 0) snippet = lines[li].substring(0, 180).trim()
+            var result = { path: pages[i], title: title, line: li + 1, snippet: snippet }
+            if (contextN > 0) {
+              result.contextBefore = lines.slice(Math.max(0, li - contextN), li)
+              result.contextAfter  = lines.slice(li + 1, Math.min(lines.length, li + 1 + contextN))
+            }
+            results.push(result)
           }
-          results.push(result)
         }
       }
-    
+
       return results
     }
     
@@ -1866,16 +1871,37 @@ jobs:
       ? args.label.trim()
       : (args.wikibackend === "s3" ? (isString(args.wikibucket) && args.wikibucket.length > 0 ? ("s3://" + args.wikibucket + "/" + args.wikiprefix) : "S3 wiki") : (cfg.root || "wiki"))
 
+    // Initialize read-only mounts from wikimounts SLON/JSON arg
+    if (isString(args.wikimounts) && args.wikimounts.trim().length > 0) {
+      try {
+        var mountsList = af.fromSLON(args.wikimounts)
+        if (!isArray(mountsList)) mountsList = [mountsList]
+        mountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          global.__wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+        })
+      } catch(mErr) { printErrnl("[mcp-wiki] wikimounts parse error: " + String(mErr)) }
+    }
+
+# ---------------
+- name : Wiki context overview
+  check:
+    in: {}
+  exec : | #js
+    return global.__wikiManager.context()
+
 # ----------------
 - name : Wiki list pages
   check:
     in:
-      path   : isString.default("")
-      compact: toBoolean.isBoolean.default(false)
+      path    : isString.default("")
+      withMeta: toBoolean.isBoolean.default(false)
+      limit   : toNumber.isNumber.default(200)
+      compact : toBoolean.isBoolean.default(false)
   exec : | #js
-    var pages = global.__wikiManager.list(args.path)
-    var result = { count: pages.length, pages: pages }
-    return args.compact ? result : result
+    var listOpts = { withMeta: args.withMeta, limit: args.limit }
+    var pages = global.__wikiManager.list(args.path, listOpts)
+    return { count: pages.length, pages: pages }
 
 # ----------------
 - name : Wiki tree
@@ -1910,18 +1936,22 @@ jobs:
 - name : Wiki read page
   check:
     in:
-      path   : isString
-      startLine: toNumber.isNumber.default(__)
-      endLine  : toNumber.isNumber.default(__)
-      compact: toBoolean.isBoolean.default(false)
+      path      : isString
+      startLine : toNumber.isNumber.default(__)
+      endLine   : toNumber.isNumber.default(__)
+      section   : isString.default(__)
+      countLines: toBoolean.isBoolean.default(false)
+      compact   : toBoolean.isBoolean.default(false)
   exec : | #js
     var readOpts = {}
     if (isNumber(args.startLine) && args.startLine > 0) readOpts.lineStart = args.startLine
-    if (isNumber(args.endLine) && args.endLine > 0) readOpts.lineEnd = args.endLine
+    if (isNumber(args.endLine)   && args.endLine   > 0) readOpts.lineEnd   = args.endLine
+    if (isString(args.section)   && args.section.trim().length > 0) readOpts.section = args.section
+    if (args.countLines === true) readOpts.countLines = true
     var page = global.__wikiManager.read(args.path, readOpts)
     if (!isObject(page)) return "[ERROR] Page not found: " + args.path
     if (args.compact === true) {
-      var compactOut = { path: page.path, title: isString(page.meta.title) ? page.meta.title : page.path, body: page.body }
+      var compactOut = { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
       if (isNumber(page.lineStart)) compactOut.lineStart = page.lineStart
       if (isNumber(page.lineEnd)) compactOut.lineEnd = page.lineEnd
       if (isNumber(page.linesTotal)) compactOut.linesTotal = page.linesTotal
@@ -1940,19 +1970,16 @@ jobs:
       contextLines : toNumber.isNumber.default(0)
       path         : isString.default("")
   exec : | #js
+    // compact=true by default when contextLines=0: returns [{path,title,description}] per page
     var hits = global.__wikiManager.search(args.query, {
       limit        : args.limit,
       caseSensitive: args.caseSensitive,
       regex        : args.regex,
       contextLines : args.contextLines,
       path         : args.path,
-      forceScan    : true
+      compact      : args.contextLines === 0
     })
-    return {
-      count  : hits.length,
-      matches: hits.map(function(h) { return { path: h.path, line: h.line, snippet: h.snippet, title: h.title } }),
-      results: hits
-    }
+    return { count: hits.length, results: hits }
 
 # ------------------
 - name : Wiki backlinks

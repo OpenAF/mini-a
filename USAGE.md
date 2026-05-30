@@ -848,6 +848,7 @@ The `start()` method accepts various configuration options:
 - **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
 - **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM (used when `llmcomplexity=true`). Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. Logs a warning if the validation LLM is not configured.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
+- **`nologtrunc`** (boolean, default: false): Disable truncation of long log output lines (show full content)
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
 - **`chatbotmode`** (boolean, default: false): Replace the agent workflow with a lightweight conversational assistant prompt
 - **`promptprofile`** (string): Control system prompt verbosity. Use `minimal` to minimize context usage, `balanced` for the reduced default profile, or `verbose` to keep richer guidance and examples. When unset, Mini-A defaults to `minimal` in chatbot mode, `verbose` with `debug=true` outside chatbot mode, and `balanced` otherwise.
@@ -881,8 +882,13 @@ The `start()` method accepts various configuration options:
 - **`wikiuseversion1`** (boolean, default: `false`): Use S3 path-style/signature-v1 compatibility for `s3`/`s3fs`.
 - **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
+- **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"`.
 
-Wiki folders become browsable sub-wikis when they contain a local `index.md`. Use `wiki` action ops `tree` or `browse` to discover section indexes before reading full pages. `backlinks` helps inspect references before edits, `move` relocates pages with link repair, and `init path=<folder/>` creates a section `index.md` in read-write mode.
+A brand-new wiki bootstraps three pages: `AGENTS.md` (contribution rules, schema, ingestion workflow, writing style), `index.md` (catalog with summaries and section links), and `log.md` (append-only journal). Folders become browsable sub-wikis when they contain a local `index.md`.
+
+**Recommended wiki ops sequence (agent or MCP):** `context` → `search` → `read` (with `section=` for long pages) → `write`/`lint`. The `context` op returns a compact overview in <500 tokens — use it once to orient before any search. `search` returns `{path, title, description}` by default (no full content); add `contextLines>0` for snippets. `list withMeta=true` returns metadata for all pages in one call. Reads to mounted wikis use the `@name/path.md` syntax; writes are always to the primary wiki.
+
+Dynamic (runtime) mount management: `wiki op="attach" name=ext backend=fs root=/path`, `wiki op="detach" name=ext`, `wiki op="mounts"`. In console: `/wiki attach ext root=/path`, `/wiki detach ext`, `/wiki mounts`.
 
 For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `esurl=` runtime argument; use `wikiurl=` with `wikibackend=es`.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags
@@ -1080,6 +1086,7 @@ Only when every stage returns an empty list (or errors) does Mini-A log the issu
   - When running through `mini-a-con.js`, also exposes `userInput`, an interactive helper backed by OpenAF `ask*` functions (`ask`, `askEncrypt`, `ask1`, `askChoose`, `askChooseMultiple`, `askStruct`) so the model can request clarification directly from the console user
   - `filesystemQuery` read supports byte ranges (`byteStart`, `byteEnd`, `byteLength`), line windows (`lineStart`, `lineEnd`, `maxLines`, `lineSeparator`), and `countLines=true` for total line count
   - `markdownFiles` uses `operation='list'` to enumerate all `.md` files, `operation='read'` to fetch one by relative path, and `operation='search'` to grep across all docs
+- **`usestdutils`** (boolean, default: true): When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names
 - **`utilsroot`** (string, default: `.`): Root directory for Mini Utils Tool file operations (only when `useutils=true`)
 - **`utilsallow`** (string, optional): Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true`
 - **`utilsdeny`** (string, optional): Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow`

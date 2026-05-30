@@ -83,6 +83,7 @@ mini-a goal="summarize this repository"
 | `debuglcch` | string | - | SLON/JSON debug channel for low-cost LLM |
 | `debugvalch` | string | - | SLON/JSON debug channel for validation LLM (used when `llmcomplexity=true`) |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
+| `nologtrunc` | boolean | `false` | Disable truncation of long log output lines (show full content) |
 | `outfile` | string | - | Path to save final answer (if not provided, prints to console) |
 
 **Examples:**
@@ -298,6 +299,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mcpprogcallbatchmax` | number | `10` | Maximum calls accepted by `/call-tools-batch` |
 | `toolcachettl` | number | `600000` | Default cache TTL in milliseconds for MCP tool results |
 | `useutils` | boolean | `false` | Auto-register Mini Utils Tool utilities as MCP connection. Tool names for `utilsallow`/`utilsdeny`: `init`, `filesystemQuery`, `filesystemModify`, `mathematics`, `timeUtilities`, `textUtilities`, `pathUtilities`, `filesystemBatch`, `validationUtilities`, `systemInfo`, `memoryStore`, `todoList`, `markdownFiles`, plus conditional `skills` (`useskills=true`) and console-only `userInput`, `showMessage` (`mini-a-con`) |
+| `usestdutils` | boolean | `true` | When `useutils=true`, expose standard Mini Utils aliases (`read`, `glob`, `grep`, `webfetch`, `question`, `skill`, `todowrite`, and `bash` for shell) instead of legacy Mini Utils names |
 | `utilsallow` | string | - | Comma-separated allowlist of Mini Utils Tool names to expose when `useutils=true` |
 | `utilsdeny` | string | - | Comma-separated denylist of Mini Utils Tool names to hide when `useutils=true`; applied after `utilsallow` |
 | `utilsroot` | string | - | Root path exposed to Mini Utils Tool file/document helpers (e.g. `markdownFiles`, `filesystemQuery`) |
@@ -867,13 +869,18 @@ agent.clearSessionMemory("my-session-id")
 
 ## Wiki Knowledge Base
 
-Mini-A can read from and write to a persistent Markdown wiki following Andrej Karpathy's LLM Wiki pattern: the agent distils knowledge from each session into structured pages, then retrieves that knowledge in future sessions.  The wiki is stored in a shared filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) sees the same pages.
+Mini-A implements an LLM wiki pattern (inspired by Karpathy's "LLM knowledge base"): the agent distils knowledge from each session into structured Markdown pages, then retrieves and extends that knowledge in future sessions. The wiki lives in a filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) shares the same pages.
 
-When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps two starter pages:
-- `AGENTS.md` for contribution rules and ingestion workflow
-- `index.md` for the main entrypoint and top-level table of contents
+When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps three starter pages:
+- `AGENTS.md` — contribution rules, page schema, ingestion workflow, writing style guide, and taxonomy conventions
+- `index.md` — catalog of all pages with summaries, section links, and recent changes
+- `log.md` — append-only journal of every write, delete, and move operation
 
-Folders become browsable sub-wikis when they contain a local `index.md`. Use `tree` or `browse` to inspect the hierarchy first, then read only the pages you need.
+Folders become browsable sub-wikis when they contain a local `index.md`. Start with `wiki op="context"` for a compact wiki overview, then `search` before reading any page.
+
+### Folder taxonomy (recommended, never enforced)
+
+Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use them when they fit; create others freely; do not move existing pages just to match the taxonomy.
 
 ### Wiki Parameters
 
@@ -885,13 +892,14 @@ Folders become browsable sub-wikis when they contain a local `index.md`. Use `tr
 | `wikiroot` | string | `.` | Root directory for the `fs` backend |
 | `wikibucket` | string | - | S3 bucket name (`s3`/`s3fs` backend) |
 | `wikiprefix` | string | - | S3 key prefix (`s3`/`s3fs`) or Elasticsearch index name (`es`, defaults to `mini_a_wiki`) |
-| `wikiurl` | string | - | S3-compatible endpoint URL (`s3`/`s3fs`) or Elasticsearch/OpenSearch base URL (`es`; this is the CLI-facing `esurl`) |
+| `wikiurl` | string | - | S3-compatible endpoint URL (`s3`/`s3fs`) or Elasticsearch/OpenSearch base URL (`es`) |
 | `wikiaccesskey` | string | - | S3 access key (`s3`/`s3fs`) or Elasticsearch username (`es`) |
 | `wikisecret` | string | - | S3 secret key (`s3`/`s3fs`) or Elasticsearch password (`es`) |
 | `wikiregion` | string | - | S3 region (`s3`/`s3fs` backend) |
 | `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3`/`s3fs` backend) |
 | `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
-| `wikilintstaleddays` | number | `90` | Days before a page without an `updated` update is marked stale in lint |
+| `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
+| `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
 
 Elasticsearch/OpenSearch backend mapping:
 
@@ -908,47 +916,64 @@ If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
 
 The agent uses the `wiki` action:
 ```json
-{ "action": "wiki", "params": { "op": "list|tree|browse|read|search|grep|backlinks|lint|write|move|delete|init", "path": "page.md", "to": "new/path.md", "query": "...", "content": "..." } }
+{ "action": "wiki", "params": { "op": "context|list|tree|browse|read|search|backlinks|lint|write|move|delete|init|mounts|attach|detach", "path": "page.md", "query": "...", "content": "..." } }
 ```
 
 | Op | Description |
 |----|-------------|
-| `list` | List all pages; optional `path` prefix filters results |
-| `tree` | Return folder/page hierarchy, section indexes, page counts, and child sections |
-| `browse` | Return nearest section index, child sections, direct pages, and suggested next reads |
-| `read` | Return full content + front-matter of `path` |
-| `search` | Full-text search; returns ranked hits for `query` |
-| `grep` | Line-level search with regex support, context lines, and line numbers |
+| `context` | **Start here.** Returns compact overview: page count, sections, mounts, and 5 recent log entries |
+| `list` | List pages; add `withMeta=true` for path+title+description+type+updated per page |
+| `tree` | Return folder/page hierarchy with section indexes and page counts; includes mounts as virtual top-level sections |
+| `browse` | Navigate section structure (shows mounts); use `path=@name/` to browse a mount |
+| `read` | Return page content; use `section=` for one heading only; use `countLines=true` to check length first |
+| `search` | Full-text search; returns `[{path, title, description}]` by default (compact); add `contextLines>0` for snippets |
 | `backlinks` | Show pages linking to a target page |
-| `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates |
-| `write` | Write or update `path` with `content` (requires `wikiaccess=rw`) |
-| `move` | Move/rename a page with internal link repair (requires `wikiaccess=rw`) |
-| `init` | Create baseline pages, or `path/index.md` for a section (requires `wikiaccess=rw`) |
-| `delete` | Remove a page (requires `wikiaccess=rw`; `AGENTS.md` is protected) |
+| `lint` | Validate wiki health: broken links, orphans, stale pages, near-duplicates, index freshness |
+| `write` | Write or update `path` (requires `wikiaccess=rw`; cannot write to `@mount/` paths) |
+| `move` | Move/rename a page with automatic internal link repair (requires `wikiaccess=rw`) |
+| `init` | Create `index.md` for a section (requires `wikiaccess=rw`) |
+| `delete` | Remove a page (requires `wikiaccess=rw`; `AGENTS.md` and `log.md` are protected) |
+| `reindex` | Rebuild the search index (requires `wikiaccess=rw`) |
+| `mounts` | List active read-only mounts |
+| `attach` | Mount a read-only wiki: `name=team backend=fs root=/path` — pages become available as `@team/...` |
+| `detach` | Unmount a previously attached wiki |
 
 ### Console Commands
 
 | Command | Description |
 |---------|-------------|
-| `/wiki list [prefix]` | List all pages (optionally filtered by prefix) |
+| `/wiki context` | Compact overview: pages, sections, mounts, recent log |
+| `/wiki list [prefix]` | List pages; `/wiki list --meta` shows title+description |
 | `/wiki read <page.md>` | Print a page's front-matter and body |
-| `/wiki search <query>` | Full-text search across all pages |
-| `/wiki lint` | Run the lint check and print a report |
+| `/wiki search <query>` | Full-text search across all pages and mounts |
+| `/wiki browse [path]` | Navigate section structure |
+| `/wiki tree [path]` | Show full folder hierarchy |
+| `/wiki lint` | Run lint check and print report |
 | `/wiki write <page.md>` | Write or update a page (requires `wikiaccess=rw`) |
+| `/wiki move <from.md> <to.md>` | Move and rewrite links (requires `wikiaccess=rw`) |
 | `/wiki delete <page.md>` | Delete a page (requires `wikiaccess=rw`) |
-| `/wiki reindex` | Rebuild wiki JSON/Lucene search indexes (requires `wikiaccess=rw`) |
+| `/wiki init [section/]` | Create section index (requires `wikiaccess=rw`) |
+| `/wiki reindex` | Rebuild search index (requires `wikiaccess=rw`) |
+| `/wiki mounts` | List active read-only mounts |
+| `/wiki attach <name> [backend=fs] [root=path]` | Mount a read-only wiki |
+| `/wiki detach <name>` | Unmount a wiki |
 | `/stats wiki` | Show wiki operation statistics for the current session |
 
 ### Examples
 
 ```bash
-# Read-only wiki from a shared folder (agents can read, not write)
+# Read-only wiki from a shared folder
 mini-a goal="summarize our architecture decisions" \
   usewiki=true wikiroot=/shared/wiki
 
 # Read-write wiki — agent can contribute new pages
 mini-a goal="research topic X and document findings in the wiki" \
   usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+
+# Wiki with a mounted read-only reference wiki
+mini-a goal="write docs based on our standards" \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki \
+  wikimounts="[{name: 'standards', backend: 'fs', root: '/shared/standards-wiki'}]"
 
 # S3-backed wiki (shared across machines or containers)
 mini-a goal="analyze and wiki" \
@@ -967,8 +992,9 @@ mini-a goal="deep research with persistent knowledge" \
   usewiki=true wikiaccess=rw wikiroot=/shared/wiki \
   usememory=true memoryuser=true
 
-# Lint the wiki from the console
+# Lint the wiki from the console and get a compact summary
 mini-a ➤ /wiki lint
+mini-a ➤ /wiki context
 ```
 
 ---

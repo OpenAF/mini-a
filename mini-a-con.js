@@ -597,6 +597,7 @@ try {
     shellallowpipes: { type: "boolean", default: false, description: "Allow pipes and redirections" },
     showexecs      : { type: "boolean", default: false, description: "Show shell/exec events in the interaction stream" },
     showseparator  : { type: "boolean", default: true, description: "Show a subtle separator line between interaction events (disable for a more compact view)" },
+    nologtrunc     : { type: "boolean", default: false, description: "Disable truncation of long log output lines (show full content)" },
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
     usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
@@ -4223,11 +4224,32 @@ try {
   }
 
   function _renderEventMessage(iconPart, messageText, extraPrefix) {
+    function _carryAnsiState(lines) {
+      if (!isArray(lines) || lines.length === 0) return lines
+      var sgrRE = /\u001b\[([0-9;]*)m/g
+      var active = []
+      return lines.map(function(rawLine) {
+        var line = isString(rawLine) ? rawLine : String(rawLine || "")
+        var prefixed = (active.length > 0 ? active.join("") : "") + line
+        var match
+        while ((match = sgrRE.exec(line)) !== null) {
+          var params = isString(match[1]) ? match[1] : ""
+          if (params.length === 0 || params === "0") {
+            active = []
+          } else {
+            active.push("\u001b[" + params + "m")
+          }
+        }
+        return prefixed
+      })
+    }
+
     var termWidth = _getConsoleRenderWidth()
     var contentWidth = Math.max(8, termWidth - 3)
     var safeMessage = isString(messageText) ? messageText : String(messageText || "")
     var extra = isString(extraPrefix) ? extraPrefix : ""
     safeMessage = safeMessage.replace(/\n/g, "↵").trim()
+    safeMessage = safeMessage.replace(/↵/g, colorifyText("↵", "FG(238)"))
     var textStyle = hintColor + ",ITALIC"
     var separatorStyle = "FG(240)"
     var separatorChar = "╌"
@@ -4238,7 +4260,7 @@ try {
     var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + iconPlain))
     var continuationWidth = Math.max(8, contentWidth - visibleLength(extra + iconIndent))
     var separatorWidth = Math.max(8, contentWidth - visibleLength(extra + separatorIndent))
-    var wrappedLines = format.string.wordWrap(safeMessage, firstLineWidth).split("\n")
+    var wrappedLines = _carryAnsiState(format.string.wordWrap(safeMessage, firstLineWidth).split("\n"))
     var renderedLines = []
 
     if (wrappedLines.length > 0) {
@@ -4250,7 +4272,7 @@ try {
     for (var wi = 1; wi < wrappedLines.length; wi++) {
       var continuationText = format.string.wordWrap(wrappedLines[wi], continuationWidth)
       continuationText.split("\n").forEach(function(line) {
-        renderedLines.push(extra + iconIndent + line)
+        renderedLines.push(extra + iconIndent + colorifyText(line, textStyle))
       })
     }
 
@@ -4842,7 +4864,8 @@ try {
         summaryExport.llm_calls = {
           total: metrics.llm_calls.total || 0,
           normal: metrics.llm_calls.normal || 0,
-          low_cost: metrics.llm_calls.low_cost || 0
+          low_cost: metrics.llm_calls.low_cost || 0,
+          validation: metrics.llm_calls.validation || 0
         }
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) summaryExport.llm_calls.fallback_to_main = metrics.llm_calls.fallback_to_main || 0
         summaryRows.push({
@@ -4859,6 +4882,11 @@ try {
           category: "",
           metric: "Low Cost",
           value: metrics.llm_calls.low_cost || 0
+        })
+        summaryRows.push({
+          category: "",
+          metric: "Validation",
+          value: metrics.llm_calls.validation || 0
         })
         if ((metrics.llm_calls.fallback_to_main || 0) > 0) {
           summaryRows.push({
@@ -4909,6 +4937,15 @@ try {
 
       // Performance
       if (isObject(metrics.performance)) {
+        var mainInputTokens = metrics.performance.llm_normal_input_tokens || 0
+        var mainOutputTokens = metrics.performance.llm_normal_output_tokens || 0
+        var lcInputTokens = metrics.performance.llm_lc_input_tokens || 0
+        var lcOutputTokens = metrics.performance.llm_lc_output_tokens || 0
+        var mainTotalTokens = mainInputTokens + mainOutputTokens
+        var lcTotalTokens = lcInputTokens + lcOutputTokens
+        var mainAndLcTotalTokens = mainTotalTokens + lcTotalTokens
+        var lcSharePct = mainAndLcTotalTokens > 0 ? ((lcTotalTokens / mainAndLcTotalTokens) * 100).toFixed(1) : "0.0"
+
         summaryExport.performance = {
           steps_taken: metrics.performance.steps_taken || 0
         }
@@ -4917,6 +4954,15 @@ try {
           summaryExport.performance.total_session_time_seconds = Number((metrics.performance.total_session_time_ms / 1000).toFixed(2))
         }
         if ((metrics.performance.llm_actual_tokens || 0) > 0) summaryExport.performance.llm_actual_tokens = metrics.performance.llm_actual_tokens || 0
+        if ((metrics.performance.llm_normal_input_tokens || 0) > 0) summaryExport.performance.llm_normal_input_tokens = metrics.performance.llm_normal_input_tokens || 0
+        if ((metrics.performance.llm_normal_output_tokens || 0) > 0) summaryExport.performance.llm_normal_output_tokens = metrics.performance.llm_normal_output_tokens || 0
+        if ((metrics.performance.llm_lc_input_tokens || 0) > 0) summaryExport.performance.llm_lc_input_tokens = metrics.performance.llm_lc_input_tokens || 0
+        if ((metrics.performance.llm_lc_output_tokens || 0) > 0) summaryExport.performance.llm_lc_output_tokens = metrics.performance.llm_lc_output_tokens || 0
+        if (mainTotalTokens > 0) summaryExport.performance.llm_main_total_tokens = mainTotalTokens
+        if (lcTotalTokens > 0) summaryExport.performance.llm_lc_total_tokens = lcTotalTokens
+        if (mainAndLcTotalTokens > 0) summaryExport.performance.llm_lc_share_pct = Number(lcSharePct)
+        if ((metrics.performance.llm_val_input_tokens || 0) > 0) summaryExport.performance.llm_val_input_tokens = metrics.performance.llm_val_input_tokens || 0
+        if ((metrics.performance.llm_val_output_tokens || 0) > 0) summaryExport.performance.llm_val_output_tokens = metrics.performance.llm_val_output_tokens || 0
         if ((metrics.performance.max_context_tokens || 0) > 0) summaryExport.performance.max_context_tokens = metrics.performance.max_context_tokens || 0
         if ((metrics.performance.avg_step_time_ms || 0) > 0) summaryExport.performance.avg_step_time_ms = metrics.performance.avg_step_time_ms || 0
         summaryRows.push({
@@ -4943,6 +4989,65 @@ try {
             category: "",
             metric: "LLM Actual Tokens",
             value: metrics.performance.llm_actual_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_normal_input_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Main Input Tokens",
+            value: metrics.performance.llm_normal_input_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_normal_output_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Main Output Tokens",
+            value: metrics.performance.llm_normal_output_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_lc_input_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "LC Input Tokens",
+            value: metrics.performance.llm_lc_input_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_lc_output_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "LC Output Tokens",
+            value: metrics.performance.llm_lc_output_tokens || 0
+          })
+        }
+        if (mainAndLcTotalTokens > 0) {
+          summaryRows.push({
+            category: "Model Tokens",
+            metric: "Main Total (In+Out)",
+            value: mainTotalTokens
+          })
+          summaryRows.push({
+            category: "",
+            metric: "LC Total (In+Out)",
+            value: lcTotalTokens
+          })
+          summaryRows.push({
+            category: "",
+            metric: "LC Share (%)",
+            value: lcSharePct
+          })
+        }
+        if ((metrics.performance.llm_val_input_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Validation Input Tokens",
+            value: metrics.performance.llm_val_input_tokens || 0
+          })
+        }
+        if ((metrics.performance.llm_val_output_tokens || 0) > 0) {
+          summaryRows.push({
+            category: "",
+            metric: "Validation Output Tokens",
+            value: metrics.performance.llm_val_output_tokens || 0
           })
         }
         if ((metrics.performance.max_context_tokens || 0) > 0) {
@@ -5306,7 +5411,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
     ]
     if (toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", description: "Interact with wiki" })
+      helpCommands.push({ command: "/wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", description: "Interact with wiki (start with context)" })
     }
     if ((isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0) || toBoolean(sessionOptions.usewiki) === true) {
       helpCommands.push({ command: "/dream [memory|wiki] [dryrun|plan|apply|reorg|lint]", description: "Consolidate memory/wiki in dream mode" })
@@ -5570,8 +5675,62 @@ try {
         } else {
           print(colorifyText("Wiki reindex failed: " + (isObject(reindexResult) ? reindexResult.error : "unknown error"), errorColor))
         }
+      } else if (sub === "context") {
+        var ctx = wm.context()
+        print(colorifyText("Wiki context: " + ctx.pages + " pages, " + ctx.sections.length + " sections", accentColor))
+        if (ctx.sections.length > 0) print("  sections: " + ctx.sections.join(", "))
+        if (ctx.mounts.length > 0) {
+          print("  mounts:")
+          ctx.mounts.forEach(function(m) { print("    @" + m.name + " — " + (m.description || "") + " (" + m.pages + " pages)") })
+        }
+        if (ctx.recent.length > 0) {
+          print("  recent:")
+          ctx.recent.forEach(function(e) { print("    " + colorifyText(e, hintColor)) })
+        }
+      } else if (sub === "mounts") {
+        var mountList = wm.mounts()
+        if (mountList.length === 0) {
+          print(colorifyText("No mounts attached.", hintColor))
+        } else {
+          print(colorifyText("Attached wikis (" + mountList.length + "):", accentColor))
+          mountList.forEach(function(m) { print("  @" + m.name + " — " + m.pages + " pages (" + m.prefix + ")") })
+        }
+      } else if (sub === "attach") {
+        // Usage: /wiki attach <name> [backend=fs] [root=path]
+        var attachParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
+        if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=path] [bucket=...] ...", errorColor)); return }
+        var attachName = attachParts[0]
+        var attachCfg = { access: "ro", backend: "fs" }
+        attachParts.slice(1).forEach(function(kv) {
+          var eq = kv.indexOf("="); if (eq < 0) return
+          attachCfg[kv.substring(0, eq)] = kv.substring(eq + 1)
+        })
+        var attachResult = wm.attach(attachName, attachCfg)
+        if (isObject(attachResult) && attachResult.ok) {
+          print(colorifyText("Attached @" + attachName + " (" + attachResult.pages + " pages)", successColor))
+        } else {
+          print(colorifyText("Attach failed: " + (isObject(attachResult) ? attachResult.error : "unknown error"), errorColor))
+        }
+      } else if (sub === "detach") {
+        if (rest.trim().length === 0) { print(colorifyText("Usage: /wiki detach <name>", errorColor)); return }
+        var detachResult = wm.detach(rest.trim())
+        if (isObject(detachResult) && detachResult.ok) {
+          print(colorifyText("Detached @" + detachResult.name, successColor))
+        } else {
+          print(colorifyText("Detach failed: " + (isObject(detachResult) ? detachResult.error : "unknown error"), errorColor))
+        }
+      } else if (sub === "list" && rest.indexOf("--meta") >= 0) {
+        var metaPath = rest.replace("--meta", "").trim()
+        var metaPages = wm.list(metaPath, { withMeta: true })
+        print(colorifyText("Wiki pages with metadata (" + metaPages.length + "):", accentColor))
+        metaPages.forEach(function(p) {
+          print("  " + colorifyText(p.path, promptColor) + (p.title ? " — " + p.title : "") + (p.description ? "\n    " + colorifyText(p.description, hintColor) : ""))
+        })
       } else {
-        print(colorifyText("Usage: /wiki [list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex] [args]", errorColor))
+        print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", errorColor))
+        print(colorifyText("  list --meta   show pages with title+description", hintColor))
+        print(colorifyText("  attach <name> [backend=fs] [root=path]", hintColor))
+        print(colorifyText("  detach <name>", hintColor))
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))

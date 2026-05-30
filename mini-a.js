@@ -132,6 +132,7 @@ var MiniA = function() {
   if (isUnDef(global.__mini_a_metrics)) global.__mini_a_metrics = {
     llm_normal_calls: $atomic(0, "long"),
     llm_lc_calls: $atomic(0, "long"),
+    llm_val_calls: $atomic(0, "long"),
     goals_achieved: $atomic(0, "long"),
     goals_failed: $atomic(0, "long"),
     thoughts_made: $atomic(0, "long"),
@@ -173,6 +174,13 @@ var MiniA = function() {
     unknown_actions: $atomic(0, "long"),
     llm_normal_tokens: $atomic(0, "long"),
     llm_lc_tokens: $atomic(0, "long"),
+    llm_val_tokens: $atomic(0, "long"),
+    llm_normal_input_tokens: $atomic(0, "long"),
+    llm_normal_output_tokens: $atomic(0, "long"),
+    llm_lc_input_tokens: $atomic(0, "long"),
+    llm_lc_output_tokens: $atomic(0, "long"),
+    llm_val_input_tokens: $atomic(0, "long"),
+    llm_val_output_tokens: $atomic(0, "long"),
     plans_generated: $atomic(0, "long"),
     plans_validated: $atomic(0, "long"),
     plans_validation_failed: $atomic(0, "long"),
@@ -316,7 +324,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"list|tree|browse|read|search|grep|backlinks|lint{{#if wikiRw}}|write|move|delete|init{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N{{#if wikiRw}} (write/move/delete/init require wikiaccess=rw){{/if}}"}); start broad wiki navigation with browse or tree, then read selectively; list returns all pages; search/grep finds matching lines with 1-based line numbers (supports regex, contextLines for surrounding lines, searchIn=body to skip front-matter, path to scope to one page); read supports partial reads via lineStart/lineEnd/maxLines/section/countLines; backlinks shows pages linking to a target; move relocates a page and repairs internal links; lint validates wiki health{{#if wikiRw}}; before any write, move, or delete, read AGENTS.md for contribution rules{{/if}}{{/if}}{{#if actionsList}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact wiki overview; search returns path+title+description by default (add contextLines>0 for snippets); list withMeta=true returns metadata per page; read uses section= to fetch one heading; browse and tree show structure including mounts; mounts/attach/detach manage read-only federated wikis (@name/path.md); lint validates wiki health{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -1591,8 +1599,8 @@ MiniA.prototype._truncateAuditValue = function(value, maxLen) {
   maxLen = isNumber(maxLen) && maxLen > 0 ? maxLen : 500
   if (isUnDef(value) || value === null) return value
   if (isString(value)) {
-    if (value.length <= maxLen) return value
-    return value.substring(0, maxLen) + "... [truncated]"
+    if (this._nologtrunc === true || value.length <= maxLen) return value
+    return value.substring(0, maxLen) + "... " + ansiColor("italic,FAINT", "[truncated]")
   }
   return value
 }
@@ -1689,6 +1697,7 @@ MiniA.prototype.getMetrics = function() {
 
     var llmNormalCalls = global.__mini_a_metrics.llm_normal_calls.get()
     var llmLcCalls = global.__mini_a_metrics.llm_lc_calls.get()
+    var llmValCalls = global.__mini_a_metrics.llm_val_calls.get()
     var advisorCalls = global.__mini_a_metrics.advisor_calls.get()
     var memorySnapshot = this._getMemoryMetricsSnapshot()
 
@@ -1696,7 +1705,8 @@ MiniA.prototype.getMetrics = function() {
         llm_calls: {
             normal: llmNormalCalls,
             low_cost: llmLcCalls,
-            total: llmNormalCalls + llmLcCalls + advisorCalls,
+            validation: llmValCalls,
+            total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls,
             fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get()
         },
         goals: {
@@ -1740,6 +1750,13 @@ MiniA.prototype.getMetrics = function() {
             llm_actual_tokens: global.__mini_a_metrics.llm_actual_tokens.get(),
             llm_normal_tokens: global.__mini_a_metrics.llm_normal_tokens.get(),
             llm_lc_tokens: global.__mini_a_metrics.llm_lc_tokens.get(),
+            llm_val_tokens: global.__mini_a_metrics.llm_val_tokens.get(),
+            llm_normal_input_tokens: global.__mini_a_metrics.llm_normal_input_tokens.get(),
+            llm_normal_output_tokens: global.__mini_a_metrics.llm_normal_output_tokens.get(),
+            llm_lc_input_tokens: global.__mini_a_metrics.llm_lc_input_tokens.get(),
+            llm_lc_output_tokens: global.__mini_a_metrics.llm_lc_output_tokens.get(),
+            llm_val_input_tokens: global.__mini_a_metrics.llm_val_input_tokens.get(),
+            llm_val_output_tokens: global.__mini_a_metrics.llm_val_output_tokens.get(),
             llm_cache_creation_tokens: global.__mini_a_metrics.llm_cache_creation_tokens.get(),
             llm_cache_read_tokens: global.__mini_a_metrics.llm_cache_read_tokens.get(),
             llm_cached_tokens: global.__mini_a_metrics.llm_cached_tokens.get(),
@@ -2620,13 +2637,26 @@ MiniA.prototype._formatTokenStats = function(stats) {
  * Print a one-line LC cost summary if dual-model is enabled and both token buckets are non-zero.
  */
 MiniA.prototype._logLcCostSummary = function() {
-  if (!this._use_lc) return
   var mainTokens = global.__mini_a_metrics.llm_normal_tokens.get()
-  var lcTokens   = global.__mini_a_metrics.llm_lc_tokens.get()
+  var mainIn     = global.__mini_a_metrics.llm_normal_input_tokens.get()
+  var mainOut    = global.__mini_a_metrics.llm_normal_output_tokens.get()
+  var valTokens  = this._use_val ? global.__mini_a_metrics.llm_val_tokens.get() : 0
+  var valIn      = this._use_val ? global.__mini_a_metrics.llm_val_input_tokens.get() : 0
+  var valOut     = this._use_val ? global.__mini_a_metrics.llm_val_output_tokens.get() : 0
+  var valPart    = valTokens > 0 ? ` | Val: ${valTokens} tokens (in: ${valIn}, out: ${valOut})` : ""
+  if (!this._use_lc) {
+    if (mainTokens > 0) {
+      this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut})${valPart}`)
+    }
+    return
+  }
+  var lcTokens = global.__mini_a_metrics.llm_lc_tokens.get()
   if (mainTokens > 0 && lcTokens > 0) {
-    var total = mainTokens + lcTokens
+    var total   = mainTokens + lcTokens
     var lcShare = Math.round(lcTokens / total * 100)
-    this.fnI("info", `[cost] Main: ${mainTokens} tokens | LC: ${lcTokens} tokens | LC share: ${lcShare}%`)
+    var lcIn    = global.__mini_a_metrics.llm_lc_input_tokens.get()
+    var lcOut   = global.__mini_a_metrics.llm_lc_output_tokens.get()
+    this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}) | LC: ${lcTokens} tokens (in: ${lcIn}, out: ${lcOut}) | LC share: ${lcShare}%${valPart}`)
   }
 }
 
@@ -3403,8 +3433,12 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
     if (isString(tier)) {
         var tierKey = tier.toLowerCase()
         if (tierKey === "lc") normalizedTier = "lc"
+        if (tierKey === "val" || tierKey === "validation") normalizedTier = "val"
         if (tierKey === "advisor") normalizedTier = "advisor"
     }
+    var statsTokens = isObject(stats) && isObject(stats.tokens) ? stats.tokens : {}
+    var promptTokens = isNumber(stats.prompt_tokens) ? stats.prompt_tokens : (isNumber(statsTokens.prompt) ? statsTokens.prompt : 0)
+    var completionTokens = isNumber(stats.completion_tokens) ? stats.completion_tokens : (isNumber(statsTokens.completion) ? statsTokens.completion : 0)
     var actualTokens = this._getTotalTokens(stats)
     var trackedTokens = this._resolveTrackedTokenTotal(stats, fallbackTokens)
 
@@ -3416,12 +3450,37 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
         if (isObject(global.__mini_a_metrics.llm_lc_tokens)) {
             global.__mini_a_metrics.llm_lc_tokens.getAdd(trackedTokens)
         }
+        if (isObject(global.__mini_a_metrics.llm_lc_input_tokens)) {
+            global.__mini_a_metrics.llm_lc_input_tokens.getAdd(promptTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_lc_output_tokens)) {
+            global.__mini_a_metrics.llm_lc_output_tokens.getAdd(completionTokens)
+        }
         if (isObject(global.__mini_a_metrics.llm_lc_calls)) {
             global.__mini_a_metrics.llm_lc_calls.inc()
+        }
+    } else if (normalizedTier === "val") {
+        if (isObject(global.__mini_a_metrics.llm_val_tokens)) {
+            global.__mini_a_metrics.llm_val_tokens.getAdd(trackedTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_val_input_tokens)) {
+            global.__mini_a_metrics.llm_val_input_tokens.getAdd(promptTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_val_output_tokens)) {
+            global.__mini_a_metrics.llm_val_output_tokens.getAdd(completionTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_val_calls)) {
+            global.__mini_a_metrics.llm_val_calls.inc()
         }
     } else if (normalizedTier === "main") {
         if (isObject(global.__mini_a_metrics.llm_normal_tokens)) {
             global.__mini_a_metrics.llm_normal_tokens.getAdd(trackedTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_normal_input_tokens)) {
+            global.__mini_a_metrics.llm_normal_input_tokens.getAdd(promptTokens)
+        }
+        if (isObject(global.__mini_a_metrics.llm_normal_output_tokens)) {
+            global.__mini_a_metrics.llm_normal_output_tokens.getAdd(completionTokens)
         }
         if (isObject(global.__mini_a_metrics.llm_normal_calls)) {
             global.__mini_a_metrics.llm_normal_calls.inc()
@@ -3522,6 +3581,35 @@ MiniA.prototype._parseUtilsToolList = function(value) {
         seen[entry] = true
         return true
     })
+}
+
+MiniA.prototype._normalizeUtilsToolList = function(value, useStd) {
+    var list = this._parseUtilsToolList(value)
+    if (useStd !== true) return list
+    var aliasMap = {
+      filesystemquery: ["read", "glob", "grep"],
+      userinput      : ["question"],
+      skills         : ["skill"],
+      todolist       : ["todowrite"],
+      textutilities  : ["webfetch"]
+    }
+    var normalized = []
+    var seen = {}
+    var self = this
+    list.forEach(function(entry) {
+      var key = String(entry || "").toLowerCase()
+      var mapped = aliasMap[key] || [key]
+      mapped.forEach(function(name) {
+        if (!seen[name]) {
+          seen[name] = true
+          normalized.push(name)
+        }
+      })
+      if (aliasMap[key] && aliasMap[key].length > 0) {
+        self.fnI("warn", "Translated legacy utils filter '" + key + "' to " + aliasMap[key].join(", "))
+      }
+    })
+    return normalized
 }
 
 MiniA.prototype._normalizePlanItems = function(plan) {
@@ -7316,6 +7404,30 @@ MiniA.prototype._initWiki = function(args) {
       this.fnI(level || "info", "[wiki] " + msg)
     }.bind(this))
     this._wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : 90
+    // Parse wikimounts: SLON/JSON array of {name, backend, root|bucket|...}
+    var wikiMountsRaw = args.wikimounts
+    if (isString(wikiMountsRaw) && wikiMountsRaw.trim().length > 0) {
+      try {
+        var wikiMountsList = af.fromSLON(wikiMountsRaw)
+        if (!isArray(wikiMountsList)) wikiMountsList = [wikiMountsList]
+        var self = this
+        wikiMountsList.forEach(function(mc) {
+          if (!isMap(mc) || !isString(mc.name)) return
+          var mr = self._wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+          if (isMap(mr) && mr.ok) self.fnI("info", "📎 [wiki] mounted @" + mc.name + " (" + mr.pages + " pages)")
+          else self.fnI("warn", "[wiki] mount failed for @" + mc.name + ": " + (isMap(mr) ? mr.error : "unknown"))
+        })
+      } catch(mountErr) {
+        this.fnI("warn", "[wiki] wikimounts parse error: " + __miniAErrMsg(mountErr))
+      }
+    } else if (isArray(wikiMountsRaw)) {
+      var self2 = this
+      wikiMountsRaw.forEach(function(mc) {
+        if (!isMap(mc) || !isString(mc.name)) return
+        var mr = self2._wikiManager.attach(mc.name, merge({ access: "ro" }, mc))
+        if (isMap(mr) && mr.ok) self2.fnI("info", "📎 [wiki] mounted @" + mc.name + " (" + mr.pages + " pages)")
+      })
+    }
     this.fnI("info", `📖 [wiki] enabled (backend=${args.wikibackend}, access=${args.wikiaccess})`)
   } catch(e) {
     this.fnI("warn", `[wiki] failed to initialize: ${__miniAErrMsg(e)}`)
@@ -8893,6 +9005,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     var includeSkillsTool = toBoolean(args.useskills) === true
+    var useStdUtils = toBoolean(args.usestdutils) === true
     if (includeSkillsTool) {
       try {
         this._availableSkills = fileTool._listSkills({})
@@ -8916,7 +9029,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if (toBoolean(args.usewiki) !== true || !isObject(this._wikiManager)) {
       methodNames = methodNames.filter(function(name) { return name !== "wiki" })
     }
-    var utilsAllow = this._parseUtilsToolList(args.utilsallow)
+    var utilsAllow = this._normalizeUtilsToolList(args.utilsallow, useStdUtils)
     if (utilsAllow.length > 0) {
       var allowMap = {}
       utilsAllow.forEach(function(name) {
@@ -8926,7 +9039,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         return allowMap[String(name).toLowerCase()] === true
       })
     }
-    var utilsDeny = this._parseUtilsToolList(args.utilsdeny)
+    var utilsDeny = this._normalizeUtilsToolList(args.utilsdeny, useStdUtils)
     if (utilsDeny.length > 0) {
       var denyMap = {}
       utilsDeny.forEach(function(name) {
@@ -8938,6 +9051,17 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     }
 
     if (methodNames.indexOf("skills") < 0) this._availableSkills = []
+    var _STD_ALIAS_NAMES = ["read", "glob", "grep", "webfetch", "question", "skill", "todowrite", "apply_patch"]
+    if (useStdUtils) {
+      var stdVisible = ["init", "filesystemModify", "mathematics", "timeUtilities", "pathUtilities", "filesystemBatch", "validationUtilities", "systemInfo", "memoryStore", "showMessage", "markdownFiles", "wiki"].concat(_STD_ALIAS_NAMES)
+      var stdMap = {}
+      stdVisible.forEach(function(n) { stdMap[n] = true })
+      methodNames = methodNames.filter(function(name) { return stdMap[name] === true })
+    } else {
+      var _aliasSet = {}
+      _STD_ALIAS_NAMES.forEach(function(n) { _aliasSet[n] = true })
+      methodNames = methodNames.filter(function(name) { return _aliasSet[name] !== true })
+    }
     if (methodNames.length === 0) return __
 
     var formatResponse = function(result) {
@@ -9270,8 +9394,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
 
     var parent = this
 
-    var fns = {
-      shell: function(params) {
+    var toolName = toBoolean(args.usestdutils) === true ? "bash" : "shell"
+    var fns = {}
+    fns[toolName] = function(params) {
         var p = isObject(params) ? params : {}
         var cmd = isString(p.command) ? p.command : ""
         if (cmd.length === 0) {
@@ -9280,6 +9405,14 @@ MiniA.prototype._createShellMcpConfig = function(args) {
           return { error: msg, content: [{ type: "text", text: msg }] }
         }
         try {
+          if (isString(p.workdir) && p.workdir.trim().length > 0) {
+            var wd = p.workdir.trim()
+            if (!io.fileExists(wd) || io.fileInfo(wd).isDirectory !== true) {
+              var wdErr = "[ERROR] bash: workdir not found: " + wd
+              return { error: wdErr, content: [{ type: "text", text: wdErr }] }
+            }
+            cmd = "cd " + wd + " && " + cmd
+          }
           var result = parent._runCommand({
             command        : cmd,
             readwrite      : toBoolean(p.readwrite) || toBoolean(args.readwrite),
@@ -9288,7 +9421,7 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             shellbanextra  : isDef(p.shellbanextra) ? p.shellbanextra : args.shellbanextra,
             shellallowpipes: isDef(p.shellallowpipes) ? toBoolean(p.shellallowpipes) : toBoolean(args.shellallowpipes),
             shellprefix    : isDef(p.shellprefix) ? p.shellprefix : args.shellprefix,
-            shelltimeout   : isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout,
+            shelltimeout   : isDef(p.timeout) ? (Number(p.timeout) * 1000) : (isDef(p.shelltimeout) ? p.shelltimeout : args.shelltimeout),
             usesandbox     : isDef(p.usesandbox) ? p.usesandbox : args.usesandbox,
             sandboxprofile : isDef(p.sandboxprofile) ? p.sandboxprofile : args.sandboxprofile,
             sandboxnonetwork: isDef(p.sandboxnonetwork) ? p.sandboxnonetwork : args.sandboxnonetwork
@@ -9302,16 +9435,18 @@ MiniA.prototype._createShellMcpConfig = function(args) {
           return { error: msg, content: [{ type: "text", text: msg }] }
         }
       }
-    }
 
-    var fnsMeta = {
-      shell: {
-        name       : "shell",
+    var fnsMeta = {}
+    fnsMeta[toolName] = {
+        name       : toolName,
         description: "Execute a POSIX shell command under Mini-A's safety checks and allowlists.",
         inputSchema: {
           type      : "object",
           properties: {
             command        : { type: "string", description: "POSIX command to execute." },
+            description    : { type: "string", description: "Tool compatibility audit description." },
+            workdir        : { type: "string", description: "Optional working directory (must exist)." },
+            timeout        : { type: "number", description: "Timeout in seconds." },
             readwrite      : { type: "boolean", description: "Allow write operations (inherits global when omitted)." },
             checkall       : { type: "boolean", description: "Ask approval even when not risky (inherits global)." },
             shellallow     : { type: "string", description: "Comma-separated allowlist to override bans." },
@@ -9323,10 +9458,9 @@ MiniA.prototype._createShellMcpConfig = function(args) {
             sandboxprofile : { type: "string", description: "Optional macOS sandbox profile path; otherwise Mini-A generates a restrictive temporary .sb profile." },
             sandboxnonetwork: { type: "boolean", description: "Disable network inside the built-in sandbox when supported; Windows remains best-effort." }
           },
-          required: ["command"]
+          required: toolName === "bash" ? ["command", "description"] : ["command"]
         }
       }
-    }
 
     return {
       id     : "mini-a-shell",
@@ -12198,8 +12332,8 @@ MiniA.prototype._runCommand = function(args) {
         global.__mini_a_metrics.shell_commands_blocked.inc()
       } else {
         this.fnI("shell", shellPrefix.length > 0
-          ? `Executing '${finalCommand}' (original: '${originalCommand}').`
-          : `Executing '${finalCommand}'...`
+          ? `Executing ${ansiColor("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")} (original: ${ansiColor("FG(218)", "'" + this._truncateAuditValue(originalCommand, 800) + "'")}).`
+          : `Executing ${ansiColor("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")}...`
         )
         var shellExec = $sh(shInput)
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
@@ -13072,7 +13206,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "mcpproxytoon", "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "utilsroot", "utilsallow", "utilsdeny",
-    "useskills", "mini-a-docs", "miniadocs",
+    "useskills", "usestdutils", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
     "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
     "autodelegation", "autodelegationthreshold", "autodelegationmaxperstep", "noisytools",
@@ -13099,7 +13233,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikiapply", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiredirects", "dreamwikiminpages", "dreamwikiflatthreshold", "dreamwikimaxdepth",
     "dreamwikipreservebodies", "dreammemoryminconfidence", "dreammemorytowiki", "dreamreport"
@@ -13453,6 +13587,7 @@ MiniA.prototype.init = function(args) {
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
+      { name: "usestdutils", type: "boolean", default: __ },
       { name: "skillmaxautoload", type: "number", default: 1 },
       { name: "skillcontextchars", type: "number", default: 8000 },
       { name: "skillmanifestchars", type: "number", default: 1536 },
@@ -13509,6 +13644,7 @@ MiniA.prototype.init = function(args) {
     args.usetoolslc = _$(toBoolean(args.usetoolslc), "args.usetoolslc").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(false)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
@@ -14169,7 +14305,7 @@ MiniA.prototype.init = function(args) {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
                 }
-                parent.fnI("exec", `Executing action '${t}' with parameters: ${af.toSLON(a)}`)
+                parent.fnI("exec", `Executing action '${t}' with parameters: ${parent._truncateAuditValue(af.toCSLON(a), 800)}`)
 
                 // Track per-tool call count
                 if (!isObject(global.__mini_a_metrics.per_tool_stats[t])) {
@@ -14203,7 +14339,7 @@ MiniA.prototype.init = function(args) {
                     global.__mini_a_metrics.per_tool_stats[t].failures.inc()
                   }
                 } else {
-                  parent.fnI("info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${af.toSLON(a)}`)
+                  parent.fnI("info", `Execution of action '${t}' finished successfully (${stringify(r, __, "").length} bytes) for parameters: ${parent._truncateAuditValue(af.toCSLON(a), 800)}`)
                   global.__mini_a_metrics.mcp_actions_executed.inc()
                   // Track per-tool successes
                   if (isObject(global.__mini_a_metrics.per_tool_stats[t])) {
@@ -14389,7 +14525,7 @@ MiniA.prototype.init = function(args) {
         "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
         "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
         "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
-        "Do NOT use a downstream tool (e.g. filesystemQuery) to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
+        "Do NOT use a downstream tool (e.g. " + (toBoolean(args.usestdutils) === true ? "read" : "filesystemQuery") + ") to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
         "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
         "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
       )
@@ -14406,8 +14542,9 @@ MiniA.prototype.init = function(args) {
       baseRules.push("If you need to respond without calling a tool, return the JSON response directly in the assistant message. Do not wrap that payload in a tool call to 'json'.")
     }
     if (this._supportsConsoleUserInput(args) === true) {
+      var _uiToolName = toBoolean(args.usestdutils) === true ? "question" : "userInput"
       baseRules.push(
-        "When you need information, clarification, or a decision from the user — such as a missing value, a choice between options, sensitive input, or a confirmation — call the 'userInput' tool instead of asking in your final answer or pausing execution."
+        "When you need information, clarification, or a decision from the user — such as a missing value, a choice between options, sensitive input, or a confirmation — call the '" + _uiToolName + "' tool instead of asking in your final answer or pausing execution."
       )
       baseRules.push(
         "When you want to show the user a progress update, status notification, or important finding during execution (not as a final answer), call the 'showMessage' tool. This prints directly to the console in real time."
@@ -14863,6 +15000,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
       { name: "useskills", type: "boolean", default: false },
+      { name: "usestdutils", type: "boolean", default: __ },
       { name: "skillmaxautoload", type: "number", default: 1 },
       { name: "skillcontextchars", type: "number", default: 8000 },
       { name: "skillmanifestchars", type: "number", default: 1536 },
@@ -14921,6 +15059,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.toolfallback = _$(toBoolean(args.toolfallback), "args.toolfallback").isBoolean().default(false)
     args.useutils = _$(toBoolean(args.useutils), "args.useutils").isBoolean().default(false)
     args.useskills = _$(toBoolean(args.useskills), "args.useskills").isBoolean().default(false)
+    args.usestdutils = _$(toBoolean(args.usestdutils), "args.usestdutils").isBoolean().default(false)
     args.skillmaxautoload = _$(args.skillmaxautoload, "args.skillmaxautoload").isNumber().default(1)
     args.skillcontextchars = _$(args.skillcontextchars, "args.skillcontextchars").isNumber().default(8000)
     args.skillmanifestchars = _$(args.skillmanifestchars, "args.skillmanifestchars").isNumber().default(1536)
@@ -14943,6 +15082,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
     args.mcpproxynative = _$(toBoolean(args.mcpproxynative), "args.mcpproxynative").isBoolean().default(false)
+    args.nologtrunc = _$(toBoolean(args.nologtrunc), "args.nologtrunc").isBoolean().default(false)
     args.format = _$(args.format, "args.format").isString().default(__)
     args.planfile = _$(args.planfile, "args.planfile").isString().default(__)
     args.planformat = _$(args.planformat, "args.planformat").isString().default(__)
@@ -15011,6 +15151,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
     if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
     args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
+    // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
+    if (isUnDef(args.wikimounts)) args.wikimounts = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
     args.utilsroot = _$(args.utilsroot, "args.utilsroot").isString().default(__)
     args.utilsallow = _$(args.utilsallow, "args.utilsallow").isString().default(__)
@@ -15071,6 +15213,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     this._routeHistory = {}
     this._configurePlanUpdates(args)
     this._sessionArgs = args
+    this._nologtrunc = args.nologtrunc === true
     sessionStartTime = isNumber(sessionStartTime) ? sessionStartTime : now()
 
     if (isDef(args.rtm) && isUnDef(args.rpm)) {
@@ -17979,8 +18122,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             var wkResult
             if (wkOp === "list") {
               global.__mini_a_metrics.wiki_ops_list.inc()
-              var wkPages = this._wikiManager.list(wkPath)
-              wkResult = "Wiki pages (" + wkPages.length + "):\n" + wkPages.join("\n")
+              var wkListOpts = { withMeta: wkParams.withMeta === true || wkParams.withMeta === "true", limit: isNumber(wkParams.limit) ? wkParams.limit : 1000 }
+              var wkPages = this._wikiManager.list(wkPath, wkListOpts)
+              if (wkListOpts.withMeta) {
+                wkResult = "Wiki pages with metadata (" + wkPages.length + "):\n" + af.toTOON(wkPages)
+              } else {
+                wkResult = "Wiki pages (" + wkPages.length + "):\n" + wkPages.join("\n")
+              }
             } else if (wkOp === "tree") {
               global.__mini_a_metrics.wiki_ops_list.inc()
               wkResult = af.toTOON(this._wikiManager.tree(wkPath, isNumber(wkParams.depth) ? wkParams.depth : 3))
@@ -18054,8 +18202,41 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               } else {
                 wkResult = af.toTOON(this._wikiManager.init(wkPath))
               }
+            } else if (wkOp === "context") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              wkResult = af.toTOON(this._wikiManager.context())
+            } else if (wkOp === "mounts") {
+              wkResult = af.toTOON(this._wikiManager.mounts())
+            } else if (wkOp === "attach") {
+              if (args.wikiaccess !== "rw" && isString(wkParams.name)) {
+                // attach is allowed even on ro agents so they can browse mounts
+              }
+              var wkMountName = isString(wkParams.name) ? wkParams.name.trim() : ""
+              if (wkMountName.length === 0) {
+                wkResult = "[ERROR] wiki attach requires 'name'"
+              } else {
+                var wkMountCfg = { access: "ro", backend: isString(wkParams.backend) ? wkParams.backend : "fs" }
+                if (isString(wkParams.root))        wkMountCfg.root        = wkParams.root
+                if (isString(wkParams.bucket))      wkMountCfg.bucket      = wkParams.bucket
+                if (isString(wkParams.prefix))      wkMountCfg.prefix      = wkParams.prefix
+                if (isString(wkParams.url))         wkMountCfg.url         = wkParams.url
+                if (isString(wkParams.accessKey))   wkMountCfg.accessKey   = wkParams.accessKey
+                if (isString(wkParams.secret))      wkMountCfg.secret      = wkParams.secret
+                if (isString(wkParams.region))      wkMountCfg.region      = wkParams.region
+                wkResult = af.toTOON(this._wikiManager.attach(wkMountName, wkMountCfg))
+              }
+            } else if (wkOp === "detach") {
+              var wkDetachName = isString(wkParams.name) ? wkParams.name.trim() : wkPath
+              if (wkDetachName.length === 0) {
+                wkResult = "[ERROR] wiki detach requires 'name'"
+              } else {
+                wkResult = af.toTOON(this._wikiManager.detach(wkDetachName))
+              }
+            } else if (wkOp === "reindex") {
+              global.__mini_a_metrics.wiki_ops_write.inc()
+              wkResult = af.toTOON(this._wikiManager.reindex())
             } else {
-              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use list, tree, browse, read, search, grep, backlinks, lint" + (args.wikiaccess === "rw" ? ", write, move, delete, init" : "")
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use context, list, tree, browse, read, search, grep, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
             runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) ${wkResult}`)
@@ -19020,7 +19201,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
-    var totalTokens = this._recordLlmStatsMetrics(stats, "main", this._estimateTokens(validationPrompt))
+    var totalTokens = this._recordLlmStatsMetrics(stats, "val", this._estimateTokens(validationPrompt))
 
     var validationContent = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
     if (isObject(validationContent) && isString(validationContent.response)) {
