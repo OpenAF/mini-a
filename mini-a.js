@@ -13228,7 +13228,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
     "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
-    "validationthreshold", "persistlearnings", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
+    "validationthreshold", "persistlearnings", "valtools", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
@@ -13580,6 +13580,7 @@ MiniA.prototype.init = function(args) {
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
       { name: "debugvalch", type: "string", default: __ },
+      { name: "valtools", type: "boolean", default: false },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
       { name: "forceplanning", type: "boolean", default: false },
@@ -14215,10 +14216,10 @@ MiniA.prototype.init = function(args) {
     }
 
     // Check the need to init debugvalch for validation LLM
-    if (isDef(args.debugvalch) && args.debugvalch.length > 0 && !this._use_val) {
-      this.fnI("warn", "debugvalch specified but validation LLM is not enabled.")
-    } else {
+    if (this._use_val) {
       this._configureDebugChannel(this.val_llm, args.debugvalch, "__mini_a_val_llm_debug", "Validation LLM")
+    } else if (isDef(args.debugvalch) && args.debugvalch.length > 0) {
+      this.fnI("info", "debugvalch configured; validation calls will be logged directly to the channel (main LLM used for validation)")
     }
 
     // Load conversation history if provided
@@ -15040,7 +15041,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorydedup", type: "boolean", default: true },
       { name: "memorypromote", type: "string", default: __ },
       { name: "memorystaledays", type: "number", default: 0 },
-      { name: "memoryinject", type: "string", default: "summary" }
+      { name: "memoryinject", type: "string", default: "summary" },
+      { name: "valtools", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -19188,24 +19190,107 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     return { verdict: "PASS", feedback: "Validation skipped (no LLM)", score: 1 }
   }
 
+  // When valtools=true, create a fresh LLM instance with read-only tools so the
+  // validator can read files or fetch URLs referenced in the validation criteria.
+  var useValTools = toBoolean(args.valtools) === true
+  var effectiveLLM = validatorLLM
+  if (useValTools) {
+    var valModelConfig = this._use_val ? this._oaf_val_model : this._oaf_model
+    if (isObject(valModelConfig)) {
+      try {
+        effectiveLLM = $llm(valModelConfig)
+        // Attach debugvalch to the fresh instance so the debug channel captures these calls
+        if (isString(this._debugvalchConfig) && this._debugvalchConfig.length > 0) {
+          this._configureDebugChannel(effectiveLLM, this._debugvalchConfig, "__mini_a_val_llm_debug", "Validation LLM")
+        }
+        var valGPT = isFunction(effectiveLLM.getGPT) ? effectiveLLM.getGPT() : __
+        if (isObject(valGPT) && isFunction(valGPT.setTool)) {
+          valGPT.setTool("read_file", "Read the full text contents of a local file by path", {
+            type: "object",
+            properties: { path: { type: "string", description: "Absolute or relative path to the local file" } },
+            required: ["path"]
+          }, function(a) {
+            try {
+              if (!isString(a.path) || a.path.length === 0) return "Error: no path provided"
+              return io.readFileString(a.path)
+            } catch(e) { return "Error reading file '" + a.path + "': " + __miniAErrMsg(e) }
+          })
+          valGPT.setTool("fetch_url", "Fetch the body of a URL via HTTP GET", {
+            type: "object",
+            properties: { url: { type: "string", description: "URL to retrieve" } },
+            required: ["url"]
+          }, function(a) {
+            try {
+              if (!isString(a.url) || a.url.length === 0) return "Error: no URL provided"
+              var conn = new java.net.URL(String(a.url)).openConnection()
+              conn.setConnectTimeout(30000)
+              conn.setReadTimeout(30000)
+              if (conn instanceof java.net.HttpURLConnection) conn.setInstanceFollowRedirects(true)
+              return String(af.fromInputStream2String(conn.getInputStream()))
+            } catch(e) { return "Error fetching '" + a.url + "': " + __miniAErrMsg(e) }
+          })
+          this.fnI("info", "Validation LLM equipped with read_file and fetch_url tools")
+        }
+      } catch(toolsErr) {
+        this.fnI("warn", "Failed to create validation LLM with tools: " + __miniAErrMsg(toolsErr) + ". Using standard LLM.")
+        effectiveLLM = validatorLLM
+        useValTools = false
+      }
+    } else {
+      useValTools = false
+    }
+  }
+
+  // Prepare the debug channel for manual writes when the main LLM is used without its own debugch
+  var debugValChName = ""
+  if (!useValTools && isString(this._debugvalchConfig) && this._debugvalchConfig.length > 0) {
+    try {
+      var debugValChMap = af.fromJSSLON(this._debugvalchConfig)
+      if (isMap(debugValChMap)) {
+        debugValChName = isString(debugValChMap.name) ? debugValChMap.name : "__mini_a_val_llm_debug"
+        if ($ch().list().indexOf(debugValChName) < 0) {
+          var dvType = isString(debugValChMap.type) ? debugValChMap.type : "simple"
+          var dvOptions = isMap(debugValChMap.options) ? debugValChMap.options : {}
+          if (dvType === "file" && isString(dvOptions.file) && !io.fileExists(dvOptions.file)) {
+            io.writeFileString(dvOptions.file, "{}")
+          }
+          $ch(debugValChName).create(dvType, dvOptions)
+        }
+      }
+    } catch(_dvErr) {}
+  }
+
   var validationPrompt = "You are validating research results against specific criteria.\n\n" +
     "RESEARCH OUTPUT:\n" + researchOutput + "\n\n" +
     "VALIDATION CRITERIA:\n" + validationGoal + "\n\n" +
-    "Evaluate the research output and respond with JSON ONLY in this structure:\n" +
-    "{\"verdict\":\"PASS|REVISE\",\"feedback\":string,\"score\":number(0-1),\"specificIssues\":[strings],\"suggestions\":[strings]}\n\n" +
-    "- Use verdict=PASS only if the research fully meets the validation criteria\n" +
-    "- Use verdict=REVISE if improvements are needed\n" +
-    "- score should be 0-1 (0=completely fails, 1=fully passes)\n" +
-    "- specificIssues: list concrete problems with the research\n" +
-    "- suggestions: actionable recommendations for improvement"
+    (useValTools ? "You have access to read_file and fetch_url tools. Use them if the validation criteria references local files or URLs you need to inspect.\n\n" : "") +
+    "Evaluate the research output and respond with JSON ONLY (no markdown, no extra text):\n" +
+    "{\"verdict\":\"PASS or REVISE\",\"feedback\":\"overall assessment\",\"score\":0.0,\"specificIssues\":[\"issue1\"],\"suggestions\":[\"suggestion1\"]}\n\n" +
+    "- verdict=PASS only if the research fully meets ALL validation criteria\n" +
+    "- verdict=REVISE if any improvements are needed\n" +
+    "- score: 0.0 to 1.0 (0=completely fails, 1=fully passes)\n" +
+    "- specificIssues: concrete problems found\n" +
+    "- suggestions: actionable steps to fix each issue"
 
   try {
     var responseWithStats = this._withExponentialBackoff(() => {
-      if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
-        return validatorLLM.promptJSONWithStats(validationPrompt)
+      if (!this._noJsonPrompt && isFunction(effectiveLLM.promptJSONWithStats)) {
+        return effectiveLLM.promptJSONWithStats(validationPrompt)
       }
-      return validatorLLM.promptWithStats(validationPrompt)
+      return effectiveLLM.promptWithStats(validationPrompt)
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
+
+    // Write prompt + response to debugvalch when main LLM handles validation (tools=false path)
+    if (debugValChName.length > 0) {
+      try {
+        $ch(debugValChName).set({ k: new Date().toISOString() }, {
+          timestamp: new Date().toISOString(),
+          prompt: validationPrompt,
+          response: isObject(responseWithStats) ? (responseWithStats.response || responseWithStats) : responseWithStats,
+          stats: isObject(responseWithStats) ? responseWithStats.stats : {}
+        })
+      } catch(_dvWriteErr) {}
+    }
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
     var totalTokens = this._recordLlmStatsMetrics(stats, "val", this._estimateTokens(validationPrompt))
@@ -19232,6 +19317,8 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     var verdict = verdictRaw === "PASS" ? "PASS" : "REVISE"
     var feedback = isString(validation.feedback) ? validation.feedback.trim() : ""
     var score = isNumber(validation.score) ? validation.score : 0
+    // Normalise 0-10 scale to 0-1 so stored score matches how it is checked
+    if (score > 1) score = score / 10
     var specificIssues = isArray(validation.specificIssues) ? validation.specificIssues.filter(isString) : []
     var suggestions = isArray(validation.suggestions) ? validation.suggestions.filter(isString) : []
     this._memoryAppend("summaries", `Validation verdict: ${verdict}${feedback.length > 0 ? " - " + feedback : ""}`, {
@@ -19336,6 +19423,29 @@ MiniA.prototype._buildCycleKnowledge = function(cycleHistory, accumulatedLearnin
     sections.push("")
   }
 
+  // Highlight the most recent failed cycle's issues/suggestions so they are not
+  // buried in history and the agent treats them as mandatory requirements.
+  var lastCycle = cycleHistory[cycleHistory.length - 1]
+  if (isObject(lastCycle) && isObject(lastCycle.validationResult) && lastCycle.validationResult.verdict !== "PASS") {
+    var mustItems = []
+    if (isArray(lastCycle.validationResult.specificIssues)) {
+      lastCycle.validationResult.specificIssues.forEach(function(issue) {
+        if (isString(issue) && issue.length > 0) mustItems.push("Issue to fix: " + issue)
+      })
+    }
+    if (isArray(lastCycle.validationResult.suggestions)) {
+      lastCycle.validationResult.suggestions.forEach(function(s) {
+        if (isString(s) && s.length > 0) mustItems.push("Required change: " + s)
+      })
+    }
+    if (mustItems.length > 0) {
+      sections.push("## YOU MUST ADDRESS IN THIS CYCLE:")
+      sections.push("")
+      mustItems.forEach(function(item) { sections.push("- " + item) })
+      sections.push("")
+    }
+  }
+
   sections.push("Use these learnings to improve your research in this cycle.")
   sections.push("")
 
@@ -19417,10 +19527,12 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   }
   deepResearchState.cycleHistory.push(cycleRecord)
 
-  // Update accumulated learnings
+  // Update accumulated learnings (dedup so repeated failures don't inflate the context)
   if (deepResearchState.persistLearnings) {
     cycleLearnings.forEach(function(learning) {
-      deepResearchState.accumulatedLearnings.push(learning)
+      if (deepResearchState.accumulatedLearnings.indexOf(learning) < 0) {
+        deepResearchState.accumulatedLearnings.push(learning)
+      }
     })
   }
 

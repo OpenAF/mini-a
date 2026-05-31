@@ -81,7 +81,7 @@ mini-a goal="summarize this repository"
 | `debugfile` | string | - | Redirect debug output to a file as NDJSON instead of screen (implies `debug=true`) |
 | `debugch` | string | - | SLON/JSON debug channel for main LLM (requires `$llm.setDebugCh`) |
 | `debuglcch` | string | - | SLON/JSON debug channel for low-cost LLM |
-| `debugvalch` | string | - | SLON/JSON debug channel for validation LLM (used when `llmcomplexity=true`) |
+| `debugvalch` | string | - | SLON/JSON debug channel for validation LLM; when no dedicated `modelval` is configured, validation calls to the main LLM are logged directly to this channel |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
 | `nologtrunc` | boolean | `false` | Disable truncation of long log output lines (show full content) |
 | `outfile` | string | - | Path to save final answer (if not provided, prints to console) |
@@ -495,8 +495,11 @@ Set `OAF_VAL_MODEL` or `modelval=...` to use a dedicated validation model; other
 | `valgoal` | string | - | Alias for `validationgoal` |
 | `validationthreshold` | string | `PASS` | Validation threshold (`PASS` or score-based like `score>=0.7`) |
 | `persistlearnings` | boolean | `true` | Carry forward learnings between cycles |
+| `valtools` | boolean | `false` | Give the validator read-only tool access (`read_file`, `fetch_url`) so it can inspect files or URLs referenced in the `valgoal` |
 
 `validationgoal` (or `valgoal`) accepts inline text or a single-line file path; when a file path is provided, Mini-A loads the file contents.
+
+Use `valtools=true` when the validation criteria references input files or URLs that the validator must read to properly assess the output (e.g. "verify that the output addresses all items from the input file").
 
 **Examples:**
 

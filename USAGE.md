@@ -846,7 +846,7 @@ The `start()` method accepts various configuration options:
 - **`debugfile`** (string, optional): Redirect all debug output to a file as NDJSON instead of printing colored blocks on screen. Implies `debug=true`. Each line is a JSON object with a `ts` (ISO timestamp) and either `type:"event"` (with `event` and `message` fields, one per agent event) or `type:"block"` (with `label` and `content` fields, for raw LLM prompt/response payloads). Use `$from(io.readFileNDJSON("debug.log")).equals("label","STEP_PROMPT").select()` to filter specific block types.
 - **`debugch`** (string, optional): SLON/JSON definition of a debug channel for main LLM debugging (requires `$llm.setDebugCh` support). Example: `"(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"`.
 - **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
-- **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM (used when `llmcomplexity=true`). Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. Logs a warning if the validation LLM is not configured.
+- **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM. Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. When a dedicated `modelval` is configured, the channel is attached to that LLM instance. When using the main LLM for validation (no `modelval`), validation prompts and responses are written directly to this channel.
 - **`raw`** (boolean, default: false): Return raw string instead of formatted output
 - **`nologtrunc`** (boolean, default: false): Disable truncation of long log output lines (show full content)
 - **`showthinking`** (boolean, default: false): Use raw prompt calls to surface XML-tagged thinking blocks (for example `<thinking>...</thinking>`) as thought logs
@@ -1389,6 +1389,7 @@ Deep research mode runs a loop of research-validate-learn cycles:
 | `valgoal` | string | - | Alias for `validationgoal` |
 | `validationthreshold` | string | `"PASS"` | Required validation verdict (`"PASS"` or score-based like `"score>=0.7"`) |
 | `persistlearnings` | boolean | `true` | Whether to carry learnings from previous cycles forward |
+| `valtools` | boolean | `false` | Give the validator read-only tool access (`read_file`, `fetch_url`) so it can inspect files or URLs referenced in the `valgoal` |
 
 ## Sub-Goal Delegation
 
@@ -1627,6 +1628,8 @@ The `validationgoal` parameter (alias: `valgoal`) defines your quality criteria.
 
 `validationgoal` (or `valgoal`) accepts either inline text or a file path (single-line path); when a file path is provided, Mini-A loads the file contents.
 
+**Important constraint:** The validator only sees the agent's output text. If your `valgoal` asks to "verify against the input file" or "check that all items from X are addressed", the validator cannot fulfil that check without reading the file. Use `valtools=true` to give the validator read-only access to local files and URLs via `read_file` and `fetch_url` tools.
+
 Examples:
 ```bash
 # Checklist validation
@@ -1644,8 +1647,8 @@ validationgoal="Rate on scale 1-10: technical accuracy, practical examples, cita
 Control when a research cycle is considered successful:
 
 - **`"PASS"`** (default): Simple pass/fail based on LLM verdict
-- **`"score>=0.7"`**: Requires validation score of 0.7 or higher (0-1 scale)
-- **`">=7"`**: Requires score of 7 or higher (automatically normalized to 0-1 scale)
+- **`"score>=0.7"`**: Requires validation score of 0.7 or higher (0–1 scale; scores returned on a 0–10 scale are automatically normalised)
+- **`">=7"`**: Requires score of 7 or higher (normalised to 0.7 on the 0–1 scale)
 
 ### Cycle Behavior
 

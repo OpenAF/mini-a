@@ -743,6 +743,7 @@ try {
     valgoal        : { type: "string", description: "Alias for validationgoal (string or file path)" },
     validationthreshold: { type: "string", default: "PASS", description: "Required validation verdict (e.g., 'PASS' or 'score>=0.7')" },
     persistlearnings: { type: "boolean", default: true, description: "Carry forward learnings between deep research cycles" },
+    valtools       : { type: "boolean", default: false, description: "Give the validator read-only tool access (read_file, fetch_url) so it can inspect files/URLs referenced in the valgoal" },
     adaptiverouting: { type: "boolean", default: false, description: "Enable adaptive tool routing." },
     routerorder    : { type: "string", description: "Comma-separated preferred routing order." },
     routerallow    : { type: "string", description: "Comma-separated allowlist of routing backends." },
