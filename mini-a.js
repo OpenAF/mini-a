@@ -19182,7 +19182,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     return { verdict: "REVISE", feedback: "Research output is empty", score: 0 }
   }
 
-  var validatorLLM = this.llm
+  var validatorLLM = (this._use_val && isObject(this.val_llm)) ? this.val_llm : this.llm
   if (!isObject(validatorLLM) || (typeof validatorLLM.promptWithStats !== "function" && typeof validatorLLM.promptJSONWithStats !== "function")) {
     this.fnI("warn", "No LLM available for validation")
     return { verdict: "PASS", feedback: "Validation skipped (no LLM)", score: 1 }
