@@ -12892,6 +12892,57 @@ MiniA.prototype._getMiniAHomeDir = function() {
   return homeDir + "/.openaf-mini-a"
 }
 
+MiniA.prototype._findNearestAgentsInstructionsPath = function(startDir) {
+  var cursor = ""
+  try {
+    var base = isString(startDir) && startDir.trim().length > 0 ? startDir.trim() : "."
+    cursor = String((new java.io.File(base)).getCanonicalPath())
+  } catch(ignoreAgentsStartDirError) {
+    try { cursor = String((new java.io.File(".")).getCanonicalPath()) } catch(ignoreAgentsCurrentDirError) {}
+  }
+  if (!isString(cursor) || cursor.trim().length === 0) return __
+
+  while (isString(cursor) && cursor.trim().length > 0) {
+    var candidate = cursor + "/AGENTS.md"
+    if (io.fileExists(candidate) && io.fileInfo(candidate).isFile === true) return candidate
+    var parent = __
+    try {
+      var parentFile = (new java.io.File(cursor)).getParentFile()
+      parent = isDef(parentFile) && parentFile !== null ? String(parentFile.getCanonicalPath()) : __
+    } catch(ignoreAgentsParentError) {}
+    if (!isString(parent) || parent.trim().length === 0 || parent === cursor) break
+    cursor = parent
+  }
+
+  return __
+}
+
+MiniA.prototype._applyAutoAgentsRules = function(args) {
+  if (!isMap(args) || args.__autoagentsrulesapplied === true) return
+  args.__autoagentsrulesapplied = true
+
+  var agentsPath = this._findNearestAgentsInstructionsPath(args._agentBaseDir)
+  if (!isString(agentsPath) || agentsPath.trim().length === 0) return
+
+  var agentsContent = ""
+  try {
+    agentsContent = io.readFileString(agentsPath)
+  } catch(readAgentsError) {
+    this.fnI("warn", "Couldn't read AGENTS.md from " + agentsPath + ": " + readAgentsError.message)
+    return
+  }
+  agentsContent = isString(agentsContent) ? agentsContent.trim() : ""
+  if (agentsContent.length === 0) return
+
+  var injectedRule = "Follow AGENTS.md instructions from " + agentsPath + ":\n" + agentsContent
+  var mergedRules = this._parseRulesArgument(args.rules)
+  if (mergedRules.indexOf(injectedRule) < 0) mergedRules.push(injectedRule)
+  args.rules = stringify(mergedRules, __, "")
+  args.__autoagentspath = agentsPath
+
+  this.fnI("load", "Auto-loaded AGENTS.md instructions from " + agentsPath + ".")
+}
+
 MiniA.prototype._resolveAgentProfilePath = function(rawAgent) {
   if (!isString(rawAgent)) return __
 
@@ -13630,6 +13681,8 @@ MiniA.prototype.init = function(args) {
       { name: "agent", type: "string", default: __ },
       { name: "agentfile", type: "string", default: __ }
     ])
+
+    this._applyAutoAgentsRules(args)
 
     // Convert and validate boolean arguments
     var useJsonToolWasDefined = isDef(args.usejsontool)
