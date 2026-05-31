@@ -903,6 +903,16 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
 | `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
+| `usewikigraph` | boolean | `false` | Enable the wiki knowledge graph layer (`.mini-a-wiki-graph/graph.json`) |
+| `wikigraphsemantic` | boolean | `false` | Enable semantic graph extraction when running graph build |
+| `wikigraphcommunity` | string | `louvain` | Community detection algorithm |
+| `wikigraphsearchhints` | boolean | `true` | Enrich `wiki search` with related pages from graph |
+| `wikigraphhintcap` | number | `5` | Maximum related graph hints returned per search |
+| `wikigraphfalkorhost` | string | - | FalkorDB host for optional graph sync/query |
+| `wikigraphfalkorport` | number | `6379` | FalkorDB port |
+| `wikigraphfalkorgraph` | string | `mini_a_wiki` | FalkorDB graph name |
+| `wikigraphfalkoruser` | string | - | FalkorDB username |
+| `wikigraphfalkorpass` | string | - | FalkorDB password |
 
 Elasticsearch/OpenSearch backend mapping:
 
@@ -940,6 +950,7 @@ The agent uses the `wiki` action:
 | `mounts` | List active read-only mounts |
 | `attach` | Mount a read-only wiki: `name=team backend=fs root=/path` — pages become available as `@team/...` |
 | `detach` | Unmount a previously attached wiki |
+| `graph` | Graph operations: `build`, `retrieve`, `answer`, `query`, `neighbors`, `path`, `communities`, `surprise`, `stats`, `export`, `falkor` |
 
 ### Console Commands
 
@@ -960,7 +971,9 @@ The agent uses the `wiki` action:
 | `/wiki mounts` | List active read-only mounts |
 | `/wiki attach <name> [backend=fs] [root=path]` | Mount a read-only wiki |
 | `/wiki detach <name>` | Unmount a wiki |
+| `/graph [build\|query\|neighbors\|path\|communities\|surprise\|export\|stats]` | Query wiki graph from console |
 | `/stats wiki` | Show wiki operation statistics for the current session |
+| `/stats` | Includes wiki graph operation counters when graph is enabled |
 
 ### Examples
 

@@ -195,6 +195,20 @@ todo:
           title         : reindex
           readOnlyHint  : false
           idempotentHint: true
+      graph_build:
+        name       : graph_build
+        description: "Build wiki graph (structural always; semantic optional when configured)."
+        inputSchema:
+          type      : object
+          properties:
+            semantic: { type: boolean, default: false }
+      graph_falkor:
+        name       : graph_falkor
+        description: "Sync/query wiki graph in FalkorDB."
+        inputSchema:
+          type      : object
+          properties:
+            query: { type: string }
 
     ((fns    )): &MCPFNS
       context : Wiki context overview
@@ -202,6 +216,8 @@ todo:
       edit    : Wiki edit page
       maintain: Wiki maintain
       reindex : Wiki reindex
+      graph_build: Wiki graph build
+      graph_falkor: Wiki graph falkor
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
@@ -375,6 +391,38 @@ jobs:
         this._rebuildLuceneIndex(docs)
       } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
     }
+    MiniAWikiManager.prototype._getGraphPath = function() {
+      var root = "."
+      if (this._backendType === "fs" || this._backendType === "s3fs") root = this._backend.root
+      return root + "/.mini-a-wiki-graph"
+    }
+    MiniAWikiManager.prototype._graphPages = function() {
+      var pages = this._safeListPages("")
+      var out = []
+      for (var i=0;i<pages.length;i++) {
+        var raw = this._backend.read(pages[i]); if (!isString(raw)) continue
+        var parsed = this.parseFrontmatter(raw)
+        out.push({ path: pages[i], meta: isMap(parsed.meta) ? parsed.meta : {}, body: isString(parsed.body) ? parsed.body : "", links: this.extractLinks(isString(parsed.body) ? parsed.body : "") })
+      }
+      return out
+    }
+    MiniAWikiManager.prototype._rebuildGraphIndex = function() {
+      if (!isObject(this._graph)) return
+      try { this._graph.buildStructural(this._graphPages()) } catch(e) { this._logFn("warn", "Failed to rebuild graph index: " + __miniAErrMsg(e)) }
+    }
+    MiniAWikiManager.prototype.graph = function(op, params) {
+      if (!isObject(this._graph)) return { ok: false, error: "graph is not enabled" }
+      var action = isString(op) ? op.toLowerCase().trim() : "stats"
+      var p = isMap(params) ? params : {}
+      if (action === "build") {
+        var s = this._graph.buildStructural(this._graphPages())
+        if (p.semantic === true) return this._graph.buildSemantic(this._graphPages(), p)
+        return { ok: true, structural: s }
+      }
+      if (action === "falkor") return isString(p.query) ? this._graph.falkorQuery(p.query) : this._graph.falkorSync()
+      if (action === "stats") return this._graph.stats()
+      return { ok: false, error: "unknown graph op: " + action }
+    }
     
     MiniAWikiManager.prototype._getLuceneIndexPath = function() {
       var root = "."
@@ -524,8 +572,12 @@ jobs:
       this._access      = "rw"
       this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
       this._config  = cfg
+      this._graph = __
       this._mounts  = isArray(this._mounts) ? this._mounts : []
       this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
+      if (toBoolean(cfg.usegraph) === true) {
+        try { loadLib("mini-a-graph.js"); this._graph = new MiniAWikiGraph({ graphDir: this._getGraphPath(), communityAlgo: "louvain" }, function(level, msg) { this._logFn(level, msg) }.bind(this)) } catch(ge) { this._graph = __ }
+      }
       this._bootstrapWiki()
     }
     
@@ -617,6 +669,7 @@ jobs:
           if (this._backend.exists(indexPath)) return { ok: true, created: [], skipped: [ indexPath ] }
           this._backend.write(indexPath, this._makeIndexContent(indexPath))
           this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
           return { ok: true, created: [ indexPath ], skipped: [] }
         } catch(sectionErr) {
           return { ok: false, error: __miniAErrMsg(sectionErr) }
@@ -630,6 +683,7 @@ jobs:
       var skipped = []
       try {
         this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
         if (!hasAgents) {
           var agentsContent = [
             "---",
@@ -1347,6 +1401,7 @@ jobs:
         try {
           this._backend.write(path, this._serializeFrontmatter(updatedMeta, reparsed.body))
           this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
           return { ok: true, path: path }
         } catch(e) {
           return { ok: false, error: __miniAErrMsg(e) }
@@ -1382,6 +1437,7 @@ jobs:
         var content = this._serializeFrontmatter(meta, bodyText)
         this._backend.write(path, content)
         this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
         return { ok: true, path: path }
       } catch(e) {
         return { ok: false, error: __miniAErrMsg(e) }
@@ -1405,6 +1461,7 @@ jobs:
       try {
         this._backend.delete(path)
         this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
         return { ok: true, path: path }
       } catch(e) {
         return { ok: false, error: __miniAErrMsg(e) }
@@ -1713,6 +1770,7 @@ jobs:
       }
     
       this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
       return {
         ok: true,
         from: fromPath,
@@ -1934,7 +1992,8 @@ jobs:
     args.wikiaccess = String(args.wikiaccess).toLowerCase().trim() === "ro" ? "ro" : "rw"
     var cfg = {
       access : args.wikiaccess,
-      backend: args.wikibackend
+      backend: args.wikibackend,
+      usegraph: true
     }
 
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
@@ -2060,7 +2119,25 @@ jobs:
     try {
       if (isFunction(wm.reindex)) return wm.reindex()
       wm._rebuildSearchIndex()
+      wm._rebuildGraphIndex()
       return { ok: true }
     } catch(e) {
       return { ok: false, error: __miniAErrMsg(e) }
     }
+
+# -------------------
+- name : Wiki graph build
+  check:
+    in:
+      semantic: toBoolean.isBoolean.default(false)
+  exec : | #js
+    if (args.wikiopsreadonly === true || String(args.wikiaccess || "").toLowerCase() !== "rw") return { ok: false, error: "wiki is read-only" }
+    return global.__wikiManager.graph("build", { semantic: args.semantic === true })
+
+# -------------------
+- name : Wiki graph falkor
+  check:
+    in:
+      query: isString.default("")
+  exec : | #js
+    return global.__wikiManager.graph("falkor", { query: args.query })

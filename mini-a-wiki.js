@@ -261,6 +261,38 @@ MiniAWikiManager.prototype._rebuildSearchIndex = function() {
   } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
 }
 
+MiniAWikiManager.prototype._getGraphPath = function() {
+  var root = "."
+  if (this._backendType === "fs" || this._backendType === "s3fs") root = this._backend.root
+  return root + "/.mini-a-wiki-graph"
+}
+
+MiniAWikiManager.prototype._graphPages = function() {
+  var pages = this._safeListPages("")
+  var out = []
+  for (var i = 0; i < pages.length; i++) {
+    var raw = this._backend.read(pages[i])
+    if (!isString(raw)) continue
+    var parsed = this.parseFrontmatter(raw)
+    out.push({
+      path: pages[i],
+      meta: isMap(parsed.meta) ? parsed.meta : {},
+      body: isString(parsed.body) ? parsed.body : "",
+      links: this.extractLinks(isString(parsed.body) ? parsed.body : "")
+    })
+  }
+  return out
+}
+
+MiniAWikiManager.prototype._rebuildGraphIndex = function() {
+  if (!isObject(this._graph)) return
+  try {
+    this._graph.buildStructural(this._graphPages())
+  } catch(e) {
+    this._logFn("warn", "Failed to rebuild graph index: " + __miniAErrMsg(e))
+  }
+}
+
 MiniAWikiManager.prototype._getLuceneIndexPath = function() {
   var root = "."
   if (this._backendType === "fs" || this._backendType === "s3fs") root = this._backend.root
@@ -308,10 +340,53 @@ MiniAWikiManager.prototype.reindex = function() {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
   try {
     this._rebuildSearchIndex()
+    this._rebuildGraphIndex()
     return { ok: true }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
   }
+}
+
+MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
+  if (!isArray(hits) || !isObject(this._graph)) return hits
+  var opts = isObject(options) ? options : {}
+  // F12: undefined means enabled; only explicit false disables hints
+  if (this._config.wikigraphsearchhints === false && opts.wikigraphsearchhints !== true) return hits
+  var cap = isNumber(opts.wikigraphhintcap) ? opts.wikigraphhintcap : (isNumber(this._config.wikigraphhintcap) ? this._config.wikigraphhintcap : 5)
+  var paths = hits.map(function(h) { return h.path }).filter(function(p) { return isString(p) && !p.startsWith("@") })
+  if (paths.length === 0) return hits
+  var related = this._graph.relatedFor(paths, { cap: cap })
+  if (!isArray(related) || related.length === 0) return hits
+  return hits.concat(related.map(function(r) {
+    return {
+      path: r.path,
+      title: r.path.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
+      description: "[Related pages (graph)] " + r.connection + " score=" + r.score + " provenance=" + r.provenance + " — " + r.digest
+    }
+  }))
+}
+
+MiniAWikiManager.prototype.graph = function(op, params) {
+  if (!isObject(this._graph)) return { ok: false, error: "graph is not enabled (usegraph=true)" }
+  var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
+  var p = isObject(params) ? params : {}
+  if (action === "build") {
+    var st = this._graph.buildStructural(this._graphPages())
+    // F5: wikigraphsemantic=true makes graph build default semantic:true (still emits corpus warning)
+    if (p.semantic === true || toBoolean(this._config.wikigraphsemantic) === true) return this._graph.buildSemantic(this._graphPages(), p)
+    return { ok: true, structural: st }
+  }
+  if (action === "query") return this._graph.query(isString(p.text) ? p.text : (isString(p.query) ? p.query : ""))
+  if (action === "neighbors") return this._graph.neighbors(isString(p.node) ? p.node : (isString(p.path) ? ("doc:" + p.path) : ""))
+  if (action === "path") return this._graph.path(p.from || p.a || "", p.to || p.b || "")
+  if (action === "communities") return this._graph.detectCommunities()
+  if (action === "surprise") return this._graph.crossDocumentSurprise()
+  if (action === "stats") return this._graph.stats()
+  if (action === "export") return this._graph.export(isString(p.format) ? p.format : "mermaid")
+  if (action === "falkor") return isString(p.query) ? this._graph.falkorQuery(p.query) : this._graph.falkorSync()
+  if (action === "retrieve") return this._graph.retrieve(p.concepts || p.query || "", p)
+  if (action === "answer") return this._graph.answer(p.question || p.query || "", p)
+  return { ok: false, error: "unknown graph op: " + action }
 }
 
 MiniAWikiManager.prototype.list = function(prefix, options) {
@@ -364,8 +439,24 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._access      = accessRaw === "rw" ? "rw" : "ro"
   this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
   this._config  = cfg
+  this._graph = __
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
+  if (toBoolean(cfg.usegraph) === true) {
+    try {
+      loadLib("mini-a-graph.js")
+      var graphCfg = {
+        graphDir: this._getGraphPath(),
+        communityAlgo: isString(cfg.wikigraphcommunity) ? cfg.wikigraphcommunity : "louvain",
+        falkor: isMap(cfg.wikigraphfalkor) ? cfg.wikigraphfalkor : __,
+        llmExtractFn: isFunction(cfg.llmExtractFn) ? cfg.llmExtractFn : __
+      }
+      this._graph = new MiniAWikiGraph(graphCfg, function(level, msg) { this._logFn(level, msg) }.bind(this))
+    } catch(graphErr) {
+      this._logFn("warn", "Graph support unavailable: " + __miniAErrMsg(graphErr))
+      this._graph = __
+    }
+  }
   this._bootstrapWiki()
 }
 
@@ -527,6 +618,7 @@ MiniAWikiManager.prototype.init = function(path) {
       if (this._backend.exists(indexPath)) return { ok: true, created: [], skipped: [ indexPath ] }
       this._backend.write(indexPath, this._makeIndexContent(indexPath))
       this._rebuildSearchIndex()
+      this._rebuildGraphIndex()
       return { ok: true, created: [ indexPath ], skipped: [] }
     } catch(sectionErr) {
       return { ok: false, error: __miniAErrMsg(sectionErr) }
@@ -541,6 +633,7 @@ MiniAWikiManager.prototype.init = function(path) {
   var skipped = []
   try {
     this._rebuildSearchIndex()
+    this._rebuildGraphIndex()
     if (!hasAgents) {
       this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now))
       created.push("AGENTS.md")
@@ -1130,6 +1223,7 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
     try {
       this._backend.write(path, this._serializeFrontmatter(updatedMeta, reparsed.body))
       this._rebuildSearchIndex()
+      this._rebuildGraphIndex()
       this._logWrite(path, updatedMeta)
       return { ok: true, path: path }
     } catch(e) {
@@ -1166,6 +1260,7 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
     var content = this._serializeFrontmatter(meta, bodyText)
     this._backend.write(path, content)
     this._rebuildSearchIndex()
+    this._rebuildGraphIndex()
     this._logWrite(path, meta)
     return { ok: true, path: path }
   } catch(e) {
@@ -1197,6 +1292,7 @@ MiniAWikiManager.prototype.delete = function(path) {
   try {
     this._backend.delete(path)
     this._rebuildSearchIndex()
+    this._rebuildGraphIndex()
     try { this.appendLog("delete", path, path) } catch(le) {}
     return { ok: true, path: path }
   } catch(e) {
@@ -1266,7 +1362,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
         if (validHits.length > 0) {
           // Fan out to mounts after primary results
           var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length)
-          return validHits.concat(mountResults)
+          return this._withGraphHints(validHits.concat(mountResults), opts)
         }
       }
     } catch(le) {
@@ -1322,7 +1418,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
   }
 
   var mountResults = this._searchMounts(query, opts, compact, limit - results.length)
-  return results.concat(mountResults)
+  return this._withGraphHints(results.concat(mountResults), opts)
 }
 
 // _searchMounts: fan search out to all mounts, prefix paths with @name/
@@ -1583,6 +1679,7 @@ MiniAWikiManager.prototype.move = function(from, to, options) {
   }
 
   this._rebuildSearchIndex()
+  this._rebuildGraphIndex()
   try { this.appendLog("move", fromPath + " → " + toPath, toPath) } catch(le) {}
   return {
     ok: true,

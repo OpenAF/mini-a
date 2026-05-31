@@ -283,6 +283,18 @@ var MiniA = function() {
     wiki_ops_delete: $atomic(0, "long"),
     wiki_ops_lint: $atomic(0, "long"),
     wiki_ops_errors: $atomic(0, "long"),
+    graph_ops_build: $atomic(0, "long"),
+    graph_ops_query: $atomic(0, "long"),
+    graph_ops_neighbors: $atomic(0, "long"),
+    graph_ops_path: $atomic(0, "long"),
+    graph_ops_communities: $atomic(0, "long"),
+    graph_ops_surprise: $atomic(0, "long"),
+    graph_ops_stats: $atomic(0, "long"),
+    graph_ops_export: $atomic(0, "long"),
+    graph_ops_falkor: $atomic(0, "long"),
+    graph_ops_retrieve: $atomic(0, "long"),
+    graph_ops_answer: $atomic(0, "long"),
+    graph_ops_errors: $atomic(0, "long"),
     llm_cache_creation_tokens: $atomic(0, "long"),
     llm_cache_read_tokens: $atomic(0, "long"),
     llm_cached_tokens: $atomic(0, "long"),
@@ -1944,6 +1956,21 @@ MiniA.prototype.getMetrics = function() {
             ops_lint: global.__mini_a_metrics.wiki_ops_lint.get(),
             ops_errors: global.__mini_a_metrics.wiki_ops_errors.get(),
             ops_total: global.__mini_a_metrics.wiki_ops_list.get() + global.__mini_a_metrics.wiki_ops_read.get() + global.__mini_a_metrics.wiki_ops_search.get() + global.__mini_a_metrics.wiki_ops_write.get() + global.__mini_a_metrics.wiki_ops_delete.get() + global.__mini_a_metrics.wiki_ops_lint.get()
+        },
+        graph: {
+            enabled: isObject(this._wikiManager) && isFunction(this._wikiManager.graph),
+            ops_build: global.__mini_a_metrics.graph_ops_build.get(),
+            ops_query: global.__mini_a_metrics.graph_ops_query.get(),
+            ops_neighbors: global.__mini_a_metrics.graph_ops_neighbors.get(),
+            ops_path: global.__mini_a_metrics.graph_ops_path.get(),
+            ops_communities: global.__mini_a_metrics.graph_ops_communities.get(),
+            ops_surprise: global.__mini_a_metrics.graph_ops_surprise.get(),
+            ops_stats: global.__mini_a_metrics.graph_ops_stats.get(),
+            ops_export: global.__mini_a_metrics.graph_ops_export.get(),
+            ops_falkor: global.__mini_a_metrics.graph_ops_falkor.get(),
+            ops_retrieve: global.__mini_a_metrics.graph_ops_retrieve.get(),
+            ops_answer: global.__mini_a_metrics.graph_ops_answer.get(),
+            ops_errors: global.__mini_a_metrics.graph_ops_errors.get()
         }
     }
 }
@@ -7386,7 +7413,19 @@ MiniA.prototype._initWiki = function(args) {
   try {
     var cfg = {
       access : args.wikiaccess,
-      backend: args.wikibackend
+      backend: args.wikibackend,
+      usegraph: toBoolean(args.usewikigraph) === true,
+      wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
+      wikigraphcommunity: args.wikigraphcommunity,
+      wikigraphhintcap: args.wikigraphhintcap,
+      wikigraphsearchhints: args.wikigraphsearchhints,
+      wikigraphfalkor: {
+        host: args.wikigraphfalkorhost,
+        port: args.wikigraphfalkorport,
+        graph: args.wikigraphfalkorgraph,
+        user: args.wikigraphfalkoruser,
+        pass: args.wikigraphfalkorpass
+      }
     }
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
       cfg.bucket          = args.wikibucket
@@ -7404,6 +7443,20 @@ MiniA.prototype._initWiki = function(args) {
       cfg.espass = args.wikisecret
     } else {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
+    }
+    // F10: set llmExtractFn before constructing the manager so configure() wires it in one pass
+    if (toBoolean(args.usewikigraph) === true) {
+      cfg.llmExtractFn = function(payload) {
+        var useVal = this._use_val && isObject(this.val_llm)
+        var llmToUse = useVal ? this.val_llm : this.llm
+        var prompt = "Extract relationships from wiki page and return JSON with keys: summary (string), relationships (array of {from,to,type,provenance,confidence}).\\nPage:\\n" + stringify(payload, __, "  ")
+        var rsp = this._withExponentialBackoff(function() {
+          if (isFunction(llmToUse.promptJSONWithStats)) return llmToUse.promptJSONWithStats(prompt)
+          var r = llmToUse.promptWithStats(prompt)
+          return af.fromJson(isMap(r) && isString(r.response) ? r.response : String(r))
+        }, this._llmRetryOptions("graph-extract", { operation: "graph-extract" }))
+        return isMap(rsp) && isMap(rsp.response) ? rsp.response : rsp
+      }.bind(this)
     }
     this._wikiManager = new MiniAWikiManager(cfg, function(level, msg) {
       this.fnI(level || "info", "[wiki] " + msg)
@@ -13240,7 +13293,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikiapply", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiredirects", "dreamwikiminpages", "dreamwikiflatthreshold", "dreamwikimaxdepth",
     "dreamwikipreservebodies", "dreammemoryminconfidence", "dreammemorytowiki", "dreamreport"
@@ -14567,6 +14620,11 @@ MiniA.prototype.init = function(args) {
           "When you discover reusable knowledge — facts, decisions, patterns, how-tos, or lessons learned — record it in the wiki: search first to avoid duplicates, then write a focused page following the contribution rules in AGENTS.md. Prefer updating an existing page over creating a new one. Always use wiki op='write' to create or update wiki pages — never use shell or file tools to write wiki files directly."
         )
       }
+      if (args.usewikigraph === true) {
+        baseRules.push(
+          "The wiki graph is enabled. Use action='graph' with params={op:'...'} for graph operations. Read-side ops: stats|query|neighbors|path|communities|surprise|retrieve|answer|export. Mutating/token-spending ops: build {semantic:true} and falkor. Wiki search already injects 'Related pages (graph)' hints automatically — read those pages directly rather than calling graph retrieve for every search."
+        )
+      }
     }
     if (args.useshell === true && toBoolean(args.readwrite) === true) {
       baseRules.push("Think before coding: state your assumptions explicitly before taking any action; never guess.")
@@ -14659,6 +14717,7 @@ MiniA.prototype.init = function(args) {
       })
       if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
       if (args.usewiki && isObject(this._wikiManager)) chatActionSet["wiki"] = true
+      if (args.usewikigraph === true && isObject(this._wikiManager)) chatActionSet["graph"] = true
       this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
@@ -14692,11 +14751,12 @@ MiniA.prototype.init = function(args) {
         manifestChars: args.skillmanifestchars
       })
 
-      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if useWikiGraph}} | graph{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
         useMemorySearch : args.usememory && args.memoryinject !== "full",
-        useWiki         : args.usewiki && isObject(this._wikiManager)
+        useWiki         : args.usewiki && isObject(this._wikiManager),
+        useWikiGraph    : args.usewikigraph === true && isObject(this._wikiManager)
       })
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 8 : 7) + ". " + rule)
@@ -15160,6 +15220,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
     if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
     args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
+    args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
+    args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
+    args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
+    args.wikigraphsearchhints = _$(toBoolean(args.wikigraphsearchhints), "args.wikigraphsearchhints").isBoolean().default(true)
+    var _wikiGraphHintCap = isNumber(args.wikigraphhintcap) ? args.wikigraphhintcap : Number(args.wikigraphhintcap)
+    if (isNaN(_wikiGraphHintCap)) _wikiGraphHintCap = __
+    args.wikigraphhintcap = _$(_wikiGraphHintCap, "args.wikigraphhintcap").isNumber().default(5)
+    args.wikigraphfalkorhost = _$(args.wikigraphfalkorhost, "args.wikigraphfalkorhost").isString().default(__)
+    var _wikiGraphFalkorPort = isNumber(args.wikigraphfalkorport) ? args.wikigraphfalkorport : Number(args.wikigraphfalkorport)
+    if (isNaN(_wikiGraphFalkorPort)) _wikiGraphFalkorPort = __
+    args.wikigraphfalkorport = _$(_wikiGraphFalkorPort, "args.wikigraphfalkorport").isNumber().default(6379)
+    args.wikigraphfalkorgraph = _$(args.wikigraphfalkorgraph, "args.wikigraphfalkorgraph").isString().default("mini_a_wiki")
+    args.wikigraphfalkoruser = _$(args.wikigraphfalkoruser, "args.wikigraphfalkoruser").isString().default(__)
+    args.wikigraphfalkorpass = _$(args.wikigraphfalkorpass, "args.wikigraphfalkorpass").isString().default(__)
     // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
     if (isUnDef(args.wikimounts)) args.wikimounts = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
@@ -18262,6 +18336,37 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           continue
         }
 
+        if (action == "graph" && args.usewiki && isObject(this._wikiManager)) {
+          var gParams = isMap(currentMsg.params) ? currentMsg.params : {}
+          var gOp = isString(gParams.op) ? gParams.op.trim().toLowerCase() : "stats"
+          try {
+            if (gOp === "build") global.__mini_a_metrics.graph_ops_build.inc()
+            else if (gOp === "query") global.__mini_a_metrics.graph_ops_query.inc()
+            else if (gOp === "neighbors") global.__mini_a_metrics.graph_ops_neighbors.inc()
+            else if (gOp === "path") global.__mini_a_metrics.graph_ops_path.inc()
+            else if (gOp === "communities") global.__mini_a_metrics.graph_ops_communities.inc()
+            else if (gOp === "surprise") global.__mini_a_metrics.graph_ops_surprise.inc()
+            else if (gOp === "stats") global.__mini_a_metrics.graph_ops_stats.inc()
+            else if (gOp === "export") global.__mini_a_metrics.graph_ops_export.inc()
+            else if (gOp === "falkor") global.__mini_a_metrics.graph_ops_falkor.inc()
+            else if (gOp === "retrieve") global.__mini_a_metrics.graph_ops_retrieve.inc()
+            else if (gOp === "answer") global.__mini_a_metrics.graph_ops_answer.inc()
+            var gResult = this._wikiManager.graph(gOp, gParams)
+            runtime.context.push(`[OBS ${stepLabel}] (graph/${gOp}) ${af.toTOON(gResult)}`)
+            if (isString(gResult) && gResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.graph_ops_errors.inc()
+          } catch(gErr) {
+            global.__mini_a_metrics.graph_ops_errors.inc()
+            runtime.context.push(`[OBS ${stepLabel}] (graph/${gOp}) [ERROR] ${__miniAErrMsg(gErr)}`)
+          }
+          runtime.consecutiveThoughts = 0
+          runtime.stepsWithoutAction = 0
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
+          flushAll()
+          continue
+        }
+
         //runtime.context.push(`[THOUGHT ${stepLabel}] ((unknown action -> think) ${thoughtStr || "no thought"})`)
         runtime.context.push(`[ERROR ${stepLabel}] (unknown action '${origActionRaw}'; use ${this._actionsList}) ${thoughtStr || "(no thought)"}`)
 
@@ -18888,6 +18993,18 @@ MiniA.prototype._runChatbotMode = function(options) {
               pendingPrompt = `wiki/${cbWkOp} result:\n${cbWkResult}\nUse this information to continue.`
             } catch(cbWkErr) {
               pendingPrompt = `wiki/${cbWkOp} error: ${__miniAErrMsg(cbWkErr)}`
+            }
+            handled = true
+            break
+          }
+
+          if (lowerAction === "graph" && args.usewiki && isObject(this._wikiManager)) {
+            var cbGParams = isMap(currentMsg.params) ? currentMsg.params : {}
+            var cbGOp = isString(cbGParams.op) ? cbGParams.op.trim().toLowerCase() : "stats"
+            try {
+              pendingPrompt = `graph/${cbGOp} result:\\n${af.toTOON(this._wikiManager.graph(cbGOp, cbGParams))}`
+            } catch(cbGErr) {
+              pendingPrompt = `[ERROR] graph/${cbGOp}: ${__miniAErrMsg(cbGErr)}`
             }
             handled = true
             break

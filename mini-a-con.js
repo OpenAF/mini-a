@@ -422,7 +422,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "skills", "wiki", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "skills", "wiki", "graph", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -633,6 +633,16 @@ try {
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]." },
+    usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
+    wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
+    wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
+    wikigraphsearchhints: { type: "boolean", description: "Append graph-related pages to wiki search results." },
+    wikigraphhintcap: { type: "number", description: "Maximum graph-hint pages appended to search results." },
+    wikigraphfalkorhost: { type: "string", description: "FalkorDB host for wiki graph." },
+    wikigraphfalkorport: { type: "number", description: "FalkorDB port for wiki graph." },
+    wikigraphfalkorgraph: { type: "string", description: "FalkorDB graph name for wiki graph." },
+    wikigraphfalkoruser: { type: "string", description: "FalkorDB username for wiki graph." },
+    wikigraphfalkorpass: { type: "string", description: "FalkorDB password for wiki graph." },
     planmode       : { type: "boolean", default: false, description: "Run in plan-only mode without executing actions" },
     validateplan   : { type: "boolean", default: false, description: "Validate a plan using LLM-based critique and structure validation" },
     convertplan    : { type: "boolean", default: false, description: "Convert plan to requested format and exit" },
@@ -1394,7 +1404,19 @@ try {
     try {
       var wikiCfg = {
         access : sessionOptions.wikiaccess,
-        backend: sessionOptions.wikibackend
+        backend: sessionOptions.wikibackend,
+        usegraph: toBoolean(sessionOptions.usewikigraph) === true,
+        wikigraphsemantic: toBoolean(sessionOptions.wikigraphsemantic) === true,
+        wikigraphcommunity: sessionOptions.wikigraphcommunity,
+        wikigraphsearchhints: sessionOptions.wikigraphsearchhints,
+        wikigraphhintcap: sessionOptions.wikigraphhintcap,
+        wikigraphfalkor: {
+          host: sessionOptions.wikigraphfalkorhost,
+          port: sessionOptions.wikigraphfalkorport,
+          graph: sessionOptions.wikigraphfalkorgraph,
+          user: sessionOptions.wikigraphfalkoruser,
+          pass: sessionOptions.wikigraphfalkorpass
+        }
       }
       if (sessionOptions.wikibackend === "s3") {
         wikiCfg.bucket          = sessionOptions.wikibucket
@@ -2306,6 +2328,52 @@ try {
               var partial = hasTrailingSpace ? "" : lastToken
               if ("dryrun".indexOf(partial) === 0) candidates.add("dryrun")
               return candidates.isEmpty() ? -1 : Number(lastTokenInsert)
+            }
+
+            return -1
+          }
+
+          // Handle /graph command completions
+          if (lookupName === "graph") {
+            if (toBoolean(sessionOptions.usewikigraph) !== true) return -1
+            var graphSubcmds = ["build", "query", "neighbors", "path", "communities", "surprise", "export", "stats"]
+            var graphExportFmts = ["mermaid", "graphml", "neo4j", "html", "svg"]
+            var remainder = uptoCursor.substring(firstSpace + 1)
+            var trimmedRemainder = remainder.replace(/^\s*/, "")
+            var insertionPoint = cursor - trimmedRemainder.length
+
+            if (trimmedRemainder.length === 0) {
+              graphSubcmds.forEach(function(opt) { candidates.add(opt) })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            var graphParts = trimmedRemainder.split(/\s+/)
+            var graphSubcmd = String(graphParts[0] || "").toLowerCase()
+            var hasTrailingSpace = /\s$/.test(trimmedRemainder)
+
+            if (graphParts.length <= 1 && !hasTrailingSpace) {
+              graphSubcmds.forEach(function(opt) {
+                if (opt.indexOf(graphSubcmd) === 0) candidates.add(opt)
+              })
+              return candidates.isEmpty() ? -1 : Number(insertionPoint)
+            }
+
+            if (graphSubcmd === "export") {
+              var fmtToken = String(graphParts[1] || "").toLowerCase()
+              var fmtInsert = hasTrailingSpace ? cursor : (cursor - fmtToken.length)
+              var fmtPartial = hasTrailingSpace ? "" : fmtToken
+              graphExportFmts.forEach(function(fmt) {
+                if (fmt.indexOf(fmtPartial) === 0) candidates.add(fmt)
+              })
+              return candidates.isEmpty() ? -1 : Number(fmtInsert)
+            }
+
+            if (graphSubcmd === "build") {
+              var buildToken = String(graphParts[1] || "").toLowerCase()
+              var buildInsert = hasTrailingSpace ? cursor : (cursor - buildToken.length)
+              var buildPartial = hasTrailingSpace ? "" : buildToken
+              if ("semantic=true".indexOf(buildPartial) === 0) candidates.add("semantic=true")
+              return candidates.isEmpty() ? -1 : Number(buildInsert)
             }
 
             return -1
@@ -5494,14 +5562,11 @@ try {
       { command: "/model [main|lc|val]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
       { command: "/models", description: "List current main, low and validation models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
-      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" }
+      { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
+      { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
+      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: dryrun, plan, apply, reorg, lint" }
     ]
-    if (toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", description: "Interact with wiki (start with context)" })
-    }
-    if ((isString(sessionOptions.memorych) && sessionOptions.memorych.trim().length > 0) || toBoolean(sessionOptions.usewiki) === true) {
-      helpCommands.push({ command: "/dream [memory|wiki] [dryrun|plan|apply|reorg|lint]", description: "Consolidate memory/wiki in dream mode" })
-    }
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
       { command: "/subtasks", description: "List all subtasks and their status" },
@@ -5820,6 +5885,35 @@ try {
       }
     } catch(wikiErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Wiki error: " + wikiErr, errorColor))
+    }
+  }
+
+  function printGraph(subcmdRaw) {
+    var wm = getConsoleWikiManager()
+    if (!isObject(wm) || !isFunction(wm.graph)) {
+      print(colorifyText("Wiki graph is not enabled. Start with usewiki=true usewikigraph=true.", hintColor))
+      return
+    }
+    var parts = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/) : []
+    var sub = parts.length > 0 ? parts[0].toLowerCase() : "stats"
+    var rest = parts.slice(1).join(" ").trim()
+    var params = { op: sub }
+    if (sub === "query" || sub === "answer" || sub === "retrieve") params.query = rest
+    if (sub === "neighbors") params.node = rest
+    if (sub === "export") params.format = rest.length > 0 ? rest : "mermaid"
+    if (sub === "path") {
+      var p = rest.split(/\s+/).filter(function(x) { return x.length > 0 })
+      if (p.length < 2) { print(colorifyText("Usage: /graph path <from> <to>", errorColor)); return }
+      params.from = p[0]
+      params.to = p[1]
+    }
+    if (sub === "build" && rest.indexOf("semantic=true") >= 0) params.semantic = true
+    try {
+      var out = wm.graph(sub, params)
+      if (isString(out)) print(out)
+      else print(printTree(out))
+    } catch(e) {
+      print(colorifyText("Graph operation failed: " + __miniAErrMsg(e), errorColor))
     }
   }
 
@@ -6261,6 +6355,14 @@ try {
       }
       if (commandLower.indexOf("wiki ") === 0) {
         printWiki(command.substring(5))
+        continue
+      }
+      if (commandLower === "graph") {
+        printGraph("stats")
+        continue
+      }
+      if (commandLower.indexOf("graph ") === 0) {
+        printGraph(command.substring(6))
         continue
       }
       if (commandLower === "dream") {

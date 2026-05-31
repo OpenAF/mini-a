@@ -189,12 +189,68 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
+      graph_query:
+        name       : graph_query
+        description: "Query wiki graph nodes."
+        inputSchema:
+          type      : object
+          properties:
+            query: { type: string }
+          required  : [ query ]
+      graph_neighbors:
+        name       : graph_neighbors
+        description: "List graph neighbors for a node or path."
+        inputSchema:
+          type      : object
+          properties:
+            node: { type: string }
+            path: { type: string }
+      graph_communities:
+        name       : graph_communities
+        description: "Return wiki graph communities grouped by shared tag. Each community has a coverage score (fraction of corpus docs in that group)."
+        inputSchema:
+          type      : object
+          properties: {}
+      graph_surprise:
+        name       : graph_surprise
+        description: "Return cross-file surprise edges with degree-based rarity scores (higher score = rarer connection)."
+        inputSchema:
+          type      : object
+          properties: {}
+      graph_stats:
+        name       : graph_stats
+        description: "Return wiki graph stats."
+        inputSchema:
+          type      : object
+          properties: {}
+      graph_export:
+        name       : graph_export
+        description: "Export wiki graph. Formats: mermaid (default), graphml (valid XML with nodes and edges), neo4j (Cypher MERGE statements), html (static HTML with mermaid), svg (label only)."
+        inputSchema:
+          type      : object
+          properties:
+            format: { type: string, default: "mermaid" }
+      graph_retrieve:
+        name       : graph_retrieve
+        description: "Graph-guided retrieval."
+        inputSchema:
+          type      : object
+          properties:
+            query: { type: string }
+
     ((fns    )): &MCPFNS
       context: Wiki context overview
       search : Wiki search pages
       read   : Wiki read page
       browse : Wiki browse section
       list   : Wiki list pages
+      graph_query: Wiki graph query
+      graph_neighbors: Wiki graph neighbors
+      graph_communities: Wiki graph communities
+      graph_surprise: Wiki graph surprise
+      graph_stats: Wiki graph stats
+      graph_export: Wiki graph export
+      graph_retrieve: Wiki graph retrieve
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
@@ -376,6 +432,40 @@ jobs:
         this._rebuildLuceneIndex(docs)
       } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
     }
+
+    MiniAWikiManager.prototype._getGraphPath = function() {
+      var root = "."
+      if (this._backendType === "fs" || this._backendType === "s3fs") root = this._backend.root
+      return root + "/.mini-a-wiki-graph"
+    }
+    MiniAWikiManager.prototype._graphPages = function() {
+      var pages = this._safeListPages("")
+      var out = []
+      for (var i=0;i<pages.length;i++) {
+        var raw = this._backend.read(pages[i]); if (!isString(raw)) continue
+        var parsed = this.parseFrontmatter(raw)
+        out.push({ path: pages[i], meta: isMap(parsed.meta) ? parsed.meta : {}, body: isString(parsed.body) ? parsed.body : "", links: this.extractLinks(isString(parsed.body) ? parsed.body : "") })
+      }
+      return out
+    }
+    MiniAWikiManager.prototype._rebuildGraphIndex = function() {
+      if (!isObject(this._graph)) return
+      try { this._graph.buildStructural(this._graphPages()) } catch(e) { this._logFn("warn", "Failed to rebuild graph index: " + __miniAErrMsg(e)) }
+    }
+    MiniAWikiManager.prototype.graph = function(op, params) {
+      if (!isObject(this._graph)) return { ok: false, error: "graph is not enabled" }
+      var action = isString(op) ? op.toLowerCase().trim() : "stats"
+      var p = isMap(params) ? params : {}
+      if (action === "build") return { ok: true, structural: this._graph.buildStructural(this._graphPages()) }
+      if (action === "query") return this._graph.query(isString(p.query) ? p.query : "")
+      if (action === "neighbors") return this._graph.neighbors(isString(p.node) ? p.node : (isString(p.path) ? ("doc:" + p.path) : ""))
+      if (action === "communities") return this._graph.detectCommunities()
+      if (action === "surprise") return this._graph.crossDocumentSurprise()
+      if (action === "stats") return this._graph.stats()
+      if (action === "export") return this._graph.export(isString(p.format) ? p.format : "mermaid")
+      if (action === "retrieve") return this._graph.retrieve(p.query || "", p)
+      return { ok: false, error: "unknown graph op: " + action }
+    }
     
     MiniAWikiManager.prototype._getLuceneIndexPath = function() {
       var root = "."
@@ -531,8 +621,12 @@ jobs:
       this._access      = "ro"
       this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
       this._config  = cfg
+      this._graph = __
       this._mounts  = isArray(this._mounts) ? this._mounts : []
       this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
+      if (toBoolean(cfg.usegraph) === true) {
+        try { loadLib("mini-a-graph.js"); this._graph = new MiniAWikiGraph({ graphDir: this._getGraphPath(), communityAlgo: "louvain" }, function(level, msg) { this._logFn(level, msg) }.bind(this)) } catch(ge) { this._graph = __ }
+      }
       this._bootstrapWiki()
     }
     
@@ -624,6 +718,7 @@ jobs:
           if (this._backend.exists(indexPath)) return { ok: true, created: [], skipped: [ indexPath ] }
           this._backend.write(indexPath, this._makeIndexContent(indexPath))
           this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
           return { ok: true, created: [ indexPath ], skipped: [] }
         } catch(sectionErr) {
           return { ok: false, error: __miniAErrMsg(sectionErr) }
@@ -638,6 +733,7 @@ jobs:
       var skipped = []
       try {
         this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
         if (!hasAgents) {
           // AGENTS.md TEMPLATE FOLLOWS — kept inline for MCP yaml standalone portability.
           // Sync with mini-a-wiki.js __miniAWikiAgentsTemplate when updating.
@@ -1251,6 +1347,7 @@ jobs:
         try {
           this._backend.write(path, this._serializeFrontmatter(updatedMeta, reparsed.body))
           this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
           return { ok: true, path: path }
         } catch(e) {
           return { ok: false, error: __miniAErrMsg(e) }
@@ -1286,6 +1383,7 @@ jobs:
         var content = this._serializeFrontmatter(meta, bodyText)
         this._backend.write(path, content)
         this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
         return { ok: true, path: path }
       } catch(e) {
         return { ok: false, error: __miniAErrMsg(e) }
@@ -1307,6 +1405,7 @@ jobs:
       try {
         this._backend.delete(path)
         this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
         return { ok: true, path: path }
       } catch(e) {
         return { ok: false, error: __miniAErrMsg(e) }
@@ -1623,6 +1722,7 @@ jobs:
       }
     
       this._rebuildSearchIndex()
+          this._rebuildGraphIndex()
       return {
         ok: true,
         from: fromPath,
@@ -1844,7 +1944,8 @@ jobs:
 
     var cfg = {
       access : "ro",
-      backend: args.wikibackend
+      backend: args.wikibackend,
+      usegraph: true
     }
 
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
@@ -1993,6 +2094,55 @@ jobs:
       return { target: links.target, count: links.count, pages: links.backlinks.map(function(b) { return { path: b.path, title: b.title } }) }
     }
     return links
+
+# -----------------
+# ------------------
+- name : Wiki graph query
+  check:
+    in:
+      query: isString
+  exec : | #js
+    return global.__wikiManager.graph("query", { query: args.query })
+
+# ------------------
+- name : Wiki graph neighbors
+  check:
+    in:
+      node: isString.default("")
+      path: isString.default("")
+  exec : | #js
+    return global.__wikiManager.graph("neighbors", { node: args.node, path: args.path })
+
+# ------------------
+- name : Wiki graph communities
+  exec : | #js
+    return global.__wikiManager.graph("communities", {})
+
+# ------------------
+- name : Wiki graph surprise
+  exec : | #js
+    return global.__wikiManager.graph("surprise", {})
+
+# ------------------
+- name : Wiki graph stats
+  exec : | #js
+    return global.__wikiManager.graph("stats", {})
+
+# ------------------
+- name : Wiki graph export
+  check:
+    in:
+      format: isString.default("mermaid")
+  exec : | #js
+    return global.__wikiManager.graph("export", { format: args.format })
+
+# ------------------
+- name : Wiki graph retrieve
+  check:
+    in:
+      query: isString
+  exec : | #js
+    return global.__wikiManager.graph("retrieve", { query: args.query })
 
 # -----------------
 # -----------------

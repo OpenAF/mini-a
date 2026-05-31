@@ -883,12 +883,22 @@ The `start()` method accepts various configuration options:
 - **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
 - **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"`.
+- **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action.
+- **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`.
+- **`wikigraphcommunity`** (string, default: `louvain`): Graph community detection algorithm.
+- **`wikigraphsearchhints`** (boolean, default: `true`): Add graph-related page hints to `wiki search`.
+- **`wikigraphhintcap`** (number, default: `5`): Maximum related-page hints from graph per search.
+- **`wikigraphfalkorhost`** (string, optional): FalkorDB host for graph sync/query.
+- **`wikigraphfalkorport`** (number, default: `6379`): FalkorDB port.
+- **`wikigraphfalkorgraph`** (string, default: `mini_a_wiki`): FalkorDB graph name.
+- **`wikigraphfalkoruser`** / **`wikigraphfalkorpass`** (string, optional): FalkorDB credentials.
 
 A brand-new wiki bootstraps three pages: `AGENTS.md` (contribution rules, schema, ingestion workflow, writing style), `index.md` (catalog with summaries and section links), and `log.md` (append-only journal). Folders become browsable sub-wikis when they contain a local `index.md`.
 
 **Recommended wiki ops sequence (agent or MCP):** `context` → `search` → `read` (with `section=` for long pages) → `write`/`lint`. The `context` op returns a compact overview in <500 tokens — use it once to orient before any search. `search` returns `{path, title, description}` by default (no full content); add `contextLines>0` for snippets. `list withMeta=true` returns metadata for all pages in one call. Reads to mounted wikis use the `@name/path.md` syntax; writes are always to the primary wiki.
 
 Dynamic (runtime) mount management: `wiki op="attach" name=ext backend=fs root=/path`, `wiki op="detach" name=ext`, `wiki op="mounts"`. In console: `/wiki attach ext root=/path`, `/wiki detach ext`, `/wiki mounts`.
+Graph runtime operations: `graph op="build|query|neighbors|path|communities|surprise|stats|export|falkor|retrieve|answer"` and in console `/graph ...`.
 
 For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `esurl=` runtime argument; use `wikiurl=` with `wikibackend=es`.
 - **`mode`** (string): Apply a preset from [`mini-a-modes.yaml`](mini-a-modes.yaml), `~/.openaf-mini-a_modes.yaml`, or `~/.openaf-mini-a/modes.yaml` to prefill a bundle of related flags

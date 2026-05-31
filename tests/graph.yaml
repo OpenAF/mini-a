@@ -1,0 +1,66 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA Graph Tests::Init
+  exec: args.tests = require("tests/graph.js")
+
+- name: MiniA Graph Tests::StructuralBuild
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphStructuralBuild
+
+- name: MiniA Graph Tests::QueryNeighbors
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphQueryNeighbors
+
+- name: MiniA Graph Tests::RelatedAndExport
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphRelatedAndExport
+
+- name: MiniA Graph Tests::SaveLoadRoundTrip
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphSaveLoadRoundTrip
+
+- name: MiniA Graph Tests::ProvenanceEdgeValidation
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphProvenanceEdgeValidation
+
+- name: MiniA Graph Tests::StaleNodePruning
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphStaleNodePruning
+
+- name: MiniA Graph Tests::SharedTagRelated
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphSharedTagRelated
+
+- name: MiniA Graph Tests::Communities
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphCommunities
+
+- name: MiniA Graph Tests::SurpriseScores
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphSurpriseScores
+
+- name: MiniA Graph Tests::GraphMLExport
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphMLExport
+
+- name: MiniA Graph Tests::ShrinkWarning
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphShrinkWarning
+
+- name: MiniA Graph Tests::SemanticInvalidation
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphSemanticInvalidation

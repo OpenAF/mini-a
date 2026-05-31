@@ -1718,6 +1718,26 @@ MiniUtilsTool.prototype.wiki = function(params) {
 
 /**
  * <odoc>
+ * <key>MiniUtilsTool.graph(params) : Object|String</key>
+ * Interact with the optional wiki graph layer when `usewikigraph=true`.
+ * </odoc>
+ */
+MiniUtilsTool.prototype.graph = function(params) {
+  params = params || {}
+  try {
+    this._ensureInitialized()
+    var wm = isObject(this._wikiManager) ? this._wikiManager : __
+    if (!isObject(wm) || !isFunction(wm.graph)) return "[ERROR] Wiki graph is not configured. Enable usewiki=true and usewikigraph=true."
+    var op = isString(params.operation) ? params.operation.toLowerCase().trim()
+      : (isString(params.op) ? params.op.toLowerCase().trim() : "stats")
+    return wm.graph(op, params)
+  } catch (e) {
+    return "[ERROR] " + __miniAErrMsg(e)
+  }
+}
+
+/**
+ * <odoc>
  * <key>MiniUtilsTool.getFileInfo(params) : Object</key>
  * Retrieves information about a file or directory specified by the `path` parameter.
  * The `params` object can have the following properties:
@@ -4335,6 +4355,24 @@ MiniUtilsTool._metadataByFn = (function() {
             then: { required: ["path"] }
           }
         ]
+      }
+    },
+    graph: {
+      name       : "graph",
+      description: "Interact with the optional wiki graph layer (requires usewikigraph=true). Operations: build, stats, query, neighbors, path, communities, surprise, retrieve, answer, export, falkor.",
+      inputSchema: {
+        type      : "object",
+        properties: {
+          operation: { type: "string", enum: ["build", "stats", "query", "neighbors", "path", "communities", "surprise", "retrieve", "answer", "export", "falkor"], default: "stats" },
+          op       : { type: "string", description: "Alias for operation." },
+          query    : { type: "string", description: "Query text for query/retrieve/answer." },
+          text     : { type: "string", description: "Alias for query in graph query." },
+          node     : { type: "string", description: "Node id for neighbors." },
+          from     : { type: "string", description: "From node/path for path operation." },
+          to       : { type: "string", description: "To node/path for path operation." },
+          format   : { type: "string", description: "Export format (mermaid, graphml, neo4j, html, svg, falkordb)." },
+          semantic : { type: "boolean", description: "When operation=build, also run semantic extraction." }
+        }
       }
     }
   }
