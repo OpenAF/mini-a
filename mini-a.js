@@ -19339,11 +19339,15 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
           }, function(a) {
             try {
               if (!isString(a.url) || a.url.length === 0) return "Error: no URL provided"
-              var conn = new java.net.URL(String(a.url)).openConnection()
+              var u = new java.net.URL(String(a.url))
+              var proto = String(u.getProtocol() || "").toLowerCase()
+              if (["http", "https"].indexOf(proto) < 0) return "Error: only http/https URLs are allowed"
+              var conn = u.openConnection()
               conn.setConnectTimeout(30000)
               conn.setReadTimeout(30000)
               if (conn instanceof java.net.HttpURLConnection) conn.setInstanceFollowRedirects(true)
-              return String(af.fromInputStream2String(conn.getInputStream()))
+              var is = conn.getInputStream()
+              try { return String(af.fromInputStream2String(is)) } finally { try { is.close() } catch(ignore) {} }
             } catch(e) { return "Error fetching '" + a.url + "': " + __miniAErrMsg(e) }
           })
           this.fnI("info", "Validation LLM equipped with read_file and fetch_url tools")
