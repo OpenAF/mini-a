@@ -616,7 +616,6 @@ MiniAWikiGraph.prototype.save = function() {
   var jsonSurprise = JSON.stringify(surpriseArr)
 
   var reportMD = "# Graph report\n\n" +
-                 "<script src=\"https://unpkg.com/vis-network/standalone/umd/vis-network.min.js\"></script>\n\n" +
                  "<div class=\"wiki-graph-container\" style=\"display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: var(--text-primary, #333); margin-top: 20px;\">\n" +
                  "  <!-- Stats Summary Cards -->\n" +
                  "  <div style=\"display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;\">\n" +
