@@ -1945,7 +1945,7 @@ jobs:
     var cfg = {
       access : "ro",
       backend: args.wikibackend,
-      usegraph: true
+      usegraph: isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false
     }
 
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
