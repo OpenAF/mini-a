@@ -353,17 +353,20 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
   // F12: undefined means enabled; only explicit false disables hints
   if (this._config.wikigraphsearchhints === false && opts.wikigraphsearchhints !== true) return hits
   var cap = isNumber(opts.wikigraphhintcap) ? opts.wikigraphhintcap : (isNumber(this._config.wikigraphhintcap) ? this._config.wikigraphhintcap : 5)
+  var lim = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : __
+  if (isNumber(lim) && hits.length >= lim) return hits
   var paths = hits.map(function(h) { return h.path }).filter(function(p) { return isString(p) && !p.startsWith("@") })
   if (paths.length === 0) return hits
   var related = this._graph.relatedFor(paths, { cap: cap })
   if (!isArray(related) || related.length === 0) return hits
-  return hits.concat(related.map(function(r) {
+  var combined = hits.concat(related.map(function(r) {
     return {
       path: r.path,
       title: r.path.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
       description: "[Related pages (graph)] " + r.connection + " score=" + r.score + " provenance=" + r.provenance + " — " + r.digest
     }
   }))
+  return isNumber(lim) ? combined.slice(0, lim) : combined
 }
 
 MiniAWikiManager.prototype.graph = function(op, params) {
