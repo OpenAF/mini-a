@@ -4367,10 +4367,7 @@ MiniUtilsTool._metadataByFn = (function() {
           op       : { type: "string", description: "Alias for operation." },
           query    : { type: "string", description: "Query text for query/retrieve/answer." },
           text     : { type: "string", description: "Alias for query in graph query." },
-          node     : { type: "string", description: "Node id for neighbors." },
-          from     : { type: "string", description: "From node/path for path operation." },
-          to       : { type: "string", description: "To node/path for path operation." },
-          format   : { type: "string", description: "Export format (mermaid, graphml, neo4j, html, svg, falkordb)." },
+          format   : { type: "string", description: "Export format (mermaid, graphml, neo4j, html, svg)." },
           semantic : { type: "boolean", description: "When operation=build, also run semantic extraction." }
         }
       }
