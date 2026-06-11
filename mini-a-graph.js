@@ -333,7 +333,8 @@ MiniAWikiGraph.prototype.crossDocumentSurprise = function() {
   var result = []
   var seen = {}
   this._state.edges.forEach(function(e) {
-    var docEdge = e.type === "LINKS_TO" || e.type === "SUPERSEDES" || e.type === "INFERRED" || e.type === "AMBIGUOUS"
+    var prov = String(e.provenance || "").toUpperCase()
+    var docEdge = e.type === "LINKS_TO" || e.type === "SUPERSEDES" || prov === "INFERRED" || prov === "AMBIGUOUS"
     if (!docEdge) return
     if (!String(e.from).startsWith("doc:") || !String(e.to).startsWith("doc:")) return
     var a = String(e.from).substring(4)
