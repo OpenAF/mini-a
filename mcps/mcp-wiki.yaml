@@ -55,6 +55,18 @@ help:
     desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
     example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
+  - name     : usewikigraph
+    desc     : "Enable the wiki knowledge graph (must have been built by a rw mini-a/mcp-wiki-ops session). When enabled, search transparently appends related-page hints."
+    example  : "false"
+    mandatory: false
+  - name     : wikigraphsearchhints
+    desc     : Append graph-related pages to search results when the wiki graph is enabled
+    example  : "true"
+    mandatory: false
+  - name     : wikigraphhintcap
+    desc     : Maximum graph-hint pages appended to search results
+    example  : "5"
+    mandatory: false
 
 todo:
 - Init
@@ -189,68 +201,12 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
-      graph_query:
-        name       : graph_query
-        description: "Query wiki graph nodes."
-        inputSchema:
-          type      : object
-          properties:
-            query: { type: string }
-          required  : [ query ]
-      graph_neighbors:
-        name       : graph_neighbors
-        description: "List graph neighbors for a node or path."
-        inputSchema:
-          type      : object
-          properties:
-            node: { type: string }
-            path: { type: string }
-      graph_communities:
-        name       : graph_communities
-        description: "Return wiki graph communities grouped by shared tag. Each community has a coverage score (fraction of corpus docs in that group)."
-        inputSchema:
-          type      : object
-          properties: {}
-      graph_surprise:
-        name       : graph_surprise
-        description: "Return cross-file surprise edges with degree-based rarity scores (higher score = rarer connection)."
-        inputSchema:
-          type      : object
-          properties: {}
-      graph_stats:
-        name       : graph_stats
-        description: "Return wiki graph stats."
-        inputSchema:
-          type      : object
-          properties: {}
-      graph_export:
-        name       : graph_export
-        description: "Export wiki graph. Formats: mermaid (default), graphml (valid XML with nodes and edges), neo4j (Cypher MERGE statements), html (static HTML with mermaid), svg (label only)."
-        inputSchema:
-          type      : object
-          properties:
-            format: { type: string, default: "mermaid" }
-      graph_retrieve:
-        name       : graph_retrieve
-        description: "Graph-guided retrieval."
-        inputSchema:
-          type      : object
-          properties:
-            query: { type: string }
-
     ((fns    )): &MCPFNS
       context: Wiki context overview
       search : Wiki search pages
       read   : Wiki read page
       browse : Wiki browse section
       list   : Wiki list pages
-      graph_query: Wiki graph query
-      graph_neighbors: Wiki graph neighbors
-      graph_communities: Wiki graph communities
-      graph_surprise: Wiki graph surprise
-      graph_stats: Wiki graph stats
-      graph_export: Wiki graph export
-      graph_retrieve: Wiki graph retrieve
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"
@@ -410,6 +366,16 @@ jobs:
       var meta = this._indexMeta()
       return meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
     }
+
+    MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
+      var p = isString(path) ? String(path).trim() : ""
+      if (p.length === 0) return false
+      if (this._isHiddenPath(p)) return true
+      var bn = p.split("/").pop()
+      if (bn === "AGENTS.md" || bn === "index.md" || bn === "log.md") return true
+      if (p.indexOf("/.mini-a-wiki-graph/") >= 0 || p.indexOf("/.mini-a-wiki-graph") === 0) return true
+      return p.split("/").some(function(part) { return part.length > 0 && part.charAt(0) === "." })
+    }
     
     MiniAWikiManager.prototype._safeListPages = function(prefix) {
       var self = this
@@ -421,7 +387,8 @@ jobs:
     MiniAWikiManager.prototype._rebuildSearchIndex = function() {
       if (this._access !== 'rw') return
       try {
-        var pages = this._safeListPages("")
+        var self = this
+        var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
         var docs = []
         for (var i=0;i<pages.length;i++) {
           var raw = this._backend.read(pages[i])
@@ -439,7 +406,8 @@ jobs:
       return root + "/.mini-a-wiki-graph"
     }
     MiniAWikiManager.prototype._graphPages = function() {
-      var pages = this._safeListPages("")
+      var self = this
+      var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
       var out = []
       for (var i=0;i<pages.length;i++) {
         var raw = this._backend.read(pages[i]); if (!isString(raw)) continue
@@ -452,19 +420,27 @@ jobs:
       if (!isObject(this._graph)) return
       try { this._graph.buildStructural(this._graphPages()) } catch(e) { this._logFn("warn", "Failed to rebuild graph index: " + __miniAErrMsg(e)) }
     }
-    MiniAWikiManager.prototype.graph = function(op, params) {
-      if (!isObject(this._graph)) return { ok: false, error: "graph is not enabled" }
-      var action = isString(op) ? op.toLowerCase().trim() : "stats"
-      var p = isMap(params) ? params : {}
-      if (action === "build") return { ok: true, structural: this._graph.buildStructural(this._graphPages()) }
-      if (action === "query") return this._graph.query(isString(p.query) ? p.query : "")
-      if (action === "neighbors") return this._graph.neighbors(isString(p.node) ? p.node : (isString(p.path) ? ("doc:" + p.path) : ""))
-      if (action === "communities") return this._graph.detectCommunities()
-      if (action === "surprise") return this._graph.crossDocumentSurprise()
-      if (action === "stats") return this._graph.stats()
-      if (action === "export") return this._graph.export(isString(p.format) ? p.format : "mermaid")
-      if (action === "retrieve") return this._graph.retrieve(p.query || "", p)
-      return { ok: false, error: "unknown graph op: " + action }
+    // Appends graph-related pages to search results when the wiki graph is enabled.
+    // Transparent to callers: a no-op when usegraph=false or the graph index is empty.
+    MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
+      if (!isArray(hits) || !isObject(this._graph)) return hits
+      var opts = isObject(options) ? options : {}
+      if (this._config.wikigraphsearchhints === false && opts.wikigraphsearchhints !== true) return hits
+      var cap = isNumber(opts.wikigraphhintcap) ? opts.wikigraphhintcap : (isNumber(this._config.wikigraphhintcap) ? this._config.wikigraphhintcap : 5)
+      var lim = isNumber(opts.limit) && opts.limit > 0 ? opts.limit : __
+      if (isNumber(lim) && hits.length >= lim) return hits
+      var paths = hits.map(function(h) { return h.path }).filter(function(p) { return isString(p) && !p.startsWith("@") })
+      if (paths.length === 0) return hits
+      var related = this._graph.relatedFor(paths, { cap: cap })
+      if (!isArray(related) || related.length === 0) return hits
+      var combined = hits.concat(related.map(function(r) {
+        return {
+          path: r.path,
+          title: r.path.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
+          description: "[Related pages (graph)] " + r.connection + " score=" + r.score + " provenance=" + r.provenance + " — " + r.digest
+        }
+      }))
+      return isNumber(lim) ? combined.slice(0, lim) : combined
     }
     
     MiniAWikiManager.prototype._getLuceneIndexPath = function() {
@@ -1436,8 +1412,9 @@ jobs:
         pattern = new RegExp(q.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"), caseSens ? "g" : "gi")
       }
     
+      var self = this
       var pages   = scopedPath.length > 0 ? [scopedPath] : this.list("")
-      pages = pages.filter(p => !this._isHiddenPath(p))
+      pages = pages.filter(function(p) { return !self._isSearchExcludedPath(p) })
       var results = []
     
       if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
@@ -1459,8 +1436,8 @@ jobs:
                 line: isNumber(h.line) ? h.line : 1,
                 snippet: isString(h.content) ? h.content.substring(0, 180) : q
               }
-            }).filter(r => isString(r.path) && r.path.length > 0)
-            if (validHits.length > 0) return validHits
+            }).filter(function(r) { return isString(r.path) && r.path.length > 0 && !self._isSearchExcludedPath(r.path) })
+            if (validHits.length > 0) return this._withGraphHints(validHits, opts)
           }
         } catch(le) {
           this._logFn("warn", "Lucene search fallback to scan: " + __miniAErrMsg(le))
@@ -1507,9 +1484,9 @@ jobs:
         }
       }
 
-      return results
+      return this._withGraphHints(results, opts)
     }
-    
+
     MiniAWikiManager.prototype.tree = function(prefix, depth) {
       var sectionPrefix = ""
       try { sectionPrefix = this._normalizeSectionPath(prefix) } catch(e) { sectionPrefix = "" }
@@ -1942,10 +1919,13 @@ jobs:
     args.wikibackend = String(args.wikibackend).toLowerCase().trim()
     if (["fs", "s3", "es", "s3fs"].indexOf(args.wikibackend) < 0) args.wikibackend = "fs"
 
+    var wikiGraphHintCap = Number(args.wikigraphhintcap)
     var cfg = {
       access : "ro",
       backend: args.wikibackend,
-      usegraph: isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false
+      usegraph: isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false,
+      wikigraphsearchhints: isDef(args.wikigraphsearchhints) ? toBoolean(args.wikigraphsearchhints) : true,
+      wikigraphhintcap: isNumber(wikiGraphHintCap) && wikiGraphHintCap > 0 ? wikiGraphHintCap : 5
     }
 
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
@@ -2094,58 +2074,3 @@ jobs:
       return { target: links.target, count: links.count, pages: links.backlinks.map(function(b) { return { path: b.path, title: b.title } }) }
     }
     return links
-
-# -----------------
-# ------------------
-- name : Wiki graph query
-  check:
-    in:
-      query: isString
-  exec : | #js
-    return global.__wikiManager.graph("query", { query: args.query })
-
-# ------------------
-- name : Wiki graph neighbors
-  check:
-    in:
-      node: isString.default("")
-      path: isString.default("")
-  exec : | #js
-    return global.__wikiManager.graph("neighbors", { node: args.node, path: args.path })
-
-# ------------------
-- name : Wiki graph communities
-  exec : | #js
-    return global.__wikiManager.graph("communities", {})
-
-# ------------------
-- name : Wiki graph surprise
-  exec : | #js
-    return global.__wikiManager.graph("surprise", {})
-
-# ------------------
-- name : Wiki graph stats
-  exec : | #js
-    return global.__wikiManager.graph("stats", {})
-
-# ------------------
-- name : Wiki graph export
-  check:
-    in:
-      format: isString.default("mermaid")
-  exec : | #js
-    return global.__wikiManager.graph("export", { format: args.format })
-
-# ------------------
-- name : Wiki graph retrieve
-  check:
-    in:
-      query: isString
-  exec : | #js
-    return global.__wikiManager.graph("retrieve", { query: args.query })
-
-# -----------------
-# -----------------
-# ------------------
-# -----------
-# -----------

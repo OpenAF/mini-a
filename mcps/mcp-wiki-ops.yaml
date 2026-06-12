@@ -43,6 +43,31 @@ help:
     desc     : Ignore TLS cert validation on S3 endpoint
     example  : "false"
     mandatory: false
+  - name     : usewikigraph
+    desc     : Enable the wiki graph layer explicitly. Also enabled automatically when FalkorDB host is provided.
+    example  : "false"
+    mandatory: false
+  - name     : wikigraphcommunity
+    desc     : Community detection algorithm for the wiki graph.
+    example  : "louvain"
+    mandatory: false
+  - name     : wikigraphfalkorhost
+    desc     : FalkorDB host for graph sync/query.
+    mandatory: false
+  - name     : wikigraphfalkorport
+    desc     : FalkorDB port for graph sync/query.
+    example  : "6379"
+    mandatory: false
+  - name     : wikigraphfalkorgraph
+    desc     : FalkorDB graph name.
+    example  : "mini_a_wiki"
+    mandatory: false
+  - name     : wikigraphfalkoruser
+    desc     : FalkorDB username.
+    mandatory: false
+  - name     : wikigraphfalkorpass
+    desc     : FalkorDB password.
+    mandatory: false
   - name     : toolPrefix
     desc     : Optional prefix prepended to all tool names (e.g. "docs-" -> docs-list, docs-read, ...)
     example  : "wiki-"
@@ -255,6 +280,13 @@ jobs:
       wikiregion          : isString.default(__)
       wikiuseversion1     : toBoolean.isBoolean.default(false)
       wikiignorecertcheck : toBoolean.isBoolean.default(false)
+      usewikigraph        : toBoolean.isBoolean.default(false)
+      wikigraphcommunity  : isString.default(__)
+      wikigraphfalkorhost : isString.default(__)
+      wikigraphfalkorport : isString.default(__)
+      wikigraphfalkorgraph: isString.default(__)
+      wikigraphfalkoruser : isString.default(__)
+      wikigraphfalkorpass : isString.default(__)
       label               : isString.default("wiki")
       wikiaccess          : isString.default("rw")
       wikiopsreadonly     : toBoolean.isBoolean.default(false)
@@ -369,6 +401,16 @@ jobs:
       var meta = this._indexMeta()
       return meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
     }
+
+    MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
+      var p = isString(path) ? String(path).trim() : ""
+      if (p.length === 0) return false
+      if (this._isHiddenPath(p)) return true
+      var bn = p.split("/").pop()
+      if (bn === "AGENTS.md" || bn === "index.md" || bn === "log.md") return true
+      if (p.indexOf("/.mini-a-wiki-graph/") >= 0 || p.indexOf("/.mini-a-wiki-graph") === 0) return true
+      return p.split("/").some(function(part) { return part.length > 0 && part.charAt(0) === "." })
+    }
     
     MiniAWikiManager.prototype._safeListPages = function(prefix) {
       var self = this
@@ -380,7 +422,8 @@ jobs:
     MiniAWikiManager.prototype._rebuildSearchIndex = function() {
       if (this._access !== 'rw') return
       try {
-        var pages = this._safeListPages("")
+        var self = this
+        var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
         var docs = []
         for (var i=0;i<pages.length;i++) {
           var raw = this._backend.read(pages[i])
@@ -397,7 +440,8 @@ jobs:
       return root + "/.mini-a-wiki-graph"
     }
     MiniAWikiManager.prototype._graphPages = function() {
-      var pages = this._safeListPages("")
+      var self = this
+      var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
       var out = []
       for (var i=0;i<pages.length;i++) {
         var raw = this._backend.read(pages[i]); if (!isString(raw)) continue
@@ -576,7 +620,14 @@ jobs:
       this._mounts  = isArray(this._mounts) ? this._mounts : []
       this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
       if (toBoolean(cfg.usegraph) === true) {
-        try { loadLib("mini-a-graph.js"); this._graph = new MiniAWikiGraph({ graphDir: this._getGraphPath(), communityAlgo: "louvain" }, function(level, msg) { this._logFn(level, msg) }.bind(this)) } catch(ge) { this._graph = __ }
+        try {
+          loadLib("mini-a-graph.js")
+          this._graph = new MiniAWikiGraph({
+            graphDir: this._getGraphPath(),
+            communityAlgo: isString(cfg.wikigraphcommunity) ? cfg.wikigraphcommunity : "louvain",
+            falkor: isMap(cfg.wikigraphfalkor) ? cfg.wikigraphfalkor : __
+          }, function(level, msg) { this._logFn(level, msg) }.bind(this))
+        } catch(ge) { this._graph = __ }
       }
       this._bootstrapWiki()
     }
@@ -1491,8 +1542,9 @@ jobs:
         pattern = new RegExp(q.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"), caseSens ? "g" : "gi")
       }
     
+      var self = this
       var pages   = scopedPath.length > 0 ? [scopedPath] : this.list("")
-      pages = pages.filter(p => !this._isHiddenPath(p))
+      pages = pages.filter(function(p) { return !self._isSearchExcludedPath(p) })
       var results = []
     
       if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
@@ -1514,7 +1566,7 @@ jobs:
                 line: isNumber(h.line) ? h.line : 1,
                 snippet: isString(h.content) ? h.content.substring(0, 180) : q
               }
-            }).filter(r => isString(r.path) && r.path.length > 0)
+            }).filter(function(r) { return isString(r.path) && r.path.length > 0 && !self._isSearchExcludedPath(r.path) })
             if (validHits.length > 0) return validHits
           }
         } catch(le) {
@@ -1990,10 +2042,20 @@ jobs:
     args.wikibackend = String(args.wikibackend).toLowerCase().trim()
     if (["fs", "s3", "es", "s3fs"].indexOf(args.wikibackend) < 0) args.wikibackend = "fs"
     args.wikiaccess = String(args.wikiaccess).toLowerCase().trim() === "ro" ? "ro" : "rw"
+    var wikiGraphFalkorHost = isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0 ? args.wikigraphfalkorhost.trim() : __
+    var wikiGraphFalkorPort = isNumber(args.wikigraphfalkorport) ? args.wikigraphfalkorport : Number(args.wikigraphfalkorport)
     var cfg = {
       access : args.wikiaccess,
       backend: args.wikibackend,
-      usegraph: toBoolean(args.usewikigraph)
+      usegraph: toBoolean(args.usewikigraph) === true || isString(wikiGraphFalkorHost),
+      wikigraphcommunity: isString(args.wikigraphcommunity) ? args.wikigraphcommunity : __,
+      wikigraphfalkor: {
+        host: wikiGraphFalkorHost,
+        port: isNumber(wikiGraphFalkorPort) ? wikiGraphFalkorPort : 6379,
+        graph: isString(args.wikigraphfalkorgraph) && args.wikigraphfalkorgraph.trim().length > 0 ? args.wikigraphfalkorgraph.trim() : "mini_a_wiki",
+        user: isString(args.wikigraphfalkoruser) && args.wikigraphfalkoruser.trim().length > 0 ? args.wikigraphfalkoruser.trim() : __,
+        pass: isString(args.wikigraphfalkorpass) && args.wikigraphfalkorpass.trim().length > 0 ? args.wikigraphfalkorpass.trim() : __
+      }
     }
 
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
@@ -2113,9 +2175,9 @@ jobs:
 # -------------------
 - name : Wiki reindex
   exec : | #js
-    if (args.wikiopsreadonly === true || String(args.wikiaccess || "").toLowerCase() !== "rw") return { ok: false, error: "wiki is read-only" }
     var wm = global.__wikiManager
     if (!isObject(wm)) return { ok: false, error: "wiki manager not initialized" }
+    if (String(wm._access || "").toLowerCase() !== "rw") return { ok: false, error: "wiki is read-only" }
     try {
       if (isFunction(wm.reindex)) return wm.reindex()
       wm._rebuildSearchIndex()
@@ -2131,8 +2193,10 @@ jobs:
     in:
       semantic: toBoolean.isBoolean.default(false)
   exec : | #js
-    if (args.wikiopsreadonly === true || String(args.wikiaccess || "").toLowerCase() !== "rw") return { ok: false, error: "wiki is read-only" }
-    return global.__wikiManager.graph("build", { semantic: args.semantic === true })
+    var wm = global.__wikiManager
+    if (!isObject(wm)) return { ok: false, error: "wiki manager not initialized" }
+    if (String(wm._access || "").toLowerCase() !== "rw") return { ok: false, error: "wiki is read-only" }
+    return wm.graph("build", { semantic: args.semantic === true })
 
 # -------------------
 - name : Wiki graph falkor

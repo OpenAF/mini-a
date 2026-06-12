@@ -239,6 +239,16 @@ MiniAWikiManager.prototype._isHiddenPath = function(path) {
   return meta.hiddenNames.indexOf(p) >= 0 || meta.hiddenNames.indexOf(bn) >= 0
 }
 
+MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
+  var p = isString(path) ? String(path).trim() : ""
+  if (p.length === 0) return false
+  if (this._isHiddenPath(p)) return true
+  var bn = p.split("/").pop()
+  if (bn === "AGENTS.md" || bn === "index.md" || bn === "log.md") return true
+  if (p.indexOf("/.mini-a-wiki-graph/") >= 0 || p.indexOf("/.mini-a-wiki-graph") === 0) return true
+  return p.split("/").some(function(part) { return part.length > 0 && part.charAt(0) === "." })
+}
+
 MiniAWikiManager.prototype._safeListPages = function(prefix) {
   var self = this
   return this._backend.list(prefix).filter(function(p) {
@@ -249,7 +259,8 @@ MiniAWikiManager.prototype._safeListPages = function(prefix) {
 MiniAWikiManager.prototype._rebuildSearchIndex = function() {
   if (this._access !== 'rw') return
   try {
-    var pages = this._safeListPages("")
+    var self = this
+    var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
     var docs = []
     for (var i=0;i<pages.length;i++) {
       var raw = this._backend.read(pages[i])
@@ -268,7 +279,8 @@ MiniAWikiManager.prototype._getGraphPath = function() {
 }
 
 MiniAWikiManager.prototype._graphPages = function() {
-  var pages = this._safeListPages("")
+  var self = this
+  var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
   var out = []
   for (var i = 0; i < pages.length; i++) {
     var raw = this._backend.read(pages[i])
@@ -1329,8 +1341,9 @@ MiniAWikiManager.prototype.search = function(query, options) {
     pattern = new RegExp(q.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"), caseSens ? "g" : "gi")
   }
 
+  var self = this
   var pages   = scopedPath.length > 0 ? [scopedPath] : this.list("")
-  pages = pages.filter(p => !this._isHiddenPath(p))
+  pages = pages.filter(function(p) { return !self._isSearchExcludedPath(p) })
   var results = []
 
   if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
@@ -1361,7 +1374,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
             return { path: hitPath, title: hitTitle, description: hitDesc }
           }
           return { path: hitPath, title: hitTitle, line: isNumber(h.line) ? h.line : 1, snippet: isString(h.content) ? h.content.substring(0, 180) : q }
-        }).filter(r => isString(r.path) && r.path.length > 0)
+        }).filter(function(r) { return isString(r.path) && r.path.length > 0 && !self._isSearchExcludedPath(r.path) })
         if (validHits.length > 0) {
           // Fan out to mounts after primary results
           var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length)

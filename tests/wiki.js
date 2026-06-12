@@ -397,14 +397,30 @@
   exports.testFsBackendSearch = function() {
     var dir = createTestDir()
     try {
+      writePage(dir, "AGENTS.md", "# Agents\nThe quick brown fox should not be searchable here.")
       writePage(dir, "alpha.md", "---\ntitle: Alpha\n---\nThe quick brown fox.")
       writePage(dir, "beta.md", "---\ntitle: Beta\n---\nSomething else entirely.")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir })
       var hits = wm.search("quick brown")
       ow.test.assert(hits.length >= 1, true, "should find matching page")
       ow.test.assert(hits[0].path, "alpha.md", "should return alpha.md")
+      ow.test.assert(hits.some(function(hit) { return hit.path === "AGENTS.md" }), false, "search should exclude AGENTS.md")
       var noHits = wm.search("zzznomatchzzz")
       ow.test.assert(noHits.length, 0, "should return empty for no match")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testFsBackendSearchSkipsWikiInternalFiles = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "alpha.md", "---\ntitle: Alpha\n---\nAlpha search term.")
+      writePage(dir, ".mini-a-wiki-graph/cache.md", "---\ntitle: Cache\n---\nAlpha search term.")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var hits = wm.search("Alpha search term")
+      ow.test.assert(hits.length, 1, "search should only return the knowledge page")
+      ow.test.assert(hits[0].path, "alpha.md", "search should ignore hidden wiki internals")
     } finally {
       cleanupTestDir(dir)
     }
