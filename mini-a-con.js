@@ -2557,7 +2557,7 @@ try {
 
     var deletedFiles = pruneConversationHistory()
     if (deletedFiles > 0) {
-      print(colorifyText("♻️ Deleted " + deletedFiles + " expired conversation file" + (deletedFiles === 1 ? "" : "s") + ".", hintColor))
+      print(colorifyText("♻️  Deleted " + deletedFiles + " expired conversation file" + (deletedFiles === 1 ? "" : "s") + ".", hintColor))
     }
 
     if (!explicitConversation && resumeConversation === true && toBoolean(sessionOptions.usehistory) === true) {

@@ -211,14 +211,20 @@ MiniAWikiGraph.prototype.buildStructural = function(pages) {
   })
   this._state.edges = []
   this._state._edgeIndex = {}
-  for (var se = 0; se < semanticEdges.length; se++) this._addEdge(semanticEdges[se].from, semanticEdges[se].to, semanticEdges[se].type, semanticEdges[se].provenance, semanticEdges[se].props)
+  for (var se = 0; se < semanticEdges.length; se++) {
+    this._addEdge(semanticEdges[se].from, semanticEdges[se].to, semanticEdges[se].type, semanticEdges[se].provenance, semanticEdges[se].props)
+  }
+  for (var ek in keepEdge) {
+    if (!Object.prototype.hasOwnProperty.call(keepEdge, ek)) continue
     var e = keepEdge[ek]
+    if (!isArray(e)) continue
     var props = {}
     if (e[2] === "IN_SECTION") {
       var sec = this._state.nodes[e[1]]
       if (sec && isMap(sec.props) && isNumber(sec.props.level)) props.level = sec.props.level
     }
     this._addEdge(e[0], e[1], e[2], e[3], props)
+  }
 
   // F2: prune stale nodes — keep nodes in keepNode or referenced by retained semantic edges
   var referencedConcept = {}
