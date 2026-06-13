@@ -2586,6 +2586,47 @@
     }
   }
 
+  exports.testAutoAgentsRulesLoadNearestAgentsFile = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var originalUserDir = String(java.lang.System.getProperty("user.dir", "") || "")
+    var tempRoot = String(io.createTempFile("mini-a-agents-", ""))
+    io.rm(tempRoot)
+    io.mkdir(tempRoot)
+
+    var nestedDir = tempRoot + "/project/src"
+    new java.io.File(nestedDir).mkdirs()
+    io.writeFileString(tempRoot + "/AGENTS.md", "- Always verify changes\n- Keep edits minimal")
+
+    try {
+      java.lang.System.setProperty("user.dir", nestedDir)
+
+      var unrelatedRoot = String(io.createTempFile("mini-a-agents-unrelated-", ""))
+      io.rm(unrelatedRoot)
+      io.mkdir(unrelatedRoot)
+
+      var args = { rules: "- Existing rule", _agentBaseDir: unrelatedRoot + "/agents" }
+      new java.io.File(args._agentBaseDir).mkdirs()
+      agent._applyAutoAgentsRules(args)
+
+      var parsedRules = agent._parseRulesArgument(args.rules)
+      ow.test.assert(parsedRules.length, 2, "Auto AGENTS load should append one additional rule block")
+      ow.test.assert(parsedRules[0], "Existing rule", "Existing rules should be preserved")
+      ow.test.assert(parsedRules[1].indexOf("Follow AGENTS.md instructions from ") === 0, true, "Auto-loaded AGENTS rule should include provenance prefix")
+      ow.test.assert(parsedRules[1].indexOf("Always verify changes") >= 0, true, "Auto-loaded AGENTS rule should include AGENTS.md content")
+      ow.test.assert(args.__autoagentspath, tempRoot + "/AGENTS.md", "Auto-loaded AGENTS path should point to the nearest parent AGENTS.md")
+
+      agent._applyAutoAgentsRules(args)
+      var parsedAfterSecondApply = agent._parseRulesArgument(args.rules)
+      ow.test.assert(parsedAfterSecondApply.length, 2, "Auto AGENTS rules should not duplicate when applied more than once")
+    } finally {
+      java.lang.System.setProperty("user.dir", originalUserDir)
+      try { io.rm(tempRoot) } catch(ignoreCleanup) {}
+      try { if (isString(unrelatedRoot) && unrelatedRoot.length > 0) io.rm(unrelatedRoot) } catch(ignoreCleanup2) {}
+    }
+  }
+
   exports.testWarnUnknownArgsIgnoresInternalParameters = function() {
     var agent = createAgent()
     var warnings = []
