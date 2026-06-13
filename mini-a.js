@@ -12919,9 +12919,8 @@ MiniA.prototype._findNearestAgentsInstructionsPath = function(startDir) {
 
 MiniA.prototype._applyAutoAgentsRules = function(args) {
   if (!isMap(args) || args.__autoagentsrulesapplied === true) return
-  args.__autoagentsrulesapplied = true
 
-  var agentsPath = this._findNearestAgentsInstructionsPath(args._agentBaseDir)
+  var agentsPath = this._findNearestAgentsInstructionsPath(".")
   if (!isString(agentsPath) || agentsPath.trim().length === 0) return
 
   var agentsContent = ""
@@ -12939,6 +12938,7 @@ MiniA.prototype._applyAutoAgentsRules = function(args) {
   if (mergedRules.indexOf(injectedRule) < 0) mergedRules.push(injectedRule)
   args.rules = stringify(mergedRules, __, "")
   args.__autoagentspath = agentsPath
+  args.__autoagentsrulesapplied = true
 
   this.fnI("load", "Auto-loaded AGENTS.md instructions from " + agentsPath + ".")
 }
