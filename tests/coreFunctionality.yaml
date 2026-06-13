@@ -27,6 +27,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testExtractEmbeddedFinalAction
 
+- name: MiniA Core Tests::DisableStreamingOnlyForStructuredOllamaToolTurns
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDisableStreamingOnlyForStructuredOllamaToolTurns
+
+- name: MiniA Core Tests::JsonToolStreamingDisabledOnlyForNativeToolCalling
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testJsonToolStreamingDisabledOnlyForNativeToolCalling
+
 - name: MiniA Core Tests::ShellToolCallAliasFallsBackToShell
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -86,6 +96,36 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testStreamThinkingTagsDoNotEmitCanonicalThoughtEvents
+
+- name: MiniA Core Tests::DefaultInteractionFnForwardsPlannerStreamEvents
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDefaultInteractionFnForwardsPlannerStreamEvents
+
+- name: MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
+
+- name: MiniA Core Tests::SupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
+
+- name: MiniA Core Tests::StreamDeltaHandlerFallsBackToPlainTextWhenChunksAreNotJson
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStreamDeltaHandlerFallsBackToPlainTextWhenChunksAreNotJson
+
+- name: MiniA Core Tests::StreamDeltaHandlerSuppressesJsonReplayAfterPlainText
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStreamDeltaHandlerSuppressesJsonReplayAfterPlainText
+
+- name: MiniA Core Tests::StructuredAgentStreamSkipsPlainThoughtPrefixAndExtractsAnswer
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStructuredAgentStreamSkipsPlainThoughtPrefixAndExtractsAnswer
 
 - name: MiniA Core Tests::RecoverJsonFromStreamChunksAfterIncompleteObjectError
   from: MiniA Core Tests::Init
@@ -525,6 +565,8 @@ todo:
 - MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
 - MiniA Core Tests::ParseRulesArgumentSupportsStructuredArrays
 - MiniA Core Tests::ExtractFinalAction
+- MiniA Core Tests::DisableStreamingOnlyForStructuredOllamaToolTurns
+- MiniA Core Tests::JsonToolStreamingDisabledOnlyForNativeToolCalling
 - MiniA Core Tests::ShellToolCallAliasFallsBackToShell
 - MiniA Core Tests::ShellToolCallAliasPreservesRealBashTool
 - MiniA Core Tests::ShellToolCallAliasWorksInProxyMode
@@ -537,6 +579,12 @@ todo:
 - MiniA Core Tests::CanonicalThoughtEmitterSeparatesThoughtAndThink
 - MiniA Core Tests::CanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
 - MiniA Core Tests::StreamThinkingTagsDoNotEmitCanonicalThoughtEvents
+- MiniA Core Tests::DefaultInteractionFnForwardsPlannerStreamEvents
+- MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
+- MiniA Core Tests::SupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
+- MiniA Core Tests::StreamDeltaHandlerFallsBackToPlainTextWhenChunksAreNotJson
+- MiniA Core Tests::StreamDeltaHandlerSuppressesJsonReplayAfterPlainText
+- MiniA Core Tests::StructuredAgentStreamSkipsPlainThoughtPrefixAndExtractsAnswer
 - MiniA Core Tests::RecoverJsonFromStreamChunksAfterIncompleteObjectError
 - MiniA Core Tests::ExtractThinkingBlocksReadsProviderThinkingFields
 - MiniA Core Tests::TaskLanePolicyProbeDetection

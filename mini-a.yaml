@@ -881,7 +881,7 @@ help:
     mandatory: false
   - name     : mode
     desc     : Apply one of the presets defined in mini-a-modes
-    example  : "ollama"
+    example  : "chatbot"
     mandatory: false
   - name     : resume
     desc     : Resume the last console conversation/history entry on startup

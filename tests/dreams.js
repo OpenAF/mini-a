@@ -121,6 +121,36 @@
     try { $ch(chName).destroy() } catch(e) {}
   }
 
+  exports.testDreamMemoryApplyPersistsConsolidatedSections = function() {
+    var chName = tempChName()
+    $ch(chName).create("simple", {})
+    var e1 = makeEntry("pp0001", "Original fact one", "active")
+    var e2 = makeEntry("pp0002", "Original fact two", "active")
+    var mgr = new MiniAMemoryManager({ dedup: false })
+    mgr.init(makeSnap({ facts: [e1, e2], summaries: [makeEntry("ppsum1", "Initial summary", "active")] }))
+    mgr.saveToChannel(chName, "")
+
+    var consolidated = makeSnap({
+      facts: [makeEntry("pp0001", "Consolidated fact", "active")],
+      summaries: [makeEntry("ppsum2", "Fresh summary", "active")]
+    })
+    var runner = new MiniADreams({ memorych: '{"name":"' + chName + '","type":"simple"}' }, function() {})
+    runner._setLlm(makeStubLlm(consolidated))
+
+    var result = runner.dreamMemory()
+    ow.test.assert(result.ok, true, "apply mode should persist successfully")
+    ow.test.assert(result.results.global.ok, true, "global apply result should be ok")
+
+    var mgr2 = new MiniAMemoryManager({})
+    mgr2.loadFromChannel(chName, "")
+    var snap = mgr2.snapshot()
+    ow.test.assert(snap.sections.facts.length, 1, "facts should be consolidated to one entry")
+    ow.test.assert(snap.sections.facts[0].value, "Consolidated fact", "fact content should be persisted")
+    ow.test.assert(snap.sections.summaries.length, 1, "summaries section should be persisted")
+    ow.test.assert(snap.sections.summaries[0].value, "Fresh summary", "summary content should be persisted")
+    try { $ch(chName).destroy() } catch(e) {}
+  }
+
   exports.testDreamMemoryDryRunDoesNotWrite = function() {
     var chName = tempChName()
     $ch(chName).create("simple", {})

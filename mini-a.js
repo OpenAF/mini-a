@@ -1487,11 +1487,8 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   })
 
   // Handle streaming output directly without formatting
-  if (e === "stream") {
+  if (e === "stream" || e === "planner_stream") {
     cFn("", m, this._id)
-    return
-  } else if (e === "planner_stream") {
-    // Ignore
     return
   }
 
@@ -2355,6 +2352,18 @@ MiniA.prototype._promptStreamWithStatsCompat = function(llmInstance, prompt, jso
   throw new Error("Streaming with stats is not supported by this LLM instance")
 }
 
+MiniA.prototype._supportsPromptStreamWithStatsCompat = function(llmInstance, jsonFlag) {
+  if (!isObject(llmInstance)) return false
+
+  var gptInstance = isFunction(llmInstance.getGPT) ? llmInstance.getGPT() : __
+  if (isObject(gptInstance) && isObject(gptInstance.model) && isFunction(gptInstance.model.rawPromptStream) && isFunction(gptInstance.getLastStats)) {
+    return true
+  }
+
+  if (jsonFlag === true) return isFunction(llmInstance.promptStreamJSONWithStats)
+  return isFunction(llmInstance.promptStreamWithStats)
+}
+
 MiniA.prototype._isIncompleteJsonObjectErrorPayload = function(payload) {
   var text = ""
   if (isString(payload)) {
@@ -2439,6 +2448,10 @@ MiniA.prototype._shouldDisableStreamingForOllamaToolCallTurn = function(modelCon
     && isMap(modelConfig)
     && isString(modelConfig.type)
     && modelConfig.type.toLowerCase() === "ollama"
+}
+
+MiniA.prototype._shouldDisableStreamingForJsonToolTurn = function(useJsonTool, functionCallingActive) {
+  return toBoolean(useJsonTool) === true && functionCallingActive === true
 }
 
 MiniA.prototype._fallbackFromToolCallingFailure = function(runtime, opts) {
@@ -2869,6 +2882,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     opts = isMap(opts) ? opts : {}
     var fieldName = isString(opts.fieldName) && opts.fieldName.length > 0 ? opts.fieldName : "answer"
     var eventName = isString(opts.eventName) && opts.eventName.length > 0 ? opts.eventName : "stream"
+    var allowPlainTextFallback = opts.allowPlainTextFallback !== false
     var decodeUnicodeEscapes = toBoolean(isObject(args) ? args.useascii : false) === true
     var jsonBuffer = ""         // Buffer for finding "answer" field
     var contentBuffer = ""      // Buffer for decoded content
@@ -2878,6 +2892,8 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     var unicodeEscapeActive = false
     var unicodeEscapeBuffer = ""
     var fieldRegex = new RegExp('"' + fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"\\s*:\\s*"')
+    var plainTextFallback = false
+    var suppressStructuredReplay = false
     var inCodeBlock = false     // Track if inside ``` code block
     var inTable = false         // Track if inside a table
     var codeBlockBuffer = ""    // Buffer code blocks until complete
@@ -2972,6 +2988,34 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
             return null
         }
         return ch
+    }
+
+    function processPlainTextContent(text) {
+        if (!isString(text) || text.length === 0) return
+        for (var i = 0; i < text.length; i++) {
+            filterChar(text.charAt(i))
+        }
+        if (!inCodeBlock && !inTable && tableHeaderCandidate.length === 0 && contentBuffer.length > 0) {
+            flushContent(contentBuffer)
+            contentBuffer = ""
+        }
+    }
+
+    function shouldFallbackToPlainText(buffer) {
+        if (!allowPlainTextFallback) return false
+        if (!isString(buffer)) return false
+        var trimmed = buffer.replace(/^\s+/, "")
+        if (trimmed.length === 0) return false
+        var first = trimmed.charAt(0)
+        return first !== "{" && first !== "["
+    }
+
+    function startsStructuredReplay(chunk) {
+        if (!isString(chunk)) return false
+        var trimmed = chunk.replace(/^\s+/, "")
+        if (trimmed.length === 0) return false
+        if (trimmed.charAt(0) === "{" || trimmed.charAt(0) === "[") return true
+        return /^```(?:json)?\s*[\{\[]/i.test(trimmed)
     }
 
     // Flush buffered content to output
@@ -3164,12 +3208,33 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
 
     // Process raw JSON chunk to extract answer content
     function processChunk(chunk) {
+        if (suppressStructuredReplay) return
+
+        if (plainTextFallback) {
+            // Some providers stream the selected field as plain deltas and then
+            // replay the complete JSON response. The plain text is already
+            // visible, so suppress the structured replay instead of leaking
+            // tool/action envelopes into the console.
+            if (startsStructuredReplay(chunk)) {
+                suppressStructuredReplay = true
+                return
+            }
+            processPlainTextContent(chunk)
+            return
+        }
+
         for (var i = 0; i < chunk.length; i++) {
             var c = chunk[i]
 
             if (!streamingAnswer) {
                 // Still looking for "answer" field
                 jsonBuffer += c
+                if (!answerDetected && shouldFallbackToPlainText(jsonBuffer)) {
+                    plainTextFallback = true
+                    processPlainTextContent(jsonBuffer + chunk.substring(i + 1))
+                    jsonBuffer = ""
+                    return
+                }
                 if (!answerDetected) {
                     var answerMatch = jsonBuffer.match(fieldRegex)
                     if (answerMatch) {
@@ -5234,7 +5299,11 @@ MiniA.prototype._injectSimplePlanStepContext = function(prompt) {
   }
 
   lines.push("")
-  lines.push("INSTRUCTIONS: Focus ONLY on completing step " + stepContext.currentStep + ". When done, update state.plan.currentStep to " + stepContext.nextStep + " and mark the step status as 'done'.")
+  if (stepContext.isFinalStep === true) {
+    lines.push("INSTRUCTIONS: Focus ONLY on completing step " + stepContext.currentStep + ". This is the final step. When done, mark the step status as 'done' and provide your final answer with action 'final'.")
+  } else {
+    lines.push("INSTRUCTIONS: Focus ONLY on completing step " + stepContext.currentStep + ". When done, update state.plan.currentStep to " + stepContext.nextStep + " and mark the step status as 'done'.")
+  }
   lines.push("---")
 
   return prompt + lines.join("\n")
@@ -6246,21 +6315,22 @@ MiniA.prototype._buildStepContext = function(plan) {
     return null
   }
 
-  var currentStep = isNumber(plan.currentStep) ? plan.currentStep : 1
+  var currentStep = isNumber(plan.currentStep) ? plan.currentStep : Number(plan.currentStep)
+  if (isNaN(currentStep) || currentStep <= 0) currentStep = 1
   var totalSteps = plan.steps.length
 
   if (currentStep > totalSteps) {
     return null // Plan is complete
   }
 
-  var currentTaskObj = plan.steps.find(function(s) { return s.id === currentStep })
+  var currentTaskObj = plan.steps.find(function(s) { return s.id === currentStep || Number(s.id) === currentStep })
   var currentTask = currentTaskObj ? (currentTaskObj.task || currentTaskObj.title || "") : ""
 
   // Build completed steps list
   var completedList = []
   for (var i = 0; i < plan.steps.length; i++) {
     var step = plan.steps[i]
-    if (step.status === "done" || step.id < currentStep) {
+    if (step.status === "done" || Number(step.id) < currentStep) {
       var taskText = step.task || step.title || ""
       completedList.push(step.id + ". " + taskText + " [DONE]")
     }
@@ -6270,7 +6340,7 @@ MiniA.prototype._buildStepContext = function(plan) {
   var remainingList = []
   for (var j = 0; j < plan.steps.length; j++) {
     var step = plan.steps[j]
-    if (step.id > currentStep && step.status !== "done") {
+    if (Number(step.id) > currentStep && step.status !== "done") {
       var taskText = step.task || step.title || ""
       remainingList.push(step.id + ". " + taskText)
     }
@@ -6282,6 +6352,7 @@ MiniA.prototype._buildStepContext = function(plan) {
     totalSteps: totalSteps,
     currentTask: currentTask,
     nextStep: currentStep < totalSteps ? currentStep + 1 : currentStep,
+    isFinalStep: currentStep >= totalSteps,
     completedSteps: completedList.length > 0 ? completedList.join("\n") : "",
     remainingSteps: remainingList.length > 0 ? remainingList.join("\n") : ""
   }
@@ -6310,8 +6381,9 @@ MiniA.prototype._mergeSimplePlanUpdate = function(planUpdate) {
   if (plan.version !== 3) return
 
   // Update currentStep if provided
-  if (isNumber(planUpdate.currentStep) && planUpdate.currentStep > 0) {
-    plan.currentStep = planUpdate.currentStep
+  var nextCurrentStep = isNumber(planUpdate.currentStep) ? planUpdate.currentStep : Number(planUpdate.currentStep)
+  if (!isNaN(nextCurrentStep) && nextCurrentStep > 0) {
+    plan.currentStep = nextCurrentStep
   }
 
   // Merge step updates if provided
@@ -6348,7 +6420,7 @@ MiniA.prototype._mergeSimplePlanUpdate = function(planUpdate) {
   // Handle direct status update for current step
   if (isString(planUpdate.status) && isNumber(plan.currentStep)) {
     var currentStepObj = plan.steps.find(function(s) {
-      return s.id === plan.currentStep
+      return s.id === plan.currentStep || Number(s.id) === plan.currentStep
     })
     if (currentStepObj) {
       currentStepObj.status = planUpdate.status
@@ -6629,7 +6701,8 @@ MiniA.prototype._handleSimplePlanUpdate = function(plan) {
     if (!isObject(plan) || !isArray(plan.steps)) return
 
     var statusIcons = this._getStatusIcons()
-    var currentStep = isNumber(plan.currentStep) ? plan.currentStep : 1
+    var currentStep = isNumber(plan.currentStep) ? plan.currentStep : Number(plan.currentStep)
+    if (isNaN(currentStep) || currentStep <= 0) currentStep = 1
     var totalSteps = plan.steps.length
     var completedCount = 0
     var lines = []
@@ -6651,7 +6724,7 @@ MiniA.prototype._handleSimplePlanUpdate = function(plan) {
         var line = stepNum + ". " + statusInfo.icon + " " + taskText
 
         // Highlight current step
-        if (stepNum === currentStep && step.status !== "done") {
+        if (Number(stepNum) === currentStep && step.status !== "done") {
             line += " <-- CURRENT"
         }
 
@@ -6659,7 +6732,7 @@ MiniA.prototype._handleSimplePlanUpdate = function(plan) {
     }
 
     // Auto-advance currentStep if current step is marked done
-    var currentStepObj = plan.steps.find(function(s) { return s.id === currentStep })
+    var currentStepObj = plan.steps.find(function(s) { return s.id === currentStep || Number(s.id) === currentStep })
     if (currentStepObj && this._isStatusDone(currentStepObj.status) && currentStep < totalSteps) {
         plan.currentStep = currentStep + 1
         this.fnI("plan", "Step " + currentStep + " completed, advancing to step " + plan.currentStep)
@@ -16910,14 +16983,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
 
       var noJsonPromptFlag = runtime.forceNoJson === true || (useLowCost ? this._noJsonPromptLC : this._noJsonPrompt)
-      var streamIntent = "answer"
-      if (useLowCost) {
-        var isLikelyDirectAnswerStep = step === 0 && goalComplexityLevel === "simple" && runtime.context.length === 0
-        streamIntent = isLikelyDirectAnswerStep ? "answer" : "planner"
-      }
-      var plannerStreaming = streamIntent === "planner"
-      var canStream = args.usestream && runtime.forceNoStream !== true && isFunction(currentLLM.promptStreamWithStats)
-      var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
+      var canStream = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(currentLLM, false)
+      var canStreamJson = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(currentLLM, true)
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       var _streamThinkingBuf = []
@@ -16927,10 +16994,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         // chunk processor. This prevents raw JSON deltas from being rendered directly.
         var _baseOnDelta = !noJsonPromptFlag
           ? this._createStreamDeltaHandler(args, {
-              fieldName: streamIntent === "planner" ? "thought" : "answer",
-              eventName: streamIntent === "planner" ? "planner_stream" : "stream"
+              fieldName: "answer",
+              eventName: "stream",
+              allowPlainTextFallback: false
             })
-          : this._createPlainStreamDeltaHandler(streamIntent === "planner" ? "planner_stream" : "stream")
+          : this._createPlainStreamDeltaHandler("stream")
         onDelta = function(chunk, payload) {
           if (isString(chunk) && chunk.length > 0) _streamRawChunks.push(chunk)
           _baseOnDelta(chunk, payload)
@@ -16974,12 +17042,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             !noJsonPromptFlag
           )
           var isOllamaToolJsonConflict = isOllamaToolCallMode
-          // usejsontool models respond via tool_calls; tool_calls are not auto-executed
-          // in streaming mode, so pendingJsonToolPayload would never be set. Use non-streaming.
-          var isJsonToolMode = toBoolean(args.usejsontool) === true
-          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode && !isOllamaToolCallMode) {
+          // Streaming is unsafe only when the compatibility json tool is
+          // attached through native function calling. Action-based proxy mode
+          // disables native tools, so usejsontool remains stream-compatible.
+          var isNativeJsonToolCallMode = this._shouldDisableStreamingForJsonToolTurn(args.usejsontool, this._useToolsActual)
+          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isNativeJsonToolCallMode && !isOllamaToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, true, onDelta)
-          } else if (canStream && !isJsonToolMode && !isOllamaToolCallMode) {
+          } else if (canStream && !isNativeJsonToolCallMode && !isOllamaToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, false, onDelta)
           }
           if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
@@ -17547,12 +17616,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             delete otherState.plan
             Object.assign(this._agentState, otherState)
           } else {
-            this._agentState = extractedState
+            var prevState = isObject(this._agentState) ? this._agentState : {}
+            var mergedState = Object.assign({}, prevState, extractedState)
+            if (isUnDef(extractedState.plan) && isObject(prevState.plan)) mergedState.plan = prevState.plan
+            this._agentState = mergedState
           }
           runtime.stateSnapshotDirty = true
           updatedStateSnapshot = getStateSnapshot()
           stateUpdatedThisStep = true
-          if (this._enablePlanning && isUnDef(this._agentState.plan)) this._agentState.plan = []
           if (this._enablePlanning) this._handlePlanUpdate()
           this._memoryAppend("facts", "Model updated runtime state.", { provenance: { source: "model", event: "state-update", step: step + 1 } })
         }
@@ -17809,7 +17880,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var stepSuffix = actionMessages.length > 1 ? `.${actionIndex + 1}` : ""
         var stepLabel = `${step + 1}${stepSuffix}`
         var currentMsg = actionMessages[actionIndex]
-        var origActionRaw = ((currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || currentMsg.think || "") + "").trim()
+        var hasExplicitThink = isDef(currentMsg.think) && isUnDef(currentMsg.action) && isUnDef(currentMsg.type) && isUnDef(currentMsg.name) && isUnDef(currentMsg.tool)
+        var origActionSeed = hasExplicitThink ? "think" : (currentMsg.action || currentMsg.type || currentMsg.name || currentMsg.tool || "")
+        var origActionRaw = ((origActionSeed || "") + "").trim()
         origActionRaw = this._normalizeActionAlias(origActionRaw)
         origActionRaw = this._resolveShellActionAlias(origActionRaw, {
           useshell     : args.useshell,
@@ -17827,6 +17900,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         // Fallback: some LLMs (e.g. Gemini via Ollama) use "arguments" (OpenAI function-calling key)
         // instead of "params" when they cannot properly execute function calls and embed the call in JSON content.
         if (isUnDef(paramsValue) && isMap(currentMsg.arguments)) paramsValue = currentMsg.arguments
+        if (origActionRaw.length == 0 && isMap(currentMsg.arguments) && isString(currentMsg.arguments.action) && currentMsg.arguments.action.trim().length > 0) {
+          origActionRaw = this._resolveShellActionAlias(this._normalizeActionAlias(currentMsg.arguments.action.trim()), {
+            useshell     : args.useshell,
+            availableTools: this.mcpToolNames
+          })
+          action = origActionRaw.toLowerCase()
+          currentMsg.action = origActionRaw
+        }
         // Fallback: model used {"action":"shell","arguments":{"command":"..."}} (function-calling style)
         if (action === "shell" && commandValue.length === 0 && isMap(currentMsg.arguments) && isString(currentMsg.arguments.command)) commandValue = currentMsg.arguments.command.trim()
 
@@ -18639,8 +18720,8 @@ MiniA.prototype._runChatbotMode = function(options) {
       var responseWithStats
       var chatbotNoJsonPromptFlag = runtime.forceNoJson === true || this._noJsonPrompt
       var chatbotStructuredOutput = !chatbotNoJsonPromptFlag && this._isStructuredOutputFormat(args.format)
-      var canStream = args.usestream && runtime.forceNoStream !== true && isFunction(this.llm.promptStreamWithStats)
-      var canStreamJson = canStream && isFunction(this.llm.promptStreamJSONWithStats)
+      var canStream = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, false)
+      var canStreamJson = args.usestream && runtime.forceNoStream !== true && this._supportsPromptStreamWithStatsCompat(this.llm, true)
       var chatbotOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
         this._oaf_model,
         this._useToolsActual === true,

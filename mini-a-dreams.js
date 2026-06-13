@@ -377,39 +377,11 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
     var normalizedSnapshot = jsonParse(stringify(consolidated, __, ""), __, __, true)
     var saveMgr = new MiniAMemoryManager({ dedup: false, compact: false })
-
-    if (isFunction(saveMgr.restoreSnapshot)) {
-      saveMgr.restoreSnapshot(normalizedSnapshot)
-    } else if (isFunction(saveMgr.loadSnapshot)) {
-      saveMgr.loadSnapshot(normalizedSnapshot)
-    } else if (isFunction(saveMgr.importSnapshot)) {
-      saveMgr.importSnapshot(normalizedSnapshot)
-    } else {
-      saveMgr._memory = {
-        entries   : [],
-        updatedAt : normalizedSnapshot.updatedAt,
-        revision  : normalizedSnapshot.revision
-      }
-
-      var entries = isArray(normalizedSnapshot.entries) ? normalizedSnapshot.entries : []
-      entries.forEach(function(entry) {
-        if (isFunction(saveMgr.setEntries)) {
-          saveMgr.setEntries([ entry ])
-        } else if (isFunction(saveMgr.addMemory)) {
-          saveMgr.addMemory(entry)
-        } else if (isFunction(saveMgr.remember)) {
-          saveMgr.remember(entry)
-        } else if (isFunction(saveMgr.upsert)) {
-          saveMgr.upsert(entry)
-        } else {
-          throw "MiniAMemoryManager does not expose a supported snapshot/entry import API for normalized persistence."
-        }
-      })
-
-      if (isDef(saveMgr._memory)) {
-        saveMgr._memory.updatedAt = normalizedSnapshot.updatedAt
-        saveMgr._memory.revision  = normalizedSnapshot.revision
-      }
+    saveMgr.init(normalizedSnapshot)
+    if (isDef(saveMgr._memory)) {
+      if (isString(normalizedSnapshot.createdAt) && normalizedSnapshot.createdAt.length > 0) saveMgr._memory.createdAt = normalizedSnapshot.createdAt
+      saveMgr._memory.updatedAt = normalizedSnapshot.updatedAt
+      saveMgr._memory.revision  = normalizedSnapshot.revision
     }
 
     var saved = saveMgr.saveToChannel(chName, ns)

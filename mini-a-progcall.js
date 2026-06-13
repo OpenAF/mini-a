@@ -71,11 +71,17 @@ MiniAProgCallServer.prototype.start = function(options) {
 
   // Bind HTTP server to 127.0.0.1 only
   ow.loadServer()
-  var hs = ow.server.httpd.start(port, "127.0.0.1")
-  this._httpServer = hs
-  this._port = hs.getPort()
-
-  this._setupRoutes(hs)
+  try {
+    var hs = ow.server.httpd.start(port, "127.0.0.1")
+    this._httpServer = hs
+    this._port = hs.getPort()
+    this._setupRoutes(hs)
+  } catch(e) {
+    try { if (isString(this._tmpDir) && io.fileExists(this._tmpDir)) io.rm(this._tmpDir) } catch(ignoreTmpCleanup) {}
+    this._tmpDir = __
+    this._token = __
+    throw e
+  }
 
   return { port: this._port, token: this._token, tmpDir: this._tmpDir }
 }
