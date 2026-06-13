@@ -881,14 +881,22 @@ The `start()` method accepts various configuration options:
 - **`wikiregion`** (string, optional): S3 region for `s3`/`s3fs`.
 - **`wikiuseversion1`** (boolean, default: `false`): Use S3 path-style/signature-v1 compatibility for `s3`/`s3fs`.
 - **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
+- **`wikiindexdir`** (string, optional): Override the local index/cache directory used for non-filesystem wiki indexes.
+- **`wikimetacache`** (boolean, default: `true`): Enable the sharded metadata cache used by wiki search/list/read helpers.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
+- **`wikilintstreamthreshold`** (number, default: `2000`): Switch wiki lint into streaming mode above this many pages.
+- **`wikilintmaxpairs`** (number, default: `250000`): Cap near-duplicate comparisons during streaming lint.
 - **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"`.
-- **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action.
+- **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action. Also enabled automatically when `wikigraphfalkorhost` is set.
 - **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`.
 - **`wikigraphcommunity`** (string, default: `louvain`): Graph community detection algorithm.
 - **`wikigraphsearchhints`** (boolean, default: `true`): Add graph-related page hints to `wiki search`.
+- **`wikigraphmounts`** (boolean, default: `true`): Add graph-related hints from attached wikis when their cached `graph.json` is available.
 - **`wikigraphhintcap`** (number, default: `5`): Maximum related-page hints from graph per search.
-- **`wikigraphfalkorhost`** (string, optional): FalkorDB host for graph sync/query.
+- **`wikimountgraphttlms`** (number, default: `60000`): TTL for cached attached-wiki graph loads.
+- **`wikigraphautosave`** (string, default: `always`): Graph autosave policy: `always`, `debounced`, or `off`.
+- **`wikigraphsavedebouncems`** (number, default: `5000`): Debounce interval when `wikigraphautosave=debounced`.
+- **`wikigraphfalkorhost`** (string, optional): FalkorDB host for graph-backed wiki state/query. When set, Mini-A uses FalkorDB instead of the local wiki graph cache.
 - **`wikigraphfalkorport`** (number, default: `6379`): FalkorDB port.
 - **`wikigraphfalkorgraph`** (string, default: `mini_a_wiki`): FalkorDB graph name.
 - **`wikigraphfalkoruser`** / **`wikigraphfalkorpass`** (string, optional): FalkorDB credentials.

@@ -7411,14 +7411,23 @@ MiniA.prototype._initWiki = function(args) {
   this._wikiManager = __
   if (toBoolean(args.usewiki) !== true) return
   try {
+    var wikiGraphEnabled = toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)
     var cfg = {
       access : args.wikiaccess,
       backend: args.wikibackend,
-      usegraph: toBoolean(args.usewikigraph) === true,
+      usegraph: wikiGraphEnabled,
+      indexdir: args.wikiindexdir,
+      wikimetacache: args.wikimetacache,
       wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
       wikigraphcommunity: args.wikigraphcommunity,
       wikigraphhintcap: args.wikigraphhintcap,
       wikigraphsearchhints: args.wikigraphsearchhints,
+      wikigraphmounts: args.wikigraphmounts,
+      wikimountgraphttlms: args.wikimountgraphttlms,
+      wikigraphautosave: args.wikigraphautosave,
+      wikigraphsavedebouncems: args.wikigraphsavedebouncems,
+      wikilintstreamthreshold: args.wikilintstreamthreshold,
+      wikilintmaxpairs: args.wikilintmaxpairs,
       wikigraphfalkor: {
         host: args.wikigraphfalkorhost,
         port: args.wikigraphfalkorport,
@@ -7445,7 +7454,7 @@ MiniA.prototype._initWiki = function(args) {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
     }
     // F10: set llmExtractFn before constructing the manager so configure() wires it in one pass
-    if (toBoolean(args.usewikigraph) === true) {
+    if (wikiGraphEnabled) {
       cfg.llmExtractFn = function(payload) {
         var useVal = this._use_val && isObject(this.val_llm)
         var llmToUse = useVal ? this.val_llm : this.llm
@@ -14620,7 +14629,7 @@ MiniA.prototype.init = function(args) {
           "When you discover reusable knowledge — facts, decisions, patterns, how-tos, or lessons learned — record it in the wiki: search first to avoid duplicates, then write a focused page following the contribution rules in AGENTS.md. Prefer updating an existing page over creating a new one. Always use wiki op='write' to create or update wiki pages — never use shell or file tools to write wiki files directly."
         )
       }
-      if (args.usewikigraph === true) {
+      if (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) {
         baseRules.push(
           "The wiki graph is enabled. Use action='graph' with params={op:'...'} for graph operations. Read-side ops: stats|query|neighbors|path|communities|surprise|retrieve|answer|export. Mutating/token-spending ops: build {semantic:true} and falkor. Wiki search already injects 'Related pages (graph)' hints automatically — read those pages directly rather than calling graph retrieve for every search."
         )
@@ -14717,7 +14726,7 @@ MiniA.prototype.init = function(args) {
       })
       if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
       if (args.usewiki && isObject(this._wikiManager)) chatActionSet["wiki"] = true
-      if (args.usewikigraph === true && isObject(this._wikiManager)) chatActionSet["graph"] = true
+      if ((args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)) chatActionSet["graph"] = true
       this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
@@ -14756,7 +14765,7 @@ MiniA.prototype.init = function(args) {
         useshell        : args.useshell,
         useMemorySearch : args.usememory && args.memoryinject !== "full",
         useWiki         : args.usewiki && isObject(this._wikiManager),
-        useWikiGraph    : args.usewikigraph === true && isObject(this._wikiManager)
+        useWikiGraph    : (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)
       })
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 8 : 7) + ". " + rule)
@@ -15217,16 +15226,34 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.wikiregion = _$(args.wikiregion, "args.wikiregion").isString().default(__)
     args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
     args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
+    args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
+    args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)
     var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
     if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
     args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
+    var _wikiLintStreamThreshold = isNumber(args.wikilintstreamthreshold) ? args.wikilintstreamthreshold : Number(args.wikilintstreamthreshold)
+    if (isNaN(_wikiLintStreamThreshold)) _wikiLintStreamThreshold = __
+    args.wikilintstreamthreshold = _$(_wikiLintStreamThreshold, "args.wikilintstreamthreshold").isNumber().default(2000)
+    var _wikiLintMaxPairs = isNumber(args.wikilintmaxpairs) ? args.wikilintmaxpairs : Number(args.wikilintmaxpairs)
+    if (isNaN(_wikiLintMaxPairs)) _wikiLintMaxPairs = __
+    args.wikilintmaxpairs = _$(_wikiLintMaxPairs, "args.wikilintmaxpairs").isNumber().default(250000)
     args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
     args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
     args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
     args.wikigraphsearchhints = _$(toBoolean(args.wikigraphsearchhints), "args.wikigraphsearchhints").isBoolean().default(true)
+    args.wikigraphmounts = _$(toBoolean(args.wikigraphmounts), "args.wikigraphmounts").isBoolean().default(true)
     var _wikiGraphHintCap = isNumber(args.wikigraphhintcap) ? args.wikigraphhintcap : Number(args.wikigraphhintcap)
     if (isNaN(_wikiGraphHintCap)) _wikiGraphHintCap = __
     args.wikigraphhintcap = _$(_wikiGraphHintCap, "args.wikigraphhintcap").isNumber().default(5)
+    var _wikiMountGraphTtlMs = isNumber(args.wikimountgraphttlms) ? args.wikimountgraphttlms : Number(args.wikimountgraphttlms)
+    if (isNaN(_wikiMountGraphTtlMs)) _wikiMountGraphTtlMs = __
+    args.wikimountgraphttlms = _$(_wikiMountGraphTtlMs, "args.wikimountgraphttlms").isNumber().default(60000)
+    args.wikigraphautosave = _$(args.wikigraphautosave, "args.wikigraphautosave").isString().default("always")
+    if (["always", "debounced", "off"].indexOf(String(args.wikigraphautosave).toLowerCase().trim()) < 0) args.wikigraphautosave = "always"
+    else args.wikigraphautosave = String(args.wikigraphautosave).toLowerCase().trim()
+    var _wikiGraphSaveDebounceMs = isNumber(args.wikigraphsavedebouncems) ? args.wikigraphsavedebouncems : Number(args.wikigraphsavedebouncems)
+    if (isNaN(_wikiGraphSaveDebounceMs)) _wikiGraphSaveDebounceMs = __
+    args.wikigraphsavedebouncems = _$(_wikiGraphSaveDebounceMs, "args.wikigraphsavedebouncems").isNumber().default(5000)
     args.wikigraphfalkorhost = _$(args.wikigraphfalkorhost, "args.wikigraphfalkorhost").isString().default(__)
     var _wikiGraphFalkorPort = isNumber(args.wikigraphfalkorport) ? args.wikigraphfalkorport : Number(args.wikigraphfalkorport)
     if (isNaN(_wikiGraphFalkorPort)) _wikiGraphFalkorPort = __
@@ -18205,7 +18232,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             var wkResult
             if (wkOp === "list") {
               global.__mini_a_metrics.wiki_ops_list.inc()
-              var wkListOpts = { withMeta: wkParams.withMeta === true || wkParams.withMeta === "true", limit: isNumber(wkParams.limit) ? wkParams.limit : 1000 }
+              var wkListOpts = {
+                withMeta: wkParams.withMeta === true || wkParams.withMeta === "true",
+                limit: isNumber(wkParams.limit) ? wkParams.limit : 1000,
+                offset: isNumber(wkParams.offset) ? wkParams.offset : 0
+              }
               var wkPages = this._wikiManager.list(wkPath, wkListOpts)
               if (wkListOpts.withMeta) {
                 wkResult = "Wiki pages with metadata (" + wkPages.length + "):\n" + af.toTOON(wkPages)

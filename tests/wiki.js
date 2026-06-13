@@ -241,6 +241,49 @@
     }
   }
 
+  exports.testListSupportsOffsetAndLimitWithoutMeta = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "a.md", "# A")
+      writePage(dir, "b.md", "# B")
+      writePage(dir, "c.md", "# C")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var pageList = wm.list("", { offset: 1, limit: 2 })
+      ow.test.assert(pageList.length, 2, "offset/limit should slice plain list output")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testWriteIncrementallyUpdatesGraph = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", usegraph: true })
+      var res = wm.write("alpha.md", { title: "Alpha", tags: ["core"] }, "# Alpha\nSee [Beta](beta.md)")
+      ow.test.assert(res.ok, true, "write should succeed")
+      var stats = wm.graph("stats", {})
+      ow.test.assert(stats.nodes > 0, true, "graph should be updated after write")
+      var neighbors = wm.graph("neighbors", { path: "alpha.md" })
+      ow.test.assert(isArray(neighbors) && neighbors.length > 0, true, "graph neighbors should be available after incremental write")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testDeleteIncrementallyUpdatesGraph = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", usegraph: true })
+      wm.write("alpha.md", { title: "Alpha" }, "# Alpha")
+      var before = wm.graph("stats", {})
+      wm.delete("alpha.md")
+      var after = wm.graph("stats", {})
+      ow.test.assert(after.nodes < before.nodes, true, "graph node count should drop after delete")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testBootstrapCreatesAgentsAndIndexForEmptyWritableWiki = function() {
     var dir = createTestDir()
     try {

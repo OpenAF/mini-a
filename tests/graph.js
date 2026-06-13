@@ -233,4 +233,71 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testGraphUpdatePageEquivalence = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural(pages())
+      g.updatePage({
+        path: "a.md",
+        meta: { title: "A2", tags: ["core", "extra"], aliases: ["Alpha"] },
+        body: "# A2\n## Intro\nSee [B](b.md)\n## More",
+        links: ["b.md"]
+      })
+      var fresh = new MiniAWikiGraph({ graphDir: dir + "-fresh" })
+      fresh.buildStructural([
+        {
+          path: "a.md",
+          meta: { title: "A2", tags: ["core", "extra"], aliases: ["Alpha"] },
+          body: "# A2\n## Intro\nSee [B](b.md)\n## More",
+          links: ["b.md"]
+        },
+        pages()[1]
+      ])
+      ow.test.assert(g.stats().nodes, fresh.stats().nodes, "incremental update should match fresh build node count")
+      ow.test.assert(g.stats().edges, fresh.stats().edges, "incremental update should match fresh build edge count")
+    } finally { try { io.rm(dir) } catch(e) {}; try { io.rm(dir + "-fresh") } catch(e2) {} }
+  }
+
+  exports.testGraphUpdatePageNoChangeIsNoop = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural(pages())
+      var before = g.stats()
+      var res = g.updatePage(pages()[0])
+      var after = g.stats()
+      ow.test.assert(res.changed, false, "unchanged page should be a no-op")
+      ow.test.assert(after.nodes, before.nodes, "node count should stay unchanged")
+      ow.test.assert(after.edges, before.edges, "edge count should stay unchanged")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testGraphRemovePagePrunesOrphans = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural([
+        { path: "x.md", meta: { title: "X", tags: ["alpha"] }, body: "# X", links: [] },
+        { path: "y.md", meta: { title: "Y", tags: ["beta"] }, body: "# Y", links: [] }
+      ])
+      g.removePage("y.md")
+      ow.test.assert(isUnDef(g._state.nodes["doc:y.md"]), true, "removed page doc node should be pruned")
+      ow.test.assert(isDef(g._state.nodes["doc:x.md"]), true, "remaining page doc node should stay")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testGraphCompactSaveNoReport = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural(pages())
+      ow.test.assert(io.fileExists(dir + "/graph.json"), true, "graph.json should exist")
+      ow.test.assert(io.fileExists(dir + "/GRAPH_REPORT.md"), false, "graph report should not be written during normal save")
+      var report = g.saveReport()
+      ow.test.assert(report.ok, true, "explicit saveReport should succeed")
+      ow.test.assert(io.fileExists(dir + "/GRAPH_REPORT.md"), true, "graph report should be created on demand")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
 })()

@@ -901,14 +901,22 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikiregion` | string | - | S3 region (`s3`/`s3fs` backend) |
 | `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3`/`s3fs` backend) |
 | `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
+| `wikiindexdir` | string | - | Override the local index/cache root used for non-filesystem wiki indexes |
+| `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
+| `wikilintstreamthreshold` | number | `2000` | Switch lint into streaming mode above this many pages |
+| `wikilintmaxpairs` | number | `250000` | Max near-duplicate comparisons during streaming lint |
 | `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
-| `usewikigraph` | boolean | `false` | Enable the wiki knowledge graph layer (`.mini-a-wiki-graph/graph.json`) |
+| `usewikigraph` | boolean | `false` | Enable the wiki knowledge graph layer (auto-enabled when `wikigraphfalkorhost` is set) |
 | `wikigraphsemantic` | boolean | `false` | Enable semantic graph extraction when running graph build |
 | `wikigraphcommunity` | string | `louvain` | Community detection algorithm |
 | `wikigraphsearchhints` | boolean | `true` | Enrich `wiki search` with related pages from graph |
+| `wikigraphmounts` | boolean | `true` | Include graph hints from attached wikis when cached graphs are available |
 | `wikigraphhintcap` | number | `5` | Maximum related graph hints returned per search |
-| `wikigraphfalkorhost` | string | - | FalkorDB host for optional graph sync/query |
+| `wikimountgraphttlms` | number | `60000` | TTL for cached mount graph loads |
+| `wikigraphautosave` | string | `always` | Graph autosave policy: `always`, `debounced`, or `off` |
+| `wikigraphsavedebouncems` | number | `5000` | Debounce interval when graph autosave uses `debounced` |
+| `wikigraphfalkorhost` | string | - | FalkorDB host for graph-backed wiki state/query; uses FalkorDB instead of the local graph cache |
 | `wikigraphfalkorport` | number | `6379` | FalkorDB port |
 | `wikigraphfalkorgraph` | string | `mini_a_wiki` | FalkorDB graph name |
 | `wikigraphfalkoruser` | string | - | FalkorDB username |
