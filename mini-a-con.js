@@ -682,6 +682,7 @@ try {
     mcpprogcalltools: { type: "string", default: "", description: "Optional comma-separated allowlist of tool names exposed by the programmatic bridge" },
     mcpprogcallbatchmax: { type: "number", default: 10, description: "Maximum calls accepted per programmatic bridge batch request" },
     nosetmcpwd     : { type: "boolean", default: false, description: "Prevent automatic MCP working directory configuration" },
+    noagentsmd     : { type: "boolean", default: false, description: "Disable automatically reading and injecting the nearest AGENTS.md file as rules" },
     rpm            : { type: "number", description: "Requests per minute limit" },
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
     tpm            : { type: "number", description: "Tokens per minute limit" },

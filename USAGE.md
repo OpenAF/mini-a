@@ -1148,6 +1148,9 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 #### MCP Working Directory
 - **`nosetmcpwd`** (boolean, default: false): By default, Mini-A sets `__flags.JSONRPC.cmd.defaultDir` to the mini-a oPack installation location, providing a consistent working directory for MCP commands. Set `nosetmcpwd=true` to prevent this automatic configuration and use the system's default working directory instead.
 
+#### Auto-loading AGENTS.md
+- **`noagentsmd`** (boolean, default: false): By default, Mini-A searches the current directory and its parents for the nearest `AGENTS.md` file and, if found, injects its contents as a rule. Set `noagentsmd=true` to disable this automatic discovery and injection.
+
 #### Rate Limiting
 - **`rpm`** (number): Rate limit in calls per minute
 - **`tpm`** (number): Maximum tokens per minute across prompt and completion

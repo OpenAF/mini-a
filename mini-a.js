@@ -13054,6 +13054,7 @@ MiniA.prototype._findNearestAgentsInstructionsPath = function(startDir) {
 
 MiniA.prototype._applyAutoAgentsRules = function(args) {
   if (!isMap(args) || args.__autoagentsrulesapplied === true) return
+  if (toBoolean(args.noagentsmd) === true) return
 
   var agentsPath = this._findNearestAgentsInstructionsPath(".")
   if (!isString(agentsPath) || agentsPath.trim().length === 0) return
@@ -13398,7 +13399,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold",
     "mcpproxytoon", "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
-    "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "utilsroot", "utilsallow", "utilsdeny",
+    "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "usestdutils", "mini-a-docs", "miniadocs",
     "usejsontool", "usedelegation", "workers", "workerreg", "workerregtoken", "workerevictionttl", "maxconcurrent",
     "delegationmaxdepth", "delegationtimeout", "delegationstalltimeout", "delegationhardtimeout", "delegationmaxretries",
@@ -13777,6 +13778,7 @@ MiniA.prototype.init = function(args) {
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
+      { name: "noagentsmd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },
@@ -15199,6 +15201,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "forceupdates", type: "boolean", default: false },
       { name: "planlog", type: "string", default: __ },
       { name: "nosetmcpwd", type: "boolean", default: false },
+      { name: "noagentsmd", type: "boolean", default: false },
       { name: "utilsroot", type: "string", default: __ },
       { name: "utilsallow", type: "string", default: __ },
       { name: "utilsdeny", type: "string", default: __ },

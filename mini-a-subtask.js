@@ -184,7 +184,7 @@ SubtaskManager._PARENT_ONLY_CHILD_ARG_NAMES = [
   "planfile", "plancontent", "planmode", "convertplan", "validateplan", "forceplanning",
   "saveplannotes", "planlog", "outfile", "outfileall", "outputfile",
   "mcp", "mcpconfig", "mcpdynamic", "mcpproxy", "mcpproxynative", "mcpproxythreshold",
-  "mcpproxytoon", "mcpproxyallow", "mcpproxydeny", "mcplazy", "nosetmcpwd", "usejsontool",
+  "mcpproxytoon", "mcpproxyallow", "mcpproxydeny", "mcplazy", "nosetmcpwd", "noagentsmd", "usejsontool",
   "useutils", "useskills", "utilsroot", "utilsallow", "utilsdeny", "miniadocs", "mini-a-docs",
   "debugfile", "goalprefix",
   "workerreg", "workerregtoken", "workerregurl", "workerreginterval",

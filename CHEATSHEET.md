@@ -307,6 +307,7 @@ mini-a goal="inspect large logs safely" useshell=true shellmaxbytes=12000
 | `mini-a-docs` | boolean | `false` | If `true` and `utilsroot` is not set, uses the Mini-A opack path as `utilsroot`; the `markdownFiles` tool description includes the resolved docs root so the LLM can navigate documentation directly |
 | `miniadocs` | boolean | `false` | Alias for `mini-a-docs` |
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
+| `noagentsmd` | boolean | `false` | Disable automatic discovery and injection of the nearest `AGENTS.md` file as a rule |
 
 **Single MCP:**
 ```bash
@@ -1396,6 +1397,7 @@ mini-a goal="perform audit" \
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `nosetmcpwd` | boolean | `false` | Prevent setting `__flags.JSONRPC.cmd.defaultDir` to mini-a oPack location |
+| `noagentsmd` | boolean | `false` | Disable automatic discovery and injection of the nearest `AGENTS.md` file as a rule |
 
 ```bash
 # Use system default working directory for MCP commands
