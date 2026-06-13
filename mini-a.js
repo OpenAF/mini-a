@@ -16971,6 +16971,17 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       var plannerStreaming = streamIntent === "planner"
       var canStream = args.usestream && runtime.forceNoStream !== true && isFunction(currentLLM.promptStreamWithStats)
       var canStreamJson = canStream && isFunction(currentLLM.promptStreamJSONWithStats)
+      // Ollama models conflict between "tools" and format:json requests, so JSON-mode
+      // streaming (and JSON-mode non-streaming) must be avoided for tool-call turns.
+      // Plain (non-JSON) streaming still works: the Ollama streaming adapter auto-executes
+      // tool_calls from the final chunk and continues streaming the follow-up text,
+      // mirroring the non-streaming promptWithStats fallback.
+      var currentModelConfig = useLowCost ? this._oaf_lc_model : this._oaf_model
+      var isOllamaToolJsonConflict = this._shouldDisableStreamingForOllamaToolCallTurn(
+        currentModelConfig,
+        this._useToolsActual === true,
+        !noJsonPromptFlag
+      )
       // Create the right streaming delta handler based on the streaming API used.
       var onDelta = null
       var _streamThinkingBuf = []
@@ -16978,6 +16989,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (args.usestream) {
         // When JSON output is expected, always route streaming through the JSON-aware
         // chunk processor. This prevents raw JSON deltas from being rendered directly.
+        // The content shape (JSON envelope vs. plain text) is governed by the system
+        // prompt (noJsonPromptFlag), not by the wire-level jsonFlag passed to the LLM -
+        // Ollama tool-call turns still emit the JSON envelope even when streamed with
+        // jsonFlag=false to avoid the tools/format:json conflict.
         var _baseOnDelta = !noJsonPromptFlag
           ? this._createStreamDeltaHandler(args, {
               fieldName: streamIntent === "planner" ? "thought" : "answer",
@@ -17013,26 +17028,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             }
             return currentLLM.promptWithStats(prompt)
           }
-          // When function calling is active, avoid streaming only for Ollama-backed
-          // turns that still expect structured/tool-calling output.
-          // The streaming adapter can surface thinking deltas while dropping the final
-          // tool_calls payload from the execution path, which leaves the loop with an
-          // empty/non-JSON body even though the provider emitted a valid tool call.
-          // Also skip format:json for these models because some fail when both tools
-          // and JSON mode are requested together.
-          var currentModelConfig = useLowCost ? this._oaf_lc_model : this._oaf_model
-          var isOllamaToolCallMode = this._shouldDisableStreamingForOllamaToolCallTurn(
-            currentModelConfig,
-            this._useToolsActual === true,
-            !noJsonPromptFlag
-          )
-          var isOllamaToolJsonConflict = isOllamaToolCallMode
           // usejsontool models respond via tool_calls; tool_calls are not auto-executed
           // in streaming mode, so pendingJsonToolPayload would never be set. Use non-streaming.
           var isJsonToolMode = toBoolean(args.usejsontool) === true
-          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode && !isOllamaToolCallMode) {
+          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, true, onDelta)
-          } else if (canStream && !isJsonToolMode && !isOllamaToolCallMode) {
+          } else if (canStream && !isJsonToolMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, false, onDelta)
           }
           if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
@@ -18703,7 +18704,10 @@ MiniA.prototype._runChatbotMode = function(options) {
       var onDelta = null
       if (args.usestream) {
         // Keep JSON-based chatbot output behind the chunk processor so we only render
-        // user-visible fields (e.g. "answer") instead of every raw JSON delta.
+        // user-visible fields (e.g. "answer") instead of every raw JSON delta. The content
+        // shape is governed by chatbotStructuredOutput (the system prompt), not by the
+        // wire-level jsonFlag - Ollama tool-call turns still emit the JSON envelope even
+        // when streamed with jsonFlag=false to avoid the tools/format:json conflict.
         onDelta = chatbotStructuredOutput
           ? this._createStreamDeltaHandler(args)
           : this._createPlainStreamDeltaHandler()
@@ -18722,7 +18726,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         }
       } else if (canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true && !chatbotOllamaToolCallMode) {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
-      } else if (canStream && !chatbotOllamaToolCallMode) {
+      } else if (canStream) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
       } else if (chatbotStructuredOutput && isDef(this.llm.promptJSONWithStats)) {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
