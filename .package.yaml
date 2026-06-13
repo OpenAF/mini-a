@@ -221,28 +221,28 @@ filesHash:
   mcps/mcp-wiki-ops.yaml: dd282b01e7ba5fe6d2020139cc3c20fe942e0a97
   mcps/mcp-wiki.yaml: f6053ed3485e13156317afa9a4846130ed50570d
   mini-a-common.js: b1ee5153750602fb6ed8078002d95f47e8a3fda7
-  mini-a-con.js: f16981d32622e25a97a46b089a9de73ba2743fb3
-  mini-a-dreams.js: d0c4ab8f48b57da48e087140b562397c06116b1b
-  mini-a-graph.js: 6a19ef48952ab37f4bfb149363185c30277bdc17
+  mini-a-con.js: 68e42dc5f4ab4b5fad4bdbf26d7ff2ece6faeade
+  mini-a-dreams.js: 7e26ba3d44252f7d73dd48dd32f3a96f0433ff83
+  mini-a-graph.js: 42b42a5e3270d0346948bf31a5f1e91cdae5a42f
   mini-a-mcp-wiki.js: 408458c83cf206724f352bd1554a967fdbd6169f
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 95ec52e03eddb2da1d89150d9c5346c2bbbc9f4e
   mini-a-memoryman.js: 85824db86ab0979281affd096549c11a979386d8
   mini-a-modelman.js: 521d0a5f93e97d137d71c22617b15ea312beb7a2
   mini-a-modes.yaml: 112b89a725f49d2f01b8e8437cf1746fb438f585
-  mini-a-progcall.js: 5cd28b78fe3bb935969444a8677d835e28a8c600
+  mini-a-progcall.js: 2bf756b84b4e955ea0cf4c1e77d2e8dd71164a42
   mini-a-response.js: d052103d2ddb8df607a5d78b1e26851df2b1e4fd
   mini-a-router.js: 381d0f2d34864fdca03d5d4f528fa0f827bbed48
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
-  mini-a-subtask.js: 74b60903a2c4df0fda3c3080160ebd2f0f315460
+  mini-a-subtask.js: e1a1d482f700b507904224e8963aef8ad34237da
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
   mini-a-utils.js: cc58e9707da62f0b0ecf2c47da646ddc5ff92023
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: b8aac08eccc7a0dd5056044003c95234571f0692
-  mini-a-wiki.js: 28f6e9b7b5f1a1f24d77806231aa73b883afc94c
+  mini-a-web.yaml: 2f3e6f0ede20cd50173aa08b125ff722ee443b25
+  mini-a-wiki.js: ab8b3655e8d7503f39bb4413cdd15d30ebc539ee
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: d3121e966192aad7dd5dfc72f9deb2aeb4490104
+  mini-a.js: 31034badf9cbc9587c37f5c4d6a30a34c828f7e5
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 97426104ad3cf41dfb7a635076ab5900e657e1d7
+  mini-a.yaml: 47250fee232f99ebadf77bd3c43cd1033fbd6a51
   public/index.md: 9b9bf9231db87c0a1f15d9011caeafc4cfcb08bd
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
