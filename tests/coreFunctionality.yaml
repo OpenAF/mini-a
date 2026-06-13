@@ -467,6 +467,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testAgentProfileBareNameResolvesFromMiniAHomeAgentsDir
 
+- name: MiniA Core Tests::AutoAgentsRulesLoadNearestAgentsFile
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutoAgentsRulesLoadNearestAgentsFile
+
 - name: MiniA Core Tests::WarnUnknownArgsIgnoresInternalParameters
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -613,6 +618,7 @@ todo:
 - MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit
 - MiniA Core Tests::AgentMiniAOverridesYieldToExplicitCliFlags
 - MiniA Core Tests::AgentProfileBareNameResolvesFromMiniAHomeAgentsDir
+- MiniA Core Tests::AutoAgentsRulesLoadNearestAgentsFile
 - MiniA Core Tests::WarnUnknownArgsIgnoresInternalParameters
 - MiniA Core Tests::WarnUnknownArgsSupportsExtraIgnoredLauncherParameters
 - MiniA Core Tests::WarnUnknownArgsUsesRawArgsWhenExplicitKeysMissing
