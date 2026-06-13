@@ -472,6 +472,9 @@ MiniAWikiGraph.prototype.buildStructural = function(pages) {
   Object.keys(semanticNodeIds).forEach(function(nodeId) {
     var node = oldNodes[nodeId]
     if (!isMap(node)) return
+    // Only preserve non-structural semantic nodes across rebuilds.
+    // Document nodes are recreated from the new structural page list.
+    if (node.type === "document") return
     if (!isMap(this._state.nodes[nodeId])) this._upsertNode(nodeId, node.type, isMap(node.props) ? clone(node.props) : {})
   }, this)
   for (var j = 0; j < oldSemanticEdges.length; j++) {
