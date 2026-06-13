@@ -233,6 +233,36 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testGraphUpdatePreservesOtherIsolatedDocuments = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural([
+        { path: "isolated.md", meta: { title: "Isolated" }, body: "No tags, links, or headings.", links: [] },
+        { path: "main.md", meta: { title: "Main", tags: ["core"] }, body: "# Main\nUpdated", links: [] }
+      ])
+      ow.test.assert(isDef(g._state.nodes["doc:isolated.md"]), true, "isolated document should exist before update")
+      g.updatePage({ path: "main.md", meta: { title: "Main v2", tags: ["core"] }, body: "# Main\nChanged", links: [] })
+      ow.test.assert(isDef(g._state.nodes["doc:isolated.md"]), true, "isolated document should survive unrelated page update")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testGraphStructuralRebuildSkipsDanglingSemanticEdges = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural([{ path: "p1.md", meta: { title: "P1" }, body: "# P1", links: [] }])
+      g._upsertNode("concept:foo", "concept", { name: "Foo" })
+      g._addEdge("doc:p1.md", "concept:foo", "MENTIONS", "INFERRED", { page: "p1.md", confidence: 0.7 })
+      ow.test.assert(g._state.edges.length > 0, true, "semantic edge should be created")
+      g.buildStructural([{ path: "p1.md", meta: { title: "P1 updated" }, body: "# P1 updated", links: [] }])
+      var dangling = g._state.edges.filter(function(edge) {
+        return !isMap(g._state.nodes[edge.from]) || !isMap(g._state.nodes[edge.to])
+      })
+      ow.test.assert(dangling.length, 0, "rebuild should not leave dangling semantic edges")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testGraphUpdatePageEquivalence = function() {
     var dir = mkTmp()
     try {
@@ -297,6 +327,36 @@
       var report = g.saveReport()
       ow.test.assert(report.ok, true, "explicit saveReport should succeed")
       ow.test.assert(io.fileExists(dir + "/GRAPH_REPORT.md"), true, "graph report should be created on demand")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testGraphSemanticBuildFallsBackWithoutLlm = function() {
+    var dir = mkTmp()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural([
+        {
+          path: "alpha.md",
+          meta: { title: "Alpha" },
+          body: "# Alpha\nAlpha references [Beta](beta.md)\n## Shared Context",
+          links: ["beta.md"]
+        }
+      ])
+      var res = g.buildSemantic([
+        {
+          path: "alpha.md",
+          meta: { title: "Alpha" },
+          body: "# Alpha\nAlpha references [Beta](beta.md)\n## Shared Context",
+          links: ["beta.md"]
+        }
+      ])
+      ow.test.assert(res.ok, true, "semantic build should not fail without an injected extractor")
+      var summary = g._state.summaries.pages["alpha.md"]
+      ow.test.assert(isString(summary.summary) && summary.summary.length > 0, true, "fallback semantic build should produce a summary")
+      var semanticEdges = g._state.edges.filter(function(edge) {
+        return String(edge.provenance || "").toUpperCase() === "AMBIGUOUS" || String(edge.provenance || "").toUpperCase() === "INFERRED"
+      })
+      ow.test.assert(semanticEdges.length > 0, true, "fallback semantic build should produce semantic edges")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 

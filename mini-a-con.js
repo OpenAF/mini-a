@@ -242,6 +242,9 @@ try {
 
       if (isUnDef(resolvedKey)) {
         logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
+        if (_knownModelTypes[_modeLower] === true) {
+          logWarn(`'${modeName}' looks like a model type, not a Mini-A mode preset. Use a preset name such as mode=chatbot, and configure the model separately (e.g. model=... or OAF_MODEL).`)
+        }
         args.__modeApplied = true
         return
       }
@@ -4437,7 +4440,7 @@ try {
 
   function printEvent(type, icon, message, id) {
     // Handle streaming output
-    if (type == "stream") {
+    if (type == "stream" || type == "planner_stream") {
       // Clear inline-event erase state before rendering stream chunks so
       // future event logs don't wipe already streamed answer text.
       if (isDef(_prevEventRenderLines)) {
@@ -4447,14 +4450,9 @@ try {
         _prevEventAnimatedRenderer = __
       }
       var streamText = isString(message) ? message : String(message || "")
-      if (type == "stream") {
-        _streamOutputStats.totalChars += streamText.length
-        _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
-        _renderStreamChunk(streamText)
-      } else {
-        //this.fnI("planner_stream", streamText)
-        //printnl(colorifyText(streamText, eventPalette.planner_stream))
-      }
+      _streamOutputStats.totalChars += streamText.length
+      _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
+      _renderStreamChunk(streamText)
       return
     }
     // Ignore user events

@@ -64,3 +64,13 @@ jobs:
   from: MiniA Graph Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testGraphSemanticInvalidation
+
+- name: MiniA Graph Tests::UpdatePreservesOtherIsolatedDocuments
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphUpdatePreservesOtherIsolatedDocuments
+
+- name: MiniA Graph Tests::StructuralRebuildSkipsDanglingSemanticEdges
+  from: MiniA Graph Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGraphStructuralRebuildSkipsDanglingSemanticEdges

@@ -7,7 +7,7 @@ var MiniAWikiGraph = function(config, loggerFn) {
   this._log = isFunction(loggerFn) ? loggerFn : function() {}
   this._graphDir = isString(this._cfg.graphDir) && this._cfg.graphDir.trim().length > 0 ? String(this._cfg.graphDir).trim() : "./.mini-a-wiki-graph"
   this._communityAlgo = isString(this._cfg.communityAlgo) ? this._cfg.communityAlgo : "louvain"
-  this._llmExtractFn = isFunction(this._cfg.llmExtractFn) ? this._cfg.llmExtractFn : __
+  this._llmExtractFn = isFunction(this._cfg.llmExtractFn) ? this._cfg.llmExtractFn : this._defaultSemanticExtract.bind(this)
   this._falkor = isMap(this._cfg.falkor) ? this._cfg.falkor : __
   this._readOnly = this._cfg.readOnly === true
   this._autosave = isString(this._cfg.autosave) ? String(this._cfg.autosave).toLowerCase().trim() : "always"
@@ -80,6 +80,106 @@ MiniAWikiGraph.prototype._estimateTokens = function(text) {
   return Math.max(1, Math.ceil(chars / 4))
 }
 
+MiniAWikiGraph.prototype._stripMarkdown = function(text) {
+  var s = isString(text) ? String(text) : ""
+  if (s.length === 0) return ""
+  s = s.replace(/```[\s\S]*?```/g, " ")
+  s = s.replace(/`([^`]+)`/g, "$1")
+  s = s.replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
+  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+  s = s.replace(/\[\[([^\]]+)\]\]/g, "$1")
+  s = s.replace(/^#+\s+/gm, "")
+  s = s.replace(/[*_~>#-]+/g, " ")
+  s = s.replace(/\s+/g, " ").trim()
+  return s
+}
+
+MiniAWikiGraph.prototype._normalizeConceptName = function(text) {
+  var s = this._stripMarkdown(text)
+  if (s.length === 0) return ""
+  s = s.replace(/\.[a-z0-9]+$/i, "")
+  s = s.replace(/\s+/g, " ").trim()
+  return s
+}
+
+MiniAWikiGraph.prototype._semanticSummaryFor = function(payload) {
+  var lines = isString(payload && payload.body) ? payload.body.split(/\r?\n/) : []
+  for (var i = 0; i < lines.length; i++) {
+    var line = this._stripMarkdown(lines[i])
+    if (line.length === 0) continue
+    if (String(lines[i] || "").match(/^#{1,6}\s+/)) continue
+    return line.substring(0, 300)
+  }
+  var fallback = this._normalizeConceptName(payload && payload.title)
+  return fallback.substring(0, 300)
+}
+
+MiniAWikiGraph.prototype._defaultSemanticExtract = function(payload) {
+  var title = this._normalizeConceptName(payload && payload.title)
+  var body = isString(payload && payload.body) ? payload.body : ""
+  var relationships = []
+  var seen = {}
+  var self = this
+  var addRel = function(from, to, type, confidence) {
+    var src = self._normalizeConceptName(from)
+    var dst = self._normalizeConceptName(to)
+    if (src.length === 0 || dst.length === 0 || src.toLowerCase() === dst.toLowerCase()) return
+    var key = [src.toLowerCase(), dst.toLowerCase(), String(type || "RELATED_TO").toUpperCase()].join("|")
+    if (seen[key]) return
+    seen[key] = true
+    relationships.push({
+      from: src,
+      to: dst,
+      type: isString(type) && type.trim().length > 0 ? type.trim().toUpperCase() : "RELATED_TO",
+      provenance: "AMBIGUOUS",
+      confidence: isNumber(confidence) ? confidence : 0.35
+    })
+  }
+
+  var headingMatches = body.match(/^#{2,6}\s+.+$/gm) || []
+  headingMatches.forEach(function(line) {
+    var heading = self._normalizeConceptName(String(line || "").replace(/^#{1,6}\s+/, ""))
+    if (heading.length > 0 && title.length > 0) addRel(title, heading, "RELATES_TO", 0.3)
+  })
+
+  var wikiLinkRe = /\[\[([^\]]+)\]\]/g
+  var wikiMatch
+  while ((wikiMatch = wikiLinkRe.exec(body)) !== null) {
+    if (title.length === 0) break
+    addRel(title, wikiMatch[1], "REFERENCES", 0.45)
+  }
+
+  var mdLinkRe = /\[([^\]]+)\]\(([^)]+)\)/g
+  var mdMatch
+  while ((mdMatch = mdLinkRe.exec(body)) !== null) {
+    if (title.length === 0) break
+    addRel(title, mdMatch[1], "REFERENCES", 0.45)
+  }
+
+  if (title.length > 0) {
+    var sentenceMatches = body.match(/(^|[.!?]\s+)([A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+){0,3})/g) || []
+    sentenceMatches.slice(0, 12).forEach(function(match) {
+      var phrase = self._normalizeConceptName(String(match || "").replace(/^[.!?\s]+/, ""))
+      if (phrase.length > 2) addRel(title, phrase, "MENTIONS", 0.25)
+    })
+  }
+
+  if (relationships.length === 0 && title.length > 0) {
+    var pathName = this._normalizeConceptName(isString(payload && payload.path) ? payload.path.split("/").pop() : "")
+    if (pathName.length > 0 && pathName.toLowerCase() !== title.toLowerCase()) addRel(title, pathName, "ALSO_KNOWN_AS", 0.2)
+  }
+
+  if (relationships.length > 0 && this._cfg._warnedSemanticFallback !== true) {
+    this._cfg._warnedSemanticFallback = true
+    this._log("warn", "[graph] semantic extraction fallback active: using built-in heuristics")
+  }
+
+  return {
+    summary: this._semanticSummaryFor(payload),
+    relationships: relationships
+  }
+}
+
 MiniAWikiGraph.prototype._pageDigest = function(p) {
   var title = isMap(p.meta) && isString(p.meta.title) ? p.meta.title : p.path
   var first = ""
@@ -138,6 +238,7 @@ MiniAWikiGraph.prototype._reindexEdges = function() {
 MiniAWikiGraph.prototype._addEdge = function(from, to, type, provenance, props) {
   if (!isString(from) || from.length === 0 || !isString(to) || to.length === 0 || !isString(type) || type.length === 0) return
   this._ensureIndexes()
+  if (!isMap(this._state.nodes[from]) || !isMap(this._state.nodes[to])) return
   var prov = this._normalizeProvenance(provenance)
   var key = this._edgeKey(from, to, type, prov)
   if (this._state._edgeIndex[key]) return
@@ -263,7 +364,7 @@ MiniAWikiGraph.prototype._pruneUnreferencedNodes = function(path) {
     var node = self._state.nodes[id]
     var refs = self._nodeRefs[id] || 0
     var keep = refs > 0
-    if (!keep && isMap(node) && node.type === "document" && isMap(node.props) && isString(node.props.path) && node.props.path === path) keep = false
+    if (!keep && isMap(node) && node.type === "document" && isMap(node.props) && isString(node.props.path) && node.props.path !== path) keep = true
     if (!keep) delete self._state.nodes[id]
   })
 }
@@ -352,19 +453,34 @@ MiniAWikiGraph.prototype._persist = function(diff) {
 MiniAWikiGraph.prototype.buildStructural = function(pages) {
   var list = isArray(pages) ? pages : []
   var oldSemanticEdges = []
+  var semanticNodeIds = {}
   ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
     var prov = String(e.provenance || "").toUpperCase()
-    if (prov === "INFERRED" || prov === "AMBIGUOUS") oldSemanticEdges.push({
-      from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: isMap(e.props) ? clone(e.props) : {}
-    })
+    if (prov === "INFERRED" || prov === "AMBIGUOUS") {
+      oldSemanticEdges.push({
+        from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: isMap(e.props) ? clone(e.props) : {}
+      })
+      semanticNodeIds[e.from] = true
+      semanticNodeIds[e.to] = true
+    }
   })
+  var oldNodes = this._state.nodes
 
   this._state = this._emptyState()
   this._ensureIndexes()
   for (var i = 0; i < list.length; i++) this._indexPageStructural(list[i])
+  Object.keys(semanticNodeIds).forEach(function(nodeId) {
+    var node = oldNodes[nodeId]
+    if (!isMap(node)) return
+    // Only preserve non-structural semantic nodes across rebuilds.
+    // Document nodes are recreated from the new structural page list.
+    if (node.type === "document") return
+    if (!isMap(this._state.nodes[nodeId])) this._upsertNode(nodeId, node.type, isMap(node.props) ? clone(node.props) : {})
+  }, this)
   for (var j = 0; j < oldSemanticEdges.length; j++) {
     var se = oldSemanticEdges[j]
     if (isMap(se.props) && isString(se.props.page) && !isMap(this._state.summaries.pages[se.props.page])) continue
+    if (!isMap(this._state.nodes[se.from]) || !isMap(this._state.nodes[se.to])) continue
     this._addEdge(se.from, se.to, se.type, se.provenance, se.props)
   }
   this._markDerivedDirty()

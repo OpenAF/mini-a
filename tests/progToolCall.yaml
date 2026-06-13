@@ -97,6 +97,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testEachInstanceGetsUniquePortAndToken
 
+- name: ProgToolCall Tests::StartFailureCleansTempDir
+  from: ProgToolCall Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStartFailureCleansTempDir
+
 - name: ProgToolCall Tests::ResultNotFound
   from: ProgToolCall Tests::Init
   to  : oJob Test

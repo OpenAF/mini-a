@@ -1047,6 +1047,9 @@ todo:
                 return
               }
               if (e == "planner_stream") {
+                if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                  global._mini_a_web_ssePush(uuid, "planner_stream", { message: m })
+                }
                 return
               }
               var _e = ""

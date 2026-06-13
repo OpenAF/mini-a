@@ -68,6 +68,7 @@ var SubtaskManager = function(parentArgs, opts) {
   }
 
   this._running = true
+  this._transitionLock = "mini_a_subtask_lock_" + genUUID()
 
   if (this.remoteDelegation) {
     this._refreshWorkerProfiles()
@@ -83,6 +84,22 @@ SubtaskManager.prototype._touchSubtask = function(subtask, reason) {
   subtask.lastActivityAt = now
   subtask.lastActivityReason = isString(reason) && reason.length > 0 ? reason : "activity"
   return true
+}
+
+SubtaskManager.prototype._claimTerminal = function(subtask, newStatus, nowValue, errorValue) {
+  if (!isMap(subtask) || !isString(newStatus) || newStatus.length === 0) return false
+  var claimed = false
+  var parent = this
+  sync(function() {
+    if (__isTerminalSubtaskState(subtask.status) || subtask.status !== "running") return
+    subtask.status = newStatus
+    subtask.completedAt = isNumber(nowValue) ? nowValue : new Date().getTime()
+    if (isDef(errorValue)) subtask.error = errorValue
+    parent.metrics.running--
+    parent.runningCount--
+    claimed = true
+  }, this._transitionLock)
+  return claimed
 }
 
 SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
@@ -955,10 +972,9 @@ SubtaskManager.prototype._remoteGet = function(workerUrl, path, query) {
 }
 
 SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, metrics, state) {
-  if (subtask.status !== "running") return false  // guard against watchdog race
+  var completedAt = new Date().getTime()
+  if (!this._claimTerminal(subtask, "completed", completedAt, __)) return false
   this._touchSubtask(subtask, "completed")
-  subtask.status = "completed"
-  subtask.completedAt = new Date().getTime()
   subtask.result = {
     answer: answer,
     metrics: metrics,
@@ -969,40 +985,51 @@ SubtaskManager.prototype._completeSubtask = function(subtask, prefix, answer, me
   var duration = isDef(subtask.startedAt) ? subtask.completedAt - subtask.startedAt : 0
   this.metrics.totalDurationMs += duration
   this.metrics.completed++
-  this.metrics.running--
-  this.runningCount--
 
   this.interactionFn("delegate", prefix + " ✅ Completed in " + Math.round(duration / 1000) + "s")
+  return true
 }
 
 SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) {
-  if (subtask.status !== "running") return "skipped"  // guard against watchdog race
-  this._touchSubtask(subtask, "failed")
-  subtask.error = error
+  var outcome = "skipped"
+  var parent = this
+  sync(function() {
+    if (subtask.status !== "running") return
+    parent._touchSubtask(subtask, "failed")
+    subtask.error = error
 
-  if (subtask.attempt < subtask.maxAttempts) {
-    subtask.status = "pending"
-    this._touchSubtask(subtask, "retry queued")
-    subtask.metadata.previousError = error
-    this.pendingQueue.push(subtask.id)
-    this.metrics.retried++
-    this.metrics.running--
-    this.runningCount--
+    if (subtask.attempt < subtask.maxAttempts) {
+      subtask.status = "pending"
+      parent._touchSubtask(subtask, "retry queued")
+      subtask.metadata.previousError = error
+      if (parent.pendingQueue.indexOf(subtask.id) < 0) parent.pendingQueue.push(subtask.id)
+      parent.metrics.retried++
+      parent.metrics.running--
+      parent.runningCount--
+      outcome = "retry"
+      return
+    }
+
+    subtask.status = "failed"
+    subtask.completedAt = new Date().getTime()
+    parent.metrics.failed++
+    parent.metrics.running--
+    parent.runningCount--
+    outcome = "failed"
+  }, this._transitionLock)
+
+  if (outcome === "skipped") return outcome
+  if (outcome === "retry") {
     this.interactionFn("delegate", prefix + " ⚠️ Failed (attempt " + subtask.attempt + "/" + subtask.maxAttempts + "), will retry: " + error)
-    return "retry"
+    return outcome
   }
 
   if (this.remoteDelegation && isString(subtask.workerUrl) && subtask.workerUrl.length > 0) {
     this._recordWorkerFailure(subtask.workerUrl, "Subtask exhausted max attempts (" + subtask.maxAttempts + ")")
   }
 
-  subtask.status = "failed"
-  subtask.completedAt = new Date().getTime()
-  this.metrics.failed++
-  this.metrics.running--
-  this.runningCount--
   this.interactionFn("delegate", prefix + " ❌ Failed after " + subtask.maxAttempts + " attempts: " + error)
-  return "failed"
+  return outcome
 }
 
 SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
@@ -1331,25 +1358,34 @@ SubtaskManager.prototype.start = function(subtaskId) {
   if (subtask.status !== "pending") {
     throw new Error("Subtask " + subtaskId + " is not in pending state (current: " + subtask.status + ")")
   }
-  
-  // Check concurrency limit
-  if (this.runningCount >= this.maxConcurrent) {
-    // Keep it pending, will be started by _processQueue
-    return
-  }
-  
-  subtask.status = "running"
-  subtask.startedAt = new Date().getTime()
-  this._touchSubtask(subtask, "started")
-  subtask.attempt++
-  this.runningCount++
-  this.metrics.running++
-  
-  // Remove from pending queue
-  var queueIndex = this.pendingQueue.indexOf(subtaskId)
-  if (queueIndex >= 0) {
-    this.pendingQueue.splice(queueIndex, 1)
-  }
+
+  var started = false
+  var manager = this
+  sync(function() {
+    if (subtask.status !== "pending") return
+
+    // Check concurrency limit
+    if (manager.runningCount >= manager.maxConcurrent) {
+      if (manager.pendingQueue.indexOf(subtaskId) < 0) manager.pendingQueue.unshift(subtaskId)
+      return
+    }
+
+    subtask.status = "running"
+    subtask.startedAt = new Date().getTime()
+    manager._touchSubtask(subtask, "started")
+    subtask.attempt++
+    manager.runningCount++
+    manager.metrics.running++
+
+    // Remove from pending queue
+    var queueIndex = manager.pendingQueue.indexOf(subtaskId)
+    if (queueIndex >= 0) {
+      manager.pendingQueue.splice(queueIndex, 1)
+    }
+    started = true
+  }, this._transitionLock)
+
+  if (!started) return
   
   // Emit delegation start event
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
@@ -1454,7 +1490,6 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   }
 
   if (wasRunning && isObject(subtask.childAgent)) {
-    subtask.status = "cancelled"
     try {
       if (isFunction(subtask.childAgent.requestStop)) {
         subtask.childAgent.requestStop(reason || "Cancelled by user", { quiet: true })
@@ -1466,21 +1501,35 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   }
   
   // Mark as cancelled
-  subtask.status = "cancelled"
-  subtask.completedAt = new Date().getTime()
-  subtask.error = reason || "Cancelled by user"
+  var cancelReason = reason || "Cancelled by user"
+  var claimedRunning = false
+  if (wasRunning) claimedRunning = this._claimTerminal(subtask, "cancelled", new Date().getTime(), cancelReason)
+  var cancelledPending = false
+  if (!wasRunning) {
+    var cancelledAt = new Date().getTime()
+    var parent = this
+    sync(function() {
+      if (__isTerminalSubtaskState(subtask.status) || subtask.status !== "pending") return
+      subtask.status = "cancelled"
+      subtask.completedAt = cancelledAt
+      subtask.error = cancelReason
+      var queueIndex = parent.pendingQueue.indexOf(subtaskId)
+      if (queueIndex >= 0) parent.pendingQueue.splice(queueIndex, 1)
+      cancelledPending = true
+    }, this._transitionLock)
+  }
   
   // Update metrics
-  if (wasRunning) {
-    this.metrics.running--
-    this.runningCount--
-  }
+  if (wasRunning && !claimedRunning) return false
+  if (!wasRunning && !cancelledPending) return false
   this.metrics.cancelled++
   
   // Remove from pending queue if present
-  var queueIndex = this.pendingQueue.indexOf(subtaskId)
-  if (queueIndex >= 0) {
-    this.pendingQueue.splice(queueIndex, 1)
+  if (wasRunning) {
+    var queueIndex = this.pendingQueue.indexOf(subtaskId)
+    if (queueIndex >= 0) {
+      this.pendingQueue.splice(queueIndex, 1)
+    }
   }
   
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
@@ -1688,6 +1737,9 @@ SubtaskManager.prototype._processQueue = function() {
     if (!isDef(subtask) || subtask.status !== "pending") continue
     try {
       this.start(nextId)
+      if (isDef(subtask) && subtask.status === "pending" && this.pendingQueue.indexOf(nextId) < 0) {
+        this.pendingQueue.unshift(nextId)
+      }
     } catch(e) {
       if (isDef(subtask)) {
         // Restore counters if start() already incremented them before throwing
@@ -1726,14 +1778,8 @@ SubtaskManager.prototype._startWatchdog = function() {
           if (subtask.status === "running" && isDef(subtask.startedAt)) {
             var timeoutReason = parent._getSubtaskTimeoutReason(subtask, now)
             if (isMap(timeoutReason)) {
-              // Claim the status transition first so worker threads see it immediately
-              // and bail out of their own completion paths.
-              subtask.status = "timeout"
-              subtask.completedAt = now
-              subtask.error = timeoutReason.message
+              if (!parent._claimTerminal(subtask, "timeout", now, timeoutReason.message)) return
               parent.metrics.timedout++
-              parent.metrics.running--
-              parent.runningCount--
 
               // Best-effort remote cancel after claiming the transition
               if (parent.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {

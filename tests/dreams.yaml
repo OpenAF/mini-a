@@ -20,6 +20,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testDreamMemoryPreservesIds
 
+- name: MiniA Dreams Tests::ApplyPersistsConsolidatedSections
+  from: MiniA Dreams Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDreamMemoryApplyPersistsConsolidatedSections
+
 - name: MiniA Dreams Tests::DryRunDoesNotWrite
   from: MiniA Dreams Tests::Init
   to  : oJob Test

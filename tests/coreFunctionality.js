@@ -150,6 +150,25 @@
     )
   }
 
+  exports.testJsonToolStreamingDisabledOnlyForNativeToolCalling = function() {
+    var agent = createAgent()
+    ow.test.assert(
+      agent._shouldDisableStreamingForJsonToolTurn(true, true),
+      true,
+      "Should disable streaming when the json compatibility tool uses native function calling"
+    )
+    ow.test.assert(
+      agent._shouldDisableStreamingForJsonToolTurn(true, false),
+      false,
+      "Should keep streaming enabled when usejsontool uses action-based mode"
+    )
+    ow.test.assert(
+      agent._shouldDisableStreamingForJsonToolTurn(false, true),
+      false,
+      "Should not disable streaming when the json compatibility tool is disabled"
+    )
+  }
+
   exports.testToolCallingFailureFallbackEscalatesLowCostOnly = function() {
     var agent = createAgent()
     agent.fnI = function() {}
@@ -580,6 +599,113 @@
     ow.test.assert(thoughtEvents.length === 0, true, "Streaming thinking tags should not emit canonical thought or think events")
     ow.test.assert(streamOutput.indexOf("Hello world") >= 0, true, "Visible streamed output should still be rendered")
     ow.test.assert(streamOutput.indexOf("hidden reasoning") < 0, true, "Hidden thinking content should not leak into streamed answer output")
+  }
+
+  exports.testDefaultInteractionFnForwardsPlannerStreamEvents = function() {
+    var agent = createAgent()
+    var forwarded = []
+
+    agent.defaultInteractionFn("planner_stream", "step in progress", function(icon, text, id) {
+      forwarded.push({ icon: icon, text: text, id: id })
+    })
+
+    ow.test.assert(forwarded.length, 1, "Planner stream events should be forwarded to custom interaction handlers")
+    ow.test.assert(forwarded[0].icon, "", "Planner stream forwarding should keep the raw streaming path")
+    ow.test.assert(forwarded[0].text, "step in progress", "Planner stream forwarding should preserve streamed content")
+    ow.test.assert(forwarded[0].id, agent.getId(), "Planner stream forwarding should preserve the agent id")
+  }
+
+  exports.testSupportsPromptStreamWithStatsCompatForRawPromptStreamProviders = function() {
+    var agent = createAgent()
+    var llm = {
+      getGPT: function() {
+        return {
+          model: {
+            rawPromptStream: function() {}
+          },
+          getLastStats: function() { return {} }
+        }
+      }
+    }
+
+    ow.test.assert(agent._supportsPromptStreamWithStatsCompat(llm, false), true, "Compat check should allow plain streaming via rawPromptStream")
+    ow.test.assert(agent._supportsPromptStreamWithStatsCompat(llm, true), true, "Compat check should allow JSON streaming via rawPromptStream")
+  }
+
+  exports.testSupportsPromptStreamWithStatsCompatFallsBackToDirectMethods = function() {
+    var agent = createAgent()
+    var llm = {
+      promptStreamWithStats: function() {},
+      promptStreamJSONWithStats: function() {}
+    }
+
+    ow.test.assert(agent._supportsPromptStreamWithStatsCompat(llm, false), true, "Compat check should allow direct plain streaming methods")
+    ow.test.assert(agent._supportsPromptStreamWithStatsCompat(llm, true), true, "Compat check should allow direct JSON streaming methods")
+  }
+
+  exports.testStreamDeltaHandlerFallsBackToPlainTextWhenChunksAreNotJson = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var onDelta = agent._createStreamDeltaHandler({ showthinking: false, useascii: false }, { fieldName: "answer", eventName: "stream" })
+    onDelta("Hello ")
+    onDelta("world")
+
+    var streamOutput = events
+      .filter(function(evt) { return evt.event === "stream" })
+      .map(function(evt) { return evt.message })
+      .join("")
+
+    ow.test.assert(streamOutput.indexOf("Hello world") >= 0, true, "Non-JSON streaming chunks should remain visible via plain-text fallback")
+  }
+
+  exports.testStreamDeltaHandlerSuppressesJsonReplayAfterPlainText = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var onDelta = agent._createStreamDeltaHandler({ showthinking: false, useascii: false }, { fieldName: "thought", eventName: "planner_stream" })
+    onDelta("Gather the actual diffs")
+    onDelta("{\"thought\":\"Gather the actual diffs\",\"action\":\"shell\",\"command\":\"git diff --stat\"}")
+    onDelta("\n")
+
+    var streamOutput = events
+      .filter(function(evt) { return evt.event === "planner_stream" })
+      .map(function(evt) { return evt.message })
+      .join("")
+
+    ow.test.assert(streamOutput.indexOf("Gather the actual diffs") >= 0, true, "Plain streamed thought should remain visible")
+    ow.test.assert(streamOutput.indexOf("\"action\"") < 0, true, "Structured replay should not leak action JSON")
+    ow.test.assert(streamOutput.indexOf("git diff --stat") < 0, true, "Structured replay should not leak command arguments")
+  }
+
+  exports.testStructuredAgentStreamSkipsPlainThoughtPrefixAndExtractsAnswer = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) {
+      events.push({ event: event, message: message })
+    }
+
+    var onDelta = agent._createStreamDeltaHandler(
+      { showthinking: false, useascii: false },
+      { fieldName: "answer", eventName: "stream", allowPlainTextFallback: false }
+    )
+    onDelta("Analyze the changes first.\n\n")
+    onDelta("{\"thought\":\"Analyze the changes first.\",\"action\":\"final\",\"answer\":\"Impact report\"}")
+
+    var streamOutput = events
+      .filter(function(evt) { return evt.event === "stream" })
+      .map(function(evt) { return evt.message })
+      .join("")
+
+    ow.test.assert(streamOutput.indexOf("Impact report") >= 0, true, "Structured agent stream should extract the final answer")
+    ow.test.assert(streamOutput.indexOf("Analyze the changes first") < 0, true, "Plain thought prefixes should not be streamed as answers")
+    ow.test.assert(streamOutput.indexOf("\"action\"") < 0, true, "Structured agent stream should not leak the JSON envelope")
   }
 
   exports.testRecoverJsonFromStreamChunksAfterIncompleteObjectError = function() {

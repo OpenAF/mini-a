@@ -1204,6 +1204,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
 
 MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
   loadLib("s3.js")
+  var parent = this
   var bucket  = isString(cfg.bucket) ? cfg.bucket.trim() : ""
   var prefix  = isString(cfg.prefix) ? cfg.prefix.trim() : "wiki/"
   if (prefix.length > 0 && !prefix.endsWith("/")) prefix = prefix + "/"
@@ -1225,7 +1226,10 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
           .map(function(o) { return isString(o.filename) ? o.filename : (isString(o.canonicalPath) ? o.canonicalPath : "") })
           .filter(function(n) { return n.length > 0 && n.endsWith(".md") && !n.endsWith("/") })
           .map(function(n) { return n.startsWith(prefix) ? n.substring(prefix.length) : n })
-      } catch(e) { return [] }
+      } catch(e) {
+        if (isFunction(parent._logFn)) parent._logFn("warn", "Failed to list wiki S3 objects: " + __miniAErrMsg(e))
+        return []
+      }
     },
     read: function(path) {
       try {
@@ -1254,6 +1258,7 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
 }
 
 MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
+  var parent = this
   includeOPack("ElasticSearch")
   loadLib("elasticsearch.js")
   var esurl = isString(cfg.esurl) ? cfg.esurl : "http://127.0.0.1:9200"
@@ -1265,7 +1270,11 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
     type: "es",
     list: function(pfx) {
       var prefix = isString(pfx) ? pfx : ""
-      return __miniAWikiEsRowsToPaths($ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 }))
+      var rows = $ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 })
+      if (isArray(rows) && rows.length >= 10000 && isFunction(parent._logFn)) {
+        parent._logFn("warn", "Elastic wiki list reached the 10000 row cap; results may be truncated.")
+      }
+      return __miniAWikiEsRowsToPaths(rows)
     },
     read: function(path) {
       var r = $ch(chName).get({ path: path })

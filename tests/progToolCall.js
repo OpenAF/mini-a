@@ -489,6 +489,24 @@
     }
   }
 
+  exports.testStartFailureCleansTempDir = function() {
+    var srv = new MiniAProgCallServer(makeMockAgent())
+    var originalStart = ow.server.httpd.start
+    ow.server.httpd.start = function() { throw new Error("boom") }
+    try {
+      var failed = false
+      try {
+        srv.start({ port: 12345 })
+      } catch(e) {
+        failed = true
+      }
+      ow.test.assert(failed, true, "start should throw when HTTP server fails")
+      ow.test.assert(isUnDef(srv._tmpDir) || srv._tmpDir === __, true, "tmpDir ref should be cleared after failed start")
+    } finally {
+      ow.server.httpd.start = originalStart
+    }
+  }
+
   exports.testResultNotFoundReturnsError = function() {
     var t = makeAndStartServer()
     var port = t.info.port; var token = t.info.token
