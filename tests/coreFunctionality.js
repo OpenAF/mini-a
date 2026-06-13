@@ -2476,7 +2476,12 @@
     try {
       java.lang.System.setProperty("user.dir", nestedDir)
 
-      var args = { rules: "- Existing rule" }
+      var unrelatedRoot = String(io.createTempFile("mini-a-agents-unrelated-", ""))
+      io.rm(unrelatedRoot)
+      io.mkdir(unrelatedRoot)
+
+      var args = { rules: "- Existing rule", _agentBaseDir: unrelatedRoot + "/agents" }
+      new java.io.File(args._agentBaseDir).mkdirs()
       agent._applyAutoAgentsRules(args)
 
       var parsedRules = agent._parseRulesArgument(args.rules)
@@ -2492,6 +2497,7 @@
     } finally {
       java.lang.System.setProperty("user.dir", originalUserDir)
       try { io.rm(tempRoot) } catch(ignoreCleanup) {}
+      try { if (isString(unrelatedRoot) && unrelatedRoot.length > 0) io.rm(unrelatedRoot) } catch(ignoreCleanup2) {}
     }
   }
 
