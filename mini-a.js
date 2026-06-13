@@ -17046,9 +17046,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           // attached through native function calling. Action-based proxy mode
           // disables native tools, so usejsontool remains stream-compatible.
           var isNativeJsonToolCallMode = this._shouldDisableStreamingForJsonToolTurn(args.usejsontool, this._useToolsActual)
+          // JSON-mode streaming must still be avoided for Ollama tool-call turns (tools +
+          // format:json conflict), but plain (non-JSON) streaming works fine: the Ollama
+          // streaming adapter auto-executes tool_calls from the final chunk and continues
+          // streaming the follow-up text, mirroring the non-streaming promptWithStats
+          // fallback. The onDelta handler already picks the JSON-aware processor based on
+          // noJsonPromptFlag, independent of this wire-level jsonFlag.
           if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isNativeJsonToolCallMode && !isOllamaToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, true, onDelta)
-          } else if (canStream && !isNativeJsonToolCallMode && !isOllamaToolCallMode) {
+          } else if (canStream && !isNativeJsonToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, false, onDelta)
           }
           if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
@@ -18750,7 +18756,7 @@ MiniA.prototype._runChatbotMode = function(options) {
         }
       } else if (canStreamJson && chatbotStructuredOutput && this._useToolsActual !== true && !chatbotOllamaToolCallMode) {
         responseWithStats = this.llm.promptStreamJSONWithStats(pendingPrompt, __, __, __, __, onDelta)
-      } else if (canStream && !chatbotOllamaToolCallMode) {
+      } else if (canStream) {
         responseWithStats = this.llm.promptStreamWithStats(pendingPrompt, __, __, __, __, __, onDelta)
       } else if (chatbotStructuredOutput && isDef(this.llm.promptJSONWithStats)) {
         responseWithStats = this.llm.promptJSONWithStats(pendingPrompt)
