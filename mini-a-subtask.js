@@ -1358,25 +1358,34 @@ SubtaskManager.prototype.start = function(subtaskId) {
   if (subtask.status !== "pending") {
     throw new Error("Subtask " + subtaskId + " is not in pending state (current: " + subtask.status + ")")
   }
-  
-  // Check concurrency limit
-  if (this.runningCount >= this.maxConcurrent) {
-    if (this.pendingQueue.indexOf(subtaskId) < 0) this.pendingQueue.unshift(subtaskId)
-    return
-  }
-  
-  subtask.status = "running"
-  subtask.startedAt = new Date().getTime()
-  this._touchSubtask(subtask, "started")
-  subtask.attempt++
-  this.runningCount++
-  this.metrics.running++
-  
-  // Remove from pending queue
-  var queueIndex = this.pendingQueue.indexOf(subtaskId)
-  if (queueIndex >= 0) {
-    this.pendingQueue.splice(queueIndex, 1)
-  }
+
+  var started = false
+  var manager = this
+  sync(function() {
+    if (subtask.status !== "pending") return
+
+    // Check concurrency limit
+    if (manager.runningCount >= manager.maxConcurrent) {
+      if (manager.pendingQueue.indexOf(subtaskId) < 0) manager.pendingQueue.unshift(subtaskId)
+      return
+    }
+
+    subtask.status = "running"
+    subtask.startedAt = new Date().getTime()
+    manager._touchSubtask(subtask, "started")
+    subtask.attempt++
+    manager.runningCount++
+    manager.metrics.running++
+
+    // Remove from pending queue
+    var queueIndex = manager.pendingQueue.indexOf(subtaskId)
+    if (queueIndex >= 0) {
+      manager.pendingQueue.splice(queueIndex, 1)
+    }
+    started = true
+  }, this._transitionLock)
+
+  if (!started) return
   
   // Emit delegation start event
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
