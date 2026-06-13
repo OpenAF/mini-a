@@ -1504,20 +1504,32 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   var cancelReason = reason || "Cancelled by user"
   var claimedRunning = false
   if (wasRunning) claimedRunning = this._claimTerminal(subtask, "cancelled", new Date().getTime(), cancelReason)
+  var cancelledPending = false
   if (!wasRunning) {
-    subtask.status = "cancelled"
-    subtask.completedAt = new Date().getTime()
-    subtask.error = cancelReason
+    var cancelledAt = new Date().getTime()
+    var parent = this
+    sync(function() {
+      if (__isTerminalSubtaskState(subtask.status) || subtask.status !== "pending") return
+      subtask.status = "cancelled"
+      subtask.completedAt = cancelledAt
+      subtask.error = cancelReason
+      var queueIndex = parent.pendingQueue.indexOf(subtaskId)
+      if (queueIndex >= 0) parent.pendingQueue.splice(queueIndex, 1)
+      cancelledPending = true
+    }, this._transitionLock)
   }
   
   // Update metrics
   if (wasRunning && !claimedRunning) return false
+  if (!wasRunning && !cancelledPending) return false
   this.metrics.cancelled++
   
   // Remove from pending queue if present
-  var queueIndex = this.pendingQueue.indexOf(subtaskId)
-  if (queueIndex >= 0) {
-    this.pendingQueue.splice(queueIndex, 1)
+  if (wasRunning) {
+    var queueIndex = this.pendingQueue.indexOf(subtaskId)
+    if (queueIndex >= 0) {
+      this.pendingQueue.splice(queueIndex, 1)
+    }
   }
   
   var prefix = "[subtask:" + subtaskId.substring(0, 8) + "]"
