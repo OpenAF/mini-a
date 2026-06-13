@@ -242,19 +242,8 @@ try {
 
       if (isUnDef(resolvedKey)) {
         logWarn(`Mode '${modeName}' not found. Available modes: ${keys.join(", ")}`)
-        var _modeLower = modeName.toLowerCase()
-        var _knownModelTypes = {
-          ollama: true,
-          openai: true,
-          gemini: true,
-          anthropic: true,
-          mistral: true,
-          groq: true,
-          openrouter: true,
-          huggingface: true
-        }
         if (_knownModelTypes[_modeLower] === true) {
-          logWarn(`'${modeName}' looks like a model type, not a Mini-A mode preset. Configure Ollama via OAF_MODEL or model=..., and use a real preset name such as mode=chatbot if needed.`)
+          logWarn(`'${modeName}' looks like a model type, not a Mini-A mode preset. Use a preset name such as mode=chatbot, and configure the model separately (e.g. model=... or OAF_MODEL).`)
         }
         args.__modeApplied = true
         return
