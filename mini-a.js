@@ -17104,10 +17104,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }
           // usejsontool models respond via tool_calls; tool_calls are not auto-executed
           // in streaming mode, so pendingJsonToolPayload would never be set. Use non-streaming.
-          var isJsonToolMode = toBoolean(args.usejsontool) === true
-          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isJsonToolMode) {
+          // Streaming is unsafe only when the compatibility json tool is attached through
+          // native function calling. Action-based proxy mode (e.g. mcpproxy) disables
+          // native tools, so usejsontool remains stream-compatible there.
+          var isNativeJsonToolCallMode = this._shouldDisableStreamingForJsonToolTurn(args.usejsontool, this._useToolsActual)
+          if (canStreamJson && !noJsonPromptFlag && !isOllamaToolJsonConflict && !isNativeJsonToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, true, onDelta)
-          } else if (canStream && !isJsonToolMode) {
+          } else if (canStream && !isNativeJsonToolCallMode) {
             return this._promptStreamWithStatsCompat(currentLLM, prompt, false, onDelta)
           }
           if (!noJsonPromptFlag && !isOllamaToolJsonConflict && isDef(currentLLM.promptJSONWithStats)) {
