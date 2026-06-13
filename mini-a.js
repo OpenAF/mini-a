@@ -283,6 +283,18 @@ var MiniA = function() {
     wiki_ops_delete: $atomic(0, "long"),
     wiki_ops_lint: $atomic(0, "long"),
     wiki_ops_errors: $atomic(0, "long"),
+    graph_ops_build: $atomic(0, "long"),
+    graph_ops_query: $atomic(0, "long"),
+    graph_ops_neighbors: $atomic(0, "long"),
+    graph_ops_path: $atomic(0, "long"),
+    graph_ops_communities: $atomic(0, "long"),
+    graph_ops_surprise: $atomic(0, "long"),
+    graph_ops_stats: $atomic(0, "long"),
+    graph_ops_export: $atomic(0, "long"),
+    graph_ops_falkor: $atomic(0, "long"),
+    graph_ops_retrieve: $atomic(0, "long"),
+    graph_ops_answer: $atomic(0, "long"),
+    graph_ops_errors: $atomic(0, "long"),
     llm_cache_creation_tokens: $atomic(0, "long"),
     llm_cache_read_tokens: $atomic(0, "long"),
     llm_cached_tokens: $atomic(0, "long"),
@@ -1944,6 +1956,21 @@ MiniA.prototype.getMetrics = function() {
             ops_lint: global.__mini_a_metrics.wiki_ops_lint.get(),
             ops_errors: global.__mini_a_metrics.wiki_ops_errors.get(),
             ops_total: global.__mini_a_metrics.wiki_ops_list.get() + global.__mini_a_metrics.wiki_ops_read.get() + global.__mini_a_metrics.wiki_ops_search.get() + global.__mini_a_metrics.wiki_ops_write.get() + global.__mini_a_metrics.wiki_ops_delete.get() + global.__mini_a_metrics.wiki_ops_lint.get()
+        },
+        graph: {
+            enabled: isObject(this._wikiManager) && isFunction(this._wikiManager.graph),
+            ops_build: global.__mini_a_metrics.graph_ops_build.get(),
+            ops_query: global.__mini_a_metrics.graph_ops_query.get(),
+            ops_neighbors: global.__mini_a_metrics.graph_ops_neighbors.get(),
+            ops_path: global.__mini_a_metrics.graph_ops_path.get(),
+            ops_communities: global.__mini_a_metrics.graph_ops_communities.get(),
+            ops_surprise: global.__mini_a_metrics.graph_ops_surprise.get(),
+            ops_stats: global.__mini_a_metrics.graph_ops_stats.get(),
+            ops_export: global.__mini_a_metrics.graph_ops_export.get(),
+            ops_falkor: global.__mini_a_metrics.graph_ops_falkor.get(),
+            ops_retrieve: global.__mini_a_metrics.graph_ops_retrieve.get(),
+            ops_answer: global.__mini_a_metrics.graph_ops_answer.get(),
+            ops_errors: global.__mini_a_metrics.graph_ops_errors.get()
         }
     }
 }
@@ -7384,9 +7411,30 @@ MiniA.prototype._initWiki = function(args) {
   this._wikiManager = __
   if (toBoolean(args.usewiki) !== true) return
   try {
+    var wikiGraphEnabled = toBoolean(args.usewikigraph) === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)
     var cfg = {
       access : args.wikiaccess,
-      backend: args.wikibackend
+      backend: args.wikibackend,
+      usegraph: wikiGraphEnabled,
+      indexdir: args.wikiindexdir,
+      wikimetacache: args.wikimetacache,
+      wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
+      wikigraphcommunity: args.wikigraphcommunity,
+      wikigraphhintcap: args.wikigraphhintcap,
+      wikigraphsearchhints: args.wikigraphsearchhints,
+      wikigraphmounts: args.wikigraphmounts,
+      wikimountgraphttlms: args.wikimountgraphttlms,
+      wikigraphautosave: args.wikigraphautosave,
+      wikigraphsavedebouncems: args.wikigraphsavedebouncems,
+      wikilintstreamthreshold: args.wikilintstreamthreshold,
+      wikilintmaxpairs: args.wikilintmaxpairs,
+      wikigraphfalkor: {
+        host: args.wikigraphfalkorhost,
+        port: args.wikigraphfalkorport,
+        graph: args.wikigraphfalkorgraph,
+        user: args.wikigraphfalkoruser,
+        pass: args.wikigraphfalkorpass
+      }
     }
     if (args.wikibackend === "s3" || args.wikibackend === "s3fs") {
       cfg.bucket          = args.wikibucket
@@ -7404,6 +7452,20 @@ MiniA.prototype._initWiki = function(args) {
       cfg.espass = args.wikisecret
     } else {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
+    }
+    // F10: set llmExtractFn before constructing the manager so configure() wires it in one pass
+    if (wikiGraphEnabled) {
+      cfg.llmExtractFn = function(payload) {
+        var useVal = this._use_val && isObject(this.val_llm)
+        var llmToUse = useVal ? this.val_llm : this.llm
+        var prompt = "Extract relationships from wiki page and return JSON with keys: summary (string), relationships (array of {from,to,type,provenance,confidence}).\\nPage:\\n" + stringify(payload, __, "  ")
+        var rsp = this._withExponentialBackoff(function() {
+          if (isFunction(llmToUse.promptJSONWithStats)) return llmToUse.promptJSONWithStats(prompt)
+          var r = llmToUse.promptWithStats(prompt)
+          return af.fromJson(isMap(r) && isString(r.response) ? r.response : String(r))
+        }, this._llmRetryOptions("graph-extract", { operation: "graph-extract" }))
+        return isMap(rsp) && isMap(rsp.response) ? rsp.response : rsp
+      }.bind(this)
     }
     this._wikiManager = new MiniAWikiManager(cfg, function(level, msg) {
       this.fnI(level || "info", "[wiki] " + msg)
@@ -13228,7 +13290,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
     "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
-    "validationthreshold", "persistlearnings", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
+    "validationthreshold", "persistlearnings", "valtools", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
@@ -13240,7 +13302,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikiapply", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiredirects", "dreamwikiminpages", "dreamwikiflatthreshold", "dreamwikimaxdepth",
     "dreamwikipreservebodies", "dreammemoryminconfidence", "dreammemorytowiki", "dreamreport"
@@ -13580,6 +13642,7 @@ MiniA.prototype.init = function(args) {
       { name: "debugch", type: "string", default: __ },
       { name: "debuglcch", type: "string", default: __ },
       { name: "debugvalch", type: "string", default: __ },
+      { name: "valtools", type: "boolean", default: false },
       { name: "planfile", type: "string", default: __ },
       { name: "planformat", type: "string", default: __ },
       { name: "forceplanning", type: "boolean", default: false },
@@ -14215,10 +14278,10 @@ MiniA.prototype.init = function(args) {
     }
 
     // Check the need to init debugvalch for validation LLM
-    if (isDef(args.debugvalch) && args.debugvalch.length > 0 && !this._use_val) {
-      this.fnI("warn", "debugvalch specified but validation LLM is not enabled.")
-    } else {
+    if (this._use_val) {
       this._configureDebugChannel(this.val_llm, args.debugvalch, "__mini_a_val_llm_debug", "Validation LLM")
+    } else if (isDef(args.debugvalch) && args.debugvalch.length > 0) {
+      this.fnI("info", "debugvalch configured; validation calls will be logged directly to the channel (main LLM used for validation)")
     }
 
     // Load conversation history if provided
@@ -14566,6 +14629,11 @@ MiniA.prototype.init = function(args) {
           "When you discover reusable knowledge — facts, decisions, patterns, how-tos, or lessons learned — record it in the wiki: search first to avoid duplicates, then write a focused page following the contribution rules in AGENTS.md. Prefer updating an existing page over creating a new one. Always use wiki op='write' to create or update wiki pages — never use shell or file tools to write wiki files directly."
         )
       }
+      if (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) {
+        baseRules.push(
+          "The wiki graph is enabled. Use action='graph' with params={op:'...'} for graph operations. Read-side ops: stats|query|neighbors|path|communities|surprise|retrieve|answer|export. Mutating/token-spending ops: build {semantic:true} and falkor. Wiki search already injects 'Related pages (graph)' hints automatically — read those pages directly rather than calling graph retrieve for every search."
+        )
+      }
     }
     if (args.useshell === true && toBoolean(args.readwrite) === true) {
       baseRules.push("Think before coding: state your assumptions explicitly before taking any action; never guess.")
@@ -14658,6 +14726,7 @@ MiniA.prototype.init = function(args) {
       })
       if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
       if (args.usewiki && isObject(this._wikiManager)) chatActionSet["wiki"] = true
+      if ((args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)) chatActionSet["graph"] = true
       this._actionsList = Object.keys(chatActionSet).join(" | ")
       var chatbotPayload = {
         chatPersonaLine: chatPersonaLine,
@@ -14691,11 +14760,12 @@ MiniA.prototype.init = function(args) {
         manifestChars: args.skillmanifestchars
       })
 
-      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if useWikiGraph}} | graph{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
         useMemorySearch : args.usememory && args.memoryinject !== "full",
-        useWiki         : args.usewiki && isObject(this._wikiManager)
+        useWiki         : args.usewiki && isObject(this._wikiManager),
+        useWikiGraph    : (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)
       })
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 8 : 7) + ". " + rule)
@@ -15040,7 +15110,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorydedup", type: "boolean", default: true },
       { name: "memorypromote", type: "string", default: __ },
       { name: "memorystaledays", type: "number", default: 0 },
-      { name: "memoryinject", type: "string", default: "summary" }
+      { name: "memoryinject", type: "string", default: "summary" },
+      { name: "valtools", type: "boolean", default: false }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -15155,9 +15226,41 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.wikiregion = _$(args.wikiregion, "args.wikiregion").isString().default(__)
     args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
     args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
+    args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
+    args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)
     var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
     if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __
     args.wikilintstaleddays = _$( _wikiLintStaleDays, "args.wikilintstaleddays").isNumber().default(90)
+    var _wikiLintStreamThreshold = isNumber(args.wikilintstreamthreshold) ? args.wikilintstreamthreshold : Number(args.wikilintstreamthreshold)
+    if (isNaN(_wikiLintStreamThreshold)) _wikiLintStreamThreshold = __
+    args.wikilintstreamthreshold = _$(_wikiLintStreamThreshold, "args.wikilintstreamthreshold").isNumber().default(2000)
+    var _wikiLintMaxPairs = isNumber(args.wikilintmaxpairs) ? args.wikilintmaxpairs : Number(args.wikilintmaxpairs)
+    if (isNaN(_wikiLintMaxPairs)) _wikiLintMaxPairs = __
+    args.wikilintmaxpairs = _$(_wikiLintMaxPairs, "args.wikilintmaxpairs").isNumber().default(250000)
+    args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
+    args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
+    args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
+    args.wikigraphsearchhints = _$(toBoolean(args.wikigraphsearchhints), "args.wikigraphsearchhints").isBoolean().default(true)
+    args.wikigraphmounts = _$(toBoolean(args.wikigraphmounts), "args.wikigraphmounts").isBoolean().default(true)
+    var _wikiGraphHintCap = isNumber(args.wikigraphhintcap) ? args.wikigraphhintcap : Number(args.wikigraphhintcap)
+    if (isNaN(_wikiGraphHintCap)) _wikiGraphHintCap = __
+    args.wikigraphhintcap = _$(_wikiGraphHintCap, "args.wikigraphhintcap").isNumber().default(5)
+    var _wikiMountGraphTtlMs = isNumber(args.wikimountgraphttlms) ? args.wikimountgraphttlms : Number(args.wikimountgraphttlms)
+    if (isNaN(_wikiMountGraphTtlMs)) _wikiMountGraphTtlMs = __
+    args.wikimountgraphttlms = _$(_wikiMountGraphTtlMs, "args.wikimountgraphttlms").isNumber().default(60000)
+    args.wikigraphautosave = _$(args.wikigraphautosave, "args.wikigraphautosave").isString().default("always")
+    if (["always", "debounced", "off"].indexOf(String(args.wikigraphautosave).toLowerCase().trim()) < 0) args.wikigraphautosave = "always"
+    else args.wikigraphautosave = String(args.wikigraphautosave).toLowerCase().trim()
+    var _wikiGraphSaveDebounceMs = isNumber(args.wikigraphsavedebouncems) ? args.wikigraphsavedebouncems : Number(args.wikigraphsavedebouncems)
+    if (isNaN(_wikiGraphSaveDebounceMs)) _wikiGraphSaveDebounceMs = __
+    args.wikigraphsavedebouncems = _$(_wikiGraphSaveDebounceMs, "args.wikigraphsavedebouncems").isNumber().default(5000)
+    args.wikigraphfalkorhost = _$(args.wikigraphfalkorhost, "args.wikigraphfalkorhost").isString().default(__)
+    var _wikiGraphFalkorPort = isNumber(args.wikigraphfalkorport) ? args.wikigraphfalkorport : Number(args.wikigraphfalkorport)
+    if (isNaN(_wikiGraphFalkorPort)) _wikiGraphFalkorPort = __
+    args.wikigraphfalkorport = _$(_wikiGraphFalkorPort, "args.wikigraphfalkorport").isNumber().default(6379)
+    args.wikigraphfalkorgraph = _$(args.wikigraphfalkorgraph, "args.wikigraphfalkorgraph").isString().default("mini_a_wiki")
+    args.wikigraphfalkoruser = _$(args.wikigraphfalkoruser, "args.wikigraphfalkoruser").isString().default(__)
+    args.wikigraphfalkorpass = _$(args.wikigraphfalkorpass, "args.wikigraphfalkorpass").isString().default(__)
     // wikimounts: SLON/JSON array of {name, backend, root|bucket|...} — left as-is (parsed at wiki init)
     if (isUnDef(args.wikimounts)) args.wikimounts = __
     args.planlog = _$(args.planlog, "args.planlog").isString().default(__)
@@ -18129,7 +18232,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             var wkResult
             if (wkOp === "list") {
               global.__mini_a_metrics.wiki_ops_list.inc()
-              var wkListOpts = { withMeta: wkParams.withMeta === true || wkParams.withMeta === "true", limit: isNumber(wkParams.limit) ? wkParams.limit : 1000 }
+              var wkListOpts = {
+                withMeta: wkParams.withMeta === true || wkParams.withMeta === "true",
+                limit: isNumber(wkParams.limit) ? wkParams.limit : 1000,
+                offset: isNumber(wkParams.offset) ? wkParams.offset : 0
+              }
               var wkPages = this._wikiManager.list(wkPath, wkListOpts)
               if (wkListOpts.withMeta) {
                 wkResult = "Wiki pages with metadata (" + wkPages.length + "):\n" + af.toTOON(wkPages)
@@ -18250,6 +18357,37 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           } catch(wkErr) {
             global.__mini_a_metrics.wiki_ops_errors.inc()
             runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) [ERROR] ${__miniAErrMsg(wkErr)}`)
+          }
+          runtime.consecutiveThoughts = 0
+          runtime.stepsWithoutAction = 0
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
+          flushAll()
+          continue
+        }
+
+        if (action == "graph" && args.usewiki && isObject(this._wikiManager)) {
+          var gParams = isMap(currentMsg.params) ? currentMsg.params : {}
+          var gOp = isString(gParams.op) ? gParams.op.trim().toLowerCase() : "stats"
+          try {
+            if (gOp === "build") global.__mini_a_metrics.graph_ops_build.inc()
+            else if (gOp === "query") global.__mini_a_metrics.graph_ops_query.inc()
+            else if (gOp === "neighbors") global.__mini_a_metrics.graph_ops_neighbors.inc()
+            else if (gOp === "path") global.__mini_a_metrics.graph_ops_path.inc()
+            else if (gOp === "communities") global.__mini_a_metrics.graph_ops_communities.inc()
+            else if (gOp === "surprise") global.__mini_a_metrics.graph_ops_surprise.inc()
+            else if (gOp === "stats") global.__mini_a_metrics.graph_ops_stats.inc()
+            else if (gOp === "export") global.__mini_a_metrics.graph_ops_export.inc()
+            else if (gOp === "falkor") global.__mini_a_metrics.graph_ops_falkor.inc()
+            else if (gOp === "retrieve") global.__mini_a_metrics.graph_ops_retrieve.inc()
+            else if (gOp === "answer") global.__mini_a_metrics.graph_ops_answer.inc()
+            var gResult = this._wikiManager.graph(gOp, gParams)
+            runtime.context.push(`[OBS ${stepLabel}] (graph/${gOp}) ${af.toTOON(gResult)}`)
+            if (isString(gResult) && gResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.graph_ops_errors.inc()
+          } catch(gErr) {
+            global.__mini_a_metrics.graph_ops_errors.inc()
+            runtime.context.push(`[OBS ${stepLabel}] (graph/${gOp}) [ERROR] ${__miniAErrMsg(gErr)}`)
           }
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
@@ -18891,6 +19029,18 @@ MiniA.prototype._runChatbotMode = function(options) {
             break
           }
 
+          if (lowerAction === "graph" && args.usewiki && isObject(this._wikiManager)) {
+            var cbGParams = isMap(currentMsg.params) ? currentMsg.params : {}
+            var cbGOp = isString(cbGParams.op) ? cbGParams.op.trim().toLowerCase() : "stats"
+            try {
+              pendingPrompt = `graph/${cbGOp} result:\\n${af.toTOON(this._wikiManager.graph(cbGOp, cbGParams))}`
+            } catch(cbGErr) {
+              pendingPrompt = `[ERROR] graph/${cbGOp}: ${__miniAErrMsg(cbGErr)}`
+            }
+            handled = true
+            break
+          }
+
           var knownActions = this._actionsList && this._actionsList.length > 0
             ? this._actionsList
             : (toolNames.length > 0 ? toolNames.join(" | ") : "think | final")
@@ -19188,24 +19338,111 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     return { verdict: "PASS", feedback: "Validation skipped (no LLM)", score: 1 }
   }
 
+  // When valtools=true, create a fresh LLM instance with read-only tools so the
+  // validator can read files or fetch URLs referenced in the validation criteria.
+  var useValTools = toBoolean(args.valtools) === true
+  var effectiveLLM = validatorLLM
+  if (useValTools) {
+    var valModelConfig = this._use_val ? this._oaf_val_model : this._oaf_model
+    if (isObject(valModelConfig)) {
+      try {
+        effectiveLLM = $llm(valModelConfig)
+        // Attach debugvalch to the fresh instance so the debug channel captures these calls
+        if (isString(this._debugvalchConfig) && this._debugvalchConfig.length > 0) {
+          this._configureDebugChannel(effectiveLLM, this._debugvalchConfig, "__mini_a_val_llm_debug", "Validation LLM")
+        }
+        var valGPT = isFunction(effectiveLLM.getGPT) ? effectiveLLM.getGPT() : __
+        if (isObject(valGPT) && isFunction(valGPT.setTool)) {
+          valGPT.setTool("read_file", "Read the full text contents of a local file by path", {
+            type: "object",
+            properties: { path: { type: "string", description: "Absolute or relative path to the local file" } },
+            required: ["path"]
+          }, function(a) {
+            try {
+              if (!isString(a.path) || a.path.length === 0) return "Error: no path provided"
+              return io.readFileString(a.path)
+            } catch(e) { return "Error reading file '" + a.path + "': " + __miniAErrMsg(e) }
+          })
+          valGPT.setTool("fetch_url", "Fetch the body of a URL via HTTP GET", {
+            type: "object",
+            properties: { url: { type: "string", description: "URL to retrieve" } },
+            required: ["url"]
+          }, function(a) {
+            try {
+              if (!isString(a.url) || a.url.length === 0) return "Error: no URL provided"
+              var u = new java.net.URL(String(a.url))
+              var proto = String(u.getProtocol() || "").toLowerCase()
+              if (["http", "https"].indexOf(proto) < 0) return "Error: only http/https URLs are allowed"
+              var conn = u.openConnection()
+              conn.setConnectTimeout(30000)
+              conn.setReadTimeout(30000)
+              if (conn instanceof java.net.HttpURLConnection) conn.setInstanceFollowRedirects(true)
+              var is = conn.getInputStream()
+              try { return String(af.fromInputStream2String(is)) } finally { try { is.close() } catch(ignore) {} }
+            } catch(e) { return "Error fetching '" + a.url + "': " + __miniAErrMsg(e) }
+          })
+          this.fnI("info", "Validation LLM equipped with read_file and fetch_url tools")
+        }
+      } catch(toolsErr) {
+        this.fnI("warn", "Failed to create validation LLM with tools: " + __miniAErrMsg(toolsErr) + ". Using standard LLM.")
+        effectiveLLM = validatorLLM
+        useValTools = false
+      }
+    } else {
+      useValTools = false
+    }
+  }
+
+  // Prepare the debug channel for manual writes when the main LLM is used without its own debugch
+  var debugValChName = ""
+  if (!useValTools && isString(this._debugvalchConfig) && this._debugvalchConfig.length > 0) {
+    try {
+      var debugValChMap = af.fromJSSLON(this._debugvalchConfig)
+      if (isMap(debugValChMap)) {
+        debugValChName = isString(debugValChMap.name) ? debugValChMap.name : "__mini_a_val_llm_debug"
+        if ($ch().list().indexOf(debugValChName) < 0) {
+          var dvType = isString(debugValChMap.type) ? debugValChMap.type : "simple"
+          var dvOptions = isMap(debugValChMap.options) ? debugValChMap.options : {}
+          if (dvType === "file" && isString(dvOptions.file) && !io.fileExists(dvOptions.file)) {
+            io.writeFileString(dvOptions.file, "{}")
+          }
+          $ch(debugValChName).create(dvType, dvOptions)
+        }
+      }
+    } catch(_dvErr) {}
+  }
+
   var validationPrompt = "You are validating research results against specific criteria.\n\n" +
     "RESEARCH OUTPUT:\n" + researchOutput + "\n\n" +
     "VALIDATION CRITERIA:\n" + validationGoal + "\n\n" +
-    "Evaluate the research output and respond with JSON ONLY in this structure:\n" +
-    "{\"verdict\":\"PASS|REVISE\",\"feedback\":string,\"score\":number(0-1),\"specificIssues\":[strings],\"suggestions\":[strings]}\n\n" +
-    "- Use verdict=PASS only if the research fully meets the validation criteria\n" +
-    "- Use verdict=REVISE if improvements are needed\n" +
-    "- score should be 0-1 (0=completely fails, 1=fully passes)\n" +
-    "- specificIssues: list concrete problems with the research\n" +
-    "- suggestions: actionable recommendations for improvement"
+    (useValTools ? "You have access to read_file and fetch_url tools. Use them if the validation criteria references local files or URLs you need to inspect.\n\n" : "") +
+    "Evaluate the research output and respond with JSON ONLY (no markdown, no extra text):\n" +
+    "{\"verdict\":\"PASS or REVISE\",\"feedback\":\"overall assessment\",\"score\":0.0,\"specificIssues\":[\"issue1\"],\"suggestions\":[\"suggestion1\"]}\n\n" +
+    "- verdict=PASS only if the research fully meets ALL validation criteria\n" +
+    "- verdict=REVISE if any improvements are needed\n" +
+    "- score: 0.0 to 1.0 (0=completely fails, 1=fully passes)\n" +
+    "- specificIssues: concrete problems found\n" +
+    "- suggestions: actionable steps to fix each issue"
 
   try {
     var responseWithStats = this._withExponentialBackoff(() => {
-      if (!this._noJsonPrompt && isFunction(validatorLLM.promptJSONWithStats)) {
-        return validatorLLM.promptJSONWithStats(validationPrompt)
+      if (!this._noJsonPrompt && isFunction(effectiveLLM.promptJSONWithStats)) {
+        return effectiveLLM.promptJSONWithStats(validationPrompt)
       }
-      return validatorLLM.promptWithStats(validationPrompt)
+      return effectiveLLM.promptWithStats(validationPrompt)
     }, this._llmRetryOptions("Research validation", { operation: "deep-research-validation" }, { initialDelay: 400 }))
+
+    // Write prompt + response to debugvalch when main LLM handles validation (tools=false path)
+    if (debugValChName.length > 0) {
+      try {
+        $ch(debugValChName).set({ k: new Date().toISOString() }, {
+          timestamp: new Date().toISOString(),
+          prompt: validationPrompt,
+          response: isObject(responseWithStats) ? (responseWithStats.response || responseWithStats) : responseWithStats,
+          stats: isObject(responseWithStats) ? responseWithStats.stats : {}
+        })
+      } catch(_dvWriteErr) {}
+    }
 
     var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
     var totalTokens = this._recordLlmStatsMetrics(stats, "val", this._estimateTokens(validationPrompt))
@@ -19232,6 +19469,8 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     var verdict = verdictRaw === "PASS" ? "PASS" : "REVISE"
     var feedback = isString(validation.feedback) ? validation.feedback.trim() : ""
     var score = isNumber(validation.score) ? validation.score : 0
+    // Normalise 0-10 scale to 0-1 so stored score matches how it is checked
+    if (score > 1) score = score / 10
     var specificIssues = isArray(validation.specificIssues) ? validation.specificIssues.filter(isString) : []
     var suggestions = isArray(validation.suggestions) ? validation.suggestions.filter(isString) : []
     this._memoryAppend("summaries", `Validation verdict: ${verdict}${feedback.length > 0 ? " - " + feedback : ""}`, {
@@ -19336,6 +19575,29 @@ MiniA.prototype._buildCycleKnowledge = function(cycleHistory, accumulatedLearnin
     sections.push("")
   }
 
+  // Highlight the most recent failed cycle's issues/suggestions so they are not
+  // buried in history and the agent treats them as mandatory requirements.
+  var lastCycle = cycleHistory[cycleHistory.length - 1]
+  if (isObject(lastCycle) && isObject(lastCycle.validationResult) && lastCycle.validationResult.verdict !== "PASS") {
+    var mustItems = []
+    if (isArray(lastCycle.validationResult.specificIssues)) {
+      lastCycle.validationResult.specificIssues.forEach(function(issue) {
+        if (isString(issue) && issue.length > 0) mustItems.push("Issue to fix: " + issue)
+      })
+    }
+    if (isArray(lastCycle.validationResult.suggestions)) {
+      lastCycle.validationResult.suggestions.forEach(function(s) {
+        if (isString(s) && s.length > 0) mustItems.push("Required change: " + s)
+      })
+    }
+    if (mustItems.length > 0) {
+      sections.push("## YOU MUST ADDRESS IN THIS CYCLE:")
+      sections.push("")
+      mustItems.forEach(function(item) { sections.push("- " + item) })
+      sections.push("")
+    }
+  }
+
   sections.push("Use these learnings to improve your research in this cycle.")
   sections.push("")
 
@@ -19417,10 +19679,12 @@ MiniA.prototype._runDeepResearchCycle = function(cycleNum, args, deepResearchSta
   }
   deepResearchState.cycleHistory.push(cycleRecord)
 
-  // Update accumulated learnings
+  // Update accumulated learnings (dedup so repeated failures don't inflate the context)
   if (deepResearchState.persistLearnings) {
     cycleLearnings.forEach(function(learning) {
-      deepResearchState.accumulatedLearnings.push(learning)
+      if (deepResearchState.accumulatedLearnings.indexOf(learning) < 0) {
+        deepResearchState.accumulatedLearnings.push(learning)
+      }
     })
   }
 

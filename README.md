@@ -513,7 +513,25 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `wikiregion` | S3 region for `s3`/`s3fs` wiki backends | - |
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
+| `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
+| `wikimetacache` | Enable sharded wiki page metadata cache | `true` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |
+| `wikilintstreamthreshold` | Page-count threshold that switches lint into streaming mode | `2000` |
+| `wikilintmaxpairs` | Max near-duplicate pairs checked during streaming lint | `250000` |
+| `usewikigraph` | Enable wiki knowledge-graph layer and `graph` action (auto-enabled when `wikigraphfalkorhost` is set) | `false` |
+| `wikigraphsemantic` | Enable semantic extraction during graph build | `false` |
+| `wikigraphcommunity` | Community algorithm for graph clustering | `louvain` |
+| `wikigraphsearchhints` | Add graph-related page hints to wiki search | `true` |
+| `wikigraphmounts` | Include attached wiki graph hints when mount graphs are available | `true` |
+| `wikigraphhintcap` | Max related graph hints per search | `5` |
+| `wikimountgraphttlms` | TTL for cached mount `graph.json` loads | `60000` |
+| `wikigraphautosave` | Graph autosave mode: `always`, `debounced`, or `off` | `always` |
+| `wikigraphsavedebouncems` | Debounce interval for graph autosave | `5000` |
+| `wikigraphfalkorhost` | FalkorDB host for graph-backed wiki state/query; uses FalkorDB instead of the local wiki graph cache | - |
+| `wikigraphfalkorport` | FalkorDB port | `6379` |
+| `wikigraphfalkorgraph` | FalkorDB graph name | `mini_a_wiki` |
+| `wikigraphfalkoruser` | FalkorDB user | - |
+| `wikigraphfalkorpass` | FalkorDB password | - |
 
 Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can use `wiki` ops `tree`, `browse`, and `backlinks` before selective `read`; read-write wikis also support `move` for link-repaired page relocation and `init path=<folder/>` for section indexes.
 

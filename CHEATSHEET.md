@@ -81,7 +81,7 @@ mini-a goal="summarize this repository"
 | `debugfile` | string | - | Redirect debug output to a file as NDJSON instead of screen (implies `debug=true`) |
 | `debugch` | string | - | SLON/JSON debug channel for main LLM (requires `$llm.setDebugCh`) |
 | `debuglcch` | string | - | SLON/JSON debug channel for low-cost LLM |
-| `debugvalch` | string | - | SLON/JSON debug channel for validation LLM (used when `llmcomplexity=true`) |
+| `debugvalch` | string | - | SLON/JSON debug channel for validation LLM; when no dedicated `modelval` is configured, validation calls to the main LLM are logged directly to this channel |
 | `raw` | boolean | `false` | Return raw string instead of formatted output |
 | `nologtrunc` | boolean | `false` | Disable truncation of long log output lines (show full content) |
 | `outfile` | string | - | Path to save final answer (if not provided, prints to console) |
@@ -495,8 +495,11 @@ Set `OAF_VAL_MODEL` or `modelval=...` to use a dedicated validation model; other
 | `valgoal` | string | - | Alias for `validationgoal` |
 | `validationthreshold` | string | `PASS` | Validation threshold (`PASS` or score-based like `score>=0.7`) |
 | `persistlearnings` | boolean | `true` | Carry forward learnings between cycles |
+| `valtools` | boolean | `false` | Give the validator read-only tool access (`read_file`, `fetch_url`) so it can inspect files or URLs referenced in the `valgoal` |
 
 `validationgoal` (or `valgoal`) accepts inline text or a single-line file path; when a file path is provided, Mini-A loads the file contents.
+
+Use `valtools=true` when the validation criteria references input files or URLs that the validator must read to properly assess the output (e.g. "verify that the output addresses all items from the input file").
 
 **Examples:**
 
@@ -898,8 +901,26 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikiregion` | string | - | S3 region (`s3`/`s3fs` backend) |
 | `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3`/`s3fs` backend) |
 | `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
+| `wikiindexdir` | string | - | Override the local index/cache root used for non-filesystem wiki indexes |
+| `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
+| `wikilintstreamthreshold` | number | `2000` | Switch lint into streaming mode above this many pages |
+| `wikilintmaxpairs` | number | `250000` | Max near-duplicate comparisons during streaming lint |
 | `wikimounts` | SLON/JSON | - | Read-only wiki mounts: `[{name: 'team', backend: 'fs', root: '/path'}]` — mounts appear as `@name/path.md` |
+| `usewikigraph` | boolean | `false` | Enable the wiki knowledge graph layer (auto-enabled when `wikigraphfalkorhost` is set) |
+| `wikigraphsemantic` | boolean | `false` | Enable semantic graph extraction when running graph build |
+| `wikigraphcommunity` | string | `louvain` | Community detection algorithm |
+| `wikigraphsearchhints` | boolean | `true` | Enrich `wiki search` with related pages from graph |
+| `wikigraphmounts` | boolean | `true` | Include graph hints from attached wikis when cached graphs are available |
+| `wikigraphhintcap` | number | `5` | Maximum related graph hints returned per search |
+| `wikimountgraphttlms` | number | `60000` | TTL for cached mount graph loads |
+| `wikigraphautosave` | string | `always` | Graph autosave policy: `always`, `debounced`, or `off` |
+| `wikigraphsavedebouncems` | number | `5000` | Debounce interval when graph autosave uses `debounced` |
+| `wikigraphfalkorhost` | string | - | FalkorDB host for graph-backed wiki state/query; uses FalkorDB instead of the local graph cache |
+| `wikigraphfalkorport` | number | `6379` | FalkorDB port |
+| `wikigraphfalkorgraph` | string | `mini_a_wiki` | FalkorDB graph name |
+| `wikigraphfalkoruser` | string | - | FalkorDB username |
+| `wikigraphfalkorpass` | string | - | FalkorDB password |
 
 Elasticsearch/OpenSearch backend mapping:
 
@@ -937,6 +958,7 @@ The agent uses the `wiki` action:
 | `mounts` | List active read-only mounts |
 | `attach` | Mount a read-only wiki: `name=team backend=fs root=/path` — pages become available as `@team/...` |
 | `detach` | Unmount a previously attached wiki |
+| `graph` | Graph operations: `build`, `retrieve`, `answer`, `query`, `neighbors`, `path`, `communities`, `surprise`, `stats`, `export`, `falkor` |
 
 ### Console Commands
 
@@ -957,7 +979,9 @@ The agent uses the `wiki` action:
 | `/wiki mounts` | List active read-only mounts |
 | `/wiki attach <name> [backend=fs] [root=path]` | Mount a read-only wiki |
 | `/wiki detach <name>` | Unmount a wiki |
+| `/graph [build\|query\|neighbors\|path\|communities\|surprise\|export\|stats]` | Query wiki graph from console |
 | `/stats wiki` | Show wiki operation statistics for the current session |
+| `/stats` | Includes wiki graph operation counters when graph is enabled |
 
 ### Examples
 
