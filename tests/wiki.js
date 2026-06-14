@@ -84,10 +84,10 @@
     ow.test.assert(resolved, "getting-started.md", "root-level page link should stay at root")
   }
 
-  exports.testResolveLinkAbsoluteReturnsNull = function() {
+  exports.testResolveLinkAbsoluteIsRootRelative = function() {
     var wm = new MiniAWikiManager({ backend: "fs", root: "." })
     var resolved = wm.resolveLink("page.md", "/absolute/page.md")
-    ow.test.assert(resolved, null, "absolute path links should return null")
+    ow.test.assert(resolved, "absolute/page.md", "absolute path links should resolve as bundle-root-relative")
   }
 
   exports.testResolveLinkExternalReturnsNull = function() {
@@ -502,11 +502,12 @@
   exports.testLintAbsolutePathLinkNotBroken = function() {
     var dir = createTestDir()
     try {
+      writePage(dir, "wiki/page.md", "---\ntitle: Page\ndescription: desc\ntype: concept\n---\n# Page")
       writePage(dir, "index.md", "---\ntitle: Index\n---\nSee [absolute](/wiki/page.md).")
       var wm = new MiniAWikiManager({ backend: "fs", root: dir })
       var report = wm.lint()
       var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
-      ow.test.assert(brokenLinks.length, 0, "absolute path links should not be broken_link errors")
+      ow.test.assert(brokenLinks.length, 0, "absolute path links to existing pages should not be broken_link errors")
     } finally {
       cleanupTestDir(dir)
     }
@@ -1159,7 +1160,7 @@
       var raw = io.readFileString(dir + "/AGENTS.md")
       ow.test.assert(raw.indexOf("mini-a:agents managed:start") >= 0, true, "AGENTS.md should have managed:start marker")
       ow.test.assert(raw.indexOf("mini-a:agents managed:end") >= 0, true, "AGENTS.md should have managed:end marker")
-      ow.test.assert(raw.indexOf("agentsVersion: 2") >= 0, true, "AGENTS.md frontmatter should have agentsVersion: 2")
+      ow.test.assert(raw.indexOf("agentsVersion: 3") >= 0, true, "AGENTS.md frontmatter should have agentsVersion: 3")
       ow.test.assert(raw.indexOf("## Quick start") >= 0, true, "AGENTS.md should have Quick start section")
     } finally { cleanupTestDir(dir) }
   }
@@ -1171,7 +1172,7 @@
       var result = wm.upgradeAgents()
       ow.test.assert(result.ok, true, "upgradeAgents should return ok")
       ow.test.assert(result.action, "noop", "already v2 should be noop")
-      ow.test.assert(result.agentsVersion, 2, "agentsVersion should be 2")
+      ow.test.assert(result.agentsVersion, 3, "agentsVersion should be 3")
     } finally { cleanupTestDir(dir) }
   }
 
@@ -1188,7 +1189,7 @@
       ow.test.assert(result.action, "upgraded", "action should be upgraded")
       var newRaw = io.readFileString(dir + "/AGENTS.md")
       ow.test.assert(newRaw.indexOf("mini-a:agents managed:start") >= 0, true, "upgraded AGENTS.md should have markers")
-      ow.test.assert(newRaw.indexOf("agentsVersion: 2") >= 0, true, "upgraded AGENTS.md should have v2")
+      ow.test.assert(newRaw.indexOf("agentsVersion: 3") >= 0, true, "upgraded AGENTS.md should have v3")
       // Should NOT have the v1 stock phrase still active (wholesale replaced)
       ow.test.assert(newRaw.indexOf("This file defines how agents") < 0, true, "v1 stock phrase should be gone after wholesale replace")
     } finally { cleanupTestDir(dir) }
@@ -1421,6 +1422,84 @@
     ow.test.assert(wikiJs.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,  true, "mini-a-wiki.js should define V1_STOCK_PHRASE")
     ow.test.assert(mcpWiki.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0, true, "mcp-wiki.yaml should define V1_STOCK_PHRASE")
     ow.test.assert(mcpOps.indexOf("__MINI_A_WIKI_V1_STOCK_PHRASE") >= 0,  true, "mcp-wiki-ops.yaml should define V1_STOCK_PHRASE")
+  }
+
+  // ── OKF compatibility ─────────────────────────────────────────────────────────
+
+  exports.testTypeAutoFilledOnWrite = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("foo.md", { title: "Foo", description: "A foo." }, "# Foo")
+      var page = wm.read("foo.md")
+      ow.test.assert(page.meta.type, "concept", "type should be auto-filled to concept")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testMissingTypeLintInfo = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "notype.md", "---\ntitle: No Type\ndescription: desc\n---\n# No Type")
+      writePage(dir, "sec/index.md", "---\ntitle: Sec Index\ndescription: desc\n---\n# Sec")
+      var result = wm.lint()
+      var typeIssues = result.issues.filter(function(i) { return i.type === "missing_frontmatter" && i.field === "type" })
+      var notypeIssue = typeIssues.filter(function(i) { return i.page === "notype.md" })
+      ow.test.assert(notypeIssue.length, 1, "notype.md should report missing type info")
+      ow.test.assert(notypeIssue[0].severity, "info", "missing type should be info severity")
+      var indexIssue = typeIssues.filter(function(i) { return i.page === "sec/index.md" })
+      ow.test.assert(indexIssue.length, 0, "section index.md should not report missing type")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testRootedLinkResolvesAndLints = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "tables/customers.md", "---\ntitle: Customers\ndescription: desc\ntype: concept\n---\n# Customers")
+      wm.write("foo.md", { title: "Foo", description: "desc" }, "See [c](/tables/customers.md)")
+      var page = wm.read("foo.md")
+      ow.test.assert(page.links.indexOf("tables/customers.md") >= 0, true, "rooted link should resolve to tables/customers.md")
+      var result = wm.lint()
+      var broken = result.issues.filter(function(i) { return i.type === "broken_link" && i.page === "foo.md" })
+      ow.test.assert(broken.length, 0, "rooted link to existing page should not be broken_link")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testTimestampReadAlias = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "ts.md", "---\ntitle: Ts\ndescription: desc\ntype: concept\ntimestamp: 2024-01-02T03:04:05.000Z\n---\n# Ts")
+      var page = wm.read("ts.md")
+      ow.test.assert(isDef(page.meta.updated), true, "updated should be set from timestamp alias")
+      ow.test.assert(new Date(String(page.meta.updated)).getTime(), new Date("2024-01-02T03:04:05.000Z").getTime(), "timestamp should be aliased as updated when updated is absent")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testTimestampWriteEmit = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("foo.md", { title: "Foo", description: "desc" }, "# Foo")
+      var page = wm.read("foo.md")
+      ow.test.assert(isDef(page.meta.timestamp), true, "timestamp should be emitted on write")
+      ow.test.assert(String(page.meta.timestamp), String(page.meta.updated), "timestamp should equal updated")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testMovePreservesRootedLinks = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      writePage(dir, "tables/customers.md", "---\ntitle: Customers\ndescription: desc\ntype: concept\n---\n# Customers")
+      wm.write("foo.md", { title: "Foo", description: "desc" }, "See [c](/tables/customers.md)")
+      writePage(dir, "other.md", "---\ntitle: Other\ndescription: desc\ntype: concept\n---\n# Other")
+      var moveResult = wm.move("other.md", "moved.md")
+      ow.test.assert(moveResult.ok, true, "move should succeed")
+      var page = wm.read("foo.md")
+      ow.test.assert(page.body.indexOf("[c](/tables/customers.md)") >= 0, true, "rooted link should remain byte-for-byte unchanged after unrelated move")
+    } finally { cleanupTestDir(dir) }
   }
 
   return exports

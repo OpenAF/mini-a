@@ -4,7 +4,7 @@
 
 // ── Template version & helpers ────────────────────────────────────────────────
 
-var __MINI_A_WIKI_AGENTS_VERSION = 2
+var __MINI_A_WIKI_AGENTS_VERSION = 3
 
 // v1 stock fingerprint phrase — if AGENTS.md contains this verbatim it was never user-edited
 var __MINI_A_WIKI_V1_STOCK_PHRASE = "This file defines how agents should read, distil, and contribute knowledge to this wiki."
@@ -64,13 +64,15 @@ var __miniAWikiAgentsTemplate = function(now) {
     "description: One-sentence summary of the page (string)",
     "created: <ISO 8601 timestamp>",
     "updated: <ISO 8601 timestamp>   # refresh on every write",
+    "type: concept | entity | comparison | summary | overview   # required by OKF; auto-filled to 'concept' if omitted",
     "---",
     "```",
+    "",
+    "`timestamp` is accepted as an alias of `updated` (OKF compatibility) — read as `updated` if `updated` is absent; written alongside `updated` on every save.",
     "",
     "### Optional front-matter fields",
     "",
     "```yaml",
-    "type: concept | entity | comparison | summary | overview   # groups pages in indexes",
     "tags: [tag1, tag2]              # lowercase slugs",
     "aliases: [alt-name]             # alternative names for search",
     "supersedes: path/to/old.md      # when this page replaces another",
@@ -1347,6 +1349,7 @@ MiniAWikiManager.prototype.parseFrontmatter = function(raw) {
   var meta = {}
   try { meta = af.fromYAML(yamlBlock) || {} } catch(e) {}
   if (!isObject(meta)) meta = {}
+  if (isDef(meta.timestamp) && isUnDef(meta.updated)) meta.updated = meta.timestamp
   return { meta: meta, body: body }
 }
 
@@ -1397,13 +1400,19 @@ MiniAWikiManager.prototype.extractLinks = function(body) {
 MiniAWikiManager.prototype.resolveLink = function(sourcePage, target) {
   if (!isString(target) || target.length === 0) return null
   if (/^https?:\/\//i.test(target)) return null   // external URL
-  if (target.startsWith("/")) return null          // absolute path — not wiki-internal
   // Cross-wiki mount link: @name/path.md — return as-is; lint validates separately
   if (target.startsWith("@")) return target
 
-  var pageDir = isString(sourcePage) && sourcePage.indexOf("/") > -1
-    ? sourcePage.substring(0, sourcePage.lastIndexOf("/") + 1)
-    : ""
+  // Bundle-root-relative link (OKF-style absolute path): resolve from the wiki root
+  var pageDir
+  if (target.startsWith("/")) {
+    pageDir = ""
+    target  = target.replace(/^\/+/, "")
+  } else {
+    pageDir = isString(sourcePage) && sourcePage.indexOf("/") > -1
+      ? sourcePage.substring(0, sourcePage.lastIndexOf("/") + 1)
+      : ""
+  }
   var combined = pageDir + target
   var parts = combined.split("/")
   var normalized = []
@@ -1618,6 +1627,8 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
       ? reparsed.meta : (isObject(existing.meta) ? existing.meta : {})
     if (!updatedMeta.created && isObject(existing.meta) && existing.meta.created) updatedMeta.created = existing.meta.created
     updatedMeta.updated = now
+    updatedMeta.timestamp = now
+    if (!isString(updatedMeta.type) || updatedMeta.type.trim().length === 0) updatedMeta.type = "concept"
 
     try {
       var updatedRaw = this._serializeFrontmatter(updatedMeta, reparsed.body)
@@ -1646,6 +1657,8 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
     meta.created = (isObject(existingPage) && isObject(existingPage.meta) && existingPage.meta.created) ? existingPage.meta.created : now
   }
   meta.updated = now
+  meta.timestamp = now
+  if (!isString(meta.type) || meta.type.trim().length === 0) meta.type = "concept"
 
   if (!isString(meta.title) || meta.title.trim().length === 0) {
     if (isObject(existingPage) && isObject(existingPage.meta) && isString(existingPage.meta.title) && existingPage.meta.title.trim().length > 0) {
@@ -2156,6 +2169,9 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
     if (!isString(pd.meta.description) || pd.meta.description.trim().length === 0) {
       issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "description" })
+    }
+    if ((!isString(pd.meta.type) || pd.meta.type.trim().length === 0) && p !== "index.md" && !p.endsWith("/index.md")) {
+      issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "type" })
     }
 
     // Check 3: Heading hierarchy

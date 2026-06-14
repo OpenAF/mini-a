@@ -130,10 +130,10 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testResolveLinkFromRoot
 
-- name: MiniA Wiki Tests::ResolveLinkAbsoluteReturnsNull
+- name: MiniA Wiki Tests::ResolveLinkAbsoluteIsRootRelative
   from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkAbsoluteReturnsNull
+  exec: args.func = args.tests.testResolveLinkAbsoluteIsRootRelative
 
 - name: MiniA Wiki Tests::ResolveLinkExternalReturnsNull
   from: MiniA Wiki Tests::Init
@@ -456,6 +456,36 @@ jobs:
   from: MiniA Wiki Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testDetachRemovesMount
+
+- name: MiniA Wiki Tests::TypeAutoFilledOnWrite
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTypeAutoFilledOnWrite
+
+- name: MiniA Wiki Tests::MissingTypeLintInfo
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMissingTypeLintInfo
+
+- name: MiniA Wiki Tests::RootedLinkResolvesAndLints
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRootedLinkResolvesAndLints
+
+- name: MiniA Wiki Tests::TimestampReadAlias
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTimestampReadAlias
+
+- name: MiniA Wiki Tests::TimestampWriteEmit
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTimestampWriteEmit
+
+- name: MiniA Wiki Tests::MovePreservesRootedLinks
+  from: MiniA Wiki Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMovePreservesRootedLinks
 
 - name: MiniA Wiki Tests::DriftGuard
   from: MiniA Wiki Tests::Init
