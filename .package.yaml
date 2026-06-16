@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260613'
+version: '20260614'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -171,7 +171,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: 0bbd033f1183a83461936fd5dabe4183941731f4
+  docs/WHATS-NEW.md: 43a6abf4a174ca2482bb9058f09b493fc410c327
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -239,7 +239,7 @@ filesHash:
   mini-a-utils.js: cc58e9707da62f0b0ecf2c47da646ddc5ff92023
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: 2f3e6f0ede20cd50173aa08b125ff722ee443b25
-  mini-a-wiki.js: ab8b3655e8d7503f39bb4413cdd15d30ebc539ee
+  mini-a-wiki.js: 3606620dc62a1e5dcb9dccd60d206979328b0831
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
   mini-a.js: 16b0d3d62ff3cd6bb97c943d55ef3e50da6b81e3
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
