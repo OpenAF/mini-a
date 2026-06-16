@@ -14492,13 +14492,12 @@ MiniA.prototype.init = function(args) {
           if (isExisting) {
             mcp = this._mcpConnections[id]
           } else {
-            // Dummy-type configs contain session-specific closures (fns, parent references).
-            // Sharing them across sessions via the $mcp cache would reuse a stale closure from
-            // a previous session, causing "_subtaskManager from undefined" errors. Only share
-            // external (stdio/remote) connections that are expensive to re-establish.
-            var _mcpIsSessionSpecific = mcpConfig.type === "dummy" || (isObject(mcpConfig.options) && (mcpConfig.options.type === "dummy" || mcpConfig.options.type === "ojob"))
+            // Mini-A decorates every MCP client with session-bound closures (pre/post hooks and
+            // the callTool wrapper below). Reusing a shared client across runs can keep stale
+            // references to a previous agent instance and trigger errors such as
+            // "_subtaskManager from undefined". Keep per-agent MCP clients isolated here.
             mcp = $mcp(merge(mcpConfig, {
-              shared: !_mcpIsSessionSpecific,
+              shared: false,
               preFn : (t, a) => {
                 if (isObject(parent._runtime)) {
                   parent._runtime.modelToolCallDetected = true
