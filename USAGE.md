@@ -1151,6 +1151,12 @@ Extend or override these presets by editing the YAML file—Mini-A reloads it on
 #### Auto-loading AGENTS.md
 - **`noagentsmd`** (boolean, default: false): By default, Mini-A searches the current directory and its parents for the nearest `AGENTS.md` file and, if found, injects its contents as a rule. Set `noagentsmd=true` to disable this automatic discovery and injection.
 
+#### Context Guard for Small Windows
+- **`contextguard`** (boolean, default: false): When `maxcontext=0`, enable a conservative small-window safety policy that proactively compresses oversized tool output and bounds proxy `readresult` extraction to avoid overflowing smaller model context windows.
+- **`contextguardbudget`** (number, default: 32000): Assumed smallest context window, in tokens, used by `contextguard` when `maxcontext=0`.
+- **`toolresultmaxinline`** (number, default: `4096` when `contextguard=true`): Maximum inline bytes kept from large tool or `readresult` outputs before Mini-A spills or truncates the content under `contextguard`.
+- **`readresultmaxmatches`** (number, default: `20` when `contextguard=true`): Maximum matching regions returned by `proxy-dispatch` `readresult` with `op='grep'` when `contextguard` is active.
+
 #### Rate Limiting
 - **`rpm`** (number): Rate limit in calls per minute
 - **`tpm`** (number): Maximum tokens per minute across prompt and completion

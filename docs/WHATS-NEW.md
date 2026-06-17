@@ -2,6 +2,22 @@
 
 ## Recent Updates
 
+### Core: Context Guard for bounded tool output
+
+**Change**: Mini-A now supports `contextguard` to keep tool-heavy runs usable on smaller context windows when `maxcontext=0`, especially when MCP proxy results or `readresult` payloads would otherwise flood the prompt.
+
+- **`contextguard=true`** enables a generic small-window safety budget with proactive compression and bounded inline tool output.
+- **`contextguardbudget`** sets the assumed smallest context window (default `32000`) used for guard calculations when no explicit `maxcontext` is configured.
+- **`toolresultmaxinline`** bounds how many bytes of large tool or `readresult` output stay inline before spill/truncation.
+- **`readresultmaxmatches`** limits the number of grep-style `readresult` match regions returned inline through `proxy-dispatch`.
+
+### Core: Optional `AGENTS.md` auto-injection
+
+**Change**: Mini-A now accepts `noagentsmd=true` to disable automatic discovery and injection of the nearest `AGENTS.md` file as a system rule.
+
+- By default Mini-A still walks up from the current working directory and loads the closest `AGENTS.md` it finds.
+- `noagentsmd=true` keeps the runtime from importing those local instructions automatically, which is useful when you need a clean run or want to prevent repository-level agent policy from affecting a task.
+
 ### Wiki: Open Knowledge Format (OKF) compatibility
 
 **Change**: The wiki (`mini-a-wiki.js`) is now format-level compatible with Google's [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog) (OKF), so mini-a wikis can be read by — and can read — OKF bundles.

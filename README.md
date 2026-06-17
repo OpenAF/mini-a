@@ -566,6 +566,8 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `maxcontext` | Context budget in tokens before proactive summarization | `0` |
 | `contextguard` | Enable a generic small-window safety budget and bounded tool-output handling when `maxcontext=0` | `false` |
 | `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
+| `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
+| `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
 | `compressgoal` | Automatically compress oversized goal text before execution | `false` |
 | `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
 | `compressgoalchars` | Character threshold before goal compression is considered | `1000` |
@@ -578,6 +580,7 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `toollog` | JSSLON definition for a dedicated tool-log channel capturing MCP tool inputs/outputs | - |
 | `showthinking` | Surface XML-tagged thinking blocks from model responses as thought logs | `false` |
 | `secpass` | Password used to unlock OpenAF sBucket model secrets for stored model definitions | - |
+| `noagentsmd` | Disable automatic discovery and injection of the nearest `AGENTS.md` file as a rule | `false` |
 | `verbose` / `debug` | Enable detailed logging | `false` |
 
 For the complete list and detailed explanations, see the [Usage Guide](USAGE.md#configuration-options).
