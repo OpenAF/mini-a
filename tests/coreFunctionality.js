@@ -1320,6 +1320,49 @@
     }
   }
 
+  exports.testContextGuardBudgetHelpers = function() {
+    var agent = createAgent()
+
+    ow.test.assert(agent._getEffectiveContextBudget({ maxcontext: 12000, contextguard: true, contextguardbudget: 32000 }, 0), 12000, "Explicit maxcontext should take precedence")
+    ow.test.assert(agent._getEffectiveContextBudget({ contextguard: true }, 0), 32000, "Context guard should assume a 32k budget by default")
+    ow.test.assert(agent._getToolResultInlineLimit({ contextguard: true }, 0), 4096, "Context guard should default inline tool observations to 4KB")
+    ow.test.assert(agent._getReadresultMaxMatches({ contextguard: true }, 0), 20, "Context guard should default readresult grep matches to 20")
+  }
+
+  exports.testProxyDispatchReadresultHonorsContextGuardLimits = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var tempPath = String(java.nio.file.Files.createTempFile("mini-a-readresult-", ".txt").toAbsolutePath())
+    try {
+      var rows = []
+      for (var i = 1; i <= 30; i++) rows.push("price line " + i)
+      io.writeFileString(tempPath, rows.join("\n"))
+
+      var proxyConfig = agent._createMcpProxyConfig([], {
+        contextguard: true,
+        toolresultmaxinline: 128,
+        readresultmaxmatches: 5
+      })
+      ow.test.assert(isMap(proxyConfig) && isMap(proxyConfig.options) && isMap(proxyConfig.options.fns), true, "Should build proxy config for readresult test")
+
+      var result = proxyConfig.options.fns["proxy-dispatch"]({
+        action    : "readresult",
+        resultFile: tempPath,
+        op        : "grep",
+        pattern   : "price line"
+      })
+
+      ow.test.assert(isMap(result), true, "readresult should return a result map")
+      ow.test.assert(result.matchCount, 30, "grep should still report the full match count")
+      ow.test.assert(result.returnedMatches, 5, "grep should cap returned matches under context guard")
+      ow.test.assert(result.limited, true, "grep should mark limited responses")
+      ow.test.assert(String(result.content[0].text).indexOf("LIMITED to first 5") >= 0, true, "grep response should explain the applied match cap")
+    } finally {
+      try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
+    }
+  }
+
   exports.testUtilsMcpAllowAndDenyFilters = function() {
     var agent = createAgent()
 

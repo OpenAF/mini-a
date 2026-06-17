@@ -135,6 +135,23 @@ help:
     desc     : "Maximum context size in tokens (default: 0 = disable proactive summarization; recover automatically on provider context-window errors)"
     example  : "200000"
     mandatory: false
+  - name     : contextguard
+    desc     : "Enable generic context/tool-output guardrails when maxcontext is unset (default: false)"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : contextguardbudget
+    desc     : "Assumed smallest context window used by contextguard when maxcontext=0 (default: 32000)"
+    example  : "32000"
+    mandatory: false
+  - name     : toolresultmaxinline
+    desc     : "Maximum bytes of tool/readresult output kept inline before spilling or truncating under contextguard"
+    example  : "4096"
+    mandatory: false
+  - name     : readresultmaxmatches
+    desc     : "Maximum matching regions returned by proxy-dispatch readresult op=grep under contextguard"
+    example  : "20"
+    mandatory: false
   - name     : compressgoal
     desc     : "Boolean to enable/disable automatic compression of oversized goal text before execution (default: false)"
     example  : "false"
@@ -1235,6 +1252,10 @@ jobs:
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
       maxcontext     : toNumber.isNumber.default(0)
+      contextguard   : toBoolean.isBoolean.default(false)
+      contextguardbudget: toNumber.isNumber.default(32000)
+      toolresultmaxinline: toNumber.isNumber.default(__)
+      readresultmaxmatches: toNumber.isNumber.default(__)
       compressgoal   : toBoolean.isBoolean.default(false)
       compressgoaltokens: toNumber.isNumber.default(250)
       compressgoalchars : toNumber.isNumber.default(1000)

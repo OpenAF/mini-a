@@ -8483,6 +8483,31 @@ MiniA.prototype._processDirectDisplayToolResult = function(toolName, original) {
     return original
 }
 
+MiniA.prototype._getEffectiveContextBudget = function(args, fallback) {
+  var opts = isMap(args) ? args : (isMap(this._sessionArgs) ? this._sessionArgs : {})
+  var defaultValue = isNumber(fallback) ? fallback : 0
+  if (isNumber(opts.maxcontext) && opts.maxcontext > 0) return Math.floor(opts.maxcontext)
+  if (toBoolean(opts.contextguard) === true) {
+    var guardBudget = isNumber(opts.contextguardbudget) && opts.contextguardbudget > 0 ? opts.contextguardbudget : 32000
+    return Math.floor(guardBudget)
+  }
+  return defaultValue
+}
+
+MiniA.prototype._getToolResultInlineLimit = function(args, fallback) {
+  var opts = isMap(args) ? args : (isMap(this._sessionArgs) ? this._sessionArgs : {})
+  if (isNumber(opts.toolresultmaxinline) && opts.toolresultmaxinline > 0) return Math.floor(opts.toolresultmaxinline)
+  if (toBoolean(opts.contextguard) === true) return 4096
+  return isNumber(fallback) && fallback > 0 ? Math.floor(fallback) : 0
+}
+
+MiniA.prototype._getReadresultMaxMatches = function(args, fallback) {
+  var opts = isMap(args) ? args : (isMap(this._sessionArgs) ? this._sessionArgs : {})
+  if (isNumber(opts.readresultmaxmatches) && opts.readresultmaxmatches > 0) return Math.floor(opts.readresultmaxmatches)
+  if (toBoolean(opts.contextguard) === true) return 20
+  return isNumber(fallback) && fallback > 0 ? Math.floor(fallback) : 0
+}
+
 MiniA.prototype._buildRoutingIntent = function(entry) {
   var e = isMap(entry) ? entry : {}
   var toolName = isString(e.toolName) ? e.toolName : ""
@@ -10817,8 +10842,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
             // Shared auto-cap threshold for all readresult ops — prevents obs-spill cascade
             // (readresult response itself gets spilled → model tries to readresult again → infinite loop).
-            // Set below the empirical OBS retroactive-spill waterline (~20 KB) to leave wrapper headroom.
-            var _autoCapThreshold = 16000
+            var _autoCapThreshold = parent._getToolResultInlineLimit(args, 16000)
 
             // slice: lines fromLine..toLine (1-based, inclusive); start/end accepted as aliases
             if (rop === "slice") {
@@ -10885,9 +10909,13 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               }
               var grepInclude = {}
               var grepMatchCount = 0
+              var grepReturnedMatches = 0
+              var grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
               for (var gi = 0; gi < ropLines.length; gi++) {
                 if (grepRx.test(ropLines[gi])) {
                   grepMatchCount++
+                  if (grepMaxMatches > 0 && grepReturnedMatches >= grepMaxMatches) continue
+                  grepReturnedMatches++
                   for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
                     grepInclude[gc] = true
                   }
@@ -10905,13 +10933,25 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
               var grepTruncated = grepText.length > _autoCapThreshold
               if (grepTruncated) grepText = grepText.substring(0, _autoCapThreshold)
+              var grepLimited = grepMaxMatches > 0 && grepMatchCount > grepReturnedMatches
+              var grepSuffix = ""
+              if (grepLimited) {
+                grepSuffix += "\n[LIMITED to first " + grepReturnedMatches + " matching regions out of " + grepMatchCount + ". Refine the pattern or use slice/head for narrower extraction.]"
+              }
+              if (grepTruncated) {
+                grepSuffix += "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern."
+                if (grepLimited) grepSuffix += " A match limit is also active."
+                grepSuffix += "]"
+              }
               var grepResp = {
                 action: "readresult", op: "grep", resultFile: resultFilePath,
                 pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
-                content: [{ type: "text", text: grepText + (grepTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern.]" : "") }],
+                returnedMatches: grepReturnedMatches,
+                content: [{ type: "text", text: grepText + grepSuffix }],
                 estimatedTokens: Math.ceil(grepText.length / 4)
               }
               if (grepTruncated) grepResp.truncated = true
+              if (grepLimited) grepResp.limited = true
               return grepResp
             }
 
@@ -13397,7 +13437,8 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
     "conversation", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
     "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold",
-    "mcpproxytoon", "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
+    "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
+    "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
     "updateinterval", "forceupdates", "planlog", "nosetmcpwd", "noagentsmd", "utilsroot", "utilsallow", "utilsdeny",
     "useskills", "usestdutils", "mini-a-docs", "miniadocs",
@@ -13758,6 +13799,10 @@ MiniA.prototype.init = function(args) {
       { name: "shellmaxbytes", type: "number", default: __ },
       { name: "toolcachettl", type: "number", default: __ },
       { name: "mcplazy", type: "boolean", default: false },
+      { name: "contextguard", type: "boolean", default: false },
+      { name: "contextguardbudget", type: "number", default: 32000 },
+      { name: "toolresultmaxinline", type: "number", default: __ },
+      { name: "readresultmaxmatches", type: "number", default: __ },
       { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
@@ -13882,6 +13927,7 @@ MiniA.prototype.init = function(args) {
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
     args.forceplanning = _$(toBoolean(args.forceplanning), "args.forceplanning").isBoolean().default(false)
     args.mcplazy = _$(toBoolean(args.mcplazy), "args.mcplazy").isBoolean().default(false)
+    args.contextguard = _$(toBoolean(args.contextguard), "args.contextguard").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
@@ -13916,6 +13962,12 @@ MiniA.prototype.init = function(args) {
     args.outputfile = _$(args.outputfile, "args.outputfile").isString().default(__)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
+    args.contextguardbudget = _$(args.contextguardbudget, "args.contextguardbudget").isNumber().default(32000)
+    if (args.contextguardbudget <= 0) args.contextguardbudget = 32000
+    args.toolresultmaxinline = _$(args.toolresultmaxinline, "args.toolresultmaxinline").isNumber().default(__)
+    if (isNumber(args.toolresultmaxinline) && args.toolresultmaxinline <= 0) args.toolresultmaxinline = __
+    args.readresultmaxmatches = _$(args.readresultmaxmatches, "args.readresultmaxmatches").isNumber().default(__)
+    if (isNumber(args.readresultmaxmatches) && args.readresultmaxmatches <= 0) args.readresultmaxmatches = __
     args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.shellmaxbytes = _$(args.shellmaxbytes, "args.shellmaxbytes").isNumber().default(__)
@@ -15180,6 +15232,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "libs", type: "string", default: __ },
       { name: "conversation", type: "string", default: __ },
       { name: "maxcontext", type: "number", default: 0 },
+      { name: "contextguard", type: "boolean", default: false },
+      { name: "contextguardbudget", type: "number", default: 32000 },
+      { name: "toolresultmaxinline", type: "number", default: __ },
+      { name: "readresultmaxmatches", type: "number", default: __ },
       { name: "compressgoal", type: "boolean", default: false },
       { name: "compressgoaltokens", type: "number", default: 250 },
       { name: "compressgoalchars", type: "number", default: 1000 },
@@ -15296,6 +15352,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.updatefreq = _$(args.updatefreq, "args.updatefreq").isString().default("auto")
     args.updateinterval = _$(args.updateinterval, "args.updateinterval").isNumber().default(3)
+    args.contextguard = _$(toBoolean(args.contextguard), "args.contextguard").isBoolean().default(false)
+    args.contextguardbudget = _$(args.contextguardbudget, "args.contextguardbudget").isNumber().default(32000)
+    if (isNumber(args.contextguardbudget) && args.contextguardbudget <= 0) args.contextguardbudget = 32000
+    args.toolresultmaxinline = _$(args.toolresultmaxinline, "args.toolresultmaxinline").isNumber().default(__)
+    if (isNumber(args.toolresultmaxinline) && args.toolresultmaxinline <= 0) args.toolresultmaxinline = __
+    args.readresultmaxmatches = _$(args.readresultmaxmatches, "args.readresultmaxmatches").isNumber().default(__)
+    if (isNumber(args.readresultmaxmatches) && args.readresultmaxmatches <= 0) args.readresultmaxmatches = __
     args.shelltimeout = _$(args.shelltimeout, "args.shelltimeout").isNumber().default(__)
     if (isNumber(args.shelltimeout) && args.shelltimeout <= 0) args.shelltimeout = __
     args.shellmaxbytes = _$(args.shellmaxbytes, "args.shellmaxbytes").isNumber().default(__)
@@ -15662,7 +15725,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
       var inputTokens = this._estimateTokens(ctx)
       // Preflight: avoid one-shot summarization when payload is likely too large.
-      var chunkThreshold = args.maxcontext > 0 ? Math.max(4000, Math.floor(args.maxcontext * 0.45)) : 12000
+      var effectiveBudget = this._getEffectiveContextBudget(args, 0)
+      var chunkThreshold = effectiveBudget > 0 ? Math.max(4000, Math.floor(effectiveBudget * 0.45)) : 12000
       var chunkBudget = Math.max(1500, Math.floor(chunkThreshold * 0.45))
       var maxChunks = 24
 
@@ -15696,7 +15760,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var checkAndSummarizeContext = () => {
       var contextMaintenanceStart = now()
       // maxcontext=0 disables proactive context management; rely on provider overflow recovery
-      var effectiveMaxContext = args.maxcontext > 0 ? args.maxcontext : 0
+      var effectiveMaxContext = this._getEffectiveContextBudget(args, 0)
       if (effectiveMaxContext <= 0) {
         var noContextBudgetMs = now() - contextMaintenanceStart
         if (noContextBudgetMs > 0) global.__mini_a_metrics.step_context_maintenance_ms.getAdd(noContextBudgetMs)
@@ -15722,7 +15786,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
 
       // Defer heavy summarization until context is close to exhaustion.
-      if (contextTokens > effectiveMaxContext * 0.9) {
+      if (contextTokens > effectiveMaxContext * 0.7) {
         var compressionRatio = contextTokens > effectiveMaxContext ? 0.3 : 0.5
         var recentLimit = Math.floor(effectiveMaxContext * compressionRatio)
 
@@ -15774,7 +15838,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     var recoverContextAfterProviderOverflow = function(stepNumber, llmType, errorInfo) {
-      if (args.maxcontext !== 0) return false
       if (!isObject(errorInfo) || errorInfo.contextOverflow !== true) return false
       if ((runtime.contextOverflowRecoveries || 0) >= 3) return false
 
@@ -15782,7 +15845,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (!isString(combinedContext) || combinedContext.length === 0) return false
 
       var beforeTokens = getCachedContextTokens()
-      this.fnI("summarize", `Detected provider context-window error (${llmType}, maxcontext=0). Auto-compressing context...`)
+      this.fnI("summarize", `Detected provider context-window error (${llmType}). Auto-compressing context...`)
       global.__mini_a_metrics.context_summarizations.inc()
 
       var summarized = summarize(combinedContext)
@@ -15956,12 +16019,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Get model response and parse as JSON
     // Check context size and summarize if too large
     // Use low-cost LLM for summarization when available
-    if (args.maxcontext > 0) {
+    var startupContextBudget = this._getEffectiveContextBudget(args, 0)
+    if (startupContextBudget > 0) {
       var _c = this.llm.getGPT().getConversation()
       var currentTokens = this._estimateTokens(stringify(_c, __, ""))
       
-      this.fnI("size", `Current context tokens: ~${currentTokens} (max allowed: ${args.maxcontext})`)
-      if (currentTokens > args.maxcontext) {
+      this.fnI("size", `Current context tokens: ~${currentTokens} (max allowed: ${startupContextBudget})`)
+      if (currentTokens > startupContextBudget) {
         var _sysc = [], _ctx = []
         _c.forEach(c => {
           if (isDef(c.role) && (c.role == "system" || c.role == "developer")) {
@@ -16043,6 +16107,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       lastContextTokens       : 0,
       contextDedupeInterval   : 10,
       lastDedupContextLength  : 0,
+      readresultLoopGuards    : {},
       advisorUses             : 0,
       advisorLastStep         : -999,
       advisorLastReason       : "",
@@ -16188,6 +16253,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       runtime.lastContextTokens = this._estimateTokens(getCachedContextText(""))
       runtime.contextTextDirty = false
       return runtime.lastContextTokens
+    }
+
+    var getEffectiveContextBudget = () => this._getEffectiveContextBudget(args, 0)
+
+    var buildReadresultGuardKey = params => {
+      if (!isMap(params) || params.action !== "readresult" || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
+      var op = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
+      var key = [params.resultFile.trim(), op]
+      if (op === "grep") key.push(isString(params.pattern) ? params.pattern : "", isNumber(params.context) ? String(params.context) : "0")
+      if (op === "slice") key.push(isNumber(params.fromLine) ? String(params.fromLine) : isNumber(params.start) ? String(params.start) : "1", isNumber(params.toLine) ? String(params.toLine) : isNumber(params.end) ? String(params.end) : "")
+      if (op === "head" || op === "tail") key.push(isNumber(params.lines) ? String(params.lines) : "50")
+      if (op === "read") key.push(isNumber(params.maxBytes) ? String(params.maxBytes) : "0")
+      return key.join("|")
     }
 
     var isPromptContextAnchor = function(entry) {
@@ -16450,7 +16528,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       onHardDecision    : advisorOnHardDecision,
       advisorBudgetRatio: advisorBudgetRatio,
       emergencyReserve  : emergencyReserve,
-      sessionTokenBudget: isNumber(args.maxcontext) && args.maxcontext > 0 ? args.maxcontext : 0
+      sessionTokenBudget: getEffectiveContextBudget()
     }
     runtime.advisorTrace = []
     runtime.hardDecisionMode = hardDecisionMode
@@ -16528,7 +16606,34 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           unresolved: true,
           provenance: { source: "tool", event: "tool-error", step: stepLabel, tool: toolName }
         })
-      } else if (isString(toolName) && toolName.length > 0) {
+      }
+      if (!hasError && isString(observation) && observation.length > 0) {
+        var inlineLimit = this._getToolResultInlineLimit(args, 0)
+        var isProxySpill = isMap(rawResult) && rawResult.autoSpilled === true && isString(rawResult.resultFile)
+        var isReadresultCall = toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult"
+        if (inlineLimit > 0 && !isProxySpill && !isReadresultCall && observation.length > inlineLimit) {
+          try {
+            var obsTempFile = java.nio.file.Files.createTempFile("mini-a-tool-obs-", ".txt")
+            var obsTempPath = String(obsTempFile.toAbsolutePath())
+            io.writeFileString(obsTempPath, observation)
+            if (isFunction(MiniA._registerProxyTempFile)) MiniA._registerProxyTempFile(obsTempPath)
+            var obsTokens = Math.ceil(observation.length / 4)
+            observation = "[Observation spilled to temporary file to protect context (auto-deleted at shutdown)." +
+              " File: " + obsTempPath +
+              " | Size: " + observation.length + " bytes (~" + obsTokens + " tokens)." +
+              " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' as needed.]"
+            rawResult = {
+              autoSpilled: true,
+              resultFile : obsTempPath,
+              tool       : toolName,
+              byteSize   : io.fileInfo(obsTempPath).size
+            }
+          } catch(obsSpillErr) {
+            observation = observation.substring(0, inlineLimit) + "\n[TRUNCATED at " + inlineLimit + " bytes. Full observation could not be spilled to a temporary file.]"
+          }
+        }
+      }
+      if (!hasError && isString(toolName) && toolName.length > 0) {
         var evidenceEntry = this._memoryAppend("evidence", `Tool '${toolName}' completed at step ${stepLabel}.`, {
           provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
         })
@@ -16555,6 +16660,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._memoryAppend("artifacts", _storedVal, _artMeta, { noDedup: true })
         }
         this._clearPendingFetchFlags(toolName, params, rawResult, observation)
+        var readresultGuardKey = buildReadresultGuardKey(params)
+        if (readresultGuardKey.length > 0) {
+          if (isMap(rawResult) && rawResult.truncated === true) {
+            runtime.readresultLoopGuards[readresultGuardKey] = (runtime.readresultLoopGuards[readresultGuardKey] || 0) + 1
+          } else {
+            delete runtime.readresultLoopGuards[readresultGuardKey]
+          }
+        }
       }
 
       runtime.consecutiveThoughts = 0
@@ -16821,7 +16934,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         this.fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
       }
       // Use selective context to reduce prompt size while preserving key information
-      var contextMaxTokens = isNumber(args.maxcontext) && args.maxcontext > 0 ? args.maxcontext : 4000
+      var contextMaxTokens = getEffectiveContextBudget() || 4000
       var promptContextBudget = Math.max(2000, contextMaxTokens - Math.max(this._estimateTokens(stateSnapshot) + 500, 1000))
       var progressEntries = selectPromptContext(promptContextBudget)
       progressEntries.unshift(`[STATE] ${stateSnapshot}`)
@@ -18223,7 +18336,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
 
         if (isKnownTool && action != "final") {
-          if (isDef(paramsValue) && !isMap(paramsValue)) {
+        if (isDef(paramsValue) && !isMap(paramsValue)) {
             flushAll()
             runtime.context.push(`[OBS ${stepLabel}] (${origActionRaw}) missing or invalid 'params' from model.`)
             this._registerRuntimeError(runtime, {
@@ -18237,6 +18350,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (!enforceDecisionGuards(stepLabel, origActionRaw, af.toSLON(paramsValue), thoughtStr)) {
             flushAll()
             break
+          }
+          var readresultGuardKey = buildReadresultGuardKey(paramsValue)
+          if (readresultGuardKey.length > 0 && (runtime.readresultLoopGuards[readresultGuardKey] || 0) >= 2) {
+            runtime.context.push(`[OBS ${stepLabel}] (contextguard) blocked repeated truncated readresult for the same file/op. Narrow the request with a smaller slice, fewer lines, or a more specific grep pattern.`)
+            this._registerRuntimeError(runtime, {
+              category: "transient",
+              message : "blocked repeated truncated readresult",
+              context : { step: stepLabel, tool: origActionRaw, readresultKey: readresultGuardKey }
+            })
+            runtime.pendingAdvisorSignals = { ambiguity: true, risk: true }
+            runtime.hadErrorThisStep = true
+            markContextDirty()
+            continue
           }
 
           var shouldUpdateToolContext = true

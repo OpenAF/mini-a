@@ -94,6 +94,23 @@ help:
     desc     : "Maximum conversation tokens before Mini-A summarizes context (default: 200000)"
     example  : "200000"
     mandatory: false
+  - name     : contextguard
+    desc     : "Enable generic context/tool-output guardrails when maxcontext is unset"
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : contextguardbudget
+    desc     : "Assumed smallest context window used by contextguard when maxcontext=0 (default: 32000)"
+    example  : "32000"
+    mandatory: false
+  - name     : toolresultmaxinline
+    desc     : "Maximum bytes of tool/readresult output kept inline before spilling or truncating under contextguard"
+    example  : "4096"
+    mandatory: false
+  - name     : readresultmaxmatches
+    desc     : "Maximum matching regions returned by proxy-dispatch readresult op=grep under contextguard"
+    example  : "20"
+    mandatory: false
   - name     : compressgoal
     desc     : "Boolean to enable/disable automatic compression of oversized goal text before execution (default: false)"
     example  : "false"
@@ -1645,6 +1662,10 @@ jobs:
       maxsteps        : toNumber().isNumber().default(__)
       earlystopthreshold: toNumber().isNumber().default(__)
       maxcontext      : toNumber().isNumber().default(200000)
+      contextguard    : toBoolean().isBoolean().default(false)
+      contextguardbudget: toNumber().isNumber().default(32000)
+      toolresultmaxinline: toNumber().isNumber().default(__)
+      readresultmaxmatches: toNumber().isNumber().default(__)
       compressgoal    : toBoolean().isBoolean().default(false)
       compressgoaltokens: toNumber().isNumber().default(250)
       compressgoalchars : toNumber().isNumber().default(1000)

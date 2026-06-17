@@ -443,6 +443,10 @@ Mini-A ships with complementary components:
 | `routerdeny` | Comma-separated route denylist applied by the adaptive router | unset |
 | `routerproxythreshold` | Payload-size threshold (bytes) where proxy routes are preferred for large requests | falls back to `mcpproxythreshold` |
 | `mcpproxytoon` | When `mcpproxythreshold>0`, serialize proxy-spilled results as TOON text (`af.toTOON`) to improve search/read efficiency on large payloads | `false` |
+| `contextguard` | Enable generic context/tool-output guardrails when `maxcontext=0`, including proactive compression and bounded `readresult` extraction | `false` |
+| `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
+| `toolresultmaxinline` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` | `4096` when `contextguard=true` |
+| `readresultmaxmatches` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` | `20` when `contextguard=true` |
 | `mcpprogcall` | Start a per-session localhost HTTP bridge so generated scripts can list/search/call MCP tools programmatically; requires `useshell=true` for script execution | `false` |
 | `mcpprogcallport` | Port for the programmatic tool-calling bridge (`0` = auto-assign free port) | `0` |
 | `mcpprogcallmaxbytes` | Max inline JSON response size before storing oversized tool results under `/result/{id}` | `4096` |
@@ -560,6 +564,8 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `rpm` | Rate limit (requests per minute) | - |
 | `tpm` | Rate limit (tokens per minute across prompt + completion) | - |
 | `maxcontext` | Context budget in tokens before proactive summarization | `0` |
+| `contextguard` | Enable a generic small-window safety budget and bounded tool-output handling when `maxcontext=0` | `false` |
+| `contextguardbudget` | Assumed smallest context window used by `contextguard` when `maxcontext=0` | `32000` |
 | `compressgoal` | Automatically compress oversized goal text before execution | `false` |
 | `compressgoaltokens` | Estimated token threshold before goal compression is considered | `250` |
 | `compressgoalchars` | Character threshold before goal compression is considered | `1000` |
