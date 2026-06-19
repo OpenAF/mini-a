@@ -4379,6 +4379,11 @@ try {
   }
 
   function _renderEventMessage(iconPart, messageText, extraPrefix) {
+    function _stripAnsiText(value) {
+      var text = isString(value) ? value : String(value || "")
+      return text.replace(/\u001b\[[0-9;]*m/g, "")
+    }
+
     function _carryAnsiState(lines) {
       if (!isArray(lines) || lines.length === 0) return lines
       var sgrRE = /\u001b\[([0-9;]*)m/g
@@ -4408,7 +4413,7 @@ try {
     var textStyle = hintColor + ",ITALIC"
     var separatorStyle = "FG(240)"
     var separatorChar = "╌"
-    var iconPlain = format.string._stripAnsi(iconPart)
+    var iconPlain = _stripAnsiText(iconPart)
     var normalizedIconPlain = iconPlain.replace(/\s{2,}$/, " ")
     var iconIndent = repeat(Math.max(0, visibleLength(iconPlain)), " ")
     var separatorIndent = repeat(Math.max(0, visibleLength(normalizedIconPlain)), " ")

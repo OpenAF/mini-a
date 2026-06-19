@@ -3510,9 +3510,11 @@ MiniA.prototype._isStatusDone = function(status) {
 
 MiniA.prototype._getTotalTokens = function(stats) {
     if (!isObject(stats)) return 0
+    var statsTokens = isObject(stats.tokens) ? stats.tokens : {}
+    if (isNumber(statsTokens.total)) return statsTokens.total
     if (isNumber(stats.total_tokens)) return stats.total_tokens
-    var prompt = isNumber(stats.prompt_tokens) ? stats.prompt_tokens : 0
-    var completion = isNumber(stats.completion_tokens) ? stats.completion_tokens : 0
+    var prompt = isNumber(stats.prompt_tokens) ? stats.prompt_tokens : (isNumber(statsTokens.prompt) ? statsTokens.prompt : 0)
+    var completion = isNumber(stats.completion_tokens) ? stats.completion_tokens : (isNumber(statsTokens.completion) ? statsTokens.completion : 0)
     var derived = prompt + completion
     return derived > 0 ? derived : 0
 }

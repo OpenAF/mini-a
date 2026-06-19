@@ -119,6 +119,17 @@
     ow.test.assert(parsed[1] === "Cite evidence when available", true, "Second array item should be preserved")
   }
 
+  exports.testGetTotalTokensUsesNestedUsageFields = function() {
+    var agent = createAgent()
+    var total = agent._getTotalTokens({
+      tokens: {
+        prompt: 5411,
+        completion: 131
+      }
+    })
+    ow.test.assert(total === 5542, true, "Nested token usage should contribute to total token accounting")
+  }
+
   exports.testExtractEmbeddedFinalAction = function() {
     var agent = createAgent()
     var payload = "```json\n{\"action\":\"final\",\"answer\":\"done\",\"thought\":\"logic\"}\n```"

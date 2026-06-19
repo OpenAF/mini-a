@@ -22,6 +22,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testParseRulesArgumentSupportsStructuredArrays
 
+- name: MiniA Core Tests::GetTotalTokensUsesNestedUsageFields
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testGetTotalTokensUsesNestedUsageFields
+
 - name: MiniA Core Tests::ExtractFinalAction
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -569,6 +574,7 @@ todo:
 - MiniA Core Tests::ParseRulesArgumentSupportsPlainText
 - MiniA Core Tests::ParseRulesArgumentSupportsBulletLists
 - MiniA Core Tests::ParseRulesArgumentSupportsStructuredArrays
+- MiniA Core Tests::GetTotalTokensUsesNestedUsageFields
 - MiniA Core Tests::ExtractFinalAction
 - MiniA Core Tests::DisableStreamingOnlyForStructuredOllamaToolTurns
 - MiniA Core Tests::JsonToolStreamingDisabledOnlyForNativeToolCalling
