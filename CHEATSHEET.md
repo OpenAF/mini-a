@@ -76,6 +76,7 @@ mini-a goal="summarize this repository"
 |-----------|------|---------|-------------|
 | `maxsteps` | number | `15` | Maximum consecutive steps without progress before forcing final answer |
 | `earlystopthreshold` | number | `3` (5 with LC) | Identical consecutive errors before early stop (auto-adjusts for low-cost models) |
+| `noagentsmd` | boolean | `false` | Disable automatic discovery and injection of the nearest `AGENTS.md` file |
 | `verbose` | boolean | `false` | Enable verbose logging |
 | `debug` | boolean | `false` | Enable debug mode with detailed logs |
 | `debugfile` | string | - | Redirect debug output to a file as NDJSON instead of screen (implies `debug=true`) |
@@ -645,6 +646,10 @@ mini-a goal="show meetup locations on a map" \
 | `state` | string/object | - | Initial state data as structured JSON/SLON |
 | `conversation` | string | - | Conversation history file to load/save |
 | `maxcontext` | number | `0` | Maximum context size in tokens (auto-summarize when exceeded) |
+| `contextguard` | boolean | `false` | Enable a generic small-window safety budget and bounded tool-output handling when `maxcontext=0` |
+| `contextguardbudget` | number | `32000` | Assumed smallest context window used by `contextguard` when `maxcontext=0` |
+| `toolresultmaxinline` | number | `4096` | Max inline bytes kept from large tool or `readresult` outputs before spill/truncation under `contextguard` |
+| `readresultmaxmatches` | number | `20` | Max matching regions returned by `proxy-dispatch` `readresult` `op='grep'` under `contextguard` |
 | `compressgoal` | boolean | `false` | Automatically compress oversized goal text before execution |
 | `compressgoaltokens` | number | `250` | Estimated token threshold before goal compression is considered |
 | `compressgoalchars` | number | `1000` | Character threshold before goal compression is considered |
@@ -872,6 +877,8 @@ agent.clearSessionMemory("my-session-id")
 ---
 
 ## Wiki Knowledge Base
+- **OKF Compatibility**: Mini-A wiki now supports Open Knowledge Format (OKF) for enhanced wiki interoperability with external knowledge bases
+
 
 Mini-A implements an LLM wiki pattern (inspired by Karpathy's "LLM knowledge base"): the agent distils knowledge from each session into structured Markdown pages, then retrieves and extends that knowledge in future sessions. The wiki lives in a filesystem folder or S3 prefix — any agent with the same `wikiroot` (or `wikibucket`) shares the same pages.
 
