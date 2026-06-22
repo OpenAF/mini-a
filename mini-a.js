@@ -3536,8 +3536,9 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
         if (tierKey === "advisor") normalizedTier = "advisor"
     }
     var statsTokens = isObject(stats) && isObject(stats.tokens) ? stats.tokens : {}
-    var promptTokens = isNumber(stats.prompt_tokens) ? stats.prompt_tokens : (isNumber(statsTokens.prompt) ? statsTokens.prompt : 0)
-    var completionTokens = isNumber(stats.completion_tokens) ? stats.completion_tokens : (isNumber(statsTokens.completion) ? statsTokens.completion : 0)
+    var safeStats = isObject(stats) ? stats : {}
+    var promptTokens = isNumber(safeStats.prompt_tokens) ? safeStats.prompt_tokens : (isNumber(statsTokens.prompt) ? statsTokens.prompt : 0)
+    var completionTokens = isNumber(safeStats.completion_tokens) ? safeStats.completion_tokens : (isNumber(statsTokens.completion) ? statsTokens.completion : 0)
     var actualTokens = this._getTotalTokens(stats)
     var trackedTokens = this._resolveTrackedTokenTotal(stats, fallbackTokens)
 
