@@ -562,6 +562,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testWikiToolVisibleWhenEnabled
 
+- name: MiniA Core Tests::ContextGuardBudgetHelpers
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testContextGuardBudgetHelpers
+
+- name: MiniA Core Tests::ProxyDispatchReadresultHonorsContextGuardLimits
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyDispatchReadresultHonorsContextGuardLimits
+
+- name: MiniA Core Tests::ResultAliasToolsExposedWithStdutils
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultAliasToolsExposedWithStdutils
+
+- name: MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResultAliasToolsBypassInlineLimitGuard
+
 include:
 - oJobTest.yaml
 
@@ -682,3 +702,7 @@ todo:
 - MiniA Core Tests::WarnUnknownArgsSuggestsClosestMatch
 - MiniA Core Tests::WikiToolNotVisibleWhenDisabled
 - MiniA Core Tests::WikiToolVisibleWhenEnabled
+- MiniA Core Tests::ContextGuardBudgetHelpers
+- MiniA Core Tests::ProxyDispatchReadresultHonorsContextGuardLimits
+- MiniA Core Tests::ResultAliasToolsExposedWithStdutils
+- MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard

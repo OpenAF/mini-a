@@ -7819,8 +7819,9 @@ MiniA.prototype._clearPendingFetchFlags = function(toolName, params, rawResult, 
   var managers = [this._sessionMemoryManager, this._globalMemoryManager].filter(isObject)
   if (managers.length === 0) return
 
-  // Case 1: readresult call resolved a spilled file — clear pendingReadresult on matching entry
-  if (toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult" && isString(params.resultFile)) {
+  // Case 1: readresult call (proxy-dispatch or result_* alias) resolved a spilled file — clear pendingReadresult on matching entry
+  var _isAliasResultAccess = /^result_(stat|read|head|tail|slice|grep)$/.test(toolName)
+  if ((_isAliasResultAccess || (toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult")) && isString(params.resultFile)) {
     var targetFile = params.resultFile.trim()
     managers.forEach(function(mgr) {
       mgr.getSectionEntries("artifacts").forEach(function(e) {
@@ -10356,6 +10357,168 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       ? Math.floor(args.mcpproxythreshold) : 0
     var globalSpillToon = toBoolean(args.mcpproxytoon) === true && globalSpillThreshold > 0
 
+    // Shared implementation for readresult — called by proxy-dispatch (action='readresult')
+    // and by the result_* alias tools exposed when usestdutils=true.
+    var _doReadResult = function(params) {
+      var resultFilePath = isString(params.resultFile) ? params.resultFile.trim() : ""
+      if (resultFilePath.length === 0) {
+        return { error: "readresult requires 'resultFile' parameter with the path returned by a prior call." }
+      }
+      var rop = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
+      var ropMaxBytes = isNumber(params.maxBytes) && params.maxBytes >= 0 ? Math.floor(params.maxBytes) : 0
+      try {
+        var spilledRaw = io.readFileString(resultFilePath)
+        var spilledByteSize = isString(spilledRaw) ? spilledRaw.length : 0
+
+        if (rop === "stat") {
+          var statLineCount = spilledRaw.split("\n").length
+          var statText = "File: " + resultFilePath + "\nSize: " + spilledByteSize + " bytes (~" + Math.ceil(spilledByteSize / 4) + " tokens)\nLines: " + statLineCount
+          return {
+            action: "readresult", op: "stat", resultFile: resultFilePath,
+            byteSize: spilledByteSize, lineCount: statLineCount,
+            estimatedTokens: Math.ceil(spilledByteSize / 4),
+            content: [{ type: "text", text: statText }]
+          }
+        }
+
+        var ropLines = spilledRaw.split("\n")
+        var ropTotalLines = ropLines.length
+
+        // Shared auto-cap threshold for all readresult ops — prevents obs-spill cascade
+        // (readresult response itself gets spilled → model tries to readresult again → infinite loop).
+        var _autoCapThreshold = parent._getToolResultInlineLimit(args, 16000)
+
+        if (rop === "slice") {
+          var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine)
+                        : isNumber(params.start)   && params.start    > 0 ? Math.floor(params.start) : 1
+          var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)
+                        : isNumber(params.end)     && params.end      > 0 ? Math.floor(params.end) : ropTotalLines
+          if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
+          var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
+          var sliceTruncated = sliceText.length > _autoCapThreshold
+          if (sliceTruncated) sliceText = sliceText.substring(0, _autoCapThreshold)
+          var sliceResp = {
+            action: "readresult", op: "slice", resultFile: resultFilePath,
+            fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
+            content: [{ type: "text", text: sliceText + (sliceTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a smaller line range with fromLine/toLine.]" : "") }],
+            estimatedTokens: Math.ceil(sliceText.length / 4)
+          }
+          if (sliceTruncated) sliceResp.truncated = true
+          return sliceResp
+        }
+
+        if (rop === "head") {
+          var headN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
+          var headText = ropLines.slice(0, headN).join("\n")
+          var headTruncated = headText.length > _autoCapThreshold
+          if (headTruncated) headText = headText.substring(0, _autoCapThreshold)
+          var headResp = {
+            action: "readresult", op: "head", resultFile: resultFilePath,
+            lines: headN, totalLines: ropTotalLines,
+            content: [{ type: "text", text: headText + (headTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Reduce lines count.]" : "") }],
+            estimatedTokens: Math.ceil(headText.length / 4)
+          }
+          if (headTruncated) headResp.truncated = true
+          return headResp
+        }
+
+        if (rop === "tail") {
+          var tailN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
+          var tailText = ropLines.slice(Math.max(0, ropTotalLines - tailN)).join("\n")
+          var tailTruncated = tailText.length > _autoCapThreshold
+          if (tailTruncated) tailText = tailText.substring(0, _autoCapThreshold)
+          var tailResp = {
+            action: "readresult", op: "tail", resultFile: resultFilePath,
+            lines: tailN, totalLines: ropTotalLines,
+            content: [{ type: "text", text: tailText + (tailTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Reduce lines count.]" : "") }],
+            estimatedTokens: Math.ceil(tailText.length / 4)
+          }
+          if (tailTruncated) tailResp.truncated = true
+          return tailResp
+        }
+
+        if (rop === "grep") {
+          var grepPat = isString(params.pattern) ? params.pattern : ""
+          if (grepPat.length === 0) return { error: "readresult op='grep' requires a 'pattern' parameter." }
+          var grepCtx = isNumber(params.context) && params.context >= 0 ? Math.floor(params.context) : 0
+          var grepRx
+          try {
+            grepRx = new RegExp(grepPat, "i")
+          } catch(rxErr) {
+            grepRx = new RegExp(grepPat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+          }
+          var grepInclude = {}
+          var grepMatchCount = 0
+          var grepReturnedMatches = 0
+          var grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
+          for (var gi = 0; gi < ropLines.length; gi++) {
+            if (grepRx.test(ropLines[gi])) {
+              grepMatchCount++
+              if (grepMaxMatches > 0 && grepReturnedMatches >= grepMaxMatches) continue
+              grepReturnedMatches++
+              for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
+                grepInclude[gc] = true
+              }
+            }
+          }
+          var grepParts = []
+          var grepLast = -1
+          for (var gi2 = 0; gi2 < ropLines.length; gi2++) {
+            if (grepInclude[gi2]) {
+              if (grepLast >= 0 && gi2 > grepLast + 1) grepParts.push("---")
+              grepParts.push((gi2 + 1) + ": " + ropLines[gi2])
+              grepLast = gi2
+            }
+          }
+          var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
+          var grepTruncated = grepText.length > _autoCapThreshold
+          if (grepTruncated) grepText = grepText.substring(0, _autoCapThreshold)
+          var grepLimited = grepMaxMatches > 0 && grepMatchCount > grepReturnedMatches
+          var grepSuffix = ""
+          if (grepLimited) {
+            grepSuffix += "\n[LIMITED to first " + grepReturnedMatches + " matching regions out of " + grepMatchCount + ". Refine the pattern or use slice/head for narrower extraction.]"
+          }
+          if (grepTruncated) {
+            grepSuffix += "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern."
+            if (grepLimited) grepSuffix += " A match limit is also active."
+            grepSuffix += "]"
+          }
+          var grepResp = {
+            action: "readresult", op: "grep", resultFile: resultFilePath,
+            pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
+            returnedMatches: grepReturnedMatches,
+            content: [{ type: "text", text: grepText + grepSuffix }],
+            estimatedTokens: Math.ceil(grepText.length / 4)
+          }
+          if (grepTruncated) grepResp.truncated = true
+          if (grepLimited) grepResp.limited = true
+          return grepResp
+        }
+
+        // read: full content inline (or truncated when maxBytes set and exceeded)
+        if (rop === "read" && ropMaxBytes === 0 && spilledByteSize > _autoCapThreshold) {
+          ropMaxBytes = _autoCapThreshold
+        }
+        var readContent = spilledRaw
+        var readTruncated = false
+        if (ropMaxBytes > 0 && spilledByteSize > ropMaxBytes) {
+          readContent = spilledRaw.substring(0, ropMaxBytes)
+          readTruncated = true
+        }
+        var readResponse = {
+          action: "readresult", op: "read", resultFile: resultFilePath,
+          totalLines: ropTotalLines, byteSize: spilledByteSize,
+          content: [{ type: "text", text: readContent + (readTruncated ? "\n[TRUNCATED at " + ropMaxBytes + " bytes. " + (spilledByteSize - ropMaxBytes) + " bytes remaining. Use op='slice' with fromLine/toLine or op='grep' with pattern to access remaining content.]" : "") }],
+          estimatedTokens: Math.ceil(readContent.length / 4)
+        }
+        if (readTruncated) readResponse.truncated = true
+        return readResponse
+
+      } catch(readErr) {
+        return { error: "Failed to read result file '" + resultFilePath + "': " + (readErr.message || String(readErr)) }
+      }
+    }
+
     // Define the proxy-dispatch function
     var fns = {
       "proxy-dispatch": function(params) {
@@ -10748,7 +10911,9 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               var previewLines = [
                 spillReason + resultFile + " (auto-deleted at shutdown).",
                 "Size: " + resultByteSize + " bytes (~" + estTokens + " tokens).",
-                "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' as needed."
+                (toBoolean(args.usestdutils) === true
+                  ? "IMPORTANT: Call result_stat with resultFile='" + resultFile + "' first (size check). Then use result_read (full), result_head/result_tail (first/last N lines), result_slice (line range), or result_grep (regex search)."
+                  : "IMPORTANT: To access this data call proxy-dispatch with action='readresult' and resultFile='" + resultFile + "'. Start with op='stat', then use op='read', op='head', op='grep', or op='slice' as needed.")
               ]
               previewLines.push("Format: " + resultFormat.toUpperCase() + ".")
               if (isMap(resultPayload)) {
@@ -10816,170 +10981,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
               if (isUnDef(params[_rdAk])) params[_rdAk] = params.arguments[_rdAk]
             }
           }
-          var resultFilePath = isString(params.resultFile) ? params.resultFile.trim() : ""
-          if (resultFilePath.length === 0) {
-            return { error: "readresult requires 'resultFile' parameter with the path returned by a prior call." }
-          }
-          // Default op is 'stat' — safe first look before committing to full content
-          var rop = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
-          // maxBytes limits content returned by op='read'; 0 = unlimited
-          var ropMaxBytes = isNumber(params.maxBytes) && params.maxBytes >= 0 ? Math.floor(params.maxBytes) : 0
-          try {
-            var spilledRaw = io.readFileString(resultFilePath)
-            var spilledByteSize = isString(spilledRaw) ? spilledRaw.length : 0
-
-            // stat: size/line-count only, no content
-            if (rop === "stat") {
-              var statLineCount = spilledRaw.split("\n").length
-              var statText = "File: " + resultFilePath + "\nSize: " + spilledByteSize + " bytes (~" + Math.ceil(spilledByteSize / 4) + " tokens)\nLines: " + statLineCount
-              return {
-                action: "readresult", op: "stat", resultFile: resultFilePath,
-                byteSize: spilledByteSize, lineCount: statLineCount,
-                estimatedTokens: Math.ceil(spilledByteSize / 4),
-                content: [{ type: "text", text: statText }]
-              }
-            }
-
-            var ropLines = spilledRaw.split("\n")
-            var ropTotalLines = ropLines.length
-
-            // Shared auto-cap threshold for all readresult ops — prevents obs-spill cascade
-            // (readresult response itself gets spilled → model tries to readresult again → infinite loop).
-            var _autoCapThreshold = parent._getToolResultInlineLimit(args, 16000)
-
-            // slice: lines fromLine..toLine (1-based, inclusive); start/end accepted as aliases
-            if (rop === "slice") {
-              var sliceFrom = isNumber(params.fromLine) && params.fromLine > 0 ? Math.floor(params.fromLine)
-                            : isNumber(params.start)   && params.start    > 0 ? Math.floor(params.start) : 1
-              var sliceTo   = isNumber(params.toLine)   && params.toLine   > 0 ? Math.floor(params.toLine)
-                            : isNumber(params.end)     && params.end      > 0 ? Math.floor(params.end) : ropTotalLines
-              if (sliceTo > ropTotalLines) sliceTo = ropTotalLines
-              var sliceText = ropLines.slice(sliceFrom - 1, sliceTo).join("\n")
-              var sliceTruncated = sliceText.length > _autoCapThreshold
-              if (sliceTruncated) sliceText = sliceText.substring(0, _autoCapThreshold)
-              var sliceResp = {
-                action: "readresult", op: "slice", resultFile: resultFilePath,
-                fromLine: sliceFrom, toLine: sliceTo, totalLines: ropTotalLines,
-                content: [{ type: "text", text: sliceText + (sliceTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a smaller line range with fromLine/toLine.]" : "") }],
-                estimatedTokens: Math.ceil(sliceText.length / 4)
-              }
-              if (sliceTruncated) sliceResp.truncated = true
-              return sliceResp
-            }
-
-            // head: first N lines
-            if (rop === "head") {
-              var headN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
-              var headText = ropLines.slice(0, headN).join("\n")
-              var headTruncated = headText.length > _autoCapThreshold
-              if (headTruncated) headText = headText.substring(0, _autoCapThreshold)
-              var headResp = {
-                action: "readresult", op: "head", resultFile: resultFilePath,
-                lines: headN, totalLines: ropTotalLines,
-                content: [{ type: "text", text: headText + (headTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Reduce lines count.]" : "") }],
-                estimatedTokens: Math.ceil(headText.length / 4)
-              }
-              if (headTruncated) headResp.truncated = true
-              return headResp
-            }
-
-            // tail: last N lines
-            if (rop === "tail") {
-              var tailN = isNumber(params.lines) && params.lines > 0 ? Math.floor(params.lines) : 50
-              var tailText = ropLines.slice(Math.max(0, ropTotalLines - tailN)).join("\n")
-              var tailTruncated = tailText.length > _autoCapThreshold
-              if (tailTruncated) tailText = tailText.substring(0, _autoCapThreshold)
-              var tailResp = {
-                action: "readresult", op: "tail", resultFile: resultFilePath,
-                lines: tailN, totalLines: ropTotalLines,
-                content: [{ type: "text", text: tailText + (tailTruncated ? "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Reduce lines count.]" : "") }],
-                estimatedTokens: Math.ceil(tailText.length / 4)
-              }
-              if (tailTruncated) tailResp.truncated = true
-              return tailResp
-            }
-
-            // grep: search for pattern, return matching lines with optional context
-            if (rop === "grep") {
-              var grepPat = isString(params.pattern) ? params.pattern : ""
-              if (grepPat.length === 0) return { error: "readresult op='grep' requires a 'pattern' parameter." }
-              var grepCtx = isNumber(params.context) && params.context >= 0 ? Math.floor(params.context) : 0
-              var grepRx
-              try {
-                grepRx = new RegExp(grepPat, "i")
-              } catch(rxErr) {
-                grepRx = new RegExp(grepPat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
-              }
-              var grepInclude = {}
-              var grepMatchCount = 0
-              var grepReturnedMatches = 0
-              var grepMaxMatches = parent._getReadresultMaxMatches(args, 0)
-              for (var gi = 0; gi < ropLines.length; gi++) {
-                if (grepRx.test(ropLines[gi])) {
-                  grepMatchCount++
-                  if (grepMaxMatches > 0 && grepReturnedMatches >= grepMaxMatches) continue
-                  grepReturnedMatches++
-                  for (var gc = Math.max(0, gi - grepCtx); gc <= Math.min(ropLines.length - 1, gi + grepCtx); gc++) {
-                    grepInclude[gc] = true
-                  }
-                }
-              }
-              var grepParts = []
-              var grepLast = -1
-              for (var gi2 = 0; gi2 < ropLines.length; gi2++) {
-                if (grepInclude[gi2]) {
-                  if (grepLast >= 0 && gi2 > grepLast + 1) grepParts.push("---")
-                  grepParts.push((gi2 + 1) + ": " + ropLines[gi2])
-                  grepLast = gi2
-                }
-              }
-              var grepText = grepMatchCount > 0 ? grepParts.join("\n") : "(no matches)"
-              var grepTruncated = grepText.length > _autoCapThreshold
-              if (grepTruncated) grepText = grepText.substring(0, _autoCapThreshold)
-              var grepLimited = grepMaxMatches > 0 && grepMatchCount > grepReturnedMatches
-              var grepSuffix = ""
-              if (grepLimited) {
-                grepSuffix += "\n[LIMITED to first " + grepReturnedMatches + " matching regions out of " + grepMatchCount + ". Refine the pattern or use slice/head for narrower extraction.]"
-              }
-              if (grepTruncated) {
-                grepSuffix += "\n[TRUNCATED at " + _autoCapThreshold + " bytes. Use a more specific pattern."
-                if (grepLimited) grepSuffix += " A match limit is also active."
-                grepSuffix += "]"
-              }
-              var grepResp = {
-                action: "readresult", op: "grep", resultFile: resultFilePath,
-                pattern: grepPat, matchCount: grepMatchCount, totalLines: ropTotalLines,
-                returnedMatches: grepReturnedMatches,
-                content: [{ type: "text", text: grepText + grepSuffix }],
-                estimatedTokens: Math.ceil(grepText.length / 4)
-              }
-              if (grepTruncated) grepResp.truncated = true
-              if (grepLimited) grepResp.limited = true
-              return grepResp
-            }
-
-            // read: full content inline (or truncated when maxBytes set and exceeded)
-            if (rop === "read" && ropMaxBytes === 0 && spilledByteSize > _autoCapThreshold) {
-              ropMaxBytes = _autoCapThreshold
-            }
-            var readContent = spilledRaw
-            var readTruncated = false
-            if (ropMaxBytes > 0 && spilledByteSize > ropMaxBytes) {
-              readContent = spilledRaw.substring(0, ropMaxBytes)
-              readTruncated = true
-            }
-            var readResponse = {
-              action: "readresult", op: "read", resultFile: resultFilePath,
-              totalLines: ropTotalLines, byteSize: spilledByteSize,
-              content: [{ type: "text", text: readContent + (readTruncated ? "\n[TRUNCATED at " + ropMaxBytes + " bytes. " + (spilledByteSize - ropMaxBytes) + " bytes remaining. Use op='slice' with fromLine/toLine or op='grep' with pattern to access remaining content.]" : "") }],
-              estimatedTokens: Math.ceil(readContent.length / 4)
-            }
-            if (readTruncated) readResponse.truncated = true
-            return readResponse
-
-          } catch(readErr) {
-            return { error: "Failed to read result file '" + resultFilePath + "': " + (readErr.message || String(readErr)) }
-          }
+          return _doReadResult(params)
         }
 
         var actionStr = isString(params.action) ? params.action.toLowerCase().trim() : String(params.action || "")
@@ -11100,6 +11102,114 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             }
           },
           required: [ "action" ]
+        }
+      }
+    }
+
+    // When usestdutils=true, expose the readresult operations as individual named tools
+    // (result_stat, result_read, result_head, result_tail, result_slice, result_grep).
+    // This follows the opencode/CLI pattern of one tool per operation rather than a
+    // single dispatching tool with an op parameter — making it trivially clear for
+    // small LLMs which tool to call on a spilled result file.
+    if (toBoolean(args.usestdutils) === true) {
+      fns["result_stat"] = function(params) {
+        var p = isMap(params) ? params : {}
+        return _doReadResult({ op: "stat", resultFile: p.resultFile })
+      }
+      fnsMeta["result_stat"] = {
+        name       : "result_stat",
+        description: "Get metadata (byte size, line count, token estimate) of a spilled result file. ALWAYS call this first before reading content to avoid context overflow.",
+        inputSchema: {
+          type      : "object",
+          properties: { resultFile: { type: "string", description: "Path returned in 'resultFile' from a prior proxy-dispatch call." } },
+          required  : ["resultFile"]
+        }
+      }
+
+      fns["result_read"] = function(params) {
+        var p = isMap(params) ? params : {}
+        return _doReadResult({ op: "read", resultFile: p.resultFile, maxBytes: p.maxBytes })
+      }
+      fnsMeta["result_read"] = {
+        name       : "result_read",
+        description: "Read full content of a spilled result file inline. Use only after result_stat confirms the file is small enough. Set maxBytes (e.g. 50000) to cap the response on large files.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            resultFile: { type: "string", description: "Path to the spilled result file." },
+            maxBytes  : { type: "integer", minimum: 0, description: "Max bytes to return (0 = auto-cap at ~16KB). Recommended: 50000." }
+          },
+          required: ["resultFile"]
+        }
+      }
+
+      fns["result_head"] = function(params) {
+        var p = isMap(params) ? params : {}
+        return _doReadResult({ op: "head", resultFile: p.resultFile, lines: p.lines })
+      }
+      fnsMeta["result_head"] = {
+        name       : "result_head",
+        description: "Read the first N lines of a spilled result file (default 50).",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            resultFile: { type: "string", description: "Path to the spilled result file." },
+            lines     : { type: "integer", minimum: 1, description: "Number of lines to return (default 50)." }
+          },
+          required: ["resultFile"]
+        }
+      }
+
+      fns["result_tail"] = function(params) {
+        var p = isMap(params) ? params : {}
+        return _doReadResult({ op: "tail", resultFile: p.resultFile, lines: p.lines })
+      }
+      fnsMeta["result_tail"] = {
+        name       : "result_tail",
+        description: "Read the last N lines of a spilled result file (default 50).",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            resultFile: { type: "string", description: "Path to the spilled result file." },
+            lines     : { type: "integer", minimum: 1, description: "Number of lines to return (default 50)." }
+          },
+          required: ["resultFile"]
+        }
+      }
+
+      fns["result_slice"] = function(params) {
+        var p = isMap(params) ? params : {}
+        return _doReadResult({ op: "slice", resultFile: p.resultFile, fromLine: p.fromLine, toLine: p.toLine })
+      }
+      fnsMeta["result_slice"] = {
+        name       : "result_slice",
+        description: "Read a specific line range from a spilled result file (1-based, inclusive).",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            resultFile: { type: "string", description: "Path to the spilled result file." },
+            fromLine  : { type: "integer", minimum: 1, description: "1-based start line (default 1)." },
+            toLine    : { type: "integer", minimum: 1, description: "1-based end line (default last line)." }
+          },
+          required: ["resultFile"]
+        }
+      }
+
+      fns["result_grep"] = function(params) {
+        var p = isMap(params) ? params : {}
+        return _doReadResult({ op: "grep", resultFile: p.resultFile, pattern: p.pattern, context: p.context })
+      }
+      fnsMeta["result_grep"] = {
+        name       : "result_grep",
+        description: "Search a spilled result file for lines matching a regex pattern (case-insensitive, falls back to literal match). Returns matched lines with optional surrounding context.",
+        inputSchema: {
+          type      : "object",
+          properties: {
+            resultFile: { type: "string", description: "Path to the spilled result file." },
+            pattern   : { type: "string", description: "Regular expression to search for (case-insensitive)." },
+            context   : { type: "integer", minimum: 0, description: "Lines of context before and after each match (default 0)." }
+          },
+          required: ["resultFile", "pattern"]
         }
       }
     }
@@ -14767,20 +14877,39 @@ MiniA.prototype.init = function(args) {
       var spillNote = spillThreshold > 0
         ? "Results exceeding " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tokens) are auto-spilled to a temporary file automatically." + (spillToon ? " Auto-spill serialization uses TOON format." : "")
         : "Set mcpproxythreshold=<bytes> to enable auto-spill; or use resultToFile=true manually."
-      baseRules.push(
-        "For large MCP payloads, proxy-dispatch supports temporary JSON handoff: " +
-        "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
-        "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
-        spillNote + " " +
-        "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
-        "To inspect or retrieve a spilled result file, use action='readresult' with the 'resultFile' path — this bypasses auto-spill entirely. " +
-        "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
-        "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
-        "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
-        "Do NOT use a downstream tool (e.g. " + (toBoolean(args.usestdutils) === true ? "read" : "filesystemQuery") + ") to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
-        "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
-        "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
-      )
+      if (toBoolean(args.usestdutils) === true) {
+        baseRules.push(
+          "For large MCP payloads, proxy-dispatch supports temporary file handoff: " +
+          "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
+          "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
+          spillNote + " " +
+          "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
+          "To inspect a spilled result file use these dedicated tools: " +
+          "result_stat (metadata only — ALWAYS call this first), " +
+          "result_read (full content, set maxBytes e.g. 50000), " +
+          "result_head/result_tail (first/last N lines), " +
+          "result_slice (lines fromLine..toLine, 1-based), " +
+          "result_grep (regex search with optional context lines). " +
+          "Do NOT use 'read' or 'grep' (filesystem tools) on spilled result files — that re-triggers auto-spill and creates an infinite loop. " +
+          "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
+          "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
+        )
+      } else {
+        baseRules.push(
+          "For large MCP payloads, proxy-dispatch supports temporary JSON handoff: " +
+          "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
+          "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
+          spillNote + " " +
+          "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
+          "To inspect or retrieve a spilled result file, use action='readresult' with the 'resultFile' path — this bypasses auto-spill entirely. " +
+          "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
+          "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
+          "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
+          "Do NOT use a downstream tool (e.g. filesystemQuery) to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
+          "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
+          "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
+        )
+      }
       baseRules.push(
         "Prefer file handoff when payloads are large and files are accessible via useutils=true (recommended) or useshell=true readwrite=true. " +
         "For small payloads (<10KB), inline is simpler. " +
@@ -16260,9 +16389,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     var getEffectiveContextBudget = () => this._getEffectiveContextBudget(args, 0)
 
-    var buildReadresultGuardKey = params => {
-      if (!isMap(params) || params.action !== "readresult" || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
-      var op = isString(params.op) ? params.op.trim().toLowerCase() : "stat"
+    var _GUARD_ALIAS_OPS = { "result_stat":"stat", "result_read":"read", "result_head":"head", "result_tail":"tail", "result_slice":"slice", "result_grep":"grep" }
+    var buildReadresultGuardKey = (params, toolName) => {
+      if (!isMap(params) || !isString(params.resultFile) || params.resultFile.trim().length === 0) return ""
+      var aliasOp = isString(toolName) ? (_GUARD_ALIAS_OPS[toolName] || "") : ""
+      if (!aliasOp && params.action !== "readresult") return ""
+      var op = aliasOp || (isString(params.op) ? params.op.trim().toLowerCase() : "stat")
       var key = [params.resultFile.trim(), op]
       if (op === "grep") key.push(isString(params.pattern) ? params.pattern : "", isNumber(params.context) ? String(params.context) : "0")
       if (op === "slice") key.push(isNumber(params.fromLine) ? String(params.fromLine) : isNumber(params.start) ? String(params.start) : "1", isNumber(params.toLine) ? String(params.toLine) : isNumber(params.end) ? String(params.end) : "")
@@ -16336,9 +16468,11 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             // Also catches truncated readresult content: _normalizeToolResult strips the response wrapper
             // and stores only content[0].text in the OBS entry, so "action: readresult" never appears
             // there — but the [TRUNCATED] marker written by readresult always does.
-            if (/action\s*[=:]\s*['"]?readresult|auto-spilled to temporary|retroactively spilled|\[TRUNCATED at \d+/i.test(obsContent)) {
+            if (/action\s*[=:]\s*['"]?readresult|auto-spilled to temporary|retroactively spilled|\[TRUNCATED at \d+|result_(?:stat|read|head|tail|slice|grep)/i.test(obsContent)) {
               var _rfMatch = obsContent.match(/resultFile[=:\s]+['"]?([^\s,'"}\]]+)/)
-              var _rfHint = _rfMatch ? " Use proxy-dispatch action='readresult' resultFile='" + _rfMatch[1] + "' with op='grep' or op='slice' to access specific data." : ""
+              var _rfHint = _rfMatch ? " Use " + (toBoolean(args.usestdutils) === true
+                ? "result_grep resultFile='" + _rfMatch[1] + "' pattern=... or result_slice fromLine=... toLine=..."
+                : "proxy-dispatch action='readresult' resultFile='" + _rfMatch[1] + "' with op='grep' or op='slice'") + " to access specific data." : ""
               return match.substring(0, 200) + "... [output truncated — readresult response too large for context." + _rfHint + "]"
             }
             try {
@@ -16365,7 +16499,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               var spillNotice = label + " [Observation retroactively spilled to temporary file during context compression (auto-deleted at shutdown)." +
                 " File: " + retroTempPath +
                 " | Size: " + obsContent.length + " bytes (~" + estTokens + " tokens)." +
-                " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' as needed.]"
+                (toBoolean(args.usestdutils) === true
+                  ? " | IMPORTANT: Call result_stat resultFile='" + retroTempPath + "' first (size check). Then use result_read, result_head, result_tail, result_slice, or result_grep as needed.]"
+                  : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + retroTempPath + "' to access. Start with op='stat', then op='read', op='head', op='grep', or op='slice' as needed.]")
               // Patch the live context entry so future selectPromptContext calls see
               // the notice directly and do not retro-spill the same data again.
               if (i >= 0 && i < runtime.context.length && runtime.context[i] === entry) {
@@ -16613,7 +16749,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (!hasError && isString(observation) && observation.length > 0) {
         var inlineLimit = this._getToolResultInlineLimit(args, 0)
         var isProxySpill = isMap(rawResult) && rawResult.autoSpilled === true && isString(rawResult.resultFile)
-        var isReadresultCall = toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult"
+        var _RESULT_ALIAS_NAMES = { "result_stat":true, "result_read":true, "result_head":true, "result_tail":true, "result_slice":true, "result_grep":true }
+        var isReadresultCall = (_RESULT_ALIAS_NAMES[toolName] === true) ||
+          (toolName === "proxy-dispatch" && isMap(params) && params.action === "readresult")
         if (inlineLimit > 0 && !isProxySpill && !isReadresultCall && observation.length > inlineLimit) {
           try {
             var obsTempFile = java.nio.file.Files.createTempFile("mini-a-tool-obs-", ".txt")
@@ -16624,7 +16762,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             observation = "[Observation spilled to temporary file to protect context (auto-deleted at shutdown)." +
               " File: " + obsTempPath +
               " | Size: " + observation.length + " bytes (~" + obsTokens + " tokens)." +
-              " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' as needed.]"
+              (toBoolean(args.usestdutils) === true
+                ? " | IMPORTANT: Call result_stat resultFile='" + obsTempPath + "' first (size check). Then use result_read, result_head, result_tail, result_slice, or result_grep as needed.]"
+                : " | IMPORTANT: Use proxy-dispatch action='readresult' resultFile='" + obsTempPath + "' to inspect it. Start with op='stat', then use op='head', op='grep', or op='slice' as needed.]")
             rawResult = {
               autoSpilled: true,
               resultFile : obsTempPath,
@@ -16663,7 +16803,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           this._memoryAppend("artifacts", _storedVal, _artMeta, { noDedup: true })
         }
         this._clearPendingFetchFlags(toolName, params, rawResult, observation)
-        var readresultGuardKey = buildReadresultGuardKey(params)
+        var readresultGuardKey = buildReadresultGuardKey(params, toolName)
         if (readresultGuardKey.length > 0) {
           if (isMap(rawResult) && rawResult.truncated === true) {
             runtime.readresultLoopGuards[readresultGuardKey] = (runtime.readresultLoopGuards[readresultGuardKey] || 0) + 1
@@ -18354,7 +18494,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             flushAll()
             break
           }
-          var readresultGuardKey = buildReadresultGuardKey(paramsValue)
+          var readresultGuardKey = buildReadresultGuardKey(paramsValue, origActionRaw)
           if (readresultGuardKey.length > 0 && (runtime.readresultLoopGuards[readresultGuardKey] || 0) >= 2) {
             runtime.context.push(`[OBS ${stepLabel}] (contextguard) blocked repeated truncated readresult for the same file/op. Narrow the request with a smaller slice, fewer lines, or a more specific grep pattern.`)
             this._registerRuntimeError(runtime, {

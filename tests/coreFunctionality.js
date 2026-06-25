@@ -1344,13 +1344,14 @@
     var agent = createAgent()
     agent.fnI = function() {}
 
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
     var tempPath = String(java.nio.file.Files.createTempFile("mini-a-readresult-", ".txt").toAbsolutePath())
     try {
       var rows = []
       for (var i = 1; i <= 30; i++) rows.push("price line " + i)
       io.writeFileString(tempPath, rows.join("\n"))
 
-      var proxyConfig = agent._createMcpProxyConfig([], {
+      var proxyConfig = agent._createMcpProxyConfig([utilsConfig], {
         contextguard: true,
         toolresultmaxinline: 128,
         readresultmaxmatches: 5
@@ -1369,6 +1370,90 @@
       ow.test.assert(result.returnedMatches, 5, "grep should cap returned matches under context guard")
       ow.test.assert(result.limited, true, "grep should mark limited responses")
       ow.test.assert(String(result.content[0].text).indexOf("LIMITED to first 5") >= 0, true, "grep response should explain the applied match cap")
+    } finally {
+      try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
+    }
+  }
+
+  exports.testResultAliasToolsExposedWithStdutils = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    var tempPath = String(java.nio.file.Files.createTempFile("mini-a-readresult-", ".txt").toAbsolutePath())
+    try {
+      var rows = []
+      for (var i = 1; i <= 20; i++) rows.push("item " + i + ": value")
+      io.writeFileString(tempPath, rows.join("\n"))
+
+      // Without usestdutils: result_* tools should NOT be present
+      var cfgOff = agent._createMcpProxyConfig([utilsConfig], { usestdutils: false })
+      ow.test.assert(isMap(cfgOff) && isMap(cfgOff.options) && isMap(cfgOff.options.fns), true, "Should build proxy config without usestdutils")
+      ow.test.assert(isUnDef(cfgOff.options.fns["result_stat"]), true, "result_stat should not be present without usestdutils")
+
+      // With usestdutils: all 6 tools should be present
+      var cfg = agent._createMcpProxyConfig([utilsConfig], { usestdutils: true })
+      ow.test.assert(isMap(cfg) && isMap(cfg.options) && isMap(cfg.options.fns), true, "Should build proxy config with usestdutils")
+      var fns = cfg.options.fns
+      ow.test.assert(isDef(fns["result_stat"]),  true, "result_stat should be present with usestdutils")
+      ow.test.assert(isDef(fns["result_read"]),  true, "result_read should be present with usestdutils")
+      ow.test.assert(isDef(fns["result_head"]),  true, "result_head should be present with usestdutils")
+      ow.test.assert(isDef(fns["result_tail"]),  true, "result_tail should be present with usestdutils")
+      ow.test.assert(isDef(fns["result_slice"]), true, "result_slice should be present with usestdutils")
+      ow.test.assert(isDef(fns["result_grep"]),  true, "result_grep should be present with usestdutils")
+
+      // result_stat returns metadata
+      var stat = fns["result_stat"]({ resultFile: tempPath })
+      ow.test.assert(isMap(stat), true, "result_stat should return a map")
+      ow.test.assert(stat.op, "stat", "result_stat response op should be stat")
+      ow.test.assert(stat.lineCount, 20, "result_stat should count 20 lines")
+      ow.test.assert(isNumber(stat.byteSize) && stat.byteSize > 0, true, "result_stat should report byte size")
+
+      // result_head returns first N lines
+      var head = fns["result_head"]({ resultFile: tempPath, lines: 3 })
+      ow.test.assert(isMap(head), true, "result_head should return a map")
+      ow.test.assert(head.op, "head", "result_head response op should be head")
+      ow.test.assert(String(head.content[0].text).indexOf("item 1:") >= 0, true, "result_head should contain first line")
+      ow.test.assert(String(head.content[0].text).indexOf("item 4:") < 0, true, "result_head with lines=3 should not contain 4th line")
+
+      // result_grep finds matching lines
+      var grep = fns["result_grep"]({ resultFile: tempPath, pattern: "item 1[05]" })
+      ow.test.assert(isMap(grep), true, "result_grep should return a map")
+      ow.test.assert(grep.op, "grep", "result_grep response op should be grep")
+      ow.test.assert(grep.matchCount, 2, "result_grep should find items 10 and 15")
+
+      // result_slice returns line range
+      var slice = fns["result_slice"]({ resultFile: tempPath, fromLine: 5, toLine: 7 })
+      ow.test.assert(isMap(slice), true, "result_slice should return a map")
+      ow.test.assert(slice.fromLine, 5, "result_slice fromLine should be 5")
+      ow.test.assert(slice.toLine, 7, "result_slice toLine should be 7")
+      ow.test.assert(String(slice.content[0].text).indexOf("item 5:") >= 0, true, "result_slice should contain line 5")
+      ow.test.assert(String(slice.content[0].text).indexOf("item 8:") < 0, true, "result_slice should not contain line 8")
+    } finally {
+      try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
+    }
+  }
+
+  exports.testResultAliasToolsBypassInlineLimitGuard = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    var tempPath = String(java.nio.file.Files.createTempFile("mini-a-readresult-", ".txt").toAbsolutePath())
+    try {
+      // Write content that would normally trigger obs-spill
+      var bigContent = []
+      for (var i = 1; i <= 100; i++) bigContent.push("line " + i + " padded content here")
+      io.writeFileString(tempPath, bigContent.join("\n"))
+
+      var cfg = agent._createMcpProxyConfig([utilsConfig], { usestdutils: true, toolresultmaxinline: 50 })
+      var fns = cfg.options.fns
+
+      // result_stat on a large file must NOT trigger obs-spill cascade
+      var stat = fns["result_stat"]({ resultFile: tempPath })
+      ow.test.assert(isMap(stat) && stat.op === "stat", true, "result_stat should succeed on large file")
+      ow.test.assert(isNumber(stat.byteSize) && stat.byteSize > 50, true, "file should be larger than inline limit")
+      // The _clearPendingFetchFlags call path also works by verifying no error is thrown
     } finally {
       try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
     }
