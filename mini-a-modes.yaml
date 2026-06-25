@@ -92,6 +92,7 @@ modes:
       memoryusersession: true
       usedelegation    : true
       autodelegation   : true
+      usestdutils      : true
       mcp              : 
       - type   : ojob
         options:
