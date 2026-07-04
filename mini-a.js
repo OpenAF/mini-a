@@ -336,7 +336,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact wiki overview; search returns path+title+description by default (add contextLines>0 for snippets); list withMeta=true returns metadata per page; read uses section= to fetch one heading; browse and tree show structure including mounts; mounts/attach/detach manage read-only federated wikis (@name/path.md); lint validates wiki health{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}{{/if}}{{#if actionsList}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -357,8 +357,7 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
 • When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "final"
 • When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
-• Tool schemas are provided via the tool interface, so keep prompts concise.
-
+{{#if includeExamples}}
 ### How to call MCP tools:
 1. Use function calling with tool name: "proxy-dispatch"
 2. Provide arguments with this structure:
@@ -379,7 +378,7 @@ Arguments: {
   }
 }
 
-• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}
+{{/if}}• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}
 {{else}}
 ## MCP TOOL ACCESS (PROXY-DISPATCH ACTION-BASED):
 • {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
@@ -388,7 +387,7 @@ Arguments: {
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "proxy-dispatch" | "final"
 
 ### How to call MCP tools:
-Use the action field with "proxy-dispatch" and provide tool details in params:
+Use the action field with "proxy-dispatch" and provide tool details in params — note the nested "action":"call" inside params, required even though the top-level action is already "proxy-dispatch":
 {
   "thought": "brief description",
   "action": "proxy-dispatch",
@@ -396,19 +395,6 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
     "action": "call",
     "tool": "tool-name",
     "arguments": { /* tool-specific parameters */ }
-  }
-}
-
-### Example MCP tool call:
-{
-  "thought": "Search for RSS feeds",
-  "action": "proxy-dispatch",
-  "params": {
-    "action": "call",
-    "tool": "find-rss-url",
-    "arguments": {
-      "query": "CNN"
-    }
   }
 }
 {{/if}}
@@ -420,8 +406,7 @@ Use the action field with "proxy-dispatch" and provide tool details in params:
 • When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "final"
 • When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 • Each tool has its own function signature - call tools directly by their name
-• Tool schemas are provided via the tool interface, so keep prompts concise.
-
+{{#if includeExamples}}
 ### How to call MCP tools:
 1. Use function calling with the actual tool name (e.g., "find-rss-url")
 2. Provide the tool's required parameters directly
@@ -431,12 +416,13 @@ Function name: "find-rss-url"
 Arguments: {
   "query": "CNN"
 }
+{{/if}}
 {{else}}{{#if usetools}}
 ## MCP TOOL ACCESS (ACTION-BASED):
 • {{toolCount}} MCP tools are available as action types
 • Call MCP tools through the JSON "action" field, just like shell or custom actions
 • The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | [MCP tool name] | "final"
-
+{{#if includeExamples}}
 ### How to call MCP tools:
 Use the action field with the tool name and provide parameters in the params field:
 {
@@ -453,6 +439,7 @@ Use the action field with the tool name and provide parameters in the params fie
     "query": "CNN"
   }
 }
+{{/if}}
 {{/if}}{{/if}}
 {{/if}}
 
@@ -1518,6 +1505,7 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
   case "summarize": _e = "🌀"; break
   case "progcall" : _e = "📟"; break
   case "subagent" : _e = "🤝"; break
+  case "compress" : _e = "🗜️"; break
   case "planner_stream": _e = "💡"; break
   default         : _e = e
   }
@@ -9121,6 +9109,7 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
 MiniA.prototype._createUtilsMcpConfig = function(args) {
   try {
     var parent = this
+    var promptProfile = this._getPromptProfile(args)
 
     if (typeof MiniUtilsTool !== "function") {
       //if (io.fileExists("mini-a-utils.js")) {
@@ -9497,7 +9486,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         description: "Execute MiniUtilsTool." + name,
         inputSchema: { type: "object" }
       }
-      fnsMeta[name] = meta
+      fnsMeta[name] = parent._slimToolMetaForProfile(meta, promptProfile)
       fns[name] = function(params) {
         var payload = params
         if (isUnDef(payload)) payload = {}
@@ -10992,116 +10981,101 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       }
     }
 
+    // When usestdutils=true, the result_* alias tools (registered below) own the
+    // readresult op parameters (resultFile, op, fromLine, toLine, lines, pattern,
+    // context, maxBytes) — omit them here to avoid describing the same operation twice.
+    var _proxyExposesReadresult = toBoolean(args.usestdutils) !== true
+    var _proxyDispatchProps = {
+      action: {
+        type       : "string",
+        description: "MUST be one of: status, list, search, call" + (_proxyExposesReadresult ? ", readresult" : "") + ". Never 'shell'/'exec'/'bash'."
+      },
+      connection: {
+        type       : "string",
+        description: "Optional connection id/alias ('default'/'primary' = proxy default). Omit to operate across all connections."
+      },
+      query: {
+        type       : "string",
+        description: "Search text for tool names/descriptions/annotations."
+      },
+      tool: {
+        type       : "string",
+        description: "Tool name to invoke when action='call'."
+      },
+      arguments: {
+        type       : "object",
+        description: "Input arguments for the downstream tool when action='call'."
+      },
+      argumentsFile: {
+        type       : "string",
+        description: "Path to a JSON file of tool arguments; overrides 'arguments'."
+      },
+      meta: {
+        type       : "object",
+        description: "Optional metadata forwarded to the downstream MCP call."
+      },
+      resultToFile: {
+        type       : "boolean",
+        description: "When true for action='call', writes the result to a temp file and returns 'resultFile' instead of inlining it."
+      },
+      resultSizeThreshold: {
+        type       : "integer",
+        description: "Per-call byte threshold that auto-spills the result to file (overrides global mcpproxythreshold). 0 = disabled.",
+        minimum    : 0
+      },
+      limit: {
+        type       : "integer",
+        description: "Max results to return for 'search'.",
+        minimum    : 1
+      },
+      includeTools: {
+        type       : "boolean",
+        description: "Include tool metadata in 'list' responses (default true)."
+      },
+      includeInputSchema: {
+        type       : "boolean",
+        description: "Include each tool's input schema in responses (default false)."
+      },
+      includeAnnotations: {
+        type       : "boolean",
+        description: "Include tool annotations in responses (default true)."
+      },
+      refresh: {
+        type       : "boolean",
+        description: "Refresh tool metadata from downstream MCPs before executing."
+      },
+      format: {
+        type       : "string",
+        description: "'list'/'search' output shape. 'compact' (default, lowest cost): {alias, tools:[{name,description}]}. 'detail': full serverInfo/annotations/inputSchema as TOON.",
+        enum       : [ "compact", "detail" ]
+      }
+    }
+    if (_proxyExposesReadresult) {
+      _proxyDispatchProps.resultFile = {
+        type       : "string",
+        description: "For action='readresult': path to a previously spilled result file."
+      }
+      _proxyDispatchProps.op = {
+        type       : "string",
+        description: "Sub-operation for action='readresult'. 'stat' (default, always use first): size/line count only. 'read': full content (after stat confirms size). 'head'/'tail': first/last N lines. 'slice': lines fromLine..toLine. 'grep': pattern match with context.",
+        enum       : [ "stat", "read", "head", "tail", "slice", "grep" ]
+      }
+      _proxyDispatchProps.fromLine = { type: "integer", description: "For op='slice': 1-based start line.", minimum: 1 }
+      _proxyDispatchProps.toLine = { type: "integer", description: "For op='slice': 1-based end line.", minimum: 1 }
+      _proxyDispatchProps.lines = { type: "integer", description: "For op='head'/'tail': number of lines (default 50).", minimum: 1 }
+      _proxyDispatchProps.pattern = { type: "string", description: "For op='grep': regex (case-insensitive), falls back to literal match." }
+      _proxyDispatchProps.context = { type: "integer", description: "For op='grep': context lines around each match (default 0).", minimum: 0 }
+      _proxyDispatchProps.maxBytes = { type: "integer", description: "For op='read': max bytes inline (truncated with notice beyond this; 0 = no limit).", minimum: 0 }
+    }
+
     var fnsMeta = {
       "proxy-dispatch": {
         name       : "proxy-dispatch",
-        description: "Interact with downstream MCP connections aggregated by this proxy. Supports a lightweight catalog check (action='status'), listing available tools (action='list'), searching metadata (action='search'), and calling specific tools (action='call' with tool name and arguments). Use this function to invoke any MCP tool.",
+        description: "Call downstream MCP tools aggregated by this proxy: action='status' (catalog check), 'list' (available tools), 'search' (search metadata), 'call' (invoke a tool)" + (_proxyExposesReadresult ? ", 'readresult' (retrieve a spilled result file)" : "") + ".",
         inputSchema: {
           type      : "object",
-          properties: {
-            action: {
-              type       : "string",
-              description: "Operation to perform. MUST be one of: 'status' (catalog check), 'list' (list available tools), 'search' (search tool metadata), 'call' (invoke a downstream tool), or 'readresult' (retrieve a previously spilled result file). No other values are valid — never use 'shell', 'exec', 'bash', or any similar value here."
-            },
-            connection: {
-              type       : "string",
-              description: "Optional connection identifier or alias. Special aliases 'default' and 'primary' resolve to the proxy default connection. When omitted, actions operate across all registered connections."
-            },
-            query: {
-              type       : "string",
-              description: "Search text applied to tool names, descriptions, and annotations."
-            },
-            tool: {
-              type       : "string",
-              description: "Name of the tool to invoke when action is 'call'."
-            },
-            arguments: {
-              type       : "object",
-              description: "Input arguments forwarded to the downstream MCP tool when action is 'call'."
-            },
-            argumentsFile: {
-              type       : "string",
-              description: "Optional path to a JSON file containing tool arguments. When provided, it overrides 'arguments'."
-            },
-            meta: {
-              type       : "object",
-              description: "Optional metadata object forwarded to the downstream MCP call."
-            },
-            resultToFile: {
-              type       : "boolean",
-              description: "When true for action='call', writes the tool result to a temporary file and returns 'resultFile' instead of embedding full content (JSON by default, TOON when mcpproxytoon applies)."
-            },
-            resultSizeThreshold: {
-              type       : "integer",
-              description: "Per-call byte size threshold. When the serialized result exceeds this value, result is written to a temporary file automatically (as if resultToFile=true). Overrides the global mcpproxythreshold. 0 = disabled. If mcpproxytoon=true and global mcpproxythreshold>0, size/preview use TOON serialization.",
-              minimum    : 0
-            },
-            resultFile: {
-              type       : "string",
-              description: "For action='readresult': path to a previously spilled result file (as returned in 'resultFile' from a prior call). The file content is returned inline without triggering auto-spill."
-            },
-            op: {
-              type       : "string",
-              description: "Sub-operation for action='readresult'. 'stat' (DEFAULT — always use first): byte size and line count only. 'read': full content inline (use only when stat confirms size is manageable). 'head': first N lines. 'tail': last N lines. 'slice': lines fromLine..toLine. 'grep': lines matching pattern with optional context.",
-              enum       : [ "stat", "read", "head", "tail", "slice", "grep" ]
-            },
-            fromLine: {
-              type       : "integer",
-              description: "For op='slice': 1-based start line (inclusive).",
-              minimum    : 1
-            },
-            toLine: {
-              type       : "integer",
-              description: "For op='slice': 1-based end line (inclusive).",
-              minimum    : 1
-            },
-            lines: {
-              type       : "integer",
-              description: "For op='head' or op='tail': number of lines to return (default 50).",
-              minimum    : 1
-            },
-            pattern: {
-              type       : "string",
-              description: "For op='grep': regular expression (case-insensitive) to search for. Falls back to literal match if invalid regex."
-            },
-            context: {
-              type       : "integer",
-              description: "For op='grep': number of lines of context to include before and after each match (default 0).",
-              minimum    : 0
-            },
-            maxBytes: {
-              type       : "integer",
-              description: "For op='read': maximum bytes to return inline. Content beyond this limit is truncated with a notice. 0 = no limit (default). Recommended: set to a safe token budget e.g. 50000.",
-              minimum    : 0
-            },
-            limit: {
-              type       : "integer",
-              description: "Maximum number of results to return for 'search' actions.",
-              minimum    : 1
-            },
-            includeTools: {
-              type       : "boolean",
-              description: "Include tool metadata in 'list' responses (default true)."
-            },
-            includeInputSchema: {
-              type       : "boolean",
-              description: "Include each tool input schema in responses (default false)."
-            },
-            includeAnnotations: {
-              type       : "boolean",
-              description: "Include tool annotations in responses (default true)."
-            },
-            refresh: {
-              type       : "boolean",
-              description: "Refresh tool metadata from downstream MCPs before executing the action."
-            },
-            format: {
-              type       : "string",
-              description: "Output format for 'list' and 'search' actions. 'compact' (default): minimal {alias, tools:[{name,description}]} — lowest token cost. 'detail': full server-returned data (serverInfo, annotations, inputSchema when requested) serialized as TOON.",
-              enum       : [ "compact", "detail" ]
-            }
-          },
-          required: [ "action" ]
+          properties: _proxyDispatchProps,
+          required  : [ "action" ]
         }
       }
     }
@@ -11220,7 +11194,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
       options: {
         name   : "mini-a-mcp-proxy",
         fns    : fns,
-        fnsMeta: fnsMeta
+        fnsMeta: parent._slimFnsMetaForProfile(fnsMeta, parent._getPromptProfile(args))
       }
     }
   } catch (e) {
@@ -11469,6 +11443,67 @@ MiniA.prototype._getToolSummaryMode = function(profile, toolCount) {
   if (normalized === "minimal") return "compact"
   if (count > 8) return "compact"
   return "standard"
+}
+
+// Truncates a schema/description string to its first N sentences, used to shrink
+// function-calling tool schemas sent to the provider under minimal/balanced profiles.
+MiniA.prototype._slimToolSchemaDescription = function(text, maxSentences) {
+  if (!isString(text) || text.length === 0) return text
+  if (!isNumber(maxSentences) || maxSentences <= 0) return text
+  var parts = text.split(/([.!?]\s+)/)
+  var sentences = []
+  for (var i = 0; i < parts.length; i += 2) {
+    sentences.push(parts[i] + (isDef(parts[i + 1]) ? parts[i + 1] : ""))
+  }
+  if (sentences.length <= maxSentences) return text
+  return sentences.slice(0, maxSentences).join("").trim()
+}
+
+// Returns a profile-appropriate clone of a single MCP tool metadata entry
+// ({name, description, inputSchema}). Verbose keeps the schema untouched; balanced
+// trims descriptions to their first sentence; minimal additionally drops descriptions
+// for optional (non-required) parameters. Never mutates the shared input.
+MiniA.prototype._slimToolMetaForProfile = function(meta, profile) {
+  if (!isMap(meta)) return meta
+  var normalized = this._normalizePromptProfile(profile)
+  if (normalized === "verbose") return meta
+
+  var clone = jsonParse(stringify(meta, __, ""), __, __, true)
+  if (!isMap(clone)) return meta
+
+  if (isString(clone.description)) {
+    clone.description = this._slimToolSchemaDescription(clone.description, normalized === "minimal" ? 1 : 2)
+  }
+
+  var schema = isMap(clone.inputSchema) ? clone.inputSchema : __
+  var props = isMap(schema) && isMap(schema.properties) ? schema.properties : __
+  if (isMap(props)) {
+    var requiredList = isArray(schema.required) ? schema.required : []
+    var self = this
+    Object.keys(props).forEach(function(key) {
+      var prop = props[key]
+      if (!isMap(prop) || !isString(prop.description)) return
+      var isRequired = requiredList.indexOf(key) >= 0
+      if (normalized === "minimal" && !isRequired) {
+        delete prop.description
+      } else {
+        prop.description = self._slimToolSchemaDescription(prop.description, 1)
+      }
+    })
+  }
+
+  return clone
+}
+
+// Applies _slimToolMetaForProfile across a whole fnsMeta map (tool name -> metadata).
+MiniA.prototype._slimFnsMetaForProfile = function(fnsMeta, profile) {
+  if (!isMap(fnsMeta)) return fnsMeta
+  var self = this
+  var out = {}
+  Object.keys(fnsMeta).forEach(function(name) {
+    out[name] = self._slimToolMetaForProfile(fnsMeta[name], profile)
+  })
+  return out
 }
 
 MiniA.prototype._tokenizePromptRankingText = function(text) {
@@ -14864,56 +14899,25 @@ MiniA.prototype.init = function(args) {
       .filter(r => r.length > 0)
 
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
-      baseRules.push("When invoking MCP tools, use function calling with 'proxy-dispatch' as the function name. In your 'thought' field, describe what the tool does (e.g., 'searching for RSS feeds', 'getting current time') rather than implementation details about proxy-dispatch.")
-      baseRules.push("When calling 'proxy-dispatch', never set tool='proxy-dispatch'. Available tools and their descriptions are listed above — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}} to execute one directly. Only use {\"action\":\"list\"} if you need to discover tools not shown above.")
-      baseRules.push("The proxy-dispatch 'action' parameter only accepts: status, list, search, call, readresult. NEVER pass action='shell', 'exec', 'bash', 'run', or any other value to proxy-dispatch — those are not valid and will fail. Shell commands use the top-level JSON 'action':'shell' field, not the proxy-dispatch tool.")
+      baseRules.push("Invoke MCP tools via function calling with 'proxy-dispatch'. Never set tool='proxy-dispatch' itself — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}}. Valid 'action' values: status, list, search, call, readresult (never 'shell'/'exec'/'bash' — shell runs via the top-level JSON \"action\":\"shell\" field).")
       if (toBoolean(args.usejsontool) !== true) {
-        baseRules.push("Do not call a tool named 'json' unless it is explicitly listed in the available tools for this request. If no MCP tool is needed, return the normal JSON response directly instead of trying to call a 'json' tool.")
+        baseRules.push("Do not call a tool named 'json' unless explicitly listed in available tools; otherwise return the JSON response directly.")
       }
-      baseRules.push("'action=list' and 'action=search' default to format='compact' (name+description only, lowest token cost). Use format='detail' only when you need inputSchema, annotations, or serverInfo. Use action='status' to cheaply check if the tool catalog has changed (compare catalogHash) without re-listing.")
+      baseRules.push("'list'/'search' default to format='compact' (lowest cost); use format='detail' only for inputSchema/annotations. Use action='status' to check catalogHash before re-listing.")
       var spillThreshold = isNumber(args.mcpproxythreshold) && args.mcpproxythreshold > 0
         ? args.mcpproxythreshold : 0
       var spillToon = toBoolean(args.mcpproxytoon) === true && spillThreshold > 0
       var spillNote = spillThreshold > 0
-        ? "Results exceeding " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tokens) are auto-spilled to a temporary file automatically." + (spillToon ? " Auto-spill serialization uses TOON format." : "")
-        : "Set mcpproxythreshold=<bytes> to enable auto-spill; or use resultToFile=true manually."
-      if (toBoolean(args.usestdutils) === true) {
-        baseRules.push(
-          "For large MCP payloads, proxy-dispatch supports temporary file handoff: " +
-          "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
-          "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
-          spillNote + " " +
-          "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
-          "To inspect a spilled result file use these dedicated tools: " +
-          "result_stat (metadata only — ALWAYS call this first), " +
-          "result_read (full content, set maxBytes e.g. 50000), " +
-          "result_head/result_tail (first/last N lines), " +
-          "result_slice (lines fromLine..toLine, 1-based), " +
-          "result_grep (regex search with optional context lines). " +
-          "Do NOT use 'read' or 'grep' (filesystem tools) on spilled result files — that re-triggers auto-spill and creates an infinite loop. " +
-          "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
-          "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
-        )
-      } else {
-        baseRules.push(
-          "For large MCP payloads, proxy-dispatch supports temporary JSON handoff: " +
-          "use 'argumentsFile' (string path) to load tool arguments from disk, 'resultToFile=true' (boolean) to write results to a temp file (returns 'resultFile'), " +
-          "or 'resultSizeThreshold' (integer bytes) to auto-spill per-call when result is large. " +
-          spillNote + " " +
-          "Size guidance: ~4 chars = 1 token; 50KB ≈ 12,500 tokens; 200KB ≈ 50,000 tokens. " +
-          "To inspect or retrieve a spilled result file, use action='readresult' with the 'resultFile' path — this bypasses auto-spill entirely. " +
-          "Default op is 'stat' (size+line count, no content) — ALWAYS start here. Only call op='read' after confirming size is small enough (e.g. <50KB). " +
-          "Other ops: op='head' (first N lines), op='tail' (last N lines), op='slice' (lines fromLine..toLine), op='grep' (regex search with optional context lines). " +
-          "For op='read', set maxBytes (e.g. 50000) to avoid overflowing context on large files; content is truncated with a notice if exceeded. " +
-          "Do NOT use a downstream tool (e.g. filesystemQuery) to read spilled result files — that will also trigger auto-spill and create an infinite loop. " +
-          "Chain pattern: pass a 'resultFile' path from one call directly as 'argumentsFile' to the next. " +
-          "When a result is written to file, the response includes size, top-level key names, and a 300-char preview — no extra read needed to decide what to extract."
-        )
-      }
+        ? "Results over " + spillThreshold + " bytes (~" + Math.ceil(spillThreshold / 4) + " tok) auto-spill to a temp file." + (spillToon ? " (TOON format)" : "")
+        : "Set mcpproxythreshold=<bytes> to enable auto-spill, or pass resultToFile=true manually."
+      var spillReadTool = toBoolean(args.usestdutils) === true
+        ? "the result_* tools (result_stat first, then result_read/result_head/result_tail/result_slice/result_grep)"
+        : "action='readresult' with op='stat' first, then op='read'/'head'/'tail'/'slice'/'grep'"
       baseRules.push(
-        "Prefer file handoff when payloads are large and files are accessible via useutils=true (recommended) or useshell=true readwrite=true. " +
-        "For small payloads (<10KB), inline is simpler. " +
-        "The 'estimatedTokens' field in inline results shows approximate token cost — use it to decide proactively whether to use 'resultToFile=true' next time."
+        "For large MCP payloads: pass 'argumentsFile' to load arguments from disk, 'resultToFile=true' or 'resultSizeThreshold' to spill results to a temp file. " +
+        spillNote + " ~4 chars = 1 token. " +
+        "To read a spilled 'resultFile', use " + spillReadTool + " — never filesystem read/grep tools (that re-triggers spill and loops). " +
+        "Chain a 'resultFile' path directly as the next call's 'argumentsFile'. Prefer file handoff for payloads >10KB; use the inline 'estimatedTokens' field to decide."
       )
     }
     if (args.useshell === true && this._useTools === true) {
@@ -15090,6 +15094,15 @@ MiniA.prototype.init = function(args) {
         agentDirectiveLine += " " + this._agentDirectiveNoInteractionRemark
       }
 
+      var planningExecutionPhase = this._enablePlanning && this._planningPhase === "execution"
+      var normalizedPromptProfile = this._normalizePromptProfile(promptProfile)
+      // Full plan-schema guidance matters most while the plan is first being generated
+      // (planningExecutionPhase===false); once execution is underway the shape is already
+      // established and terse status/progress reminders suffice for balanced.
+      var includePlanningDetails = normalizedPromptProfile === "verbose" ? true
+        : normalizedPromptProfile === "minimal" ? false
+        : planningExecutionPhase !== true
+
       var agentPayload = {
         agentPersonaLine: agentPersonaLine,
         agentDirectiveLine: agentDirectiveLine,
@@ -15111,8 +15124,8 @@ MiniA.prototype.init = function(args) {
         proxyToolCount   : proxyToolCount,
         proxyToolsList   : proxyToolsList,
         planning         : this._enablePlanning,
-        includePlanningDetails: true,
-        planningExecution: this._enablePlanning && this._planningPhase === "execution",
+        includePlanningDetails: includePlanningDetails,
+        planningExecution: planningExecutionPhase,
         // Simple plan style variables
         simplePlanStyle  : simplePlanStyle,
         currentStepContext: stepContext ? stepContext.currentStepContext : false,
@@ -15911,7 +15924,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         runtime.lastDedupContextLength = beforeLength
         if (dedupedAtCadence.length < beforeLength) {
           runtime.context = dedupedAtCadence
-          this.fnI("compress", `Removed ${beforeLength - dedupedAtCadence.length} redundant context entries`)
+          this.fnI("compress", `compress Removed ${beforeLength - dedupedAtCadence.length} redundant context entries`)
           markContextDirty()
           contextTokens = getCachedContextTokens()
         }

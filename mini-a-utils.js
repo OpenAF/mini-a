@@ -4169,7 +4169,7 @@ MiniUtilsTool._metadataByFn = (function() {
         properties: {
           operation    : {
             type       : "string",
-            description: "Operation type: list/search/read/render/invoke (aliases: get/view/cat, use/expand/apply, run).",
+            description: "Operation to perform (see enum for canonical and alias values).",
             enum       : skillOps,
             default    : "list"
           },
@@ -4314,7 +4314,7 @@ MiniUtilsTool._metadataByFn = (function() {
         properties: {
           operation: {
             type       : "string",
-            description: "Operation: list, tree, browse, read, search, backlinks, write, move, delete, lint, init (aliases: get/view/cat for read; find for search; refs/references for backlinks; validate/check for lint; save/put/create/update for write; mv/rename for move; remove/rm for delete).",
+            description: "Operation to perform (see enum for canonical and alias values).",
             enum       : ["list", "tree", "browse", "read", "search", "backlinks", "write", "move", "delete", "lint", "init", "get", "view", "cat", "find", "refs", "references", "validate", "check", "save", "put", "create", "update", "mv", "rename", "remove", "rm"],
             default    : "list"
           },
