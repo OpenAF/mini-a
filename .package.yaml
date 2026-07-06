@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260625'
+version: '20260706'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -156,13 +156,13 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 0ff48393f3d140ed8d22c8fa0dddb1b5397aa217
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: a8e4d0c4320616cb10a94fdb279646533fb7b9ff
+  CHEATSHEET.md: eaab3b4e6530832797b33dc8c9ae03e3d186d40e
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: db9b007b919a4c98588b58579be5d209c6f29495
-  README.md: a09024277d7cc03eeeca64577c31da277808e169
-  USAGE.md: 6b47dfe1fe67d83484629a5f70bb66f2ad5fbcdf
+  README.md: f0865b660a45f46143f644393bdf57fe78f1f6a5
+  USAGE.md: a0d72d91d6fa334be7f13d0fe35e3c82cca5b195
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
   docs/DELEGATION.md: 2c1d7e77905f72fff500961275cd7ed7f7d7e0e7
@@ -236,12 +236,12 @@ filesHash:
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
   mini-a-subtask.js: f275ba98c91a6a3e727cdb2c44b634b9128dee81
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
-  mini-a-utils.js: cc58e9707da62f0b0ecf2c47da646ddc5ff92023
+  mini-a-utils.js: 5879ea134af0b817874533bac62924a248507610
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: e1ded35cb51ccb992a91386ebee361ddce4e658b
   mini-a-wiki.js: 3606620dc62a1e5dcb9dccd60d206979328b0831
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: ded304b6b4762a7f1dbb24e8fbf760014b19939b
+  mini-a.js: 62e141ec682c27355dadb8ed8c3a666a6b5feca9
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: 852ba4886656fc3d1050398183ef9ab915cdf4ed
   public/index.md: 9b9bf9231db87c0a1f15d9011caeafc4cfcb08bd
