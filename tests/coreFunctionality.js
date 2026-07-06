@@ -1229,6 +1229,105 @@
     ow.test.assert(verbose.meta.finalTokens > budgeted.meta.finalTokens, true, "Budgeted prompt should be smaller than verbose prompt")
   }
 
+  exports.testMcpToolAccessHowToGatedByExamples = function() {
+    var agent = createAgent()
+
+    var balanced = renderAgentPrompt(agent, {
+      promptProfile: "balanced",
+      includeExamples: false,
+      useMcpProxy: true,
+      usetools: true,
+      usetoolsActual: true,
+      proxyToolCount: 3,
+      proxyToolsList: "find-rss-url"
+    }, {})
+    ow.test.assert(balanced.prompt.indexOf("## MCP TOOL ACCESS (PROXY-DISPATCH FUNCTION CALLING)") >= 0, true, "Balanced prompt should keep the MCP access mechanism bullets")
+    ow.test.assert(balanced.prompt.indexOf("### How to call MCP tools:") < 0, true, "Balanced prompt should omit the MCP how-to walkthrough")
+    ow.test.assert(balanced.prompt.indexOf("### Example MCP tool call:") < 0, true, "Balanced prompt should omit the MCP example call")
+    ow.test.assert(balanced.prompt.indexOf("call proxy-dispatch with {\"action\":\"list\"") >= 0, true, "Balanced prompt should keep the list-tools hint")
+
+    var verbose = renderAgentPrompt(agent, {
+      promptProfile: "verbose",
+      includeExamples: true,
+      useMcpProxy: true,
+      usetools: true,
+      usetoolsActual: true,
+      proxyToolCount: 3,
+      proxyToolsList: "find-rss-url"
+    }, {})
+    ow.test.assert(verbose.prompt.indexOf("### How to call MCP tools:") >= 0, true, "Verbose prompt should include the MCP how-to walkthrough")
+    ow.test.assert(verbose.prompt.indexOf("### Example MCP tool call:") >= 0, true, "Verbose prompt should include the MCP example call")
+
+    ow.test.assert(verbose.prompt.length > balanced.prompt.length, true, "Verbose MCP access section should render larger than balanced")
+  }
+
+  exports.testPlanningDetailsFullDuringGenerationTerseDuringExecution = function() {
+    var agent = createAgent()
+
+    // While a plan is first being generated (not yet executing), balanced should get the
+    // full state.plan schema guidance so the model constructs a well-formed plan object.
+    var generating = renderAgentPrompt(agent, {
+      promptProfile: "balanced",
+      planning: true,
+      planningExecution: false,
+      includePlanningDetails: true
+    }, {})
+    ow.test.assert(generating.prompt.indexOf("Maintain 'state.plan' as an object with at least") >= 0, true, "Balanced prompt during plan generation should include the full plan schema")
+
+    // Once execution is underway, the shape is already established; balanced should fall
+    // back to terse status/progress reminders instead of repeating the full schema.
+    var executing = renderAgentPrompt(agent, {
+      promptProfile: "balanced",
+      planning: true,
+      planningExecution: true,
+      includePlanningDetails: false
+    }, {})
+    ow.test.assert(executing.prompt.indexOf("Maintain 'state.plan' as an object with at least") < 0, true, "Balanced prompt during execution should omit the full plan schema")
+    ow.test.assert(executing.prompt.indexOf("Execute the current plan step and keep status/progress aligned with reality.") >= 0, true, "Balanced prompt during execution should keep the terse execution reminder")
+  }
+
+  exports.testSlimToolMetaForProfileTrimsDescriptionsByProfile = function() {
+    var agent = createAgent()
+    var meta = {
+      name: "sampleTool",
+      description: "First sentence. Second sentence. Third sentence.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          requiredParam: { type: "string", description: "Required param first sentence. Extra detail." },
+          optionalParam: { type: "string", description: "Optional param first sentence. Extra detail." }
+        },
+        required: ["requiredParam"]
+      }
+    }
+
+    var verboseMeta = agent._slimToolMetaForProfile(meta, "verbose")
+    ow.test.assert(verboseMeta === meta, true, "Verbose profile should return the metadata untouched")
+
+    var balancedMeta = agent._slimToolMetaForProfile(meta, "balanced")
+    ow.test.assert(balancedMeta !== meta, true, "Balanced profile should return a clone, not the original")
+    ow.test.assert(balancedMeta.description, "First sentence. Second sentence.", "Balanced profile should keep the tool description to its first two sentences")
+    ow.test.assert(balancedMeta.inputSchema.properties.optionalParam.description, "Optional param first sentence.", "Balanced profile should keep a one-sentence description for optional params")
+    ow.test.assert(meta.description, "First sentence. Second sentence. Third sentence.", "Slimming must not mutate the original metadata object")
+
+    var minimalMeta = agent._slimToolMetaForProfile(meta, "minimal")
+    ow.test.assert(minimalMeta.description, "First sentence.", "Minimal profile should keep only the first sentence of the tool description")
+    ow.test.assert(isUnDef(minimalMeta.inputSchema.properties.optionalParam.description), true, "Minimal profile should drop descriptions for optional params")
+    ow.test.assert(minimalMeta.inputSchema.properties.requiredParam.description, "Required param first sentence.", "Minimal profile should still keep a one-sentence description for required params")
+  }
+
+  exports.testCreateUtilsMcpConfigShrinksSchemasForMinimalProfile = function() {
+    var agent = createAgent()
+
+    var verboseConfig = agent._createUtilsMcpConfig({ useutils: true, promptprofile: "verbose" })
+    var minimalConfig = agent._createUtilsMcpConfig({ useutils: true, promptprofile: "minimal" })
+    ow.test.assert(isMap(verboseConfig) && isMap(minimalConfig), true, "Should build utils MCP config for both profiles")
+
+    var verboseSize = stringify(verboseConfig.options.fnsMeta, __, "").length
+    var minimalSize = stringify(minimalConfig.options.fnsMeta, __, "").length
+    ow.test.assert(minimalSize < verboseSize, true, "Minimal profile utils tool schemas should serialize smaller than verbose")
+  }
+
   exports.testUtilsMcpSkillsToggle = function() {
     var agent = createAgent()
 
@@ -1432,6 +1531,33 @@
     } finally {
       try { io.rm(tempPath) } catch(ignoreCleanupErr) {}
     }
+  }
+
+  exports.testProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+
+    // Without usestdutils, proxy-dispatch is the only way to read spilled result files,
+    // so its schema must document the readresult op parameters.
+    var cfgOff = agent._createMcpProxyConfig([utilsConfig], { usestdutils: false })
+    var schemaOff = cfgOff.options.fnsMeta["proxy-dispatch"].inputSchema
+    ow.test.assert(isDef(schemaOff.properties.op), true, "proxy-dispatch schema should document 'op' when result_* aliases are not registered")
+    ow.test.assert(schemaOff.properties.action.description.indexOf("readresult") >= 0, true, "proxy-dispatch action description should mention readresult when result_* aliases are not registered")
+
+    // With usestdutils, the result_* alias tools own those parameters; proxy-dispatch's
+    // schema should not restate them (avoids describing the same operation twice).
+    var cfgOn = agent._createMcpProxyConfig([utilsConfig], { usestdutils: true })
+    var schemaOn = cfgOn.options.fnsMeta["proxy-dispatch"].inputSchema
+    ow.test.assert(isUnDef(schemaOn.properties.op), true, "proxy-dispatch schema should omit 'op' when result_* aliases are registered")
+    ow.test.assert(isUnDef(schemaOn.properties.resultFile), true, "proxy-dispatch schema should omit 'resultFile' when result_* aliases are registered")
+    ow.test.assert(schemaOn.properties.action.description.indexOf("readresult") < 0, true, "proxy-dispatch action description should not mention readresult when result_* aliases are registered")
+
+    // The readresult action itself must still work even when unadvertised, since some
+    // models may still discover it via the (unchanged) error-message hints.
+    var stillWorks = cfgOn.options.fns["proxy-dispatch"]({ action: "readresult", resultFile: "/nonexistent/path" })
+    ow.test.assert(isMap(stillWorks), true, "readresult action should still be callable even when not advertised in the schema")
   }
 
   exports.testResultAliasToolsBypassInlineLimitGuard = function() {

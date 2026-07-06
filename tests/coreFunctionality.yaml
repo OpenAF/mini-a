@@ -267,6 +267,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testPromptSnapshotBudgetedPromptDropsSections
 
+- name: MiniA Core Tests::McpToolAccessHowToGatedByExamples
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMcpToolAccessHowToGatedByExamples
+
+- name: MiniA Core Tests::PlanningDetailsFullDuringGenerationTerseDuringExecution
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPlanningDetailsFullDuringGenerationTerseDuringExecution
+
+- name: MiniA Core Tests::SlimToolMetaForProfileTrimsDescriptionsByProfile
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSlimToolMetaForProfileTrimsDescriptionsByProfile
+
+- name: MiniA Core Tests::CreateUtilsMcpConfigShrinksSchemasForMinimalProfile
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCreateUtilsMcpConfigShrinksSchemasForMinimalProfile
+
 - name: MiniA Core Tests::UtilsMcpSkillsToggle
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -577,6 +597,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testResultAliasToolsExposedWithStdutils
 
+- name: MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
+
 - name: MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -643,6 +668,10 @@ todo:
 - MiniA Core Tests::PromptSnapshotChatbotExplicitBalancedToolDetails
 - MiniA Core Tests::PromptSnapshotPlanningExecution
 - MiniA Core Tests::PromptSnapshotBudgetedPrompt
+- MiniA Core Tests::McpToolAccessHowToGatedByExamples
+- MiniA Core Tests::PlanningDetailsFullDuringGenerationTerseDuringExecution
+- MiniA Core Tests::SlimToolMetaForProfileTrimsDescriptionsByProfile
+- MiniA Core Tests::CreateUtilsMcpConfigShrinksSchemasForMinimalProfile
 - MiniA Core Tests::UtilsMcpSkillsToggle
 - MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle
 - MiniA Core Tests::UtilsMcpSkillsLogsSourceFiles
@@ -705,4 +734,5 @@ todo:
 - MiniA Core Tests::ContextGuardBudgetHelpers
 - MiniA Core Tests::ProxyDispatchReadresultHonorsContextGuardLimits
 - MiniA Core Tests::ResultAliasToolsExposedWithStdutils
+- MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
 - MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard

@@ -16,6 +16,7 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 - [Visual & Output](#visual--output)
 - [Knowledge & Context](#knowledge--context)
 - [Working Memory](#working-memory)
+- [Dreams (Sleep Pass)](#dreams-sleep-pass)
 - [Wiki Knowledge Base](#wiki-knowledge-base)
 - [Choosing Knowledge Features](#choosing-knowledge-features)
 - [Mode Presets](#mode-presets)
@@ -1193,6 +1194,34 @@ mini-a dream=true \
   usewiki=true wikiroot=/shared/wiki \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 ```
+
+### Programmatic API (embedding use)
+
+`mini-a-dreams.js` exposes a `MiniADreams` class. Load it as a library (set `global.__mini_a_dreams_lib_mode = true` first to suppress the standalone CLI entry point that would otherwise run immediately on load):
+
+```javascript
+global.__mini_a_dreams_lib_mode = true
+loadLib("mini-a-dreams.js")
+
+var dreamer = new MiniADreams({
+  memorych: "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-memory.json'))",
+  auditch: "(name: mini_a_audit, type: file, options: (file: '/tmp/mini-a-audit.log'))",
+  usewiki: true,
+  wikiroot: "/shared/wiki",
+  model: "(type: anthropic, model: claude-sonnet-4-6)",
+  dryrun: false
+}, log)
+
+// Run whichever passes are configured (memory when memorych is set, wiki when usewiki=true)
+var result = dreamer.run()
+// => { ok: true, memory: {...}, wiki: {...} }
+
+// Or call a single pass directly
+var memResult  = dreamer.dreamMemory()   // { ok, reason? } — merges/compacts the memory channel(s)
+var wikiResult = dreamer.dreamWiki()     // { ok, reason? } — runs the wiki consolidation agent
+```
+
+`run()` picks passes based on `memorych` (memory dream) and `usewiki=true` (wiki dream), or use `dreammode="memory"|"wiki"|"both"` to force a selection. Pass a `dreamreport` path in the constructor args to also write the combined result as JSON.
 
 ---
 
