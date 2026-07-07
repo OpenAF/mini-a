@@ -5967,7 +5967,24 @@ try {
         }
       }
 
-      var runner = new MiniADreams(dreamArgs, function(msg) { print(colorifyText(msg, hintColor)) })
+      var dreamLogFn = function(msg) {
+        if (isMap(msg) && msg.type === "dream-model-output") {
+          var modelText = isString(msg.text) ? msg.text : String(msg.text || "")
+          if (modelText.length === 0) return
+          if (msg.event === "stream" || msg.event === "planner_stream") {
+            _renderStreamChunk(modelText)
+          } else {
+            _flushStreamTableBuffer()
+            _flushStreamCodeBlockBuffer()
+            _flushStreamTableHeaderCandidate()
+            _printStreamMarkdown(modelText)
+          }
+          return
+        }
+        print(colorifyText(msg, hintColor))
+      }
+      dreamLogFn.markdownModelOutput = true
+      var runner = new MiniADreams(dreamArgs, dreamLogFn)
       if ((mode === "" || mode === "memory") && hasMemory) runner.dreamMemory()
       if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "lint" || mode === "apply" || mode === "reorg") && hasWiki) runner.dreamWiki()
     } catch(dreamErr) {

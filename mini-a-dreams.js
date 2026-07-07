@@ -652,13 +652,36 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       wmCheck.read("AGENTS.md")
     }
     var agent = new MiniA()
+    var emittedModelStream = false
     agent.setInteractionFn(function(event, message) {
+      if (self._logFn && self._logFn.markdownModelOutput === true && (event === "stream" || event === "planner_stream")) {
+        emittedModelStream = true
+        try {
+          self._logFn({
+            type: "dream-model-output",
+            scope: "wiki",
+            event: event,
+            text: isString(message) ? message : String(message || "")
+          })
+        } catch(ignoreDreamModelOutputLog) {}
+        return
+      }
       agent.defaultInteractionFn(event, message, function(icon, text) {
         self._log("[dreams:wiki] " + (icon ? icon + " " : "") + text)
       })
     })
     agent.init(dreamArgs)
     var result = agent.start(dreamArgs)
+    if (self._logFn && self._logFn.markdownModelOutput === true && emittedModelStream !== true) {
+      try {
+        self._logFn({
+          type: "dream-model-output",
+          scope: "wiki",
+          event: "answer",
+          text: isString(result) ? result : String(result || "")
+        })
+      } catch(ignoreDreamModelAnswerLog) {}
+    }
     self._log("💤 [dreams] Wiki dream complete.")
     var out = merge(defaultResult, {
       ok: true,
