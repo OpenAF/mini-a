@@ -474,6 +474,25 @@ MiniAWikiManager.prototype._closeLucene = function(chName) {
   if (name === this._luceneChannel) this._luceneChannel = ""
 }
 
+MiniAWikiManager.prototype._isLuceneIndexCompatibilityError = function(e) {
+  var msg = __miniAErrMsg(e).toLowerCase()
+  return msg.indexOf("indexformattoooldexception") >= 0 ||
+    msg.indexOf("format version is not supported") >= 0 ||
+    msg.indexOf("could not load codec") >= 0 ||
+    msg.indexOf("lucene-backward-codecs.jar") >= 0
+}
+
+MiniAWikiManager.prototype._handleLuceneIncrementalFailure = function(op, e) {
+  this._luceneNeedsRebuild = true
+  var msg = __miniAErrMsg(e)
+  if (this._isLuceneIndexCompatibilityError(e)) {
+    this._logFn("warn", "Failed incremental Lucene " + op + " due to incompatible index; rebuilding Lucene index: " + msg)
+    this._rebuildSearchIndex({ resetLucene: true })
+  } else {
+    this._logFn("warn", "Failed incremental Lucene " + op + ": " + msg)
+  }
+}
+
 MiniAWikiManager.prototype._luceneSet = function(path, raw, title) {
   if (!this._ensureLucene()) return
   this._ensureIndexRuntime()
@@ -484,8 +503,7 @@ MiniAWikiManager.prototype._luceneSet = function(path, raw, title) {
     if (chName !== this._luceneChannel) this._closeLucene(chName)
     this._stats.luceneSets++
   } catch(e) {
-    this._luceneNeedsRebuild = true
-    this._logFn("warn", "Failed incremental Lucene update: " + __miniAErrMsg(e))
+    this._handleLuceneIncrementalFailure("update", e)
   }
 }
 
@@ -499,8 +517,7 @@ MiniAWikiManager.prototype._luceneUnset = function(path) {
     if (chName !== this._luceneChannel) this._closeLucene(chName)
     this._stats.luceneUnsets++
   } catch(e) {
-    this._luceneNeedsRebuild = true
-    this._logFn("warn", "Failed incremental Lucene delete: " + __miniAErrMsg(e))
+    this._handleLuceneIncrementalFailure("delete", e)
   }
 }
 
@@ -536,9 +553,10 @@ MiniAWikiManager.prototype._mountGraph = function(mount) {
   }
 }
 
-MiniAWikiManager.prototype._rebuildSearchIndex = function() {
+MiniAWikiManager.prototype._rebuildSearchIndex = function(options) {
   if (this._access !== 'rw') return
   try {
+    var opts = isObject(options) ? options : {}
     var self = this
     var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
     var docs = []
@@ -549,7 +567,7 @@ MiniAWikiManager.prototype._rebuildSearchIndex = function() {
       docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
       this._metaUpdate(pages[i], raw, parsed)
     }
-    this._rebuildLuceneIndex(docs)
+    this._rebuildLuceneIndex(docs, opts)
   } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
 }
 
@@ -602,13 +620,17 @@ MiniAWikiManager.prototype._ensureLucene = function() {
   }
 }
 
-MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs) {
+MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
   if (!this._ensureLucene()) return
   try {
+    var opts = isObject(options) ? options : {}
     this._ensureIndexRuntime()
     var idxPath = this._getLuceneIndexPath()
     var chName = this._luceneChName()
     this._closeLucene(chName)
+    if (opts.resetLucene === true) {
+      try { if (io.fileExists(idxPath)) io.rm(idxPath) } catch(ignoreRm) {}
+    }
     try {
       $ch(chName).create("searchdb", { path: idxPath, idField: "id", contentField: "content" })
       ;(isArray(docs) ? docs : []).forEach(function(d) {

@@ -653,6 +653,37 @@
     }
   }
 
+  exports.testLuceneCompatibilityErrorDetection = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var msg = "org.apache.lucene.index.IndexFormatTooOldException: Format version is not supported. Could not load codec 'Lucene103'. Did you forget to add lucene-backward-codecs.jar?"
+    ow.test.assert(wm._isLuceneIndexCompatibilityError(msg), true, "Lucene codec/index format errors should trigger compatibility recovery")
+    ow.test.assert(wm._isLuceneIndexCompatibilityError("LockObtainFailedException: lock held"), false, "Lucene lock errors should keep the normal fallback path")
+  }
+
+  exports.testLuceneIncrementalCompatibilityFailureTriggersResetRebuild = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: ".", access: "rw" })
+    var rebuildOptions
+    var warnings = []
+    wm._rebuildSearchIndex = function(options) { rebuildOptions = options }
+    wm._logFn = function(level, msg) { if (level === "warn") warnings.push(msg) }
+    wm._handleLuceneIncrementalFailure("update", "Could not load codec 'Lucene103'. The current classpath supports [Lucene104].")
+    ow.test.assert(wm._luceneNeedsRebuild, true, "incremental compatibility failure should mark Lucene for rebuild")
+    ow.test.assert(isObject(rebuildOptions) && rebuildOptions.resetLucene === true, true, "compatibility failure should request a Lucene index reset")
+    ow.test.assert(warnings[0].indexOf("incompatible index") >= 0, true, "warning should explain the reset recovery")
+  }
+
+  exports.testLuceneIncrementalGenericFailureDoesNotReset = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: ".", access: "rw" })
+    var rebuildCalled = false
+    var warnings = []
+    wm._rebuildSearchIndex = function() { rebuildCalled = true }
+    wm._logFn = function(level, msg) { if (level === "warn") warnings.push(msg) }
+    wm._handleLuceneIncrementalFailure("delete", "LockObtainFailedException: lock held")
+    ow.test.assert(wm._luceneNeedsRebuild, true, "generic incremental failure should still mark Lucene for rebuild")
+    ow.test.assert(rebuildCalled, false, "generic incremental failures should not reset the Lucene index immediately")
+    ow.test.assert(warnings[0].indexOf("Failed incremental Lucene delete:") === 0, true, "generic warning should keep the original wording")
+  }
+
   // ── Serialise round-trip ──────────────────────────────────────────────────────
 
   exports.testWriteReadRoundTrip = function() {
