@@ -72,6 +72,10 @@ help:
     desc     : SSE queue timeout in seconds before stale stream state is purged
     example  : "120"
     mandatory: false
+  - name     : webtoken
+    desc     : "Shared secret required (as an x-mini-a-token header, or ?token= for the SSE stream) on state-mutating routes. Unset (default) leaves the server open to anyone who can reach the port — with useshell=true that is remote code execution, so set this or restrict network access when exposing the server beyond localhost."
+    example  : "a-long-random-secret"
+    mandatory: false
   - name     : useattach
     desc     : "Boolean to enable/disable file attachments (default: false)"
     example  : "true"
@@ -139,6 +143,10 @@ help:
   - name     : maxsteps
     desc     : Maximum consecutive non-success steps
     example  : "50"
+    mandatory: false
+  - name     : maxtotalsteps
+    desc     : Hard ceiling on total steps regardless of progress (0=disabled); forces a final answer the same way maxsteps does
+    example  : "40"
     mandatory: false
   - name     : earlystopthreshold
     desc     : Consecutive identical errors before early stop
@@ -916,6 +924,9 @@ todo:
   ((uri          )): /info
   ((execURI      )): | #js
     try {
+      if (!global._mini_a_web_checkToken(request)) {
+        return ow.server.httpd.reply({ error: "unauthorized" })
+      }
       var _res = { status: "ok", usehistory: global.__usehistory, useattach: global.__useattach, historyretention: args.historyretention, showexecs: global.__showexecs, usestream: global.__usestream, showthinking: global.__showthinking, usemath: global.__usemath }
       return ow.server.httpd.reply(_res)
     } catch(e) {
@@ -928,7 +939,14 @@ todo:
   ((uri          )): /clear
   ((execURI      )): | #js
     try {
+      if (!global._mini_a_web_checkToken(request)) {
+        return ow.server.httpd.reply({ error: "unauthorized" })
+      }
       var postData = jsonParse(request.files.postData)
+      if (isDef(postData.uuid) && !global._mini_a_web_isValidUuid(postData.uuid)) {
+        return ow.server.httpd.reply({ error: "invalid uuid" })
+      }
+      if (isDef(postData.uuid)) delete global.__busy[postData.uuid]
       // postData.force - to be used from the history pane to delete a specific session
       // __useHistory - if no history is being used, always clear
       if (!global.__usehistory || postData.force) {
@@ -976,6 +994,9 @@ todo:
   ((execURI      )): | #js
     var _res = { error: "check server logs" }
     try {
+      if (!global._mini_a_web_checkToken(request)) {
+        return ow.server.httpd.reply({ error: "unauthorized" })
+      }
       function __normalizePromptInput(value) {
         var text = isString(value) ? value : (isDef(value) ? String(value) : "")
         text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
@@ -992,11 +1013,18 @@ todo:
       postData.prompt = __normalizePromptInput(postData.prompt)
       // Validate UUID or generate a new one
       if (isDef(postData.uuid)) {
+        if (!global._mini_a_web_isValidUuid(postData.uuid)) {
+          return ow.server.httpd.reply({ error: "invalid uuid" })
+        }
         _res.uuid = postData.uuid
       } else {
         _res.uuid = genUUID()
       }
-      
+
+      if (global.__busy[_res.uuid] === true) {
+        return ow.server.httpd.reply({ error: "session busy", uuid: _res.uuid, busy: true })
+      }
+
       // Initialize response storage
       if (isUnDef(global.__res[_res.uuid])) {
         global.__res[ _res.uuid ] = [ ]
@@ -1017,6 +1045,7 @@ todo:
       // Start Mini-A interaction in a non-blocking way
       $doV(() => {
         var uuid = _res.uuid, lma, isNewConversation = false
+        global.__busy[uuid] = true
         if (global.__usestream && isFunction(global._mini_a_web_initSSE)) {
           global._mini_a_web_initSSE(uuid)
         }
@@ -1079,7 +1108,6 @@ todo:
               case "input"    : _e = "➡️"; break
               case "output"   : _e = "⬅️"; break
               case "thought"  : _e = "💭"; break
-              case "think"    : _e = "💡"; break
               case "size"     : _e = "📏"; break
               case "rate"     : _e = "⏳"; break
               case "mcp"      : _e = "🤖"; break
@@ -1090,10 +1118,8 @@ todo:
               case "info"     : _e = "ℹ️"; break
               case "skill"    : _e = "🧩"; break
               case "load"     : _e = "📂"; break
-              case "mcp"      : _e = "🤖"; break
               case "warn"     : _e = "⚠️"; break
               case "stop"     : _e = "🛑"; break
-              case "error"    : _e = "❗"; break
               case "summarize": _e = "🌀"; break
               default         : _e = e
               }
@@ -1229,8 +1255,12 @@ todo:
               log("[" + uuid + "] " + _e + " " + m)
             } catch(eee) {
               $err(eee)
-              logWarn(`[${uuid}] Plan closed`)
-              delete global.__planState[uuid]
+              logErr(`[${uuid}] interaction handler error: ` + __miniAErrMsg(eee))
+              try {
+                if (isDef(global.__res[uuid])) {
+                  global.__res[uuid].push({ event: "❗", message: String(__miniAErrMsg(eee)) })
+                }
+              } catch(ignorePushErr) {}
             }
           })
           lma.init(merge(global.maArgs, {
@@ -1304,9 +1334,24 @@ todo:
           }
         }
         log("[" + uuid + "] " + (isObject(_rma) ? af.toSLON(_rma) : _rma))
+        delete global.__busy[uuid]
       }).catch((eee) => {
         logErr(eee)
         $err(eee)
+        var _failedUuid = _res.uuid
+        if (isDef(_failedUuid)) {
+          if (isUnDef(global.__res[_failedUuid])) global.__res[_failedUuid] = []
+          global.__res[_failedUuid].push({ event: "❗", message: "Agent failed: " + __miniAErrMsg(eee) })
+          if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+            global._mini_a_web_ssePush(_failedUuid, "interaction", { event: "error" })
+          }
+          if (global.__usestream && isFunction(global._mini_a_web_sseClose)) {
+            global._mini_a_web_sseClose(_failedUuid, "error")
+          }
+          // Discard the broken MiniA instance so a retry creates a fresh one instead of reusing a failed-init agent
+          delete global.__conversations[_failedUuid]
+          delete global.__busy[_failedUuid]
+        }
       })
     } catch(ee) {
       logErr(ee)
@@ -1320,10 +1365,23 @@ todo:
   ((uri          )): /result
   ((execURI      )): | #js
     try {
+      if (!global._mini_a_web_checkToken(request)) {
+        return ow.server.httpd.reply({ error: "unauthorized" })
+      }
       var postData = jsonParse(request.files.postData)
+      if (isDef(postData.uuid) && !global._mini_a_web_isValidUuid(postData.uuid)) {
+        return ow.server.httpd.reply({ error: "invalid uuid" })
+      }
 
       if (isDef(postData.request) && postData.request == "stop") {
-        global.__conversations[ postData.uuid ].state = "stop"
+        var _stopConv = global.__conversations[ postData.uuid ]
+        if (isDef(_stopConv)) {
+          if (isFunction(_stopConv.requestStop)) {
+            _stopConv.requestStop("Stop requested via web UI", { quiet: true })
+          } else {
+            _stopConv.state = "stop"
+          }
+        }
       }
       var _res = { content: "", status: "processing", history: [] }
       var __attachmentLangMap = {
@@ -1412,7 +1470,7 @@ todo:
               if (r.event == "👤") {
                 _res.content += "<div style=\"text-align: right;\"><i><div style=\"display: inline-block; text-align: left;\">" + __formatUserMessage(r.message) + "</div> " + r.event + "</i>\n<br><br></div>"
               } else {
-                _res.content += r.event + " <i><span style=\"color: var(--text); opacity: 0.60;\">" + r.message.replace(/\n/g, "<br>") + "</span></i>\n"
+                _res.content += r.event + " <i><span style=\"color: var(--text); opacity: 0.60;\">" + __escapeHtml(r.message).replace(/\n/g, "<br>") + "</span></i>\n"
               }
             }
           }
@@ -1463,9 +1521,17 @@ todo:
   ((execSSE      )): | #js
     var uuid = __
     try {
+      if (!global._mini_a_web_checkToken(request)) {
+        writer.write("error", { message: "unauthorized" })
+        return
+      }
       uuid = isDef(request.params) ? request.params.uuid : __
       if (isUnDef(uuid) || String(uuid).length == 0) {
         writer.write("error", { message: "uuid is required" })
+        return
+      }
+      if (!global._mini_a_web_isValidUuid(uuid)) {
+        writer.write("error", { message: "invalid uuid" })
         return
       }
       if (isUnDef(global.__sseQueues[uuid])) {
@@ -1556,10 +1622,17 @@ todo:
   ((uri          )): /load-history
   ((execURI      )): | #js
     try {
+      if (!global._mini_a_web_checkToken(request)) {
+        return ow.server.httpd.reply({ error: "unauthorized" })
+      }
       var postData = jsonParse(request.files.postData)
 
       if (isUnDef(postData.uuid)) {
         return ow.server.httpd.reply({ error: "uuid is required" })
+      }
+
+      if (!global._mini_a_web_isValidUuid(postData.uuid)) {
+        return ow.server.httpd.reply({ error: "invalid uuid" })
       }
 
       if (isUnDef(postData.history) || !Array.isArray(postData.history)) {
@@ -1660,6 +1733,7 @@ jobs:
       rpm             : toNumber().isNumber().default(__)
       tpm             : toNumber().isNumber().default(__)
       maxsteps        : toNumber().isNumber().default(__)
+      maxtotalsteps   : toNumber().isNumber().default(__)
       earlystopthreshold: toNumber().isNumber().default(__)
       maxcontext      : toNumber().isNumber().default(200000)
       contextguard    : toBoolean().isBoolean().default(false)
@@ -1851,6 +1925,7 @@ jobs:
       extraskills    : isString().default(__)
       extrahooks     : isString().default(__)
       ssequeuetimeout: toNumber().isNumber().default(120)
+      webtoken       : isString().default(__)
   exec : | #js
     if (isDef(args.usemermaid)) {
       if (isUnDef(args.usediagrams)) args.usediagrams = args.usemermaid
@@ -1890,6 +1965,19 @@ jobs:
     global.__planState = {}
     global.__subagentState = {}
     global.__sseQueues = {}
+    global.__busy = {}
+    global.__webtoken = (isString(args.webtoken) && args.webtoken.trim().length > 0) ? args.webtoken.trim() : __
+
+    global._mini_a_web_isValidUuid = (u) => isString(u) && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(u)
+
+    global._mini_a_web_checkToken = (request) => {
+      if (isUnDef(global.__webtoken)) return true
+      var _h = isMap(request) && isMap(request.header) ? request.header["x-mini-a-token"] : __
+      if (isString(_h) && _h === global.__webtoken) return true
+      // EventSource (used by /stream) cannot set custom headers, so also accept a query-param token there.
+      var _q = isMap(request) && isMap(request.params) ? request.params.token : __
+      return isString(_q) && _q === global.__webtoken
+    }
     if (isUnDef(global.__webMetrics)) {
       global.__webMetrics = { html_exports: $atomic(0, "long") }
       try {

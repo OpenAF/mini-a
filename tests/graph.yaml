@@ -74,3 +74,19 @@ jobs:
   from: MiniA Graph Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testGraphStructuralRebuildSkipsDanglingSemanticEdges
+
+todo:
+- MiniA Graph Tests::StructuralBuild
+- MiniA Graph Tests::QueryNeighbors
+- MiniA Graph Tests::RelatedAndExport
+- MiniA Graph Tests::SaveLoadRoundTrip
+- MiniA Graph Tests::ProvenanceEdgeValidation
+- MiniA Graph Tests::StaleNodePruning
+- MiniA Graph Tests::SharedTagRelated
+- MiniA Graph Tests::Communities
+- MiniA Graph Tests::SurpriseScores
+- MiniA Graph Tests::GraphMLExport
+- MiniA Graph Tests::ShrinkWarning
+- MiniA Graph Tests::SemanticInvalidation
+- MiniA Graph Tests::UpdatePreservesOtherIsolatedDocuments
+- MiniA Graph Tests::StructuralRebuildSkipsDanglingSemanticEdges

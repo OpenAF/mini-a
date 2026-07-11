@@ -837,7 +837,8 @@ The `start()` method accepts various configuration options:
 ### Optional Parameters
 
 #### Basic Configuration
-- **`maxsteps`** (number, default: 15): Maximum consecutive steps without a successful action before the agent forces a final answer
+- **`maxsteps`** (number, default: 15 via `mini-a.sh`/ojob, 50 when using the `MiniA` class programmatically): Maximum consecutive steps without a successful action before the agent forces a final answer
+- **`maxtotalsteps`** (number, default: 0/disabled): Hard ceiling on total steps regardless of progress. When reached, forces a final answer the same way `maxsteps` does — use this to bound goals that keep making "successful" progress but never call `final`.
 - **`earlystopthreshold`** (number, default: 3, auto-adjusts to 5 with low-cost models): Number of identical consecutive errors before the early stop guard activates. The system automatically increases this threshold when using low-cost models before escalation to give them more recovery opportunities. Set explicitly to override automatic behavior.
 - **`youare`** (string): Override the opening "You are ..." sentence in the agent prompt (inline text or an `@file` path); Mini-A always appends the default "Work step-by-step..." directive, and adds the "No user interaction..." remark for non-interactive surfaces (including `mini-a-web`, and `mini-a-con` unless the console-only `userInput` utils tool is available)
 - **`chatyouare`** (string): Override the opening chatbot persona sentence when `chatbotmode=true` (inline text or an `@file` path) without touching the rest of the conversational instructions

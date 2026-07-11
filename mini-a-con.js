@@ -687,6 +687,7 @@ try {
     rtm            : { type: "number", description: "Legacy alias for rpm (requests per minute)" },
     tpm            : { type: "number", description: "Tokens per minute limit" },
     maxsteps       : { type: "number", description: "Maximum consecutive non-success steps" },
+    maxtotalsteps  : { type: "number", description: "Hard ceiling on total steps regardless of progress (0=disabled)" },
     maxcontext     : { type: "number", description: "Maximum allowed context tokens" },
     compressgoal   : { type: "boolean", default: false, description: "Automatically compress oversized goal text before execution" },
     compressgoaltokens: { type: "number", default: 250, description: "Estimated token threshold before goal compression is considered" },
@@ -3640,7 +3641,7 @@ try {
       value = parsedBool
     } else if (def.type === "number") {
       var parsedNum = Number(value)
-      if (isUnDef(parsedNum)) {
+      if (isUnDef(parsedNum) || isNaN(parsedNum)) {
         printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to parse numeric value for " + key + ".", errorColor))
         return
       }
@@ -4657,6 +4658,14 @@ try {
               }
               printEvent("warn", "🛑", "Esc pressed. Requesting Mini-A to stop...")
               return true
+            } else if (!isNaN(followCode) && followCode > 0) {
+              // Not a lone ESC: this is an escape sequence (e.g. an arrow key, ESC [ A).
+              // Drain the remaining buffered bytes so the sequence's tail doesn't leak
+              // into the next poll as a stray character.
+              for (var _drainI = 0; _drainI < 8; _drainI++) {
+                var _drainRaw = con.readCharNB()
+                if (isUnDef(_drainRaw)) break
+              }
             }
           }
         }
@@ -6309,6 +6318,8 @@ try {
         try {
           // Store original args and set temporary args for model manager
           var originalGlobalArgs = clone(args)
+          var hadGlobalArgs = isDef(global._args)
+          var prevGlobalArgs = global._args
           global._args = merge(args, { __noprint: true })
 
           // Set up result capture mechanism
@@ -6326,6 +6337,8 @@ try {
           delete global.__mini_a_con_capture_model
           delete global.__mini_a_con_model_result
           args = originalGlobalArgs
+          if (hadGlobalArgs) global._args = prevGlobalArgs
+          else delete global._args
 
           if (isMap(selectedModel)) {
             sessionOptions[target] = af.toSLON(selectedModel)
@@ -6345,6 +6358,8 @@ try {
           delete global.__mini_a_con_capture_model
           delete global.__mini_a_con_model_result
           if (isDef(originalGlobalArgs)) args = originalGlobalArgs
+          if (hadGlobalArgs) global._args = prevGlobalArgs
+          else delete global._args
         }
         continue
       }

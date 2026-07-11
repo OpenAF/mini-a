@@ -27,6 +27,7 @@
       includeExamples: false,
       actionsWordNumber: "three",
       actionsList: "read_file | write_file",
+      actionFieldValues: "think | read_file | write_file | final (string or array for chaining)",
       useshell: false,
       markdown: true,
       rules: ["7. Custom rule"],
@@ -39,6 +40,13 @@
       usetools: false,
       usetoolsActual: false,
       useMcpProxy: false,
+      hasMcpAccess: false,
+      mcpAccessLabel: "ACTION-BASED",
+      mcpToolCountLine: "",
+      useMemorySearch: false,
+      useWiki: false,
+      useWikiGraph: false,
+      wikiRw: false,
       shellViaActionPreferred: false,
       toolCount: 2,
       proxyToolCount: 0,
@@ -189,6 +197,7 @@
 
     var runtime = { context: [] }
     agent._useToolsActual = true
+    agent._useToolsActualMain = true
     agent._fallbackFromToolCallingFailure(runtime, {
       stepLabel : 1,
       reason    : "low-cost tool error",
@@ -250,6 +259,8 @@
 
     var runtime = { context: [] }
     agent._useToolsActual = true
+    agent._useToolsActualMain = true
+    agent._llmNoTools = {}
     agent._fallbackFromMalformedToolCall(runtime, 3, "low-cost malformed tool call", {
       useLowCost: true
     })
@@ -268,6 +279,7 @@
 
     var runtime = { context: [] }
     agent._useToolsActual = true
+    agent._llmNoTools = {}
     agent._fallbackFromMalformedToolCall(runtime, 4, "main malformed tool call", {
       useLowCost: false
     })
@@ -286,6 +298,7 @@
     agent._restoreNoToolsModels = function() { restoreCalls++ }
     agent._useToolsActual = true
     agent._useToolsActualMain = false
+    agent._llmNoTools = {}
 
     var runtime = { context: [] }
     agent._fallbackFromMalformedToolCall(runtime, 4, "low-cost malformed tool call", {
@@ -1238,6 +1251,9 @@
       useMcpProxy: true,
       usetools: true,
       usetoolsActual: true,
+      hasMcpAccess: true,
+      mcpAccessLabel: "PROXY-DISPATCH FUNCTION CALLING",
+      mcpToolCountLine: "3 MCP tools are available through the 'proxy-dispatch' function",
       proxyToolCount: 3,
       proxyToolsList: "find-rss-url"
     }, {})
@@ -1252,6 +1268,9 @@
       useMcpProxy: true,
       usetools: true,
       usetoolsActual: true,
+      hasMcpAccess: true,
+      mcpAccessLabel: "PROXY-DISPATCH FUNCTION CALLING",
+      mcpToolCountLine: "3 MCP tools are available through the 'proxy-dispatch' function",
       proxyToolCount: 3,
       proxyToolsList: "find-rss-url"
     }, {})
@@ -1259,6 +1278,54 @@
     ow.test.assert(verbose.prompt.indexOf("### Example MCP tool call:") >= 0, true, "Verbose prompt should include the MCP example call")
 
     ow.test.assert(verbose.prompt.length > balanced.prompt.length, true, "Verbose MCP access section should render larger than balanced")
+  }
+
+  exports.testPromptSnapshotGraphAction = function() {
+    var agent = createAgent()
+
+    var withGraph = renderAgentPrompt(agent, {
+      useWikiGraph: true,
+      actionFieldValues: "think | wiki | graph | final (string or array for chaining)"
+    }, {})
+    ow.test.assert(withGraph.prompt.indexOf("\"action\": \"think | wiki | graph | final") >= 0, true, "Prompt schema action field should include graph when useWikiGraph is true")
+    ow.test.assert(withGraph.prompt.indexOf("\"graph\" - Query the wiki knowledge graph") >= 0, true, "ACTION USAGE should describe the graph action when useWikiGraph is true")
+
+    var withoutGraph = renderAgentPrompt(agent, {
+      useWikiGraph: false
+    }, {})
+    ow.test.assert(withoutGraph.prompt.indexOf("\"graph\" - Query the wiki knowledge graph") < 0, true, "ACTION USAGE should omit the graph action when useWikiGraph is false")
+  }
+
+  exports.testPromptSnapshotSingleMcpSection = function() {
+    var agent = createAgent()
+    var modes = [
+      { useMcpProxy: true, usetoolsActual: true, usetools: true, label: "PROXY-DISPATCH FUNCTION CALLING" },
+      { useMcpProxy: true, usetoolsActual: false, usetools: true, label: "PROXY-DISPATCH ACTION-BASED" },
+      { useMcpProxy: false, usetoolsActual: true, usetools: true, label: "DIRECT FUNCTION CALLING" },
+      { useMcpProxy: false, usetoolsActual: false, usetools: true, label: "ACTION-BASED" }
+    ]
+
+    modes.forEach(function(mode) {
+      var result = renderAgentPrompt(agent, {
+        useMcpProxy: mode.useMcpProxy,
+        usetoolsActual: mode.usetoolsActual,
+        usetools: mode.usetools,
+        hasMcpAccess: true,
+        mcpAccessLabel: mode.label,
+        mcpToolCountLine: "2 MCP tools are available",
+        useMemorySearch: true,
+        actionFieldValues: "think | memory_search | read_file | write_file | final (string or array for chaining)"
+      }, {})
+
+      var heading = "## MCP TOOL ACCESS (" + mode.label + ")"
+      var firstIdx = result.prompt.indexOf(heading)
+      var lastIdx = result.prompt.lastIndexOf(heading)
+      ow.test.assert(firstIdx >= 0, true, "Prompt should contain the MCP access heading for " + mode.label)
+      ow.test.assert(firstIdx === lastIdx, true, "Prompt should contain exactly one MCP access section for " + mode.label)
+
+      var actionFieldOccurrences = result.prompt.split("memory_search").length - 1
+      ow.test.assert(actionFieldOccurrences >= 1, true, "memory_search should appear in the action enumeration for " + mode.label)
+    })
   }
 
   exports.testPlanningDetailsFullDuringGenerationTerseDuringExecution = function() {
@@ -3269,5 +3336,42 @@
     var result = agent._buildSystemPromptWithBudget("agent-test", payload, agent._SYSTEM_PROMPT, { args: {}, mode: "agent" })
     ow.test.assert(isString(result.prompt), true, "System prompt should return a string")
     ow.test.assert(result.prompt.indexOf('"wiki"') >= 0, true, "Wiki tool should appear in system prompt when useWiki=true")
+  }
+
+  exports.testMaxTotalStepsArgValidationDefaultsToDisabled = function() {
+    var agent = createAgent()
+    var args = { maxsteps: 15 }
+    agent._validateArgs(args, [
+      { name: "maxsteps", type: "number", default: 50 },
+      { name: "maxtotalsteps", type: "number", default: 0 }
+    ])
+    ow.test.assert(args.maxtotalsteps, 0, "maxtotalsteps should default to 0 (disabled) when not provided")
+  }
+
+  exports.testMaxTotalStepsArgValidationAcceptsExplicitValue = function() {
+    var agent = createAgent()
+    var args = { maxtotalsteps: "40" }
+    agent._validateArgs(args, [
+      { name: "maxtotalsteps", type: "number", default: 0 }
+    ])
+    ow.test.assert(args.maxtotalsteps, 40, "maxtotalsteps should coerce a string number to a number")
+  }
+
+  exports.testInitRethrowsAndRecordsErrorOnFailure = function() {
+    var agent = createAgent()
+    agent._validateArgs = function() {
+      throw new Error("boom-for-test")
+    }
+
+    var thrown = false
+    try {
+      agent.init({ goal: "test goal" })
+    } catch(e) {
+      thrown = true
+    }
+
+    ow.test.assert(thrown, true, "init() should rethrow when an internal step fails instead of swallowing the error")
+    ow.test.assert(agent._isInitialized, false, "agent should not be marked initialized after a failed init")
+    ow.test.assert(isDef(agent._initError), true, "agent should record the init error for diagnostics")
   }
 })()

@@ -311,14 +311,14 @@ var MiniA = function() {
 
 ## RESPONSE FORMAT
 {{#if usetoolsActual}}
-When you do NOT need an MCP tool, respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
-When you DO need an MCP tool, call it directly via function calling instead of returning JSON that describes the intended tool call. Do not emit placeholder JSON or shell commands that merely narrate the tool call.
+When you DO need an MCP tool, call it directly via function calling — do not return JSON that describes the intended tool call, and do not emit placeholder JSON or shell commands that merely narrate the call.
+When you do NOT need an MCP tool, respond with exactly one valid JSON object adhering to this schema:
 {{else}}
-Always respond with exactly one valid JSON object. The JSON object MUST adhere to the following schema:
+Always respond with exactly one valid JSON object adhering to this schema:
 {{/if}}
 {
     "thought": "brief next step (1 sentence max, keep it minimal)",
-    "action": "think{{#if useshell}} | shell{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)",{{#if useshell}}
+    "action": "{{{actionFieldValues}}}",{{#if useshell}}
     "command": "required when action=shell or action entry uses shell: POSIX command to execute",{{/if}}
     "answer": "required when action=final (or action entry uses final): your complete answer {{#if isMachine}}as JSON{{else}}in markdown{{/if}}{{#if actionsList}}",
     "params": "required when action=({{{actionsList}}}) (or action entry uses these actions): JSON object with action parameters{{/if}}",
@@ -336,7 +336,8 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if actionsList}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
+• "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -349,46 +350,46 @@ Always respond with exactly one valid JSON object. The JSON object MUST adhere t
 • Add top-level "parallel": true to run all actions simultaneously{{#if useshell}} (shell commands execute in parallel){{/if}}
 {{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
-{{#if useMcpProxy}}
-{{#if usetoolsActual}}
-## MCP TOOL ACCESS (PROXY-DISPATCH FUNCTION CALLING):
-• {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' function{{#if proxyToolsList}}
+{{#if hasMcpAccess}}
+## MCP TOOL ACCESS ({{mcpAccessLabel}}):
+• {{{mcpToolCountLine}}}{{#if proxyToolsList}}
 • Available MCP tools via proxy-dispatch: {{{proxyToolsList}}}{{/if}}
+{{#if usetoolsActual}}
 • **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "final"
+• When no MCP tool is needed, use the JSON "action" field only for: {{{actionFieldValues}}}
 • When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
 {{#if includeExamples}}
 ### How to call MCP tools:
-1. Use function calling with tool name: "proxy-dispatch"
+{{#if useMcpProxy}}1. Use function calling with tool name: "proxy-dispatch"
 2. Provide arguments with this structure:
    {
      "action": "call",
      "tool": "tool-name",
      "arguments": { /* tool-specific parameters */ }
    }
-3. Optional: specify "connection" if you need a specific MCP server
+3. Optional: specify "connection" if you need a specific MCP server{{else}}1. Use function calling with the actual tool name (e.g., "find-rss-url")
+2. Provide the tool's required parameters directly{{/if}}
 
 ### Example MCP tool call:
-Function name: "proxy-dispatch"
+{{#if useMcpProxy}}Function name: "proxy-dispatch"
 Arguments: {
   "action": "call",
   "tool": "find-rss-url",
   "arguments": {
     "query": "CNN"
   }
-}
-
-{{/if}}• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}
+}{{else}}Function name: "find-rss-url"
+Arguments: {
+  "query": "CNN"
+}{{/if}}
+{{/if}}
+{{#if useMcpProxy}}• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}{{/if}}
 {{else}}
-## MCP TOOL ACCESS (PROXY-DISPATCH ACTION-BASED):
-• {{proxyToolCount}} MCP tools are available through the 'proxy-dispatch' action{{#if proxyToolsList}}
-• Available MCP tools via proxy-dispatch: {{{proxyToolsList}}}{{/if}}
-• Call the proxy-dispatch tool through the JSON "action" field
-• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "proxy-dispatch" | "final"
-
+• Call MCP tools through the JSON "action" field{{#if useMcpProxy}}, using "proxy-dispatch" (a nested "action":"call" is required inside params even though the top-level action is already "proxy-dispatch"){{else}}, just like shell or custom actions{{/if}}
+• The JSON "action" field can be: {{{actionFieldValues}}}{{#if useMcpProxy}} | proxy-dispatch{{/if}}
+{{#if includeExamples}}
 ### How to call MCP tools:
-Use the action field with "proxy-dispatch" and provide tool details in params — note the nested "action":"call" inside params, required even though the top-level action is already "proxy-dispatch":
-{
+{{#if useMcpProxy}}{
   "thought": "brief description",
   "action": "proxy-dispatch",
   "params": {
@@ -396,51 +397,24 @@ Use the action field with "proxy-dispatch" and provide tool details in params �
     "tool": "tool-name",
     "arguments": { /* tool-specific parameters */ }
   }
-}
-{{/if}}
-{{else}}
-{{#if usetoolsActual}}
-## MCP TOOL ACCESS (DIRECT FUNCTION CALLING):
-• {{toolCount}} MCP tools are available via direct function calling
-• **IMPORTANT**: MCP tools are called via function calling (tool_calls), NOT through the JSON "action" field
-• When no MCP tool is needed, use the JSON "action" field only for: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | "final"
-• When an MCP tool is needed, do not emit a JSON "action" wrapper first. Make the function call directly.
-• Each tool has its own function signature - call tools directly by their name
-{{#if includeExamples}}
-### How to call MCP tools:
-1. Use function calling with the actual tool name (e.g., "find-rss-url")
-2. Provide the tool's required parameters directly
-
-### Example MCP tool call:
-Function name: "find-rss-url"
-Arguments: {
-  "query": "CNN"
-}
-{{/if}}
-{{else}}{{#if usetools}}
-## MCP TOOL ACCESS (ACTION-BASED):
-• {{toolCount}} MCP tools are available as action types
-• Call MCP tools through the JSON "action" field, just like shell or custom actions
-• The JSON "action" field can be: "think"{{#if useshell}} | "shell"{{/if}}{{#if actionsList}} | "{{{actionsList}}}"{{/if}} | [MCP tool name] | "final"
-{{#if includeExamples}}
-### How to call MCP tools:
-Use the action field with the tool name and provide parameters in the params field:
-{
+}{{else}}{
   "thought": "brief description",
   "action": "tool-name",
   "params": { /* tool-specific parameters */ }
-}
+}{{/if}}
 
 ### Example MCP tool call:
-{
+{{#if useMcpProxy}}{
+  "thought": "Search for CNN RSS feed",
+  "action": "proxy-dispatch",
+  "params": { "action": "call", "tool": "find-rss-url", "arguments": { "query": "CNN" } }
+}{{else}}{
   "thought": "Search for RSS feeds",
   "action": "find-rss-url",
-  "params": {
-    "query": "CNN"
-  }
-}
+  "params": { "query": "CNN" }
+}{{/if}}
 {{/if}}
-{{/if}}{{/if}}
+{{/if}}
 {{/if}}
 
 {{#if planning}}
@@ -515,96 +489,29 @@ REMAINING (do not work on these yet):
 **Prompt**: GOAL: what files are in the current directory?
 **Response**:
 { "thought": "list directory", "action": "shell", "command": "ls -la" }{{/if}}
-
-### Example 3: Overthinking (BAD - avoid this)
-**Prompt**: GOAL: what is the capital of France?
-**Response** ❌:
-{ "thought": "The user is asking for the capital of France. I know this information directly without needing to use any tools or commands. The goal is achieved and I should provide the final answer with the information.", "action": "final", "answer": "The capital of France is Paris." }
-{{#if useMcpProxy}}
-{{#if usetoolsActual}}
-
-### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Function Calling)
+{{#if hasMcpAccess}}
+### Example 3: MCP Tool Usage (CORRECT)
 **Prompt**: GOAL: check if CNN has an RSS feed
-**Step 1 - Function Call**:
+{{#if usetoolsActual}}**Step 1 - Function Call**:
 \`\`\`
-Function: "proxy-dispatch"
-Arguments: {
-  "action": "call",
-  "tool": "find-rss-url",
-  "arguments": { "query": "CNN" }
-}
+{{#if useMcpProxy}}Function: "proxy-dispatch"
+Arguments: { "action": "call", "tool": "find-rss-url", "arguments": { "query": "CNN" } }{{else}}Function: "find-rss-url"
+Arguments: { "query": "CNN" }{{/if}}
 \`\`\`
 **Step 2 - After receiving tool result, return JSON**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-
-### Example 5: MCP Tool Usage (WRONG - Don't do this)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Response** ❌:
-{ "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
-**Why wrong**: MCP tools cannot be invoked directly. You must use function calling with "proxy-dispatch".
-
-### Example 6: MCP Tool Usage (WRONG - Narrating a Tool Call)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Response** ❌:
-{ "thought": "Calling proxy-dispatch now", "action": "shell", "command": "echo \"Calling proxy-dispatch now\"" }
-**Why wrong**: Narrating an MCP tool call is not executing it. Make the function call directly.
-
-### Example 7: MCP Tool Usage (WRONG - Planning via Think)
-**Prompt**: GOAL: run the systemInfo tool
-**Response** ❌:
-{ "thought": "Invoking the systemInfo tool to retrieve system information.", "action": "think" }
-**Why wrong**: Never use action="think" to describe an MCP tool you intend to call. Make the proxy-dispatch function call immediately — do not think about it first.
-{{else}}
-
-### Example 4: MCP Tool Usage (CORRECT - Proxy-Dispatch Action-Based)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Response**:
-{ "thought": "Search for CNN RSS feed", "action": "proxy-dispatch", "params": {"action": "call", "tool": "find-rss-url", "arguments": {"query": "CNN"}} }
+{{else}}**Response**:
+{{#if useMcpProxy}}{ "thought": "Search for CNN RSS feed", "action": "proxy-dispatch", "params": {"action": "call", "tool": "find-rss-url", "arguments": {"query": "CNN"}} }{{else}}{ "thought": "Search for CNN RSS feed", "action": "find-rss-url", "params": {"query": "CNN"} }{{/if}}
 **After receiving result**:
 { "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-
-### Example 5: MCP Tool Usage (WRONG - Planning via Think)
-**Prompt**: GOAL: run the systemInfo tool
-**Response** ❌:
-{ "thought": "Invoking the systemInfo tool to retrieve system information.", "action": "think" }
-**Why wrong**: Never use action="think" to describe an MCP tool you intend to call. Use action="proxy-dispatch" immediately — do not think about it first.
 {{/if}}
-{{else}}
-{{#if usetoolsActual}}
-
-### Example 4: MCP Tool Usage (CORRECT - Direct Function Calling)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Step 1 - Function Call**:
-\`\`\`
-Function: "find-rss-url"
-Arguments: {
-  "query": "CNN"
-}
-\`\`\`
-**Step 2 - After receiving tool result, return JSON**:
-{ "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-
-### Example 5: MCP Tool Usage (WRONG - Don't do this)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Response** ❌:
-{ "thought": "Search for CNN RSS", "action": "find-rss-url", "params": {"query": "CNN"} }
-**Why wrong**: MCP tools cannot be invoked through the JSON "action" field. You must use function calling with the tool name.
-
-### Example 6: MCP Tool Usage (WRONG - Narrating a Tool Call)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Response** ❌:
-{ "thought": "Calling the tool", "action": "shell", "command": "echo \"Calling the tool\"" }
-**Why wrong**: Narrating a tool call is not executing it. Make the function call directly.
-{{else}}{{#if usetools}}
-
-### Example 4: MCP Tool Usage (CORRECT - Action-Based)
-**Prompt**: GOAL: check if CNN has an RSS feed
-**Response**:
-{ "thought": "Search for CNN RSS feed", "action": "find-rss-url", "params": {"query": "CNN"} }
-**After receiving result**:
-{ "thought": "Found CNN feeds", "action": "final", "answer": "Yes, CNN has RSS feeds at..." }
-{{/if}}{{/if}}
 {{/if}}
+
+### Anti-patterns (never do these)
+❌ Padding "thought" with paragraphs of reasoning for a direct-knowledge answer — keep it to one short sentence when you already know the answer.
+{{#if hasMcpAccess}}{{#if usetoolsActual}}❌ Calling an MCP tool through the JSON "action" field instead of function calling — that shape is never read as a tool call.
+❌ Narrating a tool call (e.g. echoing "calling the tool now" via shell) instead of making it — narrating is not executing.
+{{/if}}❌ Using action="think" to describe an MCP tool you intend to call — never think about it, call it immediately.{{/if}}
 {{/if}}
 
 ## RULES:
@@ -12049,7 +11956,10 @@ MiniA.prototype._getToolSchemaSummary = function(tool, options) {
 
 MiniA.prototype._getCachedSystemPrompt = function(templateKey, payload, template) {
   var serialized = this._stableStringify(payload)
-  var cacheKey = md5(`${templateKey}::${serialized}`)
+  // Include a template-content hash so the cache can never return a prompt rendered
+  // from a different template text under the same templateKey+payload.
+  var templateHash = md5(isString(template) ? template : "")
+  var cacheKey = md5(`${templateKey}::${templateHash}::${serialized}`)
   var cached = $cache(this._systemPromptCacheName).get(cacheKey)
   if (isObject(cached) && isDef(cached.value)) {
     return cached.value
@@ -13925,6 +13835,7 @@ MiniA.prototype.init = function(args) {
         { name: "rpm", type: "number", default: __ },
         { name: "tpm", type: "number", default: __ },
         { name: "maxsteps", type: "number", default: 50 },
+        { name: "maxtotalsteps", type: "number", default: 0 },
         { name: "knowledge", type: "string", default: "" },
         { name: "chatyouare", type: "string", default: "" },
         { name: "youare", type: "string", default: "" },
@@ -14851,7 +14762,7 @@ MiniA.prototype.init = function(args) {
     if (isString(args.chatyouare) && args.chatyouare.length > 0 && args.chatyouare.indexOf("\n") < 0 && io.fileExists(args.chatyouare) && io.fileInfo(args.chatyouare).isFile) {
       args.chatyouare = io.readFileString(args.chatyouare)
     }
-    if (args.rules.length > 0 && args.rules.indexOf("\n") < 0 && io.fileExists(args.rules) && io.fileInfo(args.rules).isFile) {
+    if (isString(args.rules) && args.rules.length > 0 && args.rules.indexOf("\n") < 0 && io.fileExists(args.rules) && io.fileInfo(args.rules).isFile) {
       this.fnI("load", `Loading rules from file: ${args.rules}...`)
       args.rules = io.readFileString(args.rules)
     }
@@ -14946,7 +14857,7 @@ MiniA.prototype.init = function(args) {
       }
       if (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) {
         baseRules.push(
-          "The wiki graph is enabled. Use action='graph' with params={op:'...'} for graph operations. Read-side ops: stats|query|neighbors|path|communities|surprise|retrieve|answer|export. Mutating/token-spending ops: build {semantic:true} and falkor. Wiki search already injects 'Related pages (graph)' hints automatically — read those pages directly rather than calling graph retrieve for every search."
+          "The wiki graph is enabled — see the \"graph\" action for available ops. Mutating/token-spending ops (build {semantic:true}, falkor) should be used sparingly. Wiki search already injects 'Related pages (graph)' hints automatically — read those pages directly rather than calling graph retrieve for every search."
         )
       }
     }
@@ -14957,6 +14868,7 @@ MiniA.prototype.init = function(args) {
       baseRules.push("Goal-driven execution: turn vague instructions into verifiable success criteria before writing a single line.")
     }
 
+    var promptProfile = this._getPromptProfile(args)
     var shellViaActionPreferred = args.useshell === true && this._useTools === true
     var promptUseMcpProxy = this._useMcpProxy === true || toBoolean(args.mcpproxy) === true
     var proxyToolsList = ""
@@ -14995,7 +14907,9 @@ MiniA.prototype.init = function(args) {
           proxyToolsWithDesc.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
         }
         var MAX_PROMPT_TOOLS = 30
-        if (proxyToolsWithDesc.length > 0) {
+        // Minimal profile (small/low-cost models) keeps the tool list to names only —
+        // full TOON-encoded descriptions are reserved for balanced/verbose profiles.
+        if (proxyToolsWithDesc.length > 0 && promptProfile !== "minimal") {
           var sliced = proxyToolsWithDesc.slice(0, MAX_PROMPT_TOOLS)
           var overflow = proxyToolsWithDesc.length > MAX_PROMPT_TOOLS ? "\n... and " + (proxyToolsWithDesc.length - MAX_PROMPT_TOOLS) + " more (use action=list to see all)" : ""
           try {
@@ -15010,8 +14924,6 @@ MiniA.prototype.init = function(args) {
         proxyToolCount = 0
       }
     }
-
-    var promptProfile = this._getPromptProfile(args)
 
     if (args.chatbotmode) {
       var chatActions = []
@@ -15075,12 +14987,13 @@ MiniA.prototype.init = function(args) {
         manifestChars: args.skillmanifestchars
       })
 
+      var promptUseWikiGraph = (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)
       this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if useWikiGraph}} | graph{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
         useMemorySearch : args.usememory && args.memoryinject !== "full",
         useWiki         : args.usewiki && isObject(this._wikiManager),
-        useWikiGraph    : (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)
+        useWikiGraph    : promptUseWikiGraph
       })
 
       var numberedRules = baseRules.map((rule, idx) => idx + (args.format == "md" ? 8 : 7) + ". " + rule)
@@ -15103,6 +15016,16 @@ MiniA.prototype.init = function(args) {
         : normalizedPromptProfile === "minimal" ? false
         : planningExecutionPhase !== true
 
+      // Single source for the MCP tool-access section: one of 4 mutually exclusive
+      // modes (proxy x function-calling/action-based, direct x function-calling/action-based).
+      var hasMcpAccess = promptUseMcpProxy || this._useToolsActual === true || this._useTools === true
+      var mcpAccessLabel = promptUseMcpProxy
+        ? (this._useToolsActual ? "PROXY-DISPATCH FUNCTION CALLING" : "PROXY-DISPATCH ACTION-BASED")
+        : (this._useToolsActual ? "DIRECT FUNCTION CALLING" : "ACTION-BASED")
+      var mcpToolCountLine = promptUseMcpProxy
+        ? (proxyToolCount + " MCP tools are available through the 'proxy-dispatch' " + (this._useToolsActual ? "function" : "action"))
+        : (this.mcpTools.length + " MCP tools are available " + (this._useToolsActual ? "via direct function calling" : "as action types"))
+
       var agentPayload = {
         agentPersonaLine: agentPersonaLine,
         agentDirectiveLine: agentDirectiveLine,
@@ -15119,6 +15042,10 @@ MiniA.prototype.init = function(args) {
         usetools         : this._useTools,
         usetoolsActual   : this._useToolsActual,
         useMcpProxy      : promptUseMcpProxy,
+        hasMcpAccess     : hasMcpAccess,
+        mcpAccessLabel   : mcpAccessLabel,
+        mcpToolCountLine : mcpToolCountLine,
+        actionFieldValues: this._actionsList,
         shellViaActionPreferred: shellViaActionPreferred,
         toolCount        : this.mcpTools.length,
         proxyToolCount   : proxyToolCount,
@@ -15139,6 +15066,7 @@ MiniA.prototype.init = function(args) {
         availableSkillsList: skillPromptEntries,
         useMemorySearch    : args.usememory && args.memoryinject !== "full",
         useWiki            : args.usewiki && isObject(this._wikiManager),
+        useWikiGraph       : promptUseWikiGraph,
         wikiRw             : args.usewiki && args.wikiaccess === "rw" && isObject(this._wikiManager)
       }
       this._systemInst = this._buildSystemPromptWithBudget("agent", agentPayload, this._SYSTEM_PROMPT, {
@@ -15150,6 +15078,14 @@ MiniA.prototype.init = function(args) {
     this._isInitialized = true
   } catch(ee) {
     this._isInitialized = false
+    this._initError = ee
+    var _initErrMsg = __miniAErrMsg(ee)
+    try {
+      this.fnI("error", "Initialization failed: " + _initErrMsg + ((args.debug && ee && ee.stack) ? "\n" + ee.stack : ""))
+    } catch(ignoreLogErr) {
+      logErr("MiniA init failed: " + _initErrMsg)
+    }
+    throw ee
   }
 }
 
@@ -15179,6 +15115,7 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * - rpm (number, optional): Maximum LLM requests per minute. The agent waits between calls when this limit is reached.
  * - tpm (number, optional): Maximum LLM tokens per minute. Prompt and completion tokens count toward the limit and will trigger waits when exceeded.
  * - maxsteps (number, default=15): Maximum consecutive steps without a successful action before forcing a final answer.
+ * - maxtotalsteps (number, default=0): Hard ceiling on total steps regardless of progress (0=disabled). When reached, forces a final answer the same way maxsteps does.
  * - readwrite (boolean, default=false): Whether to allow read/write operations on the filesystem.
  * - debug (boolean, default=false): Whether to enable debug mode with detailed logs.
  * - useshell (boolean, default=false): Whether to allow shell command execution.
@@ -15369,6 +15306,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "rpm", type: "number", default: __ },
       { name: "tpm", type: "number", default: __ },
       { name: "maxsteps", type: "number", default: 15 },
+      { name: "maxtotalsteps", type: "number", default: 0 },
       { name: "knowledge", type: "string", default: "" },
       { name: "chatyouare", type: "string", default: "" },
       { name: "youare", type: "string", default: "" },
@@ -16561,6 +16499,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     }
 
     var maxSteps = isNumber(args.maxsteps) ? Math.max(0, args.maxsteps) : 0
+    var maxTotalSteps = isNumber(args.maxtotalsteps) ? Math.max(0, Math.round(args.maxtotalsteps)) : 0
 
     // Assess goal complexity for dynamic escalation thresholds
     var goalComplexity = this._assessGoalComplexity(args.goal)
@@ -17066,6 +17005,19 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           result     : this._summarizeRecentContext(runtime),
           force      : true
         })
+        break
+      }
+
+      if (maxTotalSteps > 0 && step >= maxTotalSteps) {
+        runtime.context.push(`[OBS LIMIT] Reached hard ceiling of ${maxTotalSteps} total steps.`)
+        this._recordPlanActivity("step-limit", {
+          step       : runtime.currentStepNumber,
+          status     : "IN_PROGRESS",
+          description: `Reached hard total step ceiling (${maxTotalSteps})`,
+          result     : this._summarizeRecentContext(runtime),
+          force      : true
+        })
+        runtime.totalStepCeilingHit = true
         break
       }
 
@@ -18355,7 +18307,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                     `Stop using action="think" and make the proxy-dispatch function call directly.`
                   )
                 }
-                runtime.stepsWithoutAction++
               }
             }
           }
@@ -18890,6 +18841,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         runtime.earlyStopContextRecorded = true
       }
       this.fnI("warn", `Early stop triggered after repeated failures (${recordedReason}). Requesting final answer...`)
+    } else if (runtime.totalStepCeilingHit === true) {
+      this.fnI("warn", `Reached hard total step ceiling (${maxTotalSteps}). Asking for final answer...`)
     } else {
       if (isNumber(maxSteps) && maxSteps > 0 && runtime.stepsWithoutAction >= maxSteps) {
         runtime.context.push(`[OBS LIMIT] Reached ${maxSteps} consecutive steps without successful actions.`)

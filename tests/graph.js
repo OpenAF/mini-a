@@ -81,6 +81,7 @@
     var dir = mkTmp()
     try {
       var g = new MiniAWikiGraph({ graphDir: dir })
+      g.buildStructural(pages())
       var before = g._state.edges.length
       g._addEdge("", "doc:b.md", "LINKS_TO", "EXTRACTED", {})  // bad from
       g._addEdge("doc:a.md", "", "LINKS_TO", "EXTRACTED", {})  // bad to
@@ -222,11 +223,15 @@
       // Inject a fake semantic edge and cache entry for p1.md
       g._state.semantic_cache["p1.md"] = { hash: "old-hash", updated_at: new Date().toISOString() }
       g._state.summaries.pages["p1.md"] = { digest: "P1 digest", summary: "old summary" }
+      g._upsertNode("concept:foo", "concept", { name: "Foo" })
+      g._upsertNode("concept:bar", "concept", { name: "Bar" })
       g._addEdge("concept:foo", "concept:bar", "RELATED_TO", "INFERRED", { page: "p1.md", confidence: 0.9 })
       var edgeBefore = g._state.edges.filter(function(e) { return isMap(e.props) && e.props.page === "p1.md" }).length
       ow.test.assert(edgeBefore > 0, true, "semantic edge should exist before rebuild")
-      // Rebuild with p1.md with different content (different hash)
-      g.buildStructural([{ path: "p1.md", meta: { title: "P1 updated" }, body: "# P1 new content", links: [] }])
+      // Edit the page with different content (different hash) via updatePage, which is the
+      // API that actually invalidates stale per-page semantic state (buildStructural only
+      // preserves/re-adds semantic edges for pages already indexed, it does not diff content).
+      g.updatePage({ path: "p1.md", meta: { title: "P1 updated" }, body: "# P1 new content", links: [] })
       var edgeAfter = g._state.edges.filter(function(e) { return isMap(e.props) && e.props.page === "p1.md" }).length
       ow.test.assert(edgeAfter, 0, "stale semantic edges should be dropped after content change")
       ow.test.assert(isUnDef(g._state.summaries.pages["p1.md"] && g._state.summaries.pages["p1.md"].summary), true, "stale summary should be cleared")

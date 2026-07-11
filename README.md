@@ -116,6 +116,8 @@ Then open `http://localhost:8888`.
 
 For history/attachments and S3-backed history examples, see [USAGE.md](USAGE.md#web-ui-quick-start).
 
+**Security note**: by default the web UI has no authentication — anyone who can reach the port can submit goals, and with `useshell=true` that is equivalent to remote code execution. Set `webtoken=<secret>` to require an `x-mini-a-token` header (or a `?token=` query param, used automatically by the bundled UI) on every request, and prefer binding the port to localhost or placing it behind a reverse proxy/VPN rather than exposing it directly. Optional math rendering (KaTeX) is loaded from a public CDN, so it degrades gracefully but is unavailable in fully offline deployments.
+
 ### Running in Docker
 
 Mini-A can run in Docker containers for isolated execution and portability.
@@ -400,14 +402,15 @@ Mini-A ships with complementary components:
 
 - **`mini-a.yaml`** - Core oJob definition that implements the agent workflow
 - **`mini-a-con.js`** - Interactive console available through `opack exec mini-a` (or the `mini-a` alias)
-- **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers
-- **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories
+- **`mini-a-mcptest.js`** - Interactive MCP server tester for testing and debugging MCP servers — launched via `mini-a mcptest=true`
+- **`mini-a-memoryman.js`** - Interactive working-memory manager for inspecting and maintaining persisted global/session memories — launched via `mini-a memoryman=true`
+- **`mini-a-modelman.js`** - Interactive model/config manager, also reachable from the console via `/model` — launched via `mini-a modelman=true`
 - **`mini-a-dreams.js`** - Dream engine for memory/wiki consolidation with mode routing, reorg gates, and structured output/reporting — launched via `mini-a dream=true` or `/dream`
 - **`mini-a.sh`** - Shell wrapper script for running directly from a cloned repository
 - **`mini-a.js`** - Reusable library for embedding in other OpenAF jobs
 - **`mini-a-progcall.js`** - Per-session localhost HTTP bridge used by programmatic MCP tool calling (`mcpprogcall=true`)
 - **`mini-a-subtask.js`** - SubtaskManager for local child-agent delegation and remote worker delegation
-- **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI
+- **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI — launched via `mini-a web=true` or `mini-a onport=<port>` (or directly with `./mini-a-web.sh onport=<port>`)
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml` or `~/.openaf-mini-a/modes.yaml`)
 - **`public/`** - Browser interface assets
@@ -560,7 +563,8 @@ Wiki folders become browsable sub-wikis when they contain `index.md`. Agents can
 | `workerskills` | JSON/SLON array of A2A-style worker skills exposed by `workermode=true` | - |
 | `workertags` | Comma-separated tags appended to the default worker skill in `workermode=true` | - |
 | `workerreginterval` | Worker registration heartbeat interval in milliseconds | `30000` |
-| `maxsteps` | Maximum steps before forcing final answer | `15` |
+| `maxsteps` | Maximum *consecutive* steps without a successful action before forcing a final answer (default is `15` via `mini-a.sh`/ojob, `50` when using the `MiniA` class programmatically) | `15` |
+| `maxtotalsteps` | Hard ceiling on *total* steps regardless of progress; forces a final answer the same way `maxsteps` does. `0` disables it | `0` |
 | `rpm` | Rate limit (requests per minute) | - |
 | `tpm` | Rate limit (tokens per minute across prompt + completion) | - |
 | `maxcontext` | Context budget in tokens before proactive summarization | `0` |

@@ -272,6 +272,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMcpToolAccessHowToGatedByExamples
 
+- name: MiniA Core Tests::PromptSnapshotGraphAction
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotGraphAction
+
+- name: MiniA Core Tests::PromptSnapshotSingleMcpSection
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testPromptSnapshotSingleMcpSection
+
 - name: MiniA Core Tests::PlanningDetailsFullDuringGenerationTerseDuringExecution
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -607,6 +617,106 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testResultAliasToolsBypassInlineLimitGuard
 
+- name: MiniA Core Tests::ShouldWarnUnknownArgsOnlyForConsoleMode
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testShouldWarnUnknownArgsOnlyForConsoleMode
+
+- name: MiniA Core Tests::InitSkipsUnknownArgWarningsForNonConsoleRuns
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitSkipsUnknownArgWarningsForNonConsoleRuns
+
+- name: MiniA Core Tests::InitKeepsUnknownArgWarningsForConsoleRuns
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitKeepsUnknownArgWarningsForConsoleRuns
+
+- name: MiniA Core Tests::MalformedToolCallFallbackDisablesMainTools
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMalformedToolCallFallbackDisablesMainTools
+
+- name: MiniA Core Tests::MalformedToolCallFallbackDisablesToolsWhenMainHasNoToolInterface
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMalformedToolCallFallbackDisablesToolsWhenMainHasNoToolInterface
+
+- name: MiniA Core Tests::MalformedToolCallFallbackEscalatesLowCostOnly
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMalformedToolCallFallbackEscalatesLowCostOnly
+
+- name: MiniA Core Tests::ToolCallingFailureFallbackDisablesMainTools
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolCallingFailureFallbackDisablesMainTools
+
+- name: MiniA Core Tests::ToolCallingFailureFallbackDisablesToolsWhenMainHasNoToolInterface
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolCallingFailureFallbackDisablesToolsWhenMainHasNoToolInterface
+
+- name: MiniA Core Tests::ToolCallingFailureFallbackEscalatesLowCostOnly
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolCallingFailureFallbackEscalatesLowCostOnly
+
+- name: MiniA Core Tests::RecoverToolCallPayloadFromConversation
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRecoverToolCallPayloadFromConversation
+
+- name: MiniA Core Tests::RecoverToolCallPayloadFromEnvelope
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRecoverToolCallPayloadFromEnvelope
+
+- name: MiniA Core Tests::MemoryUserDefaults
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryUserDefaults
+
+- name: MiniA Core Tests::MemoryUserSessionDefaults
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryUserSessionDefaults
+
+- name: MiniA Core Tests::ApplyLauncherEnvDefaultsSetsLibsAndModeFromEnvOverrides
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testApplyLauncherEnvDefaultsSetsLibsAndModeFromEnvOverrides
+
+- name: MiniA Core Tests::ApplyLauncherEnvDefaultsPreservesExplicitLibsAndMode
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testApplyLauncherEnvDefaultsPreservesExplicitLibsAndMode
+
+- name: MiniA Core Tests::ApplyLauncherEnvDefaultsSupportsRoutedNonInteractiveLaunches
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testApplyLauncherEnvDefaultsSupportsRoutedNonInteractiveLaunches
+
+- name: MiniA Core Tests::ApplyLibEnvDefaultSetsOnlyLibsFromEnvOverride
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testApplyLibEnvDefaultSetsOnlyLibsFromEnvOverride
+
+- name: MiniA Core Tests::MaxTotalStepsArgValidationDefaultsToDisabled
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMaxTotalStepsArgValidationDefaultsToDisabled
+
+- name: MiniA Core Tests::MaxTotalStepsArgValidationAcceptsExplicitValue
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMaxTotalStepsArgValidationAcceptsExplicitValue
+
+- name: MiniA Core Tests::InitRethrowsAndRecordsErrorOnFailure
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testInitRethrowsAndRecordsErrorOnFailure
+
 include:
 - oJobTest.yaml
 
@@ -669,6 +779,8 @@ todo:
 - MiniA Core Tests::PromptSnapshotPlanningExecution
 - MiniA Core Tests::PromptSnapshotBudgetedPrompt
 - MiniA Core Tests::McpToolAccessHowToGatedByExamples
+- MiniA Core Tests::PromptSnapshotGraphAction
+- MiniA Core Tests::PromptSnapshotSingleMcpSection
 - MiniA Core Tests::PlanningDetailsFullDuringGenerationTerseDuringExecution
 - MiniA Core Tests::SlimToolMetaForProfileTrimsDescriptionsByProfile
 - MiniA Core Tests::CreateUtilsMcpConfigShrinksSchemasForMinimalProfile
@@ -736,3 +848,23 @@ todo:
 - MiniA Core Tests::ResultAliasToolsExposedWithStdutils
 - MiniA Core Tests::ProxyDispatchSchemaOmitsReadresultParamsWhenStdutilsEnabled
 - MiniA Core Tests::ResultAliasToolsBypassInlineLimitGuard
+- MiniA Core Tests::ShouldWarnUnknownArgsOnlyForConsoleMode
+- MiniA Core Tests::InitSkipsUnknownArgWarningsForNonConsoleRuns
+- MiniA Core Tests::InitKeepsUnknownArgWarningsForConsoleRuns
+- MiniA Core Tests::MalformedToolCallFallbackDisablesMainTools
+- MiniA Core Tests::MalformedToolCallFallbackDisablesToolsWhenMainHasNoToolInterface
+- MiniA Core Tests::MalformedToolCallFallbackEscalatesLowCostOnly
+- MiniA Core Tests::ToolCallingFailureFallbackDisablesMainTools
+- MiniA Core Tests::ToolCallingFailureFallbackDisablesToolsWhenMainHasNoToolInterface
+- MiniA Core Tests::ToolCallingFailureFallbackEscalatesLowCostOnly
+- MiniA Core Tests::RecoverToolCallPayloadFromConversation
+- MiniA Core Tests::RecoverToolCallPayloadFromEnvelope
+- MiniA Core Tests::MemoryUserDefaults
+- MiniA Core Tests::MemoryUserSessionDefaults
+- MiniA Core Tests::ApplyLauncherEnvDefaultsSetsLibsAndModeFromEnvOverrides
+- MiniA Core Tests::ApplyLauncherEnvDefaultsPreservesExplicitLibsAndMode
+- MiniA Core Tests::ApplyLauncherEnvDefaultsSupportsRoutedNonInteractiveLaunches
+- MiniA Core Tests::ApplyLibEnvDefaultSetsOnlyLibsFromEnvOverride
+- MiniA Core Tests::MaxTotalStepsArgValidationDefaultsToDisabled
+- MiniA Core Tests::MaxTotalStepsArgValidationAcceptsExplicitValue
+- MiniA Core Tests::InitRethrowsAndRecordsErrorOnFailure

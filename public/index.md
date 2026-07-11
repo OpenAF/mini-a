@@ -2064,6 +2064,35 @@
         return cleanPath;
     }
 
+    // Optional shared-token auth (webtoken=... server arg). Off by default: getWebToken()
+    // returns null unless a ?token=... was seen, in which case all requests carry it.
+    function getWebToken() {
+        try {
+            if (typeof window === 'undefined') return null;
+            if (window.__miniAWebToken !== undefined) return window.__miniAWebToken;
+            const params = new URLSearchParams(window.location.search);
+            let token = params.get('token');
+            if (!token && typeof sessionStorage !== 'undefined') token = sessionStorage.getItem('mini_a_web_token');
+            if (token && typeof sessionStorage !== 'undefined') sessionStorage.setItem('mini_a_web_token', token);
+            window.__miniAWebToken = token || null;
+            return window.__miniAWebToken;
+        } catch (e) { return null; }
+    }
+
+    (function installTokenFetchInterceptor() {
+        if (typeof window === 'undefined' || !window.fetch || window.__miniAFetchPatched) return;
+        window.__miniAFetchPatched = true;
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = function(input, init) {
+            const token = getWebToken();
+            if (token) {
+                init = init || {};
+                init.headers = Object.assign({}, init.headers, { 'X-Mini-A-Token': token });
+            }
+            return originalFetch(input, init);
+        };
+    })();
+
     function isAtBottom() {
         if (!resultsDiv) return true;
         const threshold = 50; // Allow margin for rounding errors
@@ -5471,7 +5500,13 @@
 
             if (!response.ok) throw new Error('Failed to submit prompt');
 
-            await response.json();
+            const data = await response.json();
+            if (data && data.busy) {
+                lastRawContent = lastRawContent.replace(userPromptDiv, '');
+                await renderRawContent(lastRawContent + '<p style="opacity: 0.7;">This session is still processing the previous request. Please wait for it to finish.</p>');
+                forceRenderChartBlocks();
+                return;
+            }
             lastRenderedRaw = '';
             activeSubmissionStartedAt = Date.now();
             sawNonFinishedForActiveSubmission = false;
@@ -5747,7 +5782,9 @@
         streamErrorCount = 0;
         syncPreviewText();
 
-        const streamUrl = resolveAppUrl('stream') + '?uuid=' + encodeURIComponent(uuid);
+        const streamToken = getWebToken();
+        const streamUrl = resolveAppUrl('stream') + '?uuid=' + encodeURIComponent(uuid) +
+            (streamToken ? '&token=' + encodeURIComponent(streamToken) : '');
         streamSource = new EventSource(streamUrl);
         streamSource.addEventListener('stream', (event) => {
             if (!event || !event.data) return;

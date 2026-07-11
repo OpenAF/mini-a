@@ -34,6 +34,10 @@ help:
     desc     : Maximum consecutive steps without a successful action before forcing a final response
     example  : "15"
     mandatory: false
+  - name     : maxtotalsteps
+    desc     : Hard ceiling on total steps regardless of progress (0=disabled); forces a final response the same way maxsteps does
+    example  : "40"
+    mandatory: false
   - name     : rpm
     desc     : Maximum number of LLM requests per minute
     example  : "20"
@@ -118,6 +122,14 @@ help:
   - name     : youare
     desc     : "Override the opening \"You are ...\" persona sentence (string or @file path, alias: youAre) to craft specialized agents"
     example  : "You are a senior firmware analyst focused on reverse engineering embedded devices."
+    mandatory: false
+  - name     : agent
+    desc     : "Load an agent profile (.agent.md) by bare name (resolved from the home agents dir) or by path; sets persona/knowledge/rules/defaults from the profile (alias for agentfile)"
+    example  : "researcher"
+    mandatory: false
+  - name     : agentfile
+    desc     : Path to an agent profile (.agent.md) file to load; equivalent to agent
+    example  : "/path/to/researcher.agent.md"
     mandatory: false
   - name     : conversation
     desc     : Conversation history file to provide to the agent
@@ -360,6 +372,10 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : browsercontext
+    desc     : SLON/JSON browser context injected into the agent (viewport, color scheme, server port, etc.)
+    example  : "(viewportWidth: 1280, colorScheme: dark)"
+    mandatory: false
   - name     : usestream
     desc     : Enable streaming output - display LLM tokens as they arrive in real-time
     example  : "true"
@@ -392,6 +408,11 @@ help:
     desc     : Comma-separated denylist of downstream tool names hidden from proxy-dispatch
     example  : "get-url,web-search"
     mandatory: false
+  - name     : mcpproxynative
+    desc     : Force native function calling for proxy-dispatch even for providers (e.g. Ollama) that would otherwise default to action-based JSON
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : mcpprogcall
     desc     : Start the per-session localhost bridge for programmatic MCP calls
     example  : "true"
@@ -1024,6 +1045,7 @@ jobs:
         rtm            : rtm
         tpm            : tpm
         maxsteps       : maxsteps
+        maxtotalsteps  : maxtotalsteps
         maxcontext     : maxcontext
         maxcontent     : maxcontent
         compressgoal   : compressgoal
@@ -1251,6 +1273,7 @@ jobs:
       rtm            : toNumber.isNumber.default(__)
       tpm            : toNumber.isNumber.default(__)
       maxsteps       : toNumber.isNumber.default(15)
+      maxtotalsteps  : toNumber.isNumber.default(0)
       maxcontext     : toNumber.isNumber.default(0)
       contextguard   : toBoolean.isBoolean.default(false)
       contextguardbudget: toNumber.isNumber.default(32000)
