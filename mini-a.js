@@ -13066,13 +13066,17 @@ MiniA.prototype._parseRulesArgument = function(rawRules) {
   if (text.length === 0) return []
 
   if (/^[\[\{'"`]/.test(text)) {
-    try {
-      var parsed = af.fromJSSLON(text)
-      if (isArray(parsed)) return this._normalizeRulesList(parsed)
-      if (isString(parsed) || isNumber(parsed) || typeof parsed === "boolean") {
-        return this._normalizeRulesList([ parsed ])
-      }
-    } catch(ignoreRulesParse) {}
+    // af.fromJSSLON doesn't recognize plain double-quoted JSON arrays/objects here (it echoes
+    // the input back as a string instead of parsing it) — try real JSON first, then fall back
+    // to JSSLON/SLON syntax (unquoted keys, single quotes, etc.) for non-JSON input.
+    var parsed = __
+    try { parsed = JSON.parse(text) } catch(ignoreJsonParse) {
+      try { parsed = af.fromJSSLON(text) } catch(ignoreRulesParse) {}
+    }
+    if (isArray(parsed)) return this._normalizeRulesList(parsed)
+    if (isString(parsed) || isNumber(parsed) || typeof parsed === "boolean") {
+      return this._normalizeRulesList([ parsed ])
+    }
   }
 
   var lines = text.split(/\r?\n/).map(function(line) { return line.trim() }).filter(function(line) { return line.length > 0 })
@@ -19529,9 +19533,13 @@ MiniA.prototype._runChatbotMode = function(options) {
  */
 
 MiniA.prototype._outerLoopHome = function(args) {
-  if (isString(args.homedir) && args.homedir.length > 0) {
-    var info = io.fileExists(args.homedir) ? io.fileInfo(args.homedir) : __
-    var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : args.homedir
+  // args.homedir may arrive as a java.lang.String (e.g. from java.io.File...getCanonicalPath()
+  // in an embedding caller) rather than a native JS string, and isString() returns false for
+  // those — normalize with String() first so we don't silently fall through to the real home dir.
+  var homedirArg = isDef(args) && isDef(args.homedir) ? String(args.homedir) : ""
+  if (homedirArg.length > 0) {
+    var info = io.fileExists(homedirArg) ? io.fileInfo(homedirArg) : __
+    var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : homedirArg
     return resolved + "/.openaf-mini-a"
   }
   return this._getMiniAHomeDir()
@@ -19572,7 +19580,11 @@ MiniA.prototype._initOuterLoop = function(args) {
   var base = this._outerLoopHome(args)
   var sessionsRoot = base + "/sessions"
   if (!io.fileExists(sessionsRoot)) io.mkdir(sessionsRoot)
-  var sid = isString(args.outerloopsessionid) && args.outerloopsessionid.length > 0 ? args.outerloopsessionid : "session-" + nowUTC("yyyyMMdd-HHmmss") + "-" + this._id
+  // nowUTC() takes no arguments and always returns milliseconds — a format string is silently
+  // ignored, so format the timestamp explicitly to actually get "yyyyMMdd-HHmmss".
+  var _sidSdf = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss")
+  _sidSdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+  var sid = isString(args.outerloopsessionid) && args.outerloopsessionid.length > 0 ? args.outerloopsessionid : "session-" + String(_sidSdf.format(new java.util.Date())) + "-" + this._id
   var sessionDir = sessionsRoot + "/" + sid
   if (!io.fileExists(sessionDir)) io.mkdir(sessionDir)
   var instructionPath = isString(args.outerloopinstructions) && args.outerloopinstructions.length > 0 ? args.outerloopinstructions : (isString(args.taskfile) && args.taskfile.length > 0 ? args.taskfile : (isString(args.specfile) && args.specfile.length > 0 ? args.specfile : sessionDir + "/instructions.md"))
