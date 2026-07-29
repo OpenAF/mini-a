@@ -346,7 +346,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • Set "action" to an array — each entry needs "action" + "thought" + its payload field:{{#if useshell}}
   Shell: [{"action":"shell","thought":"why","command":"ls"},{"action":"shell","thought":"why","command":"pwd"}]{{/if}}{{#if actionsList}}
   Custom: [{"action":"read_file","thought":"why","params":{"path":"a.txt"}},{"action":"read_file","thought":"why","params":{"path":"b.txt"}}]{{/if}}
-• Use "action"/"command"/"params" — NOT "name"/"arguments" (that is function-calling format, not used here)
+• Use "action"/"command"/"params" — NOT "name".{{#if useMcpProxy}} For a proxy-dispatch call, put downstream tool inputs in params.arguments; do not put them beside tool or connection.{{else}} Do not use a function-calling arguments envelope.{{/if}}
 • Add top-level "parallel": true to run all actions simultaneously{{#if useshell}} (shell commands execute in parallel){{/if}}
 {{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
@@ -10721,6 +10721,35 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             return { error: "Selected connection is not available or does not expose callable tools." }
           }
 
+          // A proxy call has two envelopes: proxy controls live at the top level
+          // and downstream tool inputs live in arguments.  Silently treating
+          // misplaced inputs as an empty object can turn a requested operation
+          // into a downstream default (for example, wiki lint into wiki list).
+          var _proxyCallKeys = {
+            action: true, tool: true, connection: true, arguments: true,
+            argumentsFile: true, meta: true, resultToFile: true,
+            resultSizeThreshold: true, format: true
+          }
+          var _misplacedInputKeys = Object.keys(params).filter(function(key) {
+            return _proxyCallKeys[key] !== true
+          })
+          if (!isUnDef(params.arguments) && !isMap(params.arguments)) {
+            return {
+              action : "call",
+              tool   : toolName,
+              error  : "Call action requires 'arguments' to be an object when supplied.",
+              content: [{ type: "text", text: "Error: Call action requires 'arguments' to be an object when supplied." }]
+            }
+          }
+          if (!isMap(params.arguments) && _misplacedInputKeys.length > 0) {
+            var _misplacedMessage = "Call action received downstream input(s) at the proxy level: " + _misplacedInputKeys.join(", ") + ". Put downstream tool inputs in 'arguments', for example { action: 'call', tool: '" + toolName + "', arguments: { ... } }."
+            return {
+              action : "call",
+              tool   : toolName,
+              error  : _misplacedMessage,
+              content: [{ type: "text", text: "Error: " + _misplacedMessage }]
+            }
+          }
           var inputArgs = isMap(params.arguments) ? params.arguments : {}
           if (isString(params.argumentsFile) && params.argumentsFile.trim().length > 0) {
             var fileArgs = readProxyJsonFile(params.argumentsFile, "arguments")

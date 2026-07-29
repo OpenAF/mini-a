@@ -1278,6 +1278,21 @@
     ow.test.assert(verbose.prompt.indexOf("### Example MCP tool call:") >= 0, true, "Verbose prompt should include the MCP example call")
 
     ow.test.assert(verbose.prompt.length > balanced.prompt.length, true, "Verbose MCP access section should render larger than balanced")
+
+    var actionProxy = renderAgentPrompt(agent, {
+      promptProfile: "verbose",
+      includeExamples: true,
+      useMcpProxy: true,
+      usetools: true,
+      usetoolsActual: false,
+      hasMcpAccess: true,
+      mcpAccessLabel: "PROXY-DISPATCH ACTION-BASED",
+      mcpToolCountLine: "3 MCP tools are available through the 'proxy-dispatch' action",
+      proxyToolCount: 3,
+      proxyToolsList: "wiki"
+    }, {})
+    ow.test.assert(actionProxy.prompt.indexOf("For a proxy-dispatch call, put downstream tool inputs in params.arguments") >= 0, true, "Action-based proxy prompt should require the nested arguments envelope")
+    ow.test.assert(actionProxy.prompt.indexOf("NOT \"name\"/\"arguments\"") < 0, true, "Action-based proxy prompt must not contradict its required arguments envelope")
   }
 
   exports.testPromptSnapshotGraphAction = function() {
@@ -1495,6 +1510,22 @@
       print = originalPrint
       printErr = originalPrintErr
     }
+  }
+
+  exports.testProxyDispatchRejectsMisplacedDownstreamInputs = function() {
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
+    var proxyConfig = agent._createMcpProxyConfig([ utilsConfig ], {})
+    var result = proxyConfig.options.fns["proxy-dispatch"]({
+      action   : "call",
+      connection: "default",
+      tool     : "showMessage",
+      level    : "info"
+    })
+
+    ow.test.assert(isMap(result), true, "Proxy dispatch should return a result map for malformed calls")
+    ow.test.assert(isString(result.error) && result.error.indexOf("downstream input(s) at the proxy level: level") >= 0, true, "Proxy should reject misplaced downstream inputs instead of invoking the tool with empty arguments")
   }
 
   exports.testContextGuardBudgetHelpers = function() {
