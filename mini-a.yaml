@@ -264,6 +264,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : debugtrace
+    desc     : Keep the console /debug trace for the previous goal in a temporary file (default: true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : shellbatch
     desc     : Run in batch mode without prompting for command execution approval
     example  : "false"
@@ -1056,6 +1061,7 @@ jobs:
         checkall       : checkall
         debug          : debug
         debugfile      : debugfile
+        debugtrace     : debugtrace
         useshell       : useshell
         shell          : shell
         usesandbox     : usesandbox
@@ -1288,6 +1294,7 @@ jobs:
       checkall       : toBoolean.isBoolean.default(false)
       debug          : toBoolean.isBoolean.default(false)
       debugfile      : isString.default(__)
+      debugtrace     : toBoolean.isBoolean.default(true)
       useshell       : toBoolean.isBoolean.default(__)
       shell          : isString.default(__)
       usesandbox     : isString.default(__)

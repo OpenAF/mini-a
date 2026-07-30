@@ -107,6 +107,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testDefaultInteractionFnForwardsPlannerStreamEvents
 
+- name: MiniA Core Tests::TraceFnReceivesEventsAndPayloads
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testTraceFnReceivesEventsAndPayloads
+
 - name: MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -751,6 +756,7 @@ todo:
 - MiniA Core Tests::CanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
 - MiniA Core Tests::StreamThinkingTagsDoNotEmitCanonicalThoughtEvents
 - MiniA Core Tests::DefaultInteractionFnForwardsPlannerStreamEvents
+- MiniA Core Tests::TraceFnReceivesEventsAndPayloads
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
 - MiniA Core Tests::StreamDeltaHandlerFallsBackToPlainTextWhenChunksAreNotJson
