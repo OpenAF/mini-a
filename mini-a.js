@@ -346,7 +346,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • Set "action" to an array — each entry needs "action" + "thought" + its payload field:{{#if useshell}}
   Shell: [{"action":"shell","thought":"why","command":"ls"},{"action":"shell","thought":"why","command":"pwd"}]{{/if}}{{#if actionsList}}
   Custom: [{"action":"read_file","thought":"why","params":{"path":"a.txt"}},{"action":"read_file","thought":"why","params":{"path":"b.txt"}}]{{/if}}
-• Use "action"/"command"/"params" — NOT "name"/"arguments" (that is function-calling format, not used here)
+• Use "action"/"command"/"params" — NOT "name".{{#if useMcpProxy}} For a proxy-dispatch call, put downstream tool inputs in params.arguments; do not put them beside tool or connection.{{else}} Do not use a function-calling arguments envelope.{{/if}}
 • Add top-level "parallel": true to run all actions simultaneously{{#if useshell}} (shell commands execute in parallel){{/if}}
 {{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
@@ -10721,6 +10721,35 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             return { error: "Selected connection is not available or does not expose callable tools." }
           }
 
+          // A proxy call has two envelopes: proxy controls live at the top level
+          // and downstream tool inputs live in arguments.  Silently treating
+          // misplaced inputs as an empty object can turn a requested operation
+          // into a downstream default (for example, wiki lint into wiki list).
+          var _proxyCallKeys = {
+            action: true, tool: true, connection: true, arguments: true,
+            argumentsFile: true, meta: true, resultToFile: true,
+            resultSizeThreshold: true, format: true
+          }
+          var _misplacedInputKeys = Object.keys(params).filter(function(key) {
+            return _proxyCallKeys[key] !== true
+          })
+          if (!isUnDef(params.arguments) && !isMap(params.arguments)) {
+            return {
+              action : "call",
+              tool   : toolName,
+              error  : "Call action requires 'arguments' to be an object when supplied.",
+              content: [{ type: "text", text: "Error: Call action requires 'arguments' to be an object when supplied." }]
+            }
+          }
+          if (!isMap(params.arguments) && _misplacedInputKeys.length > 0) {
+            var _misplacedMessage = "Call action received downstream input(s) at the proxy level: " + _misplacedInputKeys.join(", ") + ". Put downstream tool inputs in 'arguments', for example { action: 'call', tool: '" + toolName + "', arguments: { ... } }."
+            return {
+              action : "call",
+              tool   : toolName,
+              error  : _misplacedMessage,
+              content: [{ type: "text", text: "Error: " + _misplacedMessage }]
+            }
+          }
           var inputArgs = isMap(params.arguments) ? params.arguments : {}
           if (isString(params.argumentsFile) && params.argumentsFile.trim().length > 0) {
             var fileArgs = readProxyJsonFile(params.argumentsFile, "arguments")
@@ -13066,13 +13095,17 @@ MiniA.prototype._parseRulesArgument = function(rawRules) {
   if (text.length === 0) return []
 
   if (/^[\[\{'"`]/.test(text)) {
-    try {
-      var parsed = af.fromJSSLON(text)
-      if (isArray(parsed)) return this._normalizeRulesList(parsed)
-      if (isString(parsed) || isNumber(parsed) || typeof parsed === "boolean") {
-        return this._normalizeRulesList([ parsed ])
-      }
-    } catch(ignoreRulesParse) {}
+    // af.fromJSSLON doesn't recognize plain double-quoted JSON arrays/objects here (it echoes
+    // the input back as a string instead of parsing it) — try real JSON first, then fall back
+    // to JSSLON/SLON syntax (unquoted keys, single quotes, etc.) for non-JSON input.
+    var parsed = __
+    try { parsed = JSON.parse(text) } catch(ignoreJsonParse) {
+      try { parsed = af.fromJSSLON(text) } catch(ignoreRulesParse) {}
+    }
+    if (isArray(parsed)) return this._normalizeRulesList(parsed)
+    if (isString(parsed) || isNumber(parsed) || typeof parsed === "boolean") {
+      return this._normalizeRulesList([ parsed ])
+    }
   }
 
   var lines = text.split(/\r?\n/).map(function(line) { return line.trim() }).filter(function(line) { return line.length > 0 })
@@ -19529,9 +19562,13 @@ MiniA.prototype._runChatbotMode = function(options) {
  */
 
 MiniA.prototype._outerLoopHome = function(args) {
-  if (isString(args.homedir) && args.homedir.length > 0) {
-    var info = io.fileExists(args.homedir) ? io.fileInfo(args.homedir) : __
-    var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : args.homedir
+  // args.homedir may arrive as a java.lang.String (e.g. from java.io.File...getCanonicalPath()
+  // in an embedding caller) rather than a native JS string, and isString() returns false for
+  // those — normalize with String() first so we don't silently fall through to the real home dir.
+  var homedirArg = isDef(args) && isDef(args.homedir) ? String(args.homedir) : ""
+  if (homedirArg.length > 0) {
+    var info = io.fileExists(homedirArg) ? io.fileInfo(homedirArg) : __
+    var resolved = isMap(info) && isString(info.canonicalPath) && info.canonicalPath.length > 0 ? info.canonicalPath : homedirArg
     return resolved + "/.openaf-mini-a"
   }
   return this._getMiniAHomeDir()
@@ -19572,7 +19609,11 @@ MiniA.prototype._initOuterLoop = function(args) {
   var base = this._outerLoopHome(args)
   var sessionsRoot = base + "/sessions"
   if (!io.fileExists(sessionsRoot)) io.mkdir(sessionsRoot)
-  var sid = isString(args.outerloopsessionid) && args.outerloopsessionid.length > 0 ? args.outerloopsessionid : "session-" + nowUTC("yyyyMMdd-HHmmss") + "-" + this._id
+  // nowUTC() takes no arguments and always returns milliseconds — a format string is silently
+  // ignored, so format the timestamp explicitly to actually get "yyyyMMdd-HHmmss".
+  var _sidSdf = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss")
+  _sidSdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+  var sid = isString(args.outerloopsessionid) && args.outerloopsessionid.length > 0 ? args.outerloopsessionid : "session-" + String(_sidSdf.format(new java.util.Date())) + "-" + this._id
   var sessionDir = sessionsRoot + "/" + sid
   if (!io.fileExists(sessionDir)) io.mkdir(sessionDir)
   var instructionPath = isString(args.outerloopinstructions) && args.outerloopinstructions.length > 0 ? args.outerloopinstructions : (isString(args.taskfile) && args.taskfile.length > 0 ? args.taskfile : (isString(args.specfile) && args.specfile.length > 0 ? args.specfile : sessionDir + "/instructions.md"))

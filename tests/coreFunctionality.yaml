@@ -317,6 +317,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testProxyDispatchPropagatesDownstreamToolErrors
 
+- name: MiniA Core Tests::ProxyDispatchRejectsMisplacedDownstreamInputs
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testProxyDispatchRejectsMisplacedDownstreamInputs
+
 - name: MiniA Core Tests::UtilsMcpAllowAndDeny
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -788,6 +793,7 @@ todo:
 - MiniA Core Tests::UtilsMcpConsoleOnlyToolsToggle
 - MiniA Core Tests::UtilsMcpSkillsLogsSourceFiles
 - MiniA Core Tests::ProxyDispatchPropagatesDownstreamToolErrors
+- MiniA Core Tests::ProxyDispatchRejectsMisplacedDownstreamInputs
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization
 - MiniA Core Tests::SubtaskChildArgSanitization
