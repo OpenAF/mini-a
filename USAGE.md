@@ -54,7 +54,7 @@ Need starter files quickly? Use the built-in template printers:
 - `mini-a --command` — print a starter slash-command markdown template
 - `mini-a --hook` — print a starter hook YAML template
 
-Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`. Use `/skills [prefix]` to list discovered skills and optionally filter by skill name prefix.
+Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`. Use `/debug` after a goal to browse its full event trace (LLM prompts/responses, thoughts, and tool activity); its picker can filter MCP/tool calls and answers, memory, system prompts, LLM prompts/responses, thinking, and problems, or pass the filter directly (for example `/debug calls`). Set `debugtrace=false` to disable the temporary trace file. Use `/skills [prefix]` to list discovered skills and optionally filter by skill name prefix.
 
 Custom slash commands are supported through markdown templates in `~/.openaf-mini-a/commands/`. Typing `/<name> ...args...` looks for `~/.openaf-mini-a/commands/<name>.md`, renders placeholders, and submits the result as the goal text.
 
@@ -845,6 +845,7 @@ The `start()` method accepts various configuration options:
 - **`verbose`** (boolean, default: false): Enable verbose logging
 - **`debug`** (boolean, default: false): Enable debug mode with detailed logs
 - **`debugfile`** (string, optional): Redirect all debug output to a file as NDJSON instead of printing colored blocks on screen. Implies `debug=true`. Each line is a JSON object with a `ts` (ISO timestamp) and either `type:"event"` (with `event` and `message` fields, one per agent event) or `type:"block"` (with `label` and `content` fields, for raw LLM prompt/response payloads). Use `$from(io.readFileNDJSON("debug.log")).equals("label","STEP_PROMPT").select()` to filter specific block types.
+- **`debugtrace`** (boolean, default: true): For `mini-a-con`, capture the most recent goal's full diagnostic trace in a temporary NDJSON file for interactive `/debug` inspection. The file is deleted when the next goal starts or the console exits.
 - **`debugch`** (string, optional): SLON/JSON definition of a debug channel for main LLM debugging (requires `$llm.setDebugCh` support). Example: `"(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"`.
 - **`debuglcch`** (string, optional): SLON/JSON definition of a debug channel for low-cost LLM debugging. Same format as `debugch`.
 - **`debugvalch`** (string, optional): SLON/JSON definition of a debug channel for the validation LLM. Same format as `debugch`. Example: `"(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"`. When a dedicated `modelval` is configured, the channel is attached to that LLM instance. When using the main LLM for validation (no `modelval`), validation prompts and responses are written directly to this channel.

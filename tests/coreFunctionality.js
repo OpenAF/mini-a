@@ -639,6 +639,23 @@
     ow.test.assert(forwarded[0].id, agent.getId(), "Planner stream forwarding should preserve the agent id")
   }
 
+  exports.testTraceFnReceivesEventsAndPayloads = function() {
+    var agent = createAgent()
+    var records = []
+    agent.setInteractionFn(function() {})
+    agent.setTraceFn(function(kind, payload) {
+      records.push({ kind: kind, payload: payload })
+    })
+
+    agent.fnI("info", "trace event")
+    agent._trace("llm_prompt", { label: "STEP_PROMPT", content: "full prompt" })
+
+    ow.test.assert(records.length, 2, "Trace sink should receive interaction and explicit payload records")
+    ow.test.assert(records[0].kind, "event", "Interaction records should use the event trace kind")
+    ow.test.assert(records[0].payload.message, "trace event", "Interaction records should keep the full message")
+    ow.test.assert(records[1].payload.content, "full prompt", "Trace records should preserve full diagnostic payloads")
+  }
+
   exports.testSupportsPromptStreamWithStatsCompatForRawPromptStreamProviders = function() {
     var agent = createAgent()
     var llm = {
@@ -1444,10 +1461,14 @@
       io.writeFileString(skillDir + java.io.File.separator + "SKILL.md", "---\ndescription: Planner\n---\nPlan {{arg1}}\n\n[context](context.md)")
 
       var events = []
+      var trace = []
       var agent = createAgent()
       agent.fnI = function(event, message) {
         events.push({ event: event, message: message })
       }
+      agent.setTraceFn(function(kind, payload) {
+        trace.push({ kind: kind, payload: payload })
+      })
 
       var cfg = agent._createUtilsMcpConfig({
         useutils: true,
@@ -1461,6 +1482,8 @@
       ow.test.assert(isMap(response) && isArray(response.content), true, "Skills MCP render should return content")
       ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("SKILL.md") >= 0 }), true, "Skills MCP render should log the skill template path")
       ow.test.assert(events.some(function(e) { return e.event === "skill" && e.message.indexOf("context.md") >= 0 }), true, "Skills MCP render should log referenced files")
+      ow.test.assert(trace.some(function(r) { return r.kind === "tool_call" && r.payload.source === "mini-utils" && r.payload.name === "skills" }), true, "Mini Utils calls should be included in the trace with full arguments")
+      ow.test.assert(trace.some(function(r) { return r.kind === "tool_result" && r.payload.source === "mini-utils" && r.payload.name === "skills" && isMap(r.payload.result) }), true, "Mini Utils answers should be included in the trace")
     } finally {
       io.rm(rootDir)
       io.rm(skillsDir)

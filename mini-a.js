@@ -86,6 +86,7 @@ var MiniA = function() {
   this._debugchConfig = __
   this._debuglcchConfig = __
   this._debugvalchConfig = __
+  this._traceFn = __
   this._adaptiveRouting = false
   this._toolRouter = new MiniAToolRouter({ enabled: false })
   this._routeHistory = {}
@@ -1446,6 +1447,21 @@ MiniA.prototype.setAnsiLogging = function(val) {
   this._useAnsiLogging = !!val
 }
 
+/**
+ * Set an optional trace sink. Console callers use this to persist complete
+ * per-goal diagnostics without retaining them in the agent process.
+ */
+MiniA.prototype.setTraceFn = function(fn) {
+  this._traceFn = isFunction(fn) ? fn : __
+}
+
+MiniA.prototype._trace = function(kind, payload) {
+  if (!isFunction(this._traceFn)) return
+  try {
+    this._traceFn(kind, payload)
+  } catch(ignoreTraceError) {}
+}
+
 MiniA.prototype._debugOut = function(label, text) {
   try {
     var rec = stringify({ ts: new Date().toISOString(), type: "block", label: label, content: text }, __, "")
@@ -1500,6 +1516,7 @@ MiniA.prototype.fnI = function(event, message) {
       io.writeFileString(this._debugFile, rec + "\n", __, true)
     } catch(_e) {}
   }
+  this._trace("event", { event: event, message: message })
   this._flushAllDebugChannelsToFiles()
   return this._fnI(event, message)
 }
@@ -9399,6 +9416,7 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
         if (isUnDef(payload)) payload = {}
         try {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
+          parent._trace("tool_call", { name: name, params: payload, source: "mini-utils" })
           var result = fileTool[name](payload)
           if (name === "skills") _logSkillSourceUsage(payload, result)
           var response = formatResponse(result)
@@ -9409,15 +9427,18 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
               response.content = [{ type: "text", text: enriched }]
             }
           }
+          parent._trace("tool_result", { name: name, params: payload, result: response, error: isMap(response) && isDef(response.error), source: "mini-utils" })
           return response
         } catch (err) {
           var message = "[ERROR] " + (err && err.message ? err.message : String(err))
           message = MiniA._enrichToolCallError(message, meta.inputSchema, payload)
           parent.fnI("warn", `Mini-A utils MCP '${name}' failed: ${message}`)
-          return {
+          var errorResponse = {
             error  : message,
             content: [{ type: "text", text: message }]
           }
+          parent._trace("tool_result", { name: name, params: payload, result: errorResponse, error: true, source: "mini-utils" })
+          return errorResponse
         }
       }
     })
@@ -12604,6 +12625,7 @@ MiniA.prototype._runCommand = function(args) {
           ? `Executing ${_ac2("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")} (original: ${_ac2("FG(218)", "'" + this._truncateAuditValue(originalCommand, 800) + "'")}).`
           : `Executing ${_ac2("FG(218)", "'" + this._truncateAuditValue(finalCommand, 800) + "'")}...`
         )
+        this._trace("shell_call", { command: originalCommand, executedCommand: finalCommand })
         var shellExec = $sh(shInput)
         if (isNumber(args.shelltimeout)) shellExec = shellExec.timeout(args.shelltimeout)
         if (isObject(this._progCallEnv)) shellExec = shellExec.envs(this._progCallEnv)
@@ -12633,6 +12655,13 @@ MiniA.prototype._runCommand = function(args) {
         : `Shell command blocked: ${args.command}`,
       result     : isString(args.output) ? args.output : "",
       command    : finalCommand
+    })
+    this._trace("shell_result", {
+      command        : args.command,
+      executedCommand: isDef(args.executedCommand) ? args.executedCommand : finalCommand,
+      output         : args.output,
+      executed       : exec === true && String(args.output || "").indexOf("[blocked") !== 0,
+      blocked        : exec !== true || String(args.output || "").indexOf("[blocked") === 0
     })
 
     return args
@@ -12835,6 +12864,7 @@ MiniA.prototype._applySystemInstructions = function(args) {
       this.fnI("size", `System prompt budget applied: ${promptMeta.initialTokens} -> ${promptMeta.finalTokens} tokens; dropped=${isArray(promptMeta.droppedSections) && promptMeta.droppedSections.length > 0 ? promptMeta.droppedSections.join(",") : "none"}`)
     }
   }
+  this._trace("llm_prompt", { label: "SYSTEM_INSTRUCTION", content: this._systemInst })
   if (toBoolean(args.debug)) {
     if (this._debugFile) {
       this._debugOut("SYSTEM_INSTRUCTION", this._systemInst)
@@ -13539,7 +13569,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "subtasks", "subtasksfile", "subtaskssequential", "forkstatemaxbytes",
     "mcpprogcall", "mcpprogcallport",
     "mcpprogcallmaxbytes", "mcpprogcallresultttl", "mcpprogcalltools", "mcpprogcallbatchmax", "agent", "agentfile",
-    "verbose", "readwrite", "debug", "debugfile", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
+    "verbose", "readwrite", "debug", "debugfile", "debugtrace", "raw", "showthinking", "useshell", "checkall", "shellallowpipes",
     "shellbatch", "usetools", "usetoolslc", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
     "usemath", "usesvg", "usevectors", "browsercontext", "chatbotmode", "useplanning", "planmode", "validateplan",
     "convertplan", "resumefailed", "showexecs", "usestream", "format", "maxcontext", "compressgoal", "compressgoaltokens", "compressgoalchars", "maxpromptchars", "rules",
@@ -13966,6 +13996,7 @@ MiniA.prototype.init = function(args) {
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
     args.debugfile = _$(args.debugfile, "args.debugfile").isString().default("")
     if (args.debugfile.length > 0) args.debug = true
+    args.debugtrace = _$(toBoolean(args.debugtrace), "args.debugtrace").isBoolean().default(true)
     this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
@@ -14647,6 +14678,7 @@ MiniA.prototype.init = function(args) {
                   parent._runtime.modelToolCallDetected = true
                 }
                 parent.fnI("exec", `Executing action '${t}' with parameters: ${parent._truncateAuditValue(af.toCSLON(a), 800)}`)
+                parent._trace("tool_call", { name: t, params: a })
 
                 // Track per-tool call count
                 if (!isObject(global.__mini_a_metrics.per_tool_stats[t])) {
@@ -14672,6 +14704,7 @@ MiniA.prototype.init = function(args) {
               },
               posFn : (t, a, r) => {
                 var hasError = isMap(r) && isDef(r.error)
+                parent._trace("tool_result", { name: t, params: a, result: r, error: hasError })
                 if (hasError) {
                   parent.fnI("error", `Execution of action '${t}' finished unsuccessfully: ${af.toSLON(r)}`)
                   global.__mini_a_metrics.mcp_actions_failed.inc()
@@ -15423,6 +15456,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.debug = _$(toBoolean(args.debug), "args.debug").isBoolean().default(false)
     args.debugfile = _$(args.debugfile, "args.debugfile").isString().default("")
     if (args.debugfile.length > 0) args.debug = true
+    args.debugtrace = _$(toBoolean(args.debugtrace), "args.debugtrace").isBoolean().default(true)
     this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
@@ -17281,6 +17315,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
       
       this.fnI("input", `Interacting with ${llmType} model (context ~${contextTokens} tokens)...`)
+      this._trace("llm_prompt", { label: "STEP_PROMPT", model: llmType, step: step + 1, content: prompt })
       // Get model response and parse as JSON
       if (args.debug) {
         if (this._debugFile) {
@@ -17437,6 +17472,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (!(isMap(recoveredMsgFromEnvelope) || isArray(recoveredMsgFromEnvelope)) && isObject(responseWithStats)) {
         recoveredMsgFromEnvelope = this._recoverMessageFromProviderError(responseWithStats)
       }
+
+      this._trace("llm_response", { label: "LLM_RESPONSE", model: llmType, step: step + 1, response: responseWithStats })
 
       if (args.debug) {
         var responseToPrint = responseWithStats
@@ -17667,6 +17704,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               print( ow.format.withSideLine("<--\n" + stringify(fallbackToPrint) + "\n<---", __, "FG(8)", "BG(15),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
             }
           }
+          this._trace("llm_response", { label: "FALLBACK_RESPONSE", model: "main", step: step + 1, response: fallbackResponseWithStats })
           var fallbackStats = isObject(fallbackResponseWithStats) ? fallbackResponseWithStats.stats : {}
           var fallbackTokenTotal = this._getTotalTokens(fallbackStats)
           registerCallUsage(fallbackTokenTotal)
@@ -17851,6 +17889,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           print( ow.format.withSideLine("<<<\n" + colorify(msg, { bgcolor: "BG(230),BLACK"}) + "\n<<<", __, "FG(220)", "BG(230),BLACK", ow.format.withSideLineThemes().doubleLineBothSides) )
         }
       }
+      this._trace("normalized_response", { label: "NORMALIZED_MSG", step: step + 1, response: msg })
 
       if (!recoveredFromEnvelopeApplied && isMap(msg)) {
         var directMsgToolUseFailed = this._extractProviderToolUseFailedGeneration(msg)
@@ -18905,6 +18944,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var finalResponseWithStats
     try {
       this.fnI("input", "Interacting with main model (final answer)...")
+      this._trace("llm_prompt", { label: "FINAL_PROMPT", model: "main", content: finalPrompt })
       finalResponseWithStats = this._withExponentialBackoff(() => {
         addCall()
         var jsonFlag = runtime.forceNoJson !== true && !this._noJsonPrompt
@@ -18930,6 +18970,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       })
       return "(no answer)"
     }
+    this._trace("llm_response", { label: "FINAL_RESPONSE", model: "main", response: finalResponseWithStats })
     if (args.debug) {
       if (this._debugFile) {
         this._debugOut("FINAL_RESPONSE", stringify(finalResponseWithStats))
@@ -19041,6 +19082,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       var chatbotDebugSnapshot = this._snapshotDebugChannel(args.debugch, "__mini_a_llm_debug")
 
       beforeCall()
+      this._trace("llm_prompt", { label: "CHATBOT_PROMPT", model: "main", step: step + 1, content: pendingPrompt })
       if (args.debug) {
         if (this._debugFile) {
           this._debugOut("CHATBOT_PROMPT", pendingPrompt)
@@ -19092,6 +19134,7 @@ MiniA.prototype._runChatbotMode = function(options) {
       } else {
         responseWithStats = this.llm.promptWithStats(pendingPrompt)
       }
+      this._trace("llm_response", { label: "CHATBOT_RESPONSE", model: "main", step: step + 1, response: responseWithStats })
       if (args.debug) {
         if (this._debugFile) {
           this._debugOut("CHATBOT_RESPONSE", stringify(responseWithStats))
@@ -19521,12 +19564,14 @@ MiniA.prototype._runChatbotMode = function(options) {
       this.fnI("warn", `Chatbot mode reached ${maxSteps} step${maxSteps == 1 ? "" : "s"} without a final answer. Requesting best effort response...`)
       var fallbackPrompt = "Please provide your best possible answer to the user's last request now."
       beforeCall()
+      this._trace("llm_prompt", { label: "CHATBOT_FALLBACK_PROMPT", model: "main", content: fallbackPrompt })
       var fallbackResponseWithStats
       if (!(runtime.forceNoJson === true || this._noJsonPrompt) && isDef(this.llm.promptJSONWithStats) && this._isStructuredOutputFormat(args.format)) {
         fallbackResponseWithStats = this.llm.promptJSONWithStats(fallbackPrompt)
       } else {
         fallbackResponseWithStats = this.llm.promptWithStats(fallbackPrompt)
       }
+      this._trace("llm_response", { label: "CHATBOT_FALLBACK_RESPONSE", model: "main", response: fallbackResponseWithStats })
       if (args.debug) {
         if (this._debugFile) {
           this._debugOut("CHATBOT_FALLBACK_RESPONSE", stringify(fallbackResponseWithStats))

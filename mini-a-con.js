@@ -425,7 +425,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "skills", "wiki", "graph", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "wiki", "graph", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -584,6 +584,7 @@ try {
     verbose        : { type: "boolean", default: false, description: "Print detailed interaction events" },
     debug          : { type: "boolean", default: false, description: "Enable debug logging" },
     debugfile      : { type: "string", description: "Write debug output to this file instead of screen (implies debug=true)" },
+    debugtrace     : { type: "boolean", default: true, description: "Capture the previous goal trace for /debug in a temporary file" },
     raw            : { type: "boolean", default: false, description: "Return raw LLM output without formatting adjustments" },
     showthinking   : { type: "boolean", default: false, description: "Surface XML-tagged model thinking blocks as thought logs (uses raw prompt calls)" },
     youare         : { type: "string", description: "Override the opening 'You are...' sentence in the agent prompt" },
@@ -2104,6 +2105,7 @@ try {
     try {
       var slashParameterHints = { set: "=", toggle: "", unset: "", show: "" }
       var statsCompletions = ["detailed", "tools", "memory", "wiki", "out=", "file=", "save=", "json="]
+      var debugFilterCompletions = ["all", "calls", "answers", "memory", "system", "prompts", "responses", "thinking", "problems"]
       var lastCompletions = ["md"]
       var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
@@ -2202,6 +2204,19 @@ try {
               if (mode.indexOf(tokenLower) === 0) candidates.add(mode)
             })
             return candidates.isEmpty() ? -1 : Number(tokenInsertionPoint)
+          }
+
+          // Handle /debug filter completions
+          if (lookupName === "debug") {
+            var debugRemainder = uptoCursor.substring(firstSpace + 1)
+            var debugFilter = debugRemainder.replace(/^\s*/, "")
+            var debugInsertionPoint = cursor - debugFilter.length
+            if (/\s/.test(debugFilter)) return -1
+            var debugFilterLower = debugFilter.toLowerCase()
+            debugFilterCompletions.forEach(function(filter) {
+              if (filter.indexOf(debugFilterLower) === 0) candidates.add(filter)
+            })
+            return candidates.isEmpty() ? -1 : Number(debugInsertionPoint)
           }
 
           // Handle /last command completions
@@ -3565,6 +3580,7 @@ try {
     }
   })
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
+  var lastDebugTrace = __
   var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true }
   var activeAgent = __
   var shutdownHandled = false
@@ -4551,6 +4567,186 @@ try {
     //print(prefix + " " + iconText + " " + message)
   }
 
+  function clearDebugTrace() {
+    if (!isObject(lastDebugTrace) || !isString(lastDebugTrace.path)) {
+      lastDebugTrace = __
+      return
+    }
+    try {
+      if (io.fileExists(lastDebugTrace.path)) io.rm(lastDebugTrace.path)
+    } catch(ignoreTraceCleanupError) {}
+    lastDebugTrace = __
+  }
+
+  function createDebugTrace(goalText) {
+    clearDebugTrace()
+    var tracePath = String(io.createTempFile("mini-a-debug-trace-", ".ndjson"))
+    var trace = { path: tracePath, sequence: 0, status: "running" }
+    lastDebugTrace = trace
+    return function(kind, payload) {
+      try {
+        trace.sequence++
+        io.writeFileString(tracePath, stringify({
+          sequence : trace.sequence,
+          timestamp: new Date().toISOString(),
+          kind     : kind,
+          payload  : payload
+        }, __, "") + "\n", __, true)
+      } catch(ignoreTraceWriteError) {}
+    }
+  }
+
+  function traceEventSummary(record) {
+    var payload = isMap(record.payload) ? record.payload : {}
+    var text = ""
+    if (isString(payload.label)) text = payload.label
+    else if (isString(payload.name)) text = payload.name
+    else if (isString(payload.event)) text = payload.event + (isDef(payload.message) ? ": " + payload.message : "")
+    else if (isString(payload.content)) text = payload.content
+    else if (isDef(payload.message)) text = String(payload.message)
+    else text = stringify(payload, __, "")
+    return truncateForConsoleWidth(String(text || "").replace(/\s+/g, " ").trim(), 90)
+  }
+
+  function classifyDebugTraceRecord(record) {
+    var payload = isMap(record.payload) ? record.payload : {}
+    var kind = isString(record.kind) ? record.kind : "event"
+    var eventName = isString(payload.event) ? payload.event.toLowerCase() : ""
+    var message = isDef(payload.message) ? String(payload.message) : ""
+    if (kind === "tool_call" || kind === "shell_call" || eventName === "mcp" || eventName === "exec" || eventName === "shell") return "calls"
+    if (kind === "tool_result" || kind === "shell_result") return "answers"
+    if (kind === "llm_prompt") return payload.label === "SYSTEM_INSTRUCTION" ? "system" : "prompts"
+    if (kind === "llm_response" || kind === "normalized_response") return "responses"
+    if (eventName === "thought" || eventName === "think") return "thinking"
+    if (/\[mem:/.test(message)) return "memory"
+    if (eventName === "error" || eventName === "warn") return "problems"
+    return "events"
+  }
+
+  var debugTraceFilters = [
+    { key: "all", label: "All events" },
+    { key: "calls", label: "MCP and tool calls" },
+    { key: "answers", label: "MCP and tool answers" },
+    { key: "memory", label: "Memory events" },
+    { key: "system", label: "System prompts" },
+    { key: "prompts", label: "LLM prompts" },
+    { key: "responses", label: "LLM responses" },
+    { key: "thinking", label: "Thinking" },
+    { key: "problems", label: "Warnings and errors" }
+  ]
+
+  function chooseDebugTraceFilter(filterArg) {
+    var requested = isString(filterArg) ? filterArg.trim().toLowerCase() : ""
+    if (requested.length > 0) {
+      var aliases = { mcp: "calls", tool: "calls", call: "calls", answer: "answers", llm: "responses", thought: "thinking", warning: "problems", error: "problems" }
+      requested = aliases[requested] || requested
+      for (var i = 0; i < debugTraceFilters.length; i++) {
+        if (debugTraceFilters[i].key === requested) return debugTraceFilters[i]
+      }
+      return __
+    }
+    var choices = debugTraceFilters.map(function(filter) { return filter.label })
+    choices.push("🔙 Cancel")
+    var selected = __miniANormalizeChoiceIndex(askChoose("Filter debug events: ", choices, choices.length), choices.length - 1)
+    return selected >= 0 && selected < debugTraceFilters.length ? debugTraceFilters[selected] : __
+  }
+
+  function readDebugTraceIndex(tracePath) {
+    var index = [], raf = __
+    try {
+      raf = new java.io.RandomAccessFile(tracePath, "r")
+      while (true) {
+        var offset = raf.getFilePointer()
+        var rawLine = raf.readLine()
+        if (rawLine === null) break
+        var line = String(new java.lang.String(new java.lang.String(rawLine).getBytes("ISO-8859-1"), "UTF-8"))
+        var record = jsonParse(line, __, __, true)
+        if (!isMap(record)) continue
+        index.push({ offset: offset, sequence: record.sequence, kind: record.kind, category: classifyDebugTraceRecord(record), timestamp: record.timestamp, summary: traceEventSummary(record) })
+      }
+    } finally {
+      if (isDef(raf)) try { raf.close() } catch(ignoreTraceIndexCloseError) {}
+    }
+    return index
+  }
+
+  function readDebugTraceRecord(tracePath, offset) {
+    var raf = __
+    try {
+      raf = new java.io.RandomAccessFile(tracePath, "r")
+      raf.seek(offset)
+      var rawLine = raf.readLine()
+      if (rawLine === null) return __
+      var line = String(new java.lang.String(new java.lang.String(rawLine).getBytes("ISO-8859-1"), "UTF-8"))
+      return jsonParse(line, __, __, true)
+    } finally {
+      if (isDef(raf)) try { raf.close() } catch(ignoreTraceRecordCloseError) {}
+    }
+  }
+
+  function inspectDebugTrace(filterArg) {
+    if (toBoolean(sessionOptions.debugtrace) !== true) {
+      print(colorifyText("Debug tracing is disabled. Use /set debugtrace true before running a goal.", hintColor))
+      return
+    }
+    if (!isObject(lastDebugTrace) || !isString(lastDebugTrace.path) || !io.fileExists(lastDebugTrace.path)) {
+      print(colorifyText("No debug trace is available for a previous goal.", hintColor))
+      return
+    }
+    var index
+    try { index = readDebugTraceIndex(lastDebugTrace.path) } catch(traceIndexError) {
+      printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Unable to read debug trace: " + traceIndexError, errorColor))
+      return
+    }
+    if (!isArray(index) || index.length === 0) {
+      print(colorifyText("The previous goal did not produce any trace events.", hintColor))
+      return
+    }
+    var interactiveFilter = !isString(filterArg) || filterArg.trim().length === 0
+    while (true) {
+      var filter = chooseDebugTraceFilter(filterArg)
+      if (isUnDef(filter)) {
+        if (isString(filterArg) && filterArg.trim().length > 0) {
+          print(colorifyText("Unknown debug filter. Use: all, calls, answers, memory, system, prompts, responses, thinking, or problems.", errorColor))
+        }
+        return
+      }
+      var filteredIndex = filter.key === "all" ? index : index.filter(function(entry) { return entry.category === filter.key })
+      if (filteredIndex.length === 0) {
+        print(colorifyText("No " + filter.label.toLowerCase() + " were recorded for the previous goal.", hintColor))
+        if (interactiveFilter) continue
+        return
+      }
+      while (true) {
+        var choices = filteredIndex.map(function(entry) {
+          return "#" + entry.sequence + " " + entry.kind + " — " + entry.summary
+        })
+        choices.push(interactiveFilter ? "🔙 Back to filters" : "🔙 Cancel")
+        var selected = __miniANormalizeChoiceIndex(askChoose("Choose a debug event: ", choices, Math.min(choices.length, 12)), choices.length - 1)
+        if (selected < 0 || selected >= filteredIndex.length) break
+        var record
+        try { record = readDebugTraceRecord(lastDebugTrace.path, filteredIndex[selected].offset) } catch(traceReadError) {
+          printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Unable to read selected trace event: " + traceReadError, errorColor))
+          continue
+        }
+        if (!isMap(record)) {
+          print(colorifyText("The selected trace event is invalid.", errorColor))
+          continue
+        }
+        print()
+        print(ow.format.withSideLine(
+          printTree(record),
+          __,
+          "FG(220)",
+          __,
+          ow.format.withSideLineThemes().doubleLineBothSides
+        ))
+      }
+      if (!interactiveFilter) return
+      filterArg = __
+    }
+  }
+
   function persistConversationSnapshot(agentInstance) {
     var convoPath = getConversationPath()
     if (!isString(convoPath) || convoPath.trim().length === 0) return
@@ -4608,7 +4804,13 @@ try {
 
     lastGoalPrompt = isString(goalText) ? goalText : (isDef(goalText) ? String(goalText) : "")
     var _args = buildArgs(effectiveGoal)
+    clearDebugTrace()
     if (!ensureModel(_args)) return false
+    var traceSink = __
+    if (toBoolean(_args.debugtrace) === true) {
+      traceSink = createDebugTrace(goalText)
+      traceSink("goal", { goal: goalText })
+    }
     var agent = new MiniA()
     activeAgent = agent
     agent.setInteractionFn(function(event, message) {
@@ -4616,6 +4818,7 @@ try {
         printEvent(event, icon, text, id)
       })
     })
+    if (isFunction(agent.setTraceFn) && isFunction(traceSink)) agent.setTraceFn(traceSink)
     if (isFunction(agent.setAnsiLogging)) agent.setAnsiLogging(__conAnsi === true)
     if (isFunction(agent.setHookFn)) {
       agent.setHookFn(function(event, contextVars) {
@@ -4675,6 +4878,7 @@ try {
       }).exec()
       _stopActivityCueLoop()
       if (stopRequested) {
+        if (isObject(lastDebugTrace)) lastDebugTrace.status = "stopped"
         _prevEventRenderLines = __
         _prevEventLastUpdate = 0
         _prevEventAnimatedRenderer = __
@@ -4683,6 +4887,7 @@ try {
       }
       lastResult = agentResult
       lastOrigResult = agentOrigResult
+      if (isObject(lastDebugTrace)) lastDebugTrace.status = "completed"
       persistConversationSnapshot(agent)
       refreshConversationStats(agent)
       var resultPreview = isString(agentResult) ? agentResult.substring(0, 2000) : (isDef(agentResult) ? stringify(agentResult, __, "").substring(0, 2000) : "")
@@ -4735,6 +4940,7 @@ try {
       _prevEventLastUpdate = 0
       _prevEventAnimatedRenderer = __
       var errMsg = isDef(e) && isDef(e.message) ? e.message : "" + e
+      if (isObject(lastDebugTrace)) lastDebugTrace.status = "failed"
       printErr(colorifyText("!!", "ITALIC," + errorColor) + " " + colorifyText("Mini-A execution failed: " + errMsg, errorColor))
       return false
     }
@@ -4863,6 +5069,7 @@ try {
 
     try { persistConversationSnapshot(activeAgent) } catch(ignorePersist) {}
     try { refreshConversationStats(activeAgent) } catch(ignoreRefresh) {}
+    clearDebugTrace()
     try {
       if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) activeAgent._stopAgentResources()
     } catch(ignoreAgentStop) {}
@@ -5575,6 +5782,7 @@ try {
       { command: "/model [main|lc|val]", description: "Choose a model definition for a slot (no arg = interactive slot picker)" },
       { command: "/models", description: "List current main, low and validation models" },
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
+      { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
@@ -6267,6 +6475,14 @@ try {
         } else {
           printConversationHistory(parsedCount)
         }
+        continue
+      }
+      if (commandLower === "debug") {
+        inspectDebugTrace()
+        continue
+      }
+      if (commandLower.indexOf("debug ") === 0) {
+        inspectDebugTrace(command.substring(6).trim())
         continue
       }
       if (commandLower === "model" || commandLower.indexOf("model ") === 0) {
