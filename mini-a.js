@@ -18678,6 +18678,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             lineEnd   : isNumber(wkParams.lineEnd)    ? wkParams.lineEnd    : __,
             section   : isString(wkParams.section)    ? wkParams.section    : __
           }
+          this._trace("wiki_call", { op: wkOp, params: wkParams })
           try {
             var wkResult
             if (wkOp === "list") {
@@ -18803,10 +18804,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use context, list, tree, browse, read, search, grep, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
+            this._trace("wiki_result", { op: wkOp, params: wkParams, result: wkResult, error: isString(wkResult) && wkResult.indexOf("[ERROR]") === 0 })
             runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) ${wkResult}`)
           } catch(wkErr) {
             global.__mini_a_metrics.wiki_ops_errors.inc()
-            runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) [ERROR] ${__miniAErrMsg(wkErr)}`)
+            var wkError = __miniAErrMsg(wkErr)
+            this._trace("wiki_result", { op: wkOp, params: wkParams, result: wkError, error: true })
+            runtime.context.push(`[OBS ${stepLabel}] (wiki/${wkOp}) [ERROR] ${wkError}`)
           }
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
@@ -19424,6 +19428,7 @@ MiniA.prototype._runChatbotMode = function(options) {
               lineEnd   : isNumber(cbWkParams.lineEnd)    ? cbWkParams.lineEnd    : __,
               section   : isString(cbWkParams.section)    ? cbWkParams.section    : __
             }
+            this._trace("wiki_call", { op: cbWkOp, params: cbWkParams, source: "chatbot" })
             try {
               var cbWkResult
               if (cbWkOp === "list") {
@@ -19480,9 +19485,12 @@ MiniA.prototype._runChatbotMode = function(options) {
               } else {
                 cbWkResult = "[ERROR] Unknown wiki op: " + cbWkOp
               }
+              this._trace("wiki_result", { op: cbWkOp, params: cbWkParams, result: cbWkResult, error: isString(cbWkResult) && cbWkResult.indexOf("[ERROR]") === 0, source: "chatbot" })
               pendingPrompt = `wiki/${cbWkOp} result:\n${cbWkResult}\nUse this information to continue.`
             } catch(cbWkErr) {
-              pendingPrompt = `wiki/${cbWkOp} error: ${__miniAErrMsg(cbWkErr)}`
+              var cbWkError = __miniAErrMsg(cbWkErr)
+              this._trace("wiki_result", { op: cbWkOp, params: cbWkParams, result: cbWkError, error: true, source: "chatbot" })
+              pendingPrompt = `wiki/${cbWkOp} error: ${cbWkError}`
             }
             handled = true
             break
