@@ -1,0 +1,48 @@
+# Minimal HTTP MCP server used as a fixture by tests/mcpAuth.yaml to exercise
+# httpdMCP's optional bearer-token authentication. Not part of the mcps/ catalog.
+help:
+  text   : Test-only MCP server for the mcpAuth test suite.
+  expects:
+  - name     : onport
+    desc     : Port to listen on.
+    mandatory: true
+  - name     : authtoken
+    desc     : Optional bearer token to require (forwarded to httpdMCP).
+    mandatory: false
+  - name     : usestream
+    desc     : If true, uses SSE responses (forwarded to httpdMCP).
+    mandatory: false
+
+ojob:
+  opacks      :
+  - openaf
+  - oJob-common
+  daemon      : true
+  logToConsole: false
+
+include:
+- oJobMCP.yaml
+
+todo:
+- (httpdStart   ): "${onport}"
+- (httpdHealthz ): "${onport}"
+- (httpdMCP     ): "${onport}"
+  ((description)): &MCPSERVER
+    serverInfo:
+      name   : mcpauth-test
+      title  : MCP Auth Test Server
+      version: 1.0.0
+  ((fnsMeta)): &MCPFNSMETA
+    echo:
+      name       : echo
+      description: Echoes whether the auth header reached the tool job (used to verify credential scrubbing).
+      inputSchema:
+        type      : object
+        properties: {}
+  ((fns    )):
+    echo: MCP Auth Echo Tool
+
+jobs:
+- name: MCP Auth Echo Tool
+  exec: |
+    args.sawAuthHeader = isDef(args._httprequest) && isDef(args._httprequest.header) && isDef(args._httprequest.header.authorization)

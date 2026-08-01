@@ -5,6 +5,7 @@ include:
 - tests/coreFunctionality.yaml
 - tests/dreams.yaml
 - tests/graph.yaml
+- tests/mcpAuth.yaml
 - tests/miniAUtils.yaml
 - tests/outerLoop.yaml
 - tests/progToolCall.yaml

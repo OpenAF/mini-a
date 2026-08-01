@@ -18,6 +18,11 @@ All MCP oJob YAML files in this project follow a consistent pattern that enables
 - **STDIO Mode**: Direct execution with communication via standard input/output
 - **HTTP Mode**: Server mode activated by providing the `onport` parameter
 
+As long as your MCP starts its HTTP endpoint through the standard `httpdMCP` shortcut (as shown
+below), it automatically inherits optional bearer-token authentication for free — no extra code
+needed. See [Authenticating HTTP MCP servers](README.md#authenticating-http-mcp-servers) in the
+README for how operators enable it via `OJOB_MCP_AUTH_TOKEN`.
+
 ## File Structure Overview
 
 Every MCP YAML file contains these essential sections:

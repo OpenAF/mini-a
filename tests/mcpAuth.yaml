@@ -1,0 +1,46 @@
+include:
+- oJobTest.yaml
+
+jobs:
+- name: MiniA MCP Auth Tests::Init
+  exec: args.tests = require("tests/mcpAuth.js")
+
+- name: MiniA MCP Auth Tests::FailOpenWhenNoToken
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFailOpenWhenNoToken
+
+- name: MiniA MCP Auth Tests::HealthzStaysOpenWithAuth
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testHealthzStaysOpenWithAuth
+
+- name: MiniA MCP Auth Tests::MissingHeaderRejected
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMissingHeaderRejected
+
+- name: MiniA MCP Auth Tests::WrongTokenRejected
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testWrongTokenRejected
+
+- name: MiniA MCP Auth Tests::CorrectTokenAccepted
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testCorrectTokenAccepted
+
+- name: MiniA MCP Auth Tests::AuthHeaderScrubbedFromToolJob
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAuthHeaderScrubbedFromToolJob
+
+- name: MiniA MCP Auth Tests::SSEUnauthorizedRejectedWithoutStreaming
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSSEUnauthorizedRejectedWithoutStreaming
+
+- name: MiniA MCP Auth Tests::SSEAuthorizedStreams
+  from: MiniA MCP Auth Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSSEAuthorizedStreams

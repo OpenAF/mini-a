@@ -816,6 +816,88 @@ This will start the MCP on port 12345. You can then interact with it remotely us
 
 You can use the same approach for any MCP in the catalog (e.g., `mcp-email.yaml`, `mcp-notify.yaml`, `mcp-net.yaml`).
 
+## Authenticating HTTP MCP servers
+
+When a MCP is exposed with `onport`, anyone who can reach the port gets full tool access — there is
+no authentication by default, so HTTP mode is normally only safe on `localhost` or a trusted network.
+Every MCP in this catalog (built on `oJobMCP.yaml`'s `httpdMCP`) supports an **optional** shared
+bearer token to lock this down, with no changes required to the MCP's own yaml.
+
+STDIO mode is unaffected — the client already owns the process, so there's nothing to authenticate.
+
+Enable it by setting `OJOB_MCP_AUTH_TOKEN` before starting the server:
+
+```bash
+OJOB_MCP_AUTH_TOKEN=s3cr3t ojob mcps/mcp-file.yaml onport=8080
+```
+
+With no token set, the server behaves exactly as before (fails open — this is a purely opt-in
+feature). Once a token is set, every request to the MCP endpoint (`/mcp` by default) must include a
+matching `Authorization: Bearer s3cr3t` header, or it receives a `401 Unauthorized`. The `/healthz`
+and `/metrics` endpoints stay unauthenticated (they're liveness probes/scrape targets); if you need
+those protected too, use oJob-common's `httpdDefaultAuth` shortcut.
+
+Related environment variables (all optional):
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `OJOB_MCP_AUTH_TOKEN` | The shared bearer token. Unset = auth disabled. | *(none)* |
+| `OJOB_MCP_AUTH_HEADER` | Header to read the credential from. | `authorization` |
+| `OJOB_MCP_AUTH_SCHEME` | Scheme prefix expected before the token. | `Bearer` |
+| `OJOB_MCP_AUTH_REALM` | Realm reported in the `WWW-Authenticate` challenge. | the MCP's server name |
+| `OJOB_MCP_AUTH_CHALLENGE` | Whether 401 responses include a `WWW-Authenticate` header. | `true` |
+
+The same `authtoken`/`authheader`/`authscheme`/`authrealm`/`authchallenge` arguments can be passed
+directly to `httpdMCP` in a custom yaml instead of using environment variables, but the env var is
+the recommended way to configure the catalog's MCPs: it keeps the token out of the process's
+command-line arguments (and therefore out of `ps` output and other jobs' args).
+
+### Client configuration examples
+
+- **Claude Code**:
+  ```bash
+  claude mcp add --transport http files http://host:8080/mcp \
+    --header "Authorization: Bearer s3cr3t"
+  ```
+- **VS Code** (`.vscode/mcp.json`):
+  ```json
+  {
+    "servers": {
+      "files": {
+        "type": "http",
+        "url": "http://host:8080/mcp",
+        "headers": { "Authorization": "Bearer ${input:token}" }
+      }
+    }
+  }
+  ```
+- **Codex** (`~/.codex/config.toml`) — Codex has a dedicated key for reading the token from the
+  environment rather than the config file:
+  ```toml
+  [mcp_servers.files]
+  url = "http://host:8080/mcp"
+  bearer_token_env_var = "MCP_FILES_TOKEN"
+  ```
+- **opencode** (`opencode.json`):
+  ```json
+  {
+    "mcp": {
+      "files": {
+        "type": "remote",
+        "url": "http://host:8080/mcp",
+        "headers": { "Authorization": "Bearer {env:MCP_FILES_TOKEN}" }
+      }
+    }
+  }
+  ```
+- **Mini-A** — `$mcp`/`mcp=` already support bearer auth directly, no extra client-side work needed:
+  ```bash
+  mini-a goal="..." mcp="(type: remote, url: 'http://host:8080/mcp', auth: (type: bearer, token: 's3cr3t'))"
+  ```
+
+For production deployments beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
+a reverse proxy (e.g. Caddy, nginx, oauth2-proxy) in front of the MCP port instead.
+
 ## How to unit test a MCP
 
 ### STDIO based
