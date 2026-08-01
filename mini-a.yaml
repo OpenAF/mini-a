@@ -265,7 +265,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : debugtrace
-    desc     : Keep the console /debug trace for the previous goal in a temporary file (default: true)
+    desc     : "Keep the console /debug trace for the previous goal in a temporary file (default: true)"
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
