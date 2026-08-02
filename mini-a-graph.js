@@ -34,8 +34,15 @@ MiniAWikiGraph.prototype._emptyState = function() {
   }
 }
 
+// _hasFalkorRead: FalkorDB is reachable for queries. Read-only graphs are allowed here —
+// an externally maintained FalkorDB is exactly what a read-only wiki should be consuming.
+MiniAWikiGraph.prototype._hasFalkorRead = function() {
+  return isMap(this._falkor) && isString(this._falkor.host) && this._falkor.host.trim().length > 0
+}
+
+// _hasFalkor: FalkorDB is writable (sync/diff/build). Read-only graphs never mutate it.
 MiniAWikiGraph.prototype._hasFalkor = function() {
-  return !this._readOnly && isMap(this._falkor) && isString(this._falkor.host) && this._falkor.host.trim().length > 0
+  return !this._readOnly && this._hasFalkorRead()
 }
 
 MiniAWikiGraph.prototype._ensureDir = function() {
@@ -936,7 +943,7 @@ MiniAWikiGraph.prototype.falkorApplyDiff = function(diff) {
 }
 
 MiniAWikiGraph.prototype.falkorQuery = function(cypher) {
-  if (!this._hasFalkor()) return { ok: false, error: "falkor not configured" }
+  if (!this._hasFalkorRead()) return { ok: false, error: "falkor not configured" }
   try {
     includeOPack("FalkorDB")
     loadLib("falkordb.js")
@@ -1008,7 +1015,8 @@ MiniAWikiGraph.prototype.saveReport = function() {
 
 MiniAWikiGraph.prototype.load = function() {
   this._ensureIndexes()
-  if (this._hasFalkor() && this._readOnly !== true) {
+  // reading the remote graph is allowed read-only; only sync/diff/build require write access
+  if (this._hasFalkorRead()) {
     var db = __
     try {
       includeOPack("FalkorDB")

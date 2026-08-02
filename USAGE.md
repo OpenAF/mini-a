@@ -2942,6 +2942,67 @@ These wrappers keep state sync/persistence centralized (instead of ad-hoc direct
 
 ---
 
+## Wiki Ingestion
+
+`mini-a-ingest.js` turns an existing body of documentation into wiki pages. Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are deterministic; only the per-source distillation calls the LLM.
+
+**Sources**: a markdown/docs folder, a git repository (local checkout or clone URL), or a web page URL. The type is auto-detected; `ingesttype=` overrides.
+
+```bash
+# a docs folder
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki
+
+# a git repository (shallow-cloned to a temp dir, commit SHA recorded)
+ojob mini-a-ingest.yaml ingestsource=https://github.com/OpenAF/mini-a wikiroot=/tmp/wiki
+
+# see what would happen first
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki ingestdryrun=true
+```
+
+From the console (requires `usewiki=true wikiaccess=rw`):
+
+```
+/ingest ./docs
+/ingest https://github.com/OpenAF/mini-a reference
+/ingest ./docs dryrun
+/ingest ./docs force
+```
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `ingestsource` | string | - | Folder, git repository (path or clone URL), or page URL — **required** |
+| `ingesttype` | string | auto | `markdown`, `repo` or `url` |
+| `ingestsection` | string | source name | Wiki section ingested pages are written into |
+| `ingestinclude` | string | - | Comma-separated path fragments to include |
+| `ingestexclude` | string | - | Comma-separated path fragments to exclude |
+| `ingestchunkchars` | number | `24000` | Maximum characters per distillation chunk |
+| `ingestmaxfilekb` | number | `512` | Sources larger than this are **skipped**, not truncated |
+| `ingestconcurrency` | number | `4` | Parallel source distillations |
+| `ingestdryrun` | boolean | `false` | Report what would be ingested without writing |
+| `ingestforce` | boolean | `false` | Re-ingest sources the ledger reports as unchanged |
+| `ingestledger` | string | `<indexRoot>/.mini-a-wiki-ingest/ledger.json` | Ledger file path |
+
+### How it works
+
+1. **Resolve** — detect the source type; shallow-clone remote repos to a temp dir and record the commit SHA.
+2. **Discover** — walk for `.md`/`.markdown`/`.mdx`/`.txt`/`.rst`/`.adoc`, skipping vendor directories (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …). `README*` and `docs/**` come first.
+3. **Ledger** — skip sources whose sha1 is unchanged since the last ingest (`ingestforce=true` overrides).
+4. **Chunk** — split oversized sources on `##`/`###` boundaries (paragraphs when headingless).
+5. **Distill** — one LLM call per source, in parallel batches, producing `{title, description, tags, type, body}`.
+6. **Write** — one source produces **one page**. Cross-page dedup and reorganisation are left to `/dream wiki apply`.
+7. **Finalize** — regenerate indexes, rebuild the search index and the knowledge graph, append to `log.md`.
+
+Ingested pages carry provenance front-matter: `source`, `source_ref` (commit SHA or origin), `source_hash` (sha1 of the ingested content) and `ingested`. A later ingest of a changed source overwrites the page, so record durable additions elsewhere.
+
+A typical full cycle:
+
+```bash
+ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/wiki
+opack exec mini-a -- usewiki=true wikiroot=/tmp/wiki wikiaccess=rw dream=true dreammode=wiki
+```
+
+---
+
 ## Dreams (Sleep Pass)
 
 The dream pass is an LLM-powered off-line consolidation step.  Given the same memory channels and wiki settings used during a regular goal, it reorganises what the agent learned: merging duplicates, marking superseded entries stale, surfacing new cross-cutting insights, and producing a lint-clean wiki — all without touching the live agent loop.
@@ -2976,9 +3037,9 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `wikiroot` / `wikibucket` / `wikibackend` | string | - | Same wiki backend settings as the regular agent |
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Preview what would change without writing anything back |
-| `dreamwikimode` | string | `apply` | Wiki dream mode: `lint`, `plan`, `apply`, `reorg` |
+| `dreamwikimode` | string | `apply` | Wiki dream mode: `plan`, `apply`, `reorg` |
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
-| `dreamwikiapply` | boolean | `false` | Required write gate for wiki `apply`/`reorg` |
+| `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
 | `dreamreport` | string | - | Optional file path to write JSON run report |
@@ -3003,11 +3064,12 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 ### Wiki dream internals
 
 1. `usewiki=true` is required; `wikiaccess` is forced to `rw`.
-2. `dreamwikimode=plan` and `dryrun=true` currently run the same no-write proposal path.
+2. `dreamwikimode=plan`, `dryrun=true` and `dreamwikidryrun=true` all run the same no-write proposal path.
 3. Use `dreamwikimode=plan` for explicit mode selection; use `dryrun=true` when you want the generic safety flag (it also affects memory dreams).
 4. Proposal output includes `new_tree`, `move_table`, `indexes_to_create`, `indexes_to_update`, and lint before/after summaries.
-5. `dreamwikimode=apply` only performs safe non-structural index work and requires `dreamwikiapply=true`.
-6. `dreamwikimode=reorg` is structural, requires `dreamwikireorg=true`, `dreamwikiapply=true`, and `dreamwikiapproval=auto`.
+5. `dreamwikimode=apply` is the default. It performs safe non-structural index work and needs no extra write gate; use `dreamwikidryrun=true` to opt out.
+6. `dreamwikimode=reorg` is structural and still gated: it requires `dreamwikireorg=true` and `dreamwikiapproval=auto`.
+6b. Every `apply` and `reorg` run finishes with a deterministic finalize pass: root and section `index.md` are regenerated from live page metadata, the metadata shards and full-text index are rebuilt, and the knowledge graph is rebuilt when `usegraph=true`.
 7. A `MiniAWikiManager` exposes hierarchy-aware `tree`, `browse`, `backlinks`, `move`, and `lint()` operations.
 8. A full `MiniA` agent is spawned with `maxsteps=60` and the following goal:
    - Discover the hierarchy with `tree`/`browse`, search related content, inspect backlinks, and list lint issues.
@@ -3065,7 +3127,7 @@ mini-a dream=true \
 # Non-interactive safe wiki apply + report artifact
 mini-a dream=true \
   usewiki=true wikiroot=/shared/wiki \
-  dreamwikimode=apply dreamwikiapply=true \
+  dreamwikimode=apply \
   dreamreport=/var/log/mini-a/dream-wiki-apply.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
@@ -3073,7 +3135,7 @@ mini-a dream=true \
 mini-a dream=true \
   usewiki=true wikiroot=/shared/wiki \
   dreamwikimode=reorg dreamwikireorg=true \
-  dreamwikiapply=true dreamwikiapproval=auto \
+  dreamwikiapproval=auto \
   dreamreport=/var/log/mini-a/dream-wiki-reorg.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 ```

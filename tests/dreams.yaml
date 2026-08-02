@@ -2,75 +2,135 @@ include:
 - oJobTest.yaml
 
 jobs:
-- name: MiniA Dreams Tests::Init
-  exec: args.tests = require("tests/dreams.js")
 
-- name: MiniA Dreams Tests::MergesDuplicates
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryMergesDuplicates
   to  : oJob Test
-  exec: args.func = args.tests.testDreamMemoryMergesDuplicates
+  exec: args.func = require("tests/dreams.js").testDreamMemoryMergesDuplicates
 
-- name: MiniA Dreams Tests::MarksStale
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryMarksStale
   to  : oJob Test
-  exec: args.func = args.tests.testDreamMemoryMarksStale
+  exec: args.func = require("tests/dreams.js").testDreamMemoryMarksStale
 
-- name: MiniA Dreams Tests::PreservesIds
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryPreservesIds
   to  : oJob Test
-  exec: args.func = args.tests.testDreamMemoryPreservesIds
+  exec: args.func = require("tests/dreams.js").testDreamMemoryPreservesIds
 
-- name: MiniA Dreams Tests::ApplyPersistsConsolidatedSections
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryApplyPersistsConsolidatedSections
   to  : oJob Test
-  exec: args.func = args.tests.testDreamMemoryApplyPersistsConsolidatedSections
+  exec: args.func = require("tests/dreams.js").testDreamMemoryApplyPersistsConsolidatedSections
 
-- name: MiniA Dreams Tests::DryRunDoesNotWrite
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryDryRunDoesNotWrite
   to  : oJob Test
-  exec: args.func = args.tests.testDreamMemoryDryRunDoesNotWrite
+  exec: args.func = require("tests/dreams.js").testDreamMemoryDryRunDoesNotWrite
 
-- name: MiniA Dreams Tests::RejectsInvalidSchema
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryRejectsInvalidSchema
   to  : oJob Test
-  exec: args.func = args.tests.testDreamMemoryRejectsInvalidSchema
+  exec: args.func = require("tests/dreams.js").testDreamMemoryRejectsInvalidSchema
 
-- name: MiniA Dreams Tests::RunRoutesMemoryOnly
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamRunRoutesMemoryOnly
   to  : oJob Test
-  exec: args.func = args.tests.testDreamRunRoutesMemoryOnly
+  exec: args.func = require("tests/dreams.js").testDreamRunRoutesMemoryOnly
 
-- name: MiniA Dreams Tests::RunRoutesWikiOnly
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamRunRoutesWikiOnly
   to  : oJob Test
-  exec: args.func = args.tests.testDreamRunRoutesWikiOnly
+  exec: args.func = require("tests/dreams.js").testDreamRunRoutesWikiOnly
 
-- name: MiniA Dreams Tests::CreateChannelInvalidInput
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamRunPrefersMemoryWhenBothConfigured
   to  : oJob Test
-  exec: args.func = args.tests.testCreateChannelFromDefInvalidInput
+  exec: args.func = require("tests/dreams.js").testDreamRunPrefersMemoryWhenBothConfigured
 
-- name: MiniA Dreams Tests::ValidateSchemaValid
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamRunForceWikiWhenRequested
   to  : oJob Test
-  exec: args.func = args.tests.testValidateMemorySchemaValid
+  exec: args.func = require("tests/dreams.js").testDreamRunForceWikiWhenRequested
 
-- name: MiniA Dreams Tests::ValidateSchemaMissingSection
-  from: MiniA Dreams Tests::Init
+- name: MiniA Dreams Tests::DreamMemoryPlanModeReturnsDryRun
   to  : oJob Test
-  exec: args.func = args.tests.testValidateMemorySchemaMissingSection
+  exec: args.func = require("tests/dreams.js").testDreamMemoryPlanModeReturnsDryRun
+
+- name: MiniA Dreams Tests::DreamWikiPlanModeProposalShape
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiPlanModeProposalShape
+
+- name: MiniA Dreams Tests::DreamWikiDryRunOptsOutOfApply
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiDryRunOptsOutOfApply
+
+- name: MiniA Dreams Tests::DreamWikiReorgApprovalGate
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiReorgApprovalGate
+
+- name: MiniA Dreams Tests::CreateChannelFromDefInvalidInput
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testCreateChannelFromDefInvalidInput
+
+- name: MiniA Dreams Tests::ValidateMemorySchemaValid
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testValidateMemorySchemaValid
+
+- name: MiniA Dreams Tests::ValidateMemorySchemaMissingSection
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testValidateMemorySchemaMissingSection
 
 - name: MiniA Dreams Tests::BuildLlmUsesOAFModelFallback
-  from: MiniA Dreams Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBuildLlmUsesOAFModelFallback
+  exec: args.func = require("tests/dreams.js").testBuildLlmUsesOAFModelFallback
 
 - name: MiniA Dreams Tests::BuildLlmPrefersModelArg
-  from: MiniA Dreams Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBuildLlmPrefersModelArg
+  exec: args.func = require("tests/dreams.js").testBuildLlmPrefersModelArg
 
 - name: MiniA Dreams Tests::BuildWikiConfigMatchesRuntimeDefaults
-  from: MiniA Dreams Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBuildWikiConfigMatchesRuntimeDefaults
+  exec: args.func = require("tests/dreams.js").testBuildWikiConfigMatchesRuntimeDefaults
+
+- name: MiniA Dreams Tests::DreamWikiApplyRunsWithoutAnExplicitGate
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyRunsWithoutAnExplicitGate
+
+- name: MiniA Dreams Tests::DreamWikiApplyDefaultsWhenNoModeGiven
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyDefaultsWhenNoModeGiven
+
+- name: MiniA Dreams Tests::DreamWikiFinalizeRegeneratesIndexAndReindexes
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiFinalizeRegeneratesIndexAndReindexes
+
+- name: MiniA Dreams Tests::DreamWikiFinalizeRunsBelowMinPages
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiFinalizeRunsBelowMinPages
+
+- name: MiniA Dreams Tests::FinalizePreservesAuthoredIndexContent
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testFinalizePreservesAuthoredIndexContent
+
+- name: MiniA Dreams Tests::DreamWikiLintModeIsGone
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiLintModeIsGone
+
+todo:
+- MiniA Dreams Tests::DreamMemoryMergesDuplicates
+- MiniA Dreams Tests::DreamMemoryMarksStale
+- MiniA Dreams Tests::DreamMemoryPreservesIds
+- MiniA Dreams Tests::DreamMemoryApplyPersistsConsolidatedSections
+- MiniA Dreams Tests::DreamMemoryDryRunDoesNotWrite
+- MiniA Dreams Tests::DreamMemoryRejectsInvalidSchema
+- MiniA Dreams Tests::DreamRunRoutesMemoryOnly
+- MiniA Dreams Tests::DreamRunRoutesWikiOnly
+- MiniA Dreams Tests::DreamRunPrefersMemoryWhenBothConfigured
+- MiniA Dreams Tests::DreamRunForceWikiWhenRequested
+- MiniA Dreams Tests::DreamMemoryPlanModeReturnsDryRun
+- MiniA Dreams Tests::DreamWikiPlanModeProposalShape
+- MiniA Dreams Tests::DreamWikiDryRunOptsOutOfApply
+- MiniA Dreams Tests::DreamWikiReorgApprovalGate
+- MiniA Dreams Tests::CreateChannelFromDefInvalidInput
+- MiniA Dreams Tests::ValidateMemorySchemaValid
+- MiniA Dreams Tests::ValidateMemorySchemaMissingSection
+- MiniA Dreams Tests::BuildLlmUsesOAFModelFallback
+- MiniA Dreams Tests::BuildLlmPrefersModelArg
+- MiniA Dreams Tests::BuildWikiConfigMatchesRuntimeDefaults
+- MiniA Dreams Tests::DreamWikiApplyRunsWithoutAnExplicitGate
+- MiniA Dreams Tests::DreamWikiApplyDefaultsWhenNoModeGiven
+- MiniA Dreams Tests::DreamWikiFinalizeRegeneratesIndexAndReindexes
+- MiniA Dreams Tests::DreamWikiFinalizeRunsBelowMinPages
+- MiniA Dreams Tests::FinalizePreservesAuthoredIndexContent
+- MiniA Dreams Tests::DreamWikiLintModeIsGone

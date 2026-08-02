@@ -1191,7 +1191,7 @@
       var raw = io.readFileString(dir + "/AGENTS.md")
       ow.test.assert(raw.indexOf("mini-a:agents managed:start") >= 0, true, "AGENTS.md should have managed:start marker")
       ow.test.assert(raw.indexOf("mini-a:agents managed:end") >= 0, true, "AGENTS.md should have managed:end marker")
-      ow.test.assert(raw.indexOf("agentsVersion: 3") >= 0, true, "AGENTS.md frontmatter should have agentsVersion: 3")
+      ow.test.assert(raw.indexOf("agentsVersion: " + __MINI_A_WIKI_AGENTS_VERSION) >= 0, true, "AGENTS.md frontmatter should carry the current agentsVersion")
       ow.test.assert(raw.indexOf("## Quick start") >= 0, true, "AGENTS.md should have Quick start section")
     } finally { cleanupTestDir(dir) }
   }
@@ -1203,7 +1203,7 @@
       var result = wm.upgradeAgents()
       ow.test.assert(result.ok, true, "upgradeAgents should return ok")
       ow.test.assert(result.action, "noop", "already v2 should be noop")
-      ow.test.assert(result.agentsVersion, 3, "agentsVersion should be 3")
+      ow.test.assert(result.agentsVersion, __MINI_A_WIKI_AGENTS_VERSION, "agentsVersion should be the current version")
     } finally { cleanupTestDir(dir) }
   }
 
@@ -1220,7 +1220,7 @@
       ow.test.assert(result.action, "upgraded", "action should be upgraded")
       var newRaw = io.readFileString(dir + "/AGENTS.md")
       ow.test.assert(newRaw.indexOf("mini-a:agents managed:start") >= 0, true, "upgraded AGENTS.md should have markers")
-      ow.test.assert(newRaw.indexOf("agentsVersion: 3") >= 0, true, "upgraded AGENTS.md should have v3")
+      ow.test.assert(newRaw.indexOf("agentsVersion: " + __MINI_A_WIKI_AGENTS_VERSION) >= 0, true, "upgraded AGENTS.md should carry the current agentsVersion")
       // Should NOT have the v1 stock phrase still active (wholesale replaced)
       ow.test.assert(newRaw.indexOf("This file defines how agents") < 0, true, "v1 stock phrase should be gone after wholesale replace")
     } finally { cleanupTestDir(dir) }
@@ -1530,6 +1530,173 @@
       ow.test.assert(moveResult.ok, true, "move should succeed")
       var page = wm.read("foo.md")
       ow.test.assert(page.body.indexOf("[c](/tables/customers.md)") >= 0, true, "rooted link should remain byte-for-byte unchanged after unrelated move")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  // ── Read-only index consumption ──────────────────────────────────────────────
+
+  // Recursive path snapshot of a wiki root. Deliberately not using wm.list(), which
+  // filters hidden paths and would hide exactly the artifacts these tests hunt for.
+  var snapshotTree = function(root) {
+    var out = []
+    var walk = function(d) {
+      var listing = io.listFiles(d)
+      if (!isMap(listing) || !isArray(listing.files)) return
+      listing.files.forEach(function(f) {
+        out.push(String(f.canonicalPath).substring(String(root).length))
+        if (f.isDirectory) walk(String(f.canonicalPath))
+      })
+    }
+    walk(root)
+    return out.sort()
+  }
+
+  var addedPaths = function(before, after) {
+    return after.filter(function(p) { return before.indexOf(p) < 0 })
+  }
+
+  exports.testReadOnlyConsumesExistingLuceneIndex = function() {
+    var dir = createTestDir()
+    try {
+      var rw = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      rw.write("notes/alpha.md", { title: "Alpha", description: "About alpha" }, "# Alpha\n\nThe quick brown zebrafish jumps.")
+      rw.write("notes/beta.md", { title: "Beta", description: "About beta" }, "# Beta\n\nA different marmoset topic.")
+      ow.test.assert(rw.reindex().ok, true, "rw reindex should succeed")
+      rw.close()
+
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      ow.test.assert(ro._searchIndexStatus(), "lucene-readonly", "ro should report a read-only lucene index")
+      var hits = ro.search("zebrafish", { limit: 5 })
+      ow.test.assert(hits.length > 0, true, "ro search should return index hits")
+      ow.test.assert(hits[0].path, "notes/alpha.md", "ro search should find the right page")
+      ro.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testReadOnlySessionWritesNothingWhenIndexExists = function() {
+    var dir = createTestDir()
+    try {
+      var rw = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      rw.write("notes/alpha.md", { title: "Alpha" }, "# Alpha\n\nThe quick brown zebrafish jumps.")
+      rw.reindex()
+      rw.close()
+
+      var before = snapshotTree(dir)
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      ro.search("zebrafish", { limit: 5 })
+      ro.read("notes/alpha.md")
+      ro.list("", { withMeta: true })
+      ro.tree("", 3)
+      ro.browse("")
+      ro.context()
+      ro.close()
+      var added = addedPaths(before, snapshotTree(dir))
+      ow.test.assert(added.length, 0, "ro session must not create files: " + stringify(added, __, ""))
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testReadOnlySessionWritesNothingWhenNoIndexExists = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "notes/gamma.md", "---\ntitle: Gamma\ndescription: About gamma\n---\n\n# Gamma\n\nA lonely platypus wanders.")
+
+      var before = snapshotTree(dir)
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      ow.test.assert(ro._searchIndexStatus(), "scan", "ro without an index should fall back to scan")
+      var hits = ro.search("platypus", { limit: 5 })
+      ow.test.assert(hits.length > 0, true, "scan fallback should still find the page")
+      ow.test.assert(hits[0].path, "notes/gamma.md", "scan fallback should find the right page")
+      ro.list("", { withMeta: true })
+      ro.tree("", 3)
+      ro.browse("")
+      ro.close()
+      var added = addedPaths(before, snapshotTree(dir))
+      ow.test.assert(added.length, 0, "ro session without an index must not create files: " + stringify(added, __, ""))
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testReadOnlySearchWorksWhileWriterLockHeld = function() {
+    var dir = createTestDir()
+    try {
+      var rw = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      rw.write("notes/alpha.md", { title: "Alpha" }, "# Alpha\n\nThe quick brown zebrafish jumps.")
+      rw.reindex()
+      rw._openLucene(false)   // keep the IndexWriter (and its lock) open
+
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var hits = ro.search("zebrafish", { limit: 5 })
+      ow.test.assert(hits.length > 0, true, "ro search must not be blocked by a held writer lock")
+      ro.close()
+      rw.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testReadOnlyRejectsIndexBuilds = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "notes/gamma.md", "---\ntitle: Gamma\n---\n# Gamma")
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", usegraph: true })
+      ow.test.assert(ro.reindex().ok, false, "reindex should be rejected on a read-only wiki")
+      var g = ro.graph("build", {})
+      ow.test.assert(g.ok, false, "graph build should be rejected on a read-only wiki")
+      ro.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testIndexBackedSearchReturnsRealSnippets = function() {
+    var dir = createTestDir()
+    try {
+      var rw = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      rw.write("notes/alpha.md", { title: "Alpha" }, "# Alpha\n\nline one\nThe quick brown zebrafish jumps.\nline three")
+      rw.reindex()
+      rw.close()
+
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var hits = ro.search("zebrafish", { limit: 5, compact: false })
+      ow.test.assert(hits.length > 0, true, "should return non-compact hits")
+      ow.test.assert(hits[0].snippet.indexOf("zebrafish") >= 0, true, "snippet should be the matching line, not the query echo")
+      ow.test.assert(hits[0].line > 1, true, "line number should point at the matching line")
+      ro.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testContextReportsRetrievalCapability = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "notes/gamma.md", "---\ntitle: Gamma\n---\n# Gamma")
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var ctx = ro.context()
+      ow.test.assert(ctx.access, "ro", "context should report access mode")
+      ow.test.assert(isMap(ctx.retrieval), true, "context should report retrieval capability")
+      ow.test.assert(ctx.retrieval.search, "scan", "context should report the search engine in use")
+      ow.test.assert(ctx.retrieval.graph, "none", "context should report graph availability")
+      ro.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testFalkorReadGateAllowsReadOnlyGraphs = function() {
+    load("mini-a-graph.js")
+    var dir = createTestDir()
+    try {
+      var g = new MiniAWikiGraph({ graphDir: dir + "/g", readOnly: true, falkor: { host: "localhost", port: 6379 } }, function() {})
+      ow.test.assert(g._hasFalkorRead(), true, "read-only graph may query an external FalkorDB")
+      ow.test.assert(g._hasFalkor(), false, "read-only graph may not write to an external FalkorDB")
+
+      var gw = new MiniAWikiGraph({ graphDir: dir + "/g2", readOnly: false, falkor: { host: "localhost", port: 6379 } }, function() {})
+      ow.test.assert(gw._hasFalkor(), true, "writable graph may write to an external FalkorDB")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testReadOnlySkipsGraphWhenNoneExists = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "notes/gamma.md", "---\ntitle: Gamma\n---\n# Gamma")
+      var before = snapshotTree(dir)
+      var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", usegraph: true })
+      ow.test.assert(isObject(ro._graph), false, "ro should not construct a graph when there is none to consume")
+      ro.close()
+      var added = addedPaths(before, snapshotTree(dir))
+      ow.test.assert(added.length, 0, "ro with usegraph must not create a graph dir: " + stringify(added, __, ""))
     } finally { cleanupTestDir(dir) }
   }
 

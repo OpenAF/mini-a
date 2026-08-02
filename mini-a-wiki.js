@@ -4,7 +4,7 @@
 
 // ── Template version & helpers ────────────────────────────────────────────────
 
-var __MINI_A_WIKI_AGENTS_VERSION = 3
+var __MINI_A_WIKI_AGENTS_VERSION = 4
 
 // v1 stock fingerprint phrase — if AGENTS.md contains this verbatim it was never user-edited
 var __MINI_A_WIKI_V1_STOCK_PHRASE = "This file defines how agents should read, distil, and contribute knowledge to this wiki."
@@ -78,6 +78,18 @@ var __miniAWikiAgentsTemplate = function(now) {
     "supersedes: path/to/old.md      # when this page replaces another",
     "status: draft | review | stable # omit for stable",
     "```",
+    "",
+    "### Provenance fields (set by the ingest pipeline)",
+    "",
+    "```yaml",
+    "source: path/or/url             # the document this page was distilled from",
+    "source_ref: <commit sha|origin> # repo commit or origin the source came from",
+    "source_hash: <sha1>             # sha1 of the ingested source content",
+    "ingested: <ISO 8601 timestamp>  # when the distillation ran",
+    "```",
+    "",
+    "Pages carrying these fields are machine-ingested. Edit them freely, but expect a later",
+    "ingest of a changed source to overwrite the page — record durable additions elsewhere.",
     "",
     "### Body conventions",
     "",
@@ -290,6 +302,8 @@ MiniAWikiManager.prototype._getIndexRoot = function() {
 
 MiniAWikiManager.prototype._ensureIndexRoot = function() {
   var root = this._getIndexRoot()
+  // read-only wikis never create index storage: they consume whatever already exists
+  if (this._access !== "rw") return root
   try { if (!io.fileExists(root)) io.mkdir(root) } catch(e) {}
   return root
 }
@@ -309,10 +323,12 @@ MiniAWikiManager.prototype._metaShardPath = function(shardKey) {
 MiniAWikiManager.prototype._loadMetaShard = function(shardKey) {
   this._ensureIndexRuntime()
   if (isMap(this._metaShards[shardKey])) return this._metaShards[shardKey]
-  try {
-    var root = this._metaRoot()
-    if (!io.fileExists(root)) io.mkdir(root)
-  } catch(e) {}
+  if (this._access === "rw") {
+    try {
+      var root = this._metaRoot()
+      if (!io.fileExists(root)) io.mkdir(root)
+    } catch(e) {}
+  }
   var shard = {}
   try {
     var path = this._metaShardPath(shardKey)
@@ -327,6 +343,8 @@ MiniAWikiManager.prototype._loadMetaShard = function(shardKey) {
 
 MiniAWikiManager.prototype._saveMetaShard = function(shardKey) {
   this._ensureIndexRuntime()
+  // read-only wikis keep the shard in memory only; never write into the source tree
+  if (this._access !== "rw") { this._metaDirty[shardKey] = false; return }
   if (this._metaDirty[shardKey] !== true) return
   try {
     var root = this._metaRoot()
@@ -445,8 +463,77 @@ MiniAWikiManager.prototype._luceneChName = function() {
   return "__mini_a_wiki_searchdb_" + sha1(this._getLuceneIndexPath()).substring(0, 8)
 }
 
+// _luceneIndexExists: true when a usable Lucene index is already on disk. Used to keep
+// read-only wikis from creating (and locking) an index they are not allowed to maintain.
+MiniAWikiManager.prototype._luceneIndexExists = function() {
+  try {
+    var idxPath = this._getLuceneIndexPath()
+    if (!io.fileExists(idxPath)) return false
+    var listing = io.listFiles(idxPath)
+    var files = isMap(listing) && isArray(listing.files) ? listing.files : []
+    return files.some(function(f) { return isString(f.filename) && f.filename.indexOf("segments") === 0 })
+  } catch(e) {
+    return false
+  }
+}
+
+// _luceneQueryReadOnly: queries an existing Lucene index through a bare DirectoryReader.
+// No IndexWriter is opened, so no write.lock is taken and nothing is created on disk.
+// Reads the searchdb channel schema (id / content / payload) rather than the addFile schema.
+MiniAWikiManager.prototype._luceneQueryReadOnly = function(query, limit) {
+  if (!this._ensureLucene()) return []
+  if (!this._luceneIndexExists()) return []
+  var max = isNumber(limit) && limit > 0 ? limit : 20
+  var dir = __, reader = __
+  var out = []
+  try {
+    var L = Packages.org.apache.lucene
+    dir = L.store.FSDirectory.open(java.nio.file.Paths.get(this._getLuceneIndexPath()))
+    reader = L.index.DirectoryReader.open(dir)
+    var searcher = new L.search.IndexSearcher(reader)
+    var parsed = new L.queryparser.classic.QueryParser("content", new L.analysis.standard.StandardAnalyzer()).parse(query)
+    var hits = searcher.search(parsed, max)
+    var scoreDocs = hits.scoreDocs
+    for (var i = 0; i < scoreDocs.length; i++) {
+      var doc = this._luceneStoredDoc(searcher, scoreDocs[i].doc)
+      if (isUnDef(doc) || doc == null) continue
+      var payload = {}
+      try { payload = af.fromJson(String(doc.get("payload") || "{}")) } catch(ep) { payload = {} }
+      out.push({
+        id     : String(doc.get("id") || ""),
+        content: isDef(doc.get("content")) ? String(doc.get("content")) : "",
+        payload: isMap(payload) ? payload : {},
+        score  : Number(scoreDocs[i].score)
+      })
+    }
+  } catch(e) {
+    this._logFn("warn", "Read-only Lucene query failed: " + __miniAErrMsg(e))
+    return []
+  } finally {
+    try { if (isDef(reader) && reader != null) reader.close() } catch(ignoreR) {}
+    try { if (isDef(dir) && dir != null) dir.close() } catch(ignoreD) {}
+  }
+  return out
+}
+
+// _luceneStoredDoc: stored-fields accessor across Lucene versions (storedFields() vs doc()).
+MiniAWikiManager.prototype._luceneStoredDoc = function(searcher, docId) {
+  try {
+    if (isDef(searcher.storedFields) && typeof searcher.storedFields === "function") {
+      var sf = searcher.storedFields()
+      if (isDef(sf) && sf != null && typeof sf.document === "function") return sf.document(docId)
+    }
+  } catch(e) {}
+  try { if (typeof searcher.doc === "function") return searcher.doc(docId) } catch(e2) {}
+  return __
+}
+
 MiniAWikiManager.prototype._openLucene = function(forceEphemeral) {
   if (!this._ensureLucene()) return __
+  // $ch(...).create("searchdb") always opens an IndexWriter (CREATE_OR_APPEND), which would
+  // take the write lock and create the index directory. Read-only wikis must never get here;
+  // they query through _luceneQueryReadOnly instead.
+  if (this._access !== "rw") return __
   this._ensureIndexRuntime()
   var chName = this._luceneChName()
   if (forceEphemeral !== true && this._luceneChannel === chName) return chName
@@ -494,6 +581,7 @@ MiniAWikiManager.prototype._handleLuceneIncrementalFailure = function(op, e) {
 }
 
 MiniAWikiManager.prototype._luceneSet = function(path, raw, title) {
+  if (this._access !== "rw") return
   if (!this._ensureLucene()) return
   this._ensureIndexRuntime()
   try {
@@ -508,6 +596,7 @@ MiniAWikiManager.prototype._luceneSet = function(path, raw, title) {
 }
 
 MiniAWikiManager.prototype._luceneUnset = function(path) {
+  if (this._access !== "rw") return
   if (!this._ensureLucene()) return
   this._ensureIndexRuntime()
   try {
@@ -567,7 +656,7 @@ MiniAWikiManager.prototype._rebuildSearchIndex = function(options) {
       docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
       this._metaUpdate(pages[i], raw, parsed)
     }
-    this._rebuildLuceneIndex(docs, opts)
+    this._ensureSearchIndex().rebuild(docs, opts)
   } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
 }
 
@@ -621,6 +710,7 @@ MiniAWikiManager.prototype._ensureLucene = function() {
 }
 
 MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
+  if (this._access !== "rw") return
   if (!this._ensureLucene()) return
   try {
     var opts = isObject(options) ? options : {}
@@ -657,6 +747,76 @@ MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Search index seam
+//
+// Full-text search is pluggable behind a duck-typed object mirroring the storage
+// backend idiom: { type, writable, available, exists, query, set, unset, rebuild, close }.
+// query() returns hits in the searchdb channel shape: { id, content, payload, score }.
+// ---------------------------------------------------------------------------
+
+MiniAWikiManager.prototype._makeLuceneSearchIndex = function() {
+  var self = this
+  return {
+    type     : "lucene",
+    writable : self._access === "rw",
+    available: function() { return self._ensureLucene() },
+    exists   : function() { return self._luceneIndexExists() },
+    query    : function(q, limit) {
+      if (self._access !== "rw") return self._luceneQueryReadOnly(q, limit)
+      var chName = self._openLucene(false)
+      if (chName === "__ephemeral__") chName = self._openLucene(true)
+      if (!isString(chName) || chName.length === 0) return []
+      var hits = $ch(chName).getAll({ query: q, limit: limit })
+      if (chName !== self._luceneChannel) self._closeLucene(chName)
+      return isArray(hits) ? hits : []
+    },
+    set      : function(path, raw, title) { self._luceneSet(path, raw, title) },
+    unset    : function(path) { self._luceneUnset(path) },
+    rebuild  : function(docs, opts) { self._rebuildLuceneIndex(docs, opts) },
+    close    : function() { self._closeLucene() }
+  }
+}
+
+MiniAWikiManager.prototype._makeNullSearchIndex = function() {
+  return {
+    type     : "none",
+    writable : false,
+    available: function() { return false },
+    exists   : function() { return false },
+    query    : function() { return [] },
+    set      : function() {},
+    unset    : function() {},
+    rebuild  : function() {},
+    close    : function() {}
+  }
+}
+
+MiniAWikiManager.prototype._ensureSearchIndex = function() {
+  if (isObject(this._searchIndex)) return this._searchIndex
+  var kind = isString(this._config.wikisearch) ? String(this._config.wikisearch).toLowerCase().trim() : "auto"
+  if (kind === "none") {
+    this._searchIndex = this._makeNullSearchIndex()
+    return this._searchIndex
+  }
+  if (kind === "opensearch") {
+    // the seam exists but no OpenSearch implementation ships yet - say so rather than
+    // silently behaving like local Lucene
+    this._logFn("warn", "wikisearch=opensearch is not implemented yet; using the local Lucene index instead.")
+  }
+  this._searchIndex = this._makeLuceneSearchIndex()
+  return this._searchIndex
+}
+
+// _searchIndexStatus: human-readable state of the full-text index, for context()/reporting.
+MiniAWikiManager.prototype._searchIndexStatus = function() {
+  var idx = this._ensureSearchIndex()
+  if (idx.type === "none") return "none"
+  if (!idx.available()) return "scan"
+  if (!idx.exists()) return this._access === "rw" ? "empty" : "scan"
+  return idx.type + (idx.writable ? "" : "-readonly")
+}
+
 MiniAWikiManager.prototype._graphUpdatePage = function(path, raw, parsed) {
   if (!isObject(this._graph) || !isFunction(this._graph.updatePage)) return
   try {
@@ -677,13 +837,13 @@ MiniAWikiManager.prototype._graphRemovePage = function(path) {
 
 MiniAWikiManager.prototype._updatePageIndexes = function(path, raw, parsed) {
   var meta = this._metaUpdate(path, raw, parsed)
-  this._luceneSet(path, raw, isMap(meta) && isString(meta.title) ? meta.title : path)
+  this._ensureSearchIndex().set(path, raw, isMap(meta) && isString(meta.title) ? meta.title : path)
   this._graphUpdatePage(path, raw, parsed)
 }
 
 MiniAWikiManager.prototype._removePageIndexes = function(path) {
   this._metaRemove(path)
-  this._luceneUnset(path)
+  this._ensureSearchIndex().unset(path)
   this._graphRemovePage(path)
 }
 
@@ -753,6 +913,12 @@ MiniAWikiManager.prototype.graph = function(op, params) {
   if (!isObject(this._graph)) return { ok: false, error: "graph is not enabled (usegraph=true)" }
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
+  // read-only wikis can query an existing graph (local graph.json or external FalkorDB)
+  // but never build or persist one
+  if (this._access !== "rw") {
+    var mutating = ["build", "report"].indexOf(action) >= 0 || (action === "falkor" && !isString(p.query))
+    if (mutating) return { ok: false, error: "wiki is read-only: graph '" + action + "' requires wikiaccess=rw" }
+  }
   if (action === "build") {
     var st = this._graph.buildStructural(this._graphPages())
     if (p.report === true && isFunction(this._graph.saveReport)) this._graph.saveReport()
@@ -817,7 +983,7 @@ MiniAWikiManager.prototype.list = function(prefix, options) {
       title      : isMap(m) && isString(m.title)       ? m.title       : p.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
       description: isMap(m) && isString(m.description) ? m.description : "",
       type       : isMap(m) && isString(m.type)        ? m.type        : "",
-      updated    : isMap(m) && isDef(m.updated)        ? String(m.updated).substring(0, 10) : ""
+      updated    : isMap(m) && isDef(m.updated)        ? __miniAWikiIsoDay(m.updated) : ""
     }
   })
 }
@@ -844,6 +1010,7 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
   this._config  = cfg
   this._graph = __
+  this._searchIndex = __
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._ensureIndexRuntime()
   this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
@@ -859,7 +1026,15 @@ MiniAWikiManager.prototype.configure = function(config) {
         autosave: isString(cfg.wikigraphautosave) ? cfg.wikigraphautosave : "always",
         saveDebounceMs: isNumber(cfg.wikigraphsavedebouncems) ? cfg.wikigraphsavedebouncems : 5000
       }
-      this._graph = new MiniAWikiGraph(graphCfg, function(level, msg) { this._logFn(level, msg) }.bind(this))
+      // read-only wikis consume an existing graph (local graph.json or an external FalkorDB);
+      // they never create one, so skip silently when there is nothing to consume.
+      if (this._access !== "rw" &&
+          !io.fileExists(graphCfg.graphDir + "/graph.json") &&
+          !(isMap(graphCfg.falkor) && isString(graphCfg.falkor.host))) {
+        this._graph = __
+      } else {
+        this._graph = new MiniAWikiGraph(graphCfg, function(level, msg) { this._logFn(level, msg) }.bind(this))
+      }
     } catch(graphErr) {
       this._logFn("warn", "Graph support unavailable: " + __miniAErrMsg(graphErr))
       this._graph = __
@@ -1016,6 +1191,175 @@ MiniAWikiManager.prototype._makeIndexContent = function(indexPath, title, descri
   return lines.join("\n")
 }
 
+// _isoDay: YYYY-MM-DD from a front-matter `updated` value. af.fromYAML turns ISO date
+// strings into Date objects, so a plain String(...).substring(0,10) yields "Sun Aug 02".
+var __miniAWikiIsoDay = function(value) {
+  if (isUnDef(value) || value === null) return ""
+  try {
+    if (isDate(value)) return value.toISOString().substring(0, 10)
+  } catch(eDate) {}
+  var s = String(value)
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0, 10)
+  try {
+    var d = new Date(s)
+    if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10)
+  } catch(eParse) {}
+  return s.substring(0, 10)
+}
+
+// _indexBodyExtras: pulls out the parts of an existing index page that regenerateIndexes does
+// not own, so author-written content survives a regeneration:
+//   intro    - prose between the `# Title` heading and the first `##` section
+//   sections - whole `## ...` blocks whose heading is not one of the generated ones
+MiniAWikiManager.prototype._indexBodyExtras = function(body) {
+  var out = { intro: "", sections: "" }
+  if (!isString(body) || body.length === 0) return out
+  var generated = { "attached wikis": true, "start here": true, "sections": true, "pages": true, "recent": true }
+  var lines = body.split(/\r?\n/)
+  var intro = []
+  var kept  = []
+  var keeping = false
+  var seenHeading = false
+  for (var i = 0; i < lines.length; i++) {
+    var line = String(lines[i])
+    var m = line.match(/^##\s+(.+?)\s*$/)
+    if (m) {
+      seenHeading = true
+      keeping = generated[String(m[1]).toLowerCase()] !== true
+    }
+    if (keeping) { kept.push(line); continue }
+    if (!seenHeading && !/^#\s+/.test(line)) intro.push(line)
+  }
+  out.intro    = intro.join("\n").replace(/^\s+|\s+$/g, "")
+  out.sections = kept.join("\n").replace(/^\s+|\s+$/g, "")
+  return out
+}
+
+// regenerateIndexes: rebuilds root and section index.md bodies from live page metadata,
+// driving the pagesInfo branch of _makeIndexContent. Existing title/description are preserved.
+// Returns { ok, regenerated:[path], skipped:[path] }.
+MiniAWikiManager.prototype.regenerateIndexes = function(options) {
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  var opts = isObject(options) ? options : {}
+  var self = this
+  var out = { ok: true, regenerated: [], skipped: [] }
+
+  var pages = this._safeListPages("").filter(function(p) {
+    var bn = p.split("/").pop()
+    return bn !== "index.md" && bn !== "AGENTS.md" && bn !== "log.md"
+  })
+
+  // group pages by their immediate directory
+  var byDir = {}
+  pages.forEach(function(p) {
+    var dir = self._pageDir(p)
+    if (!isArray(byDir[dir])) byDir[dir] = []
+    byDir[dir].push(p)
+  })
+  // every directory that holds pages gets an index, plus the root
+  var dirs = Object.keys(byDir)
+  if (dirs.indexOf("") < 0) dirs.push("")
+
+  var infoFor = function(p) {
+    var m = self._metaFor(p)
+    return {
+      path       : p,
+      title      : isMap(m) && isString(m.title) && m.title.trim().length > 0 ? m.title.trim() : self._pageTitle(p),
+      description: isMap(m) && isString(m.description) ? m.description : "",
+      type       : isMap(m) && isString(m.type) ? m.type : "",
+      updated    : isMap(m) && isDef(m.updated) ? __miniAWikiIsoDay(m.updated) : ""
+    }
+  }
+
+  dirs.sort().forEach(function(dir) {
+    var indexPath = dir + "index.md"
+    var isRoot    = indexPath === "index.md"
+
+    // direct child pages of this directory
+    var direct = (isArray(byDir[dir]) ? byDir[dir] : []).sort().map(function(p) {
+      var info = infoFor(p)
+      info.relPath = self._relativePath(indexPath, p)
+      return info
+    })
+
+    // immediate child sections of this directory
+    var childSections = dirs.filter(function(d) {
+      if (d === dir || d.indexOf(dir) !== 0) return false
+      var rest = d.substring(dir.length).replace(/\/$/, "")
+      return rest.length > 0 && rest.indexOf("/") < 0
+    }).sort().map(function(d) {
+      var childIndex = d + "index.md"
+      var cm = self._metaFor(childIndex)
+      var childPages = self._safeListPages(d).filter(function(p) { return p.split("/").pop() !== "index.md" })
+      return {
+        indexPath: self._relativePath(indexPath, childIndex),
+        title    : isMap(cm) && isString(cm.title) && cm.title.trim().length > 0 ? cm.title.trim()
+                 : d.replace(/\/$/, "").replace(/.*\//, "").replace(/[-_]/g, " "),
+        pageCount: childPages.length,
+        updated  : isMap(cm) && isDef(cm.updated) ? __miniAWikiIsoDay(cm.updated) : ""
+      }
+    })
+
+    var recent = []
+    var attached = []
+    if (isRoot) {
+      try {
+        var logRaw = this._backend.read("log.md")
+        if (isString(logRaw)) {
+          logRaw.split("\n").forEach(function(line) { if (/^## \[/.test(line)) recent.push(line.replace(/^## /, "").trim()) })
+          recent = recent.reverse().slice(0, isNumber(opts.maxRecent) ? opts.maxRecent : 10)
+        }
+      } catch(eLog) {}
+      attached = (isArray(this._mounts) ? this._mounts : []).map(function(m) {
+        var count = 0; try { count = m.manager._safeListPages("").length } catch(eC) {}
+        var desc = ""
+        try {
+          var idx = m.manager.read("index.md")
+          if (isObject(idx) && isObject(idx.meta) && isString(idx.meta.description)) desc = idx.meta.description
+        } catch(eD) {}
+        return { name: m.name, description: desc, backend: m.manager._backendType, pages: count }
+      })
+    }
+
+    // preserve the human-authored title/description, intro prose and custom sections
+    var title = __, description = __, extras = { intro: "", sections: "" }
+    try {
+      var existing = self.read(indexPath)
+      if (isObject(existing) && isObject(existing.meta)) {
+        if (isString(existing.meta.title)) title = existing.meta.title
+        if (isString(existing.meta.description)) description = existing.meta.description
+      }
+      if (isObject(existing) && isString(existing.body)) extras = self._indexBodyExtras(existing.body)
+    } catch(eRead) {}
+
+    try {
+      var content = self._makeIndexContent(indexPath, title, description, {
+        pages: direct, sections: childSections, recent: recent, attachedWikis: attached
+      })
+      // put the author's intro back in place of the generated one-liner
+      if (extras.intro.length > 0) {
+        var hIdx = content.indexOf("\n# ")
+        if (hIdx >= 0) {
+          var afterHeading = content.indexOf("\n", hIdx + 1)
+          var firstSection = content.indexOf("\n## ", hIdx)
+          if (afterHeading >= 0 && firstSection > afterHeading) {
+            content = content.substring(0, afterHeading + 1) + "\n" + extras.intro + "\n" + content.substring(firstSection)
+          }
+        }
+      }
+      if (extras.sections.length > 0) content = content.replace(/\s+$/, "") + "\n\n" + extras.sections + "\n"
+      self._backend.write(indexPath, content)
+      self._updatePageIndexes(indexPath, content, self.parseFrontmatter(content))
+      out.regenerated.push(indexPath)
+    } catch(eWrite) {
+      self._logFn("warn", "Failed to regenerate " + indexPath + ": " + __miniAErrMsg(eWrite))
+      out.skipped.push(indexPath)
+    }
+  }.bind(this))
+
+  return out
+}
+
 MiniAWikiManager.prototype.init = function(path) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
   var now = new Date().toISOString()
@@ -1170,10 +1514,12 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
     if (prefix.length > 0 && !prefix.endsWith("/")) prefix = prefix + "/"
     return prefix
   }
-  var resolvePath = function(relPath, allowMissingLeaf) {
+  // asDirectory=true resolves a folder prefix (no .md leaf required);
+  // allowMissingLeaf=true resolves a file that does not exist yet.
+  var resolvePath = function(relPath, allowMissingLeaf, asDirectory) {
     var rel = (isDef(relPath) && String(relPath).length > 0) ? __miniAWikiNormalizePath(relPath, {
-      allowDirectory  : allowMissingLeaf !== true,
-      requireMarkdown : allowMissingLeaf !== true
+      allowDirectory  : asDirectory === true || allowMissingLeaf !== true,
+      requireMarkdown : asDirectory !== true && allowMissingLeaf !== true
     }) : ""
     var candidate = rel.length > 0 ? new java.io.File(canonicalRoot, rel) : new java.io.File(canonicalRoot)
     var canonical
@@ -1195,7 +1541,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
     list: function(prefix) {
       try {
         var normalizedPrefix = normalizePrefix(prefix)
-        var dir = resolvePath(normalizedPrefix, false)
+        var dir = resolvePath(normalizedPrefix, false, true)
         return __miniAWikiFsList(dir, normalizedPrefix, sep)
       } catch(e) { return [] }
     },
@@ -1346,6 +1692,7 @@ MiniAWikiManager.prototype._makeS3FsBackend = function(cfg) {
 MiniAWikiManager.prototype.close = function() {
   var self = this
   Object.keys(this._metaDirty || {}).forEach(function(k) { self._saveMetaShard(k) })
+  if (isObject(this._searchIndex)) { try { this._searchIndex.close() } catch(ignoreIdxClose) {} }
   this._closeLucene()
   if (isObject(this._graph) && isFunction(this._graph.close)) {
     try { this._graph.close() } catch(ignoreGraphClose) {}
@@ -1732,6 +2079,33 @@ MiniAWikiManager.prototype.delete = function(path) {
   }
 }
 
+// _snippetFromContent: finds the first line of an indexed document matching pattern and
+// returns it as a scan-style snippet, so index-backed results are as usable as scan results.
+MiniAWikiManager.prototype._snippetFromContent = function(content, pattern, contextN) {
+  var empty = { line: 1, snippet: "", contextBefore: [], contextAfter: [] }
+  if (!isString(content) || content.length === 0) return empty
+  var lines = content.split(/\r?\n/)
+  for (var i = 0; i < lines.length; i++) {
+    pattern.lastIndex = 0
+    var m = pattern.exec(lines[i])
+    if (!m) continue
+    var snippet = lines[i].substring(Math.max(0, m.index - 60), m.index + 120).trim()
+    if (snippet.length === 0) snippet = lines[i].substring(0, 180).trim()
+    var ctx = isNumber(contextN) && contextN > 0 ? contextN : 0
+    pattern.lastIndex = 0   // never leave the shared regex advanced for the caller
+    return {
+      line         : i + 1,
+      snippet      : snippet,
+      contextBefore: ctx > 0 ? lines.slice(Math.max(0, i - ctx), i) : [],
+      contextAfter : ctx > 0 ? lines.slice(i + 1, Math.min(lines.length, i + 1 + ctx)) : []
+    }
+  }
+  // matched by the analyzer but not by the literal pattern (stemming, frontmatter, etc.)
+  var firstBody = lines.filter(function(l) { return String(l).trim().length > 0 })[0] || ""
+  empty.snippet = String(firstBody).substring(0, 180).trim()
+  return empty
+}
+
 MiniAWikiManager.prototype.search = function(query, options) {
   if (!isString(query) || query.trim().length === 0) return []
   var opts       = isObject(options) ? options : {}
@@ -1765,14 +2139,12 @@ MiniAWikiManager.prototype.search = function(query, options) {
   }
   var results = []
 
-  if (!forceScan && !opts.regex && scopedPath.length === 0 && this._ensureLucene()) {
+  var searchIdx = this._ensureSearchIndex()
+  var useIndex  = searchIdx.available() && (searchIdx.writable || searchIdx.exists())
+  if (!forceScan && !opts.regex && scopedPath.length === 0 && useIndex) {
     try {
-      var chName = this._openLucene(false)
-      if (chName === "__ephemeral__") chName = this._openLucene(true)
       var luceneQuery = q.replace(/(&&|\|\||[+\-!(){}\[\]^"~*?:\\/])/g, "\\$1")
-      var luceneHits
-      luceneHits = $ch(chName).getAll({ query: luceneQuery, limit: limit })
-      if (chName !== this._luceneChannel) this._closeLucene(chName)
+      var luceneHits = searchIdx.query(luceneQuery, limit)
       if (isArray(luceneHits) && luceneHits.length > 0) {
         var self = this
         var validHits = luceneHits.map(function(h) {
@@ -1781,7 +2153,14 @@ MiniAWikiManager.prototype.search = function(query, options) {
           if (compact) {
             return { path: hitPath, title: hitTitle, description: "" }
           }
-          return { path: hitPath, title: hitTitle, line: isNumber(h.line) ? h.line : 1, snippet: isString(h.content) ? h.content.substring(0, 180) : q }
+          // extract a real matching line out of the stored content instead of echoing the query
+          var loc = self._snippetFromContent(h.content, pattern, contextN)
+          var full = { path: hitPath, title: hitTitle, line: isNumber(h.line) ? h.line : loc.line, snippet: loc.snippet }
+          if (contextN > 0) {
+            full.contextBefore = loc.contextBefore
+            full.contextAfter  = loc.contextAfter
+          }
+          return full
         }).map(function(r) {
           if (!compact) return r
           var hitMeta = self._metaFor(r.path)
@@ -2521,11 +2900,38 @@ MiniAWikiManager.prototype.context = function(options) {
     return { name: m.name, pages: count, description: desc }
   })
 
+  // Retrieval capability: tells the agent up-front whether search is index-backed or a full scan,
+  // and whether a knowledge graph is available as an entry point.
+  var searchStatus = "scan"
+  try { searchStatus = this._searchIndexStatus() } catch(e) {}
+  var graphStatus = "none"
+  var entryPoints = []
+  if (isObject(this._graph)) {
+    graphStatus = isFunction(this._graph._hasFalkorRead) && this._graph._hasFalkorRead() ? "falkor" : "local"
+    try {
+      var comms = this._graph.detectCommunities()
+      var list  = isArray(comms) ? comms : (isMap(comms) && isArray(comms.communities) ? comms.communities : [])
+      entryPoints = list.slice(0, 5).map(function(c) {
+        return {
+          label: isString(c.label) ? c.label : (isString(c.name) ? c.name : String(c.id || "")),
+          size : isNumber(c.size) ? c.size : (isArray(c.members) ? c.members.length : 0)
+        }
+      }).filter(function(c) { return c.label.length > 0 })
+    } catch(ec) {}
+  }
+
   return {
-    pages   : pages.length,
-    sections: sections,
-    mounts  : mountList,
-    recent  : recent,
-    hint    : "Call search() first, then read() the best match by path. For long pages use section= to read only the heading you need."
+    pages    : pages.length,
+    sections : sections,
+    mounts   : mountList,
+    recent   : recent,
+    access   : this._access,
+    retrieval: {
+      search : searchStatus,
+      graph  : graphStatus,
+      entries: entryPoints
+    },
+    hint     : "Call search() first, then read() the best match by path. For long pages use section= to read only the heading you need." +
+               (searchStatus === "scan" ? " (search is a full scan here - prefer narrow queries)" : "")
   }
 }

@@ -1,0 +1,104 @@
+# Author: Nuno Aguiar
+help:
+  text   : |
+    Ingest knowledge into a Mini-A wiki from a documentation folder, a git repository
+    (local checkout or clone URL) or a web page.
+
+    Discovery, filtering, chunking, the re-ingest ledger, writing and finalization are
+    deterministic; only the per-source distillation uses the LLM. One source produces one
+    wiki page — cross-page dedup and reorganisation are left to '/dream wiki apply'.
+
+    Examples:
+      ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/w1
+      ojob mini-a-ingest.yaml ingestsource=https://github.com/OpenAF/mini-a wikiroot=/tmp/w1
+      ojob mini-a-ingest.yaml ingestsource=./docs wikiroot=/tmp/w1 ingestdryrun=true
+  expects:
+  - name     : ingestsource
+    desc     : Folder, git repository (path or clone URL) or page URL to ingest
+    example  : "./docs"
+    mandatory: true
+  - name     : wikiroot
+    desc     : Wiki filesystem root to ingest into
+    example  : "/tmp/wiki"
+    mandatory: false
+  - name     : ingesttype
+    desc     : Source type (markdown, repo, url) - auto-detected when omitted
+    mandatory: false
+  - name     : ingestsection
+    desc     : Wiki section to write into (default - derived from the source name)
+    mandatory: false
+  - name     : ingestinclude
+    desc     : Comma-separated path fragments to include
+    mandatory: false
+  - name     : ingestexclude
+    desc     : Comma-separated path fragments to exclude
+    mandatory: false
+  - name     : ingestchunkchars
+    desc     : Maximum characters per distillation chunk (default 24000)
+    mandatory: false
+  - name     : ingestmaxfilekb
+    desc     : Skip sources larger than this many KB (default 512)
+    mandatory: false
+  - name     : ingestconcurrency
+    desc     : Number of parallel distillations (default 4)
+    mandatory: false
+  - name     : ingestdryrun
+    desc     : Report what would be ingested without writing
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestforce
+    desc     : Re-ingest sources the ledger reports as unchanged
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : ingestledger
+    desc     : Override the ingest ledger file path
+    mandatory: false
+  - name     : model
+    desc     : SLON/JSON model config used for distillation (defaults to OAF_MODEL)
+    mandatory: false
+
+ojob:
+  opacks      :
+  - openaf: 20250915
+  - mini-a : 20260612
+  catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
+  logToConsole: true
+
+todo:
+- Mini-A Wiki Ingest
+
+jobs:
+# ---------------------------
+- name : Mini-A Wiki Ingest
+  check:
+    in:
+      ingestsource     : isString
+      wikiroot         : isString.default(".")
+      wikibackend      : isString.default("fs")
+      ingesttype       : isString.default("auto")
+      ingestsection    : isString.default(__)
+      ingestinclude    : isString.default(__)
+      ingestexclude    : isString.default(__)
+      ingestchunkchars : toNumber.isNumber.default(24000)
+      ingestmaxfilekb  : toNumber.isNumber.default(512)
+      ingestconcurrency: toNumber.isNumber.default(4)
+      ingestdryrun     : toBoolean.isBoolean.default(false)
+      ingestforce      : toBoolean.isBoolean.default(false)
+      ingestledger     : isString.default(__)
+      model            : isString.default(__)
+  exec : | #js
+    global.__mini_a_ingest_lib_mode = true
+    loadLib("mini-a-common.js")
+    loadLib("mini-a-ingest.js")
+
+    var ingestArgs = merge({}, args)
+    ingestArgs.usewiki    = "true"
+    ingestArgs.wikiaccess = "rw"
+
+    var runner = new MiniAIngest(ingestArgs, function(msg) { log(msg) })
+    var res    = runner.run()
+
+    print(af.toYAML(res))
+    if (isMap(res) && res.ok === false) exit(1)

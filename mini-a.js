@@ -13590,9 +13590,8 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
-    "dreamwikimode", "dreammemorymode", "dreamwikiapply", "dreamwikiapproval", "dreamwikireorg",
-    "dreamwikiredirects", "dreamwikiminpages", "dreamwikiflatthreshold", "dreamwikimaxdepth",
-    "dreamwikipreservebodies", "dreammemoryminconfidence", "dreammemorytowiki", "dreamreport"
+    "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
+    "dreamwikiminpages", "dreamwikimaxdepth", "dreamreport"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()

@@ -425,7 +425,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "wiki", "graph", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "wiki", "graph", "dream", "ingest", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -816,19 +816,25 @@ try {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: lint, plan, apply, or reorg." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), or reorg." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
-    dreammemoryminconfidence: { type: "number", description: "Minimum confidence for memory entries written during dream memory apply." },
-    dreammemorytowiki: { type: "boolean", default: false, description: "Allow memory dream to emit curated wiki-ready notes." },
-    dreamwikiapply : { type: "boolean", default: false, description: "Write gate for wiki apply/reorg modes." },
+    dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
-    dreamwikiredirects: { type: "boolean", default: false, description: "Generate redirect stubs during wiki reorg operations." },
-    dreamwikiminpages: { type: "number", description: "Minimum page count required before structural wiki reorg runs." },
-    dreamwikiflatthreshold: { type: "number", description: "Flatness threshold used to decide wiki reorg opportunities." },
+    dreamwikiminpages: { type: "number", description: "Minimum page count required before the deterministic index fixes run." },
     dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
-    dreamwikipreservebodies: { type: "boolean", default: false, description: "Preserve page body content when creating index-focused wiki reorg proposals." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
+    ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
+    ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
+    ingestsection  : { type: "string", description: "Wiki section ingested pages are written into." },
+    ingestinclude  : { type: "string", description: "Comma-separated path fragments to include when ingesting." },
+    ingestexclude  : { type: "string", description: "Comma-separated path fragments to exclude when ingesting." },
+    ingestchunkchars: { type: "number", description: "Maximum characters per distillation chunk during ingest." },
+    ingestmaxfilekb: { type: "number", description: "Skip ingest sources larger than this many KB." },
+    ingestconcurrency: { type: "number", description: "Number of parallel source distillations during ingest." },
+    ingestdryrun   : { type: "boolean", default: false, description: "Report what would be ingested without writing." },
+    ingestforce    : { type: "boolean", default: false, description: "Re-ingest sources the ledger reports as unchanged." },
+    ingestledger   : { type: "string", description: "Override the ingest ledger file path." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
     path           : { type: "string", description: "Static asset path used by the web UI/worker modes." },
     secpass        : { type: "string", description: "Security password used for protected model config access." },
@@ -2306,8 +2312,8 @@ try {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "lint"]
-            var dreamWikiModes = ["plan", "lint", "apply", "reorg", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg"]
+            var dreamWikiModes = ["plan", "apply", "reorg", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -5786,7 +5792,8 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: dryrun, plan, apply, reorg, lint" }
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, dryrun" },
+      { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
@@ -6138,6 +6145,60 @@ try {
     }
   }
 
+  // /ingest <source> [section] [dryrun|force]
+  function printIngest(subcmdRaw) {
+    var parts   = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
+    var flags   = { dryrun: false, force: false }
+    var operands = []
+    parts.forEach(function(p) {
+      var lower = p.toLowerCase()
+      if (lower === "dryrun") { flags.dryrun = true; return }
+      if (lower === "force")  { flags.force  = true; return }
+      operands.push(p)
+    })
+
+    if (operands.length === 0) {
+      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force]", errorColor))
+      print(colorifyText("  Ingests a docs folder, git repo or web page into the active wiki.", hintColor))
+      return
+    }
+    if (toBoolean(sessionOptions.usewiki) !== true) {
+      print(colorifyText("Wiki not enabled. Start with usewiki=true and wikiroot=...", errorColor))
+      return
+    }
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+      print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to ingest.", errorColor))
+      return
+    }
+
+    try {
+      global.__mini_a_ingest_lib_mode = true
+      loadLib("mini-a-ingest.js")
+    } catch(ingestLoadErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to load mini-a-ingest.js: " + ingestLoadErr, errorColor))
+      return
+    }
+
+    var ingestArgs = merge({}, sessionOptions)
+    ingestArgs.ingestsource = operands[0]
+    if (operands.length > 1) ingestArgs.ingestsection = operands[1]
+    if (flags.dryrun) ingestArgs.ingestdryrun = "true"
+    if (flags.force)  ingestArgs.ingestforce  = "true"
+
+    try {
+      var runner = new MiniAIngest(ingestArgs, function(msg) { print(colorifyText(msg, hintColor)) })
+      var res    = runner.run()
+      if (isMap(res) && res.ok === false) {
+        print(colorifyText("Ingest did not run: " + (isString(res.reason) ? res.reason : "unknown") +
+                           (isString(res.error) ? " — " + res.error : ""), errorColor))
+        return
+      }
+      print(printTree(res))
+    } catch(ingestErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Ingest error: " + ingestErr, errorColor))
+    }
+  }
+
   function printDream(subcmdRaw) {
     var parts  = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
     var mode   = parts.length > 0 && parts[0].toLowerCase() !== "dryrun" ? parts[0].toLowerCase() : ""
@@ -6149,7 +6210,7 @@ try {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
-    var isWikiMode = ["wiki", "plan", "lint", "apply", "reorg"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "plan", "apply", "reorg"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -6172,13 +6233,11 @@ try {
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
     try {
-      if (parts.indexOf("plan") >= 0 || parts.indexOf("lint") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
+      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
-        if (parts.indexOf("lint") >= 0) dreamArgs.dreamwikimode = "lint"
-        if (parts.indexOf("apply") >= 0) { dreamArgs.dreamwikimode = "apply"; dreamArgs.dreamwikiapply = "true" }
+        if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
-          dreamArgs.dreamwikiapply = "true"
           dreamArgs.dreamwikireorg = "true"
           dreamArgs.dreamwikiapproval = "auto"
         }
@@ -6202,8 +6261,23 @@ try {
       }
       dreamLogFn.markdownModelOutput = true
       var runner = new MiniADreams(dreamArgs, dreamLogFn)
-      if ((mode === "" || mode === "memory") && hasMemory) runner.dreamMemory()
-      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "lint" || mode === "apply" || mode === "reorg") && hasWiki) runner.dreamWiki()
+
+      // Render the result maps: a dream that declines to run (gate closed, approval required,
+      // nothing configured) reports it through the return value, not the log.
+      var reportDream = function(label, res) {
+        if (!isMap(res)) return
+        if (res.ok === false) {
+          var why = isString(res.reason) ? res.reason : "unknown"
+          print(colorifyText("Dream " + label + " did not run: " + why + (isString(res.error) ? " — " + res.error : ""), errorColor))
+          if (why === "approval-required") print(colorifyText("  Use /dream reorg to approve, or set dreamwikiapproval=auto.", hintColor))
+          if (why === "reorg-not-enabled") print(colorifyText("  Set dreamwikireorg=true to enable structural reorg.", hintColor))
+          return
+        }
+        print(printTree(res))
+      }
+
+      if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
+      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }
@@ -6615,6 +6689,10 @@ try {
       }
       if (commandLower.indexOf("graph ") === 0) {
         printGraph(command.substring(6))
+        continue
+      }
+      if (commandLower === "ingest" || commandLower.indexOf("ingest ") === 0) {
+        printIngest(commandLower === "ingest" ? "" : command.substring(7))
         continue
       }
       if (commandLower === "dream") {

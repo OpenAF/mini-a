@@ -196,6 +196,47 @@ todo:
           readOnlyHint  : true
           idempotentHint: true
 
+      tree:
+        name       : tree
+        description: "Show the folder/page hierarchy of {{label}} as a tree. Use for orientation when you need the shape of the whole wiki rather than a targeted lookup."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Optional section folder to start the tree from.
+            depth:
+              type       : integer
+              description: Maximum tree depth to expand.
+              default    : 3
+            compact:
+              type       : boolean
+              description: Return compact tree output.
+              default    : true
+        annotations:
+          title         : tree
+          readOnlyHint  : true
+          idempotentHint: true
+
+      backlinks:
+        name       : backlinks
+        description: "List the pages in {{label}} that link to a given page. Use to find the context a page sits in, or to check what would break before proposing a change."
+        inputSchema:
+          type      : object
+          properties:
+            path:
+              type       : string
+              description: Wiki page path to find inbound links for.
+            compact:
+              type       : boolean
+              description: Return compact output.
+              default    : true
+          required  : [ path ]
+        annotations:
+          title         : backlinks
+          readOnlyHint  : true
+          idempotentHint: true
+
       list:
         name       : list
         description: "List pages in {{label}}. Use withMeta=true to get path+title+description+type+updated per page — efficient for scanning the full page inventory in one call."
@@ -219,11 +260,13 @@ todo:
           idempotentHint: true
 
     ((fns    )): &MCPFNS
-      context: Wiki context overview
-      search : Wiki search pages
-      read   : Wiki read page
-      browse : Wiki browse section
-      list   : Wiki list pages
+      context  : Wiki context overview
+      search   : Wiki search pages
+      read     : Wiki read page
+      browse   : Wiki browse section
+      tree     : Wiki tree
+      backlinks: Wiki backlinks
+      list     : Wiki list pages
   ((else)):
   - (stdioMCP  ): *MCPSERVER
     ((toolPrefix)): "${toolPrefix:-}"

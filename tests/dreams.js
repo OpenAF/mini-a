@@ -43,8 +43,8 @@
   }
 
   // ─── tests ──────────────────────────────────────────────────
-
-  var exports = {}
+  // NOTE: do not declare a local `exports` here — that shadows the module object
+  // require() hands us and silently exports nothing (same convention as tests/graph.js).
 
   exports.testDreamMemoryMergesDuplicates = function() {
     var chName = tempChName()
@@ -220,7 +220,7 @@
 
   exports.testDreamRunRoutesWikiOnly = function() {
     var calls = { memory: 0, wiki: 0 }
-    var runner = new MiniADreams({ usewiki: "true", wikiroot: "/tmp", wikibackend: "fs" }, function() {})
+    var runner = new MiniADreams({ usewiki: "true", wikiroot: io.createTempDir("dreamwiki_route_"), wikibackend: "fs" }, function() {})
     runner.dreamMemory = function() { calls.memory++; return { ok: true } }
     runner.dreamWiki   = function() { calls.wiki++;   return { ok: true } }
 
@@ -234,7 +234,7 @@
     var runner = new MiniADreams({
       memorych: "{\"name\":\"dummy\",\"type\":\"simple\"}",
       usewiki: "true",
-      wikiroot: "/tmp",
+      wikiroot: io.createTempDir("dreamwiki_route_"),
       wikibackend: "fs"
     }, function() {})
     runner.dreamMemory = function() { calls.memory++; return { ok: true } }
@@ -250,7 +250,7 @@
     var runner = new MiniADreams({
       memorych: "{\"name\":\"dummy\",\"type\":\"simple\"}",
       usewiki: "true",
-      wikiroot: "/tmp",
+      wikiroot: io.createTempDir("dreamwiki_route_"),
       wikibackend: "fs",
       dreamwiki: "true"
     }, function() {})
@@ -319,26 +319,30 @@
     ow.test.assert(isMap(res.lint_after), true, "lint_after should exist")
   }
 
-  exports.testDreamWikiApplyGateRequired = function() {
-    var runner = new MiniADreams({
-      usewiki: "true",
-      wikibackend: "fs",
-      wikiroot: "/tmp",
-      dreamwikimode: "apply",
-      dreamwikiapply: "false"
-    }, function() {})
-    var res = runner.dreamWiki()
-    ow.test.assert(res.ok, false, "apply without gate should fail")
-    ow.test.assert(res.reason, "apply-gate-closed", "reason should be apply-gate-closed")
+  exports.testDreamWikiDryRunOptsOutOfApply = function() {
+    var dir = String(java.io.File.createTempFile("minidream-", "").getCanonicalPath())
+    io.rm(dir); io.mkdir(dir)
+    try {
+      var runner = new MiniADreams({
+        usewiki: "true",
+        wikibackend: "fs",
+        wikiroot: dir,
+        dreamwikimode: "apply",
+        dreamwikidryrun: "true"
+      }, function() {})
+      var res = runner.dreamWiki()
+      ow.test.assert(res.ok, true, "dry-run should succeed")
+      ow.test.assert(res.mode, "plan", "dreamwikidryrun should downgrade apply to a plan run")
+      ow.test.assert(isMap(res.proposal), true, "dry-run should still produce a proposal")
+    } finally { try { io.rm(dir) } catch(e) {} }
   }
 
   exports.testDreamWikiReorgApprovalGate = function() {
     var runner = new MiniADreams({
       usewiki: "true",
       wikibackend: "fs",
-      wikiroot: "/tmp",
+      wikiroot: io.createTempDir("dreamwiki_reorg_"),
       dreamwikimode: "reorg",
-      dreamwikiapply: "true",
       dreamwikireorg: "true",
       dreamwikiapproval: "ask"
     }, function() {})
@@ -426,6 +430,122 @@
     ow.test.assert(cfg.url, "https://s3.amazonaws.com", "s3 url should use runtime default")
     ow.test.assert(cfg.useVersion1, true, "wikiuseversion1 should be forwarded")
     ow.test.assert(cfg.ignoreCertCheck, true, "wikiignorecertcheck should be forwarded")
+  }
+
+  // ─── wiki dream apply + finalize ────────────────────────────
+
+  var makeWikiDir = function() {
+    var dir = String(java.io.File.createTempFile("minidream-wiki-", "").getCanonicalPath())
+    io.rm(dir)
+    io.mkdir(dir)
+    return dir
+  }
+
+  var seedWiki = function(dir, pageCount) {
+    load("mini-a-wiki.js")
+    var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+    for (var i = 0; i < (isNumber(pageCount) ? pageCount : 6); i++) {
+      wm.write("notes/page" + i + ".md",
+               { title: "Page " + i, description: "Description of page " + i, type: "note" },
+               "# Page " + i + "\n\nBody content for page " + i + ".")
+    }
+    wm.close()
+    return dir
+  }
+
+  exports.testDreamWikiApplyRunsWithoutAnExplicitGate = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({
+        usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply"
+      }, function() {})
+      var res = runner.dreamWiki()
+      ow.test.assert(res.ok, true, "bare apply must actually run (was a silent no-op)")
+      ow.test.assert(res.mode, "apply", "mode should be apply")
+      ow.test.assert(isMap(res.finalize), true, "apply should report a finalize step")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiApplyDefaultsWhenNoModeGiven = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir }, function() {})
+      var res = runner.dreamWiki()
+      ow.test.assert(res.ok, true, "an unset dreamwikimode should default to a working apply")
+      ow.test.assert(res.mode, "apply", "default mode should be apply")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiFinalizeRegeneratesIndexAndReindexes = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({
+        usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply"
+      }, function() {})
+      var res = runner.dreamWiki()
+      ow.test.assert(res.finalize.indexes_regenerated > 0, true, "finalize should regenerate index pages")
+      ow.test.assert(res.finalize.reindexed, true, "finalize should rebuild the search index")
+
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
+      // all seeded pages live under notes/, so the root gets the sections table
+      var idx = wm.read("index.md")
+      ow.test.assert(idx.body.indexOf("| Section | Pages | Updated |") >= 0, true, "root index should carry the generated sections table")
+      ow.test.assert(idx.body.indexOf("notes/index.md") >= 0, true, "root index should link the notes section")
+      var sect = wm.read("notes/index.md")
+      ow.test.assert(sect.body.indexOf("| Page | Updated | Summary |") >= 0, true, "section index should carry the generated page table")
+      ow.test.assert(sect.body.indexOf("Description of page 1") >= 0, true, "section index should carry live page descriptions")
+      ow.test.assert(wm._luceneIndexExists(), true, "finalize should leave a populated search index")
+      wm.close()
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiFinalizeRunsBelowMinPages = function() {
+    var dir = seedWiki(makeWikiDir(), 2)
+    try {
+      var runner = new MiniADreams({
+        usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply", dreamwikiminpages: 5
+      }, function() {})
+      var res = runner.dreamWiki()
+      ow.test.assert(res.ok, true, "a small wiki should still complete")
+      ow.test.assert(res.finalize.indexes_regenerated > 0, true, "dreamwikiminpages must not block finalization")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testFinalizePreservesAuthoredIndexContent = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      // an index page an author wrote: intro prose, a stale generated section, a custom section
+      io.writeFileString(dir + "/index.md",
+        "---\ntitle: Postmortems\ndescription: Incident postmortems for team X\n" +
+        "created: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\n---\n\n" +
+        "# Postmortems\n\nThis wiki tracks incident postmortems for team X.\n\n" +
+        "## Sections\n\n- an out-of-date hand-written list\n\n" +
+        "## House rules\n\n- Always link the incident ticket.\n")
+
+      new MiniADreams({
+        usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply"
+      }, function() {}).dreamWiki()
+
+      var body = io.readFileString(dir + "/index.md")
+      ow.test.assert(body.indexOf("This wiki tracks incident postmortems for team X") >= 0, true, "intro prose must survive regeneration")
+      ow.test.assert(body.indexOf("## House rules") >= 0, true, "custom sections must survive regeneration")
+      ow.test.assert(body.indexOf("Always link the incident ticket") >= 0, true, "custom section content must survive regeneration")
+      ow.test.assert(body.indexOf("| Section | Pages | Updated |") >= 0, true, "generated sections table should be rebuilt")
+      ow.test.assert(body.indexOf("an out-of-date hand-written list") < 0, true, "stale generated content should be replaced")
+      ow.test.assert(body.indexOf("title: Postmortems") >= 0, true, "authored title must be preserved")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiLintModeIsGone = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({
+        usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "lint"
+      }, function() {})
+      var res = runner.dreamWiki()
+      ow.test.assert(res.mode, "apply", "the removed 'lint' mode should fall back to the apply default")
+    } finally { try { io.rm(dir) } catch(e) {} }
   }
 
   return exports
