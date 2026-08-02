@@ -821,6 +821,18 @@
     ow.test.assert(io.fileExists(debugFile), true, "Should create the configured debug file when using a file-backed channel")
   }
 
+  exports.testNormalizeChannelDefAcceptsNativeFilePaths = function() {
+    var filePath = io.createTempFile("mini-a-channel-", ".json")
+    try { io.rm(filePath) } catch(ignoreChannelFileCleanup) {}
+    var normalized = af.fromJSSLON(__miniANormalizeChannelDef(filePath))
+    ow.test.assert(normalized.type, "file", "A native file path should select a file channel")
+    ow.test.assert(normalized.options.file, filePath, "The file channel should retain the supplied path")
+
+    var structured = "{ type: 'simple', options: {} }"
+    ow.test.assert(__miniANormalizeChannelDef(structured), structured, "Structured SLON should remain unchanged")
+    ow.test.assert(__miniANormalizeChannelDef("bad\u0000path"), "bad\u0000path", "An invalid native path should remain unchanged")
+  }
+
   exports.testRebuildLlmPairKeepsBareSnapshotClean = function() {
     var agent = createAgent()
 

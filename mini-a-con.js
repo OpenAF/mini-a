@@ -538,7 +538,7 @@ try {
   function ensureMemoryChannelFromDef(rawValue, fallbackName, fallbackType) {
     if (!isString(rawValue) || rawValue.trim().length === 0) return __
     var parsed = __
-    try { parsed = af.fromJSSLON(rawValue) } catch(ignoreMemoryChannelParse) {}
+    try { parsed = af.fromJSSLON(__miniANormalizeChannelDef(rawValue)) } catch(ignoreMemoryChannelParse) {}
     if (!isMap(parsed)) return __
     var cName = isString(parsed.name) && parsed.name.trim().length > 0 ? parsed.name.trim() : fallbackName
     var cType = isString(parsed.type) && parsed.type.trim().length > 0 ? parsed.type.trim() : (fallbackType || "simple")
@@ -621,8 +621,8 @@ try {
     memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
     memoryscope    : { type: "string", default: "both", description: "Memory read scope: session, global, or both." },
     memorysessionid: { type: "string", description: "Session id namespace used by memorysessionch persistence." },
-    memorych       : { type: "string", description: "JSSLON channel definition for global memory persistence." },
-    memorysessionch: { type: "string", description: "JSSLON channel definition for session memory persistence." },
+    memorych       : { type: "string", description: "JSSLON channel definition or native file path for global memory persistence." },
+    memorysessionch: { type: "string", description: "JSSLON channel definition or native file path for session memory persistence." },
     usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
     wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
     wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs or s3." },
@@ -747,12 +747,12 @@ try {
     model          : { type: "string", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
     modelval       : { type: "string", description: "Override OAF_VAL_MODEL configuration" },
-    auditch        : { type: "string", description: "Audit channel definition" },
-    toollog        : { type: "string", description: "Tool usage log channel definition" },
-    metricsch      : { type: "string", description: "Metrics channel definition" },
-    debugch        : { type: "string", description: "Debug channel definition for the main model." },
-    debuglcch      : { type: "string", description: "Debug channel definition for the low-cost model." },
-    debugvalch     : { type: "string", description: "Debug channel definition for the validation model." },
+    auditch        : { type: "string", description: "Audit channel definition or native file path" },
+    toollog        : { type: "string", description: "Tool usage log channel definition or native file path" },
+    metricsch      : { type: "string", description: "Metrics channel definition or native file path" },
+    debugch        : { type: "string", description: "Debug channel definition or native file path for the main model." },
+    debuglcch      : { type: "string", description: "Debug channel definition or native file path for the low-cost model." },
+    debugvalch     : { type: "string", description: "Debug channel definition or native file path for the validation model." },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },

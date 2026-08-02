@@ -49,7 +49,7 @@ MiniADreams.prototype._setLlm = function(llmInstance) {
 MiniADreams.prototype._createChannelFromDef = function(rawDef, fallbackName, fallbackType) {
   if (!isString(rawDef) || rawDef.trim().length === 0) return __
   var parsed = __
-  try { parsed = af.fromJSSLON(rawDef) } catch(ignoreJSSLONParse) {}
+  try { parsed = af.fromJSSLON(__miniANormalizeChannelDef(rawDef)) } catch(ignoreJSSLONParse) {}
   if (!isMap(parsed)) return __
   var cName = isString(parsed.name) && parsed.name.trim().length > 0 ? parsed.name.trim() : fallbackName
   var cType = isString(parsed.type) && parsed.type.trim().length > 0 ? parsed.type.trim() : (fallbackType || "simple")
