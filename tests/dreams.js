@@ -354,7 +354,7 @@
   exports.testCreateChannelFromDefInvalidInput = function() {
     var runner = new MiniADreams({}, function() {})
     ow.test.assert(isUnDef(runner._createChannelFromDef("", "fallback", "simple")), true, "empty string → undefined")
-    ow.test.assert(isUnDef(runner._createChannelFromDef("not{valid", "fallback", "simple")), true, "invalid JSSLON → undefined")
+    ow.test.assert(isUnDef(runner._createChannelFromDef("bad\u0000path", "fallback", "simple")), true, "invalid JSSLON and native path → undefined")
   }
 
   exports.testValidateMemorySchemaValid = function() {

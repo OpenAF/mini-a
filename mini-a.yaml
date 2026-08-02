@@ -690,27 +690,27 @@ help:
     example  : "json"
     mandatory: false
   - name     : auditch
-    desc     : SLON/JSON definition of an audit channel to record agent activity
+    desc     : SLON/JSON definition or native file path for an audit channel to record agent activity
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
   - name     : toollog
-    desc     : SLON/JSON definition of a channel that records every tool call, arguments and result
+    desc     : SLON/JSON definition or native file path for a channel that records every tool call, arguments and result
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
   - name     : metricsch
-    desc     : SLON/JSON definition of an OpenAF channel where Mini-A metrics snapshots are recorded
+    desc     : SLON/JSON definition or native file path for an OpenAF channel where Mini-A metrics snapshots are recorded
     example  : "(name: 'mini-a-metrics', type: 'mvs', options: (file: '/tmp/mini-a-metrics.db'))"
     mandatory: false
   - name     : debugch
-    desc     : SLON/JSON definition of a debug channel for LLM debugging (requires $llm.setDebugCh support)
+    desc     : SLON/JSON definition or native file path for a debug channel for LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-llm-debug.log'))"
     mandatory: false
   - name     : debuglcch
-    desc     : SLON/JSON definition of a debug channel for low-cost LLM debugging (requires $llm.setDebugCh support)
+    desc     : SLON/JSON definition or native file path for a debug channel for low-cost LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-lc-llm-debug.log'))"
     mandatory: false
   - name     : debugvalch
-    desc     : SLON/JSON definition of a debug channel for validation LLM debugging (requires $llm.setDebugCh support)
+    desc     : SLON/JSON definition or native file path for a debug channel for validation LLM debugging (requires $llm.setDebugCh support)
     example  : "(type: file, options: (file: '/tmp/mini-a-val-llm-debug.log'))"
     mandatory: false
   - name     : nosetmcpwd
@@ -825,11 +825,11 @@ help:
     example  : "research-2024"
     mandatory: false
   - name     : memorych
-    desc     : SLON/JSON channel definition for global memory persistence
+    desc     : SLON/JSON channel definition or native file path for global memory persistence
     example  : "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))"
     mandatory: false
   - name     : memorysessionch
-    desc     : SLON/JSON channel definition for session memory persistence
+    desc     : SLON/JSON channel definition or native file path for session memory persistence
     example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
     mandatory: false
   - name     : memorymaxpersection

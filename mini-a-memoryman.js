@@ -65,7 +65,7 @@ function _formatAge(iso) {
 
 function _parseChannelDef(rawValue, fallbackName, fallbackType) {
   if (!isString(rawValue) || rawValue.trim().length === 0) return __
-  var parsed = af.fromJSSLON(rawValue)
+  var parsed = af.fromJSSLON(__miniANormalizeChannelDef(rawValue))
   if (!isMap(parsed)) return __
 
   var cName = _trim(parsed.name)
