@@ -1,6 +1,7 @@
 (function() {
   load("mini-a-common.js")
   load("mini-a-wiki.js")
+  load("mini-a-mcp-wiki.js")
 
   var createTestDir = function() {
     var testDir = java.io.File.createTempFile("miniwiki-test-", "").getCanonicalPath()
@@ -852,6 +853,38 @@
     ow.test.assert(raw.indexOf("backlinks:") >= 0, true, "MCP metadata should expose backlinks")
     ow.test.assert(raw.indexOf("move:") >= 0, true, "MCP metadata should expose move")
     ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
+  }
+
+  exports.testMcpWikiRestrictedRetrieval = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "secret-page.md", "---\ntitle: Target\ndescription: A useful answer\n---\n# Target\nThe distinctive answer is saffron-owl.\nSecond line.")
+      global.__wikiManager = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikigraphsearchhints: false })
+      global.__wikiTool = __miniAMcpWikiCreateTool({ root: dir, access: "ro" }, global.__wikiManager)
+      global.__miniAMcpWiki = { restriction: new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictminquerychars: 4, wikirestrictpagecooldown: 1 }, { backend: "fs", root: dir }) }
+      var rejected = __miniAMcpWikiRestrictedSearch({ query: "*", limit: 20 })
+      ow.test.assert(rejected.error, "restricted-query-rejected", "restricted search should reject broad queries")
+      var result = __miniAMcpWikiRestrictedSearch({ query: "saffron", limit: 20, regex: true, path: "secret-page.md" })
+      ow.test.assert(result.results.length, 1, "restricted search should return the targeted result")
+      ow.test.assert(isUnDef(result.results[0].path), true, "restricted search must not disclose page paths")
+      ow.test.assert(isString(result.results[0].reference), true, "restricted search should issue an opaque reference")
+      var read = __miniAMcpWikiRestrictedRead({ path: result.results[0].reference })
+      ow.test.assert(read.content.indexOf("saffron-owl") >= 0, true, "restricted read should return a bounded excerpt")
+      ow.test.assert(isUnDef(read.path), true, "restricted read must not disclose page paths")
+      var replay = __miniAMcpWikiRestrictedRead({ path: result.results[0].reference })
+      ow.test.assert(replay.error, "invalid-or-expired-reference", "restricted references must be single-use")
+      ow.test.assert(__miniAMcpWikiDenyRestricted("tree").error, "restricted-operation", "hidden operations must be denied at dispatch")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testMcpWikiRestrictedBudgetAndConfig = function() {
+    var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictmaxsearches: 1, wikirestrictmaxchars: 10 }, { backend: "fs", root: "." })
+    ow.test.assert(r.charge("search", 5), true, "initial restricted charge should fit the budget")
+    ow.test.assert(r.charge("search", 1), false, "restricted search budget should be cumulative")
+    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true }, { access: "ro" })
+    ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
   }
 
   exports.testMcpWikiOpsMetadataIncludesOpsTools = function() {

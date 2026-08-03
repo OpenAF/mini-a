@@ -80,6 +80,18 @@ mini-a goal="..." \
 
 Read tools are optimized for retrieval: `browse`, `read`, and `search`.
 
+##### Restricted retrieval
+
+`wikirestrict=true` is an opt-in exposure mode for an untrusted MCP client that has no direct access to the wiki backend. It advertises only `search` and `read`: search returns bounded title/description metadata plus opaque, short-lived references, and read returns one bounded, single-use excerpt. It intentionally makes browsing and inventory collection difficult; it is not DRM and cannot prevent a client from retaining text it is legitimately shown.
+
+```sh
+ojob mcps/mcp-wiki.yaml label="Team wiki" wikiroot=./wiki wikirestrict=true
+ojob mcps/mcp-wiki.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
+  wikirestrict=true wikirestrictstate=/var/lib/mcp-wiki/restriction-ledger.json
+```
+
+Default limits are 3 results, 4 query characters, 300 metadata characters per result, 40 lines / 6000 characters per read, 120-second references, and a process-wide one-hour budget of 30 searches, 15 reads, and 60000 disclosed characters. Startup can only make limits stricter than the hard ceilings (10 results, 100 lines, 16000 characters/read, 200 searches, 100 reads, 500000 characters/hour). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
+
 #### mcp-wiki-ops
 
 `mcp-wiki-ops` is a standalone companion server for wiki operations that are intentionally not part of the read-first `mcp-wiki` surface.
