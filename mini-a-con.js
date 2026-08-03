@@ -625,8 +625,8 @@ try {
     memorysessionch: { type: "string", description: "JSSLON channel definition or native file path for session memory persistence." },
     usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
     wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
-    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs or s3." },
-    wikiroot       : { type: "string", description: "Root directory for the filesystem wiki backend." },
+    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs, s3, s3fs, or es." },
+    wikiroot       : { type: "string", description: "Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)." },
     wikibucket     : { type: "string", description: "Bucket name for the S3 wiki backend." },
     wikiprefix     : { type: "string", default: "wiki/", description: "Prefix path for the S3 wiki backend." },
     wikiurl        : { type: "string", description: "S3 endpoint URL for the wiki backend." },
@@ -636,7 +636,7 @@ try {
     wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
-    wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]." },
+    wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
@@ -6075,9 +6075,9 @@ try {
           mountList.forEach(function(m) { print("  @" + m.name + " — " + m.pages + " pages (" + m.prefix + ")") })
         }
       } else if (sub === "attach") {
-        // Usage: /wiki attach <name> [backend=fs] [root=path]
+        // Usage: /wiki attach <name> [backend=fs] [root=directory-or-archive.zip]
         var attachParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
-        if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=path] [bucket=...] ...", errorColor)); return }
+        if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=directory|archive.zip|archive.okt] [bucket=...] ...", errorColor)); return }
         var attachName = attachParts[0]
         var attachCfg = { access: "ro", backend: "fs" }
         attachParts.slice(1).forEach(function(kv) {
@@ -6108,7 +6108,7 @@ try {
       } else {
         print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", errorColor))
         print(colorifyText("  list --meta   show pages with title+description", hintColor))
-        print(colorifyText("  attach <name> [backend=fs] [root=path]", hintColor))
+        print(colorifyText("  attach <name> [backend=fs] [root=directory|archive.zip|archive.okt]", hintColor))
         print(colorifyText("  detach <name>", hintColor))
       }
     } catch(wikiErr) {

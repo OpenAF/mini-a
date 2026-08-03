@@ -21,6 +21,33 @@
     io.writeFileString(full, content)
   }
 
+  var createArchiveWiki = function(dir, ext) {
+    var archive = dir + java.io.File.separator + "wiki" + ext
+    plugin("ZIP")
+    var zip = new ZIP()
+    try {
+      zip.putFile("index.md", af.fromString2Bytes("---\ntitle: Archive Home\n---\n# Archive Home\narchive-root-keyword"))
+      zip.putFile("overview.md", af.fromString2Bytes("---\ntitle: Archive Overview\n---\n# Archive Overview\narchive-root-keyword"))
+      zip.putFile("guides/index.md", af.fromString2Bytes("---\ntitle: Guides\n---\n# Guides"))
+      zip.putFile("guides/setup.md", af.fromString2Bytes("---\ntitle: Archive Setup\ndescription: nested archive page\n---\n# Setup\narchive-nested-keyword"))
+      zip.putFile(".mini-a-wiki-graph/graph.json", af.fromString2Bytes(stringify({
+        version: 2,
+        nodes: {
+          "doc:overview.md": { id: "doc:overview.md", type: "document", props: { path: "overview.md", digest: "Archive overview" } },
+          "doc:guides/setup.md": { id: "doc:guides/setup.md", type: "document", props: { path: "guides/setup.md", digest: "Archive setup" } }
+        },
+        edges: [{ from: "doc:overview.md", to: "doc:guides/setup.md", type: "LINKS_TO", provenance: "EXTRACTED", props: {} }],
+        summaries: { pages: {}, communities: {} }, semantic_cache: {}, communities: [], surprise: []
+      }, __, "")))
+      zip.putFile("notes.txt", af.fromString2Bytes("not a wiki page"))
+      zip.putFile("../outside.md", af.fromString2Bytes("must not be exposed"))
+      zip.generate2File(archive, { compressionLevel: 9 })
+    } finally {
+      try { zip.close() } catch(e) {}
+    }
+    return archive
+  }
+
   // ── Parsefrontmatter ────────────────────────────────────────────────────────
 
   exports.testParseFrontmatterWithYaml = function() {
@@ -213,6 +240,35 @@
       listFilesRecursive = originalListFilesRecursive
       cleanupTestDir(dir)
     }
+  }
+
+  exports.testArchiveFsBackendZipAndOktReadOnly = function() {
+    var dir = createTestDir()
+    try {
+      [".zip", ".okt"].forEach(function(ext) {
+        var archive = createArchiveWiki(dir, ext)
+        var wm = new MiniAWikiManager({ backend: "fs", root: archive, access: "rw", usegraph: true })
+        var pages = wm.list()
+        ow.test.assert(wm._access, "ro", ext + " root must force read-only access")
+        ow.test.assert(pages.indexOf("index.md") >= 0, true, ext + " should expose root index")
+        ow.test.assert(pages.indexOf("guides/setup.md") >= 0, true, ext + " should expose nested page")
+        ow.test.assert(pages.indexOf("../outside.md") >= 0, false, ext + " should hide unsafe entries")
+        var page = wm.read("guides/setup.md")
+        ow.test.assert(page.meta.title, "Archive Setup", ext + " should parse front matter")
+        ow.test.assert(wm.search("archive-nested-keyword", { forceScan: true }).length > 0, true, ext + " should search entries")
+        ow.test.assert(wm.tree("", 2).sections[0].path, "guides/", ext + " should build nested tree")
+        ow.test.assert(wm.browse("guides").nearest_index.exists, true, ext + " should browse nested index")
+        ow.test.assert(wm.graph("stats", {}).nodes, 2, ext + " should load graph state from the archive")
+        var graphHints = wm.search("archive-root-keyword", { forceScan: true })
+        ow.test.assert(graphHints.some(function(hit) { return hit.path === "guides/setup.md" && String(hit.description).indexOf("[Related pages (graph)]") === 0 }), true, ext + " should use the archive graph for search hints")
+        ow.test.assert(wm.write("new.md", { title: "New" }, "# New").ok, false, ext + " should reject writes")
+        ow.test.assert(wm.delete("index.md").ok, false, ext + " should reject deletes")
+        ow.test.assert(wm.reindex().ok, false, ext + " should reject index rebuilds")
+        ow.test.assert(io.fileExists(dir + java.io.File.separator + ".mini-a-wiki-meta"), false, ext + " should not create metadata beside archive")
+        ow.test.assert(io.fileExists(dir + java.io.File.separator + ".mini-a-wiki-lucene"), false, ext + " should not create Lucene state beside archive")
+        ow.test.assert(io.fileExists(dir + java.io.File.separator + ".mini-a-wiki-graph"), false, ext + " should not create graph state beside archive")
+      })
+    } finally { cleanupTestDir(dir) }
   }
 
   exports.testEsRowsToPathsSkipsUndefinedRows = function() {
@@ -1413,6 +1469,25 @@
       ow.test.assert(isObject(page), true, "@team/mounted.md should be readable via mount")
       ow.test.assert(page.meta.title, "From Mount", "mounted page title should be read")
     } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  exports.testArchiveMountFederatesAndStaysReadOnly = function() {
+    var dir = createTestDir()
+    try {
+      var archive = createArchiveWiki(dir, ".zip")
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var attached = primary.attach("reference", { backend: "fs", root: archive, access: "rw" })
+      ow.test.assert(attached.ok, true, "archive mount should attach")
+      ow.test.assert(primary.read("@reference/guides/setup.md").meta.title, "Archive Setup", "archive mount should route reads")
+      var hits = primary.search("archive-nested-keyword", { forceScan: true })
+      ow.test.assert(hits.some(function(hit) { return hit.path === "@reference/guides/setup.md" }), true, "archive mount should join search")
+      ow.test.assert(primary.tree("@reference/", 2).sections[0].path, "guides/", "archive mount should build tree")
+      ow.test.assert(primary.browse("@reference/guides").nearest_index.exists, true, "archive mount should browse")
+      ow.test.assert(primary.graph("neighbors", { path: "@reference/overview.md" }).length, 1, "archive mount should load graph state")
+      var graphHints = primary.search("archive-root-keyword", { forceScan: true })
+      ow.test.assert(graphHints.some(function(hit) { return hit.path === "@reference/guides/setup.md" && String(hit.description).indexOf("[Related pages (graph @reference)]") === 0 }), true, "archive mount graph should add search hints")
+      ow.test.assert(primary.write("@reference/new.md", { title: "New" }, "# New").ok, false, "archive mount should reject writes")
+    } finally { cleanupTestDir(dir) }
   }
 
   exports.testMountSearchFanout = function() {

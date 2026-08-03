@@ -173,6 +173,21 @@
     ow.test.assert(ing._chunk("# Small\n\nbody", 5000).length, 1, "a small source is a single chunk")
   }
 
+  exports.testIngestReportsDistillationFailuresAsBatchesComplete = function() {
+    var logs = []
+    var ing = new MiniAIngest({ ingestconcurrency: 1 }, function(msg) { logs.push(msg) })
+    ing._setLlm({
+      promptJSONWithStats: function() { throw new Error("model unavailable") }
+    })
+    var pending = [{
+      src: { id: "failed.md", rel: "failed.md" }, content: "# Failed", hash: "hash", key: "key"
+    }]
+    var result = ing._distillAll(ing._llm, pending, [], 1)
+    ow.test.assert(result[0].ok, false, "the failed distillation should be returned")
+    ow.test.assert(logs.join("\n").indexOf("Distillation failed for failed.md: model unavailable") >= 0, true,
+      "a failed batch should be logged before the write pass")
+  }
+
   exports.testChunkerSplitsOnHeadingsWithinLimit = function() {
     var ing = new MiniAIngest({}, function() {})
     var parts = []

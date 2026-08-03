@@ -511,7 +511,7 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
 | `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
 | `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) | `fs` |
-| `wikiroot` | Filesystem wiki root when `wikibackend=fs` | `.` |
+| `wikiroot` | Filesystem wiki directory or local `.zip`/`.okt` archive when `wikibackend=fs`; archives are always read-only | `.` |
 | `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
 | `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
 | `wikiurl` | S3 endpoint URL, or Elasticsearch/OpenSearch base URL when `wikibackend=es` (internal `esurl`) | - |

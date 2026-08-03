@@ -874,7 +874,7 @@ The `start()` method accepts various configuration options:
 - **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
 - **`wikiaccess`** (string, default: `ro`): Wiki access mode, `ro` or `rw`.
 - **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch).
-- **`wikiroot`** (string, default: `.`): Filesystem root for `wikibackend=fs`.
+- **`wikiroot`** (string, default: `.`): Filesystem directory or local `.zip`/`.okt` archive for `wikibackend=fs`. Archive roots are always read-only, even with `wikiaccess=rw`. When `usewikigraph=true`, an archive may provide its existing `.mini-a-wiki-graph/graph.json` for read-only graph commands and search hints; Mini-A never rebuilds or writes it.
 - **`wikibucket`** (string, optional): S3 bucket for `wikibackend=s3` or `wikibackend=s3fs`.
 - **`wikiprefix`** (string, optional): S3 key prefix for `s3`/`s3fs`; Elasticsearch index name for `es` (defaults to `mini_a_wiki`).
 - **`wikiurl`** (string, optional): S3-compatible endpoint URL for `s3`/`s3fs`; Elasticsearch/OpenSearch base URL for `es` (this is the CLI-facing equivalent of the internal `esurl`).
@@ -888,7 +888,7 @@ The `start()` method accepts various configuration options:
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
 - **`wikilintstreamthreshold`** (number, default: `2000`): Switch wiki lint into streaming mode above this many pages.
 - **`wikilintmaxpairs`** (number, default: `250000`): Cap near-duplicate comparisons during streaming lint.
-- **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'team', backend: 'fs', root: '/shared/team-wiki'}]"`.
+- **`wikimounts`** (SLON/JSON, optional): Read-only wiki mounts. Array of `{name, backend, root|bucket|prefix|url|accessKey|secret|region}`. An `fs` root may be a local directory or a local `.zip`/`.okt` archive; archives expose their entry root and are always read-only. Each mount's pages appear under `@<name>/path.md` in search, read, browse, and tree. Example: `wikimounts="[{name: 'reference', backend: 'fs', root: '/shared/reference.okt'}]"`.
 - **`usewikigraph`** (boolean, default: `false`): Enable wiki knowledge-graph layer and `graph` action. Also enabled automatically when `wikigraphfalkorhost` is set.
 - **`wikigraphsemantic`** (boolean, default: `false`): Enable semantic extraction during `graph op=build`.
 - **`wikigraphcommunity`** (string, default: `louvain`): Graph community detection algorithm.
@@ -907,7 +907,7 @@ A brand-new wiki bootstraps three pages: `AGENTS.md` (contribution rules, schema
 
 **Recommended wiki ops sequence (agent or MCP):** `context` → `search` → `read` (with `section=` for long pages) → `write`/`lint`. The `context` op returns a compact overview in <500 tokens — use it once to orient before any search. `search` returns `{path, title, description}` by default (no full content); add `contextLines>0` for snippets. `list withMeta=true` returns metadata for all pages in one call. Reads to mounted wikis use the `@name/path.md` syntax; writes are always to the primary wiki.
 
-Dynamic (runtime) mount management: `wiki op="attach" name=ext backend=fs root=/path`, `wiki op="detach" name=ext`, `wiki op="mounts"`. In console: `/wiki attach ext root=/path`, `/wiki detach ext`, `/wiki mounts`.
+Dynamic (runtime) mount management: `wiki op="attach" name=ext backend=fs root=/path`, `wiki op="detach" name=ext`, `wiki op="mounts"`. For an archive mount, use `root=/path/reference.zip` or `.okt`; its `index.md` and pages must be at the archive entry root. In console: `/wiki attach ext root=/path`, `/wiki detach ext`, `/wiki mounts`.
 Graph runtime operations: `graph op="build|query|neighbors|path|communities|surprise|stats|export|falkor|retrieve|answer"` and in console `/graph ...`.
 
 For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `esurl=` runtime argument; use `wikiurl=` with `wikibackend=es`.

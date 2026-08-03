@@ -1065,9 +1065,12 @@ MiniAWikiGraph.prototype.load = function() {
     }
   }
   try {
-    var p = this._graphDir + "/graph.json"
-    if (!io.fileExists(p)) return false
-    var raw = io.readFileString(p)
+    var raw = isString(this._cfg.graphRaw) ? this._cfg.graphRaw : __
+    if (isUnDef(raw)) {
+      var p = this._graphDir + "/graph.json"
+      if (!io.fileExists(p)) return false
+      raw = io.readFileString(p)
+    }
     var obj = af.fromJson(raw)
     if (!isMap(obj)) return false
     this._state = merge(this._emptyState(), obj)

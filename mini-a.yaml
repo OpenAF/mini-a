@@ -877,7 +877,7 @@ help:
     mandatory: false
     options  : ["fs", "s3", "s3fs", "es"]
   - name     : wikiroot
-    desc     : Root directory for the filesystem wiki backend
+    desc     : Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)
     example  : "/shared/wiki"
     mandatory: false
   - name     : wikibucket

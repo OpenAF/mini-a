@@ -677,7 +677,7 @@ help:
     example  : "fs"
     mandatory: false
   - name     : wikiroot
-    desc     : Root directory for the filesystem wiki backend
+    desc     : Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)
     example  : "/shared/wiki"
     mandatory: false
   - name     : wikibucket

@@ -51,6 +51,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testFsBackendListHandlesIterableListFilesRecursiveShape
 
+- name: MiniA Wiki Tests::ArchiveFsBackendZipAndOktReadOnly
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testArchiveFsBackendZipAndOktReadOnly
+
 - name: MiniA Wiki Tests::EsRowsToPathsSkipsUndefinedRows
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testEsRowsToPathsSkipsUndefinedRows
@@ -365,6 +369,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMountReadRouted
 
+- name: MiniA Wiki Tests::ArchiveMountFederatesAndStaysReadOnly
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testArchiveMountFederatesAndStaysReadOnly
+
 - name: MiniA Wiki Tests::MountSearchFanout
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMountSearchFanout
@@ -454,6 +462,7 @@ todo:
 - MiniA Wiki Tests::FsBackendListWithPrefixKeepsPrefix
 - MiniA Wiki Tests::FsBackendListHandlesNestedListFilesRecursiveShape
 - MiniA Wiki Tests::FsBackendListHandlesIterableListFilesRecursiveShape
+- MiniA Wiki Tests::ArchiveFsBackendZipAndOktReadOnly
 - MiniA Wiki Tests::EsRowsToPathsSkipsUndefinedRows
 - MiniA Wiki Tests::FsBackendReadWrite
 - MiniA Wiki Tests::BootstrapCreatesAgentsAndIndexForEmptyWritableWiki
@@ -530,6 +539,7 @@ todo:
 - MiniA Wiki Tests::SearchWithContextLinesReturnsSnippets
 - MiniA Wiki Tests::MountWriteRejected
 - MiniA Wiki Tests::MountReadRouted
+- MiniA Wiki Tests::ArchiveMountFederatesAndStaysReadOnly
 - MiniA Wiki Tests::MountSearchFanout
 - MiniA Wiki Tests::AtPrefixRejectedByNormalizePath
 - MiniA Wiki Tests::DetachRemovesMount

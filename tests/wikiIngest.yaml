@@ -43,6 +43,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testChunkerKeepsSmallSourcesWhole
 
+- name: MiniA Wiki Ingest Tests::IngestReportsDistillationFailuresAsBatchesComplete
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestReportsDistillationFailuresAsBatchesComplete
+
 - name: MiniA Wiki Ingest Tests::ChunkerSplitsOnHeadingsWithinLimit
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testChunkerSplitsOnHeadingsWithinLimit
@@ -74,6 +78,7 @@ todo:
 - MiniA Wiki Ingest Tests::IngestForceReIngestsEverything
 - MiniA Wiki Ingest Tests::IngestReIngestsOnlyChangedSources
 - MiniA Wiki Ingest Tests::ChunkerKeepsSmallSourcesWhole
+- MiniA Wiki Ingest Tests::IngestReportsDistillationFailuresAsBatchesComplete
 - MiniA Wiki Ingest Tests::ChunkerSplitsOnHeadingsWithinLimit
 - MiniA Wiki Ingest Tests::ChunkerHandlesHeadinglessProse
 - MiniA Wiki Ingest Tests::SourceTypeDetection

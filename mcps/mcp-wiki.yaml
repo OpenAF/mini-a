@@ -11,7 +11,7 @@ help:
     example  : "fs"
     mandatory: false
   - name     : wikiroot
-    desc     : "Base directory for fs backend (default: current directory)"
+    desc     : "Base directory or local .zip/.okt archive for fs backend (archives are always read-only)"
     example  : "./wiki"
     mandatory: false
   - name     : wikibucket

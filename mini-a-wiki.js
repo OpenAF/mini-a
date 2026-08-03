@@ -620,6 +620,14 @@ MiniAWikiManager.prototype._graphPayloadFromRecord = function(path, raw, parsed)
   }
 }
 
+MiniAWikiManager.prototype._readArchiveGraph = function() {
+  if (this._archiveRoot !== true || !isObject(this._backend) || !isString(this._backend.root)) return __
+  try {
+    var raw = io.readFileString(this._backend.root + "::.mini-a-wiki-graph/graph.json")
+    return isDef(raw) ? String(raw) : __
+  } catch(e) { return __ }
+}
+
 MiniAWikiManager.prototype._mountGraph = function(mount) {
   if (!isMap(mount) || !isObject(mount.manager)) return __
   var ttl = isNumber(this._config.wikimountgraphttlms) ? this._config.wikimountgraphttlms : 60000
@@ -629,11 +637,12 @@ MiniAWikiManager.prototype._mountGraph = function(mount) {
   try {
     loadLib("mini-a-graph.js")
     var graphDir = mount.manager._getGraphPath()
-    if (!io.fileExists(graphDir + "/graph.json")) {
+    var graphRaw = mount.manager._readArchiveGraph()
+    if (!isString(graphRaw) && !io.fileExists(graphDir + "/graph.json")) {
       mount.graph = __
       return __
     }
-    mount.graph = new MiniAWikiGraph({ graphDir: graphDir, readOnly: true }, this._logFn)
+    mount.graph = new MiniAWikiGraph({ graphDir: graphDir, graphRaw: graphRaw, readOnly: true }, this._logFn)
     return mount.graph
   } catch(e) {
     this._logFn("warn", "Failed to load mount graph for @" + mount.name + ": " + __miniAErrMsg(e))
@@ -859,7 +868,7 @@ MiniAWikiManager.prototype.reindex = function() {
 }
 
 MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
-  if (!isArray(hits) || !isObject(this._graph)) return hits
+  if (!isArray(hits)) return hits
   var opts = isObject(options) ? options : {}
   // F12: undefined means enabled; only explicit false disables hints
   if (this._config.wikigraphsearchhints === false && opts.wikigraphsearchhints !== true) return hits
@@ -868,7 +877,7 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
   if (isNumber(lim) && hits.length >= lim) return hits
   var combined = hits.slice()
   var primaryPaths = hits.map(function(h) { return h.path }).filter(function(p) { return isString(p) && !p.startsWith("@") })
-  if (primaryPaths.length > 0) {
+  if (isObject(this._graph) && primaryPaths.length > 0) {
     var related = this._graph.relatedFor(primaryPaths, { cap: cap })
     if (isArray(related) && related.length > 0) {
       combined = combined.concat(related.map(function(r) {
@@ -910,9 +919,10 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
 }
 
 MiniAWikiManager.prototype.graph = function(op, params) {
-  if (!isObject(this._graph)) return { ok: false, error: "graph is not enabled (usegraph=true)" }
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
+  var mountGraphRequest = (action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")
+  if (!isObject(this._graph) && !mountGraphRequest) return { ok: false, error: "graph is not enabled (usegraph=true)" }
   // read-only wikis can query an existing graph (local graph.json or external FalkorDB)
   // but never build or persist one
   if (this._access !== "rw") {
@@ -1008,6 +1018,10 @@ MiniAWikiManager.prototype.configure = function(config) {
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
   this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
+  // A local ZIP-compatible filesystem root is a wiki bundle, not a writable
+  // directory. Detect it before any bootstrap/index/graph work can write.
+  this._archiveRoot = this._backendType === "fs" && this._isArchiveRoot(cfg.root)
+  if (this._archiveRoot) this._access = "ro"
   this._config  = cfg
   this._graph = __
   this._searchIndex = __
@@ -1026,9 +1040,11 @@ MiniAWikiManager.prototype.configure = function(config) {
         autosave: isString(cfg.wikigraphautosave) ? cfg.wikigraphautosave : "always",
         saveDebounceMs: isNumber(cfg.wikigraphsavedebouncems) ? cfg.wikigraphsavedebouncems : 5000
       }
+      graphCfg.graphRaw = this._readArchiveGraph()
       // read-only wikis consume an existing graph (local graph.json or an external FalkorDB);
       // they never create one, so skip silently when there is nothing to consume.
       if (this._access !== "rw" &&
+          !isString(graphCfg.graphRaw) &&
           !io.fileExists(graphCfg.graphDir + "/graph.json") &&
           !(isMap(graphCfg.falkor) && isString(graphCfg.falkor.host))) {
         this._graph = __
@@ -1041,6 +1057,14 @@ MiniAWikiManager.prototype.configure = function(config) {
     }
   }
   this._bootstrapWiki()
+}
+
+MiniAWikiManager.prototype._isArchiveRoot = function(root) {
+  if (!isDef(root) || String(root).trim().length === 0) return false
+  try {
+    var file = new java.io.File(String(root).trim())
+    return file.isFile() && /\.(zip|okt)$/i.test(String(file.getName()))
+  } catch(e) { return false }
 }
 
 MiniAWikiManager.prototype._bootstrapWiki = function() {
@@ -1536,6 +1560,7 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
   var rawRoot = isDef(cfg.root) ? String(cfg.root).trim() : ""
   var root = rawRoot.length > 0 ? rawRoot : "."
   var canonicalRoot = String(new java.io.File(root).getCanonicalPath())
+  if (this._archiveRoot) return this._makeArchiveFsBackend(canonicalRoot)
   var canonicalRootPrefix = canonicalRoot.endsWith(sep) ? canonicalRoot : canonicalRoot + sep
   var normalizePrefix = function(value) {
     var prefix = isDef(value) ? String(value).trim().replace(/\\/g, "/") : ""
@@ -1599,6 +1624,55 @@ MiniAWikiManager.prototype._makeFsBackend = function(cfg) {
       if (!file.isFile()) throw "not a file"
       if (!file.delete()) throw "failed to delete file"
     }
+  }
+}
+
+// ZIP and OKT files are transparent, read-only filesystem wiki roots. Paths are
+// deliberately the archive entry names: bundles must place index.md at root.
+MiniAWikiManager.prototype._makeArchiveFsBackend = function(archivePath) {
+  plugin("ZIP")
+  var safeEntry = function(value) {
+    if (!isString(value)) return __
+    try {
+      var normalized = __miniAWikiNormalizePath(value, { requireMarkdown: true })
+      // Do not reinterpret entries (for example, backslashes or ./ prefixes).
+      return normalized === value ? normalized : __
+    } catch(e) { return __ }
+  }
+  var entries = function() {
+    var zip = new ZIP()
+    try {
+      return Object.keys(zip.list(archivePath)).map(safeEntry).filter(function(p) { return isString(p) })
+    } finally {
+      try { zip.close() } catch(e) {}
+    }
+  }
+  return {
+    type: "archive",
+    root: archivePath,
+    readOnly: true,
+    list: function(prefix) {
+      var pfx = isDef(prefix) ? String(prefix).trim() : ""
+      if (pfx.length > 0) {
+        try { pfx = __miniAWikiNormalizePath(pfx, { allowDirectory: true }) } catch(e) { return [] }
+        if (pfx.length > 0) pfx = pfx + "/"
+      }
+      return entries().filter(function(path) { return pfx.length === 0 || path.indexOf(pfx) === 0 }).sort()
+    },
+    read: function(path) {
+      var entry = safeEntry(path)
+      if (isUnDef(entry)) return __
+      try {
+        var content = io.readFileString(archivePath + "::" + entry)
+        return isDef(content) ? String(content) : __
+      } catch(e) { return __ }
+    },
+    exists: function(path) {
+      var entry = safeEntry(path)
+      return isDef(entry) && entries().indexOf(entry) >= 0
+    },
+    write: function() { throw "archive wiki is read-only" },
+    delete: function() { throw "archive wiki is read-only" }
   }
 }
 
@@ -2297,6 +2371,12 @@ MiniAWikiManager.prototype._searchMounts = function(query, opts, compact, remain
 }
 
 MiniAWikiManager.prototype.tree = function(prefix, depth) {
+  var mountPrefix = isString(prefix) ? prefix.trim() : ""
+  if (mountPrefix.startsWith("@")) {
+    var mountResult = this._resolveMountPath(mountPrefix)
+    if (mountResult && mountResult.mount) return mountResult.mount.manager.tree(mountResult.localPath, depth)
+    return { path: mountPrefix, error: "mount not found: " + (mountResult ? mountResult.name : mountPrefix), pages: [], sections: [] }
+  }
   var sectionPrefix = ""
   try { sectionPrefix = this._normalizeSectionPath(prefix) } catch(e) { sectionPrefix = "" }
   var maxDepth = isNumber(depth) && depth >= 0 ? depth : 3

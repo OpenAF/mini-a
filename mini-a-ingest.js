@@ -471,7 +471,6 @@ MiniAIngest.prototype.run = function() {
     distilled.forEach(function(d) {
       if (d.ok !== true) {
         result.failed.push({ source: d.src.rel, error: d.error })
-        self._log("[ingest] Distillation failed for " + d.src.rel + ": " + d.error)
         return
       }
       var wikiPath = self._wikiPathFor(section, d.src)
@@ -544,7 +543,10 @@ MiniAIngest.prototype._distillAll = function(llm, pending, siblings, concurrency
         return merge(d, { src: p.src, hash: p.hash, key: p.key })
       })
     }
-    ;(isArray(results) ? results : []).forEach(function(r) { out.push(r) })
+    ;(isArray(results) ? results : []).forEach(function(r) {
+      out.push(r)
+      if (r.ok !== true) self._log("[ingest] Distillation failed for " + r.src.rel + ": " + r.error)
+    })
     self._log("[ingest] Distilled " + Math.min(i + concurrency, pending.length) + "/" + pending.length + " source(s).")
   }
   return out
