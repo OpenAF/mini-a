@@ -1101,6 +1101,13 @@ MiniAWikiManager.prototype._relativePath = function(fromPage, targetPage) {
 // pagesInfo (optional): { pages:[{path,title,description,type,updated,relPath}], sections:[{indexPath,title,pageCount,updated}], recent:[string], attachedWikis:[{name,description,backend,pages}] }
 MiniAWikiManager.prototype._makeIndexContent = function(indexPath, title, description, pagesInfo) {
   var now = new Date().toISOString()
+  var isoValue = function(value, fallback) {
+    if (isUnDef(value) || value === null || String(value).trim().length === 0) return fallback
+    try { if (isDate(value)) return value.toISOString() } catch(eDate) {}
+    return String(value)
+  }
+  var created = isMap(pagesInfo) ? isoValue(pagesInfo.created, now) : now
+  var updated = isMap(pagesInfo) ? isoValue(pagesInfo.updated, now) : now
   var isRoot = indexPath === "index.md"
   var sectionName = isString(title) && title.trim().length > 0 ? title.trim()
     : (isRoot ? "Wiki Home" : indexPath.replace(/\/index\.md$/i, "").replace(/[-_/]/g, " "))
@@ -1111,8 +1118,8 @@ MiniAWikiManager.prototype._makeIndexContent = function(indexPath, title, descri
     "---",
     "title: " + sectionName,
     "description: " + desc,
-    "created: " + now,
-    "updated: " + now,
+    "created: " + created,
+    "updated: " + updated,
     "tags:",
     "  - index",
     "---",
@@ -1237,6 +1244,8 @@ MiniAWikiManager.prototype._indexBodyExtras = function(body) {
 
 // regenerateIndexes: rebuilds root and section index.md bodies from live page metadata,
 // driving the pagesInfo branch of _makeIndexContent. Existing title/description are preserved.
+// options.paths may restrict regeneration to exact index paths. Unchanged pages are skipped,
+// which makes repeated deterministic repair runs content-idempotent.
 // Returns { ok, regenerated:[path], skipped:[path] }.
 MiniAWikiManager.prototype.regenerateIndexes = function(options) {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
@@ -1271,8 +1280,16 @@ MiniAWikiManager.prototype.regenerateIndexes = function(options) {
     }
   }
 
-  dirs.sort().forEach(function(dir) {
+  var requestedPaths = isArray(opts.paths) ? opts.paths : []
+  // Regenerate children before parents so a parent catalog records the final child metadata
+  // in the same pass (and a second identical pass has nothing left to change).
+  dirs.sort(function(a, b) {
+    var depthA = a.split("/").length, depthB = b.split("/").length
+    if (depthA !== depthB) return depthB - depthA
+    return a < b ? -1 : (a > b ? 1 : 0)
+  }).forEach(function(dir) {
     var indexPath = dir + "index.md"
+    if (requestedPaths.length > 0 && requestedPaths.indexOf(indexPath) < 0) return
     var isRoot    = indexPath === "index.md"
 
     // direct child pages of this directory
@@ -1322,32 +1339,47 @@ MiniAWikiManager.prototype.regenerateIndexes = function(options) {
     }
 
     // preserve the human-authored title/description, intro prose and custom sections
-    var title = __, description = __, extras = { intro: "", sections: "" }
+    var title = __, description = __, created = __, updated = __, extras = { intro: "", sections: "" }, existingRaw = __
     try {
       var existing = self.read(indexPath)
       if (isObject(existing) && isObject(existing.meta)) {
         if (isString(existing.meta.title)) title = existing.meta.title
         if (isString(existing.meta.description)) description = existing.meta.description
+        if (isDef(existing.meta.created)) created = existing.meta.created
+        if (isDef(existing.meta.updated)) updated = existing.meta.updated
       }
       if (isObject(existing) && isString(existing.body)) extras = self._indexBodyExtras(existing.body)
+      existingRaw = self._backend.read(indexPath)
     } catch(eRead) {}
 
     try {
-      var content = self._makeIndexContent(indexPath, title, description, {
-        pages: direct, sections: childSections, recent: recent, attachedWikis: attached
-      })
+      var makeContent = function(indexUpdated) {
+        var content = self._makeIndexContent(indexPath, title, description, {
+          pages: direct, sections: childSections, recent: recent, attachedWikis: attached,
+          created: created, updated: indexUpdated
+        })
       // put the author's intro back in place of the generated one-liner
-      if (extras.intro.length > 0) {
-        var hIdx = content.indexOf("\n# ")
-        if (hIdx >= 0) {
-          var afterHeading = content.indexOf("\n", hIdx + 1)
-          var firstSection = content.indexOf("\n## ", hIdx)
-          if (afterHeading >= 0 && firstSection > afterHeading) {
-            content = content.substring(0, afterHeading + 1) + "\n" + extras.intro + "\n" + content.substring(firstSection)
+        if (extras.intro.length > 0) {
+          var hIdx = content.indexOf("\n# ")
+          if (hIdx >= 0) {
+            var afterHeading = content.indexOf("\n", hIdx + 1)
+            var firstSection = content.indexOf("\n## ", hIdx)
+            if (afterHeading >= 0 && firstSection > afterHeading) {
+              content = content.substring(0, afterHeading + 1) + "\n" + extras.intro + "\n" + content.substring(firstSection)
+            }
           }
         }
+        if (extras.sections.length > 0) content = content.replace(/\s+$/, "") + "\n\n" + extras.sections + "\n"
+        return content
       }
-      if (extras.sections.length > 0) content = content.replace(/\s+$/, "") + "\n\n" + extras.sections + "\n"
+      // Generate once using the existing timestamp. If it is identical, do not write.
+      var content = makeContent(updated)
+      if (isString(existingRaw) && existingRaw === content) {
+        out.skipped.push(indexPath)
+        return
+      }
+      // A changed catalog needs a fresh `updated`, while preserving its original `created`.
+      content = makeContent(new Date().toISOString())
       self._backend.write(indexPath, content)
       self._updatePageIndexes(indexPath, content, self.parseFrontmatter(content))
       out.regenerated.push(indexPath)
@@ -1732,6 +1764,13 @@ MiniAWikiManager.prototype._serializeFrontmatter = function(meta, body) {
 
 // Returns [{raw, type}] where type is "md" (page-relative) or "wiki" (root-relative).
 // External https?:// targets are excluded here since they are never wiki-internal.
+MiniAWikiManager.prototype._wikiLinkTarget = function(value) {
+  var target = String(value || "").split("|")[0].split("#")[0].trim()
+  if (target.length === 0) return ""
+  if (target.toLowerCase().endsWith(".md")) return target.replace(/^\/+/, "")
+  return target.toLowerCase().replace(/\s+/g, "-") + ".md"
+}
+
 MiniAWikiManager.prototype._extractLinkEntries = function(body) {
   if (!isString(body)) return []
   var entries = []
@@ -1745,13 +1784,12 @@ MiniAWikiManager.prototype._extractLinkEntries = function(body) {
       entries.push({ raw: target, type: "md" })
     }
   }
-  // Wiki-style links: [[Page Name]] — always root-relative slugs
+  // Wiki-style links: [[Page Name]] and [[path.md|label]] — always root-relative.
   var wikiRe = /\[\[([^\]]+)\]\]/g
   while ((m = wikiRe.exec(body)) !== null) {
-    var name = m[1].trim()
-    if (name.length > 0) {
-      var slug = name.toLowerCase().replace(/\s+/g, "-") + ".md"
-      if (!seen[slug]) { seen[slug] = true; entries.push({ raw: slug, type: "wiki" }) }
+    var target = this._wikiLinkTarget(m[1])
+    if (target.length > 0) {
+      if (!seen[target]) { seen[target] = true; entries.push({ raw: target, type: "wiki" }) }
     }
   }
   return entries
@@ -2441,9 +2479,11 @@ MiniAWikiManager.prototype._rewriteLinksForMove = function(raw, sourcePage, from
     return "[" + label + "](" + self._relativePath(rebaseOnly === true ? toPath : sourcePage, resolved) + anchor + ")"
   })
   body = body.replace(/\[\[([^\]]+)\]\]/g, function(full, label) {
-    var slug = String(label).trim().toLowerCase().replace(/\s+/g, "-") + ".md"
-    if (slug !== fromPath) return full
-    return "[" + label + "](" + self._relativePath(rebaseOnly === true ? toPath : sourcePage, toPath) + ")"
+    var target = self._wikiLinkTarget(label)
+    if (target !== fromPath) return full
+    var pipe = String(label).indexOf("|")
+    var text = pipe >= 0 ? String(label).substring(pipe + 1).trim() : label
+    return "[" + text + "](" + self._relativePath(rebaseOnly === true ? toPath : sourcePage, toPath) + ")"
   })
   return body
 }

@@ -123,6 +123,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testLintExternalLinkNotBroken
 
+- name: MiniA Wiki Tests::LintAliasedWikiLinkNotBroken
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLintAliasedWikiLinkNotBroken
+
 - name: MiniA Wiki Tests::LintAbsolutePathLinkNotBroken
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testLintAbsolutePathLinkNotBroken
@@ -468,6 +472,7 @@ todo:
 - MiniA Wiki Tests::ResolveLinkEscapesRootReturnsNull
 - MiniA Wiki Tests::LintBrokenLink
 - MiniA Wiki Tests::LintExternalLinkNotBroken
+- MiniA Wiki Tests::LintAliasedWikiLinkNotBroken
 - MiniA Wiki Tests::LintAbsolutePathLinkNotBroken
 - MiniA Wiki Tests::LintRelativeLinkInSubdirValid
 - MiniA Wiki Tests::LintRelativeLinkInSubdirBroken

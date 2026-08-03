@@ -52,10 +52,11 @@
 
   exports.testExtractWikiStyleLinks = function() {
     var wm = new MiniAWikiManager({ backend: "fs", root: "." })
-    var body = "See [[Getting Started]] and [[API Reference]] for more."
+    var body = "See [[Getting Started]] and [[API Reference]] and [[mini-a/usage.md|Usage]] for more."
     var links = wm.extractLinks(body)
     ow.test.assert(links.indexOf("getting-started.md") >= 0, true, "should find getting-started.md")
     ow.test.assert(links.indexOf("api-reference.md") >= 0, true, "should find api-reference.md")
+    ow.test.assert(links.indexOf("mini-a/usage.md") >= 0, true, "should use the target portion of an aliased wiki link")
   }
 
   exports.testExtractLinksDeduplicates = function() {
@@ -500,6 +501,20 @@
     }
   }
 
+  exports.testLintAliasedWikiLinkNotBroken = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "---\ntitle: Index\n---\nSee [[mini-a/usage.md|Usage]].")
+      writePage(dir, "mini-a/usage.md", "---\ntitle: Usage\n---\nContent.")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var brokenLinks = report.issues.filter(function(i) { return i.type === "broken_link" })
+      ow.test.assert(brokenLinks.length, 0, "aliased wiki links should resolve their target path")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testLintAbsolutePathLinkNotBroken = function() {
     var dir = createTestDir()
     try {
@@ -803,7 +818,7 @@
     try {
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
       wm.write("old.md", { title: "Old", created: "2024-01-01T00:00:00.000Z" }, "# Old\nSee [home](index.md).")
-      wm.write("index.md", { title: "Index" }, "# Index\nSee [old](old.md).")
+      wm.write("index.md", { title: "Index" }, "# Index\nSee [old](old.md) and [[old.md|Old page]].")
       var result = wm.move("old.md", "guides/new.md")
       ow.test.assert(result.ok, true, "move should succeed")
       ow.test.assert(wm.read("old.md"), __, "old page should be deleted by default")
@@ -812,6 +827,7 @@
       ow.test.assert(moved.body.indexOf("../index.md") >= 0, true, "moved page relative links should be rebased")
       var index = wm.read("index.md")
       ow.test.assert(index.body.indexOf("guides/new.md") >= 0, true, "incoming links should point to new page")
+      ow.test.assert(index.body.indexOf("[[old.md|Old page]]") < 0, true, "aliased wiki links should be rewritten on move")
     } finally {
       cleanupTestDir(dir)
     }

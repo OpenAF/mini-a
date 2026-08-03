@@ -477,6 +477,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     redirects_created: 0,
     issues_fixed: [],
     skipped_uncertain_moves: [],
+    repairs: { fixed: [], skipped: [], candidates: [] },
     lint_before: { errors: 0, warnings: 0, info: 0 },
     lint_after: { errors: 0, warnings: 0, info: 0 }
   }
@@ -527,25 +528,6 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     }
   }
 
-  var updateIndexLinks = function(wm, indexPath, targets) {
-    var page = wm.read(indexPath)
-    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) return false
-    var body = page.body
-    var changed = false
-    ;(isArray(targets) ? targets : []).forEach(function(target) {
-      var rel = wm._relativePath(indexPath, target)
-      var label = target.replace(/\/index\.md$/i, "").replace(/\.md$/i, "").replace(/.*\//, "").replace(/[-_]/g, " ")
-      var link = "[" + label + "](" + rel + ")"
-      if (body.indexOf("(" + rel + ")") < 0 && body.indexOf("[" + label + "]") < 0) {
-        body += "\n- " + link
-        changed = true
-      }
-    })
-    if (!changed) return false
-    var wr = wm.write(indexPath, page.meta, body)
-    return isMap(wr) && wr.ok === true
-  }
-
   if (isDryRun) {
     self._log("💤 [dreams] Wiki dream dry-run: building proposal package...")
     try {
@@ -555,6 +537,9 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       defaultResult.mode = "plan"
       defaultResult.lint_before = lintSummary(lintBeforeDry)
       defaultResult.lint_after = lintSummary(lintBeforeDry)
+      defaultResult.repairs = self._repairWikiLint(wmDry, lintBeforeDry, { dryRun: true, minPages: self._args.dreamwikiminpages })
+      defaultResult.issues_fixed = defaultResult.repairs.fixed.map(function(issue) { return issue.type + ":" + issue.page })
+      proposal.repairs = defaultResult.repairs
       defaultResult.proposal = proposal
       wmDry.close()
       self._log("[dreams:wiki] Dry-run complete — proposal generated with " + proposal.indexes_to_create.length + " index creates and " + proposal.indexes_to_update.length + " index updates.")
@@ -594,45 +579,23 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       var lintBefore = wmApply.lint(lintMemMgr, { staleDays: staleDays })
       defaultResult.lint_before = lintSummary(lintBefore)
 
-      var issues = isArray(lintBefore.issues) ? lintBefore.issues : []
-      var missingIndexes = issues.filter(function(iss) { return iss.type === "missing_index" })
-      var missingLinks = issues.filter(function(iss) { return iss.type === "index_missing_links" })
-      var pageCount = isArray(wmApply.list("")) ? wmApply.list("").length : 0
-      var minPages = isNumber(self._args.dreamwikiminpages) ? self._args.dreamwikiminpages : Number(self._args.dreamwikiminpages)
-      if (isNaN(minPages)) minPages = 5
-      if (pageCount < minPages) {
-        defaultResult.skipped_uncertain_moves.push("apply skipped: page count " + pageCount + " is below dreamwikiminpages " + minPages)
-      } else {
-        missingIndexes.forEach(function(iss) {
-          var r = wmApply.init(iss.section)
-          if (isMap(r) && r.ok === true && isArray(r.created) && r.created.length > 0) {
-            defaultResult.indexes_created += r.created.length
-            defaultResult.issues_fixed.push("missing_index:" + iss.page)
-          }
-        })
-
-        var targetsByIndex = {}
-        missingLinks.forEach(function(iss) {
-          if (!isString(iss.page) || !isString(iss.target)) return
-          if (!isArray(targetsByIndex[iss.page])) targetsByIndex[iss.page] = []
-          targetsByIndex[iss.page].push(iss.target)
-        })
-        Object.keys(targetsByIndex).forEach(function(indexPath) {
-          if (updateIndexLinks(wmApply, indexPath, targetsByIndex[indexPath])) {
-            defaultResult.indexes_updated++
-            defaultResult.pages_changed++
-            defaultResult.issues_fixed.push("index_missing_links:" + indexPath)
-          }
-        })
-
-        // stale_index used to be "fixed" by rewriting the page with identical content just to
-        // bump `updated`. _finalizeWiki now regenerates index bodies from live page metadata,
-        // which fixes staleness for real.
-      }
+      defaultResult.repairs = self._repairWikiLint(wmApply, lintBefore, { minPages: self._args.dreamwikiminpages })
+      defaultResult.repairs.fixed.forEach(function(issue) {
+        defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
+        if (issue.type === "missing_index") defaultResult.indexes_created++
+        else {
+          defaultResult.indexes_updated++
+          defaultResult.pages_changed++
+        }
+      })
+      defaultResult.repairs.skipped.forEach(function(issue) {
+        if (issue.reason === "below-min-pages") defaultResult.skipped_uncertain_moves.push(
+          "apply skipped: page count " + issue.page_count + " is below dreamwikiminpages " + issue.min_pages)
+      })
 
       // Always finalize, even when the deterministic fixes were skipped: a small wiki
       // still deserves a correct index, a fresh search index and a rebuilt graph.
-      var fin = self._finalizeWiki(wmApply, defaultResult)
+      var fin = self._finalizeWiki(wmApply, defaultResult, { appendLog: false })
       defaultResult.finalize = fin
 
       var lintAfter = wmApply.lint(lintMemMgr, { staleDays: staleDays })
@@ -725,14 +688,103 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   }
 }
 
+// _repairWikiLint performs only mechanical structure repairs. It intentionally leaves
+// content-dependent findings (especially broken links) for a human or reorg-mode LLM pass.
+// In dry-run mode it returns the same candidates without touching the wiki.
+MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
+  var opts = isMap(options) ? options : {}
+  var dryRun = opts.dryRun === true
+  var result = { fixed: [], skipped: [], candidates: [] }
+  var issues = isMap(lintResult) && isArray(lintResult.issues) ? lintResult.issues : []
+  var pageCount = isArray(wm.list("")) ? wm.list("").length : 0
+  var minPages = isNumber(opts.minPages) ? opts.minPages : Number(opts.minPages)
+  if (isNaN(minPages)) minPages = 5
+  var deterministic = { missing_index: true, index_missing_links: true, stale_index: true }
+  var issueCopy = function(issue, extra) {
+    var out = { type: issue.type, page: issue.page }
+    if (isString(issue.target)) out.target = issue.target
+    if (isString(issue.section)) out.section = issue.section
+    if (isMap(extra)) Object.keys(extra).forEach(function(k) { out[k] = extra[k] })
+    return out
+  }
+
+  issues.forEach(function(issue) {
+    if (deterministic[issue.type] === true) result.candidates.push(issueCopy(issue))
+    else result.skipped.push(issueCopy(issue, {
+      reason: issue.type === "broken_link" ? "target-not-resolved-with-certainty" : "requires-semantic-judgment"
+    }))
+  })
+  if (dryRun || result.candidates.length === 0) return result
+  if (pageCount < minPages) {
+    result.candidates.forEach(function(issue) {
+      result.skipped.push(issueCopy(issue, { reason: "below-min-pages", page_count: pageCount, min_pages: minPages }))
+    })
+    return result
+  }
+
+  var createIssues = issues.filter(function(issue) { return issue.type === "missing_index" })
+  createIssues.forEach(function(issue) {
+    var created = wm.init(issue.section)
+    if (isMap(created) && created.ok === true && isArray(created.created) && created.created.indexOf(issue.page) >= 0) {
+      result.fixed.push(issueCopy(issue))
+    } else {
+      result.skipped.push(issueCopy(issue, { reason: isMap(created) && isString(created.error) ? created.error : "index-not-created" }))
+    }
+  })
+
+  var targetsByIndex = {}
+  issues.filter(function(issue) { return issue.type === "index_missing_links" }).forEach(function(issue) {
+    if (!isString(issue.page) || !isString(issue.target)) return
+    if (!isArray(targetsByIndex[issue.page])) targetsByIndex[issue.page] = []
+    targetsByIndex[issue.page].push(issue.target)
+  })
+  Object.keys(targetsByIndex).forEach(function(indexPath) {
+    var page = wm.read(indexPath)
+    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) {
+      targetsByIndex[indexPath].forEach(function(target) {
+        result.skipped.push({ type: "index_missing_links", page: indexPath, target: target, reason: "index-not-readable" })
+      })
+      return
+    }
+    var body = page.body
+    var changed = false
+    targetsByIndex[indexPath].forEach(function(target) {
+      var rel = wm._relativePath(indexPath, target)
+      var label = target.replace(/\/index\.md$/i, "").replace(/\.md$/i, "").replace(/.*\//, "").replace(/[-_]/g, " ")
+      if (body.indexOf("(" + rel + ")") < 0) {
+        body += "\n- [" + label + "](" + rel + ")"
+        changed = true
+      }
+    })
+    var wr = changed ? wm.write(indexPath, page.meta, body) : { ok: true }
+    targetsByIndex[indexPath].forEach(function(target) {
+      if (isMap(wr) && wr.ok === true) result.fixed.push({ type: "index_missing_links", page: indexPath, target: target })
+      else result.skipped.push({ type: "index_missing_links", page: indexPath, target: target, reason: "index-not-updated" })
+    })
+  })
+
+  var staleByIndex = {}
+  issues.filter(function(issue) { return issue.type === "stale_index" && isString(issue.page) }).forEach(function(issue) { staleByIndex[issue.page] = true })
+  var stalePaths = Object.keys(staleByIndex)
+  if (stalePaths.length > 0) {
+    var refreshed = wm.regenerateIndexes({ paths: stalePaths })
+    issues.filter(function(issue) { return issue.type === "stale_index" }).forEach(function(issue) {
+      if (isMap(refreshed) && isArray(refreshed.regenerated) && refreshed.regenerated.indexOf(issue.page) >= 0) result.fixed.push(issueCopy(issue))
+      else result.skipped.push(issueCopy(issue, { reason: "index-not-regenerated" }))
+    })
+  }
+  return result
+}
+
 // _finalizeWiki: the deterministic post-pass every write-mode wiki dream ends with, so a
 // dreamt wiki is always left reorganized, reindexed and re-linked:
 //   1. regenerate root + section index.md from live page metadata
 //   2. rebuild the metadata shards and the full-text index
 //   3. rebuild the knowledge graph
 // Returns a report; never throws (a finalize failure must not lose the apply results).
-MiniADreams.prototype._finalizeWiki = function(wm, result) {
+MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
   var self = this
+  var opts = isMap(options) ? options : {}
   var report = { ok: true, indexes_regenerated: 0, reindexed: false, graph: "skipped", errors: [] }
   if (!isObject(wm)) return { ok: false, errors: ["no wiki manager"] }
 
@@ -769,9 +821,11 @@ MiniADreams.prototype._finalizeWiki = function(wm, result) {
     }
   }
 
-  try {
-    wm.appendLog("dream", "finalize", report.indexes_regenerated + " indexes regenerated, reindex=" + report.reindexed + ", graph=" + report.graph)
-  } catch(eL) {}
+  if (opts.appendLog !== false) {
+    try {
+      wm.appendLog("dream", "finalize", report.indexes_regenerated + " indexes regenerated, reindex=" + report.reindexed + ", graph=" + report.graph)
+    } catch(eL) {}
+  }
 
   report.ok = report.errors.length === 0
   return report

@@ -537,6 +537,55 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  var seedRepairWiki = function(dir) {
+    load("mini-a-wiki.js")
+    var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+    wm.write("section/index.md", { title: "Section", description: "Section index" }, "# Section")
+    wm.write("section/one.md", { title: "One", description: "One" }, "# One")
+    wm.write("section/two.md", { title: "Two", description: "Two" }, "# Two")
+    wm.write("missing/page.md", { title: "Missing index page", description: "Missing" }, "# Missing")
+    wm.write("other.md", { title: "Other", description: "Other" }, "# Other\n\n[broken](does-not-exist.md)")
+    wm.close()
+    io.writeFileString(dir + "/section/index.md", "---\ntitle: Section\ndescription: Section index\ncreated: 2020-01-01T00:00:00.000Z\nupdated: 2020-01-01T00:00:00.000Z\n---\n\n# Section")
+  }
+
+  exports.testDreamWikiApplyRepairsCertainLintOnly = function() {
+    var dir = makeWikiDir()
+    try {
+      seedRepairWiki(dir)
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      var fixed = res.repairs.fixed
+      ow.test.assert(fixed.some(function(i) { return i.type === "missing_index" && i.page === "missing/index.md" }), true, "apply should create a missing index")
+      ow.test.assert(fixed.some(function(i) { return i.type === "index_missing_links" && i.page === "section/index.md" }), true, "apply should add missing index links")
+      ow.test.assert(fixed.some(function(i) { return i.type === "stale_index" && i.page === "section/index.md" }), true, "apply should regenerate stale indexes")
+      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "broken_link" && i.reason === "target-not-resolved-with-certainty" }), true, "broken links must remain explicitly skipped")
+      ow.test.assert(res.lint_after.errors >= 1, true, "unresolved broken links must remain in lint output")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairDryRunAndIdempotence = function() {
+    var dir = makeWikiDir()
+    try {
+      seedRepairWiki(dir)
+      var before = io.readFileString(dir + "/section/index.md")
+      var dry = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply", dreamwikidryrun: "true" }, function() {}).dreamWiki()
+      ow.test.assert(dry.repairs.candidates.length >= 3, true, "dry-run should report deterministic repair candidates")
+      ow.test.assert(io.readFileString(dir + "/section/index.md"), before, "dry-run must not write indexes")
+
+      new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      var afterFirst = {
+        root: io.readFileString(dir + "/index.md"),
+        section: io.readFileString(dir + "/section/index.md"),
+        missing: io.readFileString(dir + "/missing/index.md")
+      }
+      var second = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      ow.test.assert(second.repairs.fixed.length, 0, "second identical apply should not repair anything")
+      ow.test.assert(io.readFileString(dir + "/index.md"), afterFirst.root, "second apply should not rewrite the root index")
+      ow.test.assert(io.readFileString(dir + "/section/index.md"), afterFirst.section, "second apply should not rewrite a section index")
+      ow.test.assert(io.readFileString(dir + "/missing/index.md"), afterFirst.missing, "second apply should not rewrite a created index")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testDreamWikiLintModeIsGone = function() {
     var dir = seedWiki(makeWikiDir())
     try {

@@ -103,6 +103,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testFinalizePreservesAuthoredIndexContent
 
+- name: MiniA Dreams Tests::DreamWikiApplyRepairsCertainLintOnly
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyRepairsCertainLintOnly
+
+- name: MiniA Dreams Tests::DreamWikiRepairDryRunAndIdempotence
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairDryRunAndIdempotence
+
 - name: MiniA Dreams Tests::DreamWikiLintModeIsGone
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiLintModeIsGone
@@ -133,4 +141,6 @@ todo:
 - MiniA Dreams Tests::DreamWikiFinalizeRegeneratesIndexAndReindexes
 - MiniA Dreams Tests::DreamWikiFinalizeRunsBelowMinPages
 - MiniA Dreams Tests::FinalizePreservesAuthoredIndexContent
+- MiniA Dreams Tests::DreamWikiApplyRepairsCertainLintOnly
+- MiniA Dreams Tests::DreamWikiRepairDryRunAndIdempotence
 - MiniA Dreams Tests::DreamWikiLintModeIsGone
