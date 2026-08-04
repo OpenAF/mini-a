@@ -12,6 +12,38 @@ var __miniAMcpWikiRestrictedCeilings = {
   maxChars: 500000, window: 86400, pageCooldown: 86400
 }
 
+var __miniAMcpWikiRestrictionProfiles = {
+  tight: {
+    searchLimit: 3, minQueryChars: 4, metaChars: 300, readLines: 40,
+    readChars: 6000, refTtl: 120, maxSearches: 30, maxReads: 15,
+    maxChars: 60000, window: 3600, pageCooldown: 3600
+  },
+  moderate: {
+    searchLimit: 5, minQueryChars: 3, metaChars: 600, readLines: 70,
+    readChars: 10000, refTtl: 300, maxSearches: 60, maxReads: 30,
+    maxChars: 150000, window: 3600, pageCooldown: 900
+  },
+  relaxed: {
+    searchLimit: 10, minQueryChars: 2, metaChars: 1200, readLines: 100,
+    readChars: 16000, refTtl: 600, maxSearches: 120, maxReads: 60,
+    maxChars: 400000, window: 3600, pageCooldown: 0
+  }
+}
+
+var __miniAMcpWikiRestrictionOptionMap = {
+  wikirestrictsearchlimit : "searchLimit",
+  wikirestrictminquerychars: "minQueryChars",
+  wikirestrictmetachars   : "metaChars",
+  wikirestrictreadlines   : "readLines",
+  wikirestrictreadchars   : "readChars",
+  wikirestrictrefttl      : "refTtl",
+  wikirestrictmaxsearches : "maxSearches",
+  wikirestrictmaxreads    : "maxReads",
+  wikirestrictmaxchars    : "maxChars",
+  wikirestrictwindow      : "window",
+  wikirestrictpagecooldown: "pageCooldown"
+}
+
 function __miniAMcpWikiSafeChars(value, max) {
   var s = isDef(value) ? String(value) : ""
   if (!isNumber(max) || max < 1 || s.length <= max) return s
@@ -23,9 +55,26 @@ function __miniAMcpWikiSafeChars(value, max) {
 
 function __miniAMcpWikiRestrictedError(code) { return { ok: false, error: code } }
 
-function __miniAMcpWikiPositiveOption(args, name, fallback, ceiling) {
+function __miniAMcpWikiRestrictionProfileName(args) {
+  var raw = isDef(args.wikirestrictprofile) ? String(args.wikirestrictprofile).trim() : "tight"
+  var profile = raw.toLowerCase()
+  if (!isMap(__miniAMcpWikiRestrictionProfiles[profile])) {
+    throw "Invalid wikirestrictprofile '" + raw + "'. Expected one of: tight, moderate, relaxed."
+  }
+  return profile
+}
+
+function __miniAMcpWikiRestrictionDefault(args, argName, fieldName) {
+  var profileName = __miniAMcpWikiRestrictionProfileName(args)
+  var profile = __miniAMcpWikiRestrictionProfiles[profileName]
+  var tight = __miniAMcpWikiRestrictionProfiles.tight
+  return isDef(profile[fieldName]) ? profile[fieldName] : tight[fieldName]
+}
+
+function __miniAMcpWikiPositiveOption(args, name, fallback, ceiling, minimum) {
+  var min = isDef(minimum) ? minimum : 1
   var value = isDef(args[name]) ? Number(args[name]) : fallback
-  if (!isFinite(value) || value <= 0 || Math.floor(value) !== value || value > ceiling) {
+  if (!isFinite(value) || value < min || Math.floor(value) !== value || value > ceiling) {
     throw "invalid restricted retrieval option: " + name
   }
   return value
@@ -70,18 +119,17 @@ function MiniAMcpWikiRestriction(args, cfg) {
   this.audit = []
   this.stateId = sha1(nowNano() + "|" + genUUID())
   this.maxEntries = 2048
-  this.policy = {
-    searchLimit : __miniAMcpWikiPositiveOption(args, "wikirestrictsearchlimit", 3, __miniAMcpWikiRestrictedCeilings.searchLimit),
-    minQueryChars: __miniAMcpWikiPositiveOption(args, "wikirestrictminquerychars", 4, __miniAMcpWikiRestrictedCeilings.minQueryChars),
-    metaChars   : __miniAMcpWikiPositiveOption(args, "wikirestrictmetachars", 300, __miniAMcpWikiRestrictedCeilings.metaChars),
-    readLines   : __miniAMcpWikiPositiveOption(args, "wikirestrictreadlines", 40, __miniAMcpWikiRestrictedCeilings.readLines),
-    readChars   : __miniAMcpWikiPositiveOption(args, "wikirestrictreadchars", 6000, __miniAMcpWikiRestrictedCeilings.readChars),
-    refTtl      : __miniAMcpWikiPositiveOption(args, "wikirestrictrefttl", 120, __miniAMcpWikiRestrictedCeilings.refTtl),
-    maxSearches : __miniAMcpWikiPositiveOption(args, "wikirestrictmaxsearches", 30, __miniAMcpWikiRestrictedCeilings.maxSearches),
-    maxReads    : __miniAMcpWikiPositiveOption(args, "wikirestrictmaxreads", 15, __miniAMcpWikiRestrictedCeilings.maxReads),
-    maxChars    : __miniAMcpWikiPositiveOption(args, "wikirestrictmaxchars", 60000, __miniAMcpWikiRestrictedCeilings.maxChars),
-    window      : __miniAMcpWikiPositiveOption(args, "wikirestrictwindow", 3600, __miniAMcpWikiRestrictedCeilings.window),
-    pageCooldown: __miniAMcpWikiPositiveOption(args, "wikirestrictpagecooldown", 3600, __miniAMcpWikiRestrictedCeilings.pageCooldown)
+  this.profile = __miniAMcpWikiRestrictionProfileName(args)
+  this.policy = {}
+  for(var argName in __miniAMcpWikiRestrictionOptionMap) {
+    var fieldName = __miniAMcpWikiRestrictionOptionMap[argName]
+    this.policy[fieldName] = __miniAMcpWikiPositiveOption(
+      args,
+      argName,
+      __miniAMcpWikiRestrictionDefault(args, argName, fieldName),
+      __miniAMcpWikiRestrictedCeilings[fieldName],
+      fieldName === "pageCooldown" ? 0 : 1
+    )
   }
   this.statePath = isString(args.wikirestrictstate) && args.wikirestrictstate.trim().length > 0 ? args.wikirestrictstate.trim() : __
   if (this.statePath && cfg.backend === "fs") {
@@ -417,7 +465,7 @@ function __miniAMcpWikiInit(args, options) {
     logPrefix: logPrefix
   }
 
-  if (restricted) printErrnl("[" + logPrefix + "] restricted retrieval active (" + (restriction.statePath ? "persistent state" : "process-only state") + "; tools: search, read)")
+  if (restricted) printErrnl("[" + logPrefix + "] restricted retrieval active (profile: " + restriction.profile + "; " + (restriction.statePath ? "persistent state" : "process-only state") + "; tools: search, read)")
 
   return global.__miniAMcpWiki
 }
