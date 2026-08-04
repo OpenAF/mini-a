@@ -19,6 +19,7 @@
 | mcp-shell  | Local shell execution MCP       | STDIO/HTTP       | (included) | [mcp-shell.yaml](mcp-shell.yaml)   |
 | mcp-mini-a | Mini-A agent runner MCP         | STDIO/HTTP       | (included) | [mcp-mini-a.yaml](mcp-mini-a.yaml) |
 | mcp-wiki   | Mini-A wiki knowledge base MCP with hierarchy navigation (discovery/read) | STDIO/HTTP | (included) | [mcp-wiki.yaml](mcp-wiki.yaml) |
+| mcp-wiki-safe | Mini-A wiki MCP restricted to opaque-reference search and bounded read excerpts (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-wiki-safe.yaml](mcp-wiki-safe.yaml) |
 | mcp-wiki-ops | Mini-A wiki maintenance MCP (lint and readwrite operations) | STDIO/HTTP | (included) | [mcp-wiki-ops.yaml](mcp-wiki-ops.yaml) |
 | mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
@@ -80,17 +81,28 @@ mini-a goal="..." \
 
 Read tools are optimized for retrieval: `browse`, `read`, and `search`.
 
-##### Restricted retrieval
+`audit=true` (or `OJOB_MCP_AUDIT=true`) logs every MCP tool call (tool name plus its call arguments — page paths, search queries, and so on) via OpenAF's `log()` function. It is off by default. See [Auditing MCP tool calls](#auditing-mcp-tool-calls) below — this works the same way for every MCP in this catalog, not just `mcp-wiki`/`mcp-wiki-safe`.
 
-`wikirestrict=true` is an opt-in exposure mode for an untrusted MCP client that has no direct access to the wiki backend. It advertises only `search` and `read`: search returns bounded title/description metadata plus opaque, short-lived references, and read returns one bounded, single-use excerpt. It intentionally makes browsing and inventory collection difficult; it is not DRM and cannot prevent a client from retaining text it is legitimately shown.
+#### mcp-wiki-safe
+
+`mcp-wiki-safe` is a standalone companion server for exposing a wiki to an untrusted MCP client that has no direct access to the wiki backend. Unlike `mcp-wiki`, restricted retrieval is always on — there is no argument that disables it. It advertises only `search` and `read`: search returns bounded title/description metadata plus opaque, short-lived references, and read returns one bounded, single-use excerpt. It intentionally makes browsing and inventory collection difficult; it is not DRM and cannot prevent a client from retaining text it is legitimately shown.
 
 ```sh
-ojob mcps/mcp-wiki.yaml label="Team wiki" wikiroot=./wiki wikirestrict=true
-ojob mcps/mcp-wiki.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
-  wikirestrict=true wikirestrictstate=/var/lib/mcp-wiki/restriction-ledger.json
+ojob mcps/mcp-wiki-safe.yaml label="Team wiki" wikiroot=./wiki
+ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
+  wikirestrictstate=/var/lib/mcp-wiki/restriction-ledger.json
 ```
 
 Default limits are 3 results, 4 query characters, 300 metadata characters per result, 40 lines / 6000 characters per read, 120-second references, and a process-wide one-hour budget of 30 searches, 15 reads, and 60000 disclosed characters. Startup can only make limits stricter than the hard ceilings (10 results, 100 lines, 16000 characters/read, 200 searches, 100 reads, 500000 characters/hour). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
+
+By default the opaque references returned by `search` (and the per-page issuance cooldown) live only in that one process's memory — fine for a single instance, but a problem if `mcp-wiki-safe` runs as multiple replicas behind a load balancer (e.g. a Kubernetes `Deployment`): the `read` call that consumes a reference can land on a different replica than the `search` call that issued it, and would incorrectly see `invalid-or-expired-reference`. Set `wikirestrictrefch` to a SLON/JSON OpenAF channel definition (same conventions as `auditch`, see `github.com/openaf/docs/openaf.md`) to move that state out of the process, so any replica can consume a reference issued by any other one:
+
+```sh
+ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
+  wikirestrictrefch="(type: 'redis', options: (host: 'redis.svc', port: 6379))"
+```
+
+Use a channel type with real per-key operations across concurrent writers for multi-replica deployments — `redis` or `mongo` are appropriate; `simple` (the default, in-memory) and `file` are single-writer stores, fine for one instance but unsafe shared by concurrent replicas (whole-ledger overwrite races). Entries (references and page cooldowns) are discarded once their TTL/cooldown elapses, via lazy expiry on read plus a background sweep rate-limited to roughly once per `wikirestrictrefttl` seconds. `wikirestrictstate` (usage/budget counters) is independent of `wikirestrictrefch` and remains a local, per-process ledger.
 
 #### mcp-wiki-ops
 
@@ -909,6 +921,26 @@ command-line arguments (and therefore out of `ps` output and other jobs' args).
 
 For production deployments beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
 a reverse proxy (e.g. Caddy, nginx, oauth2-proxy) in front of the MCP port instead.
+
+## Auditing MCP tool calls
+
+Every MCP in this catalog (built on `oJobMCP.yaml`'s `httpdMCP`/`stdioMCP`) supports an **optional**
+audit log of every tool call, with no changes required to the MCP's own yaml. Unlike bearer-token
+auth, this works in both HTTP and STDIO mode.
+
+Enable it by setting `OJOB_MCP_AUDIT` before starting the server:
+
+```bash
+OJOB_MCP_AUDIT=true ojob mcps/mcp-file.yaml onport=8080
+```
+
+With it unset (or `false`), the server behaves exactly as before (off by default — this is a purely
+opt-in feature). Once enabled, every `tools/call` request logs one line via OpenAF's `log()` function
+before the tool's job runs: `[audit] <server name> tool=<name> args=<json>`.
+
+The same `audit` argument can be passed directly to `httpdMCP`/`stdioMCP` in a custom yaml (or via
+each MCP's own `audit=true` CLI arg, where documented) instead of using the environment variable, but
+the env var is the recommended way to configure the catalog's MCPs, consistent with `OJOB_MCP_AUTH_TOKEN`.
 
 ## How to unit test a MCP
 

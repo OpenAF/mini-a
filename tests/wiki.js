@@ -931,6 +931,21 @@
     ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
   }
 
+  exports.testMcpWikiSafeIsRestrictedOnlyAndAlwaysOn = function() {
+    var mcpWiki = io.readFileString("mcps/mcp-wiki.yaml")
+    ow.test.assert(mcpWiki.indexOf("wikirestrict") < 0, true, "mcp-wiki.yaml should no longer reference wikirestrict (moved to mcp-wiki-safe.yaml)")
+
+    var safe = io.readFileString("mcps/mcp-wiki-safe.yaml")
+    ow.test.assert(safe.indexOf("name   : mcp-wiki-safe") >= 0, true, "mcp-wiki-safe.yaml should identify itself as mcp-wiki-safe")
+    ow.test.assert(safe.indexOf("args.wikirestrict = true") >= 0, true, "mcp-wiki-safe.yaml must force restricted retrieval on, not accept it as a caller-controlled arg")
+    ow.test.assert(/wikirestrict\s*:/.test(safe), false, "mcp-wiki-safe.yaml must not declare wikirestrict as a check.in arg (no off switch)")
+    ow.test.assert(safe.indexOf("context:") < 0, true, "mcp-wiki-safe.yaml should not expose context")
+    ow.test.assert(safe.indexOf("browse:") < 0, true, "mcp-wiki-safe.yaml should not expose browse")
+    ow.test.assert(safe.indexOf("tree:") < 0, true, "mcp-wiki-safe.yaml should not expose tree")
+    ow.test.assert(safe.indexOf("backlinks:") < 0, true, "mcp-wiki-safe.yaml should not expose backlinks")
+    ow.test.assert(safe.indexOf("list:") < 0, true, "mcp-wiki-safe.yaml should not expose list")
+  }
+
   exports.testMcpWikiRestrictedRetrieval = function() {
     var dir = createTestDir()
     try {
@@ -961,6 +976,45 @@
     ow.test.assert(r.charge("search", 1), false, "restricted search budget should be cumulative")
     var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true }, { access: "ro" })
     ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
+  }
+
+  exports.testMcpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel = function() {
+    var chDef = "(name: '_test_mcp_wiki_refs_" + genUUID().replace(/-/g, "") + "', type: 'simple')"
+    var cfg = { backend: "fs", root: "." }
+    var baseArgs = { wikirestrict: true, wikirestrictminquerychars: 1, wikirestrictpagecooldown: 3600, wikirestrictrefch: chDef }
+
+    // Each instance below stands in for one Kubernetes replica: they share nothing
+    // with each other except the channel, so any cross-instance success here can
+    // only come from the channel actually carrying the state.
+    var replicaA = new MiniAMcpWikiRestriction(baseArgs, cfg)
+    var replicaB = new MiniAMcpWikiRestriction(baseArgs, cfg)
+    var replicaC = new MiniAMcpWikiRestriction(baseArgs, cfg)
+
+    var ref = replicaA.issue("shared-page.md")
+    ow.test.assert(isString(ref), true, "replica A should issue a reference")
+
+    var grant = replicaB.consume(ref)
+    ow.test.assert(isMap(grant), true, "replica B should be able to consume a reference issued by replica A")
+    ow.test.assert(grant.path, "shared-page.md", "consumed grant should carry the original path")
+
+    ow.test.assert(isUnDef(replicaC.consume(ref)), true, "a reference already consumed on one replica must not be consumable again from another")
+
+    ow.test.assert(isUnDef(replicaB.issue("shared-page.md")), true, "a page cooldown issued by replica A must block replica B from re-issuing a reference for the same page")
+    ow.test.assert(isString(replicaC.issue("other-page.md")), true, "an unrelated page should still be issuable from any replica")
+  }
+
+  exports.testMcpWikiRestrictedRefChannelSweepsExpiredEntries = function() {
+    var chName = "_test_mcp_wiki_sweep_" + genUUID().replace(/-/g, "")
+    var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictrefch: "(name: '" + chName + "', type: 'simple')" }, { backend: "fs", root: "." })
+    var ref = r.issue("expiring-page.md")
+    ow.test.assert(isString(ref), true, "reference should be issued")
+
+    // simulate the TTL having already elapsed and force an immediate sweep
+    $ch(chName).set({ kind: "ref", ref: ref }, { path: "expiring-page.md", expires: Date.now() - 1000 })
+    r._lastSweep = 0
+    r._purge()
+
+    ow.test.assert(isUnDef($ch(chName).get({ kind: "ref", ref: ref })), true, "an expired reference should be swept from the shared channel")
   }
 
   exports.testMcpWikiOpsMetadataIncludesOpsTools = function() {

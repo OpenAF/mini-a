@@ -84,100 +84,14 @@ help:
     desc     : Maximum graph-hint pages appended to search results
     example  : "5"
     mandatory: false
-  - name     : wikirestrict
-    desc     : Enable opt-in restricted retrieval (only opaque-reference search and bounded read excerpts)
-    example  : "true"
-    mandatory: false
-  - name     : wikirestrictsearchlimit
-    desc     : "Restricted-mode maximum search results (default: 3; ceiling: 10)"
-    mandatory: false
-  - name     : wikirestrictminquerychars
-    desc     : "Restricted-mode minimum useful query length (default: 4)"
-    mandatory: false
-  - name     : wikirestrictmetachars
-    desc     : "Restricted-mode metadata character cap per result (default: 300)"
-    mandatory: false
-  - name     : wikirestrictreadlines
-    desc     : "Restricted-mode maximum excerpt lines (default: 40; ceiling: 100)"
-    mandatory: false
-  - name     : wikirestrictreadchars
-    desc     : "Restricted-mode maximum excerpt characters (default: 6000; ceiling: 16000)"
-    mandatory: false
-  - name     : wikirestrictrefttl
-    desc     : "Restricted-mode opaque reference lifetime in seconds (default: 120)"
-    mandatory: false
-  - name     : wikirestrictmaxsearches
-    desc     : "Restricted-mode searches per budget window (default: 30)"
-    mandatory: false
-  - name     : wikirestrictmaxreads
-    desc     : "Restricted-mode reads per budget window (default: 15)"
-    mandatory: false
-  - name     : wikirestrictmaxchars
-    desc     : "Restricted-mode total disclosed characters per budget window (default: 60000)"
-    mandatory: false
-  - name     : wikirestrictwindow
-    desc     : "Restricted-mode budget window in seconds (default: 3600)"
-    mandatory: false
-  - name     : wikirestrictpagecooldown
-    desc     : "Restricted-mode delay before a page may receive another reference (default: 3600)"
-    mandatory: false
-  - name     : wikirestrictstate
-    desc     : Optional persistent restricted-retrieval ledger path outside wikiroot
+  - name     : audit
+    desc     : If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments) via OpenAF's log() function. Handled generically by oJobMCP.yaml.
+    example  : "false"
     mandatory: false
 
 todo:
 - Init
-- (if    ): "toBoolean(args.wikirestrict) === true"
-  ((then)):
-  - (if    ): "isDef(args.onport)"
-    ((then)):
-    - (httpdStart   ): "${onport:-8080}"
-    - (httpdHealthz ): "${onport:-8080}"
-    - (httpdMetrics ): "${onport:-8080}"
-    - (httpdMCP     ): "${onport:-8080}"
-      ((toolPrefix )): "${toolPrefix:-}"
-      ((tplDesc    )): true
-      ((description)):
-        serverInfo: { name: mcp-wiki, title: OpenAF restricted wiki server, version: 1.0.0 }
-      ((fnsMeta)):
-        search:
-          name: search
-          description: "Search {{label}} for a targeted answer. Results contain opaque, short-lived read references only."
-          inputSchema:
-            type: object
-            properties: { query: { type: string, description: Targeted query (minimum configured length). } }
-            required: [ query ]
-          annotations: { title: search, readOnlyHint: true, idempotentHint: true }
-        read:
-          name: read
-          description: "Read one bounded excerpt using an opaque reference returned by search. References are single-use."
-          inputSchema:
-            type: object
-            properties:
-              path: { type: string, description: Opaque reference returned by search. }
-              startLine: { type: integer, description: Optional bounded excerpt start line. }
-              endLine: { type: integer, description: Optional bounded excerpt end line. }
-              section: { type: string, description: Optional heading name. }
-            required: [ path ]
-          annotations: { title: read, readOnlyHint: true, idempotentHint: true }
-      ((fns)): { search: Wiki search pages, read: Wiki read page }
-    ((else)):
-    - (stdioMCP): { serverInfo: { name: mcp-wiki, title: OpenAF restricted wiki server, version: 1.0.0 } }
-      ((toolPrefix)): "${toolPrefix:-}"
-      ((tplDesc)): true
-      ((fnsMeta)):
-        search:
-          name: search
-          description: "Search {{label}} for a targeted answer. Results contain opaque, short-lived read references only."
-          inputSchema: { type: object, properties: { query: { type: string, description: Targeted query (minimum configured length). } }, required: [ query ] }
-          annotations: { title: search, readOnlyHint: true, idempotentHint: true }
-        read:
-          name: read
-          description: "Read one bounded excerpt using an opaque reference returned by search. References are single-use."
-          inputSchema: { type: object, properties: { path: { type: string, description: Opaque reference returned by search. }, startLine: { type: integer }, endLine: { type: integer }, section: { type: string } }, required: [ path ] }
-          annotations: { title: read, readOnlyHint: true, idempotentHint: true }
-      ((fns)): { search: Wiki search pages, read: Wiki read page }
-- (if    ): "toBoolean(args.wikirestrict) !== true && isDef(args.onport)"
+- (if    ): "isDef(args.onport)"
   ((then)):
   - (httpdStart   ): "${onport:-8080}"
   - (httpdHealthz ): "${onport:-8080}"
@@ -358,13 +272,11 @@ todo:
       backlinks: Wiki backlinks
       list     : Wiki list pages
   ((else)):
-  - (if    ): "toBoolean(args.wikirestrict) !== true"
-    ((then)):
-    - (stdioMCP  ): *MCPSERVER
-      ((toolPrefix)): "${toolPrefix:-}"
-      ((tplDesc   )): true
-      ((fnsMeta   )): *MCPFNSMETA
-      ((fns       )): *MCPFNS
+  - (stdioMCP  ): *MCPSERVER
+    ((toolPrefix)): "${toolPrefix:-}"
+    ((tplDesc   )): true
+    ((fnsMeta   )): *MCPFNSMETA
+    ((fns       )): *MCPFNS
 
 ojob:
   opacks      :
@@ -404,19 +316,6 @@ jobs:
       wikigraphfalkorpass : isString.default(__)
       wikigraphsearchhints: toBoolean.isBoolean.default(__)
       wikigraphhintcap    : toNumber.isNumber.default(__)
-      wikirestrict        : toBoolean.isBoolean.default(false)
-      wikirestrictsearchlimit: toNumber.isNumber.default(__)
-      wikirestrictminquerychars: toNumber.isNumber.default(__)
-      wikirestrictmetachars: toNumber.isNumber.default(__)
-      wikirestrictreadlines: toNumber.isNumber.default(__)
-      wikirestrictreadchars: toNumber.isNumber.default(__)
-      wikirestrictrefttl : toNumber.isNumber.default(__)
-      wikirestrictmaxsearches: toNumber.isNumber.default(__)
-      wikirestrictmaxreads: toNumber.isNumber.default(__)
-      wikirestrictmaxchars: toNumber.isNumber.default(__)
-      wikirestrictwindow : toNumber.isNumber.default(__)
-      wikirestrictpagecooldown: toNumber.isNumber.default(__)
-      wikirestrictstate  : isString.default(__)
       label               : isString.default("wiki")
       wikimounts          : isString.default(__)
   exec : | #js
@@ -431,8 +330,6 @@ jobs:
   check:
     in: {}
   exec : | #js
-    var denied = __miniAMcpWikiDenyRestricted("context")
-    if (isDef(denied)) return denied
     return global.__wikiTool.wiki({ operation: "context" })
 
 - name : Wiki list pages
@@ -443,8 +340,6 @@ jobs:
       limit   : toNumber.isNumber.default(200)
       compact : toBoolean.isBoolean.default(false)
   exec : | #js
-    var denied = __miniAMcpWikiDenyRestricted("list")
-    if (isDef(denied)) return denied
     return global.__wikiTool.wiki({
       operation: "list",
       path     : args.path,
@@ -460,8 +355,6 @@ jobs:
       depth  : toNumber.isNumber.default(3)
       compact: toBoolean.isBoolean.default(true)
   exec : | #js
-    var denied = __miniAMcpWikiDenyRestricted("tree")
-    if (isDef(denied)) return denied
     return global.__wikiTool.wiki({
       operation: "tree",
       path     : args.path,
@@ -475,8 +368,6 @@ jobs:
       path   : isString.default("")
       compact: toBoolean.isBoolean.default(true)
   exec : | #js
-    var denied = __miniAMcpWikiDenyRestricted("browse")
-    if (isDef(denied)) return denied
     return global.__wikiTool.wiki({
       operation: "browse",
       path     : args.path,
@@ -493,7 +384,15 @@ jobs:
       countLines: toBoolean.isBoolean.default(false)
       compact   : toBoolean.isBoolean.default(false)
   exec : | #js
-    return __miniAMcpWikiRestrictedRead(args)
+    return global.__wikiTool.wiki({
+      operation : "read",
+      path      : args.path,
+      lineStart : args.startLine,
+      lineEnd   : args.endLine,
+      section   : args.section,
+      countLines: args.countLines,
+      compact   : args.compact
+    })
 
 - name : Wiki search pages
   check:
@@ -505,7 +404,16 @@ jobs:
       contextLines : toNumber.isNumber.default(0)
       path         : isString.default("")
   exec : | #js
-    return __miniAMcpWikiRestrictedSearch(args)
+    return global.__wikiTool.wiki({
+      operation    : "search",
+      query        : args.query,
+      limit        : args.limit,
+      caseSensitive: args.caseSensitive,
+      regex        : args.regex,
+      contextLines : args.contextLines,
+      path         : args.path,
+      compact      : args.contextLines === 0
+    })
 
 - name : Wiki backlinks
   check:
@@ -513,8 +421,6 @@ jobs:
       path   : isString
       compact: toBoolean.isBoolean.default(true)
   exec : | #js
-    var denied = __miniAMcpWikiDenyRestricted("backlinks")
-    if (isDef(denied)) return denied
     return global.__wikiTool.wiki({
       operation: "backlinks",
       path     : args.path,

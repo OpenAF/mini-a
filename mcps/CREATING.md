@@ -23,6 +23,10 @@ below), it automatically inherits optional bearer-token authentication for free 
 needed. See [Authenticating HTTP MCP servers](README.md#authenticating-http-mcp-servers) in the
 README for how operators enable it via `OJOB_MCP_AUTH_TOKEN`.
 
+Both `httpdMCP` and `stdioMCP` also inherit optional per-tool-call audit logging for free — no
+extra code needed. See [Auditing MCP tool calls](README.md#auditing-mcp-tool-calls) in the README
+for how operators enable it via `OJOB_MCP_AUDIT`.
+
 ## File Structure Overview
 
 Every MCP YAML file contains these essential sections:

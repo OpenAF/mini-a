@@ -31,6 +31,37 @@ function __miniAMcpWikiPositiveOption(args, name, fallback, ceiling) {
   return value
 }
 
+function __miniAMcpWikiCreateChannelFromDef(rawDef, fallbackName, fallbackType) {
+  var parsed = __
+  try { parsed = af.fromJSSLON(__miniANormalizeChannelDef(rawDef)) } catch(ignoreParse) {}
+  if (!isMap(parsed)) throw "invalid restricted reference channel definition"
+  var cName = isString(parsed.name) && parsed.name.trim().length > 0 ? parsed.name.trim() : fallbackName
+  var cType = isString(parsed.type) && parsed.type.trim().length > 0 ? parsed.type.trim() : (fallbackType || "simple")
+  var cOpts = isMap(parsed.options) ? parsed.options : {}
+  var exists = false
+  try { exists = $ch().list().indexOf(cName) >= 0 } catch(ignoreList) {}
+  if (!exists) {
+    try { $ch(cName).create(cType, cOpts) } catch(e) { throw "restricted reference channel unavailable (" + cType + "): " + __miniAErrMsg(e) }
+  }
+  return cName
+}
+
+function __miniAMcpWikiParseChannelKey(rawKey) {
+  if (isMap(rawKey)) return rawKey
+  if (!isString(rawKey)) return __
+  var text = rawKey.trim()
+  if (text.length === 0) return __
+  var parsed = __
+  try { parsed = jsonParse(text, __, __, true) } catch(ignoreJsonParse) {}
+  if (!isMap(parsed)) { try { parsed = af.fromJSSLON(text) } catch(ignoreJSSLONParse) {} }
+  return isMap(parsed) ? parsed : __
+}
+
+function __miniAMcpWikiChannelUnset(ch, key) {
+  if (isFunction(ch.unset)) { try { ch.unset(key); return } catch(ignoreUnset) {} }
+  try { ch.set(key, __) } catch(ignoreClear) {}
+}
+
 function MiniAMcpWikiRestriction(args, cfg) {
   args = isMap(args) ? args : {}
   this.enabled = toBoolean(args.wikirestrict) === true
@@ -59,6 +90,17 @@ function MiniAMcpWikiRestriction(args, cfg) {
     if (state === root || state.startsWith(root + java.io.File.separator)) throw "restricted state must be outside wikiroot"
     this.statePath = state
   }
+  // Opt-in: unset (default) keeps references/cooldowns in this process's memory only,
+  // today's behavior, correct for a single standalone instance. Set to a SLON/JSON
+  // OpenAF channel definition (e.g. redis) so multiple replicas behind a load balancer
+  // share one issue/consume ledger: a reference issued by one replica's search call can
+  // be consumed by whichever replica later serves the matching read call. Channel-type
+  // choice matters: `simple`/`file` are single-writer stores (fine standalone, unsafe
+  // shared by concurrent replicas); `redis`/`mongo` do real per-key ops and are safe.
+  this.refChName = isString(args.wikirestrictrefch) && args.wikirestrictrefch.trim().length > 0
+    ? __miniAMcpWikiCreateChannelFromDef(args.wikirestrictrefch, "_mini_a_wiki_restrict_refs", "simple")
+    : __
+  this._lastSweep = 0
   this.usage = { started: Date.now(), searches: 0, reads: 0, chars: 0 }
   this._loadState()
 }
@@ -70,7 +112,7 @@ MiniAMcpWikiRestriction.prototype._loadState = function() {
     var saved = af.fromJson(io.readFileString(this.statePath))
     if (!isMap(saved) || !isMap(saved.usage)) throw "invalid ledger"
     this.usage = saved.usage
-    this.cooldowns = isMap(saved.cooldowns) ? saved.cooldowns : {}
+    if (!this.refChName) this.cooldowns = isMap(saved.cooldowns) ? saved.cooldowns : {}
   } catch(e) { throw "restricted state unavailable" }
 }
 
@@ -80,17 +122,41 @@ MiniAMcpWikiRestriction.prototype._saveState = function() {
     var parent = new java.io.File(this.statePath).getParentFile()
     if (!parent || (!parent.exists() && !parent.mkdirs())) throw "state directory unavailable"
     var temp = this.statePath + ".tmp-" + genUUID()
-    io.writeFileString(temp, stringify({ usage: this.usage, cooldowns: this.cooldowns }, __, ""))
+    // cooldowns move to the shared channel once configured; the local ledger keeps usage only
+    io.writeFileString(temp, stringify({ usage: this.usage, cooldowns: this.refChName ? {} : this.cooldowns }, __, ""))
     java.nio.file.Files.move(java.nio.file.Paths.get(temp), java.nio.file.Paths.get(this.statePath), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
   } catch(e) { throw "restricted state unavailable" }
+}
+
+MiniAMcpWikiRestriction.prototype._sweepChannel = function(now) {
+  var ch = $ch(this.refChName)
+  var keys = []
+  try { keys = ch.getKeys() } catch(ignoreGetKeys) { return }
+  keys.forEach(function(rawKey) {
+    var key = __miniAMcpWikiParseChannelKey(rawKey)
+    if (!isMap(key)) return
+    try {
+      var value = ch.get(key)
+      if (isMap(value) && Number(value.expires || 0) <= now) __miniAMcpWikiChannelUnset(ch, key)
+    } catch(ignoreSweepEntry) {}
+  })
 }
 
 MiniAMcpWikiRestriction.prototype._purge = function() {
   var now = Date.now(), self = this
   if (now - Number(this.usage.started || 0) >= this.policy.window * 1000) this.usage = { started: now, searches: 0, reads: 0, chars: 0 }
+  if (this.audit.length > this.maxEntries) this.audit = this.audit.slice(-this.maxEntries)
+  if (this.refChName) {
+    // rate-limited: avoid a full channel scan (redis/s3/etc. round-trips) on every call
+    var sweepEveryMs = Math.max(this.policy.refTtl, 30) * 1000
+    if (now - Number(this._lastSweep || 0) >= sweepEveryMs) {
+      this._lastSweep = now
+      this._sweepChannel(now)
+    }
+    return
+  }
   Object.keys(this.refs).forEach(function(k) { if (Number(self.refs[k].expires || 0) <= now) delete self.refs[k] })
   Object.keys(this.cooldowns).forEach(function(k) { if (Number(self.cooldowns[k]) <= now) delete self.cooldowns[k] })
-  if (this.audit.length > this.maxEntries) this.audit = this.audit.slice(-this.maxEntries)
 }
 
 MiniAMcpWikiRestriction.prototype._event = function(kind, value) {
@@ -114,21 +180,45 @@ MiniAMcpWikiRestriction.prototype.charge = function(kind, chars) {
   return true
 }
 
+MiniAMcpWikiRestriction.prototype._cooldownActive = function(hash) {
+  if (this.refChName) {
+    var v
+    try { v = $ch(this.refChName).get({ kind: "cooldown", hash: hash }) } catch(ignoreGet) { return false }
+    return isMap(v) && Number(v.expires || 0) > Date.now()
+  }
+  return isDef(this.cooldowns[hash]) && Number(this.cooldowns[hash]) > Date.now()
+}
+
 MiniAMcpWikiRestriction.prototype.issue = function(path) {
   this._purge()
   var hash = sha1(String(path))
-  if (isDef(this.cooldowns[hash])) return __
+  if (this._cooldownActive(hash)) return __
   var ref = sha256(this.stateId + "|" + nowNano() + "|" + genUUID()).substring(0, 32)
-  this.refs[ref] = { path: path, expires: Date.now() + this.policy.refTtl * 1000 }
-  this.cooldowns[hash] = Date.now() + this.policy.pageCooldown * 1000
+  var refExpires = Date.now() + this.policy.refTtl * 1000
+  var cooldownExpires = Date.now() + this.policy.pageCooldown * 1000
+  if (this.refChName) {
+    $ch(this.refChName).set({ kind: "ref", ref: ref }, { path: path, expires: refExpires })
+    $ch(this.refChName).set({ kind: "cooldown", hash: hash }, { expires: cooldownExpires })
+  } else {
+    this.refs[ref] = { path: path, expires: refExpires }
+    this.cooldowns[hash] = cooldownExpires
+  }
   return ref
 }
 
 MiniAMcpWikiRestriction.prototype.consume = function(ref) {
   this._purge()
-  if (!isString(ref) || !isMap(this.refs[ref])) return __
-  var grant = this.refs[ref]
-  delete this.refs[ref]
+  if (!isString(ref)) return __
+  var grant
+  if (this.refChName) {
+    var ch = $ch(this.refChName), key = { kind: "ref", ref: ref }
+    grant = ch.get(key)
+    if (isMap(grant)) __miniAMcpWikiChannelUnset(ch, key)
+  } else {
+    grant = this.refs[ref]
+    delete this.refs[ref]
+  }
+  if (!isMap(grant)) return __
   return Number(grant.expires) > Date.now() ? grant : __
 }
 
@@ -312,19 +402,21 @@ function __miniAMcpWikiInit(args, options) {
     cfg.wikigraphsearchhints = false
   }
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
+  var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"
   global.__wikiManager = new MiniAWikiManager(cfg)
   global.__wikiTool = __miniAMcpWikiCreateTool(cfg, global.__wikiManager)
   args.label = __miniAMcpWikiDefaultLabel(args, cfg)
-  __miniAMcpWikiAttachMounts(global.__wikiManager, args.wikimounts, isString(options.logPrefix) ? options.logPrefix : "mcp-wiki")
+  __miniAMcpWikiAttachMounts(global.__wikiManager, args.wikimounts, logPrefix)
 
   global.__miniAMcpWiki = {
     access: cfg.access,
     config: cfg,
     label : args.label,
-    restriction: restriction
+    restriction: restriction,
+    logPrefix: logPrefix
   }
 
-  if (restricted) printErrnl("[" + (isString(options.logPrefix) ? options.logPrefix : "mcp-wiki") + "] restricted retrieval active (" + (restriction.statePath ? "persistent state" : "process-only state") + "; tools: search, read)")
+  if (restricted) printErrnl("[" + logPrefix + "] restricted retrieval active (" + (restriction.statePath ? "persistent state" : "process-only state") + "; tools: search, read)")
 
   return global.__miniAMcpWiki
 }

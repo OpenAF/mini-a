@@ -219,6 +219,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiMetadataIncludesHierarchyTools
 
+- name: MiniA Wiki Tests::McpWikiSafeIsRestrictedOnlyAndAlwaysOn
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiSafeIsRestrictedOnlyAndAlwaysOn
+
 - name: MiniA Wiki Tests::McpWikiRestrictedRetrieval
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRetrieval
@@ -226,6 +230,14 @@ jobs:
 - name: MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedBudgetAndConfig
+
+- name: MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
+
+- name: MiniA Wiki Tests::McpWikiRestrictedRefChannelSweepsExpiredEntries
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefChannelSweepsExpiredEntries
 
 - name: MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
   to  : oJob Test
@@ -504,6 +516,11 @@ todo:
 - MiniA Wiki Tests::MoveRedirectStub
 - MiniA Wiki Tests::InitCreatesSectionIndex
 - MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
+- MiniA Wiki Tests::McpWikiSafeIsRestrictedOnlyAndAlwaysOn
+- MiniA Wiki Tests::McpWikiRestrictedRetrieval
+- MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
+- MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
+- MiniA Wiki Tests::McpWikiRestrictedRefChannelSweepsExpiredEntries
 - MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
 - MiniA Wiki Tests::FsBackendDelete
 - MiniA Wiki Tests::FsBackendDeleteNonExistent
