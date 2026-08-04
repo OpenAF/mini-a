@@ -939,6 +939,8 @@
     ow.test.assert(safe.indexOf("name   : mcp-wiki-safe") >= 0, true, "mcp-wiki-safe.yaml should identify itself as mcp-wiki-safe")
     ow.test.assert(safe.indexOf("args.wikirestrict = true") >= 0, true, "mcp-wiki-safe.yaml must force restricted retrieval on, not accept it as a caller-controlled arg")
     ow.test.assert(/wikirestrict\s*:/.test(safe), false, "mcp-wiki-safe.yaml must not declare wikirestrict as a check.in arg (no off switch)")
+    ow.test.assert(safe.indexOf("usewikigraph") >= 0, true, "mcp-wiki-safe.yaml should document the explicit graph-hint opt-in")
+    ow.test.assert(safe.indexOf("allowRestrictedGraphHints") >= 0, true, "mcp-wiki-safe.yaml should pass graph hints through only as an explicit restricted opt-in")
     ow.test.assert(safe.indexOf("context:") < 0, true, "mcp-wiki-safe.yaml should not expose context")
     ow.test.assert(safe.indexOf("browse:") < 0, true, "mcp-wiki-safe.yaml should not expose browse")
     ow.test.assert(safe.indexOf("tree:") < 0, true, "mcp-wiki-safe.yaml should not expose tree")
@@ -977,6 +979,33 @@
     var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/" }, { access: "ro" })
     ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
     ow.test.assert(cfg.s3artifactprefix, "published-cache/", "MCP configuration should pass the S3 artifact prefix to the wiki manager")
+  }
+
+  exports.testMcpWikiRestrictedGraphHintsAreOptInOpaqueReferences = function() {
+    var dir = createTestDir()
+    try {
+      var base = { wikirestrict: true, wikiroot: dir, usewikigraph: false }
+      var disabled = __miniAMcpWikiInit(base, { access: "ro", readonly: true, allowRestrictedGraphHints: false })
+      ow.test.assert(disabled.config.wikigraphsearchhints, false, "restricted graph hints should remain disabled by default")
+
+      var enabled = __miniAMcpWikiInit({ wikirestrict: true, wikiroot: dir, usewikigraph: true }, { access: "ro", readonly: true, allowRestrictedGraphHints: true })
+      ow.test.assert(enabled.config.wikigraphsearchhints, true, "safe restricted graph hints should require the explicit opt-in")
+
+      global.__wikiManager = {
+        search: function() { return [
+          { path: "answer.md", title: "Answer", description: "Direct match" },
+          { path: "related-secret.md", title: "Related secret", description: "[Related pages (graph)] linked score=1 provenance=link - private digest" }
+        ] }
+      }
+      global.__miniAMcpWiki = { restriction: new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictminquerychars: 4, wikirestrictpagecooldown: 1 }, { backend: "fs", root: dir }) }
+      var result = __miniAMcpWikiRestrictedSearch({ query: "answer" })
+      ow.test.assert(result.results.length, 2, "opted-in graph hints should enrich restricted search")
+      ow.test.assert(result.results[1].description, "Related page", "graph hints should not disclose graph relationship metadata")
+      ow.test.assert(isString(result.results[1].reference), true, "graph hints should be exposed as opaque read references")
+      ow.test.assert(isUnDef(result.results[1].path), true, "graph hints must not disclose their wiki paths")
+    } finally {
+      cleanupTestDir(dir)
+    }
   }
 
   exports.testS3ArtifactsHydrateLocalSearchAndGraphCache = function() {

@@ -243,7 +243,11 @@ function __miniAMcpWikiRestrictedSearch(args) {
     var ref = state.issue(hit.path)
     if (!ref) return
     var title = __miniAMcpWikiSafeChars(hit.title, state.policy.metaChars)
-    var description = __miniAMcpWikiSafeChars(hit.description, Math.max(0, state.policy.metaChars - title.length))
+    // Graph-derived hits are an explicit opt-in in mcp-wiki-safe. Keep their
+    // relationship, provenance, digest, and underlying path private; callers
+    // receive the same opaque reference flow as for a direct search result.
+    var isGraphHint = isString(hit.description) && hit.description.indexOf("[Related pages (graph") === 0
+    var description = isGraphHint ? "Related page" : __miniAMcpWikiSafeChars(hit.description, Math.max(0, state.policy.metaChars - title.length))
     chars += title.length + description.length + ref.length
     results.push({ title: title, description: description, reference: ref })
   })
@@ -400,7 +404,10 @@ function __miniAMcpWikiInit(args, options) {
   var cfg = __miniAMcpWikiBuildConfig(args, options)
   if (restricted) {
     cfg.access = "ro"
-    cfg.wikigraphsearchhints = false
+    // Restricted retrieval never enables graph traversal implicitly. The safe
+    // server may explicitly opt in, while still returning graph hits only as
+    // opaque read references through the restricted search result filter.
+    cfg.wikigraphsearchhints = options.allowRestrictedGraphHints === true && toBoolean(args.usewikigraph) === true
   }
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
   var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"

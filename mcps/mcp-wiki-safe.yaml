@@ -44,8 +44,12 @@ help:
     example  : "false"
     mandatory: false
   - name     : wikis3artifactprefix
-    desc     : "Optional S3 prefix containing a published local Lucene cache. It is downloaded to wikiindexdir at startup. Graph hints remain disabled by restricted retrieval."
+    desc     : "Optional S3 prefix containing a published local Lucene cache. It is downloaded to wikiindexdir at startup. Graph hints remain disabled by default in restricted retrieval."
     example  : "wiki-artifacts/"
+    mandatory: false
+  - name     : usewikigraph
+    desc     : "Opt in to graph-backed related-page hints in restricted search. Hints remain opaque read references and do not expose graph paths or relationship metadata."
+    example  : "true"
     mandatory: false
   - name     : wikiindexdir
     desc     : Local cache directory used for downloaded S3 Lucene artifacts
@@ -205,6 +209,7 @@ jobs:
       wikiignorecertcheck     : toBoolean.isBoolean.default(false)
       wikis3artifactprefix    : isString.default(__)
       wikiindexdir            : isString.default(__)
+      usewikigraph            : toBoolean.isBoolean.default(false)
       wikirestrictsearchlimit : toNumber.isNumber.default(__)
       wikirestrictminquerychars: toNumber.isNumber.default(__)
       wikirestrictmetachars   : toNumber.isNumber.default(__)
@@ -227,9 +232,10 @@ jobs:
     // file can never be launched into an unrestricted state.
     args.wikirestrict = true
     var info = __miniAMcpWikiInit(args, {
-      access   : "ro",
-      readonly : true,
-      logPrefix: "mcp-wiki-safe"
+      access                  : "ro",
+      readonly                : true,
+      allowRestrictedGraphHints: args.usewikigraph === true,
+      logPrefix               : "mcp-wiki-safe"
     })
     if (!isMap(info.restriction) || info.restriction.enabled !== true) throw "mcp-wiki-safe: restricted retrieval failed to activate"
 
