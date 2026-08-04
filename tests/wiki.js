@@ -970,6 +970,72 @@
     }
   }
 
+
+  var assertRestrictedPolicy = function(policy, expected, message) {
+    for(var key in expected) {
+      ow.test.assert(policy[key], expected[key], message + " should set " + key)
+    }
+  }
+
+  exports.testMcpWikiRestrictedProfiles = function() {
+    var tight = {
+      searchLimit: 3, minQueryChars: 4, metaChars: 300, readLines: 40,
+      readChars: 6000, refTtl: 120, maxSearches: 30, maxReads: 15,
+      maxChars: 60000, window: 3600, pageCooldown: 3600
+    }
+    var moderate = {
+      searchLimit: 5, minQueryChars: 3, metaChars: 600, readLines: 70,
+      readChars: 10000, refTtl: 300, maxSearches: 60, maxReads: 30,
+      maxChars: 150000, window: 3600, pageCooldown: 900
+    }
+    var relaxed = {
+      searchLimit: 10, minQueryChars: 2, metaChars: 1200, readLines: 100,
+      readChars: 16000, refTtl: 600, maxSearches: 120, maxReads: 60,
+      maxChars: 400000, window: 3600, pageCooldown: 0
+    }
+
+    var implicit = new MiniAMcpWikiRestriction({ wikirestrict: true }, { backend: "fs", root: "." })
+    ow.test.assert(implicit.profile, "tight", "omitted restricted profile should default to tight")
+    assertRestrictedPolicy(implicit.policy, tight, "omitted restricted profile")
+
+    var explicitTight = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "tight" }, { backend: "fs", root: "." })
+    ow.test.assert(explicitTight.profile, "tight", "explicit tight profile should remain tight")
+    assertRestrictedPolicy(explicitTight.policy, tight, "explicit tight profile")
+
+    var explicitModerate = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "moderate" }, { backend: "fs", root: "." })
+    ow.test.assert(explicitModerate.profile, "moderate", "moderate profile should be recorded")
+    assertRestrictedPolicy(explicitModerate.policy, moderate, "moderate profile")
+
+    var explicitRelaxed = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "relaxed" }, { backend: "fs", root: "." })
+    ow.test.assert(explicitRelaxed.profile, "relaxed", "relaxed profile should be recorded")
+    assertRestrictedPolicy(explicitRelaxed.policy, relaxed, "relaxed profile")
+
+    var mixedCase = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "MODERATE" }, { backend: "fs", root: "." })
+    ow.test.assert(mixedCase.profile, "moderate", "profile names should be case-insensitive")
+    assertRestrictedPolicy(mixedCase.policy, moderate, "mixed-case moderate profile")
+
+    var override = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "moderate", wikirestrictreadlines: 90, wikirestrictmaxreads: 25 }, { backend: "fs", root: "." })
+    ow.test.assert(override.profile, "moderate", "override should keep selected profile")
+    ow.test.assert(override.policy.searchLimit, moderate.searchLimit, "override should preserve profile defaults for unspecified fields")
+    ow.test.assert(override.policy.readLines, 90, "explicit read-lines override should win over profile default")
+    ow.test.assert(override.policy.maxReads, 25, "explicit max-reads override should win over profile default")
+
+    var falsyOverride = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "moderate", wikirestrictpagecooldown: 0 }, { backend: "fs", root: "." })
+    ow.test.assert(falsyOverride.policy.pageCooldown, 0, "explicit zero page cooldown should remain zero")
+
+    var invalidThrown = false
+    try { new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "foo" }, { backend: "fs", root: "." }) } catch(e) {
+      invalidThrown = String(e).indexOf("Invalid wikirestrictprofile 'foo'. Expected one of: tight, moderate, relaxed.") >= 0
+    }
+    ow.test.assert(invalidThrown, true, "invalid profile should fail fast with a useful error")
+
+    var ceilingThrown = false
+    try { new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictprofile: "relaxed", wikirestrictreadlines: 101 }, { backend: "fs", root: "." }) } catch(e) {
+      ceilingThrown = String(e).indexOf("wikirestrictreadlines") >= 0
+    }
+    ow.test.assert(ceilingThrown, true, "explicit values above hard ceilings should still be rejected")
+  }
+
   exports.testMcpWikiRestrictedBudgetAndConfig = function() {
     var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictmaxsearches: 1, wikirestrictmaxchars: 10 }, { backend: "fs", root: "." })
     ow.test.assert(r.charge("search", 5), true, "initial restricted charge should fit the budget")

@@ -885,6 +885,7 @@ The `start()` method accepts various configuration options:
 - **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
 - **`wikiindexdir`** (string, optional): Override the local index/cache directory used for non-filesystem wiki indexes.
 - **`wikis3artifactprefix`** (string, optional): For an `s3` wiki, download a separately published artifact tree into `wikiindexdir` at startup. Place Lucene files below `.mini-a-wiki-lucene/`; `mcp-wiki` can also consume `.mini-a-wiki-graph/graph.json` when `usewikigraph=true`. The MCP servers remain read-only and never publish artifacts back to S3.
+- **`wikirestrictprofile`** (string, default: `tight`): For `mcp-wiki-safe`, selects restricted retrieval defaults: `tight`, `moderate`, or `relaxed` (case-insensitive). `tight` preserves the previous defaults; individual `wikirestrict*` settings override profile values; hard disclosure ceilings remain enforced and the safe server stays read-only with only `search` and `read`.
 - **`wikimetacache`** (boolean, default: `true`): Enable the sharded metadata cache used by wiki search/list/read helpers.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
 - **`wikilintstreamthreshold`** (number, default: `2000`): Switch wiki lint into streaming mode above this many pages.
