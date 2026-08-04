@@ -265,6 +265,16 @@ function __miniAMcpWikiDefaultLabel(args, cfg) {
 
 function __miniAMcpWikiCreateTool(cfg, wikiManager) {
   var toolRoot = isString(cfg.root) && cfg.root.trim().length > 0 ? cfg.root.trim() : "."
+  // MiniUtilsTool requires a directory, while the wiki backend also accepts
+  // ZIP/OKT files as read-only roots. The helper is only the MCP facade, so
+  // use the bundle's parent directory in that case.
+  if (cfg.backend === "fs" && /\.(zip|okt)$/i.test(toolRoot)) {
+    var rootFile = new java.io.File(toolRoot)
+    if (rootFile.isFile()) {
+      var parent = rootFile.getCanonicalFile().getParentFile()
+      if (parent) toolRoot = String(parent.getCanonicalPath())
+    }
+  }
   var tool = new MiniUtilsTool({
     root     : toolRoot,
     readwrite: String(cfg.access || "").toLowerCase() === "rw"

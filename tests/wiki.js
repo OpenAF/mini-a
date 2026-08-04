@@ -267,6 +267,10 @@
         ow.test.assert(io.fileExists(dir + java.io.File.separator + ".mini-a-wiki-meta"), false, ext + " should not create metadata beside archive")
         ow.test.assert(io.fileExists(dir + java.io.File.separator + ".mini-a-wiki-lucene"), false, ext + " should not create Lucene state beside archive")
         ow.test.assert(io.fileExists(dir + java.io.File.separator + ".mini-a-wiki-graph"), false, ext + " should not create graph state beside archive")
+
+        __miniAMcpWikiInit({ wikibackend: "fs", wikiroot: archive }, { access: "ro", readonly: true })
+        ow.test.assert(global.__wikiTool._initialized, true, ext + " MCP helper should initialize against the archive parent directory")
+        ow.test.assert(global.__wikiTool.wiki({ operation: "read", path: "guides/setup.md" }).meta.title, "Archive Setup", ext + " MCP helper should read archive pages")
       })
     } finally { cleanupTestDir(dir) }
   }
