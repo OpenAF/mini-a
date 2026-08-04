@@ -521,6 +521,7 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
+| `wikis3artifactprefix` | Optional S3 prefix containing a published `.mini-a-wiki-lucene/` cache and, for `mcp-wiki`, `.mini-a-wiki-graph/graph.json`; downloaded into `wikiindexdir` on startup | - |
 | `wikimetacache` | Enable sharded wiki page metadata cache | `true` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |
 | `wikilintstreamthreshold` | Page-count threshold that switches lint into streaming mode | `2000` |

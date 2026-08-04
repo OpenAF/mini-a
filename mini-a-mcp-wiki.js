@@ -299,6 +299,7 @@ function __miniAMcpWikiBuildConfig(args, options) {
     access              : access,
     backend             : backend,
     indexdir            : isString(args.wikiindexdir) && args.wikiindexdir.trim().length > 0 ? args.wikiindexdir.trim() : __,
+    s3artifactprefix    : isString(args.wikis3artifactprefix) && args.wikis3artifactprefix.trim().length > 0 ? args.wikis3artifactprefix.trim() : __,
     wikimetacache       : isDef(args.wikimetacache) ? toBoolean(args.wikimetacache) : true,
     usegraph            : (isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false) || isString(wikiGraphFalkorHost),
     wikigraphcommunity  : isString(args.wikigraphcommunity) && args.wikigraphcommunity.trim().length > 0 ? args.wikigraphcommunity.trim() : __,

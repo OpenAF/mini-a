@@ -673,6 +673,47 @@ MiniAWikiManager.prototype._getGraphPath = function() {
   return this._ensureIndexRoot() + "/.mini-a-wiki-graph"
 }
 
+// _hydrateS3Artifacts downloads a separately stored, immutable search cache.
+// Wiki pages remain under wikiprefix; Lucene and graph files use this explicit
+// prefix so ordinary page listing/search never exposes implementation artifacts.
+MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
+  if (this._backendType !== "s3" || !isString(this._config.s3artifactprefix) || this._config.s3artifactprefix.trim().length === 0) return
+  var artifactPrefix = this._config.s3artifactprefix.trim()
+  if (!artifactPrefix.endsWith("/")) artifactPrefix += "/"
+  var bucket = isString(this._config.bucket) ? this._config.bucket.trim() : ""
+  if (bucket.length === 0) return
+  var root = this._getIndexRoot()
+  try {
+    var rootFile = new java.io.File(root)
+    if (!rootFile.exists() && !rootFile.mkdirs()) throw "could not create local artifact cache"
+    var s3 = this._backend.client
+    var objects = s3.listObjects(bucket, artifactPrefix, false, true)
+    if (!isArray(objects)) return
+    var restored = 0
+    objects.forEach(function(obj) {
+      var key = isString(obj.filename) ? obj.filename : (isString(obj.canonicalPath) ? obj.canonicalPath : "")
+      if (!key.startsWith(artifactPrefix) || key.endsWith("/")) return
+      var relative = key.substring(artifactPrefix.length)
+      if (relative.length === 0 || relative.indexOf("..") >= 0 || relative.startsWith("/")) return
+      var target = new java.io.File(rootFile, relative)
+      var canonicalRoot = rootFile.getCanonicalPath() + java.io.File.separator
+      if (!target.getCanonicalPath().startsWith(canonicalRoot)) return
+      var parent = target.getParentFile()
+      if (!parent.exists() && !parent.mkdirs()) throw "could not create artifact cache directory"
+      var stream = s3.getObjectStream(bucket, key)
+      try {
+        java.nio.file.Files.copy(stream, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        restored++
+      } finally {
+        try { stream.close() } catch(ignoreClose) {}
+      }
+    })
+    if (restored > 0) this._logFn("info", "Hydrated " + restored + " wiki search/graph artifacts from S3")
+  } catch(e) {
+    this._logFn("warn", "Failed to hydrate wiki search/graph artifacts from S3: " + __miniAErrMsg(e))
+  }
+}
+
 MiniAWikiManager.prototype._graphPages = function() {
   var self = this
   var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
@@ -1028,6 +1069,7 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._ensureIndexRuntime()
   this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
+  this._hydrateS3Artifacts()
   if (toBoolean(cfg.usegraph) === true) {
     try {
       loadLib("mini-a-graph.js")

@@ -974,8 +974,38 @@
     var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictmaxsearches: 1, wikirestrictmaxchars: 10 }, { backend: "fs", root: "." })
     ow.test.assert(r.charge("search", 5), true, "initial restricted charge should fit the budget")
     ow.test.assert(r.charge("search", 1), false, "restricted search budget should be cumulative")
-    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true }, { access: "ro" })
+    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/" }, { access: "ro" })
     ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
+    ow.test.assert(cfg.s3artifactprefix, "published-cache/", "MCP configuration should pass the S3 artifact prefix to the wiki manager")
+  }
+
+  exports.testS3ArtifactsHydrateLocalSearchAndGraphCache = function() {
+    var dir = createTestDir()
+    try {
+      var payloads = {
+        "published/.mini-a-wiki-lucene/segments_1": "lucene-fixture",
+        "published/.mini-a-wiki-graph/graph.json": "{\"version\":2}"
+      }
+      var fake = {
+        _backendType: "s3",
+        _config: { bucket: "wiki-bucket", s3artifactprefix: "published/", indexdir: dir },
+        _getIndexRoot: function() { return dir },
+        _backend: { client: {
+          listObjects: function(bucket, prefix) {
+            ow.test.assert(bucket, "wiki-bucket", "artifact hydration should use the configured bucket")
+            ow.test.assert(prefix, "published/", "artifact hydration should use the configured prefix")
+            return Object.keys(payloads).map(function(filename) { return { filename: filename } })
+          },
+          getObjectStream: function(bucket, key) { return af.fromString2InputStream(payloads[key]) }
+        } },
+        _logFn: function() {}
+      }
+      MiniAWikiManager.prototype._hydrateS3Artifacts.call(fake)
+      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-lucene/segments_1"), "lucene-fixture", "Lucene artifact should be restored locally")
+      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-graph/graph.json"), "{\"version\":2}", "graph artifact should be restored locally")
+    } finally {
+      cleanupTestDir(dir)
+    }
   }
 
   exports.testMcpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel = function() {

@@ -43,6 +43,14 @@ help:
     desc     : Ignore TLS cert validation on S3 endpoint
     example  : "false"
     mandatory: false
+  - name     : wikis3artifactprefix
+    desc     : "Optional S3 prefix containing a published local Lucene cache. It is downloaded to wikiindexdir at startup. Graph hints remain disabled by restricted retrieval."
+    example  : "wiki-artifacts/"
+    mandatory: false
+  - name     : wikiindexdir
+    desc     : Local cache directory used for downloaded S3 Lucene artifacts
+    example  : "/var/cache/mini-a/wiki"
+    mandatory: false
   - name     : toolPrefix
     desc     : Optional prefix prepended to all tool names (e.g. "docs-" -> docs-search, docs-read)
     example  : "wiki-"
@@ -113,12 +121,12 @@ todo:
     ((description)): &MCPSERVER
       serverInfo:
         name   : mcp-wiki-safe
-        title  : OpenAF restricted wiki server
+        title  : "{{label}} knowledge base"
         version: 1.0.0
     ((fnsMeta)): &MCPFNSMETA
       search:
         name       : search
-        description: "Search {{label}} for a targeted answer. Results contain opaque, short-lived read references only."
+        description: "Search on {{label}} for a targeted answer. Results contain opaque, short-lived read references only."
         inputSchema:
           type      : object
           properties:
@@ -195,6 +203,8 @@ jobs:
       wikiregion              : isString.default(__)
       wikiuseversion1         : toBoolean.isBoolean.default(false)
       wikiignorecertcheck     : toBoolean.isBoolean.default(false)
+      wikis3artifactprefix    : isString.default(__)
+      wikiindexdir            : isString.default(__)
       wikirestrictsearchlimit : toNumber.isNumber.default(__)
       wikirestrictminquerychars: toNumber.isNumber.default(__)
       wikirestrictmetachars   : toNumber.isNumber.default(__)

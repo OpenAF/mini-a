@@ -461,6 +461,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testReadOnlySkipsGraphWhenNoneExists
 
+- name: MiniA Wiki Tests::S3ArtifactsHydrateLocalSearchAndGraphCache
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
+
 todo:
 - MiniA Wiki Tests::ParseFrontmatterWithYaml
 - MiniA Wiki Tests::ParseFrontmatterWithoutBlock
@@ -576,3 +580,4 @@ todo:
 - MiniA Wiki Tests::ContextReportsRetrievalCapability
 - MiniA Wiki Tests::FalkorReadGateAllowsReadOnlyGraphs
 - MiniA Wiki Tests::ReadOnlySkipsGraphWhenNoneExists
+- MiniA Wiki Tests::S3ArtifactsHydrateLocalSearchAndGraphCache
