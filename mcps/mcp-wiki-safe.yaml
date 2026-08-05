@@ -68,7 +68,7 @@ help:
     example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
   - name     : wikirestrictprofile
-    desc     : "Restricted retrieval default profile: tight, moderate or relaxed. Defaults to tight. Explicit individual restriction settings override profile values."
+    desc     : "Restricted retrieval default profile: tight, moderate, relaxed or off. Defaults to tight. Explicit individual restriction settings override profile values. 'off' disables restricted retrieval entirely (raw search/read, no opaque references, no budgets) -- equivalent to running the unrestricted mcp-wiki.yaml server; only use it for trusted clients."
     example  : "moderate"
     mandatory: false
   - name     : wikirestrictsearchlimit
@@ -232,17 +232,24 @@ jobs:
       wikimounts              : isString.default(__)
   exec : | #js
     loadLib("mini-a-mcp-wiki.js")
-    // restricted retrieval is this server's only mode: always force it on,
-    // regardless of any caller-supplied/env "wikirestrict" value, so this
-    // file can never be launched into an unrestricted state.
-    args.wikirestrict = true
+    // restricted retrieval is this server's default and only supported mode,
+    // regardless of any caller-supplied/env "wikirestrict" value, EXCEPT for
+    // the explicit "off" profile below, which is an opt-in escape hatch that
+    // turns this server into an unrestricted one (same as mcp-wiki.yaml).
+    var restrictOff = isString(args.wikirestrictprofile) && args.wikirestrictprofile.trim().toLowerCase() === "off"
+    args.wikirestrict = !restrictOff
     var info = __miniAMcpWikiInit(args, {
       access                  : "ro",
       readonly                : true,
       allowRestrictedGraphHints: args.usewikigraph === true,
       logPrefix               : "mcp-wiki-safe"
     })
-    if (!isMap(info.restriction) || info.restriction.enabled !== true) throw "mcp-wiki-safe: restricted retrieval failed to activate"
+    if (restrictOff) {
+      if (isMap(info.restriction) && info.restriction.enabled === true) throw "mcp-wiki-safe: restricted retrieval failed to deactivate"
+      printErrnl("[mcp-wiki-safe] WARNING: restricted retrieval disabled (profile: off) -- serving raw, unbounded search/read; only expose this to trusted clients")
+    } else {
+      if (!isMap(info.restriction) || info.restriction.enabled !== true) throw "mcp-wiki-safe: restricted retrieval failed to activate"
+    }
 
 - name : Wiki search pages
   check:

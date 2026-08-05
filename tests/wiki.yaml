@@ -219,9 +219,13 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiMetadataIncludesHierarchyTools
 
-- name: MiniA Wiki Tests::McpWikiSafeIsRestrictedOnlyAndAlwaysOn
+- name: MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
   to  : oJob Test
-  exec: args.func = require("tests/wiki.js").testMcpWikiSafeIsRestrictedOnlyAndAlwaysOn
+  exec: args.func = require("tests/wiki.js").testMcpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
+
+- name: MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiSafeOffProfileDisablesRestriction
 
 - name: MiniA Wiki Tests::McpWikiRestrictedRetrieval
   to  : oJob Test
@@ -528,7 +532,8 @@ todo:
 - MiniA Wiki Tests::MoveRedirectStub
 - MiniA Wiki Tests::InitCreatesSectionIndex
 - MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
-- MiniA Wiki Tests::McpWikiSafeIsRestrictedOnlyAndAlwaysOn
+- MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
+- MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
 - MiniA Wiki Tests::McpWikiRestrictedRetrieval
 - MiniA Wiki Tests::McpWikiRestrictedProfiles
 - MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig

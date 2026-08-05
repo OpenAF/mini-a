@@ -85,7 +85,7 @@ Read tools are optimized for retrieval: `browse`, `read`, and `search`.
 
 #### mcp-wiki-safe
 
-`mcp-wiki-safe` is a standalone companion server for exposing a wiki to an untrusted MCP client that has no direct access to the wiki backend. Unlike `mcp-wiki`, restricted retrieval is always on — there is no argument that disables it. It advertises only `search` and `read`: search returns bounded title/description metadata plus opaque, short-lived references, and read returns one bounded, single-use excerpt. It intentionally makes browsing and inventory collection difficult; it is not DRM and cannot prevent a client from retaining text it is legitimately shown.
+`mcp-wiki-safe` is a standalone companion server for exposing a wiki to an untrusted MCP client that has no direct access to the wiki backend. Unlike `mcp-wiki`, restricted retrieval is on by default and there is no individual argument that disables it — only the explicit `wikirestrictprofile=off` escape hatch (below) does. It advertises only `search` and `read`: search returns bounded title/description metadata plus opaque, short-lived references, and read returns one bounded, single-use excerpt. It intentionally makes browsing and inventory collection difficult; it is not DRM and cannot prevent a client from retaining text it is legitimately shown.
 
 ```sh
 ojob mcps/mcp-wiki-safe.yaml label="Team wiki" wikiroot=./wiki
@@ -93,13 +93,16 @@ ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
   wikirestrictstate=/var/lib/mcp-wiki/restriction-ledger.json
 ```
 
-Restricted retrieval defaults are controlled by `wikirestrictprofile` (`tight`, `moderate`, or `relaxed`, case-insensitive). `tight` is the default and preserves the previous behavior exactly. Profiles change disclosure limits only; they do not make the server writable, disable opaque/single-use references, or expose any tools beyond `search` and `read`. Existing individual settings still override the selected profile, and hard ceilings remain enforced independently of profile choice (including `wikirestrictsearchlimit <= 10`, `wikirestrictreadlines <= 100`, and `wikirestrictreadchars <= 16000`). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
+Restricted retrieval defaults are controlled by `wikirestrictprofile` (`tight`, `moderate`, `relaxed`, or `off`, case-insensitive). `tight` is the default and preserves the previous behavior exactly. The `tight`/`moderate`/`relaxed` profiles change disclosure limits only; they do not make the server writable, disable opaque/single-use references, or expose any tools beyond `search` and `read`. Existing individual settings still override the selected profile, and hard ceilings remain enforced independently of profile choice (including `wikirestrictsearchlimit <= 10`, `wikirestrictreadlines <= 100`, and `wikirestrictreadchars <= 16000`). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
+
+`wikirestrictprofile=off` is different in kind: it turns restricted retrieval off entirely — raw, unbounded `search`/`read`, no opaque references, no per-window budgets, no page cooldowns — making `mcp-wiki-safe` behave the same as the unrestricted `mcp-wiki` server (still read-only). All individual `wikirestrict*` settings are ignored in this mode since there is no restriction state to apply them to. Only use it for clients you already trust; it defeats the purpose of running the "safe" server in the first place.
 
 | Profile | searchlimit | minquerychars | metachars | readlines | readchars | refttl | maxsearches | maxreads | maxchars | window | pagecooldown |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `tight` (default, legacy) | 3 | 4 | 300 | 40 | 6000 | 120 | 30 | 15 | 60000 | 3600 | 3600 |
 | `moderate` | 5 | 3 | 600 | 70 | 10000 | 300 | 60 | 30 | 150000 | 3600 | 900 |
 | `relaxed` | 10 | 2 | 1200 | 100 | 16000 | 600 | 120 | 60 | 400000 | 3600 | 0 |
+| `off` | unbounded | — | — | — | — | — | — | — | — | — | — |
 
 ```sh
 ojob mcps/mcp-wiki-safe.yaml \
@@ -115,6 +118,13 @@ ojob mcps/mcp-wiki-safe.yaml \
 ```
 
 In the second example, `wikirestrictmaxreads=25` overrides the relaxed profile's default of 60 while the other relaxed defaults remain in effect.
+
+```sh
+ojob mcps/mcp-wiki-safe.yaml \
+  wikiroot=./wiki \
+  label="Internal documentation" \
+  wikirestrictprofile=off
+```
 
 By default the opaque references returned by `search` (and the per-page issuance cooldown) live only in that one process's memory — fine for a single instance, but a problem if `mcp-wiki-safe` runs as multiple replicas behind a load balancer (e.g. a Kubernetes `Deployment`): the `read` call that consumes a reference can land on a different replica than the `search` call that issued it, and would incorrectly see `invalid-or-expired-reference`. Set `wikirestrictrefch` to a SLON/JSON OpenAF channel definition (same conventions as `auditch`, see `github.com/openaf/docs/openaf.md`) to move that state out of the process, so any replica can consume a reference issued by any other one:
 

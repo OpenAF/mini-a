@@ -931,14 +931,14 @@
     ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
   }
 
-  exports.testMcpWikiSafeIsRestrictedOnlyAndAlwaysOn = function() {
+  exports.testMcpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape = function() {
     var mcpWiki = io.readFileString("mcps/mcp-wiki.yaml")
     ow.test.assert(mcpWiki.indexOf("wikirestrict") < 0, true, "mcp-wiki.yaml should no longer reference wikirestrict (moved to mcp-wiki-safe.yaml)")
 
     var safe = io.readFileString("mcps/mcp-wiki-safe.yaml")
     ow.test.assert(safe.indexOf("name   : mcp-wiki-safe") >= 0, true, "mcp-wiki-safe.yaml should identify itself as mcp-wiki-safe")
-    ow.test.assert(safe.indexOf("args.wikirestrict = true") >= 0, true, "mcp-wiki-safe.yaml must force restricted retrieval on, not accept it as a caller-controlled arg")
-    ow.test.assert(/wikirestrict\s*:/.test(safe), false, "mcp-wiki-safe.yaml must not declare wikirestrict as a check.in arg (no off switch)")
+    ow.test.assert(safe.indexOf("args.wikirestrict = !restrictOff") >= 0, true, "mcp-wiki-safe.yaml must derive wikirestrict from the profile, not accept it directly as a caller-controlled arg")
+    ow.test.assert(/wikirestrict\s*:/.test(safe), false, "mcp-wiki-safe.yaml must not declare wikirestrict as a check.in arg (only wikirestrictprofile=off can disable it)")
     ow.test.assert(safe.indexOf("usewikigraph") >= 0, true, "mcp-wiki-safe.yaml should document the explicit graph-hint opt-in")
     ow.test.assert(safe.indexOf("allowRestrictedGraphHints") >= 0, true, "mcp-wiki-safe.yaml should pass graph hints through only as an explicit restricted opt-in")
     ow.test.assert(safe.indexOf("context:") < 0, true, "mcp-wiki-safe.yaml should not expose context")
@@ -946,6 +946,31 @@
     ow.test.assert(safe.indexOf("tree:") < 0, true, "mcp-wiki-safe.yaml should not expose tree")
     ow.test.assert(safe.indexOf("backlinks:") < 0, true, "mcp-wiki-safe.yaml should not expose backlinks")
     ow.test.assert(safe.indexOf("list:") < 0, true, "mcp-wiki-safe.yaml should not expose list")
+
+    ow.test.assert(safe.indexOf('wikirestrictprofile.trim().toLowerCase() === "off"') >= 0, true, "mcp-wiki-safe.yaml should recognize wikirestrictprofile=off as the sole opt-in escape hatch")
+  }
+
+  exports.testMcpWikiSafeOffProfileDisablesRestriction = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "secret-page.md", "---\ntitle: Target\ndescription: A useful answer\n---\n# Target\nThe distinctive answer is saffron-owl.\nSecond line.")
+
+      // mirrors what mcp-wiki-safe.yaml's Init job computes when wikirestrictprofile=off
+      // (String(dir): createTestDir() returns a java.lang.String, and isString() on that is false)
+      var info = __miniAMcpWikiInit({ wikirestrict: false, wikiroot: String(dir) }, { access: "ro", readonly: true })
+      ow.test.assert(info.restriction.enabled, false, "wikirestrict:false must leave restriction disabled")
+
+      var searchResult = __miniAMcpWikiRestrictedSearch({ query: "saffron", limit: 20 })
+      ow.test.assert(isArray(searchResult.results), true, "unrestricted search should return the plain wiki tool's shape")
+      ow.test.assert(searchResult.results.length > 0, true, "unrestricted search should find the page")
+      ow.test.assert(searchResult.results[0].path, "secret-page.md", "unrestricted search should expose the real path, not an opaque reference")
+
+      var readResult = __miniAMcpWikiRestrictedRead({ path: "secret-page.md" })
+      ow.test.assert(isString(readResult.body), true, "unrestricted read should return the plain wiki tool's shape")
+      ow.test.assert(readResult.body.indexOf("saffron-owl") >= 0, true, "unrestricted read should return the full page body, not a bounded excerpt")
+    } finally {
+      cleanupTestDir(dir)
+    }
   }
 
   exports.testMcpWikiRestrictedRetrieval = function() {
