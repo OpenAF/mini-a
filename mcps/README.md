@@ -93,7 +93,28 @@ ojob mcps/mcp-wiki-safe.yaml onport=8888 label="Team wiki" wikiroot=./wiki \
   wikirestrictstate=/var/lib/mcp-wiki/restriction-ledger.json
 ```
 
-Default limits are 3 results, 4 query characters, 300 metadata characters per result, 40 lines / 6000 characters per read, 120-second references, and a process-wide one-hour budget of 30 searches, 15 reads, and 60000 disclosed characters. Startup can only make limits stricter than the hard ceilings (10 results, 100 lines, 16000 characters/read, 200 searches, 100 reads, 500000 characters/hour). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
+Restricted retrieval defaults are controlled by `wikirestrictprofile` (`tight`, `moderate`, or `relaxed`, case-insensitive). `tight` is the default and preserves the previous behavior exactly. Profiles change disclosure limits only; they do not make the server writable, disable opaque/single-use references, or expose any tools beyond `search` and `read`. Existing individual settings still override the selected profile, and hard ceilings remain enforced independently of profile choice (including `wikirestrictsearchlimit <= 10`, `wikirestrictreadlines <= 100`, and `wikirestrictreadchars <= 16000`). Use a persistent ledger outside `wikiroot` for HTTP deployments; protect it with normal filesystem permissions and share it between processes that must share a budget. Authentication, TLS, network ACLs, and backend permissions remain necessary.
+
+| Profile | searchlimit | minquerychars | metachars | readlines | readchars | refttl | maxsearches | maxreads | maxchars | window | pagecooldown |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `tight` (default, legacy) | 3 | 4 | 300 | 40 | 6000 | 120 | 30 | 15 | 60000 | 3600 | 3600 |
+| `moderate` | 5 | 3 | 600 | 70 | 10000 | 300 | 60 | 30 | 150000 | 3600 | 900 |
+| `relaxed` | 10 | 2 | 1200 | 100 | 16000 | 600 | 120 | 60 | 400000 | 3600 | 0 |
+
+```sh
+ojob mcps/mcp-wiki-safe.yaml \
+  wikiroot=./wiki \
+  label="Internal documentation" \
+  wikirestrictprofile=moderate
+
+ojob mcps/mcp-wiki-safe.yaml \
+  wikiroot=./wiki \
+  label="Internal documentation" \
+  wikirestrictprofile=relaxed \
+  wikirestrictmaxreads=25
+```
+
+In the second example, `wikirestrictmaxreads=25` overrides the relaxed profile's default of 60 while the other relaxed defaults remain in effect.
 
 By default the opaque references returned by `search` (and the per-page issuance cooldown) live only in that one process's memory — fine for a single instance, but a problem if `mcp-wiki-safe` runs as multiple replicas behind a load balancer (e.g. a Kubernetes `Deployment`): the `read` call that consumes a reference can land on a different replica than the `search` call that issued it, and would incorrectly see `invalid-or-expired-reference`. Set `wikirestrictrefch` to a SLON/JSON OpenAF channel definition (same conventions as `auditch`, see `github.com/openaf/docs/openaf.md`) to move that state out of the process, so any replica can consume a reference issued by any other one:
 

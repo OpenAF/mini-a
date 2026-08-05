@@ -227,6 +227,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRetrieval
 
+- name: MiniA Wiki Tests::McpWikiRestrictedProfiles
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedProfiles
+
 - name: MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedBudgetAndConfig
@@ -526,6 +530,7 @@ todo:
 - MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
 - MiniA Wiki Tests::McpWikiSafeIsRestrictedOnlyAndAlwaysOn
 - MiniA Wiki Tests::McpWikiRestrictedRetrieval
+- MiniA Wiki Tests::McpWikiRestrictedProfiles
 - MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
 - MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences
 - MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel

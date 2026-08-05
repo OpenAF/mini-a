@@ -67,6 +67,10 @@ help:
     desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
     example  : "[{name: 'team', backend: 'fs', root: './team-wiki'}]"
     mandatory: false
+  - name     : wikirestrictprofile
+    desc     : "Restricted retrieval default profile: tight, moderate or relaxed. Defaults to tight. Explicit individual restriction settings override profile values."
+    example  : "moderate"
+    mandatory: false
   - name     : wikirestrictsearchlimit
     desc     : "Maximum search results (default: 3; ceiling: 10)"
     mandatory: false
@@ -210,6 +214,7 @@ jobs:
       wikis3artifactprefix    : isString.default(__)
       wikiindexdir            : isString.default(__)
       usewikigraph            : toBoolean.isBoolean.default(false)
+      wikirestrictprofile     : isString.default("tight")
       wikirestrictsearchlimit : toNumber.isNumber.default(__)
       wikirestrictminquerychars: toNumber.isNumber.default(__)
       wikirestrictmetachars   : toNumber.isNumber.default(__)
