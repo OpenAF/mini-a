@@ -1095,7 +1095,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dryrun` | boolean | `false` | Report what would change without writing anything back |
 | `dreamwikimode` | string | `apply` | Wiki mode: `lint`, `plan`, `apply`, `reorg` |
 | `dreammemorymode` | string | `apply` | Memory mode: `plan` or `apply` |
-| `dreamwikiapply` | boolean | `false` | Required write gate for wiki apply/reorg |
+| `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of apply) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
 | `dreamwikireorg` | boolean | `false` | Allow structural wiki reorg |
 | `dreamreport` | string | - | Optional JSON output report path |
@@ -1172,7 +1172,7 @@ mini-a dream=true \
 # Non-interactive safe apply + JSON report
 mini-a dream=true \
   usewiki=true wikiroot=/shared/wiki \
-  dreamwikimode=apply dreamwikiapply=true \
+  dreamwikimode=apply \
   dreamreport=/var/log/mini-a/dream-wiki-apply.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 ```

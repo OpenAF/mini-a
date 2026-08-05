@@ -2,6 +2,53 @@
 
 ## Recent Updates
 
+### Wiki: automated knowledge ingestion (`mini-a-ingest.js`)
+
+**Change**: New ingestion pipeline that turns a documentation folder, a git repository (local checkout or clone URL) or a web page into distilled, linked, indexed wiki pages.
+
+- **Entry points**: `ojob mini-a-ingest.yaml ingestsource=<source> wikiroot=<path>`, the `/ingest <source> [section] [dryrun] [force]` console command, or `MiniAIngest` as a library.
+- **Deterministic except distillation**: discovery, filtering, chunking, the re-ingest ledger, writing and finalization are all deterministic; only the per-source distillation calls the LLM (one call per source, run in parallel batches of `ingestconcurrency`).
+- **One source → one page.** Cross-page dedup and reorganisation are deliberately left to `/dream wiki apply`, which already does that job.
+- **Incremental by default**: a ledger at `<indexRoot>/.mini-a-wiki-ingest/ledger.json` records a sha1 per source (plus the commit SHA for repos), so a second run over an unchanged source is a no-op. `ingestforce=true` overrides.
+- **Oversized sources are skipped, not truncated** (`ingestmaxfilekb`, default 512) — a half-read document distills into a confident lie. Large-but-acceptable sources are split by a heading-aware chunker (`ingestchunkchars`, default 24000).
+- **Vendor directories are excluded** by default (`.git`, `node_modules`, `target`, `build`, `dist`, `vendor`, `.venv`, `__pycache__`, …); `ingestinclude`/`ingestexclude` narrow further. `README*` and `docs/**` are ingested first.
+- **Provenance front-matter**: ingested pages record `source`, `source_ref`, `source_hash` and `ingested`. `AGENTS.md` documents these fields (`agentsVersion` bumped to `4`, auto-upgrading existing wikis on next open).
+- Every ingest finishes with the same finalize pass as a dream: indexes regenerated, search index and graph rebuilt — so ingested pages are searchable immediately.
+
+New arguments: `ingestsource`, `ingesttype`, `ingestsection`, `ingestinclude`, `ingestexclude`, `ingestchunkchars`, `ingestmaxfilekb`, `ingestconcurrency`, `ingestdryrun`, `ingestforce`, `ingestledger`.
+
+### Wiki: `list(prefix)` returned nothing for section prefixes
+
+**Fix**: `MiniAWikiManager.list("docs")` (and every internal caller, including `browse`) always returned `[]` on the `fs` backend. The prefix was resolved through a path check that required a `.md` leaf, so any folder prefix threw and was swallowed by a `catch` returning `[]`. Section listings, section page counts and `browse` direct-page listings now work.
+
+**Fix**: front-matter `updated` values are `Date` objects after YAML parsing, so index and listing tables rendered dates as `Sun Aug 02` instead of `2026-08-02`.
+
+### Wiki: read-only wikis consume existing indexes instead of building them
+
+**Change**: Index build and maintenance remain `wikiaccess=rw` only, but a read-only wiki now *consumes* whatever indexes already exist — local Lucene/graph files, or an externally maintained FalkorDB — instead of quietly degrading to a full scan.
+
+- **A read-only session no longer writes anything into the wiki.** Previously, opening a `ro` wiki took the Lucene **writer lock** and created an empty index directory inside the wiki root (`$ch(...).create("searchdb", ...)` always opens an `IndexWriter` with `CREATE_OR_APPEND`), and metadata shards were written into the source tree on every cache miss. Search now goes through a bare `DirectoryReader` (`_luceneQueryReadOnly`) that takes no lock and creates no files; metadata shards stay in memory; index roots and graph directories are not created.
+- **A `ro` wiki with no index at all** falls back to the scan path and still creates nothing.
+- **Read-only search works while a writer holds the lock**, so a `rw` agent and a `ro` reader can share one wiki.
+- **FalkorDB is readable read-only.** `_hasFalkor()` conflated read and write access, so a `ro` wiki could not even query an external graph. It is now split into `_hasFalkorRead()` (queries, allowed read-only) and `_hasFalkor()` (sync/diff/build, still write-only).
+- **Index-backed results carry real snippets** — the Lucene path used to echo the query back as the snippet and report line 1.
+- **`context()` reports retrieval capability**: `access`, plus `retrieval.search` (`lucene` / `lucene-readonly` / `scan` / `none`), `retrieval.graph` (`local` / `falkor` / `none`) and graph community entry points, so an agent knows up front whether search is index-backed or a full scan.
+- **`tree` and `backlinks` are now reachable as MCP tools** — `mcps/mcp-wiki.yaml` declared the jobs but omitted them from its tool metadata.
+- Full-text search is now behind a small pluggable seam (`{ type, writable, available, exists, query, set, unset, rebuild, close }`), so an external search index can be added without touching the search call sites. `wikisearch=auto|lucene|none` selects the engine; **`wikisearch=opensearch` is not implemented yet** and logs a warning before falling back to the local Lucene index.
+
+### Dreams: `/dream wiki` consolidated, and always finalized
+
+**Breaking change**: the wiki dream modes and arguments were consolidated.
+
+- **Bare `/dream wiki` used to be a silent no-op.** `apply` was the default mode, but it returned immediately at a `dreamwikiapply` gate that defaulted to `false`, and the console discarded the returned result — so nothing ran and nothing was reported. `apply` now runs by default and the console renders the result (including the reason when a dream declines to run).
+- **`dreamwikiapply` is removed**; use **`dreamwikidryrun=true`** to opt *out* of writing. The agent-driven `reorg` mode keeps its explicit gates (`dreamwikireorg` + `dreamwikiapproval`).
+- **The `lint` mode is removed** — it was `plan` minus the proposal and duplicated `/wiki lint`. Modes are now `plan`, `apply` (default) and `reorg`.
+- **Removed unused arguments**: `dreammemoryminconfidence`, `dreammemorytowiki`, `dreamwikiredirects`, `dreamwikiflatthreshold`, `dreamwikipreservebodies`. None were read by any code.
+- **Every `apply` and `reorg` run now ends with a deterministic finalize pass**: root and section `index.md` are regenerated from live page metadata, metadata shards and the full-text index are rebuilt, and the knowledge graph is rebuilt when `usewikigraph=true`. This replaces the old `stale_index` "fix", which rewrote a page with byte-identical content just to bump `updated`.
+- **`index.md` regeneration**: index pages are generated catalogs (as `AGENTS.md` has always documented — "never edit `index.md` directly"). Regeneration rewrites the generated `Start here` / `Sections` / `Pages` / `Recent` / `Attached wikis` blocks from live metadata. Front-matter `title`/`description`, the intro prose between the `# Title` heading and the first `##`, and any *other* `##` sections you wrote are all preserved.
+- **`lint()` now receives the memory manager** during dreams, so the `memory_conflict` check can actually fire — it previously never could.
+- `dreamwikiminpages` no longer blocks finalization: a small wiki still gets a correct index.
+
 ### Core: Context Guard for bounded tool output
 
 **Change**: Mini-A now supports `contextguard` to keep tool-heavy runs usable on smaller context windows when `maxcontext=0`, especially when MCP proxy results or `readresult` payloads would otherwise flood the prompt.

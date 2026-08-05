@@ -21,15 +21,15 @@ help:
     example  : "/tmp/mini-a-web-debug.ndjson"
     mandatory: false
   - name     : debugch
-    desc     : SLON/JSON debug channel for the main LLM
+    desc     : SLON/JSON definition or native file path for a debug channel for the main LLM
     example  : "(type: file, options: (file: '/tmp/mini-a-main-debug.ndjson'))"
     mandatory: false
   - name     : debuglcch
-    desc     : SLON/JSON debug channel for the low-cost LLM
+    desc     : SLON/JSON definition or native file path for a debug channel for the low-cost LLM
     example  : "(type: file, options: (file: '/tmp/mini-a-lc-debug.ndjson'))"
     mandatory: false
   - name     : debugvalch
-    desc     : SLON/JSON debug channel for the validation LLM
+    desc     : SLON/JSON definition or native file path for a debug channel for the validation LLM
     example  : "(type: file, options: (file: '/tmp/mini-a-val-debug.ndjson'))"
     mandatory: false
   - name     : showexecs
@@ -627,11 +627,11 @@ help:
     example  : "research-2024"
     mandatory: false
   - name     : memorych
-    desc     : SLON/JSON channel definition for global memory persistence
+    desc     : SLON/JSON channel definition or native file path for global memory persistence
     example  : "(name: mini_a_global_mem, type: file, options: (file: '/tmp/mini-a-global.json'))"
     mandatory: false
   - name     : memorysessionch
-    desc     : SLON/JSON channel definition for session memory persistence
+    desc     : SLON/JSON channel definition or native file path for session memory persistence
     example  : "(name: mini_a_session_mem, type: file, options: (file: '/tmp/mini-a-session.json'))"
     mandatory: false
   - name     : memorymaxpersection
@@ -677,7 +677,7 @@ help:
     example  : "fs"
     mandatory: false
   - name     : wikiroot
-    desc     : Root directory for the filesystem wiki backend
+    desc     : Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)
     example  : "/shared/wiki"
     mandatory: false
   - name     : wikibucket
@@ -736,15 +736,15 @@ help:
     example  : "json"
     mandatory: false
   - name     : auditch
-    desc     : "SLON/JSON definition of an audit channel for Mini-A interaction logs"
+    desc     : "SLON/JSON definition or native file path for an audit channel for Mini-A interaction logs"
     example  : "(type: file, options: (file: '/tmp/mini-a-audit.log'))"
     mandatory: false
   - name     : toollog
-    desc     : "SLON/JSON definition of a channel that records tool calls, arguments and responses"
+    desc     : "SLON/JSON definition or native file path for a channel that records tool calls, arguments and responses"
     example  : "(type: file, options: (file: '/tmp/mini-a-tools.log'))"
     mandatory: false
   - name     : metricsch
-    desc     : "SLON/JSON definition of an OpenAF channel where Mini-A metrics snapshots are recorded"
+    desc     : "SLON/JSON definition or native file path for an OpenAF channel where Mini-A metrics snapshots are recorded"
     example  : "(name: 'mini-a-metrics', type: 'mvs', options: (file: '/tmp/mini-a-metrics.db'))"
     mandatory: false
   - name     : usedelegation

@@ -2090,7 +2090,7 @@ MiniA.prototype._configureDebugChannel = function(llmInstance, debugConfig, defa
   }
 
   try {
-    var debugMap = af.fromJSSLON(debugConfig)
+    var debugMap = af.fromJSSLON(__miniANormalizeChannelDef(debugConfig))
     if (!isMap(debugMap)) return
     if (isUnDef(debugMap.name)) debugMap.name = defaultName
     var channelType = isString(debugMap.type) ? debugMap.type : "simple"
@@ -7283,7 +7283,7 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
   this._memorychName = __
   if (isString(args.memorych) && args.memorych.trim().length > 0) {
     try {
-      var _memorychm = af.fromJSSLON(args.memorych)
+      var _memorychm = af.fromJSSLON(__miniANormalizeChannelDef(args.memorych))
       if (isMap(_memorychm)) {
         var _memorychName = isString(_memorychm.name) && _memorychm.name.trim().length > 0 ? _memorychm.name.trim() : "_mini_a_memory_channel"
         var _memorychType = isString(_memorychm.type) ? _memorychm.type : "simple"
@@ -7307,7 +7307,7 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
   this._memorysessionchName = __
   if (isString(args.memorysessionch) && args.memorysessionch.trim().length > 0) {
     try {
-      var _memorysessionchm = af.fromJSSLON(args.memorysessionch)
+      var _memorysessionchm = af.fromJSSLON(__miniANormalizeChannelDef(args.memorysessionch))
       if (isMap(_memorysessionchm)) {
         var _memorysessionchName = isString(_memorysessionchm.name) && _memorysessionchm.name.trim().length > 0 ? _memorysessionchm.name.trim() : "_mini_a_session_memory_channel"
         var _memorysessionchType = isString(_memorysessionchm.type) ? _memorysessionchm.type : "simple"
@@ -13590,9 +13590,8 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
-    "dreamwikimode", "dreammemorymode", "dreamwikiapply", "dreamwikiapproval", "dreamwikireorg",
-    "dreamwikiredirects", "dreamwikiminpages", "dreamwikiflatthreshold", "dreamwikimaxdepth",
-    "dreamwikipreservebodies", "dreammemoryminconfidence", "dreammemorytowiki", "dreamreport"
+    "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
+    "dreamwikiminpages", "dreamwikimaxdepth", "dreamreport"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -14328,7 +14327,7 @@ MiniA.prototype.init = function(args) {
 
     // Check the need to init auditch
     if (isDef(args.auditch) && args.auditch.length > 0) {
-      var _auditchm = af.fromJSSLON(args.auditch)
+      var _auditchm = af.fromJSSLON(__miniANormalizeChannelDef(args.auditch))
       if (isMap(_auditchm)) {
         try {
           ow.ch.create("_mini_a_audit_channel", false, isDef(_auditchm.type) ? _auditchm.type : "simple", isMap(_auditchm.options) ? _auditchm.options : {})
@@ -14341,7 +14340,7 @@ MiniA.prototype.init = function(args) {
 
     // Check the need to init toollog
     if (isDef(args.toollog) && args.toollog.length > 0) {
-      var _toollogm = af.fromJSSLON(args.toollog)
+      var _toollogm = af.fromJSSLON(__miniANormalizeChannelDef(args.toollog))
       if (isMap(_toollogm)) {
         try {
           ow.ch.create("_mini_a_toollog_channel", false, isDef(_toollogm.type) ? _toollogm.type : "simple", isMap(_toollogm.options) ? _toollogm.options : {})
@@ -14355,7 +14354,7 @@ MiniA.prototype.init = function(args) {
     // Check the need to init metricsch
     if (isDef(args.metricsch) && args.metricsch.length > 0) {
       try {
-        var _metricschm = af.fromJSSLON(args.metricsch)
+        var _metricschm = af.fromJSSLON(__miniANormalizeChannelDef(args.metricsch))
         if (isMap(_metricschm)) {
           var _metricschName = isString(_metricschm.name) && _metricschm.name.trim().length > 0 ? _metricschm.name.trim() : "_mini_a_metrics_channel"
           var _metricschType = isString(_metricschm.type) ? _metricschm.type : "simple"
@@ -19874,7 +19873,7 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
   var debugValChName = ""
   if (!useValTools && isString(this._debugvalchConfig) && this._debugvalchConfig.length > 0) {
     try {
-      var debugValChMap = af.fromJSSLON(this._debugvalchConfig)
+      var debugValChMap = af.fromJSSLON(__miniANormalizeChannelDef(this._debugvalchConfig))
       if (isMap(debugValChMap)) {
         debugValChName = isString(debugValChMap.name) ? debugValChMap.name : "__mini_a_val_llm_debug"
         if ($ch().list().indexOf(debugValChName) < 0) {

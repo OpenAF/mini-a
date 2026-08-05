@@ -425,7 +425,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "wiki", "graph", "dream", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "wiki", "graph", "dream", "ingest", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -538,7 +538,7 @@ try {
   function ensureMemoryChannelFromDef(rawValue, fallbackName, fallbackType) {
     if (!isString(rawValue) || rawValue.trim().length === 0) return __
     var parsed = __
-    try { parsed = af.fromJSSLON(rawValue) } catch(ignoreMemoryChannelParse) {}
+    try { parsed = af.fromJSSLON(__miniANormalizeChannelDef(rawValue)) } catch(ignoreMemoryChannelParse) {}
     if (!isMap(parsed)) return __
     var cName = isString(parsed.name) && parsed.name.trim().length > 0 ? parsed.name.trim() : fallbackName
     var cType = isString(parsed.type) && parsed.type.trim().length > 0 ? parsed.type.trim() : (fallbackType || "simple")
@@ -621,12 +621,12 @@ try {
     memoryusersession: { type: "boolean", default: false, description: "Enable usememory and auto-configure ~/.openaf-mini-a file-backed session memory only." },
     memoryscope    : { type: "string", default: "both", description: "Memory read scope: session, global, or both." },
     memorysessionid: { type: "string", description: "Session id namespace used by memorysessionch persistence." },
-    memorych       : { type: "string", description: "JSSLON channel definition for global memory persistence." },
-    memorysessionch: { type: "string", description: "JSSLON channel definition for session memory persistence." },
+    memorych       : { type: "string", description: "JSSLON channel definition or native file path for global memory persistence." },
+    memorysessionch: { type: "string", description: "JSSLON channel definition or native file path for session memory persistence." },
     usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
     wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
-    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs or s3." },
-    wikiroot       : { type: "string", description: "Root directory for the filesystem wiki backend." },
+    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs, s3, s3fs, or es." },
+    wikiroot       : { type: "string", description: "Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)." },
     wikibucket     : { type: "string", description: "Bucket name for the S3 wiki backend." },
     wikiprefix     : { type: "string", default: "wiki/", description: "Prefix path for the S3 wiki backend." },
     wikiurl        : { type: "string", description: "S3 endpoint URL for the wiki backend." },
@@ -636,7 +636,7 @@ try {
     wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
-    wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts [{name, backend, root|bucket|prefix|url|...}]." },
+    wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
@@ -747,12 +747,12 @@ try {
     model          : { type: "string", description: "Override OAF_MODEL configuration" },
     modellc        : { type: "string", description: "Override OAF_LC_MODEL configuration" },
     modelval       : { type: "string", description: "Override OAF_VAL_MODEL configuration" },
-    auditch        : { type: "string", description: "Audit channel definition" },
-    toollog        : { type: "string", description: "Tool usage log channel definition" },
-    metricsch      : { type: "string", description: "Metrics channel definition" },
-    debugch        : { type: "string", description: "Debug channel definition for the main model." },
-    debuglcch      : { type: "string", description: "Debug channel definition for the low-cost model." },
-    debugvalch     : { type: "string", description: "Debug channel definition for the validation model." },
+    auditch        : { type: "string", description: "Audit channel definition or native file path" },
+    toollog        : { type: "string", description: "Tool usage log channel definition or native file path" },
+    metricsch      : { type: "string", description: "Metrics channel definition or native file path" },
+    debugch        : { type: "string", description: "Debug channel definition or native file path for the main model." },
+    debuglcch      : { type: "string", description: "Debug channel definition or native file path for the low-cost model." },
+    debugvalch     : { type: "string", description: "Debug channel definition or native file path for the validation model." },
     deepresearch   : { type: "boolean", default: false, description: "Enable deep research mode with iterative validation" },
     maxcycles      : { type: "number", default: 3, description: "Maximum research cycles in deep research mode" },
     validationgoal : { type: "string", description: "Validation criteria for deep research outcomes (string or file path; implies deepresearch=true, maxcycles=3)" },
@@ -816,19 +816,25 @@ try {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: lint, plan, apply, or reorg." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), or reorg." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
-    dreammemoryminconfidence: { type: "number", description: "Minimum confidence for memory entries written during dream memory apply." },
-    dreammemorytowiki: { type: "boolean", default: false, description: "Allow memory dream to emit curated wiki-ready notes." },
-    dreamwikiapply : { type: "boolean", default: false, description: "Write gate for wiki apply/reorg modes." },
+    dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
-    dreamwikiredirects: { type: "boolean", default: false, description: "Generate redirect stubs during wiki reorg operations." },
-    dreamwikiminpages: { type: "number", description: "Minimum page count required before structural wiki reorg runs." },
-    dreamwikiflatthreshold: { type: "number", description: "Flatness threshold used to decide wiki reorg opportunities." },
+    dreamwikiminpages: { type: "number", description: "Minimum page count required before the deterministic index fixes run." },
     dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
-    dreamwikipreservebodies: { type: "boolean", default: false, description: "Preserve page body content when creating index-focused wiki reorg proposals." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
+    ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
+    ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
+    ingestsection  : { type: "string", description: "Wiki section ingested pages are written into." },
+    ingestinclude  : { type: "string", description: "Comma-separated path fragments to include when ingesting." },
+    ingestexclude  : { type: "string", description: "Comma-separated path fragments to exclude when ingesting." },
+    ingestchunkchars: { type: "number", description: "Maximum characters per distillation chunk during ingest." },
+    ingestmaxfilekb: { type: "number", description: "Skip ingest sources larger than this many KB." },
+    ingestconcurrency: { type: "number", description: "Number of parallel source distillations during ingest." },
+    ingestdryrun   : { type: "boolean", default: false, description: "Report what would be ingested without writing." },
+    ingestforce    : { type: "boolean", default: false, description: "Re-ingest sources the ledger reports as unchanged." },
+    ingestledger   : { type: "string", description: "Override the ingest ledger file path." },
     workermode     : { type: "boolean", default: false, description: "Start in worker mode for delegated agent execution." },
     path           : { type: "string", description: "Static asset path used by the web UI/worker modes." },
     secpass        : { type: "string", description: "Security password used for protected model config access." },
@@ -2306,8 +2312,8 @@ try {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "lint"]
-            var dreamWikiModes = ["plan", "lint", "apply", "reorg", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg"]
+            var dreamWikiModes = ["plan", "apply", "reorg", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -5786,7 +5792,8 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: dryrun, plan, apply, reorg, lint" }
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, dryrun" },
+      { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
     helpCommands.push(
       { command: "/delegate <goal>", description: "Delegate a sub-goal to a child agent (requires usedelegation=true)" },
@@ -6068,9 +6075,9 @@ try {
           mountList.forEach(function(m) { print("  @" + m.name + " — " + m.pages + " pages (" + m.prefix + ")") })
         }
       } else if (sub === "attach") {
-        // Usage: /wiki attach <name> [backend=fs] [root=path]
+        // Usage: /wiki attach <name> [backend=fs] [root=directory-or-archive.zip]
         var attachParts = rest.split(/\s+/).filter(function(p) { return p.length > 0 })
-        if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=path] [bucket=...] ...", errorColor)); return }
+        if (attachParts.length === 0) { print(colorifyText("Usage: /wiki attach <name> [backend=fs|s3|es] [root=directory|archive.zip|archive.okt] [bucket=...] ...", errorColor)); return }
         var attachName = attachParts[0]
         var attachCfg = { access: "ro", backend: "fs" }
         attachParts.slice(1).forEach(function(kv) {
@@ -6101,7 +6108,7 @@ try {
       } else {
         print(colorifyText("Usage: /wiki [context|list|tree|browse|read|search|backlinks|delete|lint|write|move|init|reindex|mounts|attach|detach] [args]", errorColor))
         print(colorifyText("  list --meta   show pages with title+description", hintColor))
-        print(colorifyText("  attach <name> [backend=fs] [root=path]", hintColor))
+        print(colorifyText("  attach <name> [backend=fs] [root=directory|archive.zip|archive.okt]", hintColor))
         print(colorifyText("  detach <name>", hintColor))
       }
     } catch(wikiErr) {
@@ -6138,6 +6145,60 @@ try {
     }
   }
 
+  // /ingest <source> [section] [dryrun|force]
+  function printIngest(subcmdRaw) {
+    var parts   = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
+    var flags   = { dryrun: false, force: false }
+    var operands = []
+    parts.forEach(function(p) {
+      var lower = p.toLowerCase()
+      if (lower === "dryrun") { flags.dryrun = true; return }
+      if (lower === "force")  { flags.force  = true; return }
+      operands.push(p)
+    })
+
+    if (operands.length === 0) {
+      print(colorifyText("Usage: /ingest <folder|repo-url|page-url> [section] [dryrun] [force]", errorColor))
+      print(colorifyText("  Ingests a docs folder, git repo or web page into the active wiki.", hintColor))
+      return
+    }
+    if (toBoolean(sessionOptions.usewiki) !== true) {
+      print(colorifyText("Wiki not enabled. Start with usewiki=true and wikiroot=...", errorColor))
+      return
+    }
+    if (String(sessionOptions.wikiaccess || "").toLowerCase() !== "rw") {
+      print(colorifyText("Wiki is read-only. Start with wikiaccess=rw to ingest.", errorColor))
+      return
+    }
+
+    try {
+      global.__mini_a_ingest_lib_mode = true
+      loadLib("mini-a-ingest.js")
+    } catch(ingestLoadErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Failed to load mini-a-ingest.js: " + ingestLoadErr, errorColor))
+      return
+    }
+
+    var ingestArgs = merge({}, sessionOptions)
+    ingestArgs.ingestsource = operands[0]
+    if (operands.length > 1) ingestArgs.ingestsection = operands[1]
+    if (flags.dryrun) ingestArgs.ingestdryrun = "true"
+    if (flags.force)  ingestArgs.ingestforce  = "true"
+
+    try {
+      var runner = new MiniAIngest(ingestArgs, function(msg) { print(colorifyText(msg, hintColor)) })
+      var res    = runner.run()
+      if (isMap(res) && res.ok === false) {
+        print(colorifyText("Ingest did not run: " + (isString(res.reason) ? res.reason : "unknown") +
+                           (isString(res.error) ? " — " + res.error : ""), errorColor))
+        return
+      }
+      print(printTree(res))
+    } catch(ingestErr) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Ingest error: " + ingestErr, errorColor))
+    }
+  }
+
   function printDream(subcmdRaw) {
     var parts  = isString(subcmdRaw) ? subcmdRaw.trim().split(/\s+/).filter(function(p) { return p.length > 0 }) : []
     var mode   = parts.length > 0 && parts[0].toLowerCase() !== "dryrun" ? parts[0].toLowerCase() : ""
@@ -6149,7 +6210,7 @@ try {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
-    var isWikiMode = ["wiki", "plan", "lint", "apply", "reorg"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "plan", "apply", "reorg"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -6172,13 +6233,11 @@ try {
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
     try {
-      if (parts.indexOf("plan") >= 0 || parts.indexOf("lint") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
+      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
-        if (parts.indexOf("lint") >= 0) dreamArgs.dreamwikimode = "lint"
-        if (parts.indexOf("apply") >= 0) { dreamArgs.dreamwikimode = "apply"; dreamArgs.dreamwikiapply = "true" }
+        if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
-          dreamArgs.dreamwikiapply = "true"
           dreamArgs.dreamwikireorg = "true"
           dreamArgs.dreamwikiapproval = "auto"
         }
@@ -6202,8 +6261,23 @@ try {
       }
       dreamLogFn.markdownModelOutput = true
       var runner = new MiniADreams(dreamArgs, dreamLogFn)
-      if ((mode === "" || mode === "memory") && hasMemory) runner.dreamMemory()
-      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "lint" || mode === "apply" || mode === "reorg") && hasWiki) runner.dreamWiki()
+
+      // Render the result maps: a dream that declines to run (gate closed, approval required,
+      // nothing configured) reports it through the return value, not the log.
+      var reportDream = function(label, res) {
+        if (!isMap(res)) return
+        if (res.ok === false) {
+          var why = isString(res.reason) ? res.reason : "unknown"
+          print(colorifyText("Dream " + label + " did not run: " + why + (isString(res.error) ? " — " + res.error : ""), errorColor))
+          if (why === "approval-required") print(colorifyText("  Use /dream reorg to approve, or set dreamwikiapproval=auto.", hintColor))
+          if (why === "reorg-not-enabled") print(colorifyText("  Set dreamwikireorg=true to enable structural reorg.", hintColor))
+          return
+        }
+        print(printTree(res))
+      }
+
+      if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
+      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }
@@ -6615,6 +6689,10 @@ try {
       }
       if (commandLower.indexOf("graph ") === 0) {
         printGraph(command.substring(6))
+        continue
+      }
+      if (commandLower === "ingest" || commandLower.indexOf("ingest ") === 0) {
+        printIngest(commandLower === "ingest" ? "" : command.substring(7))
         continue
       }
       if (commandLower === "dream") {

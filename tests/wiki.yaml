@@ -2,492 +2,597 @@ include:
 - oJobTest.yaml
 
 jobs:
-- name: MiniA Wiki Tests::Init
-  exec: args.tests = require("tests/wiki.js")
 
 - name: MiniA Wiki Tests::ParseFrontmatterWithYaml
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testParseFrontmatterWithYaml
+  exec: args.func = require("tests/wiki.js").testParseFrontmatterWithYaml
 
 - name: MiniA Wiki Tests::ParseFrontmatterWithoutBlock
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testParseFrontmatterWithoutBlock
+  exec: args.func = require("tests/wiki.js").testParseFrontmatterWithoutBlock
 
 - name: MiniA Wiki Tests::ExtractMarkdownLinks
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testExtractMarkdownLinks
+  exec: args.func = require("tests/wiki.js").testExtractMarkdownLinks
 
 - name: MiniA Wiki Tests::ExtractWikiStyleLinks
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testExtractWikiStyleLinks
+  exec: args.func = require("tests/wiki.js").testExtractWikiStyleLinks
 
 - name: MiniA Wiki Tests::ExtractLinksDeduplicates
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testExtractLinksDeduplicates
+  exec: args.func = require("tests/wiki.js").testExtractLinksDeduplicates
 
 - name: MiniA Wiki Tests::NearDuplicateIdentical
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testNearDuplicateIdentical
+  exec: args.func = require("tests/wiki.js").testNearDuplicateIdentical
 
 - name: MiniA Wiki Tests::NearDuplicateDifferent
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testNearDuplicateDifferent
+  exec: args.func = require("tests/wiki.js").testNearDuplicateDifferent
 
 - name: MiniA Wiki Tests::FsBackendList
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendList
+  exec: args.func = require("tests/wiki.js").testFsBackendList
 
 - name: MiniA Wiki Tests::FsBackendListRealFiles
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendListRealFiles
+  exec: args.func = require("tests/wiki.js").testFsBackendListRealFiles
 
 - name: MiniA Wiki Tests::FsBackendListWithPrefixKeepsPrefix
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendListWithPrefixKeepsPrefix
+  exec: args.func = require("tests/wiki.js").testFsBackendListWithPrefixKeepsPrefix
 
 - name: MiniA Wiki Tests::FsBackendListHandlesNestedListFilesRecursiveShape
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendListHandlesNestedListFilesRecursiveShape
+  exec: args.func = require("tests/wiki.js").testFsBackendListHandlesNestedListFilesRecursiveShape
 
 - name: MiniA Wiki Tests::FsBackendListHandlesIterableListFilesRecursiveShape
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendListHandlesIterableListFilesRecursiveShape
+  exec: args.func = require("tests/wiki.js").testFsBackendListHandlesIterableListFilesRecursiveShape
+
+- name: MiniA Wiki Tests::ArchiveFsBackendZipAndOktReadOnly
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testArchiveFsBackendZipAndOktReadOnly
 
 - name: MiniA Wiki Tests::EsRowsToPathsSkipsUndefinedRows
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testEsRowsToPathsSkipsUndefinedRows
+  exec: args.func = require("tests/wiki.js").testEsRowsToPathsSkipsUndefinedRows
 
 - name: MiniA Wiki Tests::FsBackendReadWrite
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendReadWrite
+  exec: args.func = require("tests/wiki.js").testFsBackendReadWrite
 
 - name: MiniA Wiki Tests::BootstrapCreatesAgentsAndIndexForEmptyWritableWiki
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBootstrapCreatesAgentsAndIndexForEmptyWritableWiki
+  exec: args.func = require("tests/wiki.js").testBootstrapCreatesAgentsAndIndexForEmptyWritableWiki
 
 - name: MiniA Wiki Tests::BootstrapAddsIndexToLegacyAgentsOnlyWiki
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBootstrapAddsIndexToLegacyAgentsOnlyWiki
+  exec: args.func = require("tests/wiki.js").testBootstrapAddsIndexToLegacyAgentsOnlyWiki
 
 - name: MiniA Wiki Tests::BootstrapDoesNotModifyNonEmptyWikiWithoutIndex
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBootstrapDoesNotModifyNonEmptyWikiWithoutIndex
+  exec: args.func = require("tests/wiki.js").testBootstrapDoesNotModifyNonEmptyWikiWithoutIndex
 
 - name: MiniA Wiki Tests::FsBackendRejectsTraversalRead
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendRejectsTraversalRead
+  exec: args.func = require("tests/wiki.js").testFsBackendRejectsTraversalRead
 
 - name: MiniA Wiki Tests::FsBackendRejectsTraversalWrite
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendRejectsTraversalWrite
+  exec: args.func = require("tests/wiki.js").testFsBackendRejectsTraversalWrite
 
 - name: MiniA Wiki Tests::FsBackendReadOnlyWrite
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendReadOnlyWrite
+  exec: args.func = require("tests/wiki.js").testFsBackendReadOnlyWrite
 
 - name: MiniA Wiki Tests::FsBackendReadMissing
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendReadMissing
+  exec: args.func = require("tests/wiki.js").testFsBackendReadMissing
 
 - name: MiniA Wiki Tests::FsBackendSearch
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendSearch
+  exec: args.func = require("tests/wiki.js").testFsBackendSearch
 
 - name: MiniA Wiki Tests::ResolveLinkSameDir
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkSameDir
+  exec: args.func = require("tests/wiki.js").testResolveLinkSameDir
 
 - name: MiniA Wiki Tests::ResolveLinkDotDot
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkDotDot
+  exec: args.func = require("tests/wiki.js").testResolveLinkDotDot
 
 - name: MiniA Wiki Tests::ResolveLinkFromRoot
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkFromRoot
+  exec: args.func = require("tests/wiki.js").testResolveLinkFromRoot
 
 - name: MiniA Wiki Tests::ResolveLinkAbsoluteIsRootRelative
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkAbsoluteIsRootRelative
+  exec: args.func = require("tests/wiki.js").testResolveLinkAbsoluteIsRootRelative
 
 - name: MiniA Wiki Tests::ResolveLinkExternalReturnsNull
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkExternalReturnsNull
+  exec: args.func = require("tests/wiki.js").testResolveLinkExternalReturnsNull
 
 - name: MiniA Wiki Tests::ResolveLinkEscapesRootReturnsNull
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testResolveLinkEscapesRootReturnsNull
+  exec: args.func = require("tests/wiki.js").testResolveLinkEscapesRootReturnsNull
 
 - name: MiniA Wiki Tests::LintBrokenLink
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintBrokenLink
+  exec: args.func = require("tests/wiki.js").testLintBrokenLink
 
 - name: MiniA Wiki Tests::LintExternalLinkNotBroken
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintExternalLinkNotBroken
+  exec: args.func = require("tests/wiki.js").testLintExternalLinkNotBroken
+
+- name: MiniA Wiki Tests::LintAliasedWikiLinkNotBroken
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLintAliasedWikiLinkNotBroken
 
 - name: MiniA Wiki Tests::LintAbsolutePathLinkNotBroken
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintAbsolutePathLinkNotBroken
+  exec: args.func = require("tests/wiki.js").testLintAbsolutePathLinkNotBroken
 
 - name: MiniA Wiki Tests::LintRelativeLinkInSubdirValid
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintRelativeLinkInSubdirValid
+  exec: args.func = require("tests/wiki.js").testLintRelativeLinkInSubdirValid
 
 - name: MiniA Wiki Tests::LintRelativeLinkInSubdirBroken
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintRelativeLinkInSubdirBroken
+  exec: args.func = require("tests/wiki.js").testLintRelativeLinkInSubdirBroken
 
 - name: MiniA Wiki Tests::LintDotDotLinkValid
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintDotDotLinkValid
+  exec: args.func = require("tests/wiki.js").testLintDotDotLinkValid
 
 - name: MiniA Wiki Tests::ReadIncludesResolvedLinks
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testReadIncludesResolvedLinks
+  exec: args.func = require("tests/wiki.js").testReadIncludesResolvedLinks
 
 - name: MiniA Wiki Tests::LintOrphan
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintOrphan
+  exec: args.func = require("tests/wiki.js").testLintOrphan
 
 - name: MiniA Wiki Tests::LintMissingFrontmatter
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintMissingFrontmatter
+  exec: args.func = require("tests/wiki.js").testLintMissingFrontmatter
 
 - name: MiniA Wiki Tests::LintHeadingHierarchy
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintHeadingHierarchy
+  exec: args.func = require("tests/wiki.js").testLintHeadingHierarchy
 
 - name: MiniA Wiki Tests::LintStalePage
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintStalePage
+  exec: args.func = require("tests/wiki.js").testLintStalePage
 
 - name: MiniA Wiki Tests::LintNearDuplicate
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintNearDuplicate
+  exec: args.func = require("tests/wiki.js").testLintNearDuplicate
 
 - name: MiniA Wiki Tests::LintSummaryCountsCorrect
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintSummaryCountsCorrect
+  exec: args.func = require("tests/wiki.js").testLintSummaryCountsCorrect
 
 - name: MiniA Wiki Tests::WriteReadRoundTrip
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteReadRoundTrip
+  exec: args.func = require("tests/wiki.js").testWriteReadRoundTrip
 
 - name: MiniA Wiki Tests::RawWritePreservesCreatedMetadata
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testRawWritePreservesCreatedMetadata
+  exec: args.func = require("tests/wiki.js").testRawWritePreservesCreatedMetadata
 
 - name: MiniA Wiki Tests::TreeShowsNestedSectionIndex
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testTreeShowsNestedSectionIndex
+  exec: args.func = require("tests/wiki.js").testTreeShowsNestedSectionIndex
 
 - name: MiniA Wiki Tests::BrowseSuggestsSectionReads
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBrowseSuggestsSectionReads
+  exec: args.func = require("tests/wiki.js").testBrowseSuggestsSectionReads
 
 - name: MiniA Wiki Tests::LintMissingIndex
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintMissingIndex
+  exec: args.func = require("tests/wiki.js").testLintMissingIndex
 
 - name: MiniA Wiki Tests::LintIndexMissingLinks
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLintIndexMissingLinks
+  exec: args.func = require("tests/wiki.js").testLintIndexMissingLinks
 
 - name: MiniA Wiki Tests::BacklinksFindsReferences
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBacklinksFindsReferences
+  exec: args.func = require("tests/wiki.js").testBacklinksFindsReferences
 
 - name: MiniA Wiki Tests::MoveRewritesLinksAndPreservesCreated
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMoveRewritesLinksAndPreservesCreated
+  exec: args.func = require("tests/wiki.js").testMoveRewritesLinksAndPreservesCreated
 
 - name: MiniA Wiki Tests::MoveRedirectStub
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMoveRedirectStub
+  exec: args.func = require("tests/wiki.js").testMoveRedirectStub
 
 - name: MiniA Wiki Tests::InitCreatesSectionIndex
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testInitCreatesSectionIndex
+  exec: args.func = require("tests/wiki.js").testInitCreatesSectionIndex
 
 - name: MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMcpWikiMetadataIncludesHierarchyTools
+  exec: args.func = require("tests/wiki.js").testMcpWikiMetadataIncludesHierarchyTools
+
+- name: MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
+
+- name: MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiSafeOffProfileDisablesRestriction
+
+- name: MiniA Wiki Tests::McpWikiRestrictedRetrieval
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRetrieval
+
+- name: MiniA Wiki Tests::McpWikiRestrictedProfiles
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedProfiles
+
+- name: MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedBudgetAndConfig
+
+- name: MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedGraphHintsAreOptInOpaqueReferences
+
+- name: MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
+
+- name: MiniA Wiki Tests::McpWikiRestrictedRefChannelSweepsExpiredEntries
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRefChannelSweepsExpiredEntries
 
 - name: MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMcpWikiOpsMetadataIncludesOpsTools
+  exec: args.func = require("tests/wiki.js").testMcpWikiOpsMetadataIncludesOpsTools
 
 - name: MiniA Wiki Tests::FsBackendDelete
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendDelete
+  exec: args.func = require("tests/wiki.js").testFsBackendDelete
 
 - name: MiniA Wiki Tests::FsBackendDeleteNonExistent
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendDeleteNonExistent
+  exec: args.func = require("tests/wiki.js").testFsBackendDeleteNonExistent
 
 - name: MiniA Wiki Tests::FsBackendDeleteReadOnly
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendDeleteReadOnly
+  exec: args.func = require("tests/wiki.js").testFsBackendDeleteReadOnly
 
 - name: MiniA Wiki Tests::FsBackendDeleteWithPath
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testFsBackendDeleteWithPath
+  exec: args.func = require("tests/wiki.js").testFsBackendDeleteWithPath
 
 - name: MiniA Wiki Tests::SearchReturnsLineNumbers
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchReturnsLineNumbers
+  exec: args.func = require("tests/wiki.js").testSearchReturnsLineNumbers
 
 - name: MiniA Wiki Tests::SearchWithRegex
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchWithRegex
+  exec: args.func = require("tests/wiki.js").testSearchWithRegex
 
 - name: MiniA Wiki Tests::SearchScopedToPath
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchScopedToPath
+  exec: args.func = require("tests/wiki.js").testSearchScopedToPath
 
 - name: MiniA Wiki Tests::SearchWithContextLines
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchWithContextLines
+  exec: args.func = require("tests/wiki.js").testSearchWithContextLines
 
 - name: MiniA Wiki Tests::SearchBodyOnlySkipsFrontmatter
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchBodyOnlySkipsFrontmatter
+  exec: args.func = require("tests/wiki.js").testSearchBodyOnlySkipsFrontmatter
 
 - name: MiniA Wiki Tests::ReadWithLineRange
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testReadWithLineRange
+  exec: args.func = require("tests/wiki.js").testReadWithLineRange
 
 - name: MiniA Wiki Tests::ReadCountLines
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testReadCountLines
+  exec: args.func = require("tests/wiki.js").testReadCountLines
 
 - name: MiniA Wiki Tests::ReadSection
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testReadSection
+  exec: args.func = require("tests/wiki.js").testReadSection
 
 - name: MiniA Wiki Tests::ReadMaxLines
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testReadMaxLines
+  exec: args.func = require("tests/wiki.js").testReadMaxLines
 
 - name: MiniA Wiki Tests::WriteAppend
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteAppend
+  exec: args.func = require("tests/wiki.js").testWriteAppend
 
 - name: MiniA Wiki Tests::WriteLineInsert
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteLineInsert
+  exec: args.func = require("tests/wiki.js").testWriteLineInsert
 
 - name: MiniA Wiki Tests::WriteReplaceLineRange
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteReplaceLineRange
+  exec: args.func = require("tests/wiki.js").testWriteReplaceLineRange
 
 - name: MiniA Wiki Tests::WriteSection
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteSection
+  exec: args.func = require("tests/wiki.js").testWriteSection
 
 - name: MiniA Wiki Tests::WriteSectionNotFound
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteSectionNotFound
+  exec: args.func = require("tests/wiki.js").testWriteSectionNotFound
 
 - name: MiniA Wiki Tests::WritePartialModesRequireExistingPage
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWritePartialModesRequireExistingPage
+  exec: args.func = require("tests/wiki.js").testWritePartialModesRequireExistingPage
 
 # ── v2 new feature tests ──────────────────────────────────────────────────────
 
 - name: MiniA Wiki Tests::BootstrapCreatesLogMd
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBootstrapCreatesLogMd
+  exec: args.func = require("tests/wiki.js").testBootstrapCreatesLogMd
 
 - name: MiniA Wiki Tests::BootstrapAgentsMdV2HasManagedMarkers
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testBootstrapAgentsMdV2HasManagedMarkers
+  exec: args.func = require("tests/wiki.js").testBootstrapAgentsMdV2HasManagedMarkers
 
 - name: MiniA Wiki Tests::UpgradeAgentsNoopWhenCurrent
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testUpgradeAgentsNoopWhenCurrent
+  exec: args.func = require("tests/wiki.js").testUpgradeAgentsNoopWhenCurrent
 
 - name: MiniA Wiki Tests::UpgradeAgentsWholesaleReplacesStockV1
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testUpgradeAgentsWholesaleReplacesStockV1
+  exec: args.func = require("tests/wiki.js").testUpgradeAgentsWholesaleReplacesStockV1
 
 - name: MiniA Wiki Tests::UpgradeAgentsPreservesUserEdits
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testUpgradeAgentsPreservesUserEdits
+  exec: args.func = require("tests/wiki.js").testUpgradeAgentsPreservesUserEdits
 
 - name: MiniA Wiki Tests::AppendLogWritesToLogMd
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testAppendLogWritesToLogMd
+  exec: args.func = require("tests/wiki.js").testAppendLogWritesToLogMd
 
 - name: MiniA Wiki Tests::WriteContentPageAppendsToLog
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteContentPageAppendsToLog
+  exec: args.func = require("tests/wiki.js").testWriteContentPageAppendsToLog
 
 - name: MiniA Wiki Tests::WriteToIndexMdDoesNotAppendToLog
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testWriteToIndexMdDoesNotAppendToLog
+  exec: args.func = require("tests/wiki.js").testWriteToIndexMdDoesNotAppendToLog
 
 - name: MiniA Wiki Tests::LogMdExemptFromLintOrphan
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testLogMdExemptFromLintOrphan
+  exec: args.func = require("tests/wiki.js").testLogMdExemptFromLintOrphan
 
 - name: MiniA Wiki Tests::ContextOpReturnsSummary
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testContextOpReturnsSummary
+  exec: args.func = require("tests/wiki.js").testContextOpReturnsSummary
 
 - name: MiniA Wiki Tests::ListWithMeta
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testListWithMeta
+  exec: args.func = require("tests/wiki.js").testListWithMeta
 
 - name: MiniA Wiki Tests::SearchCompactByDefault
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchCompactByDefault
+  exec: args.func = require("tests/wiki.js").testSearchCompactByDefault
 
 - name: MiniA Wiki Tests::SearchWithContextLinesReturnsSnippets
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testSearchWithContextLinesReturnsSnippets
+  exec: args.func = require("tests/wiki.js").testSearchWithContextLinesReturnsSnippets
 
 - name: MiniA Wiki Tests::MountWriteRejected
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMountWriteRejected
+  exec: args.func = require("tests/wiki.js").testMountWriteRejected
 
 - name: MiniA Wiki Tests::MountReadRouted
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMountReadRouted
+  exec: args.func = require("tests/wiki.js").testMountReadRouted
+
+- name: MiniA Wiki Tests::ArchiveMountFederatesAndStaysReadOnly
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testArchiveMountFederatesAndStaysReadOnly
 
 - name: MiniA Wiki Tests::MountSearchFanout
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMountSearchFanout
+  exec: args.func = require("tests/wiki.js").testMountSearchFanout
 
 - name: MiniA Wiki Tests::AtPrefixRejectedByNormalizePath
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testAtPrefixRejectedByNormalizePath
+  exec: args.func = require("tests/wiki.js").testAtPrefixRejectedByNormalizePath
 
 - name: MiniA Wiki Tests::DetachRemovesMount
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testDetachRemovesMount
+  exec: args.func = require("tests/wiki.js").testDetachRemovesMount
 
 - name: MiniA Wiki Tests::TypeAutoFilledOnWrite
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testTypeAutoFilledOnWrite
+  exec: args.func = require("tests/wiki.js").testTypeAutoFilledOnWrite
 
 - name: MiniA Wiki Tests::MissingTypeLintInfo
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMissingTypeLintInfo
+  exec: args.func = require("tests/wiki.js").testMissingTypeLintInfo
 
 - name: MiniA Wiki Tests::RootedLinkResolvesAndLints
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testRootedLinkResolvesAndLints
+  exec: args.func = require("tests/wiki.js").testRootedLinkResolvesAndLints
 
 - name: MiniA Wiki Tests::TimestampReadAlias
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testTimestampReadAlias
+  exec: args.func = require("tests/wiki.js").testTimestampReadAlias
 
 - name: MiniA Wiki Tests::TimestampWriteEmit
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testTimestampWriteEmit
+  exec: args.func = require("tests/wiki.js").testTimestampWriteEmit
 
 - name: MiniA Wiki Tests::MovePreservesRootedLinks
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testMovePreservesRootedLinks
+  exec: args.func = require("tests/wiki.js").testMovePreservesRootedLinks
 
 - name: MiniA Wiki Tests::DriftGuard
-  from: MiniA Wiki Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testDriftGuard
+  exec: args.func = require("tests/wiki.js").testDriftGuard
+
+- name: MiniA Wiki Tests::ReadOnlyConsumesExistingLuceneIndex
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlyConsumesExistingLuceneIndex
+
+- name: MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenIndexExists
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlySessionWritesNothingWhenIndexExists
+
+- name: MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenNoIndexExists
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlySessionWritesNothingWhenNoIndexExists
+
+- name: MiniA Wiki Tests::ReadOnlySearchWorksWhileWriterLockHeld
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlySearchWorksWhileWriterLockHeld
+
+- name: MiniA Wiki Tests::ReadOnlyRejectsIndexBuilds
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlyRejectsIndexBuilds
+
+- name: MiniA Wiki Tests::IndexBackedSearchReturnsRealSnippets
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testIndexBackedSearchReturnsRealSnippets
+
+- name: MiniA Wiki Tests::ContextReportsRetrievalCapability
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testContextReportsRetrievalCapability
+
+- name: MiniA Wiki Tests::FalkorReadGateAllowsReadOnlyGraphs
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testFalkorReadGateAllowsReadOnlyGraphs
+
+- name: MiniA Wiki Tests::ReadOnlySkipsGraphWhenNoneExists
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlySkipsGraphWhenNoneExists
+
+- name: MiniA Wiki Tests::S3ArtifactsHydrateLocalSearchAndGraphCache
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testS3ArtifactsHydrateLocalSearchAndGraphCache
+
+todo:
+- MiniA Wiki Tests::ParseFrontmatterWithYaml
+- MiniA Wiki Tests::ParseFrontmatterWithoutBlock
+- MiniA Wiki Tests::ExtractMarkdownLinks
+- MiniA Wiki Tests::ExtractWikiStyleLinks
+- MiniA Wiki Tests::ExtractLinksDeduplicates
+- MiniA Wiki Tests::NearDuplicateIdentical
+- MiniA Wiki Tests::NearDuplicateDifferent
+- MiniA Wiki Tests::FsBackendList
+- MiniA Wiki Tests::FsBackendListRealFiles
+- MiniA Wiki Tests::FsBackendListWithPrefixKeepsPrefix
+- MiniA Wiki Tests::FsBackendListHandlesNestedListFilesRecursiveShape
+- MiniA Wiki Tests::FsBackendListHandlesIterableListFilesRecursiveShape
+- MiniA Wiki Tests::ArchiveFsBackendZipAndOktReadOnly
+- MiniA Wiki Tests::EsRowsToPathsSkipsUndefinedRows
+- MiniA Wiki Tests::FsBackendReadWrite
+- MiniA Wiki Tests::BootstrapCreatesAgentsAndIndexForEmptyWritableWiki
+- MiniA Wiki Tests::BootstrapAddsIndexToLegacyAgentsOnlyWiki
+- MiniA Wiki Tests::BootstrapDoesNotModifyNonEmptyWikiWithoutIndex
+- MiniA Wiki Tests::FsBackendRejectsTraversalRead
+- MiniA Wiki Tests::FsBackendRejectsTraversalWrite
+- MiniA Wiki Tests::FsBackendReadOnlyWrite
+- MiniA Wiki Tests::FsBackendReadMissing
+- MiniA Wiki Tests::FsBackendSearch
+- MiniA Wiki Tests::ResolveLinkSameDir
+- MiniA Wiki Tests::ResolveLinkDotDot
+- MiniA Wiki Tests::ResolveLinkFromRoot
+- MiniA Wiki Tests::ResolveLinkAbsoluteIsRootRelative
+- MiniA Wiki Tests::ResolveLinkExternalReturnsNull
+- MiniA Wiki Tests::ResolveLinkEscapesRootReturnsNull
+- MiniA Wiki Tests::LintBrokenLink
+- MiniA Wiki Tests::LintExternalLinkNotBroken
+- MiniA Wiki Tests::LintAliasedWikiLinkNotBroken
+- MiniA Wiki Tests::LintAbsolutePathLinkNotBroken
+- MiniA Wiki Tests::LintRelativeLinkInSubdirValid
+- MiniA Wiki Tests::LintRelativeLinkInSubdirBroken
+- MiniA Wiki Tests::LintDotDotLinkValid
+- MiniA Wiki Tests::ReadIncludesResolvedLinks
+- MiniA Wiki Tests::LintOrphan
+- MiniA Wiki Tests::LintMissingFrontmatter
+- MiniA Wiki Tests::LintHeadingHierarchy
+- MiniA Wiki Tests::LintStalePage
+- MiniA Wiki Tests::LintNearDuplicate
+- MiniA Wiki Tests::LintSummaryCountsCorrect
+- MiniA Wiki Tests::WriteReadRoundTrip
+- MiniA Wiki Tests::RawWritePreservesCreatedMetadata
+- MiniA Wiki Tests::TreeShowsNestedSectionIndex
+- MiniA Wiki Tests::BrowseSuggestsSectionReads
+- MiniA Wiki Tests::LintMissingIndex
+- MiniA Wiki Tests::LintIndexMissingLinks
+- MiniA Wiki Tests::BacklinksFindsReferences
+- MiniA Wiki Tests::MoveRewritesLinksAndPreservesCreated
+- MiniA Wiki Tests::MoveRedirectStub
+- MiniA Wiki Tests::InitCreatesSectionIndex
+- MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
+- MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
+- MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
+- MiniA Wiki Tests::McpWikiRestrictedRetrieval
+- MiniA Wiki Tests::McpWikiRestrictedProfiles
+- MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
+- MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences
+- MiniA Wiki Tests::McpWikiRestrictedRefsAreSharedAcrossReplicasViaChannel
+- MiniA Wiki Tests::McpWikiRestrictedRefChannelSweepsExpiredEntries
+- MiniA Wiki Tests::McpWikiOpsMetadataIncludesOpsTools
+- MiniA Wiki Tests::FsBackendDelete
+- MiniA Wiki Tests::FsBackendDeleteNonExistent
+- MiniA Wiki Tests::FsBackendDeleteReadOnly
+- MiniA Wiki Tests::FsBackendDeleteWithPath
+- MiniA Wiki Tests::SearchReturnsLineNumbers
+- MiniA Wiki Tests::SearchWithRegex
+- MiniA Wiki Tests::SearchScopedToPath
+- MiniA Wiki Tests::SearchWithContextLines
+- MiniA Wiki Tests::SearchBodyOnlySkipsFrontmatter
+- MiniA Wiki Tests::ReadWithLineRange
+- MiniA Wiki Tests::ReadCountLines
+- MiniA Wiki Tests::ReadSection
+- MiniA Wiki Tests::ReadMaxLines
+- MiniA Wiki Tests::WriteAppend
+- MiniA Wiki Tests::WriteLineInsert
+- MiniA Wiki Tests::WriteReplaceLineRange
+- MiniA Wiki Tests::WriteSection
+- MiniA Wiki Tests::WriteSectionNotFound
+- MiniA Wiki Tests::WritePartialModesRequireExistingPage
+- MiniA Wiki Tests::BootstrapCreatesLogMd
+- MiniA Wiki Tests::BootstrapAgentsMdV2HasManagedMarkers
+- MiniA Wiki Tests::UpgradeAgentsNoopWhenCurrent
+- MiniA Wiki Tests::UpgradeAgentsWholesaleReplacesStockV1
+- MiniA Wiki Tests::UpgradeAgentsPreservesUserEdits
+- MiniA Wiki Tests::AppendLogWritesToLogMd
+- MiniA Wiki Tests::WriteContentPageAppendsToLog
+- MiniA Wiki Tests::WriteToIndexMdDoesNotAppendToLog
+- MiniA Wiki Tests::LogMdExemptFromLintOrphan
+- MiniA Wiki Tests::ContextOpReturnsSummary
+- MiniA Wiki Tests::ListWithMeta
+- MiniA Wiki Tests::SearchCompactByDefault
+- MiniA Wiki Tests::SearchWithContextLinesReturnsSnippets
+- MiniA Wiki Tests::MountWriteRejected
+- MiniA Wiki Tests::MountReadRouted
+- MiniA Wiki Tests::ArchiveMountFederatesAndStaysReadOnly
+- MiniA Wiki Tests::MountSearchFanout
+- MiniA Wiki Tests::AtPrefixRejectedByNormalizePath
+- MiniA Wiki Tests::DetachRemovesMount
+- MiniA Wiki Tests::TypeAutoFilledOnWrite
+- MiniA Wiki Tests::MissingTypeLintInfo
+- MiniA Wiki Tests::RootedLinkResolvesAndLints
+- MiniA Wiki Tests::TimestampReadAlias
+- MiniA Wiki Tests::TimestampWriteEmit
+- MiniA Wiki Tests::MovePreservesRootedLinks
+- MiniA Wiki Tests::DriftGuard
+- MiniA Wiki Tests::ReadOnlyConsumesExistingLuceneIndex
+- MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenIndexExists
+- MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenNoIndexExists
+- MiniA Wiki Tests::ReadOnlySearchWorksWhileWriterLockHeld
+- MiniA Wiki Tests::ReadOnlyRejectsIndexBuilds
+- MiniA Wiki Tests::IndexBackedSearchReturnsRealSnippets
+- MiniA Wiki Tests::ContextReportsRetrievalCapability
+- MiniA Wiki Tests::FalkorReadGateAllowsReadOnlyGraphs
+- MiniA Wiki Tests::ReadOnlySkipsGraphWhenNoneExists
+- MiniA Wiki Tests::S3ArtifactsHydrateLocalSearchAndGraphCache

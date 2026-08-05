@@ -511,7 +511,7 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
 | `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
 | `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) | `fs` |
-| `wikiroot` | Filesystem wiki root when `wikibackend=fs` | `.` |
+| `wikiroot` | Filesystem wiki directory or local `.zip`/`.okt` archive when `wikibackend=fs`; archives are always read-only | `.` |
 | `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
 | `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
 | `wikiurl` | S3 endpoint URL, or Elasticsearch/OpenSearch base URL when `wikibackend=es` (internal `esurl`) | - |
@@ -521,6 +521,8 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
+| `wikis3artifactprefix` | Optional S3 prefix containing a published `.mini-a-wiki-lucene/` cache and, for `mcp-wiki`, `.mini-a-wiki-graph/graph.json`; downloaded into `wikiindexdir` on startup | - |
+| `wikirestrictprofile` | `mcp-wiki-safe` restricted retrieval defaults profile (`tight`, `moderate`, or `relaxed`); `tight` preserves legacy defaults and individual `wikirestrict*` settings override profile values | `tight` |
 | `wikimetacache` | Enable sharded wiki page metadata cache | `true` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |
 | `wikilintstreamthreshold` | Page-count threshold that switches lint into streaming mode | `2000` |

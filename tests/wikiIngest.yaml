@@ -1,0 +1,86 @@
+include:
+- oJobTest.yaml
+
+jobs:
+
+- name: MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestDiscoversMarkdownAndSkipsVendorDirs
+
+- name: MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestDryRunWritesNoPages
+
+- name: MiniA Wiki Ingest Tests::IngestRespectsIncludeAndExclude
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestRespectsIncludeAndExclude
+
+- name: MiniA Wiki Ingest Tests::IngestSkipsOversizedSources
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestSkipsOversizedSources
+
+- name: MiniA Wiki Ingest Tests::IngestWritesOnePagePerSourceWithProvenance
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestWritesOnePagePerSourceWithProvenance
+
+- name: MiniA Wiki Ingest Tests::IngestFinalizesIndexesAndSearchIndex
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestFinalizesIndexesAndSearchIndex
+
+- name: MiniA Wiki Ingest Tests::IngestSecondRunIsANoOp
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestSecondRunIsANoOp
+
+- name: MiniA Wiki Ingest Tests::IngestForceReIngestsEverything
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestForceReIngestsEverything
+
+- name: MiniA Wiki Ingest Tests::IngestReIngestsOnlyChangedSources
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestReIngestsOnlyChangedSources
+
+- name: MiniA Wiki Ingest Tests::ChunkerKeepsSmallSourcesWhole
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testChunkerKeepsSmallSourcesWhole
+
+- name: MiniA Wiki Ingest Tests::IngestReportsDistillationFailuresAsBatchesComplete
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestReportsDistillationFailuresAsBatchesComplete
+
+- name: MiniA Wiki Ingest Tests::ChunkerSplitsOnHeadingsWithinLimit
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testChunkerSplitsOnHeadingsWithinLimit
+
+- name: MiniA Wiki Ingest Tests::ChunkerHandlesHeadinglessProse
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testChunkerHandlesHeadinglessProse
+
+- name: MiniA Wiki Ingest Tests::SourceTypeDetection
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testSourceTypeDetection
+
+- name: MiniA Wiki Ingest Tests::IngestRefusesReadOnlyWiki
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestRefusesReadOnlyWiki
+
+- name: MiniA Wiki Ingest Tests::IngestRequiresASource
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestRequiresASource
+
+todo:
+- MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
+- MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages
+- MiniA Wiki Ingest Tests::IngestRespectsIncludeAndExclude
+- MiniA Wiki Ingest Tests::IngestSkipsOversizedSources
+- MiniA Wiki Ingest Tests::IngestWritesOnePagePerSourceWithProvenance
+- MiniA Wiki Ingest Tests::IngestFinalizesIndexesAndSearchIndex
+- MiniA Wiki Ingest Tests::IngestSecondRunIsANoOp
+- MiniA Wiki Ingest Tests::IngestForceReIngestsEverything
+- MiniA Wiki Ingest Tests::IngestReIngestsOnlyChangedSources
+- MiniA Wiki Ingest Tests::ChunkerKeepsSmallSourcesWhole
+- MiniA Wiki Ingest Tests::IngestReportsDistillationFailuresAsBatchesComplete
+- MiniA Wiki Ingest Tests::ChunkerSplitsOnHeadingsWithinLimit
+- MiniA Wiki Ingest Tests::ChunkerHandlesHeadinglessProse
+- MiniA Wiki Ingest Tests::SourceTypeDetection
+- MiniA Wiki Ingest Tests::IngestRefusesReadOnlyWiki
+- MiniA Wiki Ingest Tests::IngestRequiresASource

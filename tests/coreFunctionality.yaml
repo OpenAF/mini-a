@@ -157,6 +157,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testConfigureDebugChannelCreatesOrReconfiguresChannel
 
+- name: MiniA Core Tests::NormalizeChannelDef
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testNormalizeChannelDefAcceptsNativeFilePaths
+
 - name: MiniA Core Tests::RebuildLlmPair
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -766,6 +771,7 @@ todo:
 - MiniA Core Tests::ExtractThinkingBlocksReadsProviderThinkingFields
 - MiniA Core Tests::TaskLanePolicyProbeDetection
 - MiniA Core Tests::ConfigureDebugChannel
+- MiniA Core Tests::NormalizeChannelDef
 - MiniA Core Tests::RebuildLlmPair
 - MiniA Core Tests::ToolCacheKeys
 - MiniA Core Tests::CategorizeError

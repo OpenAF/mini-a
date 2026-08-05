@@ -732,6 +732,27 @@ function __miniAParseListOption(value) {
   return value.split(",").map(function(v) { return v.trim().toLowerCase() }).filter(function(v) { return v.length > 0 })
 }
 
+// Accept a channel definition or a native filesystem path. A path is converted
+// to the file-channel shape expected by OpenAF while structured SLON/JSON is
+// left untouched.
+function __miniANormalizeChannelDef(value) {
+  if (!isString(value)) return value
+  var text = value.trim()
+  if (text.length === 0) return value
+
+  var parsed = __
+  try { parsed = af.fromJSSLON(text) } catch(ignoreChannelDefParse) {}
+  if (isMap(parsed) || isArray(parsed)) return value
+
+  try {
+    java.nio.file.Paths.get(text)
+    if (io.fileExists(text) && io.fileInfo(text).isDirectory) return value
+    return stringify({ type: "file", options: { file: text } }, __, "")
+  } catch(ignoreInvalidChannelPath) {
+    return value
+  }
+}
+
 function __miniANormalizePromptProfile(profile, fallbackProfile) {
   var normalized = isString(profile) ? profile.trim().toLowerCase() : ""
   if (normalized === "minimal" || normalized === "balanced" || normalized === "verbose") return normalized
