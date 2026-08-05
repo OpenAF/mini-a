@@ -23,6 +23,36 @@ function __miniAMcpWikiSafeChars(value, max) {
 
 function __miniAMcpWikiRestrictedError(code) { return { ok: false, error: code } }
 
+function __miniAMcpWikiRestrictedBudgetError(state, operation, chars) {
+  state._purge()
+  var now = Date.now()
+  var resetAt = Number(state.usage.started || now) + state.policy.window * 1000
+  var budget = operation === "search" ? "searches" : (operation === "read" ? "reads" : "characters")
+  var used = operation === "search" ? state.usage.searches : (operation === "read" ? state.usage.reads : state.usage.chars)
+  var limit = operation === "search" ? state.policy.maxSearches : (operation === "read" ? state.policy.maxReads : state.policy.maxChars)
+  if (operation !== "search" && operation !== "read") {
+    budget = "characters"
+    used = state.usage.chars
+    limit = state.policy.maxChars
+  } else if (state.usage.chars + Math.max(0, Number(chars || 0)) > state.policy.maxChars) {
+    budget = "characters"
+    used = state.usage.chars
+    limit = state.policy.maxChars
+  }
+  var retryAfterSeconds = Math.max(0, Math.ceil((resetAt - now) / 1000))
+  return {
+    ok: false,
+    error: "restricted-budget-exhausted",
+    operation: operation,
+    budget: budget,
+    used: used,
+    limit: limit,
+    windowSeconds: state.policy.window,
+    retryAfterSeconds: retryAfterSeconds,
+    message: "Restricted " + budget + " budget exhausted for " + operation + " (" + used + "/" + limit + " per " + state.policy.window + " seconds). Wait " + retryAfterSeconds + " seconds before retrying; avoid parallel fallback requests."
+  }
+}
+
 function __miniAMcpWikiPositiveOption(args, name, fallback, ceiling) {
   var value = isDef(args[name]) ? Number(args[name]) : fallback
   if (!isFinite(value) || value <= 0 || Math.floor(value) !== value || value > ceiling) {
@@ -233,7 +263,7 @@ function __miniAMcpWikiRestrictedSearch(args) {
   if (!state || !state.enabled) return global.__wikiTool.wiki({ operation: "search", query: args.query, limit: args.limit, caseSensitive: args.caseSensitive, regex: args.regex, contextLines: args.contextLines, path: args.path, compact: args.contextLines === 0 })
   var q = isString(args.query) ? args.query.trim() : ""
   if (q.length < state.policy.minQueryChars || !/[A-Za-z0-9\u00c0-\uffff]/.test(q) || /[*?]{2,}|^\*|^\.$/.test(q)) return __miniAMcpWikiRestrictedError("restricted-query-rejected")
-  if (!state._can("search", 0)) return __miniAMcpWikiRestrictedError("restricted-budget-exhausted")
+  if (!state._can("search", 0)) return __miniAMcpWikiRestrictedBudgetError(state, "search", 0)
   state._event("search", q)
   var hits
   try { hits = global.__wikiManager.search(q, { limit: state.policy.searchLimit, regex: false, caseSensitive: false, contextLines: 0, compact: true, path: "" }) } catch(e) { return __miniAMcpWikiRestrictedError("restricted-unavailable") }
@@ -251,7 +281,7 @@ function __miniAMcpWikiRestrictedSearch(args) {
     chars += title.length + description.length + ref.length
     results.push({ title: title, description: description, reference: ref })
   })
-  if (!state.charge("search", chars)) return __miniAMcpWikiRestrictedError("restricted-budget-exhausted")
+  if (!state.charge("search", chars)) return __miniAMcpWikiRestrictedBudgetError(state, "search", chars)
   return { results: results }
 }
 
@@ -261,7 +291,7 @@ function __miniAMcpWikiRestrictedRead(args) {
   if (args.countLines === true) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
   var grant = state.consume(args.path)
   if (!grant) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
-  if (!state._can("read", 0)) return __miniAMcpWikiRestrictedError("restricted-budget-exhausted")
+  if (!state._can("read", 0)) return __miniAMcpWikiRestrictedBudgetError(state, "read", 0)
   state._event("read", grant.path)
   var page
   try { page = global.__wikiManager.read(grant.path) } catch(e) { page = __ }
@@ -279,7 +309,7 @@ function __miniAMcpWikiRestrictedRead(args) {
     if (end - start > state.policy.readLines || start >= lines.length || end <= start) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")
   }
   var content = __miniAMcpWikiSafeChars(lines.slice(start, end).join("\n"), state.policy.readChars)
-  if (!state.charge("read", content.length)) return __miniAMcpWikiRestrictedError("restricted-budget-exhausted")
+  if (!state.charge("read", content.length)) return __miniAMcpWikiRestrictedBudgetError(state, "read", content.length)
   return { content: content }
 }
 
