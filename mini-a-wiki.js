@@ -5,6 +5,55 @@
 // ── Template version & helpers ────────────────────────────────────────────────
 
 var __MINI_A_WIKI_AGENTS_VERSION = 4
+var __MINI_A_WIKI_LEXICAL_SCHEMA_VERSION = 1
+var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
+  "arabic", "armenian", "basque", "bengali", "brazilian", "bulgarian", "catalan", "chinese", "cjk", "czech", "danish", "dutch", "english", "estonian", "finnish", "french", "galician", "german", "greek", "hindi", "hungarian", "indonesian", "irish", "italian", "latvian", "lithuanian", "norwegian", "persian", "polish", "portuguese", "romanian", "russian", "sorani", "spanish", "swedish", "tamil", "telugu", "thai", "turkish"
+]
+
+// Keep the on-disk index contract deliberately small and model-free. More
+// expensive lexical features remain explicit opt-ins in wikilexical.
+var __miniAWikiLexicalConfig = function(raw) {
+  var value = raw
+  if (isUnDef(value) || value === null || (isString(value) && value.trim().length === 0)) value = { language: "english" }
+  if (isString(value)) {
+    try { value = af.fromJSSLON(value) } catch(e) { throw new Error("Invalid wikilexical configuration: expected SLON/JSON object: " + __miniAErrMsg(e)) }
+  }
+  if (!isMap(value)) throw new Error("Invalid wikilexical configuration: expected a SLON/JSON object")
+  var allowed = { language: true, synonyms: true, shingles: true, ngrams: true, queryexpansion: true, pseudorelevancefeedback: true }
+  Object.keys(value).forEach(function(key) {
+    if (allowed[String(key).toLowerCase()] !== true) throw new Error("Invalid wikilexical configuration: unsupported option '" + key + "'")
+  })
+  var language = isString(value.language) ? value.language.toLowerCase().trim() : "english"
+  if (__MINI_A_WIKI_LEXICAL_LANGUAGES.indexOf(language) < 0) throw new Error("Invalid wikilexical language '" + String(value.language) + "'. Supported Lucene languages include english, french, german, portuguese and spanish.")
+  var cfg = { language: language, synonyms: [], shingles: true, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false }
+  if (isDef(value.synonyms)) {
+    if (!isArray(value.synonyms)) throw new Error("Invalid wikilexical synonyms: expected an array of synonym rules")
+    cfg.synonyms = value.synonyms.map(function(rule, i) {
+      var terms = isString(rule) ? rule.split(",") : rule
+      if (!isArray(terms) || terms.length < 2 || !terms.every(function(t) { return isString(t) && t.trim().length > 0 })) throw new Error("Invalid wikilexical synonym rule at index " + i + ": use a comma-separated string or an array with at least two terms")
+      return terms.map(function(t) { return t.trim().toLowerCase() })
+    })
+  }
+  ;["shingles", "ngrams", "queryExpansion", "pseudoRelevanceFeedback"].forEach(function(key) {
+    var sourceKey = key.toLowerCase()
+    var provided = isDef(value[key]) ? value[key] : value[sourceKey]
+    if (isDef(provided) && typeof provided !== "boolean") throw new Error("Invalid wikilexical " + key + ": expected boolean")
+    if (isDef(provided)) cfg[key] = provided
+  })
+  return cfg
+}
+
+var __miniAWikiLexicalFingerprint = function(cfg) {
+  var normalized = {
+    language: cfg.language,
+    synonyms: cfg.synonyms,
+    shingles: cfg.shingles === true,
+    ngrams: cfg.ngrams === true,
+    queryExpansion: cfg.queryExpansion === true,
+    pseudoRelevanceFeedback: cfg.pseudoRelevanceFeedback === true
+  }
+  return sha1(stringify(normalized, __, ""))
+}
 
 // v1 stock fingerprint phrase — if AGENTS.md contains this verbatim it was never user-edited
 var __MINI_A_WIKI_V1_STOCK_PHRASE = "This file defines how agents should read, distil, and contribute knowledge to this wiki."
@@ -280,6 +329,7 @@ MiniAWikiManager.prototype._ensureIndexRuntime = function() {
   this._luceneChannel = isString(this._luceneChannel) ? this._luceneChannel : ""
   this._luceneFallbackWarned = this._luceneFallbackWarned === true
   this._luceneNeedsRebuild = this._luceneNeedsRebuild === true
+  this._lexicalReadOnlyWarned = this._lexicalReadOnlyWarned === true
   this._stats = isMap(this._stats) ? this._stats : { luceneFullRebuilds: 0, luceneSets: 0, luceneUnsets: 0, metaHits: 0, metaMisses: 0 }
 }
 
@@ -538,7 +588,7 @@ MiniAWikiManager.prototype._openLucene = function(forceEphemeral) {
   var chName = this._luceneChName()
   if (forceEphemeral !== true && this._luceneChannel === chName) return chName
   try {
-    $ch(chName).create("searchdb", { path: this._getLuceneIndexPath(), idField: "id", contentField: "content" })
+    $ch(chName).create("searchdb", this._luceneOptions())
     if (forceEphemeral !== true) this._luceneChannel = chName
     return chName
   } catch(e) {
@@ -652,7 +702,7 @@ MiniAWikiManager.prototype._mountGraph = function(mount) {
 }
 
 MiniAWikiManager.prototype._rebuildSearchIndex = function(options) {
-  if (this._access !== 'rw') return
+  if (this._access !== 'rw') return { ok: false, error: "wiki is read-only" }
   try {
     var opts = isObject(options) ? options : {}
     var self = this
@@ -665,8 +715,11 @@ MiniAWikiManager.prototype._rebuildSearchIndex = function(options) {
       docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
       this._metaUpdate(pages[i], raw, parsed)
     }
-    this._ensureSearchIndex().rebuild(docs, opts)
-  } catch(e) { this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e)) }
+    return this._ensureSearchIndex().rebuild(docs, opts)
+  } catch(e) {
+    this._logFn('warn', 'Failed to rebuild wiki index: ' + __miniAErrMsg(e))
+    return { ok: false, error: __miniAErrMsg(e) }
+  }
 }
 
 MiniAWikiManager.prototype._getGraphPath = function() {
@@ -745,6 +798,73 @@ MiniAWikiManager.prototype._getLuceneIndexPath = function() {
   return this._ensureIndexRoot() + "/.mini-a-wiki-lucene"
 }
 
+MiniAWikiManager.prototype._getLexicalManifestPath = function() {
+  return this._getLuceneIndexPath() + "/mini-a-lexical.json"
+}
+
+MiniAWikiManager.prototype._lexicalManifest = function() {
+  try {
+    var path = this._getLexicalManifestPath()
+    if (!io.fileExists(path)) return __
+    var manifest = af.fromJson(io.readFileString(path))
+    return isMap(manifest) ? manifest : __
+  } catch(e) { return __ }
+}
+
+MiniAWikiManager.prototype._lexicalManifestStatus = function() {
+  var manifest = this._lexicalManifest()
+  if (!isMap(manifest)) return { compatible: false, reason: "missing" }
+  if (manifest.schemaVersion !== __MINI_A_WIKI_LEXICAL_SCHEMA_VERSION) return { compatible: false, reason: "schema" }
+  if (manifest.fingerprint !== this._lexicalFingerprint) return { compatible: false, reason: "configuration" }
+  return { compatible: true, manifest: manifest }
+}
+
+MiniAWikiManager.prototype._writeLexicalManifest = function() {
+  if (this._access !== "rw") return false
+  var indexPath = this._getLuceneIndexPath()
+  if (!io.fileExists(indexPath)) io.mkdir(indexPath)
+  var manifest = {
+    schemaVersion: __MINI_A_WIKI_LEXICAL_SCHEMA_VERSION,
+    lexical: this._lexicalConfig,
+    fingerprint: this._lexicalFingerprint
+  }
+  io.writeFileString(this._getLexicalManifestPath(), stringify(manifest, __, ""))
+  return true
+}
+
+MiniAWikiManager.prototype._hasEnhancedLexicalSupport = function() {
+  try {
+    if (isUnDef(ow.ch.__types.searchdb) || !isFunction(ow.ch.__types.searchdb.search)) return false
+    // searchdb.search existed before enhanced lexical retrieval. Check the
+    // adapter implementation rather than mistaking that plain API for support.
+    return String(ow.ch.__types.searchdb.search).toLowerCase().indexOf("lexicalenhanced") >= 0
+  } catch(e) { return false }
+}
+
+MiniAWikiManager.prototype._luceneOptions = function() {
+  return {
+    path: this._getLuceneIndexPath(),
+    idField: "id",
+    contentField: "content",
+    analyzer: this._lexicalConfig.language,
+    lexical: this._luceneLexicalOptions()
+  }
+}
+
+MiniAWikiManager.prototype._luceneLexicalOptions = function() {
+  return {
+    language: this._lexicalConfig.language,
+    synonyms: {
+      enabled: this._lexicalConfig.synonyms.length > 0,
+      rules: this._lexicalConfig.synonyms.map(function(rule) { return rule.join(",") })
+    },
+    shingles: { enabled: this._lexicalConfig.shingles === true },
+    characterNGrams: { enabled: this._lexicalConfig.ngrams === true },
+    queryExpansion: { enabled: this._lexicalConfig.queryExpansion === true },
+    pseudoRelevanceFeedback: { enabled: this._lexicalConfig.pseudoRelevanceFeedback === true }
+  }
+}
+
 MiniAWikiManager.prototype._ensureLucene = function() {
   if (this._luceneReady === true) return true
   try {
@@ -760,8 +880,8 @@ MiniAWikiManager.prototype._ensureLucene = function() {
 }
 
 MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
-  if (this._access !== "rw") return
-  if (!this._ensureLucene()) return
+  if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
+  if (!this._ensureLucene()) return { ok: false, error: "Lucene oPack is not available" }
   try {
     var opts = isObject(options) ? options : {}
     this._ensureIndexRuntime()
@@ -772,7 +892,7 @@ MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
       try { if (io.fileExists(idxPath)) io.rm(idxPath) } catch(ignoreRm) {}
     }
     try {
-      $ch(chName).create("searchdb", { path: idxPath, idField: "id", contentField: "content" })
+      $ch(chName).create("searchdb", this._luceneOptions())
       ;(isArray(docs) ? docs : []).forEach(function(d) {
         $ch(chName).set({ id: d.path }, { content: d.raw, payload: { path: d.path, title: d.title } })
       })
@@ -792,8 +912,10 @@ MiniAWikiManager.prototype._rebuildLuceneIndex = function(docs, options) {
     }
     this._stats.luceneFullRebuilds++
     this._luceneNeedsRebuild = false
+    return { ok: true }
   } catch(e) {
     this._logFn("warn", "Failed to rebuild Lucene index: " + __miniAErrMsg(e))
+    return { ok: false, error: __miniAErrMsg(e) }
   }
 }
 
@@ -813,17 +935,31 @@ MiniAWikiManager.prototype._makeLuceneSearchIndex = function() {
     available: function() { return self._ensureLucene() },
     exists   : function() { return self._luceneIndexExists() },
     query    : function(q, limit) {
-      if (self._access !== "rw") return self._luceneQueryReadOnly(q, limit)
+      var manifestStatus = self._lexicalManifestStatus()
+      if (self._access !== "rw") {
+        if (!manifestStatus.compatible) {
+          if (self._luceneIndexExists() && self._lexicalReadOnlyWarned !== true) {
+            self._logFn("warn", "Wiki Lucene index uses a legacy or mismatched lexical schema; using ordinary Lucene search. The publisher must run writable reindex and republish the artifacts.")
+            self._lexicalReadOnlyWarned = true
+          }
+          return self._luceneQueryReadOnly(q, limit)
+        }
+        // The enhanced searchdb API is channel-backed and opening it takes an
+        // IndexWriter lock. Keep read-only/hydrated managers mutation-free.
+        return self._luceneQueryReadOnly(q, limit)
+      }
       var chName = self._openLucene(false)
       if (chName === "__ephemeral__") chName = self._openLucene(true)
       if (!isString(chName) || chName.length === 0) return []
-      var hits = $ch(chName).getAll({ query: q, limit: limit })
+      var hits = manifestStatus.compatible && self._hasEnhancedLexicalSupport()
+        ? ow.ch.__types.searchdb.search(chName, { mode: "lexicalEnhanced", query: q, lexical: self._luceneLexicalOptions(), limit: limit })
+        : $ch(chName).getAll({ query: q, limit: limit })
       if (chName !== self._luceneChannel) self._closeLucene(chName)
       return isArray(hits) ? hits : []
     },
     set      : function(path, raw, title) { self._luceneSet(path, raw, title) },
     unset    : function(path) { self._luceneUnset(path) },
-    rebuild  : function(docs, opts) { self._rebuildLuceneIndex(docs, opts) },
+    rebuild  : function(docs, opts) { return self._rebuildLuceneIndex(docs, opts) },
     close    : function() { self._closeLucene() }
   }
 }
@@ -900,7 +1036,11 @@ MiniAWikiManager.prototype._removePageIndexes = function(path) {
 MiniAWikiManager.prototype.reindex = function() {
   if (this._access !== "rw") return { ok: false, error: "wiki is read-only" }
   try {
-    this._rebuildSearchIndex()
+    if (!this._ensureLucene() || !this._hasEnhancedLexicalSupport()) return { ok: false, error: "Lucene oPack does not support lexicalEnhanced search; upgrade the lucene oPack before publishing an enhanced wiki index." }
+    var manifestStatus = this._lexicalManifestStatus()
+    var rebuilt = this._rebuildSearchIndex({ resetLucene: !manifestStatus.compatible })
+    if (!isMap(rebuilt) || rebuilt.ok !== true) return isMap(rebuilt) ? rebuilt : { ok: false, error: "failed to rebuild lexical index" }
+    this._writeLexicalManifest()
     this._rebuildGraphIndex()
     return { ok: true }
   } catch(e) {
@@ -1055,6 +1195,12 @@ MiniAWikiManager.prototype._resolveMountPath = function(path) {
 
 MiniAWikiManager.prototype.configure = function(config) {
   var cfg = isMap(config) ? config : {}
+  // The explicit runtime value wins. The environment form is intentionally
+  // read here too so direct manager/MCP construction has the same behaviour as
+  // the Mini-A launcher.
+  if (isUnDef(cfg.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) cfg.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
+  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical)
+  this._lexicalFingerprint = __miniAWikiLexicalFingerprint(this._lexicalConfig)
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
@@ -2991,6 +3137,10 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   this._mounts = this._mounts.filter(function(m) { return m.name !== name })
   var cfg = isMap(config) ? config : {}
   cfg.access = "ro"
+  // Mounts inherit the caller's lexical contract unless they explicitly select
+  // another language/rule set. This makes a single wikilexical setting apply
+  // consistently to federated retrieval.
+  if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._lexicalConfig
   try {
     var manager = new MiniAWikiManager(cfg, this._logFn)
     var count   = manager._safeListPages("").length

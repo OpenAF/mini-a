@@ -7405,6 +7405,7 @@ MiniA.prototype._initWiki = function(args) {
       backend: args.wikibackend,
       usegraph: wikiGraphEnabled,
       indexdir: args.wikiindexdir,
+      wikilexical: args.wikilexical,
       wikimetacache: args.wikimetacache,
       wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
       wikigraphcommunity: args.wikigraphcommunity,
@@ -13589,7 +13590,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamreport"
   ].forEach(function(name) {
@@ -15567,6 +15568,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
     args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
     args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
+    if (isUnDef(args.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) args.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
+    if (isDef(args.wikilexical) && !isString(args.wikilexical) && !isMap(args.wikilexical)) throw new Error("args.wikilexical must be a SLON/JSON string or object")
     args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)
     var _wikiLintStaleDays = isNumber(args.wikilintstaleddays) ? args.wikilintstaleddays : Number(args.wikilintstaleddays)
     if (isNaN(_wikiLintStaleDays)) _wikiLintStaleDays = __

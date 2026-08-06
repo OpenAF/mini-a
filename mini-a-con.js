@@ -637,6 +637,7 @@ try {
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
+    wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'}." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
@@ -1417,6 +1418,8 @@ try {
       var wikiCfg = {
         access : sessionOptions.wikiaccess,
         backend: sessionOptions.wikibackend,
+        indexdir: sessionOptions.wikiindexdir,
+        wikilexical: sessionOptions.wikilexical,
         usegraph: toBoolean(sessionOptions.usewikigraph) === true,
         wikigraphsemantic: toBoolean(sessionOptions.wikigraphsemantic) === true,
         wikigraphcommunity: sessionOptions.wikigraphcommunity,

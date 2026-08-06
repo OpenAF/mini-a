@@ -775,7 +775,7 @@
       ow.test.assert(isString(page.meta.updated), true, "updated timestamp set")
       ow.test.assert(page.body.trim().indexOf("# Round Trip") === 0, true, "body preserved")
       var reindexResult = wm.reindex()
-      ow.test.assert(isObject(reindexResult) && reindexResult.ok === true, true, "reindex should succeed in rw mode")
+      ow.test.assert(isObject(reindexResult) && reindexResult.ok === wm._hasEnhancedLexicalSupport(), true, "reindex should require lexicalEnhanced Lucene support")
     } finally {
       cleanupTestDir(dir)
     }
@@ -1076,9 +1076,10 @@
     ow.test.assert(denied.windowSeconds, 3600, "restricted budget errors should report the budget window")
     ow.test.assert(denied.retryAfterSeconds > 0, true, "restricted budget errors should give retry guidance")
     ow.test.assert(denied.message.indexOf("avoid parallel fallback requests") >= 0, true, "restricted budget errors should discourage repeated fallback requests")
-    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/" }, { access: "ro" })
+    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/", wikilexical: "{ language: 'french', synonyms: [['velo', 'bicyclette']] }" }, { access: "ro" })
     ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
     ow.test.assert(cfg.s3artifactprefix, "published-cache/", "MCP configuration should pass the S3 artifact prefix to the wiki manager")
+    ow.test.assert(cfg.wikilexical.indexOf("french") >= 0, true, "MCP configuration should pass lexical configuration to the wiki manager")
   }
 
   exports.testMcpWikiRestrictedGraphHintsAreOptInOpaqueReferences = function() {
@@ -1896,13 +1897,50 @@
     return after.filter(function(p) { return before.indexOf(p) < 0 })
   }
 
+  exports.testLexicalConfigDefaultsAndValidation = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    ow.test.assert(wm._lexicalConfig.language, "english", "lexical search should default to English")
+    ow.test.assert(wm._lexicalConfig.synonyms.length, 0, "default lexical search should not add synonyms")
+    var portuguese = new MiniAWikiManager({ backend: "fs", root: ".", wikilexical: "{ language: 'portuguese', synonyms: [['carro', 'automovel']] }" })
+    ow.test.assert(portuguese._lexicalConfig.language, "portuguese", "configured Lucene language should be preserved")
+    ow.test.assert(portuguese._lexicalConfig.synonyms[0][1], "automovel", "configured synonym rules should be normalized")
+    var invalid = false
+    try { new MiniAWikiManager({ backend: "fs", root: ".", wikilexical: { language: "klingon" } }) } catch(e) { invalid = String(e).indexOf("Invalid wikilexical language") >= 0 }
+    ow.test.assert(invalid, true, "invalid lexical languages should fail initialization clearly")
+  }
+
+  exports.testLexicalManifestUpgradeContract = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var resetSeen = __
+      wm._hasEnhancedLexicalSupport = function() { return true }
+      wm._rebuildSearchIndex = function(opts) { resetSeen = opts.resetLucene; return { ok: true } }
+      wm._rebuildGraphIndex = function() {}
+      var first = wm.reindex()
+      ow.test.assert(first.ok, true, "a supported lexical reindex should succeed")
+      ow.test.assert(resetSeen, true, "a legacy index without manifest should be reset")
+      var manifest = af.fromJson(io.readFileString(wm._getLexicalManifestPath()))
+      ow.test.assert(manifest.fingerprint, wm._lexicalFingerprint, "successful reindex should write the lexical manifest")
+      resetSeen = __
+      wm.reindex()
+      ow.test.assert(resetSeen, false, "matching manifests should retain the normal rebuild path")
+      var changed = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikilexical: { language: "french" } })
+      changed._hasEnhancedLexicalSupport = function() { return true }
+      changed._rebuildSearchIndex = function(opts) { resetSeen = opts.resetLucene; return { ok: true } }
+      changed._rebuildGraphIndex = function() {}
+      ow.test.assert(changed.reindex().ok, true, "changed lexical configuration should reindex")
+      ow.test.assert(resetSeen, true, "a changed lexical fingerprint should reset the legacy fields")
+    } finally { cleanupTestDir(dir) }
+  }
+
   exports.testReadOnlyConsumesExistingLuceneIndex = function() {
     var dir = createTestDir()
     try {
       var rw = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
       rw.write("notes/alpha.md", { title: "Alpha", description: "About alpha" }, "# Alpha\n\nThe quick brown zebrafish jumps.")
       rw.write("notes/beta.md", { title: "Beta", description: "About beta" }, "# Beta\n\nA different marmoset topic.")
-      ow.test.assert(rw.reindex().ok, true, "rw reindex should succeed")
+      ow.test.assert(rw.reindex().ok, rw._hasEnhancedLexicalSupport(), "rw reindex should require lexicalEnhanced support")
       rw.close()
 
       var ro = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
