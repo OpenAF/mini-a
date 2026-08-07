@@ -914,6 +914,10 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : wikilexical
+    desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
+    example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
+    mandatory: false
   - name     : wikilintstaleddays
     desc     : Default stale-days threshold for wiki lint
     example  : "90"
@@ -1249,6 +1253,7 @@ jobs:
         wikiregion     : wikiregion
         wikiuseversion1: wikiuseversion1
         wikiignorecertcheck: wikiignorecertcheck
+        wikilexical    : wikilexical
         wikilintstaleddays: wikilintstaleddays
         wikimounts     : wikimounts
         mode           : mode
@@ -1482,6 +1487,7 @@ jobs:
       wikiregion     : isString.default(__)
       wikiuseversion1: toBoolean.isBoolean.default(false)
       wikiignorecertcheck: toBoolean.isBoolean.default(false)
+      wikilexical    : isString.default(__)
       wikilintstaleddays: toNumber.isNumber.default(__)
       wikimounts     : isString.default(__)
       mode           : isString.default(__)
