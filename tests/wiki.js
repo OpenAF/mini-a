@@ -931,6 +931,19 @@
     ow.test.assert(raw.indexOf("Wiki move page") >= 0, true, "MCP jobs should wire move")
   }
 
+  exports.testMcpWikiSearchSchemasDescribeLexicalRetrieval = function() {
+    var wiki = io.readFileString("mcps/mcp-wiki.yaml")
+    var safe = io.readFileString("mcps/mcp-wiki-safe.yaml")
+    var schemas = [wiki, safe]
+    schemas.forEach(function(raw) {
+      ow.test.assert(raw.indexOf("lexical keyword retrieval") >= 0, true, "search metadata should identify lexical retrieval")
+      ow.test.assert(raw.indexOf("not semantic question answering") >= 0, true, "query metadata should reject semantic-QA expectations")
+      ow.test.assert(raw.indexOf("Prefer exact terms, names, aliases, and short phrases") >= 0, true, "query metadata should guide keyword construction")
+    })
+    ow.test.assert(wiki.indexOf("graph-related pages may be appended as supplemental hints") >= 0, true, "normal wiki metadata should describe optional graph hints")
+    ow.test.assert(safe.indexOf("graph-related pages may be returned only as opaque supplemental references") >= 0, true, "safe wiki metadata should describe opaque optional graph hints")
+  }
+
   exports.testMcpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape = function() {
     var mcpWiki = io.readFileString("mcps/mcp-wiki.yaml")
     ow.test.assert(mcpWiki.indexOf("wikirestrict") < 0, true, "mcp-wiki.yaml should no longer reference wikirestrict (moved to mcp-wiki-safe.yaml)")
@@ -941,6 +954,9 @@
     ow.test.assert(/wikirestrict\s*:/.test(safe), false, "mcp-wiki-safe.yaml must not declare wikirestrict as a check.in arg (only wikirestrictprofile=off can disable it)")
     ow.test.assert(safe.indexOf("usewikigraph") >= 0, true, "mcp-wiki-safe.yaml should document the explicit graph-hint opt-in")
     ow.test.assert(safe.indexOf("allowRestrictedGraphHints") >= 0, true, "mcp-wiki-safe.yaml should pass graph hints through only as an explicit restricted opt-in")
+    ow.test.assert(safe.indexOf("Maximum results requested; safe-mode policy applies its lower configured cap.") >= 0, true, "mcp-wiki-safe.yaml should document the normal search arguments without weakening its result cap")
+    ow.test.assert(safe.indexOf("Opaque reference returned by search, not a wiki page path.") >= 0, true, "mcp-wiki-safe.yaml should document read like mcp-wiki while retaining opaque references")
+    ow.test.assert(safe.indexOf("countLines:") >= 0, true, "mcp-wiki-safe.yaml should advertise the compatible read arguments")
     ow.test.assert(safe.indexOf("context:") < 0, true, "mcp-wiki-safe.yaml should not expose context")
     ow.test.assert(safe.indexOf("browse:") < 0, true, "mcp-wiki-safe.yaml should not expose browse")
     ow.test.assert(safe.indexOf("tree:") < 0, true, "mcp-wiki-safe.yaml should not expose tree")

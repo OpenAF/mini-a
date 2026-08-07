@@ -219,6 +219,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiMetadataIncludesHierarchyTools
 
+- name: MiniA Wiki Tests::McpWikiSearchSchemasDescribeLexicalRetrieval
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiSearchSchemasDescribeLexicalRetrieval
+
 - name: MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
@@ -540,6 +544,7 @@ todo:
 - MiniA Wiki Tests::MoveRedirectStub
 - MiniA Wiki Tests::InitCreatesSectionIndex
 - MiniA Wiki Tests::McpWikiMetadataIncludesHierarchyTools
+- MiniA Wiki Tests::McpWikiSearchSchemasDescribeLexicalRetrieval
 - MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
 - MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
 - MiniA Wiki Tests::McpWikiRestrictedRetrieval
