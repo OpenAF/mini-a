@@ -221,9 +221,9 @@ filesHash:
   mcps/mcp-time.yaml: 8df5af4746cfa16a7b4c6020d232adbc6d2f76c3
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: 9edd0937bf0b9d57e0ba92b6e73c67685370de12
-  mcps/mcp-wiki-ops.yaml: ef601a0041d63439921a70c5e87f0124a5850f6b
-  mcps/mcp-wiki-safe.yaml: 9e25a3b535d2a52e91d752ac0adea48b8f16db36
-  mcps/mcp-wiki.yaml: ca3892e61ed4ae73e8a10f1383a29d6854a70e40
+  mcps/mcp-wiki-ops.yaml: 6d8cd2f6b9459baa86bf0777922a328935e84ec1
+  mcps/mcp-wiki-safe.yaml: c87a5bda7aa189e92c5aabfaac3022269f4714af
+  mcps/mcp-wiki.yaml: 38368487c536e839488d2d5529470e470b8872f5
   mini-a-common.js: ec309a9abd82a1b6a3473db950cf06e38b34ceae
   mini-a-con.js: 9c6ca0f929939ab3ac4a1e50f6d3c6a1d6da02a4
   mini-a-dreams.js: 9ed02d385ec7389d078d49188552f3f1c03ca8b7
