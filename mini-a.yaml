@@ -915,7 +915,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : wikilexical
-    desc     : SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback
+    desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
     mandatory: false
   - name     : wikilintstaleddays
