@@ -3,6 +3,10 @@ include:
 
 jobs:
 
+- name: MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyFrontmatterHeadingsLinksAndFixpoint
+
 - name: MiniA Dreams Tests::DreamMemoryMergesDuplicates
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamMemoryMergesDuplicates

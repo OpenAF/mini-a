@@ -2022,6 +2022,30 @@ MiniAWikiManager.prototype._serializeFrontmatter = function(meta, body) {
   return "---\n" + yaml + "---\n" + (isString(body) ? body : "")
 }
 
+// Markdown headings outside fenced code blocks.  Keeping this parser here makes
+// lint, anchor validation and deterministic dream repairs agree exactly.
+MiniAWikiManager.prototype._markdownHeadings = function(body) {
+  var out = [], fenced = false, fenceChar = ""
+  String(body || "").split(/\r?\n/).forEach(function(line, lineNo) {
+    var fence = String(line).match(/^\s*(```+|~~~+)/)
+    if (fence) {
+      var ch = fence[1].substring(0, 1)
+      if (!fenced) { fenced = true; fenceChar = ch }
+      else if (ch === fenceChar) { fenced = false; fenceChar = "" }
+      return
+    }
+    if (fenced) return
+    var m = String(line).match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
+    if (m) out.push({ line: lineNo, level: m[1].length, text: String(m[2]).trim() })
+  })
+  return out
+}
+
+MiniAWikiManager.prototype._headingAnchor = function(text) {
+  return String(text || "").toLowerCase().trim().replace(/<[^>]+>/g, "")
+    .replace(/[^a-z0-9\s_-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-")
+}
+
 // ── Link extraction ───────────────────────────────────────────────────────────
 
 // Returns [{raw, type}] where type is "md" (page-relative) or "wiki" (root-relative).
@@ -2038,10 +2062,12 @@ MiniAWikiManager.prototype._extractLinkEntries = function(body) {
   var entries = []
   var seen    = {}
   var m
-  var mdRe = /\[([^\]]*)\]\(([^)]+\.md[^)]*)\)/g
+  var mdRe = /\[([^\]]*)\]\(([^)]+)\)/g
   while ((m = mdRe.exec(body)) !== null) {
-    var target = m[2].split("#")[0].trim()
-    if (target.length > 0 && !/^https?:\/\//i.test(target) && !seen[target]) {
+    var target = m[2].trim()
+    var pathPart = target.split("#")[0]
+    var internal = target.charAt(0) === "#" || /\.md$/i.test(pathPart) || /\/$/.test(pathPart) || !/\.[a-z0-9]+$/i.test(pathPart)
+    if (target.length > 0 && internal && !/^[a-z][a-z0-9+.-]*:/i.test(target) && !seen[target]) {
       seen[target] = true
       entries.push({ raw: target, type: "md" })
     }
@@ -2853,8 +2879,21 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     // Check 1: Broken internal links
     // md links are page-relative; wiki-style links are always root-relative; @name/... are cross-wiki
     pd.linkEntries.forEach(function(entry) {
-      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(p, entry.raw)
+      var bits = String(entry.raw).split("#"), linkPath = bits.shift(), anchor = bits.join("#")
+      var resolved = linkPath.length === 0 ? p : (entry.type === "wiki" ? linkPath : self.resolveLink(p, linkPath))
+      var nonCanonical = false
+      if (resolved === null && linkPath.length > 0 && entry.type === "md") {
+        var withMd = self.resolveLink(p, linkPath + ".md")
+        var withIndex = self.resolveLink(p, linkPath.replace(/\/$/, "") + "/index.md")
+        if (isString(withMd) && self._backend.exists(withMd)) { resolved = withMd; nonCanonical = true }
+        else if (isString(withIndex) && self._backend.exists(withIndex)) { resolved = withIndex; nonCanonical = true }
+        else resolved = withMd
+      }
       if (resolved === null) return  // external URL, absolute path, or escapes root — not wiki-internal
+      if (nonCanonical) {
+        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, detail: "non-canonical internal path" })
+        return
+      }
       // Cross-wiki mount link
       if (isString(resolved) && resolved.startsWith("@")) {
         var mres = self._resolveMountPath(resolved.endsWith(".md") ? resolved : resolved + "/index.md")
@@ -2869,6 +2908,10 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
       } else {
         if (!isNumber(incomingCount[resolved])) incomingCount[resolved] = 0
         incomingCount[resolved]++
+        if (anchor.length > 0 && pageData[resolved]) {
+          var wanted = anchor.toLowerCase(), anchors = self._markdownHeadings(pageData[resolved].body).map(function(h) { return self._headingAnchor(h.text) })
+          if (anchors.indexOf(wanted) < 0) issues.push({ severity: "error", type: "invalid_anchor", page: p, target: entry.raw, resolved: resolved, anchor: anchor })
+        }
       }
     })
 
@@ -2879,22 +2922,29 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     if (!isString(pd.meta.description) || pd.meta.description.trim().length === 0) {
       issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "description" })
     }
+    if (isUnDef(pd.meta.created) || String(pd.meta.created).trim().length === 0) {
+      issues.push({ severity: "warning", type: "missing_frontmatter", page: p, field: "created" })
+    }
+    if (isUnDef(pd.meta.updated) || String(pd.meta.updated).trim().length === 0) {
+      issues.push({ severity: "warning", type: "missing_frontmatter", page: p, field: "updated" })
+    }
     if ((!isString(pd.meta.type) || pd.meta.type.trim().length === 0) && p !== "index.md" && !p.endsWith("/index.md")) {
       issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "type" })
     }
 
-    // Check 3: Heading hierarchy
-    var h2seen = false, h3seen = false
-    pd.body.split("\n").forEach(function(line) {
-      if (/^## /.test(line)) h2seen = true
-      if (/^### /.test(line)) {
-        if (!h2seen) issues.push({ severity: "warning", type: "heading_hierarchy", page: p, detail: "h3 before h2" })
-        h3seen = true
+    // Check 3: one title-synchronised H1 and a non-skipping hierarchy.
+    var headings = self._markdownHeadings(pd.body)
+    var h1s = headings.filter(function(h) { return h.level === 1 })
+    if (h1s.length === 0) issues.push({ severity: "warning", type: "missing_h1", page: p })
+    if (h1s.length > 1) issues.push({ severity: "warning", type: "multiple_h1", page: p, count: h1s.length })
+    if (h1s.length > 0 && isString(pd.meta.title) && pd.meta.title.trim().length > 0 && h1s[0].text !== pd.meta.title.trim()) {
+      issues.push({ severity: "warning", type: "title_h1_mismatch", page: p, title: pd.meta.title, heading: h1s[0].text })
+    }
+    for (var hi = 1; hi < headings.length; hi++) {
+      if (headings[hi].level > headings[hi - 1].level + 1) {
+        issues.push({ severity: "warning", type: "heading_hierarchy", page: p, line: headings[hi].line + 1, from: headings[hi - 1].level, to: headings[hi].level })
       }
-      if (/^#### /.test(line) && !h3seen) {
-        issues.push({ severity: "warning", type: "heading_hierarchy", page: p, detail: "h4 before h3" })
-      }
-    })
+    }
 
     // Check 4: Stale pages
     if (staleDays > 0) {
@@ -2945,16 +2995,23 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     var indexData = pageData[indexPath]
     if (!indexData) {
       issues.push({ severity: "warning", type: "missing_index", section: dir, page: indexPath, direct_pages: directPages.length, child_indexes: childIndexes.length })
+      directPages.forEach(function(required) {
+        issues.push({ severity: "warning", type: "structural_orphan", section: dir, page: required, parent: indexPath })
+      })
       return
     }
 
     var linked = {}
     indexData.linkEntries.forEach(function(entry) {
-      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(indexPath, entry.raw)
+      var indexTarget = String(entry.raw).split("#")[0]
+      var resolved = entry.type === "wiki" ? indexTarget : self.resolveLink(indexPath, indexTarget)
       if (isString(resolved)) linked[resolved] = true
     })
     directPages.concat(childIndexes).forEach(function(required) {
-      if (!linked[required]) issues.push({ severity: "warning", type: "index_missing_links", section: dir, page: indexPath, target: required })
+      if (!linked[required]) {
+        issues.push({ severity: "warning", type: "index_missing_links", section: dir, page: indexPath, target: required })
+        if (!/\/index\.md$/i.test(required) && required !== "index.md") issues.push({ severity: "warning", type: "structural_orphan", section: dir, page: required, parent: indexPath })
+      }
     })
 
     if (isDef(indexData.meta.updated)) {
@@ -2972,13 +3029,16 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   })
 
-  // Check 6: Orphaned pages (no incoming links — skip index-like and protected files)
+  // Check 6: Pages represented only by their parent catalogue remain semantic advice.
   pages.forEach(function(p) {
     var name = p.replace(/.*\//, "").toLowerCase()
     if (name === "index.md" || name === "readme.md" || name === "log.md") return
-    if ((incomingCount[p] || 0) === 0) {
-      issues.push({ severity: "warning", type: "orphan", page: p })
-    }
+    var parent = self._pageDir(p) + "index.md"
+    var parentLinks = pageData[parent] ? pageData[parent].linkEntries.some(function(e) {
+      var ep = String(e.raw).split("#")[0]
+      return (e.type === "wiki" ? ep : self.resolveLink(parent, ep)) === p
+    }) : false
+    if (parentLinks && (incomingCount[p] || 0) <= 1) issues.push({ severity: "info", type: "semantic_orphan", page: p, parent: parent })
   })
 
   // Check 7: Near-duplicate page bodies

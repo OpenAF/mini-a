@@ -558,7 +558,7 @@
       ow.test.assert(fixed.some(function(i) { return i.type === "missing_index" && i.page === "missing/index.md" }), true, "apply should create a missing index")
       ow.test.assert(fixed.some(function(i) { return i.type === "index_missing_links" && i.page === "section/index.md" }), true, "apply should add missing index links")
       ow.test.assert(fixed.some(function(i) { return i.type === "stale_index" && i.page === "section/index.md" }), true, "apply should regenerate stale indexes")
-      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "broken_link" && i.reason === "target-not-resolved-with-certainty" }), true, "broken links must remain explicitly skipped")
+      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "broken_link" && i.reason === "no-candidate" }), true, "unresolvable broken links must remain explicitly skipped")
       ow.test.assert(res.lint_after.errors >= 1, true, "unresolved broken links must remain in lint output")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
@@ -594,6 +594,28 @@
       }, function() {})
       var res = runner.dreamWiki()
       ow.test.assert(res.mode, "apply", "the removed 'lint' mode should fall back to the apply default")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiApplyFrontmatterHeadingsLinksAndFixpoint = function() {
+    var dir = makeWikiDir()
+    try {
+      io.mkdir(dir + "/topics")
+      io.writeFileString(dir + "/topics/oauth-token-flow.md", "---\naliases:\n- OAuth flow\n---\n# OAuth token flow\n\n### Details\n\nText.")
+      io.writeFileString(dir + "/source.md", "---\ntitle: Source\ndescription: Source page\ntype: concept\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\n---\n# Source\n\n[flow](OAuth flow)")
+      var first = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      var target = io.readFileString(dir + "/topics/oauth-token-flow.md")
+      var source = io.readFileString(dir + "/source.md")
+      ow.test.assert(target.indexOf("title: OAuth token flow") >= 0, true, "title should be derived from the sole H1")
+      ow.test.assert(target.indexOf("type: concept") >= 0, true, "missing type should be repaired")
+      ow.test.assert(target.indexOf("description:") < 0, true, "description must not be invented")
+      ow.test.assert(target.indexOf("## Details") >= 0, true, "skipped heading level should be repaired")
+      ow.test.assert(source.indexOf("(topics/oauth-token-flow.md)") >= 0, true, "unique alias should resolve deterministically")
+      ow.test.assert(first.repair_passes >= 1 && first.repair_passes <= 3, true, "apply should use a bounded fixpoint")
+      var bytes = target + "\n---SOURCE---\n" + source
+      var second = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      ow.test.assert(second.pages_changed, 0, "second apply must be idempotent")
+      ow.test.assert(io.readFileString(dir + "/topics/oauth-token-flow.md") + "\n---SOURCE---\n" + io.readFileString(dir + "/source.md"), bytes, "content must be byte-identical on second apply")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 

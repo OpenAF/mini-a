@@ -579,14 +579,26 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       var lintBefore = wmApply.lint(lintMemMgr, { staleDays: staleDays })
       defaultResult.lint_before = lintSummary(lintBefore)
 
-      defaultResult.repairs = self._repairWikiLint(wmApply, lintBefore, { minPages: self._args.dreamwikiminpages })
+      var allRepairs = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
+      var changedPageSet = {}, repairPasses = 0, currentLint = lintBefore
+      for (var repairPass = 0; repairPass < 3; repairPass++) {
+        var passRepairs = self._repairWikiLint(wmApply, currentLint, { minPages: self._args.dreamwikiminpages })
+        repairPasses++
+        allRepairs.fixed = allRepairs.fixed.concat(passRepairs.fixed)
+        allRepairs.skipped = allRepairs.skipped.concat(passRepairs.skipped)
+        allRepairs.candidates = allRepairs.candidates.concat(passRepairs.candidates)
+        passRepairs.fixed.forEach(function(issue) { if (isString(issue.page)) changedPageSet[issue.page] = true })
+        if (passRepairs.pages_changed === 0) break
+        currentLint = wmApply.lint(lintMemMgr, { staleDays: staleDays })
+      }
+      allRepairs.pages_changed = Object.keys(changedPageSet).length
+      defaultResult.repairs = allRepairs
+      defaultResult.repair_passes = repairPasses
+      defaultResult.pages_changed = allRepairs.pages_changed
       defaultResult.repairs.fixed.forEach(function(issue) {
         defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
         if (issue.type === "missing_index") defaultResult.indexes_created++
-        else {
-          defaultResult.indexes_updated++
-          defaultResult.pages_changed++
-        }
+        else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
       })
       defaultResult.repairs.skipped.forEach(function(issue) {
         if (issue.reason === "below-min-pages") defaultResult.skipped_uncertain_moves.push(
@@ -694,88 +706,158 @@ MiniADreams.prototype.dreamWiki = function(opts) {
 MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   var opts = isMap(options) ? options : {}
   var dryRun = opts.dryRun === true
-  var result = { fixed: [], skipped: [], candidates: [] }
+  var result = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
   var issues = isMap(lintResult) && isArray(lintResult.issues) ? lintResult.issues : []
-  var pageCount = isArray(wm.list("")) ? wm.list("").length : 0
-  var minPages = isNumber(opts.minPages) ? opts.minPages : Number(opts.minPages)
-  if (isNaN(minPages)) minPages = 5
-  var deterministic = { missing_index: true, index_missing_links: true, stale_index: true }
-  var issueCopy = function(issue, extra) {
-    var out = { type: issue.type, page: issue.page }
-    if (isString(issue.target)) out.target = issue.target
-    if (isString(issue.section)) out.section = issue.section
+  var repairable = {
+    missing_index: true, index_missing_links: true, stale_index: true,
+    missing_frontmatter: true, missing_h1: true, multiple_h1: true,
+    title_h1_mismatch: true, heading_hierarchy: true, broken_link: true,
+    invalid_anchor: true, structural_orphan: true
+  }
+  var copyIssue = function(issue, extra) {
+    var out = {}
+    Object.keys(issue || {}).forEach(function(k) { if (k !== "severity") out[k] = issue[k] })
     if (isMap(extra)) Object.keys(extra).forEach(function(k) { out[k] = extra[k] })
     return out
   }
-
   issues.forEach(function(issue) {
-    if (deterministic[issue.type] === true) result.candidates.push(issueCopy(issue))
-    else result.skipped.push(issueCopy(issue, {
-      reason: issue.type === "broken_link" ? "target-not-resolved-with-certainty" : "requires-semantic-judgment"
-    }))
+    if (repairable[issue.type]) result.candidates.push(copyIssue(issue))
+    else result.skipped.push(copyIssue(issue, { reason: "requires-semantic-judgment" }))
   })
-  if (dryRun || result.candidates.length === 0) return result
-  if (pageCount < minPages) {
-    result.candidates.forEach(function(issue) {
-      result.skipped.push(issueCopy(issue, { reason: "below-min-pages", page_count: pageCount, min_pages: minPages }))
-    })
-    return result
+  if (dryRun) return result
+
+  var changedPages = {}
+  var markFixed = function(issue, extra) {
+    result.fixed.push(copyIssue(issue, merge({ confidence: "certain", changed: true }, extra || {})))
+    var physicalPage = isMap(extra) && isString(extra.physical_page) ? extra.physical_page : issue.page
+    if (isString(physicalPage)) changedPages[physicalPage] = true
   }
 
-  var createIssues = issues.filter(function(issue) { return issue.type === "missing_index" })
-  createIssues.forEach(function(issue) {
-    var created = wm.init(issue.section)
-    if (isMap(created) && created.ok === true && isArray(created.created) && created.created.indexOf(issue.page) >= 0) {
-      result.fixed.push(issueCopy(issue))
-    } else {
-      result.skipped.push(issueCopy(issue, { reason: isMap(created) && isString(created.error) ? created.error : "index-not-created" }))
-    }
-  })
-
-  var targetsByIndex = {}
-  issues.filter(function(issue) { return issue.type === "index_missing_links" }).forEach(function(issue) {
-    if (!isString(issue.page) || !isString(issue.target)) return
-    if (!isArray(targetsByIndex[issue.page])) targetsByIndex[issue.page] = []
-    targetsByIndex[issue.page].push(issue.target)
-  })
-  Object.keys(targetsByIndex).forEach(function(indexPath) {
-    var page = wm.read(indexPath)
-    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) {
-      targetsByIndex[indexPath].forEach(function(target) {
-        result.skipped.push({ type: "index_missing_links", page: indexPath, target: target, reason: "index-not-readable" })
-      })
-      return
-    }
-    var body = page.body
-    var changed = false
-    targetsByIndex[indexPath].forEach(function(target) {
-      var rel = wm._relativePath(indexPath, target)
-      var label = target.replace(/\/index\.md$/i, "").replace(/\.md$/i, "").replace(/.*\//, "").replace(/[-_]/g, " ")
-      if (body.indexOf("(" + rel + ")") < 0) {
-        body += "\n- [" + label + "](" + rel + ")"
-        changed = true
+  // Frontmatter and headings are deliberately coalesced into one physical write per page.
+  var pageIssues = {}
+  issues.filter(function(i) {
+    return i.type === "missing_frontmatter" || i.type === "missing_h1" || i.type === "multiple_h1" ||
+      i.type === "title_h1_mismatch" || i.type === "heading_hierarchy"
+  }).forEach(function(i) { if (!isArray(pageIssues[i.page])) pageIssues[i.page] = []; pageIssues[i.page].push(i) })
+  Object.keys(pageIssues).sort().forEach(function(path) {
+    if (path === "index.md" || path.endsWith("/index.md") || path === "AGENTS.md" || path === "log.md") return
+    var page = wm.read(path)
+    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) return
+    var meta = clone(page.meta), body = page.body, changed = false
+    var headings = wm._markdownHeadings(body), h1s = headings.filter(function(h) { return h.level === 1 })
+    if (!isString(meta.title) || meta.title.trim().length === 0) {
+      if (h1s.length === 1) meta.title = h1s[0].text
+      else {
+        var name = path.replace(/.*\//, "").replace(/\.md$/i, "").replace(/[-_]+/g, " ")
+        meta.title = name.length > 0 ? name.substring(0, 1).toUpperCase() + name.substring(1) : "Untitled"
       }
-    })
-    var wr = changed ? wm.write(indexPath, page.meta, body) : { ok: true }
-    targetsByIndex[indexPath].forEach(function(target) {
-      if (isMap(wr) && wr.ok === true) result.fixed.push({ type: "index_missing_links", page: indexPath, target: target })
-      else result.skipped.push({ type: "index_missing_links", page: indexPath, target: target, reason: "index-not-updated" })
-    })
+      changed = true
+    }
+    if (!isString(meta.type) || meta.type.trim().length === 0) { meta.type = "concept"; changed = true }
+    if (isUnDef(meta.created) || String(meta.created).trim().length === 0) {
+      meta.created = isDef(meta.timestamp) && String(meta.timestamp).trim().length > 0 ? meta.timestamp : new Date().toISOString()
+      changed = true
+    }
+    var lines = body.split(/\r?\n/)
+    headings = wm._markdownHeadings(body)
+    h1s = headings.filter(function(h) { return h.level === 1 })
+    if (h1s.length === 0 && isString(meta.title) && meta.title.length > 0) {
+      body = "# " + meta.title + (body.length > 0 ? "\n\n" + body.replace(/^\s+/, "") : "")
+      changed = true
+    } else if (h1s.length > 0) {
+      var previous = 0, firstH1 = true
+      headings.forEach(function(h) {
+        var level = h.level
+        if (level === 1) {
+          if (firstH1) { level = 1; firstH1 = false }
+          else level = previous > 1 ? previous : 2
+        }
+        if (previous > 0 && level > previous + 1) level = previous + 1
+        var text = h.line === h1s[0].line ? meta.title : h.text
+        var replacement = new Array(level + 1).join("#") + " " + text
+        if (lines[h.line] !== replacement) { lines[h.line] = replacement; changed = true }
+        previous = level
+      })
+      body = lines.join("\n")
+    }
+    if (changed) {
+      var wr = wm.write(path, meta, body)
+      if (isMap(wr) && wr.ok === true) pageIssues[path].forEach(function(i) { markFixed(i, { reason: "frontmatter-heading-normalized" }) })
+      else pageIssues[path].forEach(function(i) { result.skipped.push(copyIssue(i, { reason: "page-not-updated" })) })
+    }
   })
 
-  var staleByIndex = {}
-  issues.filter(function(issue) { return issue.type === "stale_index" && isString(issue.page) }).forEach(function(issue) { staleByIndex[issue.page] = true })
-  var stalePaths = Object.keys(staleByIndex)
-  if (stalePaths.length > 0) {
-    var refreshed = wm.regenerateIndexes({ paths: stalePaths })
-    issues.filter(function(issue) { return issue.type === "stale_index" }).forEach(function(issue) {
-      if (isMap(refreshed) && isArray(refreshed.regenerated) && refreshed.regenerated.indexOf(issue.page) >= 0) result.fixed.push(issueCopy(issue))
-      else result.skipped.push(issueCopy(issue, { reason: "index-not-regenerated" }))
+  // Build one catalogue for this pass. Resolution classes are tried in strength order;
+  // a class is accepted only when it produces one candidate.
+  var catalogue = wm.list("").filter(function(p) { return /\.md$/i.test(p) && p !== "AGENTS.md" && p !== "log.md" }).map(function(p) {
+    var pg = wm.read(p), meta = isMap(pg) && isMap(pg.meta) ? pg.meta : {}
+    return { path: p, lower: p.toLowerCase(), base: p.replace(/.*\//, ""), stem: p.replace(/.*\//, "").replace(/\.md$/i, ""),
+      title: isString(meta.title) ? meta.title.trim() : "", aliases: isArray(meta.aliases) ? meta.aliases : [],
+      anchors: isMap(pg) ? wm._markdownHeadings(pg.body).map(function(h) { return wm._headingAnchor(h.text) }) : [] }
+  })
+  var slug = function(v) { return String(v || "").toLowerCase().trim().replace(/[^a-z0-9\s_-]/g, "").replace(/[\s_]+/g, "-") }
+  var unique = function(arr) { var seen = {}, out = []; arr.forEach(function(c) { if (!seen[c.path]) { seen[c.path] = true; out.push(c) } }); return out }
+  var resolveBroken = function(issue) {
+    if (String(issue.target || "").startsWith("@")) return { reason: "mounted-wiki-unresolved" }
+    var bits = String(issue.target || "").split("#"), rawPath = bits.shift(), anchor = bits.join("#")
+    var resolved = rawPath.length === 0 ? issue.page : wm.resolveLink(issue.page, rawPath)
+    var attempts = []
+    if (isString(resolved)) {
+      attempts.push({ name: "exact-resolved-path", matches: catalogue.filter(function(c) { return c.path === resolved }) })
+      attempts.push({ name: "exact-md-path", matches: catalogue.filter(function(c) { return c.path === resolved + ".md" }) })
+      attempts.push({ name: "directory-index", matches: catalogue.filter(function(c) { return c.path === resolved.replace(/\/$/, "") + "/index.md" }) })
+    } else if (rawPath.length > 0) {
+      resolved = wm.resolveLink(issue.page, rawPath + ".md")
+      if (isString(resolved)) attempts.push({ name: "exact-md-path", matches: catalogue.filter(function(c) { return c.path === resolved }) })
+      var dirResolved = wm.resolveLink(issue.page, rawPath.replace(/\/$/, "") + "/index.md")
+      if (isString(dirResolved)) attempts.push({ name: "directory-index", matches: catalogue.filter(function(c) { return c.path === dirResolved }) })
+    }
+    var needle = rawPath.replace(/\/$/, "").replace(/\.md$/i, ""), base = needle.replace(/.*\//, "")
+    attempts.push({ name: "case-insensitive-path", matches: catalogue.filter(function(c) { return c.lower === (String(resolved || needle) + (/\.md$/i.test(String(resolved || needle)) ? "" : ".md")).toLowerCase() }) })
+    attempts.push({ name: "unique-basename", ambiguous: "ambiguous-basename", matches: catalogue.filter(function(c) { return c.stem.toLowerCase() === base.toLowerCase() }) })
+    attempts.push({ name: "unique-title-match", ambiguous: "ambiguous-title", matches: catalogue.filter(function(c) { return c.title.toLowerCase() === needle.toLowerCase() || c.title.toLowerCase() === base.toLowerCase() }) })
+    attempts.push({ name: "unique-alias-match", ambiguous: "ambiguous-alias", matches: catalogue.filter(function(c) { return c.aliases.some(function(a) { return String(a).toLowerCase() === needle.toLowerCase() || String(a).toLowerCase() === base.toLowerCase() }) }) })
+    attempts.push({ name: "unique-slug-title", ambiguous: "ambiguous-title", matches: catalogue.filter(function(c) { return slug(c.title) === slug(base) }) })
+    for (var ai = 0; ai < attempts.length; ai++) {
+      var matches = unique(attempts[ai].matches)
+      if (matches.length > 1) return { reason: attempts[ai].ambiguous || "ambiguous-target" }
+      if (matches.length === 1) {
+        if (anchor.length > 0 && matches[0].anchors.indexOf(anchor.toLowerCase()) < 0) return { reason: "invalid-anchor" }
+        return { candidate: matches[0], strategy: attempts[ai].name, anchor: anchor }
+      }
+    }
+    return { reason: "no-candidate" }
+  }
+  issues.filter(function(i) { return i.type === "broken_link" || i.type === "invalid_anchor" }).forEach(function(issue) {
+    var found = resolveBroken(issue)
+    if (!found.candidate) { result.skipped.push(copyIssue(issue, { reason: found.reason })); return }
+    var page = wm.read(issue.page)
+    if (!isMap(page) || !isString(page.body)) { result.skipped.push(copyIssue(issue, { reason: "page-not-readable" })); return }
+    var rel = found.candidate.path === issue.page && found.anchor.length > 0 ? "" : wm._relativePath(issue.page, found.candidate.path)
+    var newTarget = rel + (found.anchor.length > 0 ? "#" + found.anchor : "")
+    var oldTarget = String(issue.target), replaced = false
+    var body = page.body.replace(/\[([^\]]*)\]\(([^)]+)\)/g, function(all, label, target) {
+      if (!replaced && String(target).trim() === oldTarget) { replaced = true; return "[" + label + "](" + newTarget + ")" }
+      return all
+    })
+    if (!replaced || body === page.body) { result.skipped.push(copyIssue(issue, { reason: "link-not-rewritable" })); return }
+    var wr = wm.write(issue.page, page.meta, body)
+    if (isMap(wr) && wr.ok === true) markFixed(issue, { resolved: found.candidate.path, strategy: found.strategy, reason: found.strategy })
+  })
+
+  // Index/orphan repairs use the established generator so there is only one index format.
+  var indexIssues = issues.filter(function(i) { return i.type === "missing_index" || i.type === "index_missing_links" || i.type === "stale_index" || i.type === "structural_orphan" })
+  if (indexIssues.length > 0) {
+    var reg = wm.regenerateIndexes()
+    indexIssues.forEach(function(issue) {
+      var indexPath = issue.type === "structural_orphan" ? issue.parent : issue.page
+      if (isMap(reg) && isArray(reg.regenerated) && reg.regenerated.indexOf(indexPath) >= 0) markFixed(issue, { reason: "index-regenerated", physical_page: indexPath })
+      else result.skipped.push(copyIssue(issue, { reason: "index-unchanged" }))
     })
   }
+  result.pages_changed = Object.keys(changedPages).length
   return result
 }
-
 // _finalizeWiki: the deterministic post-pass every write-mode wiki dream ends with, so a
 // dreamt wiki is always left reorganized, reindexed and re-linked:
 //   1. regenerate root + section index.md from live page metadata
