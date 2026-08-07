@@ -189,7 +189,7 @@ ojob:
   opacks      :
   - openaf     : 20250915
   - oJob-common: 20250914
-  - mini-a     : 20260612
+  - mini-a     : 20260807
   catch       : printErrnl("[" + job.name + "] "); $err(exception, __, __, job.exec)
   logToConsole: false
   argsFromEnvs: true
