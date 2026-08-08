@@ -214,6 +214,15 @@ MiniUtilsTool.prototype._resolveSkillsRoots = function(options) {
       }
     }
   }
+
+  // Agent Plugins skills/ contributions - appended last (after defaults) so
+  // plugin skills never shadow user/default skills on a name collision
+  // (_listSkills is first-root-wins).
+  if (isArray(options.pluginskillsroots)) {
+    options.pluginskillsroots.forEach(function(entry) {
+      addRoot(entry)
+    })
+  }
   return roots
 }
 

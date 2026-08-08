@@ -9031,6 +9031,41 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
   return __
 }
 
+// Discovers Agent Plugins (agent-plugins.org) directories/roots from args.plugins,
+// args.pluginsroot(s), memoized per agent instance so plugin dirs are scanned once
+// regardless of how many call sites need the result (skills wiring + MCP wiring).
+MiniA.prototype._getPluginsDiscovery = function(args) {
+  if (isObject(this._pluginsDiscovery)) return this._pluginsDiscovery
+
+  if (typeof __miniAPluginDiscover !== "function") {
+    loadLib("mini-a-plugins.js")
+  }
+  if (typeof __miniAPluginDiscover !== "function") {
+    this._pluginsDiscovery = { skillsRoots: [], mcpConfigs: [], warnings: [] }
+    return this._pluginsDiscovery
+  }
+
+  var result
+  try {
+    result = __miniAPluginDiscover({
+      plugins     : args.plugins,
+      pluginsroot : args.pluginsroot,
+      pluginsroots: args.pluginsroots,
+      homedir     : args.homedir
+    })
+  } catch (discoverErr) {
+    this.fnI("warn", `Agent Plugins discovery failed: ${__miniAErrMsg(discoverErr)}`)
+    result = { skillsRoots: [], mcpConfigs: [], warnings: [] }
+  }
+
+  if (isArray(result.warnings)) {
+    result.warnings.forEach((w) => this.fnI("warn", `Agent Plugins: ${w}`))
+  }
+
+  this._pluginsDiscovery = result
+  return result
+}
+
 MiniA.prototype._createUtilsMcpConfig = function(args) {
   try {
     var parent = this
@@ -9055,6 +9090,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if ((isString(args.extraskills) || args.extraskills instanceof java.lang.String) && String(args.extraskills).trim().length > 0) {
       var extraSkillRoots = String(args.extraskills).split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
       if (extraSkillRoots.length > 0) toolOptions.skillsroots = extraSkillRoots
+    }
+    var pluginSkillsRoots = this._getPluginsDiscovery(args).skillsRoots
+    if (isArray(pluginSkillsRoots) && pluginSkillsRoots.length > 0) {
+      toolOptions.pluginskillsroots = pluginSkillsRoots
     }
     var fileTool = new MiniUtilsTool(toolOptions)
     if (fileTool._initialized !== true) {
@@ -13583,7 +13622,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
-    "extraskills", "extrahooks", "workerregurl", "workerskills", "workertags", "workerreginterval", "secpass",
+    "extraskills", "extrahooks", "plugins", "pluginsroot", "pluginsroots", "workerregurl", "workerskills", "workertags", "workerreginterval", "secpass",
     "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
@@ -14612,6 +14651,15 @@ MiniA.prototype.init = function(args) {
         var parsedMcpConfigs = af.fromJSSLON(args.mcp)
         if (!isArray(parsedMcpConfigs)) parsedMcpConfigs = [parsedMcpConfigs]
         aggregatedMcpConfigs = aggregatedMcpConfigs.concat(parsedMcpConfigs)
+      }
+
+      // Agent Plugins mcp.json servers register independently of useutils/useskills -
+      // a plugin may contribute only an mcp.json with no skills/ at all. Each config
+      // already carries an explicit id ("plugin:<name>:<server>") so the dedup below
+      // (by md5 of config.id) behaves deterministically.
+      var pluginMcpConfigs = this._getPluginsDiscovery(args).mcpConfigs
+      if (isArray(pluginMcpConfigs) && pluginMcpConfigs.length > 0) {
+        aggregatedMcpConfigs = aggregatedMcpConfigs.concat(pluginMcpConfigs)
       }
 
       if (args.useutils === true || args.useskills === true) {

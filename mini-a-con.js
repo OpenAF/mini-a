@@ -844,6 +844,9 @@ try {
     extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
     extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
     extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" },
+    plugins        : { type: "string", description: "Comma-separated Agent Plugins (agent-plugins.org) directories, each containing a plugin.json" },
+    pluginsroot    : { type: "string", description: "Directory containing multiple Agent Plugins subfolders (default: .openaf-mini-a/plugins)" },
+    pluginsroots   : { type: "string", description: "Comma-separated directories, each containing multiple Agent Plugins subfolders" },
     homedir        : { type: "string", description: "Override the home directory used to locate the .openaf-mini-a folder (default: user home)" }
   }
 
@@ -2102,6 +2105,29 @@ try {
   var extraSkillsDirs = parseExtraDirPaths(findArgumentValue(args, "extraskills"))
   extraSkillsDirs.forEach(function(dir) {
     var extra = loadSlashCommandsFromDir(dir, customSkillSlashCommands, { sourceLabel: "extra skills", enableSkillFolders: true, sourceCategory: "skill" })
+    Object.keys(extra).forEach(function(k) {
+      if (!Object.prototype.hasOwnProperty.call(customSkillSlashCommands, k)) customSkillSlashCommands[k] = extra[k]
+    })
+  })
+
+  // Agent Plugins skills/ contributions, exposed as $name slash commands just like extraskills.
+  // Warnings from a malformed plugin are surfaced later when an agent actually runs (via
+  // MiniA._getPluginsDiscovery); this pre-scan stays quiet to avoid double-logging at startup.
+  var pluginSkillsDirs = []
+  try {
+    if (typeof __miniAPluginDiscover !== "function") loadLib("mini-a-plugins.js")
+    if (typeof __miniAPluginDiscover === "function") {
+      var pluginsDiscoveryForConsole = __miniAPluginDiscover({
+        plugins     : findArgumentValue(args, "plugins"),
+        pluginsroot : findArgumentValue(args, "pluginsroot"),
+        pluginsroots: findArgumentValue(args, "pluginsroots"),
+        homedir     : findArgumentValue(args, "homedir")
+      })
+      if (isArray(pluginsDiscoveryForConsole.skillsRoots)) pluginSkillsDirs = pluginsDiscoveryForConsole.skillsRoots
+    }
+  } catch (pluginDiscoverErr) {}
+  pluginSkillsDirs.forEach(function(dir) {
+    var extra = loadSlashCommandsFromDir(dir, customSkillSlashCommands, { sourceLabel: "plugin skills", enableSkillFolders: true, sourceCategory: "skill" })
     Object.keys(extra).forEach(function(k) {
       if (!Object.prototype.hasOwnProperty.call(customSkillSlashCommands, k)) customSkillSlashCommands[k] = extra[k]
     })

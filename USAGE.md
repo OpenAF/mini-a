@@ -92,6 +92,15 @@ To load skills from additional directories, pass `extraskills=<path1>,<path2>`. 
 mini-a extraskills=/path/to/shared-skills,/path/to/project-skills
 ```
 
+### Agent Plugins
+
+Mini-A can also load skills (and MCP servers) bundled as an [Agent Plugins](https://agent-plugins.org) directory (`plugin.json` + `skills/` + `mcp.json`). Use `plugins=<dir1,dir2>` for explicit plugin directories, or `pluginsroot=<dir>` / `pluginsroots=<dir1,dir2>` for directories that each contain many plugin subfolders (default: `.openaf-mini-a/plugins`). These compose with `extraskills`/`mcp=` — they don't replace them — and a plugin's skills never win a name conflict over the default/extra skill directories. See **[docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)** for the full directory layout, the `PLUGIN_ROOT`/`PLUGIN_DATA` contract, and current limitations.
+
+```bash
+mini-a goal="..." plugins=/path/to/my-plugin
+mini-a goal="..." pluginsroot=/path/to/plugins-folder
+```
+
 To invoke one template directly from the command line (without entering the console), use `exec=`:
 
 ```bash
@@ -229,7 +238,7 @@ By default, Mini-A reads all configuration (commands, skills, hooks, modes, hist
 mini-a homedir=/opt/shared/mini-a-config goal="..."
 ```
 
-This replaces `~` in all `.openaf-mini-a` lookups — custom commands, skills, hooks, modes, agent profiles, history, and memory files all resolve relative to the provided path. The `extracommands`, `extraskills`, and `extrahooks` parameters continue to work as additional directories on top of whichever base is active.
+This replaces `~` in all `.openaf-mini-a` lookups — custom commands, skills, hooks, modes, agent profiles, history, and memory files all resolve relative to the provided path. The `extracommands`, `extraskills`, and `extrahooks` parameters continue to work as additional directories on top of whichever base is active. It also affects the default Agent Plugins `pluginsroot` and where per-plugin `PLUGIN_DATA` directories are created (see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)).
 
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
