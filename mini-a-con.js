@@ -636,6 +636,7 @@ try {
     wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
+    wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'}." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
@@ -817,13 +818,14 @@ try {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), or reorg." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), reorg, or repair." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
     dreamwikiminpages: { type: "number", description: "Minimum page count required before the deterministic index fixes run." },
     dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
+    dreamwikilintresultlimit: { type: "number", description: "Maximum lint issues returned per dream-agent request (default 25)." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
     ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
     ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
@@ -842,6 +844,9 @@ try {
     extracommands  : { type: "string", description: "Comma-separated extra directories for custom slash commands" },
     extraskills    : { type: "string", description: "Comma-separated extra directories for custom skills" },
     extrahooks     : { type: "string", description: "Comma-separated extra directories for custom hooks" },
+    plugins        : { type: "string", description: "Comma-separated Agent Plugins (agent-plugins.org) directories, each containing a plugin.json" },
+    pluginsroot    : { type: "string", description: "Directory containing multiple Agent Plugins subfolders (default: .openaf-mini-a/plugins)" },
+    pluginsroots   : { type: "string", description: "Comma-separated directories, each containing multiple Agent Plugins subfolders" },
     homedir        : { type: "string", description: "Override the home directory used to locate the .openaf-mini-a folder (default: user home)" }
   }
 
@@ -2105,6 +2110,29 @@ try {
     })
   })
 
+  // Agent Plugins skills/ contributions, exposed as $name slash commands just like extraskills.
+  // Warnings from a malformed plugin are surfaced later when an agent actually runs (via
+  // MiniA._getPluginsDiscovery); this pre-scan stays quiet to avoid double-logging at startup.
+  var pluginSkillsDirs = []
+  try {
+    if (typeof __miniAPluginDiscover !== "function") loadLib("mini-a-plugins.js")
+    if (typeof __miniAPluginDiscover === "function") {
+      var pluginsDiscoveryForConsole = __miniAPluginDiscover({
+        plugins     : findArgumentValue(args, "plugins"),
+        pluginsroot : findArgumentValue(args, "pluginsroot"),
+        pluginsroots: findArgumentValue(args, "pluginsroots"),
+        homedir     : findArgumentValue(args, "homedir")
+      })
+      if (isArray(pluginsDiscoveryForConsole.skillsRoots)) pluginSkillsDirs = pluginsDiscoveryForConsole.skillsRoots
+    }
+  } catch (pluginDiscoverErr) {}
+  pluginSkillsDirs.forEach(function(dir) {
+    var extra = loadSlashCommandsFromDir(dir, customSkillSlashCommands, { sourceLabel: "plugin skills", enableSkillFolders: true, sourceCategory: "skill" })
+    Object.keys(extra).forEach(function(k) {
+      if (!Object.prototype.hasOwnProperty.call(customSkillSlashCommands, k)) customSkillSlashCommands[k] = extra[k]
+    })
+  })
+
   var extraHooksDirs = parseExtraDirPaths(findArgumentValue(args, "extrahooks"))
   extraHooksDirs.forEach(function(dir) {
     loadHooksFromDir(dir, loadedHooks)
@@ -2315,8 +2343,8 @@ try {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg"]
-            var dreamWikiModes = ["plan", "apply", "reorg", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "repair"]
+            var dreamWikiModes = ["plan", "apply", "reorg", "repair", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -5795,7 +5823,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, dryrun" },
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, dryrun" },
       { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
     helpCommands.push(
@@ -6213,7 +6241,7 @@ try {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
-    var isWikiMode = ["wiki", "plan", "apply", "reorg"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "plan", "apply", "reorg", "repair"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -6236,13 +6264,16 @@ try {
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
     try {
-      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
+      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0) {
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
         if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
+        if (parts.indexOf("repair") >= 0) dreamArgs.dreamwikimode = "repair"
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
           dreamArgs.dreamwikireorg = "true"
-          dreamArgs.dreamwikiapproval = "auto"
+          // Keep the interactive command behind the existing approval gate. An
+          // unattended caller can still opt in explicitly with dreamwikiapproval=auto.
+          dreamArgs.dreamwikiapproval = "ask"
         }
       }
 
@@ -6269,10 +6300,15 @@ try {
       // nothing configured) reports it through the return value, not the log.
       var reportDream = function(label, res) {
         if (!isMap(res)) return
+        if (res.partial === true) {
+          print(colorifyText("Dream " + label + " completed partially: " + (res.reason || "verification incomplete"), errorColor))
+          print(printTree(res))
+          return
+        }
         if (res.ok === false) {
           var why = isString(res.reason) ? res.reason : "unknown"
           print(colorifyText("Dream " + label + " did not run: " + why + (isString(res.error) ? " — " + res.error : ""), errorColor))
-          if (why === "approval-required") print(colorifyText("  Use /dream reorg to approve, or set dreamwikiapproval=auto.", hintColor))
+          if (why === "approval-required") print(colorifyText("  Set dreamwikiapproval=auto explicitly to run an unattended reorganisation.", hintColor))
           if (why === "reorg-not-enabled") print(colorifyText("  Set dreamwikireorg=true to enable structural reorg.", hintColor))
           return
         }
@@ -6280,7 +6316,7 @@ try {
       }
 
       if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
-      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg") && hasWiki) reportDream("wiki", runner.dreamWiki())
+      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }

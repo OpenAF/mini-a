@@ -1,0 +1,46 @@
+include:
+- oJobTest.yaml
+
+jobs:
+
+- name: MiniA Agent Plugins Tests::ValidPluginSkillsOnly
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testValidPluginSkillsOnly
+
+- name: MiniA Agent Plugins Tests::ValidPluginMcpStdioOnly
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testValidPluginMcpStdioOnly
+
+- name: MiniA Agent Plugins Tests::MalformedPluginJsonSkipsPluginNotSiblings
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testMalformedPluginJsonSkipsPluginNotSiblings
+
+- name: MiniA Agent Plugins Tests::ForwardCompatUnknownTopLevelKey
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testForwardCompatUnknownTopLevelKey
+
+- name: MiniA Agent Plugins Tests::PlaceholderExpansionLeavesUnknownLiteral
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testPlaceholderExpansionLeavesUnknownLiteral
+
+- name: MiniA Agent Plugins Tests::PathTraversalRejected
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testPathTraversalRejected
+
+- name: MiniA Agent Plugins Tests::McpJsonVersionMismatchDropsOnlyMcpSurface
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testMcpJsonVersionMismatchDropsOnlyMcpSurface
+
+- name: MiniA Agent Plugins Tests::BadMcpServerEntrySkippedNotWholePlugin
+  to  : oJob Test
+  exec: args.func = require("tests/agentPlugins.js").testBadMcpServerEntrySkippedNotWholePlugin
+
+todo:
+- MiniA Agent Plugins Tests::ValidPluginSkillsOnly
+- MiniA Agent Plugins Tests::ValidPluginMcpStdioOnly
+- MiniA Agent Plugins Tests::MalformedPluginJsonSkipsPluginNotSiblings
+- MiniA Agent Plugins Tests::ForwardCompatUnknownTopLevelKey
+- MiniA Agent Plugins Tests::PlaceholderExpansionLeavesUnknownLiteral
+- MiniA Agent Plugins Tests::PathTraversalRejected
+- MiniA Agent Plugins Tests::McpJsonVersionMismatchDropsOnlyMcpSurface
+- MiniA Agent Plugins Tests::BadMcpServerEntrySkippedNotWholePlugin
