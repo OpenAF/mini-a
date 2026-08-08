@@ -2891,26 +2891,26 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
       }
       if (resolved === null) return  // external URL, absolute path, or escapes root — not wiki-internal
       if (nonCanonical) {
-        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, detail: "non-canonical internal path" })
+        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, detail: "non-canonical internal path", linkType: entry.type })
         return
       }
       // Cross-wiki mount link
       if (isString(resolved) && resolved.startsWith("@")) {
         var mres = self._resolveMountPath(resolved.endsWith(".md") ? resolved : resolved + "/index.md")
         if (!mres || !mres.mount) {
-          issues.push({ severity: "info", type: "unresolved_mount_link", page: p, target: entry.raw, mount: mres ? mres.name : resolved })
+          issues.push({ severity: "info", type: "unresolved_mount_link", page: p, target: entry.raw, mount: mres ? mres.name : resolved, linkType: entry.type })
         }
         return
       }
       var exists = self._backend.exists(resolved)
       if (!exists) {
-        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved })
+        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, linkType: entry.type })
       } else {
         if (!isNumber(incomingCount[resolved])) incomingCount[resolved] = 0
         incomingCount[resolved]++
         if (anchor.length > 0 && pageData[resolved]) {
           var wanted = anchor.toLowerCase(), anchors = self._markdownHeadings(pageData[resolved].body).map(function(h) { return self._headingAnchor(h.text) })
-          if (anchors.indexOf(wanted) < 0) issues.push({ severity: "error", type: "invalid_anchor", page: p, target: entry.raw, resolved: resolved, anchor: anchor })
+          if (anchors.indexOf(wanted) < 0) issues.push({ severity: "error", type: "invalid_anchor", page: p, target: entry.raw, resolved: resolved, anchor: anchor, linkType: entry.type })
         }
       }
     })

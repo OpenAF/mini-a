@@ -6213,7 +6213,7 @@ try {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
-    var isWikiMode = ["wiki", "plan", "apply", "reorg"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "plan", "apply", "reorg", "repair"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -6281,7 +6281,7 @@ try {
       }
 
       if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
-      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg") && hasWiki) reportDream("wiki", runner.dreamWiki())
+      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }

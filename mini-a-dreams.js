@@ -847,17 +847,22 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   var unique = function(arr) { var seen = {}, out = []; arr.forEach(function(c) { if (!seen[c.path]) { seen[c.path] = true; out.push(c) } }); return out }
   var resolveBroken = function(issue) {
     if (String(issue.target || "").startsWith("@")) return { reason: "mounted-wiki-unresolved" }
+    // Wiki-style [[...]] targets are always root-relative (per _wikiLinkTarget/lint), unlike
+    // md-style (label)(target) links which resolveLink resolves relative to the source page's
+    // directory — routing wiki-style targets through resolveLink would wrongly prefix them
+    // with the source page's directory for any page not at wiki root.
+    var isWikiStyle = issue.linkType === "wiki"
     var bits = String(issue.target || "").split("#"), rawPath = bits.shift(), anchor = bits.join("#")
-    var resolved = rawPath.length === 0 ? issue.page : wm.resolveLink(issue.page, rawPath)
+    var resolved = rawPath.length === 0 ? issue.page : (isWikiStyle ? rawPath.replace(/^\/+/, "") : wm.resolveLink(issue.page, rawPath))
     var attempts = []
     if (isString(resolved)) {
       attempts.push({ name: "exact-resolved-path", matches: catalogue.filter(function(c) { return c.path === resolved }) })
       attempts.push({ name: "exact-md-path", matches: catalogue.filter(function(c) { return c.path === resolved + ".md" }) })
       attempts.push({ name: "directory-index", matches: catalogue.filter(function(c) { return c.path === resolved.replace(/\/$/, "") + "/index.md" }) })
     } else if (rawPath.length > 0) {
-      resolved = wm.resolveLink(issue.page, rawPath + ".md")
+      resolved = isWikiStyle ? rawPath.replace(/^\/+/, "") + ".md" : wm.resolveLink(issue.page, rawPath + ".md")
       if (isString(resolved)) attempts.push({ name: "exact-md-path", matches: catalogue.filter(function(c) { return c.path === resolved }) })
-      var dirResolved = wm.resolveLink(issue.page, rawPath.replace(/\/$/, "") + "/index.md")
+      var dirResolved = isWikiStyle ? rawPath.replace(/^\/+/, "").replace(/\/$/, "") + "/index.md" : wm.resolveLink(issue.page, rawPath.replace(/\/$/, "") + "/index.md")
       if (isString(dirResolved)) attempts.push({ name: "directory-index", matches: catalogue.filter(function(c) { return c.path === dirResolved }) })
     }
     var needle = rawPath.replace(/\/$/, "").replace(/\.md$/i, ""), base = needle.replace(/.*\//, "")
@@ -881,13 +886,24 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     if (!found.candidate) { result.skipped.push(copyIssue(issue, { reason: found.reason })); return }
     var page = wm.read(issue.page)
     if (!isMap(page) || !isString(page.body)) { result.skipped.push(copyIssue(issue, { reason: "page-not-readable" })); return }
-    var rel = found.candidate.path === issue.page && found.anchor.length > 0 ? "" : wm._relativePath(issue.page, found.candidate.path)
-    var newTarget = rel + (found.anchor.length > 0 ? "#" + found.anchor : "")
-    var oldTarget = String(issue.target), replaced = false
-    var body = page.body.replace(/\[([^\]]*)\]\(([^)]+)\)/g, function(all, label, target) {
-      if (!replaced && String(target).trim() === oldTarget) { replaced = true; return "[" + label + "](" + newTarget + ")" }
-      return all
-    })
+    var oldTarget = String(issue.target), replaced = false, body
+    if (issue.linkType === "wiki") {
+      // Wiki-style [[...]] targets are root-relative and anchor-stripped by _wikiLinkTarget
+      // (see lint's link extraction), so the stored target matches the candidate path directly.
+      body = page.body.replace(/\[\[([^\]]+)\]\]/g, function(all, inner) {
+        if (replaced || wm._wikiLinkTarget(inner) !== oldTarget) return all
+        replaced = true
+        var pipeAt = inner.indexOf("|")
+        return "[[" + found.candidate.path + (pipeAt >= 0 ? inner.substring(pipeAt) : "") + "]]"
+      })
+    } else {
+      var rel = found.candidate.path === issue.page && found.anchor.length > 0 ? "" : wm._relativePath(issue.page, found.candidate.path)
+      var newTarget = rel + (found.anchor.length > 0 ? "#" + found.anchor : "")
+      body = page.body.replace(/\[([^\]]*)\]\(([^)]+)\)/g, function(all, label, target) {
+        if (!replaced && String(target).trim() === oldTarget) { replaced = true; return "[" + label + "](" + newTarget + ")" }
+        return all
+      })
+    }
     if (!replaced || body === page.body) { result.skipped.push(copyIssue(issue, { reason: "link-not-rewritable" })); return }
     var wr = wm.write(issue.page, page.meta, body)
     if (isMap(wr) && wr.ok === true) markFixed(issue, { resolved: found.candidate.path, strategy: found.strategy, reason: found.strategy })
