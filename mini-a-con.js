@@ -817,7 +817,7 @@ try {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), or reorg." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), reorg, or repair." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
@@ -5795,7 +5795,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, dryrun" },
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, dryrun" },
       { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
     helpCommands.push(
@@ -6236,9 +6236,10 @@ try {
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
     try {
-      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0) {
+      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0) {
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
         if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
+        if (parts.indexOf("repair") >= 0) dreamArgs.dreamwikimode = "repair"
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
           dreamArgs.dreamwikireorg = "true"

@@ -451,10 +451,11 @@ MiniADreams.prototype._wikiLintMemoryManager = function() {
 
 MiniADreams.prototype.dreamWiki = function(opts) {
   var self = this
-  // Modes: plan (propose only) | apply (deterministic fixes) | reorg (full agent loop).
+  // Modes: plan (propose only) | apply (deterministic fixes) | reorg (full agent loop) |
+  // repair (deterministic fixes only, no AGENTS.md upgrade/finalize — the fast, isolated version of apply).
   // 'lint' was dropped — it was 'plan' minus the proposal and duplicated /wiki lint.
   var wikiMode = isString(self._args.dreamwikimode) ? self._args.dreamwikimode.trim().toLowerCase() : ""
-  if (wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg") wikiMode = ""
+  if (wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg" && wikiMode !== "repair") wikiMode = ""
   var effectiveMode = wikiMode.length > 0 ? wikiMode : "apply"
   // apply now runs by default; dreamwikidryrun is the opt-out
   var isDryRun = toBoolean(self._args.dryrun) === true || toBoolean(self._args.dreamwikidryrun) === true
@@ -579,22 +580,12 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       var lintBefore = wmApply.lint(lintMemMgr, { staleDays: staleDays })
       defaultResult.lint_before = lintSummary(lintBefore)
 
-      var allRepairs = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
-      var changedPageSet = {}, repairPasses = 0, currentLint = lintBefore
-      for (var repairPass = 0; repairPass < 3; repairPass++) {
-        var passRepairs = self._repairWikiLint(wmApply, currentLint, { minPages: self._args.dreamwikiminpages })
-        repairPasses++
-        allRepairs.fixed = allRepairs.fixed.concat(passRepairs.fixed)
-        allRepairs.skipped = allRepairs.skipped.concat(passRepairs.skipped)
-        allRepairs.candidates = allRepairs.candidates.concat(passRepairs.candidates)
-        passRepairs.fixed.forEach(function(issue) { if (isString(issue.page)) changedPageSet[issue.page] = true })
-        if (passRepairs.pages_changed === 0) break
-        currentLint = wmApply.lint(lintMemMgr, { staleDays: staleDays })
-      }
-      allRepairs.pages_changed = Object.keys(changedPageSet).length
-      defaultResult.repairs = allRepairs
-      defaultResult.repair_passes = repairPasses
-      defaultResult.pages_changed = allRepairs.pages_changed
+      var loopResult = self._runWikiRepairLoop(wmApply, lintBefore, function() {
+        return wmApply.lint(lintMemMgr, { staleDays: staleDays })
+      }, 3, { minPages: self._args.dreamwikiminpages })
+      defaultResult.repairs = loopResult.repairs
+      defaultResult.repair_passes = loopResult.passes
+      defaultResult.pages_changed = loopResult.repairs.pages_changed
       defaultResult.repairs.fixed.forEach(function(issue) {
         defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
         if (issue.type === "missing_index") defaultResult.indexes_created++
@@ -622,6 +613,42 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     } catch(applyErr) {
       self._log("[dreams:wiki] Apply error: " + __miniAErrMsg(applyErr))
       return { ok: false, reason: "apply-error", error: __miniAErrMsg(applyErr) }
+    }
+  }
+
+  // repair: just the deterministic fixer — no AGENTS.md upgrade, no index/search/graph
+  // finalize. The fast, isolated way to run _repairWikiLint on its own (testing, or a quick
+  // link-repair pass you don't want bundled with a full apply).
+  if (effectiveMode === "repair") {
+    self._log("💤 [dreams] Starting wiki dream repair pass...")
+    try {
+      var wmRepair = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:repair] " + msg) })
+      var repairLintBefore = wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      defaultResult.lint_before = lintSummary(repairLintBefore)
+
+      var repairLoopResult = self._runWikiRepairLoop(wmRepair, repairLintBefore, function() {
+        return wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      }, 3, { minPages: self._args.dreamwikiminpages })
+      defaultResult.repairs = repairLoopResult.repairs
+      defaultResult.repair_passes = repairLoopResult.passes
+      defaultResult.pages_changed = repairLoopResult.repairs.pages_changed
+      defaultResult.repairs.fixed.forEach(function(issue) {
+        defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
+        if (issue.type === "missing_index") defaultResult.indexes_created++
+        else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
+      })
+
+      var repairLintAfter = wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      defaultResult.lint_after = lintSummary(repairLintAfter)
+      wmRepair.close()
+      self._log("💤 [dreams] Wiki dream repair complete — " + defaultResult.repairs.fixed.length + " issues fixed over " +
+        defaultResult.repair_passes + " pass(es), lint " +
+        defaultResult.lint_before.errors + "E/" + defaultResult.lint_before.warnings + "W -> " +
+        defaultResult.lint_after.errors + "E/" + defaultResult.lint_after.warnings + "W.")
+      return defaultResult
+    } catch(repairErr) {
+      self._log("[dreams:wiki] Repair error: " + __miniAErrMsg(repairErr))
+      return { ok: false, reason: "repair-error", error: __miniAErrMsg(repairErr) }
     }
   }
 
@@ -678,9 +705,26 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         })
       } catch(ignoreDreamModelAnswerLog) {}
     }
-    // The agent has just moved/merged/rewritten pages; finalize deterministically so the
-    // wiki is left reindexed, re-linked and with a rebuilt graph.
+    // The agent has just moved/merged/rewritten pages, which is exactly the kind of change
+    // that breaks links and leaves frontmatter/heading drift — and it did so working from
+    // its own judgment within a step budget, so it won't have caught everything. Run one
+    // bounded deterministic repair pass to clean up what it left behind, same as apply mode,
+    // before finalizing so the wiki is left reindexed, re-linked and with a rebuilt graph.
     var wmFinal = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:finalize] " + msg) })
+    var reorgLintBefore = wmFinal.lint(lintMemMgr, { staleDays: staleDays })
+    defaultResult.lint_before = lintSummary(reorgLintBefore)
+    var reorgLoopResult = self._runWikiRepairLoop(wmFinal, reorgLintBefore, function() {
+      return wmFinal.lint(lintMemMgr, { staleDays: staleDays })
+    }, 1, { minPages: self._args.dreamwikiminpages })
+    defaultResult.repairs = reorgLoopResult.repairs
+    defaultResult.repair_passes = reorgLoopResult.passes
+    defaultResult.pages_changed += reorgLoopResult.repairs.pages_changed
+    reorgLoopResult.repairs.fixed.forEach(function(issue) {
+      defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
+      if (issue.type === "missing_index") defaultResult.indexes_created++
+      else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
+    })
+
     var reorgFinalize = self._finalizeWiki(wmFinal, defaultResult)
     var reorgLint = lintSummary(wmFinal.lint(lintMemMgr, { staleDays: staleDays }))
     wmFinal.close()
@@ -700,9 +744,11 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   }
 }
 
-// _repairWikiLint performs only mechanical structure repairs. It intentionally leaves
-// content-dependent findings (especially broken links) for a human or reorg-mode LLM pass.
-// In dry-run mode it returns the same candidates without touching the wiki.
+// _repairWikiLint performs mechanical repairs only — structure, frontmatter, headings, and
+// broken links/anchors resolved with certainty against the page catalogue. Findings that need
+// semantic judgment (near_duplicate, orphan, memory_conflict, ambiguous link targets) are left
+// for a human or reorg-mode LLM pass. In dry-run mode it returns the same candidates without
+// touching the wiki.
 MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   var opts = isMap(options) ? options : {}
   var dryRun = opts.dryRun === true
@@ -788,8 +834,10 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   })
 
   // Build one catalogue for this pass. Resolution classes are tried in strength order;
-  // a class is accepted only when it produces one candidate.
-  var catalogue = wm.list("").filter(function(p) { return /\.md$/i.test(p) && p !== "AGENTS.md" && p !== "log.md" }).map(function(p) {
+  // a class is accepted only when it produces one candidate. This is a full read of every
+  // page, so skip it entirely on passes that have no broken_link/invalid_anchor to resolve.
+  var brokenIssues = issues.filter(function(i) { return i.type === "broken_link" || i.type === "invalid_anchor" })
+  var catalogue = brokenIssues.length === 0 ? [] : wm.list("").filter(function(p) { return /\.md$/i.test(p) && p !== "AGENTS.md" && p !== "log.md" }).map(function(p) {
     var pg = wm.read(p), meta = isMap(pg) && isMap(pg.meta) ? pg.meta : {}
     return { path: p, lower: p.toLowerCase(), base: p.replace(/.*\//, ""), stem: p.replace(/.*\//, "").replace(/\.md$/i, ""),
       title: isString(meta.title) ? meta.title.trim() : "", aliases: isArray(meta.aliases) ? meta.aliases : [],
@@ -828,7 +876,7 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     }
     return { reason: "no-candidate" }
   }
-  issues.filter(function(i) { return i.type === "broken_link" || i.type === "invalid_anchor" }).forEach(function(issue) {
+  brokenIssues.forEach(function(issue) {
     var found = resolveBroken(issue)
     if (!found.candidate) { result.skipped.push(copyIssue(issue, { reason: found.reason })); return }
     var page = wm.read(issue.page)
@@ -846,9 +894,23 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   })
 
   // Index/orphan repairs use the established generator so there is only one index format.
+  // Scoped to the affected index paths — regenerateIndexes() would otherwise rewrite every
+  // index in the wiki on every pass, and _finalizeWiki already does the unfiltered pass once.
   var indexIssues = issues.filter(function(i) { return i.type === "missing_index" || i.type === "index_missing_links" || i.type === "stale_index" || i.type === "structural_orphan" })
   if (indexIssues.length > 0) {
-    var reg = wm.regenerateIndexes()
+    // Include every ancestor index up to root, not just the paths lint flagged this pass:
+    // a brand-new nested section only reveals its parent's missing_index/index_missing_links
+    // issue once the child index.md actually exists, so without the ancestor chain a deep
+    // tree needs one repair pass per level to reach root. Adding ancestors here reaches root
+    // in a single regenerateIndexes() call, same as the old unfiltered behavior.
+    var indexPaths = {}
+    indexIssues.forEach(function(issue) {
+      var p = issue.type === "structural_orphan" ? issue.parent : issue.page
+      indexPaths[p] = true
+      var dir = p.replace(/[^\/]*$/, "")
+      while (dir.length > 0) { dir = dir.replace(/[^\/]*\/$/, ""); indexPaths[dir + "index.md"] = true }
+    })
+    var reg = wm.regenerateIndexes({ paths: Object.keys(indexPaths) })
     indexIssues.forEach(function(issue) {
       var indexPath = issue.type === "structural_orphan" ? issue.parent : issue.page
       if (isMap(reg) && isArray(reg.regenerated) && reg.regenerated.indexOf(indexPath) >= 0) markFixed(issue, { reason: "index-regenerated", physical_page: indexPath })
@@ -858,6 +920,31 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   result.pages_changed = Object.keys(changedPages).length
   return result
 }
+
+// _runWikiRepairLoop: repeatedly calls _repairWikiLint, re-linting only when a pass actually
+// changed pages, up to maxPasses. Shared by apply mode, reorg's post-agent cleanup, and the
+// standalone repair mode so the convergence/aggregation logic exists in one place. lintFn is
+// called to get a fresh lint result between passes — never on the last permitted pass, since
+// that result would just be discarded when the loop ends.
+MiniADreams.prototype._runWikiRepairLoop = function(wm, initialLint, lintFn, maxPasses, repairOpts) {
+  var self = this
+  var passesBound = isNumber(maxPasses) && maxPasses > 0 ? Math.round(maxPasses) : 1
+  var allRepairs = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
+  var changedPageSet = {}, passes = 0, currentLint = initialLint
+  for (var i = 0; i < passesBound; i++) {
+    var passRepairs = self._repairWikiLint(wm, currentLint, repairOpts || {})
+    passes++
+    allRepairs.fixed = allRepairs.fixed.concat(passRepairs.fixed)
+    allRepairs.skipped = allRepairs.skipped.concat(passRepairs.skipped)
+    allRepairs.candidates = allRepairs.candidates.concat(passRepairs.candidates)
+    passRepairs.fixed.forEach(function(issue) { if (isString(issue.page)) changedPageSet[issue.page] = true })
+    if (passRepairs.pages_changed === 0 || i === passesBound - 1) break
+    currentLint = lintFn()
+  }
+  allRepairs.pages_changed = Object.keys(changedPageSet).length
+  return { repairs: allRepairs, passes: passes }
+}
+
 // _finalizeWiki: the deterministic post-pass every write-mode wiki dream ends with, so a
 // dreamt wiki is always left reorganized, reindexed and re-linked:
 //   1. regenerate root + section index.md from live page metadata
@@ -1004,7 +1091,7 @@ MiniADreams.prototype.run = function() {
     self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
     self._log("  dreammode=      Explicit run mode: memory, wiki or both")
     self._log("  dreamwiki=true  Force wiki dream when memorych is also configured")
-    self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg")
+    self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg, repair")
     self._log("  dreammemorymode=Memory mode: plan, apply")
     self._log("  dreamwikidryrun=true  Propose without writing (opt-out of apply)")
     self._log("  dreamwikireorg= Enable the agent-driven structural reorg mode (true/false)")
