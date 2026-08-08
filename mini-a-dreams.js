@@ -422,6 +422,9 @@ var _WIKI_DREAM_GOAL =
   "IMPORTANT CONSTRAINTS:\n" +
   "- Do NOT edit AGENTS.md, index.md, or log.md. These are regenerated deterministically by the apply pass.\n" +
   "- Do NOT write to mounted wikis (@name/... paths). They are read-only.\n\n" +
+  "- Shell and filesystem tools are unavailable in this pass. Use only wiki operations and result_* tools.\n" +
+  "- A wiki write replaces the whole page. For an existing page, use a bounded line/section edit; do not rewrite a page merely to fix a link or frontmatter.\n" +
+  "- Lint results are paged. Filter by severity/type/page and inspect only the affected issue before changing a page.\n\n" +
   "Follow these steps in order:\n" +
   "1. Discovery: use wiki op=\"context\" for a compact overview, then op=\"lint\" for all issues, op=\"tree\" and op=\"browse\" for structure, op=\"backlinks\" for cross-references.\n" +
   "2. Plan: produce a short reorganisation plan in your context before writing. Folders with index.md are section sub-wikis. Keep existing paths valid unless you intentionally move them.\n" +
@@ -663,6 +666,21 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   })
   dreamArgs.usewiki     = "true"
   dreamArgs.wikiaccess  = "rw"
+  // A reorg should only be able to mutate the wiki through its constrained wiki
+  // operations. In particular, do not let an agent bypass spill-result guards by
+  // reading temporary files with `cat`, or alter the wiki root through shell tools.
+  dreamArgs.useshell    = false
+  dreamArgs.readwrite   = false
+  // Structural edits are never delegated to the low-cost controller. It may be
+  // configured for ordinary runs, but reorg decisions must stay on the main model.
+  dreamArgs.modellock   = "main"
+  // Some MCP catalogs expose a shell tool independently of Mini-A's top-level
+  // shell action. Deny it explicitly for dreams as well.
+  dreamArgs.mcpproxydeny = isString(dreamArgs.mcpproxydeny) && dreamArgs.mcpproxydeny.trim().length > 0
+    ? dreamArgs.mcpproxydeny + ",bash" : "bash"
+  dreamArgs.dreamwikisurgical = true
+  dreamArgs.wikilintresultlimit = isNumber(self._args.dreamwikilintresultlimit) && self._args.dreamwikilintresultlimit > 0
+    ? Math.round(self._args.dreamwikilintresultlimit) : 25
   dreamArgs.usememory   = (isDef(self._args.memorych) && String(self._args.memorych).trim().length > 0) ? "true" : "false"
   dreamArgs.memoryscope = "global"
   dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 60
@@ -730,11 +748,18 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     wmFinal.close()
 
     self._log("💤 [dreams] Wiki dream complete.")
+    var unresolvedErrors = reorgLint.errors > 0
     var out = merge(defaultResult, {
-      ok: true,
+      // Agent text is not proof that the pass completed. The fresh lint result is
+      // authoritative and leaves the caller with a machine-readable partial state.
+      ok: !unresolvedErrors,
       mode: "reorg",
       result: isString(result) ? result.substring(0, 500) : String(result || "").substring(0, 500)
     })
+    if (unresolvedErrors) {
+      out.partial = true
+      out.reason = "lint-errors-remain"
+    }
     out.finalize   = reorgFinalize
     out.lint_after = reorgLint
     return out

@@ -337,7 +337,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path","severity":"error|warning|info","types":"broken_link,invalid_anchor","page":"page.md","limit":N (lint filters/results){{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -13592,7 +13592,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
-    "dreamwikiminpages", "dreamwikimaxdepth", "dreamreport"
+    "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -15580,6 +15580,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiLintMaxPairs = isNumber(args.wikilintmaxpairs) ? args.wikilintmaxpairs : Number(args.wikilintmaxpairs)
     if (isNaN(_wikiLintMaxPairs)) _wikiLintMaxPairs = __
     args.wikilintmaxpairs = _$(_wikiLintMaxPairs, "args.wikilintmaxpairs").isNumber().default(250000)
+    var _wikiLintResultLimit = isNumber(args.wikilintresultlimit) ? args.wikilintresultlimit : Number(args.wikilintresultlimit)
+    if (isNaN(_wikiLintResultLimit)) _wikiLintResultLimit = __
+    args.wikilintresultlimit = _$(_wikiLintResultLimit, "args.wikilintresultlimit").isNumber().default(0)
+    args.dreamwikisurgical = _$(toBoolean(args.dreamwikisurgical), "args.dreamwikisurgical").isBoolean().default(false)
     args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
     args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
     args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
@@ -18728,7 +18732,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             } else if (wkOp === "lint") {
               global.__mini_a_metrics.wiki_ops_lint.inc()
               var wkLint = this._wikiManager.lint(this._memoryManager, { staleDays: this._wikiLintStaleDays })
-              wkResult = af.toTOON(wkLint)
+              var wkLintLimit = isNumber(wkParams.limit) && wkParams.limit > 0
+                ? Math.floor(wkParams.limit)
+                : (isNumber(args.wikilintresultlimit) && args.wikilintresultlimit > 0 ? args.wikilintresultlimit : 0)
+              var wkLintIssues = isArray(wkLint.issues) ? wkLint.issues : []
+              var wkLintSeverity = isString(wkParams.severity) ? wkParams.severity.trim().toLowerCase() : ""
+              var wkLintTypes = isString(wkParams.types) ? wkParams.types.split(",").map(function(v) { return v.trim() }).filter(function(v) { return v.length > 0 }) : []
+              var wkLintPage = isString(wkParams.page) ? wkParams.page.trim() : ""
+              var wkFilteredIssues = wkLintIssues.filter(function(issue) {
+                if (wkLintSeverity.length > 0 && String(issue.severity || "").toLowerCase() !== wkLintSeverity) return false
+                if (wkLintTypes.length > 0 && wkLintTypes.indexOf(String(issue.type || "")) < 0) return false
+                return wkLintPage.length === 0 || String(issue.page || "") === wkLintPage
+              })
+              if (wkLintLimit > 0) {
+                wkResult = af.toTOON({ summary: wkLint.summary, issues: wkFilteredIssues.slice(0, wkLintLimit), shown: Math.min(wkLintLimit, wkFilteredIssues.length), total: wkFilteredIssues.length, next: wkFilteredIssues.length > wkLintLimit ? "Refine severity, types, or page to inspect more issues." : __ })
+              } else wkResult = af.toTOON(wkLint)
             } else if (wkOp === "write") {
               global.__mini_a_metrics.wiki_ops_write.inc()
               if (args.wikiaccess !== "rw") {
@@ -18737,6 +18755,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 wkResult = "[ERROR] wiki write requires 'path'"
               } else if (wkContent.length === 0 && !wkWriteOpts.append) {
                 wkResult = "[ERROR] wiki write requires 'content'"
+              } else if (args.dreamwikisurgical === true && !wkWriteOpts.append && isUnDef(wkWriteOpts.lineInsert) && isUnDef(wkWriteOpts.lineStart) && isUnDef(wkWriteOpts.lineEnd) && isUnDef(wkWriteOpts.section) && isObject(this._wikiManager.read(wkPath))) {
+                wkResult = "[ERROR] dream wiki writes to an existing page require append, lineStart/lineEnd, lineInsert, or section; full-page replacement is disabled"
               } else {
                 var wkWrite = this._wikiManager.write(wkPath, wkContent, __, wkWriteOpts)
                 wkResult = isObject(wkWrite) && wkWrite.ok ? "Wrote " + wkPath : "[ERROR] " + (isObject(wkWrite) ? wkWrite.error : "write failed")

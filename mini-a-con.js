@@ -636,6 +636,7 @@ try {
     wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
+    wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
     wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'}." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
@@ -824,6 +825,7 @@ try {
     dreamwikireorg : { type: "boolean", default: false, description: "Allow structural wiki reorg operations." },
     dreamwikiminpages: { type: "number", description: "Minimum page count required before the deterministic index fixes run." },
     dreamwikimaxdepth: { type: "number", description: "Maximum folder depth considered during wiki reorg planning." },
+    dreamwikilintresultlimit: { type: "number", description: "Maximum lint issues returned per dream-agent request (default 25)." },
     dreamreport    : { type: "string", description: "Optional file path to write dream JSON report output." },
     ingestsource   : { type: "string", description: "Folder, git repository or page URL to ingest into the wiki." },
     ingesttype     : { type: "string", description: "Ingest source type: markdown, repo or url (auto-detected when unset)." },
@@ -6243,7 +6245,9 @@ try {
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
           dreamArgs.dreamwikireorg = "true"
-          dreamArgs.dreamwikiapproval = "auto"
+          // Keep the interactive command behind the existing approval gate. An
+          // unattended caller can still opt in explicitly with dreamwikiapproval=auto.
+          dreamArgs.dreamwikiapproval = "ask"
         }
       }
 
@@ -6270,10 +6274,15 @@ try {
       // nothing configured) reports it through the return value, not the log.
       var reportDream = function(label, res) {
         if (!isMap(res)) return
+        if (res.partial === true) {
+          print(colorifyText("Dream " + label + " completed partially: " + (res.reason || "verification incomplete"), errorColor))
+          print(printTree(res))
+          return
+        }
         if (res.ok === false) {
           var why = isString(res.reason) ? res.reason : "unknown"
           print(colorifyText("Dream " + label + " did not run: " + why + (isString(res.error) ? " — " + res.error : ""), errorColor))
-          if (why === "approval-required") print(colorifyText("  Use /dream reorg to approve, or set dreamwikiapproval=auto.", hintColor))
+          if (why === "approval-required") print(colorifyText("  Set dreamwikiapproval=auto explicitly to run an unattended reorganisation.", hintColor))
           if (why === "reorg-not-enabled") print(colorifyText("  Set dreamwikireorg=true to enable structural reorg.", hintColor))
           return
         }
