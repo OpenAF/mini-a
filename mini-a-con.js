@@ -2315,8 +2315,8 @@ try {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg"]
-            var dreamWikiModes = ["plan", "apply", "reorg", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "repair"]
+            var dreamWikiModes = ["plan", "apply", "reorg", "repair", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
