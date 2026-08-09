@@ -1764,6 +1764,8 @@
 
   exports.testSubtaskManagerDestroyCancelsWatchdog = function() {
     var manager = new SubtaskManager({}, {})
+    ow.test.assert(isUnDef(manager._watchdogPromise), true, "A local delegation manager should not start its watchdog before a subtask is submitted")
+    manager._startWatchdog()
     var watchdogPromise = manager._watchdogPromise
     var cancelReason = __
     var originalCancel = watchdogPromise.cancel

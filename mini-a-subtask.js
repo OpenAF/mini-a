@@ -76,8 +76,10 @@ var SubtaskManager = function(parentArgs, opts) {
     this._refreshWorkerProfiles()
   }
   
-  // Start watchdog for deadlines
-  this._startWatchdog()
+  // Remote workers can need heartbeat eviction before a subtask is submitted.
+  // Local delegation starts the watchdog lazily when there is actual work, so
+  // an otherwise idle console does not retain a background shutdown thread.
+  if (this.remoteDelegation) this._startWatchdog()
 }
 
 SubtaskManager.prototype._touchSubtask = function(subtask, reason) {
@@ -1324,6 +1326,7 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
   
   opts = _$(opts, "opts").isMap().default({})
   childArgs = _$(childArgs, "childArgs").isMap().default({})
+  this._startWatchdog()
   
   var depth = this.currentDepth + 1
   if (depth > this.maxDepth) {
@@ -1797,6 +1800,7 @@ SubtaskManager.prototype._processQueue = function() {
  */
 SubtaskManager.prototype._startWatchdog = function() {
   var parent = this
+  if (parent._running !== true || isDef(parent._watchdogPromise)) return
   
   this._watchdogPromise = $doV(function() {
     while (parent._running) {
