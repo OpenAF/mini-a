@@ -1762,6 +1762,22 @@
     manager.destroy()
   }
 
+  exports.testSubtaskManagerDestroyCancelsWatchdog = function() {
+    var manager = new SubtaskManager({}, {})
+    var watchdogPromise = manager._watchdogPromise
+    var cancelReason = __
+    var originalCancel = watchdogPromise.cancel
+    watchdogPromise.cancel = function(reason) {
+      cancelReason = reason
+      return originalCancel.call(this, reason)
+    }
+
+    manager.destroy()
+
+    ow.test.assert(manager._running, false, "Destroy should stop the watchdog loop")
+    ow.test.assert(cancelReason, "Subtask manager stopped", "Destroy should interrupt the watchdog immediately")
+  }
+
   exports.testSubtaskManagerStripsParentOnlyChildArgs = function() {
     var manager = new SubtaskManager({
       goal: "parent goal",

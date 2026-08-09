@@ -342,6 +342,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerNormalizesWorkerSkills
 
+- name: MiniA Core Tests::SubtaskWatchdogShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerDestroyCancelsWatchdog
+
 - name: MiniA Core Tests::SubtaskChildArgSanitization
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -808,6 +813,7 @@ todo:
 - MiniA Core Tests::ProxyDispatchRejectsMisplacedDownstreamInputs
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization
+- MiniA Core Tests::SubtaskWatchdogShutdown
 - MiniA Core Tests::SubtaskChildArgSanitization
 - MiniA Core Tests::SubtaskExplicitChildArgs
 - MiniA Core Tests::SubtaskCancelStopsLocalChild

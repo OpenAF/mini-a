@@ -68,6 +68,7 @@ var SubtaskManager = function(parentArgs, opts) {
   }
 
   this._running = true
+  this._watchdogPromise = __
   this._transitionLock = "mini_a_subtask_lock_" + genUUID()
 
   if (this.remoteDelegation) {
@@ -142,6 +143,9 @@ SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
  */
 SubtaskManager.prototype.destroy = function() {
   this._running = false
+  if (isDef(this._watchdogPromise) && isFunction(this._watchdogPromise.cancel)) {
+    try { this._watchdogPromise.cancel("Subtask manager stopped") } catch(ignoreWatchdogCancel) {}
+  }
 }
 
 SubtaskManager.prototype._normalizeWorkers = function(workers) {
@@ -1765,7 +1769,7 @@ SubtaskManager.prototype._processQueue = function() {
 SubtaskManager.prototype._startWatchdog = function() {
   var parent = this
   
-  $doV(function() {
+  this._watchdogPromise = $doV(function() {
     while (parent._running) {
       try {
         var now = new Date().getTime()

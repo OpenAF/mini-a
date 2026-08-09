@@ -701,6 +701,9 @@ MiniA.prototype._stopAgentResources = function() {
         }.bind(this))
       }
     } catch(ignoreSubtaskStop) {}
+    try {
+      if (isFunction(this._subtaskManager.destroy)) this._subtaskManager.destroy()
+    } catch(ignoreSubtaskDestroy) {}
   }
 
   if (isDef(this._regHttpServer) && isDef(ow) && isDef(ow.server) && isDef(ow.server.httpd) && typeof ow.server.httpd.stop === "function") {
