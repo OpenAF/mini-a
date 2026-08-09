@@ -69,6 +69,7 @@ var SubtaskManager = function(parentArgs, opts) {
 
   this._running = true
   this._watchdogPromise = __
+  this._watchdogWakeSignal = new java.lang.Object()
   this._transitionLock = "mini_a_subtask_lock_" + genUUID()
 
   if (this.remoteDelegation) {
@@ -143,6 +144,16 @@ SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
  */
 SubtaskManager.prototype.destroy = function() {
   this._running = false
+  // $doV cancellation does not interrupt sleep(..., true), so wake the
+  // watchdog explicitly instead of making console shutdown wait for its
+  // five-second polling interval.
+  if (isDef(this._watchdogWakeSignal)) {
+    try {
+      sync(function() {
+        this._watchdogWakeSignal.notifyAll()
+      }.bind(this), this._watchdogWakeSignal)
+    } catch(ignoreWatchdogWake) {}
+  }
   if (isDef(this._watchdogPromise) && isFunction(this._watchdogPromise.cancel)) {
     try { this._watchdogPromise.cancel("Subtask manager stopped") } catch(ignoreWatchdogCancel) {}
   }
@@ -1867,8 +1878,15 @@ SubtaskManager.prototype._startWatchdog = function() {
         // Ignore watchdog errors
       }
       
-      // Check every 5 seconds
-      sleep(5000, true)
+      // Check every 5 seconds, but allow destroy() to wake this wait
+      // immediately so an idle delegated console can exit promptly.
+      if (parent._running) {
+        try {
+          sync(function() {
+            if (parent._running) parent._watchdogWakeSignal.wait(5000)
+          }, parent._watchdogWakeSignal)
+        } catch(ignoreWatchdogWake) {}
+      }
     }
   })
 }
