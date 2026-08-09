@@ -56,6 +56,10 @@ help:
   - name     : wikihttptimeout
     desc     : HTTP wiki request timeout in milliseconds (default 30000)
     mandatory: false
+  - name     : wikiartifactrefreshsecs
+    desc     : Recheck an HTTP or bundled-S3 artifact cache after this many seconds between wiki requests (0 disables; default 0)
+    example  : "300"
+    mandatory: false
   - name     : usewikigraph
     desc     : "Opt in to graph-backed related-page hints in restricted search. Hints remain opaque read references and do not expose graph paths or relationship metadata."
     example  : "true"
@@ -255,6 +259,7 @@ jobs:
       s3artifactbundle        : toBoolean.isBoolean.default(false)
       wikihttpindexurl        : isString.default(__)
       wikihttptimeout         : toNumber.isNumber.default(30000)
+      wikiartifactrefreshsecs : toNumber.isNumber.default(0)
       wikiindexdir            : isString.default(__)
       wikilexical             : isString.default(__)
       usewikigraph            : toBoolean.isBoolean.default(false)

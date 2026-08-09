@@ -298,6 +298,31 @@
     ow.test.assert(__miniAWikiBasicAuth("user", "pass"), "Basic dXNlcjpwYXNz", "HTTP basic auth should be correctly encoded")
   }
 
+  exports.testPeriodicArtifactBundleRefreshReopensCachedRuntime = function() {
+    var searchesClosed = 0, graphsClosed = 0, graphsOpened = 0, hydrations = 0
+    var fake = {
+      _config: { wikiartifactrefreshsecs: 60, s3artifactbundle: true },
+      _backendType: "s3",
+      _artifactLastCheckAt: 0,
+      _searchIndex: { close: function() { searchesClosed++ } },
+      _graph: { close: function() { graphsClosed++ } },
+      _hydrateS3Artifacts: function() { hydrations++; return true },
+      _initializeGraph: function() { graphsOpened++ },
+      _logFn: function() {}
+    }
+    ow.test.assert(MiniAWikiManager.prototype._maybeRefreshArtifactBundle.call(fake), true, "changed S3 bundle should refresh the local runtime")
+    ow.test.assert(searchesClosed, 1, "refresh should close the old Lucene reader")
+    ow.test.assert(graphsClosed, 1, "refresh should close the old graph reader")
+    ow.test.assert(graphsOpened, 1, "refresh should reopen graph state")
+    ow.test.assert(hydrations, 1, "refresh should hydrate once")
+    ow.test.assert(MiniAWikiManager.prototype._maybeRefreshArtifactBundle.call(fake), false, "refresh interval should suppress an immediate second metadata probe")
+    ow.test.assert(hydrations, 1, "suppressed refresh should not hydrate again")
+
+    fake._config.s3artifactbundle = false
+    fake._artifactLastCheckAt = 0
+    ow.test.assert(MiniAWikiManager.prototype._maybeRefreshArtifactBundle.call(fake), false, "individual S3 artifact trees should not be periodically refreshed")
+  }
+
   exports.testHttpBackendIsReadOnly = function() {
     var hydrate = MiniAWikiManager.prototype._hydrateHttpArtifacts
     try {
@@ -1137,9 +1162,10 @@
     ow.test.assert(denied.windowSeconds, 3600, "restricted budget errors should report the budget window")
     ow.test.assert(denied.retryAfterSeconds > 0, true, "restricted budget errors should give retry guidance")
     ow.test.assert(denied.message.indexOf("avoid parallel fallback requests") >= 0, true, "restricted budget errors should discourage repeated fallback requests")
-    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/", wikilexical: "{ language: 'french', synonyms: [['velo', 'bicyclette']] }" }, { access: "ro" })
+    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/", wikiartifactrefreshsecs: 300, wikilexical: "{ language: 'french', synonyms: [['velo', 'bicyclette']] }" }, { access: "ro" })
     ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
     ow.test.assert(cfg.s3artifactprefix, "published-cache/", "MCP configuration should pass the S3 artifact prefix to the wiki manager")
+    ow.test.assert(cfg.wikiartifactrefreshsecs, 300, "MCP configuration should pass the artifact refresh interval to the wiki manager")
     ow.test.assert(cfg.wikilexical.indexOf("french") >= 0, true, "MCP configuration should pass lexical configuration to the wiki manager")
   }
 

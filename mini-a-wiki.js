@@ -370,6 +370,7 @@ MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
 }
 
 MiniAWikiManager.prototype._safeListPages = function(prefix) {
+  this._maybeRefreshArtifactBundle()
   var self = this
   return this._backend.list(prefix).filter(function(p) {
     return isString(p) && p.endsWith('.md') && !self._isHiddenPath(p)
@@ -818,11 +819,10 @@ MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
   if (toBoolean(this._config.s3artifactbundle) === true) {
     var bundleKey = artifactPrefix + "mini-a-wiki-index.zip"
     var s3 = this._backend.client
-    this._hydrateArtifactBundle(function() {
+    return this._hydrateArtifactBundle(function() {
       var stat = s3.statObject(bucket, bundleKey)
       return { etag: isDef(stat.etag) ? String(stat.etag) : "", lastModified: isDef(stat.modifiedTime) ? String(stat.modifiedTime) : "" }
     }, function() { return s3.getObjectStream(bucket, bundleKey) }, "s3", bundleKey)
-    return
   }
   var root = this._getIndexRoot()
   try {
@@ -851,8 +851,10 @@ MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
       }
     })
     if (restored > 0) this._logFn("info", "Hydrated " + restored + " wiki search/graph artifacts from S3")
+    return false
   } catch(e) {
     this._logFn("warn", "Failed to hydrate wiki search/graph artifacts from S3: " + __miniAErrMsg(e))
+    return false
   }
 }
 
@@ -1251,6 +1253,7 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
 }
 
 MiniAWikiManager.prototype.graph = function(op, params) {
+  this._maybeRefreshArtifactBundle()
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
   var mountGraphRequest = (action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")
@@ -1370,6 +1373,13 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : (this._backendType === "http" ? this._makeHttpBackend(cfg) : this._makeFsBackend(cfg))))
   this._hydrateS3Artifacts()
   if (this._backendType === "http") this._hydrateHttpArtifacts()
+  this._artifactLastCheckAt = new Date().getTime()
+  this._initializeGraph()
+  this._bootstrapWiki()
+}
+
+MiniAWikiManager.prototype._initializeGraph = function() {
+  var cfg = this._config
   if (toBoolean(cfg.usegraph) === true) {
     try {
       loadLib("mini-a-graph.js")
@@ -1398,7 +1408,6 @@ MiniAWikiManager.prototype.configure = function(config) {
       this._graph = __
     }
   }
-  this._bootstrapWiki()
 }
 
 MiniAWikiManager.prototype._isArchiveRoot = function(root) {
@@ -2129,7 +2138,7 @@ MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
     conn.setConnectTimeout(timeout); conn.setReadTimeout(timeout); conn.setRequestMethod(method); auth(conn)
     return conn
   }
-  this._hydrateArtifactBundle(function() {
+  return this._hydrateArtifactBundle(function() {
     var conn = connect("HEAD"), code = Number(conn.getResponseCode())
     if (code < 200 || code >= 300) throw "HTTP bundle metadata returned " + code
     return { etag: String(conn.getHeaderField("ETag") || ""), lastModified: String(conn.getHeaderField("Last-Modified") || "") }
@@ -2138,6 +2147,38 @@ MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
     if (code < 200 || code >= 300) throw "HTTP bundle download returned " + code
     return conn.getInputStream()
   }, "http", bundleUrl)
+}
+
+// Remote artifact bundles are immutable snapshots. A long-lived server may
+// cheaply probe their metadata between requests and replace the whole local
+// snapshot only when it changed. Individual S3 artifacts deliberately do not
+// participate: mixing files from two Lucene generations is unsafe.
+MiniAWikiManager.prototype._maybeRefreshArtifactBundle = function() {
+  var seconds = Number(this._config.wikiartifactrefreshsecs)
+  if (!isNumber(seconds) || seconds <= 0 || this._artifactRefreshInProgress === true) return false
+  var refreshable = this._backendType === "http" || (this._backendType === "s3" && toBoolean(this._config.s3artifactbundle) === true)
+  if (!refreshable) return false
+  var now = new Date().getTime()
+  var last = isNumber(this._artifactLastCheckAt) ? this._artifactLastCheckAt : 0
+  if (last > 0 && now - last < seconds * 1000) return false
+  this._artifactLastCheckAt = now
+  this._artifactRefreshInProgress = true
+  try {
+    var changed = this._backendType === "http" ? this._hydrateHttpArtifacts() : this._hydrateS3Artifacts()
+    if (changed !== true) return false
+    if (isObject(this._searchIndex) && isFunction(this._searchIndex.close)) this._searchIndex.close()
+    this._searchIndex = __
+    if (isObject(this._graph) && isFunction(this._graph.close)) this._graph.close()
+    this._graph = __
+    this._initializeGraph()
+    this._logFn("info", "Refreshed wiki search/graph artifact bundle")
+    return true
+  } catch(e) {
+    this._logFn("warn", "Failed to refresh wiki search/graph artifact bundle: " + __miniAErrMsg(e))
+    return false
+  } finally {
+    this._artifactRefreshInProgress = false
+  }
 }
 
 MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
@@ -2426,6 +2467,7 @@ MiniAWikiManager.prototype._sliceLines = function(lines, options) {
 
 MiniAWikiManager.prototype.read = function(path, options) {
   if (!isString(path) || path.trim().length === 0) return __
+  this._maybeRefreshArtifactBundle()
   var trimmed = path.trim()
   // Mount routing: @name/localpath
   if (trimmed.startsWith("@")) {
@@ -2653,6 +2695,7 @@ MiniAWikiManager.prototype._snippetFromContent = function(content, pattern, cont
 
 MiniAWikiManager.prototype.search = function(query, options) {
   if (!isString(query) || query.trim().length === 0) return []
+  this._maybeRefreshArtifactBundle()
   var opts       = isObject(options) ? options : {}
   var limit      = isNumber(opts.limit)        && opts.limit        > 0 ? opts.limit        : 20
   var contextN   = isNumber(opts.contextLines) && opts.contextLines > 0 ? Math.min(opts.contextLines, 10) : 0

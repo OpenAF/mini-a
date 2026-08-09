@@ -943,6 +943,7 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `s3artifactbundle` | boolean | `false` | Hydrate S3 Lucene/graph state from one zip bundle |
 | `wikihttpindexurl` | string | - | HTTP bundle URL; defaults to `<wikiurl>/mini-a-wiki-index.zip` |
 | `wikihttptimeout` | number | `30000` | HTTP wiki request timeout in milliseconds |
+| `wikiartifactrefreshsecs` | number | `0` | Recheck HTTP or bundled-S3 artifact metadata between wiki requests; `0` disables periodic refresh |
 | `wikilexical` | SLON/JSON | `{ language: "english" }` | Lucene lexical configuration: language, synonym rules, and opt-in enhanced retrieval features |
 | `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
@@ -1149,7 +1150,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `wikiroot` | string | `.` | Wiki filesystem root path |
 | `wikibackend` | string | `fs` | Wiki backend (`fs`, `s3`, `s3fs`, `es`, `http`) — same as regular wiki settings |
 
-For `wikibackend=http`, host pages plus `mini-a-wiki-index.zip` (Lucene and optional graph cache). It is read-only and refreshes the bundle only at process start; use `wikihttpindexurl` to override the bundle URL and `wikihttptimeout` to set its timeout. `s3artifactbundle=true` uses the same zip format under `wikis3artifactprefix`.
+For `wikibackend=http`, host pages plus `mini-a-wiki-index.zip` (Lucene and optional graph cache). It is read-only; use `wikihttpindexurl` to override the bundle URL, `wikihttptimeout` to set its timeout, and `wikiartifactrefreshsecs` to refresh a long-lived instance between requests. `s3artifactbundle=true` uses the same zip format under `wikis3artifactprefix`.
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Report what would change without writing anything back |
 | `dreamwikimode` | string | `apply` | Wiki mode: `lint`, `plan`, `apply`, `reorg` |

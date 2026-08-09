@@ -4,7 +4,7 @@
 
 ### Wiki: static HTTP(S) backend and artifact bundles
 
-**Change**: Read-only `wikibackend=http` wikis fetch pages from a static server while consuming a published `mini-a-wiki-index.zip` for catalog, Lucene search, and graph state. S3 can opt into the same bundle with `s3artifactbundle=true`; remote ETag/Last-Modified metadata is checked when the process starts.
+**Change**: Read-only `wikibackend=http` wikis fetch pages from a static server while consuming a published `mini-a-wiki-index.zip` for catalog, Lucene search, and graph state. S3 can opt into the same bundle with `s3artifactbundle=true`; set `wikiartifactrefreshsecs` to periodically recheck remote ETag/Last-Modified metadata in long-lived processes.
 
 ### Wiki: automated knowledge ingestion (`mini-a-ingest.js`)
 

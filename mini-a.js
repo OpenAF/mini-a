@@ -7453,6 +7453,7 @@ MiniA.prototype._initWiki = function(args) {
       s3artifactbundle: args.s3artifactbundle,
       wikihttpindexurl: args.wikihttpindexurl,
       wikihttptimeout: args.wikihttptimeout,
+      wikiartifactrefreshsecs: args.wikiartifactrefreshsecs,
       wikilexical: args.wikilexical,
       wikimetacache: args.wikimetacache,
       wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
@@ -13680,7 +13681,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
     "lcescalatedefer", "lcbudget", "llmcomplexity",
-    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout",
+    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
@@ -15675,6 +15676,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiHttpTimeout = isNumber(args.wikihttptimeout) ? args.wikihttptimeout : Number(args.wikihttptimeout)
     if (isNaN(_wikiHttpTimeout)) _wikiHttpTimeout = __
     args.wikihttptimeout = _$(_wikiHttpTimeout, "args.wikihttptimeout").isNumber().default(30000)
+    var _wikiArtifactRefreshSecs = isNumber(args.wikiartifactrefreshsecs) ? args.wikiartifactrefreshsecs : Number(args.wikiartifactrefreshsecs)
+    if (isNaN(_wikiArtifactRefreshSecs)) _wikiArtifactRefreshSecs = __
+    args.wikiartifactrefreshsecs = _$(_wikiArtifactRefreshSecs, "args.wikiartifactrefreshsecs").isNumber().default(0)
     if (isUnDef(args.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) args.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
     if (isDef(args.wikilexical) && !isString(args.wikilexical) && !isMap(args.wikilexical)) throw new Error("args.wikilexical must be a SLON/JSON string or object")
     args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)

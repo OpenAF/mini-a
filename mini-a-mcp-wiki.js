@@ -387,6 +387,7 @@ function __miniAMcpWikiBuildConfig(args, options) {
     s3artifactbundle    : toBoolean(args.s3artifactbundle) === true,
     wikihttpindexurl    : isString(args.wikihttpindexurl) && args.wikihttpindexurl.trim().length > 0 ? args.wikihttpindexurl.trim() : __,
     wikihttptimeout     : isNumber(Number(args.wikihttptimeout)) ? Number(args.wikihttptimeout) : 30000,
+    wikiartifactrefreshsecs: isNumber(Number(args.wikiartifactrefreshsecs)) ? Number(args.wikiartifactrefreshsecs) : 0,
     wikimetacache       : isDef(args.wikimetacache) ? toBoolean(args.wikimetacache) : true,
     usegraph            : (isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false) || isString(wikiGraphFalkorHost),
     wikigraphcommunity  : isString(args.wikigraphcommunity) && args.wikigraphcommunity.trim().length > 0 ? args.wikigraphcommunity.trim() : __,

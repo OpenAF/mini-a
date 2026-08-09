@@ -527,8 +527,9 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `s3artifactbundle` | Use `<wikis3artifactprefix>/mini-a-wiki-index.zip` for S3 cache hydration | `false` |
 | `wikihttpindexurl` | Optional HTTP artifact-bundle URL; defaults to `<wikiurl>/mini-a-wiki-index.zip` | - |
 | `wikihttptimeout` | HTTP wiki request timeout in milliseconds | `30000` |
+| `wikiartifactrefreshsecs` | Recheck HTTP or bundled-S3 artifact metadata between wiki requests; `0` disables periodic refresh | `0` |
 
-Static HTTP wikis are read-only: pages are fetched live from `wikiurl`, while `list`, search, and graph use a published `mini-a-wiki-index.zip` containing `.mini-a-wiki-lucene/` and optionally `.mini-a-wiki-graph/graph.json`. Bundle changes are checked at startup only, so restart long-running MCP servers after republishing. The Lucene-derived catalog excludes pages omitted from the search index.
+Static HTTP wikis are read-only: pages are fetched live from `wikiurl`, while `list`, search, and graph use a published `mini-a-wiki-index.zip` containing `.mini-a-wiki-lucene/` and optionally `.mini-a-wiki-graph/graph.json`. Set `wikiartifactrefreshsecs` to refresh a long-running server after republishing; `0` retains startup-only checks. The Lucene-derived catalog excludes pages omitted from the search index.
 
 See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations, mounts, graphs, and publishing static bundles.
 | `wikirestrictprofile` | `mcp-wiki-safe` restricted retrieval defaults profile (`tight`, `moderate`, or `relaxed`); `tight` preserves legacy defaults and individual `wikirestrict*` settings override profile values | `tight` |
