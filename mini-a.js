@@ -659,6 +659,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._stopRequested = false
   this._stopReason = ""
   this._stopRequestedAt = __
+  this._resourcesStopped = false
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -684,6 +685,12 @@ load("mini-a-sandbox.js")
 load("mini-a-tool-selection.js")
 
 MiniA.prototype._stopAgentResources = function() {
+  // This is invoked both by the console finalizer and by the OpenAF shutdown
+  // hook. Destroying an already-stopped stdio MCP client can wait on its
+  // worker promise again, so make resource teardown strictly once-only.
+  if (this._resourcesStopped === true) return
+  this._resourcesStopped = true
+
   if (isFunction(MiniA._releaseMetricsChannel)) MiniA._releaseMetricsChannel(this)
   this._metricschCollecting = false
   this._metricschRegistered = false
@@ -726,11 +733,18 @@ MiniA.prototype._stopAgentResources = function() {
         try { client.destroy() } catch(ignoreMcpDestroyErr) {}
       }
     }.bind(this))
+    this._mcpConnections = {}
+  }
+
+  if (this._useMcpProxy === true && isFunction(MiniA._destroyMcpProxyConnections)) {
+    try { MiniA._destroyMcpProxyConnections(this._id) } catch(ignoreMcpProxyDestroyErr) {}
   }
 
   if (isObject(this._wikiManager) && isFunction(this._wikiManager.close)) {
     try { this._wikiManager.close() } catch(ignoreWikiCloseErr) {}
   }
+
+  if (isFunction(MiniA._untrackInstance)) MiniA._untrackInstance(this)
 }
 
 MiniA.prototype.requestStop = function(reason, options) {
@@ -809,6 +823,13 @@ MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
   if (!isArray(MiniA._activeInstances)) MiniA._activeInstances = []
   if (MiniA._activeInstances.indexOf(instance) === -1) MiniA._activeInstances.push(instance)
+}
+
+MiniA._untrackInstance = function(instance) {
+  if (!isObject(instance) || !isArray(MiniA._activeInstances)) return
+  MiniA._activeInstances = MiniA._activeInstances.filter(function(activeInstance) {
+    return activeInstance !== instance
+  })
 }
 
 MiniA._registerMetricsChannel = function(agent, channelName, options) {
@@ -894,6 +915,29 @@ MiniA._destroyAllMcpConnections = function() {
   })
 }
 
+MiniA._destroyMcpProxyConnections = function(ownerId) {
+  var state = global.__mcpProxyState__
+  if (!isObject(state)) return false
+
+  // During normal agent teardown only the agent that configured the proxy may
+  // close it. The process shutdown hook deliberately omits ownerId so it can
+  // clean up a partially initialized proxy as well.
+  if (isString(ownerId) && ownerId.length > 0 && state.ownerId !== ownerId) return false
+
+  var destroyedClients = []
+  Object.keys(state.connections || {}).forEach(function(connectionId) {
+    var entry = state.connections[connectionId]
+    var client = isObject(entry) ? entry.client : __
+    if (!isObject(client) || typeof client.destroy !== "function" || destroyedClients.indexOf(client) >= 0) return
+    destroyedClients.push(client)
+    try { client.destroy() } catch(ignoreProxyClientDestroy) {}
+  })
+
+  delete global.__mcpProxyState__
+  delete global.__mcpProxyHelpers__
+  return true
+}
+
 MiniA._stopAllRegistrationServers = function() {
   if (!isArray(MiniA._activeInstances)) return
   if (isUnDef(ow) || isUnDef(ow.server) || isUnDef(ow.server.httpd) || typeof ow.server.httpd.stop !== "function") return
@@ -940,14 +984,10 @@ MiniA._registerShutdownHook = function() {
     try { MiniA._stopAllAgentResources() } catch(ignoreAgentStopError) {}
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
+    try { MiniA._destroyMcpProxyConnections() } catch(ignoreMcpProxyCleanupError) {}
     try { MiniA._cleanupSandboxTempFiles() } catch(ignoreSandboxTempCleanupError) {}
     try { MiniA._cleanupProxyTempFiles() } catch(ignoreTempCleanupError) {}
     try { MiniA._stopAllProgCallServers() } catch(ignoreProgCallStopError) {}
-    try {
-      if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
-        $mcp.destroy()
-      }
-    } catch(ignoreMcpDestroy) {}
   })
 
   MiniA._shutdownHookRegistered = true
@@ -10218,6 +10258,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
     // Initialize all downstream MCP connections
     var state = global.__mcpProxyState__
+    state.ownerId = parent._id
     mcpConfigs.forEach(function(descriptor, index) {
       var configObject = descriptor
       if (isString(descriptor)) {

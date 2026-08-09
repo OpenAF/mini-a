@@ -1812,6 +1812,50 @@
     ow.test.assert(destroyed, true, "Agent teardown should destroy its subtask manager")
   }
 
+  exports.testStopAgentResourcesIsIdempotentAndUntracksAgent = function() {
+    var agent = createAgent()
+    var destroyed = 0
+    agent._mcpConnections = {
+      "test-client": {
+        destroy: function() { destroyed++ }
+      }
+    }
+
+    agent._stopAgentResources()
+    agent._stopAgentResources()
+
+    ow.test.assert(destroyed, 1, "Agent teardown should destroy each MCP client only once")
+    ow.test.assert(Object.keys(agent._mcpConnections).length, 0, "Agent teardown should release MCP references")
+    ow.test.assert(MiniA._activeInstances.indexOf(agent) < 0, true, "Stopped agent should not remain in global shutdown tracking")
+  }
+
+  exports.testDestroyMcpProxyConnectionsClosesOwnerClientsOnce = function() {
+    var savedProxyState = global.__mcpProxyState__
+    var savedProxyHelpers = global.__mcpProxyHelpers__
+    var destroyed = 0
+    var sharedClient = { destroy: function() { destroyed++ } }
+    try {
+      global.__mcpProxyState__ = {
+        ownerId: "proxy-owner",
+        connections: {
+          a: { client: sharedClient },
+          b: { client: sharedClient }
+        }
+      }
+      global.__mcpProxyHelpers__ = { stale: true }
+
+      ow.test.assert(MiniA._destroyMcpProxyConnections("another-agent"), false, "A non-owner must not close another agent's proxy")
+      ow.test.assert(destroyed, 0, "A non-owner must not destroy proxy clients")
+      ow.test.assert(MiniA._destroyMcpProxyConnections("proxy-owner"), true, "The proxy owner should close its downstream clients")
+      ow.test.assert(destroyed, 1, "A shared proxy client should be destroyed once")
+      ow.test.assert(isUnDef(global.__mcpProxyState__), true, "Proxy state should be released after teardown")
+      ow.test.assert(isUnDef(global.__mcpProxyHelpers__), true, "Proxy helpers should be released after teardown")
+    } finally {
+      global.__mcpProxyState__ = savedProxyState
+      global.__mcpProxyHelpers__ = savedProxyHelpers
+    }
+  }
+
   exports.testSubtaskManagerStripsParentOnlyChildArgs = function() {
     var manager = new SubtaskManager({
       goal: "parent goal",

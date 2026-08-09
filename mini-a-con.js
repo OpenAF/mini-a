@@ -4848,6 +4848,14 @@ try {
       traceSink = createDebugTrace(goalText)
       traceSink("goal", { goal: goalText })
     }
+
+    // The console retains the previous agent only for display/history. Its
+    // runtime resources (delegation watchdogs, MCP clients and servers) must
+    // not survive into the next prompt, otherwise /exit has to tear down every
+    // agent created during the session.
+    if (isObject(activeAgent) && isFunction(activeAgent._stopAgentResources)) {
+      try { activeAgent._stopAgentResources() } catch(ignorePreviousAgentStop) {}
+    }
     var agent = new MiniA()
     activeAgent = agent
     agent.setInteractionFn(function(event, message) {

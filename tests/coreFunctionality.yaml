@@ -352,6 +352,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testStopAgentResourcesDestroysSubtaskManager
 
+- name: MiniA Core Tests::AgentResourceShutdownIdempotent
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStopAgentResourcesIsIdempotentAndUntracksAgent
+
+- name: MiniA Core Tests::ProxyMcpShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDestroyMcpProxyConnectionsClosesOwnerClientsOnce
+
 - name: MiniA Core Tests::SubtaskChildArgSanitization
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -820,6 +830,8 @@ todo:
 - MiniA Core Tests::WorkerSkillNormalization
 - MiniA Core Tests::SubtaskWatchdogShutdown
 - MiniA Core Tests::AgentSubtaskManagerShutdown
+- MiniA Core Tests::AgentResourceShutdownIdempotent
+- MiniA Core Tests::ProxyMcpShutdown
 - MiniA Core Tests::SubtaskChildArgSanitization
 - MiniA Core Tests::SubtaskExplicitChildArgs
 - MiniA Core Tests::SubtaskCancelStopsLocalChild
