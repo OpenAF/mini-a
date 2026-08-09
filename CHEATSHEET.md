@@ -7,6 +7,7 @@ A comprehensive quick reference for all Mini-A parameters, modes, and common usa
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Agent Files & Plugins](#agent-files--plugins)
 - [Core Parameters](#core-parameters)
 - [Model Configuration](#model-configuration)
   - [Model Strategy Modes](#model-strategy-modes)
@@ -51,7 +52,7 @@ export OAF_LC_MODEL="(type: openai, model: gpt-3.5-turbo, key: 'your-key')"
 mini-a goal="summarize this repository"
 ```
 
-## Agent Files
+## Agent Files & Plugins
 
 - Use `agent=<path-or-inline-markdown>` to preload Mini-A parameters from YAML frontmatter metadata.
 - Use `--agent` to print a starter agent markdown template.
@@ -59,6 +60,33 @@ mini-a goal="summarize this repository"
 - Use `--command` to print a starter slash-command markdown template.
 - Use `--hook` to print a starter hook YAML template.
 - See [AGENT-CHEATSHEET.md](AGENT-CHEATSHEET.md) for the full key mapping and examples.
+
+### Agent Plugins
+
+Mini-A supports the [Agent Plugins](https://agent-plugins.org) 1.0.0 directory format. A plugin contains a required `plugin.json` manifest and may contribute `skills/` and/or MCP servers in `mcp.json`. Loaded plugin skills behave like ordinary skills, and plugin MCP servers behave like ordinary MCP connections.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `plugins` | string | - | Comma-separated explicit plugin directories; each directory must contain `plugin.json` |
+| `pluginsroot` | string | `~/.openaf-mini-a/plugins` | Directory containing one level of plugin subdirectories |
+| `pluginsroots` | string | - | Comma-separated additional plugin-root directories |
+| `homedir` | string | user home | Changes the default plugin root and per-plugin data location |
+
+```bash
+# Load one or more explicit plugin directories
+mini-a goal="use the available plugin skills" \
+  plugins="~/plugins/reports,~/plugins/issue-tracker"
+
+# Discover every plugin immediately under a shared root
+mini-a goal="summarize this repository" pluginsroot=~/team-plugins
+```
+
+- Plugin skill directories are appended after built-in and `extraskills` directories, so they cannot shadow an existing skill with the same name.
+- `plugins`, `pluginsroot(s)`, `extraskills`, and `mcp=` compose; none replaces the others.
+- For plugin stdio MCP servers, Mini-A provides `PLUGIN_ROOT` and a managed `PLUGIN_DATA` directory at `~/.openaf-mini-a/plugin-data/<plugin-name>/`. The placeholders `${PLUGIN_ROOT}` and `${PLUGIN_DATA}` may be used in plugin `mcp.json` arguments, environment values, and working directory.
+- A malformed plugin or MCP entry is skipped with a warning without preventing other plugins, skills, or MCP servers from loading.
+
+See [Agent Plugins support](docs/AGENT-PLUGINS.md) for the manifest layout, supported transports, security constraints, and OpenAF-version limitations.
 
 ---
 
@@ -911,6 +939,7 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3`/`s3fs` backend) |
 | `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
 | `wikiindexdir` | string | - | Override the local index/cache root used for non-filesystem wiki indexes |
+| `wikilexical` | SLON/JSON | `{ language: "english" }` | Lucene lexical configuration: language, synonym rules, and opt-in enhanced retrieval features |
 | `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
 | `wikilintstreamthreshold` | number | `2000` | Switch lint into streaming mode above this many pages |
@@ -941,6 +970,24 @@ Elasticsearch/OpenSearch backend mapping:
 | `wikisecret` | `espass` | Optional basic-auth password |
 
 If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
+
+### Lexical Search Configuration
+
+`wikilexical` configures model-free Lucene retrieval. Its default is `{ language: "english" }`; choose any supported Lucene language and add domain aliases when useful. The expensive features `shingles`, `ngrams`, `queryExpansion`, and `pseudoRelevanceFeedback` are disabled unless explicitly enabled.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `language` | string | `english` | Lucene analyzer language, for example `portuguese`, `french`, `german`, or `spanish` |
+| `synonyms` | array | `[]` | Inline rules; each is a comma-separated string or an array with at least two terms |
+| `synonymsFile` | string | - | Additional synonym rules from a SLON/JSON array or comma-separated text file |
+| `shingles` | boolean | `false` | Enable phrase shingles |
+| `ngrams` | boolean | `false` | Enable n-gram indexing/query support |
+| `queryExpansion` | boolean | `false` | Enable synonym-based query expansion |
+| `pseudoRelevanceFeedback` | boolean | `false` | Enable pseudo-relevance-feedback expansion |
+
+`OAF_MINI_A_WIKI_LEXICAL` is the environment-variable equivalent. An explicit `wikilexical=` value takes precedence. A relative `synonymsFile` is resolved from a filesystem wiki root; non-filesystem backends require an absolute path.
+
+After changing this configuration, run writable `/wiki reindex`: Mini-A records the index contract in `.mini-a-wiki-lucene/mini-a-lexical.json`. Read-only or hydrated indexes with a legacy/mismatched contract fall back to ordinary Lucene search and log a publisher-reindex warning.
 
 ### Wiki Actions (agent)
 
@@ -1002,6 +1049,12 @@ mini-a goal="summarize our architecture decisions" \
 # Read-write wiki — agent can contribute new pages
 mini-a goal="research topic X and document findings in the wiki" \
   usewiki=true wikiaccess=rw wikiroot=/shared/wiki
+
+# Portuguese retrieval with domain aliases; reindex after changing lexical settings
+mini-a goal="search the product knowledge base" \
+  usewiki=true wikiaccess=rw wikiroot=/shared/wiki \
+  wikilexical="{ language: 'portuguese', synonyms: [['carro', 'automovel']] }"
+# In the console: /wiki reindex
 
 # Wiki with a mounted read-only reference wiki
 mini-a goal="write docs based on our standards" \
