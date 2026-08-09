@@ -522,7 +522,7 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
-| `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; explicit `synonyms` and opt-in enhanced features supported) | `{ language: "english" }` |
+| `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; inline `synonyms` and optional `synonymsFile` rules supported; enhanced features are opt-in) | `{ language: "english" }` |
 | `wikis3artifactprefix` | Optional S3 prefix containing a published `.mini-a-wiki-lucene/` cache and, for `mcp-wiki`, `.mini-a-wiki-graph/graph.json`; downloaded into `wikiindexdir` on startup | - |
 | `wikirestrictprofile` | `mcp-wiki-safe` restricted retrieval defaults profile (`tight`, `moderate`, or `relaxed`); `tight` preserves legacy defaults and individual `wikirestrict*` settings override profile values | `tight` |
 | `wikimetacache` | Enable sharded wiki page metadata cache | `true` |

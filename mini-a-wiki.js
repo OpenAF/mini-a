@@ -12,27 +12,50 @@ var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
 
 // Keep the on-disk index contract deliberately small and model-free. More
 // expensive lexical features remain explicit opt-ins in wikilexical.
-var __miniAWikiLexicalConfig = function(raw) {
+var __miniAWikiLexicalConfig = function(raw, wikiRoot) {
   var value = raw
   if (isUnDef(value) || value === null || (isString(value) && value.trim().length === 0)) value = { language: "english" }
   if (isString(value)) {
     try { value = af.fromJSSLON(value) } catch(e) { throw new Error("Invalid wikilexical configuration: expected SLON/JSON object: " + __miniAErrMsg(e)) }
   }
   if (!isMap(value)) throw new Error("Invalid wikilexical configuration: expected a SLON/JSON object")
-  var allowed = { language: true, synonyms: true, shingles: true, ngrams: true, queryexpansion: true, pseudorelevancefeedback: true }
+  var allowed = { language: true, synonyms: true, synonymsfile: true, shingles: true, ngrams: true, queryexpansion: true, pseudorelevancefeedback: true }
   Object.keys(value).forEach(function(key) {
     if (allowed[String(key).toLowerCase()] !== true) throw new Error("Invalid wikilexical configuration: unsupported option '" + key + "'")
   })
   var language = isString(value.language) ? value.language.toLowerCase().trim() : "english"
   if (__MINI_A_WIKI_LEXICAL_LANGUAGES.indexOf(language) < 0) throw new Error("Invalid wikilexical language '" + String(value.language) + "'. Supported Lucene languages include english, french, german, portuguese and spanish.")
-  var cfg = { language: language, synonyms: [], shingles: true, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false }
-  if (isDef(value.synonyms)) {
-    if (!isArray(value.synonyms)) throw new Error("Invalid wikilexical synonyms: expected an array of synonym rules")
-    cfg.synonyms = value.synonyms.map(function(rule, i) {
+  var cfg = { language: language, synonyms: [], shingles: false, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false }
+  var normalizeRules = function(rules, source) {
+    if (!isArray(rules)) throw new Error("Invalid wikilexical " + source + ": expected an array of synonym rules")
+    return rules.map(function(rule, i) {
       var terms = isString(rule) ? rule.split(",") : rule
-      if (!isArray(terms) || terms.length < 2 || !terms.every(function(t) { return isString(t) && t.trim().length > 0 })) throw new Error("Invalid wikilexical synonym rule at index " + i + ": use a comma-separated string or an array with at least two terms")
+      if (!isArray(terms) || terms.length < 2 || !terms.every(function(t) { return isString(t) && t.trim().length > 0 })) throw new Error("Invalid wikilexical synonym rule at index " + i + " in " + source + ": use a comma-separated string or an array with at least two terms")
       return terms.map(function(t) { return t.trim().toLowerCase() })
     })
+  }
+  if (isDef(value.synonyms)) {
+    cfg.synonyms = normalizeRules(value.synonyms, "synonyms")
+  }
+  var synonymsFile = isDef(value.synonymsFile) ? value.synonymsFile : value.synonymsfile
+  if (isDef(synonymsFile)) {
+    if (!isString(synonymsFile) || synonymsFile.trim().length === 0) throw new Error("Invalid wikilexical synonymsFile: expected a non-empty file path")
+    var synonymsPath = synonymsFile.trim()
+    if (!(new java.io.File(synonymsPath)).isAbsolute()) {
+      var rootFile = isDef(wikiRoot) ? new java.io.File(String(wikiRoot)) : __
+      if (isUnDef(rootFile) || !rootFile.isDirectory()) throw new Error("Invalid wikilexical synonymsFile: a relative path requires a filesystem wiki root")
+      synonymsPath = rootFile.getCanonicalPath() + java.io.File.separator + synonymsPath
+    }
+    var synonymsJavaFile = new java.io.File(synonymsPath)
+    if (!synonymsJavaFile.isFile()) throw new Error("Invalid wikilexical synonymsFile: file not found: " + synonymsPath)
+    var synonymsRaw = io.readFileString(synonymsPath).trim()
+    var fileRules
+    try {
+      fileRules = af.fromJSSLON(synonymsRaw)
+    } catch(e) {
+    }
+    if (!isArray(fileRules)) fileRules = synonymsRaw.split(/\r?\n/).map(function(line) { return line.trim() }).filter(function(line) { return line.length > 0 && line.indexOf("#") !== 0 })
+    cfg.synonyms = cfg.synonyms.concat(normalizeRules(fileRules, "synonymsFile"))
   }
   ;["shingles", "ngrams", "queryExpansion", "pseudoRelevanceFeedback"].forEach(function(key) {
     var sourceKey = key.toLowerCase()
@@ -1199,7 +1222,7 @@ MiniAWikiManager.prototype.configure = function(config) {
   // read here too so direct manager/MCP construction has the same behaviour as
   // the Mini-A launcher.
   if (isUnDef(cfg.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) cfg.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
-  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical)
+  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical, cfg.root)
   this._lexicalFingerprint = __miniAWikiLexicalFingerprint(this._lexicalConfig)
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"

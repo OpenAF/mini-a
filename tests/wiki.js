@@ -1914,15 +1914,26 @@
   }
 
   exports.testLexicalConfigDefaultsAndValidation = function() {
-    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
-    ow.test.assert(wm._lexicalConfig.language, "english", "lexical search should default to English")
-    ow.test.assert(wm._lexicalConfig.synonyms.length, 0, "default lexical search should not add synonyms")
-    var portuguese = new MiniAWikiManager({ backend: "fs", root: ".", wikilexical: "{ language: 'portuguese', synonyms: [['carro', 'automovel']] }" })
-    ow.test.assert(portuguese._lexicalConfig.language, "portuguese", "configured Lucene language should be preserved")
-    ow.test.assert(portuguese._lexicalConfig.synonyms[0][1], "automovel", "configured synonym rules should be normalized")
-    var invalid = false
-    try { new MiniAWikiManager({ backend: "fs", root: ".", wikilexical: { language: "klingon" } }) } catch(e) { invalid = String(e).indexOf("Invalid wikilexical language") >= 0 }
-    ow.test.assert(invalid, true, "invalid lexical languages should fail initialization clearly")
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      ow.test.assert(wm._lexicalConfig.language, "english", "lexical search should default to English")
+      ow.test.assert(wm._lexicalConfig.synonyms.length, 0, "default lexical search should not add synonyms")
+      ow.test.assert(wm._lexicalConfig.shingles, false, "shingles should remain opt-in by default")
+      var portuguese = new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: "{ language: 'portuguese', synonyms: [['carro', 'automovel']] }" })
+      ow.test.assert(portuguese._lexicalConfig.language, "portuguese", "configured Lucene language should be preserved")
+      ow.test.assert(portuguese._lexicalConfig.synonyms[0][1], "automovel", "configured synonym rules should be normalized")
+      io.writeFileString(dir + java.io.File.separator + "synonyms.txt", "# Domain aliases\nk8s, kubernetes\nsso, single sign on\n")
+      var fromFile = new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: { synonyms: [["js", "javascript"]], synonymsFile: "synonyms.txt" } })
+      ow.test.assert(fromFile._lexicalConfig.synonyms.length, 3, "synonym files should add to inline synonym rules")
+      ow.test.assert(fromFile._lexicalConfig.synonyms[1][1], "kubernetes", "relative synonym files should resolve from the wiki root")
+      var invalid = false
+      try { new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: { language: "klingon" } }) } catch(e) { invalid = String(e).indexOf("Invalid wikilexical language") >= 0 }
+      ow.test.assert(invalid, true, "invalid lexical languages should fail initialization clearly")
+      var missing = false
+      try { new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: { synonymsFile: "missing.txt" } }) } catch(e) { missing = String(e).indexOf("synonymsFile: file not found") >= 0 }
+      ow.test.assert(missing, true, "missing synonym files should fail initialization clearly")
+    } finally { cleanupTestDir(dir) }
   }
 
   exports.testLexicalManifestUpgradeContract = function() {

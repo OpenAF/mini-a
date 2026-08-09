@@ -638,7 +638,7 @@ try {
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
-    wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'}." },
+    wikilexical    : { type: "string", description: "SLON/JSON Lucene lexical configuration; defaults to {language:'english'} and supports optional synonymsFile." },
     usewikigraph   : { type: "boolean", default: false, description: "Enable the wiki knowledge graph for structural and semantic page relationships." },
     wikigraphsemantic: { type: "boolean", default: false, description: "Build semantic (embedding-based) edges in addition to structural links when running /graph build." },
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },

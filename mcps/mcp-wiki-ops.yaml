@@ -85,8 +85,8 @@ help:
     example  : "false"
     mandatory: false
   - name     : wikilexical
-    desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports explicit synonym rules."
-    example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
+    desc     : "SLON/JSON Lucene lexical configuration. Defaults to {language: 'english'}; supports inline synonyms and an optional synonymsFile."
+    example  : "{ language: 'english', synonymsFile: 'synonyms.txt' }"
     mandatory: false
   - name     : wikimounts
     desc     : "SLON/JSON array of read-only wiki mounts: [{name, backend, root|bucket|prefix|url|...}]"
