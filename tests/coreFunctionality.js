@@ -1772,10 +1772,44 @@
       return originalCancel.call(this, reason)
     }
 
+    var executionCancelReason = __
+    var remoteCancelCalled = false
+    manager.remoteDelegation = true
+    manager._remoteRequest = function() { remoteCancelCalled = true }
+    manager.subtasks.shutdownsubtask = {
+      id: "shutdownsubtask",
+      status: "running",
+      workerUrl: "http://worker.invalid",
+      remoteTaskId: "remote-task",
+      _executionPromise: {
+        cancel: function(reason) {
+          executionCancelReason = reason
+          return true
+        }
+      }
+    }
+    manager.runningCount = 1
+    manager.metrics.running = 1
+
     manager.destroy()
 
     ow.test.assert(manager._running, false, "Destroy should stop the watchdog loop")
     ow.test.assert(cancelReason, "Subtask manager stopped", "Destroy should interrupt the watchdog immediately")
+    ow.test.assert(executionCancelReason, "Subtask manager stopped", "Destroy should interrupt active subtask execution")
+    ow.test.assert(remoteCancelCalled, false, "Shutdown should not wait for a remote cancellation request")
+  }
+
+  exports.testStopAgentResourcesDestroysSubtaskManager = function() {
+    var agent = createAgent()
+    var destroyed = false
+    agent._subtaskManager = {
+      list: function() { return [] },
+      destroy: function() { destroyed = true }
+    }
+
+    agent._stopAgentResources()
+
+    ow.test.assert(destroyed, true, "Agent teardown should destroy its subtask manager")
   }
 
   exports.testSubtaskManagerStripsParentOnlyChildArgs = function() {

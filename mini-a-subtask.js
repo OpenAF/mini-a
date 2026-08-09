@@ -146,6 +146,16 @@ SubtaskManager.prototype.destroy = function() {
   if (isDef(this._watchdogPromise) && isFunction(this._watchdogPromise.cancel)) {
     try { this._watchdogPromise.cancel("Subtask manager stopped") } catch(ignoreWatchdogCancel) {}
   }
+  Object.keys(this.subtasks).forEach(function(subtaskId) {
+    var subtask = this.subtasks[subtaskId]
+    if (!isMap(subtask)) return
+    if (!__isTerminalSubtaskState(subtask.status)) {
+      try { this.cancel(subtaskId, "Subtask manager stopped") } catch(ignoreSubtaskCancel) {}
+    }
+    if (isDef(subtask._executionPromise) && isFunction(subtask._executionPromise.cancel)) {
+      try { subtask._executionPromise.cancel("Subtask manager stopped") } catch(ignoreExecutionCancel) {}
+    }
+  }.bind(this))
 }
 
 SubtaskManager.prototype._normalizeWorkers = function(workers) {
@@ -1039,7 +1049,7 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
 SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
   var parent = this
 
-  $doV(function() {
+  subtask._executionPromise = $doV(function() {
     var childAgent = __
     try {
       if (subtask.status !== "running") return
@@ -1085,6 +1095,9 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
         parent._failOrRetrySubtask(subtask, prefix, error)
       }
     } finally {
+      if (isObject(childAgent) && isFunction(childAgent._stopAgentResources)) {
+        try { childAgent._stopAgentResources() } catch(ignoreChildStop) {}
+      }
       if (subtask.childAgent === childAgent) subtask.childAgent = __
     }
 
@@ -1097,7 +1110,7 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
 SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
   var parent = this
 
-  $doV(function() {
+  subtask._executionPromise = $doV(function() {
     try {
       var mergedArgs = parent._buildChildArgs(subtask)
       var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
@@ -1332,7 +1345,8 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     depth: depth,
     metadata: opts.metadata || {},
     fork: toBoolean(opts.fork) === true,
-    forkState: (toBoolean(opts.fork) === true && isMap(opts.forkState)) ? opts.forkState : __
+    forkState: (toBoolean(opts.fork) === true && isMap(opts.forkState)) ? opts.forkState : __,
+    _executionPromise: __
   }
   
   this.subtasks[subtaskId] = subtask
@@ -1477,7 +1491,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   
   var wasRunning = subtask.status === "running"
 
-  if (wasRunning && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
+  if (wasRunning && this._running === true && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
     try {
       if (this.useA2A) {
         this._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
@@ -1503,7 +1517,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
       }
     } catch(ignoreLocalCancel) {}
   }
-  
+
   // Mark as cancelled
   var cancelReason = reason || "Cancelled by user"
   var claimedRunning = false
@@ -1527,6 +1541,10 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   if (wasRunning && !claimedRunning) return false
   if (!wasRunning && !cancelledPending) return false
   this.metrics.cancelled++
+
+  if (wasRunning && isDef(subtask._executionPromise) && isFunction(subtask._executionPromise.cancel)) {
+    try { subtask._executionPromise.cancel(reason || "Cancelled by user") } catch(ignoreExecutionCancel) {}
+  }
   
   // Remove from pending queue if present
   if (wasRunning) {

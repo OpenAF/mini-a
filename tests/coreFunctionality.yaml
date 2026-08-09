@@ -347,6 +347,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerDestroyCancelsWatchdog
 
+- name: MiniA Core Tests::AgentSubtaskManagerShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStopAgentResourcesDestroysSubtaskManager
+
 - name: MiniA Core Tests::SubtaskChildArgSanitization
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -814,6 +819,7 @@ todo:
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization
 - MiniA Core Tests::SubtaskWatchdogShutdown
+- MiniA Core Tests::AgentSubtaskManagerShutdown
 - MiniA Core Tests::SubtaskChildArgSanitization
 - MiniA Core Tests::SubtaskExplicitChildArgs
 - MiniA Core Tests::SubtaskCancelStopsLocalChild

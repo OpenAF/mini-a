@@ -689,21 +689,22 @@ MiniA.prototype._stopAgentResources = function() {
   this._metricschRegistered = false
 
   if (isObject(this._subtaskManager)) {
-    try {
-      var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
-      if (isArray(subtasks)) {
-        subtasks.forEach(function(subtask) {
-          if (!isMap(subtask) || !isString(subtask.id) || !isString(subtask.status)) return
-          if (MiniA._terminalSubtaskStates[subtask.status] === true) return
-          try {
-            this._subtaskManager.cancel(subtask.id, this._stopReason || "Stop requested")
-          } catch(ignoreCancelErr) {}
-        }.bind(this))
-      }
-    } catch(ignoreSubtaskStop) {}
-    try {
-      if (isFunction(this._subtaskManager.destroy)) this._subtaskManager.destroy()
-    } catch(ignoreSubtaskDestroy) {}
+    if (isFunction(this._subtaskManager.destroy)) {
+      try { this._subtaskManager.destroy() } catch(ignoreSubtaskDestroy) {}
+    } else {
+      try {
+        var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
+        if (isArray(subtasks)) {
+          subtasks.forEach(function(subtask) {
+            if (!isMap(subtask) || !isString(subtask.id) || !isString(subtask.status)) return
+            if (MiniA._terminalSubtaskStates[subtask.status] === true) return
+            try {
+              this._subtaskManager.cancel(subtask.id, this._stopReason || "Stop requested")
+            } catch(ignoreCancelErr) {}
+          }.bind(this))
+        }
+      } catch(ignoreSubtaskStop) {}
+    }
   }
 
   if (isDef(this._regHttpServer) && isDef(ow) && isDef(ow.server) && isDef(ow.server.httpd) && typeof ow.server.httpd.stop === "function") {
