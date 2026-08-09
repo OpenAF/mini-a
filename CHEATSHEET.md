@@ -928,7 +928,7 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 |-----------|------|---------|-------------|
 | `usewiki` | boolean | `false` | Enable the wiki knowledge base |
 | `wikiaccess` | string | `ro` | Access mode: `ro` (read-only) or `rw` (read-write) |
-| `wikibackend` | string | `fs` | Backend: `fs` (filesystem), `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) |
+| `wikibackend` | string | `fs` | Backend: `fs` (filesystem), `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) |
 | `wikiroot` | string | `.` | Root directory for the `fs` backend |
 | `wikibucket` | string | - | S3 bucket name (`s3`/`s3fs` backend) |
 | `wikiprefix` | string | - | S3 key prefix (`s3`/`s3fs`) or Elasticsearch index name (`es`, defaults to `mini_a_wiki`) |
@@ -939,6 +939,10 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikiuseversion1` | boolean | `false` | Use S3 path-style (v1) signing (`s3`/`s3fs` backend) |
 | `wikiignorecertcheck` | boolean | `false` | Skip TLS certificate validation (`s3`/`s3fs` backend) |
 | `wikiindexdir` | string | - | Override the local index/cache root used for non-filesystem wiki indexes |
+| `wikis3artifactprefix` | string | - | S3 artifact prefix; set `s3artifactbundle=true` to consume its `mini-a-wiki-index.zip` |
+| `s3artifactbundle` | boolean | `false` | Hydrate S3 Lucene/graph state from one zip bundle |
+| `wikihttpindexurl` | string | - | HTTP bundle URL; defaults to `<wikiurl>/mini-a-wiki-index.zip` |
+| `wikihttptimeout` | number | `30000` | HTTP wiki request timeout in milliseconds |
 | `wikilexical` | SLON/JSON | `{ language: "english" }` | Lucene lexical configuration: language, synonym rules, and opt-in enhanced retrieval features |
 | `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
@@ -1143,7 +1147,9 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to surface new insights |
 | `usewiki` | boolean | `false` | Enable wiki dream (consolidates the wiki in a full read-write pass) |
 | `wikiroot` | string | `.` | Wiki filesystem root path |
-| `wikibackend` | string | `fs` | Wiki backend (`fs`, `s3`, `s3fs`, `es`) — same as regular wiki settings |
+| `wikibackend` | string | `fs` | Wiki backend (`fs`, `s3`, `s3fs`, `es`, `http`) — same as regular wiki settings |
+
+For `wikibackend=http`, host pages plus `mini-a-wiki-index.zip` (Lucene and optional graph cache). It is read-only and refreshes the bundle only at process start; use `wikihttpindexurl` to override the bundle URL and `wikihttptimeout` to set its timeout. `s3artifactbundle=true` uses the same zip format under `wikis3artifactprefix`.
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Report what would change without writing anything back |
 | `dreamwikimode` | string | `apply` | Wiki mode: `lint`, `plan`, `apply`, `reorg` |

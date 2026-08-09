@@ -511,11 +511,11 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `memorydedup` | Deduplicate near-identical memory entries before append | `true` |
 | `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
 | `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
-| `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) | `fs` |
+| `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) | `fs` |
 | `wikiroot` | Filesystem wiki directory or local `.zip`/`.okt` archive when `wikibackend=fs`; archives are always read-only | `.` |
 | `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
 | `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
-| `wikiurl` | S3 endpoint URL, or Elasticsearch/OpenSearch base URL when `wikibackend=es` (internal `esurl`) | - |
+| `wikiurl` | S3 endpoint, Elasticsearch/OpenSearch base URL, or static page-server base URL when `wikibackend=http` | - |
 | `wikiaccesskey` | S3 access key, or Elasticsearch username when `wikibackend=es` | - |
 | `wikisecret` | S3 secret key, or Elasticsearch password when `wikibackend=es` | - |
 | `wikiregion` | S3 region for `s3`/`s3fs` wiki backends | - |
@@ -524,6 +524,13 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
 | `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; inline `synonyms` and optional `synonymsFile` rules supported; enhanced features are opt-in) | `{ language: "english" }` |
 | `wikis3artifactprefix` | Optional S3 prefix containing a published `.mini-a-wiki-lucene/` cache and, for `mcp-wiki`, `.mini-a-wiki-graph/graph.json`; downloaded into `wikiindexdir` on startup | - |
+| `s3artifactbundle` | Use `<wikis3artifactprefix>/mini-a-wiki-index.zip` for S3 cache hydration | `false` |
+| `wikihttpindexurl` | Optional HTTP artifact-bundle URL; defaults to `<wikiurl>/mini-a-wiki-index.zip` | - |
+| `wikihttptimeout` | HTTP wiki request timeout in milliseconds | `30000` |
+
+Static HTTP wikis are read-only: pages are fetched live from `wikiurl`, while `list`, search, and graph use a published `mini-a-wiki-index.zip` containing `.mini-a-wiki-lucene/` and optionally `.mini-a-wiki-graph/graph.json`. Bundle changes are checked at startup only, so restart long-running MCP servers after republishing. The Lucene-derived catalog excludes pages omitted from the search index.
+
+See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations, mounts, graphs, and publishing static bundles.
 | `wikirestrictprofile` | `mcp-wiki-safe` restricted retrieval defaults profile (`tight`, `moderate`, or `relaxed`); `tight` preserves legacy defaults and individual `wikirestrict*` settings override profile values | `tight` |
 | `wikimetacache` | Enable sharded wiki page metadata cache | `true` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |

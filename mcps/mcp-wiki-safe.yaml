@@ -7,7 +7,7 @@ help:
     example  : "8888"
     mandatory: false
   - name     : wikibackend
-    desc     : Wiki backend type (fs, s3, s3fs or es)
+    desc     : Wiki backend type (fs, s3, s3fs, es or http; https is an alias)
     example  : "fs"
     mandatory: false
   - name     : wikiroot
@@ -23,7 +23,7 @@ help:
     example  : "wiki/"
     mandatory: false
   - name     : wikiurl
-    desc     : S3 endpoint/base URL for s3/s3fs, or Elasticsearch/OpenSearch base URL for es (internal esurl)
+    desc     : S3 endpoint for s3/s3fs, Elasticsearch/OpenSearch base URL for es, or static wiki base URL for http
     example  : "https://s3.amazonaws.com"
     mandatory: false
   - name     : wikiaccesskey
@@ -46,6 +46,15 @@ help:
   - name     : wikis3artifactprefix
     desc     : "Optional S3 prefix containing a published local Lucene cache. It is downloaded to wikiindexdir at startup. Graph hints remain disabled by default in restricted retrieval."
     example  : "wiki-artifacts/"
+    mandatory: false
+  - name     : s3artifactbundle
+    desc     : Use <prefix>/mini-a-wiki-index.zip instead of individual S3 artifact objects
+    mandatory: false
+  - name     : wikihttpindexurl
+    desc     : Optional HTTP artifact bundle URL (defaults to <wikiurl>/mini-a-wiki-index.zip)
+    mandatory: false
+  - name     : wikihttptimeout
+    desc     : HTTP wiki request timeout in milliseconds (default 30000)
     mandatory: false
   - name     : usewikigraph
     desc     : "Opt in to graph-backed related-page hints in restricted search. Hints remain opaque read references and do not expose graph paths or relationship metadata."
@@ -243,6 +252,9 @@ jobs:
       wikiuseversion1         : toBoolean.isBoolean.default(false)
       wikiignorecertcheck     : toBoolean.isBoolean.default(false)
       wikis3artifactprefix    : isString.default(__)
+      s3artifactbundle        : toBoolean.isBoolean.default(false)
+      wikihttpindexurl        : isString.default(__)
+      wikihttptimeout         : toNumber.isNumber.default(30000)
       wikiindexdir            : isString.default(__)
       wikilexical             : isString.default(__)
       usewikigraph            : toBoolean.isBoolean.default(false)

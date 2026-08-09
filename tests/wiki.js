@@ -288,6 +288,51 @@
     ow.test.assert(paths[1], "docs/page.md", "should keep second valid path")
   }
 
+  exports.testHttpBundleHelpers = function() {
+    ow.test.assert(__miniAWikiUrlJoin("https://wiki.example/", "/index.md"), "https://wiki.example/index.md", "URL joining should use exactly one slash")
+    ow.test.assert(isUnDef(__miniAWikiBundleEntryRelative("../outside")), true, "bundle entry paths must reject traversal")
+    ow.test.assert(__miniAWikiBundleEntryRelative(".mini-a-wiki-lucene/segments_1"), ".mini-a-wiki-lucene/segments_1", "Lucene entries should be retained")
+    ow.test.assert(__miniAWikiBundleChanged({ etag: "new" }, { etag: "old" }), true, "a changed ETag should refresh the bundle")
+    ow.test.assert(__miniAWikiBundleChanged({ etag: "same" }, { etag: "same" }), false, "an unchanged ETag should skip refresh")
+    ow.test.assert(__miniAWikiBundleChanged({ lastModified: "now" }, { lastModified: "now" }), false, "an unchanged modification time should skip refresh")
+    ow.test.assert(__miniAWikiBasicAuth("user", "pass"), "Basic dXNlcjpwYXNz", "HTTP basic auth should be correctly encoded")
+  }
+
+  exports.testHttpBackendIsReadOnly = function() {
+    var hydrate = MiniAWikiManager.prototype._hydrateHttpArtifacts
+    try {
+      MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {}
+      var wm = new MiniAWikiManager({ backend: "https", url: "https://wiki.example", access: "rw" })
+      ow.test.assert(wm._backendType, "http", "https should normalize to the HTTP backend")
+      ow.test.assert(wm._access, "ro", "HTTP wikis must force read-only access")
+      ow.test.assert(wm.write("new.md", { title: "New" }, "# New").ok, false, "HTTP wikis should reject writes")
+      ow.test.assert(wm.delete("new.md").ok, false, "HTTP wikis should reject deletes")
+    } finally { MiniAWikiManager.prototype._hydrateHttpArtifacts = hydrate }
+  }
+
+  exports.testArtifactBundleHydratesAtomically = function() {
+    var dir = createTestDir(), archive = dir + "/bundle.zip"
+    try {
+      var zip = new ZIP()
+      try {
+        zip.putFile(".mini-a-wiki-lucene/segments_1", af.fromString2Bytes("lucene-binary-fixture"))
+        zip.putFile(".mini-a-wiki-graph/graph.json", af.fromString2Bytes("{\"version\":2}"))
+        zip.generate2File(archive, { compressionLevel: 0 })
+      } finally { try { zip.close() } catch(ignoreZip) {} }
+      var fake = { _getIndexRoot: function() { return dir }, _logFn: function() {} }
+      var changed = MiniAWikiManager.prototype._hydrateArtifactBundle.call(fake,
+        function() { return { etag: "fixture-v1", lastModified: "" } },
+        function() { return new java.io.FileInputStream(archive) }, "test", "bundle.zip")
+      ow.test.assert(changed, true, "a new bundle should hydrate")
+      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-lucene/segments_1"), "lucene-binary-fixture", "Lucene bundle entries should be extracted")
+      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-graph/graph.json"), "{\"version\":2}", "graph bundle entries should be extracted")
+      var unchanged = MiniAWikiManager.prototype._hydrateArtifactBundle.call(fake,
+        function() { return { etag: "fixture-v1", lastModified: "" } },
+        function() { throw "unchanged bundle must not download" }, "test", "bundle.zip")
+      ow.test.assert(unchanged, false, "unchanged bundle metadata should skip download")
+    } finally { cleanupTestDir(dir) }
+  }
+
   exports.testFsBackendReadWrite = function() {
     var dir = createTestDir()
     try {

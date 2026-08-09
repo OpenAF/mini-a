@@ -1,6 +1,6 @@
 // Author: Nuno Aguiar
 // License: Apache 2.0
-// Description: Wiki manager for Mini-A. Supports filesystem and S3 backends.
+// Description: Wiki manager for Mini-A. Supports filesystem, S3, Elasticsearch and static HTTP(S) backends.
 
 // ── Template version & helpers ────────────────────────────────────────────────
 
@@ -76,6 +76,36 @@ var __miniAWikiLexicalFingerprint = function(cfg) {
     pseudoRelevanceFeedback: cfg.pseudoRelevanceFeedback === true
   }
   return sha1(stringify(normalized, __, ""))
+}
+
+// These small helpers are deliberately standalone so callers can validate URL and
+// bundle metadata behaviour without requiring a live HTTP or S3 service.
+var __miniAWikiUrlJoin = function(base, path) {
+  var b = isString(base) ? base.trim() : ""
+  var p = isString(path) ? path.trim() : ""
+  while (b.endsWith("/")) b = b.substring(0, b.length - 1)
+  while (p.startsWith("/")) p = p.substring(1)
+  return p.length > 0 ? b + "/" + p : b
+}
+
+var __miniAWikiBundleChanged = function(remote, local) {
+  if (!isMap(remote) || !isMap(local)) return true
+  if (isString(remote.etag) && remote.etag.length > 0) return remote.etag !== local.etag
+  if (isString(remote.lastModified) && remote.lastModified.length > 0) return remote.lastModified !== local.lastModified
+  return true
+}
+
+var __miniAWikiBundleEntryRelative = function(entry) {
+  if (!isString(entry)) return __
+  var value = String(entry).replace(/\\/g, "/")
+  if (value.indexOf("..") >= 0 || value.startsWith("/")) return __
+  if (value.indexOf(".mini-a-wiki-lucene/") === 0 || value.indexOf(".mini-a-wiki-graph/") === 0) return value
+  return __
+}
+
+var __miniAWikiBasicAuth = function(accessKey, secret) {
+  var raw = new java.lang.String(String(accessKey) + ":" + String(secret))
+  return "Basic " + java.util.Base64.getEncoder().encodeToString(raw.getBytes("UTF-8"))
 }
 
 // v1 stock fingerprint phrase — if AGENTS.md contains this verbatim it was never user-edited
@@ -363,6 +393,7 @@ MiniAWikiManager.prototype._getBackendIdentity = function() {
   if (this._backendType === "es") {
     return "es|" + (this._config.esurl || "") + "|" + (this._config.esindex || "")
   }
+  if (this._backendType === "http") return "http|" + (this._config.url || "")
   return "fs|" + (isObject(this._backend) && isString(this._backend.root) ? this._backend.root : ".")
 }
 
@@ -589,6 +620,32 @@ MiniAWikiManager.prototype._luceneQueryReadOnly = function(query, limit) {
   return out
 }
 
+MiniAWikiManager.prototype._luceneListAllReadOnly = function(prefix) {
+  if (!this._ensureLucene() || !this._luceneIndexExists()) return []
+  var pfx = isString(prefix) ? prefix.trim() : ""
+  var dir = __, reader = __, out = [], seen = {}
+  try {
+    var L = Packages.org.apache.lucene
+    dir = L.store.FSDirectory.open(java.nio.file.Paths.get(this._getLuceneIndexPath()))
+    reader = L.index.DirectoryReader.open(dir)
+    var searcher = new L.search.IndexSearcher(reader)
+    var live = L.index.MultiBits.getLiveDocs(reader)
+    for (var i = 0; i < reader.maxDoc(); i++) {
+      if (isDef(live) && live != null && !live.get(i)) continue
+      var doc = this._luceneStoredDoc(searcher, i)
+      var id = isDef(doc) && doc != null ? String(doc.get("id") || "") : ""
+      if (id.length > 0 && id.endsWith(".md") && id.indexOf(pfx) === 0 && seen[id] !== true) { seen[id] = true; out.push(id) }
+    }
+  } catch(e) {
+    this._logFn("warn", "Read-only Lucene listing failed: " + __miniAErrMsg(e))
+    return []
+  } finally {
+    try { if (isDef(reader) && reader != null) reader.close() } catch(ignoreR) {}
+    try { if (isDef(dir) && dir != null) dir.close() } catch(ignoreD) {}
+  }
+  return out.sort()
+}
+
 // _luceneStoredDoc: stored-fields accessor across Lucene versions (storedFields() vs doc()).
 MiniAWikiManager.prototype._luceneStoredDoc = function(searcher, docId) {
   try {
@@ -758,6 +815,15 @@ MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
   if (!artifactPrefix.endsWith("/")) artifactPrefix += "/"
   var bucket = isString(this._config.bucket) ? this._config.bucket.trim() : ""
   if (bucket.length === 0) return
+  if (toBoolean(this._config.s3artifactbundle) === true) {
+    var bundleKey = artifactPrefix + "mini-a-wiki-index.zip"
+    var s3 = this._backend.client
+    this._hydrateArtifactBundle(function() {
+      var stat = s3.statObject(bucket, bundleKey)
+      return { etag: isDef(stat.etag) ? String(stat.etag) : "", lastModified: isDef(stat.modifiedTime) ? String(stat.modifiedTime) : "" }
+    }, function() { return s3.getObjectStream(bucket, bundleKey) }, "s3", bundleKey)
+    return
+  }
   var root = this._getIndexRoot()
   try {
     var rootFile = new java.io.File(root)
@@ -788,6 +854,68 @@ MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
   } catch(e) {
     this._logFn("warn", "Failed to hydrate wiki search/graph artifacts from S3: " + __miniAErrMsg(e))
   }
+}
+
+// Hydrate a complete Lucene+graph cache without ever merging old segment files
+// into a new index. remoteMetaFn must only perform a cheap metadata request.
+MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downloadFn, source, key) {
+  var self = this
+  var root = this._getIndexRoot()
+  var rootFile = new java.io.File(root)
+  var metaFile = new java.io.File(root + "/.mini-a-wiki-bundle-meta.json")
+  var zipFile = new java.io.File(root + "/.mini-a-wiki-bundle-" + genUUID() + ".zip")
+  var suffix = ".new-" + genUUID()
+  var luceneNew = new java.io.File(root + "/.mini-a-wiki-lucene" + suffix)
+  var graphNew = new java.io.File(root + "/.mini-a-wiki-graph" + suffix)
+  var installed = false
+  var remove = function(file) {
+    if (!file.exists()) return
+    if (file.isDirectory()) { var children = file.listFiles(); for (var i = 0; isDef(children) && i < children.length; i++) remove(children[i]) }
+    file.delete()
+  }
+  try {
+    if (!rootFile.exists() && !rootFile.mkdirs()) throw "could not create local artifact cache"
+    var remote = remoteMetaFn()
+    var local = __
+    try { if (metaFile.isFile()) local = af.fromJson(io.readFileString(metaFile.getPath())) } catch(ignoreMeta) {}
+    if (!__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key) return false
+    var stream = downloadFn()
+    try { java.nio.file.Files.copy(stream, zipFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) } finally { try { stream.close() } catch(ignoreClose) {} }
+    plugin("ZIP")
+    var zip = new ZIP()
+    try {
+      var zipPath = String(zipFile.getPath())
+      var entries = Object.keys(zip.list(zipPath))
+      entries.forEach(function(entry) {
+        var relative = __miniAWikiBundleEntryRelative(entry)
+        if (isUnDef(relative) || relative.endsWith("/")) return
+        var targetRoot = relative.indexOf(".mini-a-wiki-lucene/") === 0 ? luceneNew : graphNew
+        var child = relative.substring(relative.indexOf("/") + 1)
+        var target = new java.io.File(targetRoot.getPath() + java.io.File.separator + child)
+        var canonicalRoot = targetRoot.getCanonicalPath() + java.io.File.separator
+        if (child.indexOf("..") >= 0 || !target.getCanonicalPath().startsWith(canonicalRoot)) throw "unsafe artifact bundle entry"
+        var parent = target.getParentFile()
+        if (!parent.exists() && !parent.mkdirs()) throw "could not create artifact cache directory"
+        var entryStream = zip.streamGetFileStream(zipPath, entry)
+        try { java.nio.file.Files.copy(entryStream, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) } finally { try { entryStream.close() } catch(ignoreEntryClose) {} }
+      })
+    } finally { try { zip.close() } catch(ignoreZipClose) {} }
+    var lucene = new java.io.File(root + "/.mini-a-wiki-lucene")
+    var graph = new java.io.File(root + "/.mini-a-wiki-graph")
+    remove(lucene); remove(graph)
+    if (!luceneNew.exists()) throw "bundle has no Lucene artifacts"
+    if (luceneNew.exists()) java.nio.file.Files.move(luceneNew.toPath(), lucene.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    if (graphNew.exists()) java.nio.file.Files.move(graphNew.toPath(), graph.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    installed = true
+    if (!lucene.exists()) throw "could not install Lucene artifact bundle"
+    remote.source = source; remote.key = key; remote.fetchedAt = new Date().toISOString()
+    io.writeFileString(metaFile.getPath(), stringify(remote, __, ""))
+    this._logFn("info", "Hydrated wiki search/graph artifact bundle from " + source)
+    return true
+  } catch(e) {
+    this._logFn("warn", "Failed to hydrate wiki search/graph artifact bundle: " + __miniAErrMsg(e))
+    return false
+  } finally { try { zipFile.delete(); if (!installed) { remove(luceneNew); remove(graphNew) } } catch(ignoreClean) {} }
 }
 
 MiniAWikiManager.prototype._graphPages = function() {
@@ -1227,18 +1355,21 @@ MiniAWikiManager.prototype.configure = function(config) {
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
-  this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
+  if (backendRaw === "https") backendRaw = "http"
+  this._backendType = ["s3", "es", "s3fs", "http"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
   // A local ZIP-compatible filesystem root is a wiki bundle, not a writable
   // directory. Detect it before any bootstrap/index/graph work can write.
   this._archiveRoot = this._backendType === "fs" && this._isArchiveRoot(cfg.root)
   if (this._archiveRoot) this._access = "ro"
+  if (this._backendType === "http") this._access = "ro"
   this._config  = cfg
   this._graph = __
   this._searchIndex = __
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._ensureIndexRuntime()
-  this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
+  this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : (this._backendType === "http" ? this._makeHttpBackend(cfg) : this._makeFsBackend(cfg))))
   this._hydrateS3Artifacts()
+  if (this._backendType === "http") this._hydrateHttpArtifacts()
   if (toBoolean(cfg.usegraph) === true) {
     try {
       loadLib("mini-a-graph.js")
@@ -1942,6 +2073,71 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
       try { s3client.close() } catch(e) {}
     }
   }
+}
+
+// ── Static HTTP(S) backend ──────────────────────────────────────────────────
+
+MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
+  var parent = this
+  var base = isString(cfg.url) ? cfg.url.trim() : ""
+  var timeout = isNumber(Number(cfg.wikihttptimeout)) && Number(cfg.wikihttptimeout) > 0 ? Number(cfg.wikihttptimeout) : 30000
+  var secret = isString(cfg.secret) && cfg.secret.length > 0 ? cfg.secret : (isString(getEnv("OAF_MINI_A_WIKI_SECRET")) ? getEnv("OAF_MINI_A_WIKI_SECRET") : __)
+  var auth = function(connection) {
+    if (isString(cfg.accessKey) && cfg.accessKey.length > 0 && isString(secret) && secret.length > 0) connection.setRequestProperty("Authorization", __miniAWikiBasicAuth(cfg.accessKey, secret))
+    else if (isString(secret) && secret.length > 0) connection.setRequestProperty("Authorization", "Bearer " + secret)
+  }
+  var open = function(path, method) {
+    var connection = new java.net.URL(__miniAWikiUrlJoin(base, path)).openConnection()
+    connection.setConnectTimeout(timeout); connection.setReadTimeout(timeout)
+    if (isDef(connection.setRequestMethod)) connection.setRequestMethod(method)
+    auth(connection)
+    return connection
+  }
+  return {
+    type: "http",
+    url: base,
+    list: function(prefix) { return parent._luceneListAllReadOnly(prefix) },
+    read: function(path) {
+      try {
+        var conn = open(path, "GET")
+        if (Number(conn.getResponseCode()) < 200 || Number(conn.getResponseCode()) >= 300) return __
+        var stream = conn.getInputStream()
+        try { return af.fromInputStream2String(stream) } finally { try { stream.close() } catch(ignoreClose) {} }
+      } catch(e) { return __ }
+    },
+    exists: function(path) {
+      try { var code = Number(open(path, "HEAD").getResponseCode()); return code >= 200 && code < 300 } catch(e) { return false }
+    },
+    write: function() { throw "http wiki is read-only" },
+    delete: function() { throw "http wiki is read-only" },
+    close: function() {}
+  }
+}
+
+MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
+  var base = isString(this._config.url) ? this._config.url.trim() : ""
+  if (base.length === 0) return
+  var bundleUrl = isString(this._config.wikihttpindexurl) && this._config.wikihttpindexurl.trim().length > 0 ? this._config.wikihttpindexurl.trim() : __miniAWikiUrlJoin(base, "mini-a-wiki-index.zip")
+  var timeout = isNumber(Number(this._config.wikihttptimeout)) && Number(this._config.wikihttptimeout) > 0 ? Number(this._config.wikihttptimeout) : 30000
+  var secret = isString(this._config.secret) && this._config.secret.length > 0 ? this._config.secret : (isString(getEnv("OAF_MINI_A_WIKI_SECRET")) ? getEnv("OAF_MINI_A_WIKI_SECRET") : __)
+  var auth = function(conn) {
+    if (isString(this._config.accessKey) && this._config.accessKey.length > 0 && isString(secret) && secret.length > 0) conn.setRequestProperty("Authorization", __miniAWikiBasicAuth(this._config.accessKey, secret));
+    else if (isString(secret) && secret.length > 0) conn.setRequestProperty("Authorization", "Bearer " + secret)
+  }.bind(this)
+  var connect = function(method) {
+    var conn = new java.net.URL(bundleUrl).openConnection()
+    conn.setConnectTimeout(timeout); conn.setReadTimeout(timeout); conn.setRequestMethod(method); auth(conn)
+    return conn
+  }
+  this._hydrateArtifactBundle(function() {
+    var conn = connect("HEAD"), code = Number(conn.getResponseCode())
+    if (code < 200 || code >= 300) throw "HTTP bundle metadata returned " + code
+    return { etag: String(conn.getHeaderField("ETag") || ""), lastModified: String(conn.getHeaderField("Last-Modified") || "") }
+  }, function() {
+    var conn = connect("GET"), code = Number(conn.getResponseCode())
+    if (code < 200 || code >= 300) throw "HTTP bundle download returned " + code
+    return conn.getInputStream()
+  }, "http", bundleUrl)
 }
 
 MiniAWikiManager.prototype._makeEsBackend = function(cfg) {

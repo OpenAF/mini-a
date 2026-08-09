@@ -1063,7 +1063,8 @@ MiniADreams.prototype._buildWikiConfig = function() {
   var a = this._args
   if (!toBoolean(a.usewiki)) return __
   var backend = this._argStr(a.wikibackend).length > 0 ? this._argStr(a.wikibackend).toLowerCase() : "fs"
-  var cfg = { access: "rw", backend: backend }
+  if (backend === "https") backend = "http"
+  var cfg = { access: "rw", backend: backend, indexdir: a.wikiindexdir, s3artifactprefix: a.wikis3artifactprefix, s3artifactbundle: toBoolean(a.s3artifactbundle) === true, wikihttpindexurl: a.wikihttpindexurl, wikihttptimeout: a.wikihttptimeout }
   // carry graph settings so _finalizeWiki can rebuild the knowledge graph.
   // The user-facing arg is usewikigraph (usegraph is the wiki-manager config key).
   if (this._wikiGraphEnabled()) {
@@ -1098,6 +1099,10 @@ MiniADreams.prototype._buildWikiConfig = function() {
     cfg.esindex = this._argStr(a.wikiprefix).length > 0 ? this._argStr(a.wikiprefix) : "mini_a_wiki"
     cfg.esuser  = a.wikiaccesskey
     cfg.espass  = a.wikisecret
+  } else if (backend === "http") {
+    cfg.url       = this._argStr(a.wikiurl)
+    cfg.accessKey = a.wikiaccesskey
+    cfg.secret    = a.wikisecret
   }
   return cfg
 }

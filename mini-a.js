@@ -7449,6 +7449,10 @@ MiniA.prototype._initWiki = function(args) {
       backend: args.wikibackend,
       usegraph: wikiGraphEnabled,
       indexdir: args.wikiindexdir,
+      s3artifactprefix: args.wikis3artifactprefix,
+      s3artifactbundle: args.s3artifactbundle,
+      wikihttpindexurl: args.wikihttpindexurl,
+      wikihttptimeout: args.wikihttptimeout,
       wikilexical: args.wikilexical,
       wikimetacache: args.wikimetacache,
       wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
@@ -7483,6 +7487,10 @@ MiniA.prototype._initWiki = function(args) {
       cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
       cfg.esuser = args.wikiaccesskey
       cfg.espass = args.wikisecret
+    } else if (args.wikibackend === "http") {
+      cfg.url = args.wikiurl
+      cfg.accessKey = args.wikiaccesskey
+      cfg.secret = args.wikisecret
     } else {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
     }
@@ -13672,7 +13680,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
     "lcescalatedefer", "lcbudget", "llmcomplexity",
-    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
+    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
@@ -15649,8 +15657,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
     else args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
     args.wikibackend = _$(args.wikibackend, "args.wikibackend").isString().default("fs")
-    if (["fs", "s3", "es", "s3fs"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
-    else args.wikibackend = String(args.wikibackend).toLowerCase().trim()
+    if (["fs", "s3", "es", "s3fs", "http", "https"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
+    else { args.wikibackend = String(args.wikibackend).toLowerCase().trim(); if (args.wikibackend === "https") args.wikibackend = "http" }
     args.wikiroot = _$(args.wikiroot, "args.wikiroot").isString().default(__)
     args.wikibucket = _$(args.wikibucket, "args.wikibucket").isString().default(__)
     args.wikiprefix = _$(args.wikiprefix, "args.wikiprefix").isString().default("wiki/")
@@ -15661,6 +15669,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
     args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
     args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
+    args.wikis3artifactprefix = _$(args.wikis3artifactprefix, "args.wikis3artifactprefix").isString().default(__)
+    args.s3artifactbundle = _$(toBoolean(args.s3artifactbundle), "args.s3artifactbundle").isBoolean().default(false)
+    args.wikihttpindexurl = _$(args.wikihttpindexurl, "args.wikihttpindexurl").isString().default(__)
+    var _wikiHttpTimeout = isNumber(args.wikihttptimeout) ? args.wikihttptimeout : Number(args.wikihttptimeout)
+    if (isNaN(_wikiHttpTimeout)) _wikiHttpTimeout = __
+    args.wikihttptimeout = _$(_wikiHttpTimeout, "args.wikihttptimeout").isNumber().default(30000)
     if (isUnDef(args.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) args.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
     if (isDef(args.wikilexical) && !isString(args.wikilexical) && !isMap(args.wikilexical)) throw new Error("args.wikilexical must be a SLON/JSON string or object")
     args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)

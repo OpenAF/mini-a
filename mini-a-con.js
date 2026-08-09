@@ -625,7 +625,7 @@ try {
     memorysessionch: { type: "string", description: "JSSLON channel definition or native file path for session memory persistence." },
     usewiki        : { type: "boolean", default: false, description: "Enable the wiki knowledge base for shared markdown knowledge." },
     wikiaccess     : { type: "string", default: "ro", description: "Wiki access mode: ro or rw." },
-    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs, s3, s3fs, or es." },
+    wikibackend    : { type: "string", default: "fs", description: "Wiki backend: fs, s3, s3fs, es, or http (https is an alias)." },
     wikiroot       : { type: "string", description: "Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)." },
     wikibucket     : { type: "string", description: "Bucket name for the S3 wiki backend." },
     wikiprefix     : { type: "string", default: "wiki/", description: "Prefix path for the S3 wiki backend." },
@@ -635,6 +635,10 @@ try {
     wikiregion     : { type: "string", description: "S3 region for the wiki backend." },
     wikiuseversion1: { type: "boolean", default: false, description: "Use S3 signature v1 for wiki access." },
     wikiignorecertcheck: { type: "boolean", default: false, description: "Disable TLS certificate checks for the wiki S3 backend." },
+    wikis3artifactprefix: { type: "string", description: "S3 prefix containing published wiki search/graph artifacts." },
+    s3artifactbundle: { type: "boolean", default: false, description: "Use one mini-a-wiki-index.zip artifact bundle for S3 hydration." },
+    wikihttpindexurl: { type: "string", description: "Optional URL for the HTTP wiki mini-a-wiki-index.zip bundle." },
+    wikihttptimeout: { type: "number", default: 30000, description: "HTTP wiki request timeout in milliseconds." },
     wikilintstaleddays: { type: "number", default: 90, description: "Default stale-page threshold in days for wiki lint." },
     wikilintresultlimit: { type: "number", default: 0, description: "Default maximum lint issues returned to an agent (0 returns all; dream reorg defaults to 25)." },
     wikimounts     : { type: "string", description: "SLON/JSON array of read-only wiki mounts; fs roots may be directories or local .zip/.okt archives." },
@@ -1424,6 +1428,10 @@ try {
         access : sessionOptions.wikiaccess,
         backend: sessionOptions.wikibackend,
         indexdir: sessionOptions.wikiindexdir,
+        s3artifactprefix: sessionOptions.wikis3artifactprefix,
+        s3artifactbundle: sessionOptions.s3artifactbundle,
+        wikihttpindexurl: sessionOptions.wikihttpindexurl,
+        wikihttptimeout: sessionOptions.wikihttptimeout,
         wikilexical: sessionOptions.wikilexical,
         usegraph: toBoolean(sessionOptions.usewikigraph) === true,
         wikigraphsemantic: toBoolean(sessionOptions.wikigraphsemantic) === true,
@@ -1447,6 +1455,11 @@ try {
         wikiCfg.region          = sessionOptions.wikiregion
         wikiCfg.useVersion1     = sessionOptions.wikiuseversion1
         wikiCfg.ignoreCertCheck = sessionOptions.wikiignorecertcheck
+      } else if (sessionOptions.wikibackend === "http" || sessionOptions.wikibackend === "https") {
+        wikiCfg.backend = "http"
+        wikiCfg.url = sessionOptions.wikiurl
+        wikiCfg.accessKey = sessionOptions.wikiaccesskey
+        wikiCfg.secret = sessionOptions.wikisecret
       } else {
         wikiCfg.root = isString(sessionOptions.wikiroot) && sessionOptions.wikiroot.trim().length > 0 ? sessionOptions.wikiroot.trim() : "."
       }
