@@ -44,6 +44,28 @@ MiniADreams.prototype._setLlm = function(llmInstance) {
   this._llm = llmInstance
 }
 
+// Convert old append-only tool dumps into bounded reviewable observations before
+// asking the dream model to consolidate them. It never discards the original ID.
+MiniADreams.prototype._normalizeLegacyArtifacts = function(snapshot) {
+  if (!isMap(snapshot) || !isMap(snapshot.sections) || !isArray(snapshot.sections.artifacts)) return snapshot
+  snapshot.sections.artifacts = snapshot.sections.artifacts.map(function(entry) {
+    if (!isMap(entry) || isString(entry.kind)) return entry
+    var sourceTool = isString(entry.sourceTool) ? entry.sourceTool : (isMap(entry.provenance) ? entry.provenance.tool : "")
+    if (!isString(sourceTool) || sourceTool.length === 0) return entry
+    var raw = isString(entry.value) ? entry.value : String(entry.value || "")
+    var key = "artifact:legacy:" + sourceTool + ":" + sha1(raw.substring(0, 512)).substring(0, 12)
+    entry.kind = "artifact:legacy"
+    entry.key = key
+    entry.observedAt = isString(entry.updatedAt) ? entry.updatedAt : new Date().toISOString()
+    entry.expiresAt = new Date(Date.now() + 86400000).toISOString()
+    entry.taskScope = "general::" + sourceTool
+    entry.value = "Legacy tool observation: " + sourceTool + " | " + raw.replace(/\s+/g, " ").substring(0, 320)
+    entry.meta = merge(isMap(entry.meta) ? entry.meta : {}, { needsReview: true, legacyRawSize: raw.length })
+    return entry
+  })
+  return snapshot
+}
+
 // ── channel helpers ───────────────────────────────────────────
 
 MiniADreams.prototype._createChannelFromDef = function(rawDef, fallbackName, fallbackType) {
@@ -261,7 +283,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
   // Helper: consolidate one manager's memory via LLM
   var consolidateOne = function(mgr, label, chName, ns) {
-    var snap = mgr.snapshot()
+    var snap = self._normalizeLegacyArtifacts(mgr.snapshot())
     var beforeCounts = {}
     _MEMORY_SECTIONS.forEach(function(s) { beforeCounts[s] = isArray(snap.sections[s]) ? snap.sections[s].length : 0 })
     var totalBefore = _MEMORY_SECTIONS.reduce(function(sum, s) { return sum + beforeCounts[s] }, 0)

@@ -2933,6 +2933,38 @@
     try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
   }
 
+  exports.testMemoryKeyedUpsertAndExpiry = function() {
+    var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+    mgr.init({ sections: { artifacts: [{ value: "legacy entry" }] } })
+    ow.test.assert(mgr.getSectionEntries("artifacts").length === 1, true, "Legacy entries should remain readable")
+    var first = mgr.upsert("artifacts", "artifact:http:head:http-request:https://example.invalid", {
+      value: "HEAD https://example.invalid -> 200", kind: "artifact:http", observedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 86400000).toISOString(), taskScope: "report::http-request"
+    })
+    var second = mgr.upsert("artifacts", "artifact:http:head:http-request:https://example.invalid", {
+      value: "HEAD https://example.invalid -> 304", kind: "artifact:http", observedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 86400000).toISOString(), taskScope: "report::http-request"
+    })
+    ow.test.assert(first.id === second.id, true, "Same key should refresh rather than append")
+    ow.test.assert(mgr.getSectionEntries("artifacts").filter(function(e) { return e.key === first.key }).length === 1, true, "One keyed observation should remain")
+    mgr.upsert("artifacts", "expired", { value: "expired", expiresAt: new Date(Date.now() - 1000).toISOString() })
+    ow.test.assert(mgr.snapshotCompact().artifacts.filter(function(e) { return e.key === "expired" }).length === 0, true, "Expired entries must not enter compact snapshots")
+    ow.test.assert(mgr.purgeExpired() === 1, true, "Expired record should be purged")
+  }
+
+  exports.testValidatedToolContractsOnly = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", goal: "daily report", debug: false, verbose: false }, agent._agentState)
+    agent._memoryUpsert("decisions", "tool-contract:proxy-dispatch:call:http-request", "unvalidated guess", {
+      kind: "tool-contract", validated: false, taskScope: "daily-report::http-request", meta: { invocation: { action: "wrong" } }
+    })
+    agent._recordValidatedToolContract("proxy-dispatch", { action: "call", tool: "http-request", arguments: { method: "HEAD", url: "https://example.invalid" } }, "evidence-1", { goal: "daily report" })
+    var contracts = agent._buildValidatedToolContracts({ goal: "daily report" })
+    ow.test.assert(contracts.length === 1, true, "Only the validated contract should be injected")
+    ow.test.assert(contracts[0].params.action === "call" && contracts[0].params.tool === "http-request", true, "Proxy contract must use nested call/tool/arguments shape")
+  }
+
   exports.testAgentCapabilitiesEnableUndefinedFlags = function() {
     var agent = createAgent()
     agent.fnI = function() {}

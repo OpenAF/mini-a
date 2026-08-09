@@ -36,7 +36,7 @@ MiniAMemoryManager.prototype._sections = function() {
 MiniAMemoryManager.prototype._createEmptyMemory = function() {
   var nowIso = new Date().toISOString()
   var mem = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     createdAt: nowIso,
     updatedAt: nowIso,
     revision: 0,
@@ -85,8 +85,21 @@ MiniAMemoryManager.prototype._normalizeEntry = function(entry, defaults) {
     sourceTool       : isString(e.sourceTool) && e.sourceTool.length > 0 ? e.sourceTool : __,
     sourceParams     : isString(e.sourceParams) && e.sourceParams.length > 0 ? e.sourceParams : __,
     pendingReadresult: toBoolean(e.pendingReadresult) === true,
-    resultFile       : isString(e.resultFile) && e.resultFile.length > 0 ? e.resultFile : __
+    resultFile       : isString(e.resultFile) && e.resultFile.length > 0 ? e.resultFile : __,
+    // v2 fields are deliberately optional so v1 channel entries remain valid.
+    kind             : isString(e.kind) && e.kind.length > 0 ? e.kind : __,
+    key              : isString(e.key) && e.key.length > 0 ? e.key : __,
+    observedAt       : isString(e.observedAt) ? e.observedAt : __,
+    expiresAt        : isString(e.expiresAt) ? e.expiresAt : __,
+    taskScope        : isString(e.taskScope) && e.taskScope.length > 0 ? e.taskScope : __,
+    validated        : toBoolean(e.validated) === true
   }
+}
+
+MiniAMemoryManager.prototype._isExpired = function(entry, nowMs) {
+  if (!isObject(entry) || !isString(entry.expiresAt) || entry.expiresAt.length === 0) return false
+  var expiry = new Date(entry.expiresAt).getTime()
+  return !isNaN(expiry) && expiry <= (isNumber(nowMs) ? nowMs : Date.now())
 }
 
 MiniAMemoryManager.prototype._touch = function() {
@@ -136,6 +149,7 @@ MiniAMemoryManager.prototype.init = function(seedMemory) {
     }
   }
   this._touch()
+  this.purgeExpired()
   return this.snapshot()
 }
 
@@ -149,7 +163,7 @@ MiniAMemoryManager.prototype.snapshotCompact = function() {
   var self = this
   var result = {}
   this._sections().forEach(function(section) {
-    var list = self._getSection(section) || []
+    var list = (self._getSection(section) || []).filter(function(e) { return !self._isExpired(e) })
     if (list.length === 0) return
     result[section] = list.map(function(e) {
       var c = { id: e.id, v: e.value }
@@ -168,6 +182,11 @@ MiniAMemoryManager.prototype.snapshotCompact = function() {
       if (isString(e.sourceParams))        c.tp    = e.sourceParams
       if (e.pendingReadresult === true)    c.pr    = true
       if (isString(e.resultFile))          c.rf    = e.resultFile
+      if (isString(e.kind))                c.k     = e.kind
+      if (isString(e.key))                 c.key   = e.key
+      if (isString(e.taskScope))           c.scope = e.taskScope
+      if (isString(e.expiresAt))           c.exp   = e.expiresAt
+      if (e.validated === true)            c.val   = true
       return c
     })
   })
@@ -183,7 +202,7 @@ MiniAMemoryManager.prototype._getSection = function(name) {
 MiniAMemoryManager.prototype.getSectionEntries = function(name) {
   var list = this._getSection(name)
   if (!isArray(list)) return []
-  return jsonParse(stringify(list, __, ""), __, __, true)
+  return jsonParse(stringify(list.filter(function(e) { return !this._isExpired(e) }.bind(this)), __, ""), __, __, true)
 }
 
 MiniAMemoryManager.prototype.append = function(section, entry, options) {
@@ -213,6 +232,55 @@ MiniAMemoryManager.prototype.append = function(section, entry, options) {
   this._boundedMaintenance(opts)
   this._emitEvent("append", { section: section, id: normalized.id, totalEntries: beforeLength + 1 })
   return normalized
+}
+
+// Replaces a stable observation/contract record without growing the section.
+MiniAMemoryManager.prototype.upsert = function(section, key, entry, options) {
+  if (this._config.enabled !== true || !isString(key) || key.trim().length === 0) return __
+  var list = this._getSection(section)
+  if (!isArray(list)) return __
+  var opts = isObject(options) ? options : {}
+  var normalized = this._normalizeEntry(merge(isObject(entry) ? entry : { value: entry }, { key: key.trim() }), opts)
+  var nowIso = new Date().toISOString()
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].key !== normalized.key) continue
+    var preservedId = list[i].id
+    var createdAt = list[i].createdAt
+    var confirmCount = (isNumber(list[i].confirmCount) ? list[i].confirmCount : 1) + 1
+    list[i] = merge(list[i], normalized)
+    list[i].id = preservedId
+    list[i].createdAt = createdAt
+    list[i].updatedAt = nowIso
+    list[i].confirmedAt = nowIso
+    list[i].observedAt = isString(normalized.observedAt) ? normalized.observedAt : nowIso
+    list[i].confirmCount = confirmCount
+    list[i].stale = false
+    this._touch()
+    this._emitEvent("upsert", { section: section, id: preservedId, key: normalized.key, replaced: true })
+    return list[i]
+  }
+  list.push(normalized)
+  this._touch()
+  this._boundedMaintenance(opts)
+  this._emitEvent("upsert", { section: section, id: normalized.id, key: normalized.key, replaced: false })
+  return normalized
+}
+
+MiniAMemoryManager.prototype.purgeExpired = function(now) {
+  var nowMs = isNumber(now) ? now : (isDate(now) ? now.getTime() : Date.now())
+  var removed = 0
+  var self = this
+  this._sections().forEach(function(section) {
+    var list = self._getSection(section) || []
+    var kept = list.filter(function(entry) { return !self._isExpired(entry, nowMs) })
+    removed += list.length - kept.length
+    self._memory.sections[section] = kept
+  })
+  if (removed > 0) {
+    this._touch()
+    this._emitEvent("expire", { removed: removed })
+  }
+  return removed
 }
 
 MiniAMemoryManager.prototype.update = function(section, id, patch) {
@@ -343,7 +411,7 @@ MiniAMemoryManager.prototype._priority = function(section) {
 MiniAMemoryManager.prototype.compact = function() {
   var self = this
   var sections = this._sections()
-  var droppedEntries = 0
+  var droppedEntries = this.purgeExpired()
   var sectionDrops = {}
 
   sections.forEach(function(section) {
@@ -353,6 +421,7 @@ MiniAMemoryManager.prototype.compact = function() {
       var aPend = (a.truncated === true || a.pendingReadresult === true) ? 1 : 0
       var bPend = (b.truncated === true || b.pendingReadresult === true) ? 1 : 0
       if (aPend !== bPend) return bPend - aPend
+      if ((a.validated === true ? 1 : 0) !== (b.validated === true ? 1 : 0)) return (b.validated === true ? 1 : 0) - (a.validated === true ? 1 : 0)
       var ast = (a.status === "active" ? 1 : 0) + (a.stale === true ? -1 : 0)
       var bst = (b.status === "active" ? 1 : 0) + (b.stale === true ? -1 : 0)
       if (ast !== bst) return bst - ast

@@ -877,9 +877,11 @@ The `start()` method accepts various configuration options:
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
 - **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
 - **`memorydedup`** (boolean, default: true): Deduplicate near-identical entries during append.
+- **`memoryartifactttldays`** (number, default: `7`): Expiry window for normalized tool and network observations. Expired entries are excluded from search and prompt injection, then removed during maintenance.
+- **`memoryindexttldays`** (number, default: `1`): Shorter expiry window for list, search, and index snapshots.
 - **`memorypromote`** (string, default: `""`): Comma-separated list of memory sections to auto-promote from the session store to the global store at session end. Uses a refresh-or-append strategy: near-duplicate global entries have their `confirmedAt` and `confirmCount` updated rather than duplicated; entirely new entries are appended. `memoryuser=true` sets this to `facts,decisions,summaries`. Set to `""` to disable promotion.
 - **`memorystaledays`** (number, default: `0`): Number of days after which a global memory entry that has not been re-confirmed by any session is marked `stale=true`. The sweep runs automatically after each auto-promotion pass. Stale entries are not deleted immediately — they are evicted by compaction when a section overflows `memorymaxpersection`, giving recently confirmed entries priority. Set to `0` to disable staleness tracking. `memoryuser=true` sets this to `30`.
-- **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
+- **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. Matching validated tool contracts are injected in both modes. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
 - **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
 - **`wikiaccess`** (string, default: `ro`): Wiki access mode, `ro` or `rw`.
 - **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, `es` (Elasticsearch/OpenSearch), or read-only `http` (`https` is accepted as an alias).
@@ -2941,6 +2943,8 @@ By default (`memoryinject=summary`), the step context contains only a compact se
 - `limit` (optional, default `10`) — max results per section
 
 Results are keyword-scored (word overlap) and returned as TOON text in the step context. Use `memoryinject=full` to restore the previous behaviour of embedding all compact entries in every step prompt.
+
+Tool output is retained as a keyed, bounded observation rather than a raw response. Repeating the same operation and target refreshes that record; large output remains in the existing temporary spill file. A successful call may create a validated procedural contract in `decisions`; schema failures only create short-lived risks and never teach an invocation shape.
 
 ### Extension Points
 

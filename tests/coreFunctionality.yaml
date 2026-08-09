@@ -552,6 +552,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testManagedMemoryRefreshAndStaleMetrics
 
+- name: MiniA Core Tests::MemoryKeyedUpsertAndExpiry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryKeyedUpsertAndExpiry
+
+- name: MiniA Core Tests::ValidatedToolContractsOnly
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testValidatedToolContractsOnly
+
 - name: MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -870,6 +880,8 @@ todo:
 - MiniA Core Tests::MemoryFreshnessRefreshAndSweep
 - MiniA Core Tests::ManagedMemoryMetrics
 - MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
+- MiniA Core Tests::MemoryKeyedUpsertAndExpiry
+- MiniA Core Tests::ValidatedToolContractsOnly
 - MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
 - MiniA Core Tests::AgentCapabilitiesRespectExplicitFalseFlags
 - MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit

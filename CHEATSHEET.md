@@ -1876,7 +1876,7 @@ When using the interactive console (`mini-a` or `opack exec mini-a`):
 | `/show <prefix>` | Display parameters starting with prefix (e.g., `/show plan`) |
 | `/context` | Show visual token usage breakdown (using internal estimates or API stats) |
 | `/context llm` or `/context analyze` | Analyze conversation tokens using LLM (prefers low-cost model if configured) |
-| `/stats memory` | Show working-memory statistics and per-section counts for the active session |
+| `/stats memory` | Show working-memory statistics, keyed upserts, expirations, and validated-contract use for the active session |
 | `/stats detailed memory` | Show full metrics plus the focused memory view (`out=file.json` also supported) |
 | `/stats wiki` | Show wiki operation statistics (list/read/search/write/lint counts and errors) |
 | `/dream [memory\|wiki] [dryrun]` | Run memory and/or wiki dream consolidation pass (only shown when `memorych` or `usewiki=true` is set) |

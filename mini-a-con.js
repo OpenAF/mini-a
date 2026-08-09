@@ -5582,12 +5582,18 @@ try {
           { category: "Activity", metric: "Appends", value: memory.appends || 0 },
           { category: "", metric: "Dedup Hits", value: memory.dedup_hits || 0 },
           { category: "", metric: "Updates", value: memory.updates || 0 },
+          { category: "", metric: "Keyed Upserts", value: memory.upserts || 0 },
+          { category: "", metric: "Expired Removed", value: memory.expirations || 0 },
           { category: "", metric: "Removes", value: memory.removes || 0 },
           { category: "", metric: "Compactions", value: memory.compactions || 0 },
           { category: "", metric: "Promotions", value: memory.promotions || 0 }
         ]
 
         if ((memory.promoted_entries || 0) > 0) memoryRows.push({ category: "", metric: "Promoted Entries", value: memory.promoted_entries || 0 })
+        if ((memory.injected_tokens || 0) > 0) memoryRows.push({ category: "Quality", metric: "Injected Tokens", value: memory.injected_tokens || 0 })
+        if ((memory.raw_bytes_rejected || 0) > 0) memoryRows.push({ category: "", metric: "Raw Bytes Rejected", value: memory.raw_bytes_rejected || 0 })
+        if ((memory.validated_contracts_used || 0) > 0) memoryRows.push({ category: "", metric: "Validated Contracts Used", value: memory.validated_contracts_used || 0 })
+        if ((memory.unvalidated_contracts_suppressed || 0) > 0) memoryRows.push({ category: "", metric: "Unvalidated Contracts Suppressed", value: memory.unvalidated_contracts_suppressed || 0 })
         if ((memory.status_marks || 0) > 0) memoryRows.push({ category: "", metric: "Status Marks", value: memory.status_marks || 0 })
         if ((memory.evidence_attached || 0) > 0) memoryRows.push({ category: "", metric: "Evidence Attached", value: memory.evidence_attached || 0 })
         if ((memory.session_clears || 0) > 0) memoryRows.push({ category: "", metric: "Session Clears", value: memory.session_clears || 0 })

@@ -509,6 +509,8 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
 | `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |
 | `memorydedup` | Deduplicate near-identical memory entries before append | `true` |
+| `memoryartifactttldays` | TTL for normalized tool/network observations before expiry removal | `7` |
+| `memoryindexttldays` | TTL for list/search/index observation snapshots | `1` |
 | `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
 | `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
 | `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) | `fs` |
