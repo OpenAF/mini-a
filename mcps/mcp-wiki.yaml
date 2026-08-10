@@ -110,7 +110,7 @@ help:
     example  : "5"
     mandatory: false
   - name     : audit
-    desc     : If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments) via OpenAF's log() function. Handled generically by oJobMCP.yaml.
+    desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments, handled generically by oJobMCP.yaml) plus every page actually fetched from a remote wikibackend (s3, http, es) -- backend, resolved location (s3://bucket/key, URL, or es:index/path), and byte count -- via OpenAF's log() function. The latter also covers pages fetched internally while serving search/lint/list, not just the top-level read tool call."
     example  : "false"
     mandatory: false
 
@@ -350,6 +350,7 @@ jobs:
       wikigraphhintcap    : toNumber.isNumber.default(__)
       label               : isString.default("wiki")
       wikimounts          : isString.default(__)
+      audit               : default(__)
   exec : | #js
     loadLib("mini-a-mcp-wiki.js")
     __miniAMcpWikiInit(args, {

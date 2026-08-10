@@ -129,7 +129,7 @@ help:
     example  : "(type: 'redis', options: (host: 'redis.svc', port: 6379))"
     mandatory: false
   - name     : audit
-    desc     : If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments) via OpenAF's log() function. Handled generically by oJobMCP.yaml.
+    desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments, handled generically by oJobMCP.yaml) plus every page actually fetched from a remote wikibackend (s3, http, es) -- backend, resolved location (s3://bucket/key, URL, or es:index/path), and byte count -- via OpenAF's log() function. Only the resolved location is logged, never the opaque reference exposed to restricted-mode callers."
     example  : "false"
     mandatory: false
 
@@ -279,6 +279,7 @@ jobs:
       wikirestrictrefch       : isString.default(__)
       label                   : isString.default("wiki")
       wikimounts              : isString.default(__)
+      audit                   : default(__)
   exec : | #js
     loadLib("mini-a-mcp-wiki.js")
     // restricted retrieval is this server's default and only supported mode,

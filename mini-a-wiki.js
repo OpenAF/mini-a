@@ -333,11 +333,20 @@ var __miniAWikiLogTemplate = function(now) {
   ].join("\n")
 }
 
-var MiniAWikiManager = function(config, loggerFn) {
+var MiniAWikiManager = function(config, loggerFn, auditFn) {
   this._logFn  = isFunction(loggerFn) ? loggerFn : function() {}
+  this._auditFn = isFunction(auditFn) ? auditFn : function() {}
   this._config = {}
   this._backend = __
   this.configure(config)
+}
+
+// Best-effort hook for backends that fetch page content from an external
+// store (s3, http, es). Never lets a caller-supplied audit callback break
+// retrieval. `identifier` is the backend-resolved location (s3://bucket/key,
+// full URL, es:index/path) -- distinct from `path`, the wiki-relative path.
+MiniAWikiManager.prototype._auditRetrieval = function(backend, identifier, path, ok, bytes) {
+  try { this._auditFn({ backend: backend, identifier: identifier, path: path, ok: ok === true, bytes: isNumber(bytes) ? bytes : 0 }) } catch(e) {}
 }
 
 
@@ -2059,10 +2068,16 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
       }
     },
     read: function(path) {
+      var identifier = "s3://" + bucket + "/" + prefix + path
       try {
         var stream = s3client.getObjectStream(bucket, prefix + path)
-        return af.fromInputStream2String(stream)
-      } catch(e) { return __ }
+        var content = af.fromInputStream2String(stream)
+        parent._auditRetrieval("s3", identifier, path, true, isString(content) ? content.length : 0)
+        return content
+      } catch(e) {
+        parent._auditRetrieval("s3", identifier, path, false, 0)
+        return __
+      }
     },
     write: function(path, content) {
       s3client.putObjectStream(bucket, prefix + path,
@@ -2107,12 +2122,23 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
     url: base,
     list: function(prefix) { return parent._luceneListAllReadOnly(prefix) },
     read: function(path) {
+      var identifier = __miniAWikiUrlJoin(base, path)
       try {
         var conn = open(path, "GET")
-        if (Number(conn.getResponseCode()) < 200 || Number(conn.getResponseCode()) >= 300) return __
+        if (Number(conn.getResponseCode()) < 200 || Number(conn.getResponseCode()) >= 300) {
+          parent._auditRetrieval("http", identifier, path, false, 0)
+          return __
+        }
         var stream = conn.getInputStream()
-        try { return af.fromInputStream2String(stream) } finally { try { stream.close() } catch(ignoreClose) {} }
-      } catch(e) { return __ }
+        try {
+          var content = af.fromInputStream2String(stream)
+          parent._auditRetrieval("http", identifier, path, true, isString(content) ? content.length : 0)
+          return content
+        } finally { try { stream.close() } catch(ignoreClose) {} }
+      } catch(e) {
+        parent._auditRetrieval("http", identifier, path, false, 0)
+        return __
+      }
     },
     exists: function(path) {
       try { var code = Number(open(path, "HEAD").getResponseCode()); return code >= 200 && code < 300 } catch(e) { return false }
@@ -2192,6 +2218,7 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
   es.createCh(index, ["path"], chName)
   return {
     type: "es",
+    index: index,
     list: function(pfx) {
       var prefix = isString(pfx) ? pfx : ""
       var rows = $ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 })
@@ -2202,7 +2229,9 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
     },
     read: function(path) {
       var r = $ch(chName).get({ path: path })
-      return isMap(r) ? r.raw : __
+      var raw = isMap(r) ? r.raw : __
+      parent._auditRetrieval("es", "es:" + index + "/" + path, path, isDef(raw), isString(raw) ? raw.length : 0)
+      return raw
     },
     write: function(path, content) { $ch(chName).set({ path: path }, { path: path, raw: content }) },
     exists: function(path) { return isMap($ch(chName).get({ path: path })) },
@@ -3464,7 +3493,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   // consistently to federated retrieval.
   if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._lexicalConfig
   try {
-    var manager = new MiniAWikiManager(cfg, this._logFn)
+    var manager = new MiniAWikiManager(cfg, this._logFn, this._auditFn)
     var count   = manager._safeListPages("").length
     this._mounts.push({ name: name, manager: manager, prefix: "@" + name + "/" })
     return { ok: true, name: name, pages: count }

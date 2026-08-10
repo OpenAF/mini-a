@@ -484,6 +484,32 @@ function __miniAMcpWikiAttachMounts(wikiManager, mountsRaw, logPrefix) {
   }
 }
 
+// Same opt-in precedence as oJobMCP.yaml's per-tool-call audit (args.audit,
+// falling back to env OJOB_MCP_AUDIT): args.audit is a raw/uncoerced value
+// here since Init's check.in only declares it as default(__).
+function __miniAMcpWikiAuditEnabled(args) {
+  var raw = isDef(args.audit) ? args.audit : (getEnv("OJOB_MCP_AUDIT") || "false")
+  return toBoolean(raw) === true
+}
+
+// Backend-resolved retrieval audit: logs every page actually fetched from a
+// remote wiki store (s3/http/es), independent of and complementary to
+// oJobMCP.yaml's per-tool-call audit -- which only sees the top-level MCP
+// tool call, not internal fetches made while serving search/lint/list/etc.
+function __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix) {
+  if (!auditEnabled) return function() {}
+  return function(event) {
+    try { log("[audit] " + logPrefix + " retrieve " + af.toSLON({ backend: event.backend, id: event.identifier, path: event.path, ok: event.ok, bytes: event.bytes })) } catch(e) {}
+  }
+}
+
+function __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix) {
+  if (!auditEnabled) return function() {}
+  return function(level, msg) {
+    try { log("[" + logPrefix + "] " + level + ": " + msg) } catch(e) {}
+  }
+}
+
 function __miniAMcpWikiInit(args, options) {
   args = isMap(args) ? args : {}
   options = isMap(options) ? options : {}
@@ -503,7 +529,10 @@ function __miniAMcpWikiInit(args, options) {
   }
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
   var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"
-  global.__wikiManager = new MiniAWikiManager(cfg)
+  var auditEnabled = __miniAMcpWikiAuditEnabled(args)
+  global.__wikiManager = new MiniAWikiManager(cfg,
+    __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix),
+    __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix))
   global.__wikiTool = __miniAMcpWikiCreateTool(cfg, global.__wikiManager)
   args.label = __miniAMcpWikiDefaultLabel(args, cfg)
   __miniAMcpWikiAttachMounts(global.__wikiManager, args.wikimounts, logPrefix)
