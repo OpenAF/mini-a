@@ -6943,7 +6943,9 @@ try {
 
   finalizeSession("exit")
   //if (isDef(ow.oJob)) ow.oJob.stop()
-  exit(0, true)
+  // Use a regular JVM exit so Mini-A's global MCP cleanup hook also runs.
+  // oJob.stop() remains disabled above because it can wait on unrelated jobs.
+  exit(0)
 } catch(_ge) {
   $err(_ge)
 }
