@@ -63,3 +63,29 @@ mini-a usewiki=true wikibackend=http wikiurl=https://docs.example/wiki
 mini-a usewiki=true wikiaccess=ro wikibackend=s3 wikibucket=team-wiki \
   wikis3artifactprefix=published/ s3artifactbundle=true
 ```
+
+## Browser
+
+`mini-a-wiki-browser.yaml` provides a read-only web browser backed by
+`oJobBrowse.yaml`. It connects to the Mini-A wiki MCP job for `search` only and
+uses the same `fs`, `s3`/`s3fs`, or `http` backend settings to display matched
+Markdown and HTML pages.
+
+```sh
+# Browse a local wiki at http://localhost:8091/
+ojob mini-a-wiki-browser.yaml wikiroot=./wiki
+
+# Browse a published static wiki
+ojob mini-a-wiki-browser.yaml wikibackend=http \
+  wikiurl=https://docs.example/wiki wikiindexdir=/var/cache/mini-a/wiki
+
+# Rewrite query strings in links while rendering pages
+ojob mini-a-wiki-browser.yaml wikiroot=./wiki \
+  linkqueryregex='^page=(.*)$' linkqueryreplace='path=$1'
+```
+
+Use `wikijob` to select another compatible Mini-A wiki MCP oJob. Search results
+must expose page paths, so do not point the browser at the restricted
+`mcp-wiki-safe.yaml` profile. `linkqueryregex` is a JavaScript regular
+expression applied independently to each rendered link query string;
+`linkqueryreplace` uses JavaScript replacement syntax such as `$1`.

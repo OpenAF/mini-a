@@ -150,6 +150,7 @@ files:
 - mini-a-utils.js
 - mini-a-web.sh
 - mini-a-web.yaml
+- mini-a-wiki-browser.yaml
 - mini-a-wiki.js
 - mini-a-worker.yaml
 - mini-a.js
@@ -179,7 +180,7 @@ filesHash:
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
   docs/WHATS-NEW.md: 73102d5f71b69ba58e99dace49c55533d3acd166
-  docs/WIKI.md: cd785fb30eeb23c41559155a32e0149190f187b5
+  docs/WIKI.md: 1f9ddc020d3c2edd3722ee8f8ac9f96451394297
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -251,6 +252,7 @@ filesHash:
   mini-a-utils.js: b32c7b7665466e56ac966602c82c327f60e8a663
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
   mini-a-web.yaml: bb278692f8533b41053ebc3dc2d70f5c0c20d731
+  mini-a-wiki-browser.yaml: 2fe75086c0661bf623e2af228dfc81efa4f74a23
   mini-a-wiki.js: 7921e9bb212d45d34b7e9ff5e5e8933b41f427fe
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
   mini-a.js: 2a878775b882b34486c1d2d282d2a65d1eef6d04

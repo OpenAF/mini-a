@@ -1,0 +1,194 @@
+# Author: OpenAI Assistant
+
+include:
+- https://github.com/OpenAF/ojob-common/raw/master/oJobBrowse.yaml
+
+help:
+  text   : Search and browse a Mini-A wiki from a web browser.
+  expects:
+  - name     : onport
+    desc     : HTTP port on which to expose the browser.
+    example  : "8091"
+    mandatory: false
+  - name     : uri
+    desc     : URI under which to expose the wiki browser.
+    example  : "/"
+    mandatory: false
+  - name     : wikijob
+    desc     : Mini-A wiki MCP oJob used for search. The browser only calls its search tool.
+    example  : "mcps/mcp-wiki.yaml"
+    mandatory: false
+  - name     : wikibackend
+    desc     : Wiki backend type (fs, s3, s3fs or http; https is an alias).
+    example  : "fs"
+    mandatory: false
+  - name     : wikiroot
+    desc     : Base directory or local .zip/.okt archive for the fs backend.
+    example  : "./wiki"
+    mandatory: false
+  - name     : wikibucket
+    desc     : S3 bucket for the s3/s3fs backend.
+    mandatory: false
+  - name     : wikiprefix
+    desc     : S3 key prefix for the s3/s3fs backend.
+    mandatory: false
+  - name     : wikiurl
+    desc     : S3 endpoint or static HTTP wiki base URL.
+    mandatory: false
+  - name     : wikiaccesskey
+    desc     : S3 access key.
+    mandatory: false
+  - name     : wikisecret
+    desc     : S3 secret key. OAF_MINI_A_WIKI_SECRET is used when omitted.
+    mandatory: false
+  - name     : wikiregion
+    desc     : S3 region.
+    mandatory: false
+  - name     : wikiuseversion1
+    desc     : Force S3 signature version 1.
+    mandatory: false
+  - name     : wikiignorecertcheck
+    desc     : Ignore TLS certificate validation for S3.
+    mandatory: false
+  - name     : wikihttpindexurl
+    desc     : Optional HTTP search artifact URL.
+    mandatory: false
+  - name     : wikihttptimeout
+    desc     : HTTP request timeout in milliseconds.
+    mandatory: false
+  - name     : wikiindexdir
+    desc     : Local search artifact cache directory.
+    mandatory: false
+  - name     : linkqueryregex
+    desc     : Optional regular expression applied to link query strings in displayed Markdown or HTML.
+    example  : "^page=(.*)$"
+    mandatory: false
+  - name     : linkqueryreplace
+    desc     : Replacement for linkqueryregex (JavaScript replacement syntax).
+    example  : "path=$1"
+    mandatory: false
+
+todo:
+- Init
+- (httpdBrowse): "${onport:-8091}"
+  ((uri    )): "${uri:-/}"
+  ((options)):
+    browse : true
+    showURI: false
+    default: ""
+  ((fns    )):
+    getList  : &GETLIST | #js
+      var query = isMap(request.params) && isDef(request.params.q) ? String(request.params.q).trim() : ""
+      var content = '<form method="get" style="display:flex;gap:.5rem;margin:.75rem 0">' +
+                    '<input name="q" value="' + global.__miniAWikiBrowserEscape(query) + '" placeholder="Search the wiki" style="flex:1;padding:.45rem">' +
+                    '<button type="submit">Search</button></form>'
+      var hits = []
+      if (query.length > 0) {
+        var answer = global.__miniAWikiBrowserMCP.callTool("search", { query: query, limit: global.__miniAWikiBrowserLimit })
+        if (isMap(answer) && isArray(answer.results)) hits = answer.results
+        if (isMap(answer) && isMap(answer.content) && isArray(answer.content.results)) hits = answer.content.results
+        if (isMap(answer) && isArray(answer.content) && answer.content.length > 0 && isString(answer.content[0].text)) {
+          try {
+            var parsed = jsonParse(answer.content[0].text, __, __, true)
+            if (isMap(parsed) && isArray(parsed.results)) hits = parsed.results
+          } catch(ignoreTextResult) {}
+        }
+      }
+      return {
+        isList     : true,
+        fields     : [ "Path", "Title", "Description" ],
+        alignFields: [ "left", "left", "left" ],
+        key        : "Path",
+        content    : content,
+        list       : hits.filter(function(hit) { return isMap(hit) && isString(hit.path) }).map(function(hit) {
+          return {
+            isDirectory: false,
+            values     : {
+              Path       : hit.path,
+              Title      : isDef(hit.title) ? hit.title : "",
+              Description: isDef(hit.description) ? hit.description : ""
+            }
+          }
+        })
+      }
+    getObj   : &GETOBJ | #js
+      var path = request.uri.replace(new RegExp("^" + options.parentURI + "/?"), "").replace(/\/$/, "")
+      path = decodeURIComponent(path)
+      var body
+      if (/\.html?$/i.test(path)) {
+        var safePath = __miniAWikiNormalizePath(path, { requireMarkdown: false })
+        body = global.__miniAWikiBrowserWiki._backend.read(safePath)
+      } else {
+        var page = global.__miniAWikiBrowserWiki.read(path)
+        body = isMap(page) && isDef(page.body) ? page.body : __
+      }
+      if (isUnDef(body)) throw new Error("Wiki page not found: " + path)
+      body = String(body)
+      body = global.__miniAWikiBrowserReplaceLinkQueries(body)
+      return { data: body, type: /\.md$/i.test(path) ? "md" : "raw" }
+
+jobs:
+- name : Init
+  check:
+    in:
+      onport            : toNumber.isNumber.default(8091)
+      uri               : isString.default("/")
+      wikijob           : isString.default("mcps/mcp-wiki.yaml")
+      wikibackend       : isString.default("fs")
+      wikiroot          : isString.default(".")
+      wikibucket        : isString.default(__)
+      wikiprefix        : isString.default("")
+      wikiurl           : isString.default(__)
+      wikiaccesskey     : isString.default(__)
+      wikisecret        : isString.default(__)
+      wikiregion        : isString.default(__)
+      wikiuseversion1   : toBoolean.isBoolean.default(false)
+      wikiignorecertcheck: toBoolean.isBoolean.default(false)
+      wikihttpindexurl  : isString.default(__)
+      wikihttptimeout   : toNumber.isNumber.default(30000)
+      wikiindexdir      : isString.default(__)
+      searchlimit       : toNumber.isNumber.default(50)
+      linkqueryregex    : isString.default(__)
+      linkqueryreplace  : isString.default("")
+  exec : | #js
+    loadLib("mini-a-mcp-wiki.js")
+
+    var wikiArgs = {
+      wikibackend       : args.wikibackend,
+      wikiroot          : args.wikiroot,
+      wikibucket        : args.wikibucket,
+      wikiprefix        : args.wikiprefix,
+      wikiurl           : args.wikiurl,
+      wikiaccesskey     : args.wikiaccesskey,
+      wikisecret        : args.wikisecret,
+      wikiregion        : args.wikiregion,
+      wikiuseversion1   : args.wikiuseversion1,
+      wikiignorecertcheck: args.wikiignorecertcheck,
+      wikihttpindexurl  : args.wikihttpindexurl,
+      wikihttptimeout   : args.wikihttptimeout,
+      wikiindexdir      : args.wikiindexdir,
+      wikiaccess        : "ro"
+    }
+    var cfg = __miniAMcpWikiBuildConfig(wikiArgs, { access: "ro", readonly: true })
+    global.__miniAWikiBrowserWiki = new MiniAWikiManager(cfg)
+    global.__miniAWikiBrowserLimit = args.searchlimit
+    global.__miniAWikiBrowserMCP = $mcp({
+      type   : "ojob",
+      options: {
+        job : args.wikijob,
+        args: wikiArgs
+      }
+    })
+    global.__miniAWikiBrowserMCP.initialize()
+
+    global.__miniAWikiBrowserEscape = function(value) {
+      return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;")
+    }
+    var linkQueryRE = isString(args.linkqueryregex) && args.linkqueryregex.length > 0 ? new RegExp(args.linkqueryregex, "g") : __
+    global.__miniAWikiBrowserReplaceLinkQueries = function(value) {
+      if (isUnDef(linkQueryRE)) return value
+      return String(value).replace(/([?&])([^\s\"'<>\)]+)/g, function(all, separator, query) {
+        linkQueryRE.lastIndex = 0
+        return separator + query.replace(linkQueryRE, args.linkqueryreplace)
+      })
+    }
