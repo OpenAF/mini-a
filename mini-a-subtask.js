@@ -68,14 +68,18 @@ var SubtaskManager = function(parentArgs, opts) {
   }
 
   this._running = true
+  this._watchdogPromise = __
+  this._watchdogWakeSignal = new java.lang.Object()
   this._transitionLock = "mini_a_subtask_lock_" + genUUID()
 
   if (this.remoteDelegation) {
     this._refreshWorkerProfiles()
   }
   
-  // Start watchdog for deadlines
-  this._startWatchdog()
+  // Remote workers can need heartbeat eviction before a subtask is submitted.
+  // Local delegation starts the watchdog lazily when there is actual work, so
+  // an otherwise idle console does not retain a background shutdown thread.
+  if (this.remoteDelegation) this._startWatchdog()
 }
 
 SubtaskManager.prototype._touchSubtask = function(subtask, reason) {
@@ -142,6 +146,29 @@ SubtaskManager.prototype._getSubtaskTimeoutReason = function(subtask, now) {
  */
 SubtaskManager.prototype.destroy = function() {
   this._running = false
+  // $doV cancellation does not interrupt sleep(..., true), so wake the
+  // watchdog explicitly instead of making console shutdown wait for its
+  // five-second polling interval.
+  if (isDef(this._watchdogWakeSignal)) {
+    try {
+      sync(function() {
+        this._watchdogWakeSignal.notifyAll()
+      }.bind(this), this._watchdogWakeSignal)
+    } catch(ignoreWatchdogWake) {}
+  }
+  if (isDef(this._watchdogPromise) && isFunction(this._watchdogPromise.cancel)) {
+    try { this._watchdogPromise.cancel("Subtask manager stopped") } catch(ignoreWatchdogCancel) {}
+  }
+  Object.keys(this.subtasks).forEach(function(subtaskId) {
+    var subtask = this.subtasks[subtaskId]
+    if (!isMap(subtask)) return
+    if (!__isTerminalSubtaskState(subtask.status)) {
+      try { this.cancel(subtaskId, "Subtask manager stopped") } catch(ignoreSubtaskCancel) {}
+    }
+    if (isDef(subtask._executionPromise) && isFunction(subtask._executionPromise.cancel)) {
+      try { subtask._executionPromise.cancel("Subtask manager stopped") } catch(ignoreExecutionCancel) {}
+    }
+  }.bind(this))
 }
 
 SubtaskManager.prototype._normalizeWorkers = function(workers) {
@@ -1035,7 +1062,7 @@ SubtaskManager.prototype._failOrRetrySubtask = function(subtask, prefix, error) 
 SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
   var parent = this
 
-  $doV(function() {
+  subtask._executionPromise = $doV(function() {
     var childAgent = __
     try {
       if (subtask.status !== "running") return
@@ -1081,6 +1108,9 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
         parent._failOrRetrySubtask(subtask, prefix, error)
       }
     } finally {
+      if (isObject(childAgent) && isFunction(childAgent._stopAgentResources)) {
+        try { childAgent._stopAgentResources() } catch(ignoreChildStop) {}
+      }
       if (subtask.childAgent === childAgent) subtask.childAgent = __
     }
 
@@ -1093,7 +1123,7 @@ SubtaskManager.prototype._startLocalSubtask = function(subtask, prefix) {
 SubtaskManager.prototype._startRemoteSubtask = function(subtask, prefix) {
   var parent = this
 
-  $doV(function() {
+  subtask._executionPromise = $doV(function() {
     try {
       var mergedArgs = parent._buildChildArgs(subtask)
       var workerUrl = parent._nextWorkerForSubtask(subtask, mergedArgs)
@@ -1296,6 +1326,7 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
   
   opts = _$(opts, "opts").isMap().default({})
   childArgs = _$(childArgs, "childArgs").isMap().default({})
+  this._startWatchdog()
   
   var depth = this.currentDepth + 1
   if (depth > this.maxDepth) {
@@ -1328,7 +1359,8 @@ SubtaskManager.prototype.submit = function(goal, childArgs, opts) {
     depth: depth,
     metadata: opts.metadata || {},
     fork: toBoolean(opts.fork) === true,
-    forkState: (toBoolean(opts.fork) === true && isMap(opts.forkState)) ? opts.forkState : __
+    forkState: (toBoolean(opts.fork) === true && isMap(opts.forkState)) ? opts.forkState : __,
+    _executionPromise: __
   }
   
   this.subtasks[subtaskId] = subtask
@@ -1473,7 +1505,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   
   var wasRunning = subtask.status === "running"
 
-  if (wasRunning && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
+  if (wasRunning && this._running === true && this.remoteDelegation && isString(subtask.workerUrl) && isString(subtask.remoteTaskId)) {
     try {
       if (this.useA2A) {
         this._remoteRequest(subtask.workerUrl, "/tasks:cancel", {
@@ -1499,7 +1531,7 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
       }
     } catch(ignoreLocalCancel) {}
   }
-  
+
   // Mark as cancelled
   var cancelReason = reason || "Cancelled by user"
   var claimedRunning = false
@@ -1523,6 +1555,10 @@ SubtaskManager.prototype.cancel = function(subtaskId, reason) {
   if (wasRunning && !claimedRunning) return false
   if (!wasRunning && !cancelledPending) return false
   this.metrics.cancelled++
+
+  if (wasRunning && isDef(subtask._executionPromise) && isFunction(subtask._executionPromise.cancel)) {
+    try { subtask._executionPromise.cancel(reason || "Cancelled by user") } catch(ignoreExecutionCancel) {}
+  }
   
   // Remove from pending queue if present
   if (wasRunning) {
@@ -1764,8 +1800,9 @@ SubtaskManager.prototype._processQueue = function() {
  */
 SubtaskManager.prototype._startWatchdog = function() {
   var parent = this
+  if (parent._running !== true || isDef(parent._watchdogPromise)) return
   
-  $doV(function() {
+  this._watchdogPromise = $doV(function() {
     while (parent._running) {
       try {
         var now = new Date().getTime()
@@ -1845,8 +1882,15 @@ SubtaskManager.prototype._startWatchdog = function() {
         // Ignore watchdog errors
       }
       
-      // Check every 5 seconds
-      sleep(5000, true)
+      // Check every 5 seconds, but allow destroy() to wake this wait
+      // immediately so an idle delegated console can exit promptly.
+      if (parent._running) {
+        try {
+          sync(function() {
+            if (parent._running) parent._watchdogWakeSignal.wait(5000)
+          }, parent._watchdogWakeSignal)
+        } catch(ignoreWatchdogWake) {}
+      }
     }
   })
 }

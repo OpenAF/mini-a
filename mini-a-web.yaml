@@ -367,6 +367,10 @@ help:
     desc     : Max low-cost model tokens before switching permanently to main model
     example  : "50000"
     mandatory: false
+  - name     : lcjsonretries
+    desc     : Extra same-step low-cost model retries on invalid JSON before falling back to main model
+    example  : "1"
+    mandatory: false
   - name     : llmcomplexity
     desc     : Use the low-cost model to validate medium-complexity decisions
     example  : "true"
@@ -1776,6 +1780,7 @@ jobs:
       evidencegatestrictness: isString().default(__)
       lcescalatedefer : toBoolean().isBoolean().default(__)
       lcbudget        : toNumber().isNumber().default(__)
+      lcjsonretries   : toNumber().isNumber().default(__)
       llmcomplexity   : toBoolean().isBoolean().default(false)
       usehistory      : toBoolean().isBoolean().default(false)
       useattach       : toBoolean().isBoolean().default(false)

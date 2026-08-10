@@ -288,6 +288,84 @@
     ow.test.assert(paths[1], "docs/page.md", "should keep second valid path")
   }
 
+  exports.testHttpBundleHelpers = function() {
+    ow.test.assert(__miniAWikiUrlJoin("https://wiki.example/", "/index.md"), "https://wiki.example/index.md", "URL joining should use exactly one slash")
+    ow.test.assert(isUnDef(__miniAWikiBundleEntryRelative("../outside")), true, "bundle entry paths must reject traversal")
+    ow.test.assert(__miniAWikiBundleEntryRelative(".mini-a-wiki-lucene/segments_1"), ".mini-a-wiki-lucene/segments_1", "Lucene entries should be retained")
+    ow.test.assert(__miniAWikiBundleChanged({ etag: "new" }, { etag: "old" }), true, "a changed ETag should refresh the bundle")
+    ow.test.assert(__miniAWikiBundleChanged({ etag: "same" }, { etag: "same" }), false, "an unchanged ETag should skip refresh")
+    ow.test.assert(__miniAWikiBundleChanged({ lastModified: "now" }, { lastModified: "now" }), false, "an unchanged modification time should skip refresh")
+    ow.test.assert(__miniAWikiBasicAuth("user", "pass"), "Basic dXNlcjpwYXNz", "HTTP basic auth should be correctly encoded")
+  }
+
+  exports.testCliForwardsHttpBundleOptions = function() {
+    var job = io.readFileString("mini-a.yaml")
+    ;["wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs"].forEach(function(option) {
+      ow.test.assert((new RegExp("\\b" + option + "\\s*:\\s*" + option + "\\b")).test(job), true, "CLI job should forward " + option + " to Mini-A")
+    })
+    ow.test.assert(job.indexOf('options  : ["fs", "s3", "s3fs", "es", "http", "https"]') >= 0, true, "CLI job should accept HTTP wiki backends")
+  }
+
+  exports.testPeriodicArtifactBundleRefreshReopensCachedRuntime = function() {
+    var searchesClosed = 0, graphsClosed = 0, graphsOpened = 0, hydrations = 0
+    var fake = {
+      _config: { wikiartifactrefreshsecs: 60, s3artifactbundle: true },
+      _backendType: "s3",
+      _artifactLastCheckAt: 0,
+      _searchIndex: { close: function() { searchesClosed++ } },
+      _graph: { close: function() { graphsClosed++ } },
+      _hydrateS3Artifacts: function() { hydrations++; return true },
+      _initializeGraph: function() { graphsOpened++ },
+      _logFn: function() {}
+    }
+    ow.test.assert(MiniAWikiManager.prototype._maybeRefreshArtifactBundle.call(fake), true, "changed S3 bundle should refresh the local runtime")
+    ow.test.assert(searchesClosed, 1, "refresh should close the old Lucene reader")
+    ow.test.assert(graphsClosed, 1, "refresh should close the old graph reader")
+    ow.test.assert(graphsOpened, 1, "refresh should reopen graph state")
+    ow.test.assert(hydrations, 1, "refresh should hydrate once")
+    ow.test.assert(MiniAWikiManager.prototype._maybeRefreshArtifactBundle.call(fake), false, "refresh interval should suppress an immediate second metadata probe")
+    ow.test.assert(hydrations, 1, "suppressed refresh should not hydrate again")
+
+    fake._config.s3artifactbundle = false
+    fake._artifactLastCheckAt = 0
+    ow.test.assert(MiniAWikiManager.prototype._maybeRefreshArtifactBundle.call(fake), false, "individual S3 artifact trees should not be periodically refreshed")
+  }
+
+  exports.testHttpBackendIsReadOnly = function() {
+    var hydrate = MiniAWikiManager.prototype._hydrateHttpArtifacts
+    try {
+      MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {}
+      var wm = new MiniAWikiManager({ backend: "https", url: "https://wiki.example", access: "rw" })
+      ow.test.assert(wm._backendType, "http", "https should normalize to the HTTP backend")
+      ow.test.assert(wm._access, "ro", "HTTP wikis must force read-only access")
+      ow.test.assert(wm.write("new.md", { title: "New" }, "# New").ok, false, "HTTP wikis should reject writes")
+      ow.test.assert(wm.delete("new.md").ok, false, "HTTP wikis should reject deletes")
+    } finally { MiniAWikiManager.prototype._hydrateHttpArtifacts = hydrate }
+  }
+
+  exports.testArtifactBundleHydratesAtomically = function() {
+    var dir = createTestDir(), archive = dir + "/bundle.zip"
+    try {
+      var zip = new ZIP()
+      try {
+        zip.putFile(".mini-a-wiki-lucene/segments_1", af.fromString2Bytes("lucene-binary-fixture"))
+        zip.putFile(".mini-a-wiki-graph/graph.json", af.fromString2Bytes("{\"version\":2}"))
+        zip.generate2File(archive, { compressionLevel: 0 })
+      } finally { try { zip.close() } catch(ignoreZip) {} }
+      var fake = { _getIndexRoot: function() { return dir }, _logFn: function() {} }
+      var changed = MiniAWikiManager.prototype._hydrateArtifactBundle.call(fake,
+        function() { return { etag: "fixture-v1", lastModified: "" } },
+        function() { return new java.io.FileInputStream(archive) }, "test", "bundle.zip")
+      ow.test.assert(changed, true, "a new bundle should hydrate")
+      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-lucene/segments_1"), "lucene-binary-fixture", "Lucene bundle entries should be extracted")
+      ow.test.assert(io.readFileString(dir + "/.mini-a-wiki-graph/graph.json"), "{\"version\":2}", "graph bundle entries should be extracted")
+      var unchanged = MiniAWikiManager.prototype._hydrateArtifactBundle.call(fake,
+        function() { return { etag: "fixture-v1", lastModified: "" } },
+        function() { throw "unchanged bundle must not download" }, "test", "bundle.zip")
+      ow.test.assert(unchanged, false, "unchanged bundle metadata should skip download")
+    } finally { cleanupTestDir(dir) }
+  }
+
   exports.testFsBackendReadWrite = function() {
     var dir = createTestDir()
     try {
@@ -1092,9 +1170,10 @@
     ow.test.assert(denied.windowSeconds, 3600, "restricted budget errors should report the budget window")
     ow.test.assert(denied.retryAfterSeconds > 0, true, "restricted budget errors should give retry guidance")
     ow.test.assert(denied.message.indexOf("avoid parallel fallback requests") >= 0, true, "restricted budget errors should discourage repeated fallback requests")
-    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/", wikilexical: "{ language: 'french', synonyms: [['velo', 'bicyclette']] }" }, { access: "ro" })
+    var cfg = __miniAMcpWikiBuildConfig({ usewikigraph: true, wikigraphsearchhints: true, wikis3artifactprefix: "published-cache/", wikiartifactrefreshsecs: 300, wikilexical: "{ language: 'french', synonyms: [['velo', 'bicyclette']] }" }, { access: "ro" })
     ow.test.assert(cfg.wikigraphsearchhints, true, "default configuration must preserve graph search hints")
     ow.test.assert(cfg.s3artifactprefix, "published-cache/", "MCP configuration should pass the S3 artifact prefix to the wiki manager")
+    ow.test.assert(cfg.wikiartifactrefreshsecs, 300, "MCP configuration should pass the artifact refresh interval to the wiki manager")
     ow.test.assert(cfg.wikilexical.indexOf("french") >= 0, true, "MCP configuration should pass lexical configuration to the wiki manager")
   }
 
@@ -1914,15 +1993,26 @@
   }
 
   exports.testLexicalConfigDefaultsAndValidation = function() {
-    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
-    ow.test.assert(wm._lexicalConfig.language, "english", "lexical search should default to English")
-    ow.test.assert(wm._lexicalConfig.synonyms.length, 0, "default lexical search should not add synonyms")
-    var portuguese = new MiniAWikiManager({ backend: "fs", root: ".", wikilexical: "{ language: 'portuguese', synonyms: [['carro', 'automovel']] }" })
-    ow.test.assert(portuguese._lexicalConfig.language, "portuguese", "configured Lucene language should be preserved")
-    ow.test.assert(portuguese._lexicalConfig.synonyms[0][1], "automovel", "configured synonym rules should be normalized")
-    var invalid = false
-    try { new MiniAWikiManager({ backend: "fs", root: ".", wikilexical: { language: "klingon" } }) } catch(e) { invalid = String(e).indexOf("Invalid wikilexical language") >= 0 }
-    ow.test.assert(invalid, true, "invalid lexical languages should fail initialization clearly")
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      ow.test.assert(wm._lexicalConfig.language, "english", "lexical search should default to English")
+      ow.test.assert(wm._lexicalConfig.synonyms.length, 0, "default lexical search should not add synonyms")
+      ow.test.assert(wm._lexicalConfig.shingles, false, "shingles should remain opt-in by default")
+      var portuguese = new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: "{ language: 'portuguese', synonyms: [['carro', 'automovel']] }" })
+      ow.test.assert(portuguese._lexicalConfig.language, "portuguese", "configured Lucene language should be preserved")
+      ow.test.assert(portuguese._lexicalConfig.synonyms[0][1], "automovel", "configured synonym rules should be normalized")
+      io.writeFileString(dir + java.io.File.separator + "synonyms.txt", "# Domain aliases\nk8s, kubernetes\nsso, single sign on\n")
+      var fromFile = new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: { synonyms: [["js", "javascript"]], synonymsFile: "synonyms.txt" } })
+      ow.test.assert(fromFile._lexicalConfig.synonyms.length, 3, "synonym files should add to inline synonym rules")
+      ow.test.assert(fromFile._lexicalConfig.synonyms[1][1], "kubernetes", "relative synonym files should resolve from the wiki root")
+      var invalid = false
+      try { new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: { language: "klingon" } }) } catch(e) { invalid = String(e).indexOf("Invalid wikilexical language") >= 0 }
+      ow.test.assert(invalid, true, "invalid lexical languages should fail initialization clearly")
+      var missing = false
+      try { new MiniAWikiManager({ backend: "fs", root: dir, wikilexical: { synonymsFile: "missing.txt" } }) } catch(e) { missing = String(e).indexOf("synonymsFile: file not found") >= 0 }
+      ow.test.assert(missing, true, "missing synonym files should fail initialization clearly")
+    } finally { cleanupTestDir(dir) }
   }
 
   exports.testLexicalManifestUpgradeContract = function() {

@@ -1,6 +1,6 @@
 // Author: Nuno Aguiar
 // License: Apache 2.0
-// Description: Wiki manager for Mini-A. Supports filesystem and S3 backends.
+// Description: Wiki manager for Mini-A. Supports filesystem, S3, Elasticsearch and static HTTP(S) backends.
 
 // ── Template version & helpers ────────────────────────────────────────────────
 
@@ -12,27 +12,50 @@ var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
 
 // Keep the on-disk index contract deliberately small and model-free. More
 // expensive lexical features remain explicit opt-ins in wikilexical.
-var __miniAWikiLexicalConfig = function(raw) {
+var __miniAWikiLexicalConfig = function(raw, wikiRoot) {
   var value = raw
   if (isUnDef(value) || value === null || (isString(value) && value.trim().length === 0)) value = { language: "english" }
   if (isString(value)) {
     try { value = af.fromJSSLON(value) } catch(e) { throw new Error("Invalid wikilexical configuration: expected SLON/JSON object: " + __miniAErrMsg(e)) }
   }
   if (!isMap(value)) throw new Error("Invalid wikilexical configuration: expected a SLON/JSON object")
-  var allowed = { language: true, synonyms: true, shingles: true, ngrams: true, queryexpansion: true, pseudorelevancefeedback: true }
+  var allowed = { language: true, synonyms: true, synonymsfile: true, shingles: true, ngrams: true, queryexpansion: true, pseudorelevancefeedback: true }
   Object.keys(value).forEach(function(key) {
     if (allowed[String(key).toLowerCase()] !== true) throw new Error("Invalid wikilexical configuration: unsupported option '" + key + "'")
   })
   var language = isString(value.language) ? value.language.toLowerCase().trim() : "english"
   if (__MINI_A_WIKI_LEXICAL_LANGUAGES.indexOf(language) < 0) throw new Error("Invalid wikilexical language '" + String(value.language) + "'. Supported Lucene languages include english, french, german, portuguese and spanish.")
-  var cfg = { language: language, synonyms: [], shingles: true, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false }
-  if (isDef(value.synonyms)) {
-    if (!isArray(value.synonyms)) throw new Error("Invalid wikilexical synonyms: expected an array of synonym rules")
-    cfg.synonyms = value.synonyms.map(function(rule, i) {
+  var cfg = { language: language, synonyms: [], shingles: false, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false }
+  var normalizeRules = function(rules, source) {
+    if (!isArray(rules)) throw new Error("Invalid wikilexical " + source + ": expected an array of synonym rules")
+    return rules.map(function(rule, i) {
       var terms = isString(rule) ? rule.split(",") : rule
-      if (!isArray(terms) || terms.length < 2 || !terms.every(function(t) { return isString(t) && t.trim().length > 0 })) throw new Error("Invalid wikilexical synonym rule at index " + i + ": use a comma-separated string or an array with at least two terms")
+      if (!isArray(terms) || terms.length < 2 || !terms.every(function(t) { return isString(t) && t.trim().length > 0 })) throw new Error("Invalid wikilexical synonym rule at index " + i + " in " + source + ": use a comma-separated string or an array with at least two terms")
       return terms.map(function(t) { return t.trim().toLowerCase() })
     })
+  }
+  if (isDef(value.synonyms)) {
+    cfg.synonyms = normalizeRules(value.synonyms, "synonyms")
+  }
+  var synonymsFile = isDef(value.synonymsFile) ? value.synonymsFile : value.synonymsfile
+  if (isDef(synonymsFile)) {
+    if (!isString(synonymsFile) || synonymsFile.trim().length === 0) throw new Error("Invalid wikilexical synonymsFile: expected a non-empty file path")
+    var synonymsPath = synonymsFile.trim()
+    if (!(new java.io.File(synonymsPath)).isAbsolute()) {
+      var rootFile = isDef(wikiRoot) ? new java.io.File(String(wikiRoot)) : __
+      if (isUnDef(rootFile) || !rootFile.isDirectory()) throw new Error("Invalid wikilexical synonymsFile: a relative path requires a filesystem wiki root")
+      synonymsPath = rootFile.getCanonicalPath() + java.io.File.separator + synonymsPath
+    }
+    var synonymsJavaFile = new java.io.File(synonymsPath)
+    if (!synonymsJavaFile.isFile()) throw new Error("Invalid wikilexical synonymsFile: file not found: " + synonymsPath)
+    var synonymsRaw = io.readFileString(synonymsPath).trim()
+    var fileRules
+    try {
+      fileRules = af.fromJSSLON(synonymsRaw)
+    } catch(e) {
+    }
+    if (!isArray(fileRules)) fileRules = synonymsRaw.split(/\r?\n/).map(function(line) { return line.trim() }).filter(function(line) { return line.length > 0 && line.indexOf("#") !== 0 })
+    cfg.synonyms = cfg.synonyms.concat(normalizeRules(fileRules, "synonymsFile"))
   }
   ;["shingles", "ngrams", "queryExpansion", "pseudoRelevanceFeedback"].forEach(function(key) {
     var sourceKey = key.toLowerCase()
@@ -53,6 +76,36 @@ var __miniAWikiLexicalFingerprint = function(cfg) {
     pseudoRelevanceFeedback: cfg.pseudoRelevanceFeedback === true
   }
   return sha1(stringify(normalized, __, ""))
+}
+
+// These small helpers are deliberately standalone so callers can validate URL and
+// bundle metadata behaviour without requiring a live HTTP or S3 service.
+var __miniAWikiUrlJoin = function(base, path) {
+  var b = isString(base) ? base.trim() : ""
+  var p = isString(path) ? path.trim() : ""
+  while (b.endsWith("/")) b = b.substring(0, b.length - 1)
+  while (p.startsWith("/")) p = p.substring(1)
+  return p.length > 0 ? b + "/" + p : b
+}
+
+var __miniAWikiBundleChanged = function(remote, local) {
+  if (!isMap(remote) || !isMap(local)) return true
+  if (isString(remote.etag) && remote.etag.length > 0) return remote.etag !== local.etag
+  if (isString(remote.lastModified) && remote.lastModified.length > 0) return remote.lastModified !== local.lastModified
+  return true
+}
+
+var __miniAWikiBundleEntryRelative = function(entry) {
+  if (!isString(entry)) return __
+  var value = String(entry).replace(/\\/g, "/")
+  if (value.indexOf("..") >= 0 || value.startsWith("/")) return __
+  if (value.indexOf(".mini-a-wiki-lucene/") === 0 || value.indexOf(".mini-a-wiki-graph/") === 0) return value
+  return __
+}
+
+var __miniAWikiBasicAuth = function(accessKey, secret) {
+  var raw = new java.lang.String(String(accessKey) + ":" + String(secret))
+  return "Basic " + java.util.Base64.getEncoder().encodeToString(raw.getBytes("UTF-8"))
 }
 
 // v1 stock fingerprint phrase — if AGENTS.md contains this verbatim it was never user-edited
@@ -280,11 +333,20 @@ var __miniAWikiLogTemplate = function(now) {
   ].join("\n")
 }
 
-var MiniAWikiManager = function(config, loggerFn) {
+var MiniAWikiManager = function(config, loggerFn, auditFn) {
   this._logFn  = isFunction(loggerFn) ? loggerFn : function() {}
+  this._auditFn = isFunction(auditFn) ? auditFn : function() {}
   this._config = {}
   this._backend = __
   this.configure(config)
+}
+
+// Best-effort hook for backends that fetch page content from an external
+// store (s3, http, es). Never lets a caller-supplied audit callback break
+// retrieval. `identifier` is the backend-resolved location (s3://bucket/key,
+// full URL, es:index/path) -- distinct from `path`, the wiki-relative path.
+MiniAWikiManager.prototype._auditRetrieval = function(backend, identifier, path, ok, bytes) {
+  try { this._auditFn({ backend: backend, identifier: identifier, path: path, ok: ok === true, bytes: isNumber(bytes) ? bytes : 0 }) } catch(e) {}
 }
 
 
@@ -317,6 +379,7 @@ MiniAWikiManager.prototype._isSearchExcludedPath = function(path) {
 }
 
 MiniAWikiManager.prototype._safeListPages = function(prefix) {
+  this._maybeRefreshArtifactBundle()
   var self = this
   return this._backend.list(prefix).filter(function(p) {
     return isString(p) && p.endsWith('.md') && !self._isHiddenPath(p)
@@ -340,6 +403,7 @@ MiniAWikiManager.prototype._getBackendIdentity = function() {
   if (this._backendType === "es") {
     return "es|" + (this._config.esurl || "") + "|" + (this._config.esindex || "")
   }
+  if (this._backendType === "http") return "http|" + (this._config.url || "")
   return "fs|" + (isObject(this._backend) && isString(this._backend.root) ? this._backend.root : ".")
 }
 
@@ -566,6 +630,32 @@ MiniAWikiManager.prototype._luceneQueryReadOnly = function(query, limit) {
   return out
 }
 
+MiniAWikiManager.prototype._luceneListAllReadOnly = function(prefix) {
+  if (!this._ensureLucene() || !this._luceneIndexExists()) return []
+  var pfx = isString(prefix) ? prefix.trim() : ""
+  var dir = __, reader = __, out = [], seen = {}
+  try {
+    var L = Packages.org.apache.lucene
+    dir = L.store.FSDirectory.open(java.nio.file.Paths.get(this._getLuceneIndexPath()))
+    reader = L.index.DirectoryReader.open(dir)
+    var searcher = new L.search.IndexSearcher(reader)
+    var live = L.index.MultiBits.getLiveDocs(reader)
+    for (var i = 0; i < reader.maxDoc(); i++) {
+      if (isDef(live) && live != null && !live.get(i)) continue
+      var doc = this._luceneStoredDoc(searcher, i)
+      var id = isDef(doc) && doc != null ? String(doc.get("id") || "") : ""
+      if (id.length > 0 && id.endsWith(".md") && id.indexOf(pfx) === 0 && seen[id] !== true) { seen[id] = true; out.push(id) }
+    }
+  } catch(e) {
+    this._logFn("warn", "Read-only Lucene listing failed: " + __miniAErrMsg(e))
+    return []
+  } finally {
+    try { if (isDef(reader) && reader != null) reader.close() } catch(ignoreR) {}
+    try { if (isDef(dir) && dir != null) dir.close() } catch(ignoreD) {}
+  }
+  return out.sort()
+}
+
 // _luceneStoredDoc: stored-fields accessor across Lucene versions (storedFields() vs doc()).
 MiniAWikiManager.prototype._luceneStoredDoc = function(searcher, docId) {
   try {
@@ -735,6 +825,14 @@ MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
   if (!artifactPrefix.endsWith("/")) artifactPrefix += "/"
   var bucket = isString(this._config.bucket) ? this._config.bucket.trim() : ""
   if (bucket.length === 0) return
+  if (toBoolean(this._config.s3artifactbundle) === true) {
+    var bundleKey = artifactPrefix + "mini-a-wiki-index.zip"
+    var s3 = this._backend.client
+    return this._hydrateArtifactBundle(function() {
+      var stat = s3.statObject(bucket, bundleKey)
+      return { etag: isDef(stat.etag) ? String(stat.etag) : "", lastModified: isDef(stat.modifiedTime) ? String(stat.modifiedTime) : "" }
+    }, function() { return s3.getObjectStream(bucket, bundleKey) }, "s3", bundleKey)
+  }
   var root = this._getIndexRoot()
   try {
     var rootFile = new java.io.File(root)
@@ -762,9 +860,73 @@ MiniAWikiManager.prototype._hydrateS3Artifacts = function() {
       }
     })
     if (restored > 0) this._logFn("info", "Hydrated " + restored + " wiki search/graph artifacts from S3")
+    return false
   } catch(e) {
     this._logFn("warn", "Failed to hydrate wiki search/graph artifacts from S3: " + __miniAErrMsg(e))
+    return false
   }
+}
+
+// Hydrate a complete Lucene+graph cache without ever merging old segment files
+// into a new index. remoteMetaFn must only perform a cheap metadata request.
+MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downloadFn, source, key) {
+  var self = this
+  var root = this._getIndexRoot()
+  var rootFile = new java.io.File(root)
+  var metaFile = new java.io.File(root + "/.mini-a-wiki-bundle-meta.json")
+  var zipFile = new java.io.File(root + "/.mini-a-wiki-bundle-" + genUUID() + ".zip")
+  var suffix = ".new-" + genUUID()
+  var luceneNew = new java.io.File(root + "/.mini-a-wiki-lucene" + suffix)
+  var graphNew = new java.io.File(root + "/.mini-a-wiki-graph" + suffix)
+  var installed = false
+  var remove = function(file) {
+    if (!file.exists()) return
+    if (file.isDirectory()) { var children = file.listFiles(); for (var i = 0; isDef(children) && i < children.length; i++) remove(children[i]) }
+    file.delete()
+  }
+  try {
+    if (!rootFile.exists() && !rootFile.mkdirs()) throw "could not create local artifact cache"
+    var remote = remoteMetaFn()
+    var local = __
+    try { if (metaFile.isFile()) local = af.fromJson(io.readFileString(metaFile.getPath())) } catch(ignoreMeta) {}
+    if (!__miniAWikiBundleChanged(remote, local) && local.source === source && local.key === key) return false
+    var stream = downloadFn()
+    try { java.nio.file.Files.copy(stream, zipFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) } finally { try { stream.close() } catch(ignoreClose) {} }
+    plugin("ZIP")
+    var zip = new ZIP()
+    try {
+      var zipPath = String(zipFile.getPath())
+      var entries = Object.keys(zip.list(zipPath))
+      entries.forEach(function(entry) {
+        var relative = __miniAWikiBundleEntryRelative(entry)
+        if (isUnDef(relative) || relative.endsWith("/")) return
+        var targetRoot = relative.indexOf(".mini-a-wiki-lucene/") === 0 ? luceneNew : graphNew
+        var child = relative.substring(relative.indexOf("/") + 1)
+        var target = new java.io.File(targetRoot.getPath() + java.io.File.separator + child)
+        var canonicalRoot = targetRoot.getCanonicalPath() + java.io.File.separator
+        if (child.indexOf("..") >= 0 || !target.getCanonicalPath().startsWith(canonicalRoot)) throw "unsafe artifact bundle entry"
+        var parent = target.getParentFile()
+        if (!parent.exists() && !parent.mkdirs()) throw "could not create artifact cache directory"
+        var entryStream = zip.streamGetFileStream(zipPath, entry)
+        try { java.nio.file.Files.copy(entryStream, target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING) } finally { try { entryStream.close() } catch(ignoreEntryClose) {} }
+      })
+    } finally { try { zip.close() } catch(ignoreZipClose) {} }
+    var lucene = new java.io.File(root + "/.mini-a-wiki-lucene")
+    var graph = new java.io.File(root + "/.mini-a-wiki-graph")
+    remove(lucene); remove(graph)
+    if (!luceneNew.exists()) throw "bundle has no Lucene artifacts"
+    if (luceneNew.exists()) java.nio.file.Files.move(luceneNew.toPath(), lucene.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    if (graphNew.exists()) java.nio.file.Files.move(graphNew.toPath(), graph.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    installed = true
+    if (!lucene.exists()) throw "could not install Lucene artifact bundle"
+    remote.source = source; remote.key = key; remote.fetchedAt = new Date().toISOString()
+    io.writeFileString(metaFile.getPath(), stringify(remote, __, ""))
+    this._logFn("info", "Hydrated wiki search/graph artifact bundle from " + source)
+    return true
+  } catch(e) {
+    this._logFn("warn", "Failed to hydrate wiki search/graph artifact bundle: " + __miniAErrMsg(e))
+    return false
+  } finally { try { zipFile.delete(); if (!installed) { remove(luceneNew); remove(graphNew) } } catch(ignoreClean) {} }
 }
 
 MiniAWikiManager.prototype._graphPages = function() {
@@ -1100,6 +1262,7 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
 }
 
 MiniAWikiManager.prototype.graph = function(op, params) {
+  this._maybeRefreshArtifactBundle()
   var action = isString(op) ? op.toLowerCase().trim() : (isObject(params) && isString(params.op) ? params.op.toLowerCase().trim() : "stats")
   var p = isObject(params) ? params : {}
   var mountGraphRequest = (action === "neighbors" || action === "retrieve") && isString(p.path) && p.path.startsWith("@")
@@ -1199,23 +1362,33 @@ MiniAWikiManager.prototype.configure = function(config) {
   // read here too so direct manager/MCP construction has the same behaviour as
   // the Mini-A launcher.
   if (isUnDef(cfg.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) cfg.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
-  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical)
+  this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical, cfg.root)
   this._lexicalFingerprint = __miniAWikiLexicalFingerprint(this._lexicalConfig)
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
-  this._backendType = ["s3", "es", "s3fs"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
+  if (backendRaw === "https") backendRaw = "http"
+  this._backendType = ["s3", "es", "s3fs", "http"].indexOf(backendRaw) >= 0 ? backendRaw : "fs"
   // A local ZIP-compatible filesystem root is a wiki bundle, not a writable
   // directory. Detect it before any bootstrap/index/graph work can write.
   this._archiveRoot = this._backendType === "fs" && this._isArchiveRoot(cfg.root)
   if (this._archiveRoot) this._access = "ro"
+  if (this._backendType === "http") this._access = "ro"
   this._config  = cfg
   this._graph = __
   this._searchIndex = __
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._ensureIndexRuntime()
-  this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : this._makeFsBackend(cfg)))
+  this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : (this._backendType === "http" ? this._makeHttpBackend(cfg) : this._makeFsBackend(cfg))))
   this._hydrateS3Artifacts()
+  if (this._backendType === "http") this._hydrateHttpArtifacts()
+  this._artifactLastCheckAt = new Date().getTime()
+  this._initializeGraph()
+  this._bootstrapWiki()
+}
+
+MiniAWikiManager.prototype._initializeGraph = function() {
+  var cfg = this._config
   if (toBoolean(cfg.usegraph) === true) {
     try {
       loadLib("mini-a-graph.js")
@@ -1244,7 +1417,6 @@ MiniAWikiManager.prototype.configure = function(config) {
       this._graph = __
     }
   }
-  this._bootstrapWiki()
 }
 
 MiniAWikiManager.prototype._isArchiveRoot = function(root) {
@@ -1896,10 +2068,16 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
       }
     },
     read: function(path) {
+      var identifier = "s3://" + bucket + "/" + prefix + path
       try {
         var stream = s3client.getObjectStream(bucket, prefix + path)
-        return af.fromInputStream2String(stream)
-      } catch(e) { return __ }
+        var content = af.fromInputStream2String(stream)
+        parent._auditRetrieval("s3", identifier, path, true, isString(content) ? content.length : 0)
+        return content
+      } catch(e) {
+        parent._auditRetrieval("s3", identifier, path, false, 0)
+        return __
+      }
     },
     write: function(path, content) {
       s3client.putObjectStream(bucket, prefix + path,
@@ -1921,6 +2099,114 @@ MiniAWikiManager.prototype._makeS3Backend = function(cfg) {
   }
 }
 
+// ── Static HTTP(S) backend ──────────────────────────────────────────────────
+
+MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
+  var parent = this
+  var base = isString(cfg.url) ? cfg.url.trim() : ""
+  var timeout = isNumber(Number(cfg.wikihttptimeout)) && Number(cfg.wikihttptimeout) > 0 ? Number(cfg.wikihttptimeout) : 30000
+  var secret = isString(cfg.secret) && cfg.secret.length > 0 ? cfg.secret : (isString(getEnv("OAF_MINI_A_WIKI_SECRET")) ? getEnv("OAF_MINI_A_WIKI_SECRET") : __)
+  var auth = function(connection) {
+    if (isString(cfg.accessKey) && cfg.accessKey.length > 0 && isString(secret) && secret.length > 0) connection.setRequestProperty("Authorization", __miniAWikiBasicAuth(cfg.accessKey, secret))
+    else if (isString(secret) && secret.length > 0) connection.setRequestProperty("Authorization", "Bearer " + secret)
+  }
+  var open = function(path, method) {
+    var connection = new java.net.URL(__miniAWikiUrlJoin(base, path)).openConnection()
+    connection.setConnectTimeout(timeout); connection.setReadTimeout(timeout)
+    if (isDef(connection.setRequestMethod)) connection.setRequestMethod(method)
+    auth(connection)
+    return connection
+  }
+  return {
+    type: "http",
+    url: base,
+    list: function(prefix) { return parent._luceneListAllReadOnly(prefix) },
+    read: function(path) {
+      var identifier = __miniAWikiUrlJoin(base, path)
+      try {
+        var conn = open(path, "GET")
+        if (Number(conn.getResponseCode()) < 200 || Number(conn.getResponseCode()) >= 300) {
+          parent._auditRetrieval("http", identifier, path, false, 0)
+          return __
+        }
+        var stream = conn.getInputStream()
+        try {
+          var content = af.fromInputStream2String(stream)
+          parent._auditRetrieval("http", identifier, path, true, isString(content) ? content.length : 0)
+          return content
+        } finally { try { stream.close() } catch(ignoreClose) {} }
+      } catch(e) {
+        parent._auditRetrieval("http", identifier, path, false, 0)
+        return __
+      }
+    },
+    exists: function(path) {
+      try { var code = Number(open(path, "HEAD").getResponseCode()); return code >= 200 && code < 300 } catch(e) { return false }
+    },
+    write: function() { throw "http wiki is read-only" },
+    delete: function() { throw "http wiki is read-only" },
+    close: function() {}
+  }
+}
+
+MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
+  var base = isString(this._config.url) ? this._config.url.trim() : ""
+  if (base.length === 0) return
+  var bundleUrl = isString(this._config.wikihttpindexurl) && this._config.wikihttpindexurl.trim().length > 0 ? this._config.wikihttpindexurl.trim() : __miniAWikiUrlJoin(base, "mini-a-wiki-index.zip")
+  var timeout = isNumber(Number(this._config.wikihttptimeout)) && Number(this._config.wikihttptimeout) > 0 ? Number(this._config.wikihttptimeout) : 30000
+  var secret = isString(this._config.secret) && this._config.secret.length > 0 ? this._config.secret : (isString(getEnv("OAF_MINI_A_WIKI_SECRET")) ? getEnv("OAF_MINI_A_WIKI_SECRET") : __)
+  var auth = function(conn) {
+    if (isString(this._config.accessKey) && this._config.accessKey.length > 0 && isString(secret) && secret.length > 0) conn.setRequestProperty("Authorization", __miniAWikiBasicAuth(this._config.accessKey, secret));
+    else if (isString(secret) && secret.length > 0) conn.setRequestProperty("Authorization", "Bearer " + secret)
+  }.bind(this)
+  var connect = function(method) {
+    var conn = new java.net.URL(bundleUrl).openConnection()
+    conn.setConnectTimeout(timeout); conn.setReadTimeout(timeout); conn.setRequestMethod(method); auth(conn)
+    return conn
+  }
+  return this._hydrateArtifactBundle(function() {
+    var conn = connect("HEAD"), code = Number(conn.getResponseCode())
+    if (code < 200 || code >= 300) throw "HTTP HEAD " + bundleUrl + " for bundle metadata returned " + code
+    return { etag: String(conn.getHeaderField("ETag") || ""), lastModified: String(conn.getHeaderField("Last-Modified") || "") }
+  }, function() {
+    var conn = connect("GET"), code = Number(conn.getResponseCode())
+    if (code < 200 || code >= 300) throw "HTTP GET " + bundleUrl + " for bundle download returned " + code
+    return conn.getInputStream()
+  }, "http", bundleUrl)
+}
+
+// Remote artifact bundles are immutable snapshots. A long-lived server may
+// cheaply probe their metadata between requests and replace the whole local
+// snapshot only when it changed. Individual S3 artifacts deliberately do not
+// participate: mixing files from two Lucene generations is unsafe.
+MiniAWikiManager.prototype._maybeRefreshArtifactBundle = function() {
+  var seconds = Number(this._config.wikiartifactrefreshsecs)
+  if (!isNumber(seconds) || seconds <= 0 || this._artifactRefreshInProgress === true) return false
+  var refreshable = this._backendType === "http" || (this._backendType === "s3" && toBoolean(this._config.s3artifactbundle) === true)
+  if (!refreshable) return false
+  var now = new Date().getTime()
+  var last = isNumber(this._artifactLastCheckAt) ? this._artifactLastCheckAt : 0
+  if (last > 0 && now - last < seconds * 1000) return false
+  this._artifactLastCheckAt = now
+  this._artifactRefreshInProgress = true
+  try {
+    var changed = this._backendType === "http" ? this._hydrateHttpArtifacts() : this._hydrateS3Artifacts()
+    if (changed !== true) return false
+    if (isObject(this._searchIndex) && isFunction(this._searchIndex.close)) this._searchIndex.close()
+    this._searchIndex = __
+    if (isObject(this._graph) && isFunction(this._graph.close)) this._graph.close()
+    this._graph = __
+    this._initializeGraph()
+    this._logFn("info", "Refreshed wiki search/graph artifact bundle")
+    return true
+  } catch(e) {
+    this._logFn("warn", "Failed to refresh wiki search/graph artifact bundle: " + __miniAErrMsg(e))
+    return false
+  } finally {
+    this._artifactRefreshInProgress = false
+  }
+}
+
 MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
   var parent = this
   includeOPack("ElasticSearch")
@@ -1932,6 +2218,7 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
   es.createCh(index, ["path"], chName)
   return {
     type: "es",
+    index: index,
     list: function(pfx) {
       var prefix = isString(pfx) ? pfx : ""
       var rows = $ch(chName).getAll({ query: { prefix: { path: prefix } }, size: 10000 })
@@ -1942,7 +2229,9 @@ MiniAWikiManager.prototype._makeEsBackend = function(cfg) {
     },
     read: function(path) {
       var r = $ch(chName).get({ path: path })
-      return isMap(r) ? r.raw : __
+      var raw = isMap(r) ? r.raw : __
+      parent._auditRetrieval("es", "es:" + index + "/" + path, path, isDef(raw), isString(raw) ? raw.length : 0)
+      return raw
     },
     write: function(path, content) { $ch(chName).set({ path: path }, { path: path, raw: content }) },
     exists: function(path) { return isMap($ch(chName).get({ path: path })) },
@@ -2022,6 +2311,30 @@ MiniAWikiManager.prototype._serializeFrontmatter = function(meta, body) {
   return "---\n" + yaml + "---\n" + (isString(body) ? body : "")
 }
 
+// Markdown headings outside fenced code blocks.  Keeping this parser here makes
+// lint, anchor validation and deterministic dream repairs agree exactly.
+MiniAWikiManager.prototype._markdownHeadings = function(body) {
+  var out = [], fenced = false, fenceChar = ""
+  String(body || "").split(/\r?\n/).forEach(function(line, lineNo) {
+    var fence = String(line).match(/^\s*(```+|~~~+)/)
+    if (fence) {
+      var ch = fence[1].substring(0, 1)
+      if (!fenced) { fenced = true; fenceChar = ch }
+      else if (ch === fenceChar) { fenced = false; fenceChar = "" }
+      return
+    }
+    if (fenced) return
+    var m = String(line).match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
+    if (m) out.push({ line: lineNo, level: m[1].length, text: String(m[2]).trim() })
+  })
+  return out
+}
+
+MiniAWikiManager.prototype._headingAnchor = function(text) {
+  return String(text || "").toLowerCase().trim().replace(/<[^>]+>/g, "")
+    .replace(/[^a-z0-9\s_-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-")
+}
+
 // ── Link extraction ───────────────────────────────────────────────────────────
 
 // Returns [{raw, type}] where type is "md" (page-relative) or "wiki" (root-relative).
@@ -2038,10 +2351,12 @@ MiniAWikiManager.prototype._extractLinkEntries = function(body) {
   var entries = []
   var seen    = {}
   var m
-  var mdRe = /\[([^\]]*)\]\(([^)]+\.md[^)]*)\)/g
+  var mdRe = /\[([^\]]*)\]\(([^)]+)\)/g
   while ((m = mdRe.exec(body)) !== null) {
-    var target = m[2].split("#")[0].trim()
-    if (target.length > 0 && !/^https?:\/\//i.test(target) && !seen[target]) {
+    var target = m[2].trim()
+    var pathPart = target.split("#")[0]
+    var internal = target.charAt(0) === "#" || /\.md$/i.test(pathPart) || /\/$/.test(pathPart) || !/\.[a-z0-9]+$/i.test(pathPart)
+    if (target.length > 0 && internal && !/^[a-z][a-z0-9+.-]*:/i.test(target) && !seen[target]) {
       seen[target] = true
       entries.push({ raw: target, type: "md" })
     }
@@ -2181,6 +2496,7 @@ MiniAWikiManager.prototype._sliceLines = function(lines, options) {
 
 MiniAWikiManager.prototype.read = function(path, options) {
   if (!isString(path) || path.trim().length === 0) return __
+  this._maybeRefreshArtifactBundle()
   var trimmed = path.trim()
   // Mount routing: @name/localpath
   if (trimmed.startsWith("@")) {
@@ -2408,6 +2724,7 @@ MiniAWikiManager.prototype._snippetFromContent = function(content, pattern, cont
 
 MiniAWikiManager.prototype.search = function(query, options) {
   if (!isString(query) || query.trim().length === 0) return []
+  this._maybeRefreshArtifactBundle()
   var opts       = isObject(options) ? options : {}
   var limit      = isNumber(opts.limit)        && opts.limit        > 0 ? opts.limit        : 20
   var contextN   = isNumber(opts.contextLines) && opts.contextLines > 0 ? Math.min(opts.contextLines, 10) : 0
@@ -2853,22 +3170,39 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     // Check 1: Broken internal links
     // md links are page-relative; wiki-style links are always root-relative; @name/... are cross-wiki
     pd.linkEntries.forEach(function(entry) {
-      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(p, entry.raw)
+      var bits = String(entry.raw).split("#"), linkPath = bits.shift(), anchor = bits.join("#")
+      var resolved = linkPath.length === 0 ? p : (entry.type === "wiki" ? linkPath : self.resolveLink(p, linkPath))
+      var nonCanonical = false
+      if (resolved === null && linkPath.length > 0 && entry.type === "md") {
+        var withMd = self.resolveLink(p, linkPath + ".md")
+        var withIndex = self.resolveLink(p, linkPath.replace(/\/$/, "") + "/index.md")
+        if (isString(withMd) && self._backend.exists(withMd)) { resolved = withMd; nonCanonical = true }
+        else if (isString(withIndex) && self._backend.exists(withIndex)) { resolved = withIndex; nonCanonical = true }
+        else resolved = withMd
+      }
       if (resolved === null) return  // external URL, absolute path, or escapes root — not wiki-internal
+      if (nonCanonical) {
+        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, detail: "non-canonical internal path", linkType: entry.type })
+        return
+      }
       // Cross-wiki mount link
       if (isString(resolved) && resolved.startsWith("@")) {
         var mres = self._resolveMountPath(resolved.endsWith(".md") ? resolved : resolved + "/index.md")
         if (!mres || !mres.mount) {
-          issues.push({ severity: "info", type: "unresolved_mount_link", page: p, target: entry.raw, mount: mres ? mres.name : resolved })
+          issues.push({ severity: "info", type: "unresolved_mount_link", page: p, target: entry.raw, mount: mres ? mres.name : resolved, linkType: entry.type })
         }
         return
       }
       var exists = self._backend.exists(resolved)
       if (!exists) {
-        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved })
+        issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, linkType: entry.type })
       } else {
         if (!isNumber(incomingCount[resolved])) incomingCount[resolved] = 0
         incomingCount[resolved]++
+        if (anchor.length > 0 && pageData[resolved]) {
+          var wanted = anchor.toLowerCase(), anchors = self._markdownHeadings(pageData[resolved].body).map(function(h) { return self._headingAnchor(h.text) })
+          if (anchors.indexOf(wanted) < 0) issues.push({ severity: "error", type: "invalid_anchor", page: p, target: entry.raw, resolved: resolved, anchor: anchor, linkType: entry.type })
+        }
       }
     })
 
@@ -2879,22 +3213,29 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     if (!isString(pd.meta.description) || pd.meta.description.trim().length === 0) {
       issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "description" })
     }
+    if (isUnDef(pd.meta.created) || String(pd.meta.created).trim().length === 0) {
+      issues.push({ severity: "warning", type: "missing_frontmatter", page: p, field: "created" })
+    }
+    if (isUnDef(pd.meta.updated) || String(pd.meta.updated).trim().length === 0) {
+      issues.push({ severity: "warning", type: "missing_frontmatter", page: p, field: "updated" })
+    }
     if ((!isString(pd.meta.type) || pd.meta.type.trim().length === 0) && p !== "index.md" && !p.endsWith("/index.md")) {
       issues.push({ severity: "info", type: "missing_frontmatter", page: p, field: "type" })
     }
 
-    // Check 3: Heading hierarchy
-    var h2seen = false, h3seen = false
-    pd.body.split("\n").forEach(function(line) {
-      if (/^## /.test(line)) h2seen = true
-      if (/^### /.test(line)) {
-        if (!h2seen) issues.push({ severity: "warning", type: "heading_hierarchy", page: p, detail: "h3 before h2" })
-        h3seen = true
+    // Check 3: one title-synchronised H1 and a non-skipping hierarchy.
+    var headings = self._markdownHeadings(pd.body)
+    var h1s = headings.filter(function(h) { return h.level === 1 })
+    if (h1s.length === 0) issues.push({ severity: "warning", type: "missing_h1", page: p })
+    if (h1s.length > 1) issues.push({ severity: "warning", type: "multiple_h1", page: p, count: h1s.length })
+    if (h1s.length > 0 && isString(pd.meta.title) && pd.meta.title.trim().length > 0 && h1s[0].text !== pd.meta.title.trim()) {
+      issues.push({ severity: "warning", type: "title_h1_mismatch", page: p, title: pd.meta.title, heading: h1s[0].text })
+    }
+    for (var hi = 1; hi < headings.length; hi++) {
+      if (headings[hi].level > headings[hi - 1].level + 1) {
+        issues.push({ severity: "warning", type: "heading_hierarchy", page: p, line: headings[hi].line + 1, from: headings[hi - 1].level, to: headings[hi].level })
       }
-      if (/^#### /.test(line) && !h3seen) {
-        issues.push({ severity: "warning", type: "heading_hierarchy", page: p, detail: "h4 before h3" })
-      }
-    })
+    }
 
     // Check 4: Stale pages
     if (staleDays > 0) {
@@ -2945,16 +3286,23 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     var indexData = pageData[indexPath]
     if (!indexData) {
       issues.push({ severity: "warning", type: "missing_index", section: dir, page: indexPath, direct_pages: directPages.length, child_indexes: childIndexes.length })
+      directPages.forEach(function(required) {
+        issues.push({ severity: "warning", type: "structural_orphan", section: dir, page: required, parent: indexPath })
+      })
       return
     }
 
     var linked = {}
     indexData.linkEntries.forEach(function(entry) {
-      var resolved = entry.type === "wiki" ? entry.raw : self.resolveLink(indexPath, entry.raw)
+      var indexTarget = String(entry.raw).split("#")[0]
+      var resolved = entry.type === "wiki" ? indexTarget : self.resolveLink(indexPath, indexTarget)
       if (isString(resolved)) linked[resolved] = true
     })
     directPages.concat(childIndexes).forEach(function(required) {
-      if (!linked[required]) issues.push({ severity: "warning", type: "index_missing_links", section: dir, page: indexPath, target: required })
+      if (!linked[required]) {
+        issues.push({ severity: "warning", type: "index_missing_links", section: dir, page: indexPath, target: required })
+        if (!/\/index\.md$/i.test(required) && required !== "index.md") issues.push({ severity: "warning", type: "structural_orphan", section: dir, page: required, parent: indexPath })
+      }
     })
 
     if (isDef(indexData.meta.updated)) {
@@ -2972,13 +3320,16 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
     }
   })
 
-  // Check 6: Orphaned pages (no incoming links — skip index-like and protected files)
+  // Check 6: Pages represented only by their parent catalogue remain semantic advice.
   pages.forEach(function(p) {
     var name = p.replace(/.*\//, "").toLowerCase()
     if (name === "index.md" || name === "readme.md" || name === "log.md") return
-    if ((incomingCount[p] || 0) === 0) {
-      issues.push({ severity: "warning", type: "orphan", page: p })
-    }
+    var parent = self._pageDir(p) + "index.md"
+    var parentLinks = pageData[parent] ? pageData[parent].linkEntries.some(function(e) {
+      var ep = String(e.raw).split("#")[0]
+      return (e.type === "wiki" ? ep : self.resolveLink(parent, ep)) === p
+    }) : false
+    if (parentLinks && (incomingCount[p] || 0) <= 1) issues.push({ severity: "info", type: "semantic_orphan", page: p, parent: parent })
   })
 
   // Check 7: Near-duplicate page bodies
@@ -3142,7 +3493,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   // consistently to federated retrieval.
   if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._lexicalConfig
   try {
-    var manager = new MiniAWikiManager(cfg, this._logFn)
+    var manager = new MiniAWikiManager(cfg, this._logFn, this._auditFn)
     var count   = manager._safeListPages("").length
     this._mounts.push({ name: name, manager: manager, prefix: "@" + name + "/" })
     return { ok: true, name: name, pages: count }

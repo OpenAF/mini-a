@@ -483,7 +483,11 @@
         usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply"
       }, function() {})
       var res = runner.dreamWiki()
-      ow.test.assert(res.finalize.indexes_regenerated > 0, true, "finalize should regenerate index pages")
+      // The scoped repair loop can create/update every index the wiki needs before finalize
+      // ever runs its own unfiltered pass, in which case finalize legitimately regenerates
+      // nothing (everything is already current) — so check the pipeline's total, not
+      // finalize's own count specifically.
+      ow.test.assert(res.indexes_created + res.indexes_updated + res.finalize.indexes_regenerated > 0, true, "apply should regenerate index pages somewhere in the pipeline")
       ow.test.assert(res.finalize.reindexed, true, "finalize should rebuild the search index")
 
       load("mini-a-wiki.js")
@@ -508,7 +512,12 @@
       }, function() {})
       var res = runner.dreamWiki()
       ow.test.assert(res.ok, true, "a small wiki should still complete")
-      ow.test.assert(res.finalize.indexes_regenerated > 0, true, "dreamwikiminpages must not block finalization")
+      // The (unread) minPages option no longer suppresses repairs, so the deterministic
+      // repair pass can regenerate every index itself before finalize's own unfiltered
+      // pass runs — check the pipeline's total rather than finalize's own count.
+      ow.test.assert(res.indexes_created + res.indexes_updated + res.finalize.indexes_regenerated > 0, true, "dreamwikiminpages must not block finalization")
+      ow.test.assert(io.fileExists(dir + "/notes/index.md"), true, "dreamwikiminpages must not block finalization")
+      ow.test.assert(io.fileExists(dir + "/index.md"), true, "dreamwikiminpages must not block finalization")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
@@ -558,7 +567,7 @@
       ow.test.assert(fixed.some(function(i) { return i.type === "missing_index" && i.page === "missing/index.md" }), true, "apply should create a missing index")
       ow.test.assert(fixed.some(function(i) { return i.type === "index_missing_links" && i.page === "section/index.md" }), true, "apply should add missing index links")
       ow.test.assert(fixed.some(function(i) { return i.type === "stale_index" && i.page === "section/index.md" }), true, "apply should regenerate stale indexes")
-      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "broken_link" && i.reason === "target-not-resolved-with-certainty" }), true, "broken links must remain explicitly skipped")
+      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "broken_link" && i.reason === "no-candidate" }), true, "unresolvable broken links must remain explicitly skipped")
       ow.test.assert(res.lint_after.errors >= 1, true, "unresolved broken links must remain in lint output")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
@@ -586,6 +595,47 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testDreamWikiRepairModeFixesWithoutFinalizing = function() {
+    var dir = makeWikiDir()
+    try {
+      seedRepairWiki(dir)
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, true, "repair mode should succeed")
+      ow.test.assert(res.mode, "repair", "mode should be repair")
+      ow.test.assert(isUnDef(res.finalize), true, "repair mode should not run the finalize step")
+      var fixed = res.repairs.fixed
+      ow.test.assert(fixed.some(function(i) { return i.type === "missing_index" && i.page === "missing/index.md" }), true, "repair should create a missing index")
+      ow.test.assert(fixed.some(function(i) { return i.type === "stale_index" && i.page === "section/index.md" }), true, "repair should regenerate stale indexes")
+      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "broken_link" && i.reason === "no-candidate" }), true, "unresolvable broken links must remain explicitly skipped")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairModeReachesRootOnDeepNewTree = function() {
+    // Repair mode has no finalize step to fall back on, so this exercises the scoped
+    // regenerateIndexes() call directly: a brand-new 3-level-deep section only reveals its
+    // grandparent's missing_index issue once the child index.md exists, which without the
+    // ancestor-chain fix takes one repair pass per level — root would never be reached
+    // within the 3-pass bound.
+    //
+    // regenerateIndexes() derives its directory set from the immediate parent dir of each real
+    // page plus root, so intermediate directories with no page of their own (a/, a/b/) are never
+    // in that universe regardless of what paths are requested — that's a pre-existing structural
+    // limitation of regenerateIndexes(), not something the ancestor-chain fix changes. Only assert
+    // the two indexes regenerateIndexes() can actually produce: root and the leaf's own directory.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("a/b/c/page.md", { title: "Page", description: "Deep page" }, "# Page")
+      wm.close()
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, true, "repair mode should succeed on a fresh nested tree")
+      ow.test.assert(io.fileExists(dir + "/index.md"), true, "root index should be created in a single repair run")
+      ow.test.assert(io.fileExists(dir + "/a/b/c/index.md"), true, "leaf index a/b/c/ should be created")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testDreamWikiLintModeIsGone = function() {
     var dir = seedWiki(makeWikiDir())
     try {
@@ -594,6 +644,28 @@
       }, function() {})
       var res = runner.dreamWiki()
       ow.test.assert(res.mode, "apply", "the removed 'lint' mode should fall back to the apply default")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiApplyFrontmatterHeadingsLinksAndFixpoint = function() {
+    var dir = makeWikiDir()
+    try {
+      io.mkdir(dir + "/topics")
+      io.writeFileString(dir + "/topics/oauth-token-flow.md", "---\naliases:\n- OAuth flow\n---\n# OAuth token flow\n\n### Details\n\nText.")
+      io.writeFileString(dir + "/source.md", "---\ntitle: Source\ndescription: Source page\ntype: concept\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\n---\n# Source\n\n[flow](OAuth flow)")
+      var first = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      var target = io.readFileString(dir + "/topics/oauth-token-flow.md")
+      var source = io.readFileString(dir + "/source.md")
+      ow.test.assert(target.indexOf("title: OAuth token flow") >= 0, true, "title should be derived from the sole H1")
+      ow.test.assert(target.indexOf("type: concept") >= 0, true, "missing type should be repaired")
+      ow.test.assert(target.indexOf("description:") < 0, true, "description must not be invented")
+      ow.test.assert(target.indexOf("## Details") >= 0, true, "skipped heading level should be repaired")
+      ow.test.assert(source.indexOf("(topics/oauth-token-flow.md)") >= 0, true, "unique alias should resolve deterministically")
+      ow.test.assert(first.repair_passes >= 1 && first.repair_passes <= 3, true, "apply should use a bounded fixpoint")
+      var bytes = target + "\n---SOURCE---\n" + source
+      var second = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      ow.test.assert(second.pages_changed, 0, "second apply must be idempotent")
+      ow.test.assert(io.readFileString(dir + "/topics/oauth-token-flow.md") + "\n---SOURCE---\n" + io.readFileString(dir + "/source.md"), bytes, "content must be byte-identical on second apply")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 

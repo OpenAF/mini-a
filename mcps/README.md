@@ -953,6 +953,13 @@ command-line arguments (and therefore out of `ps` output and other jobs' args).
 For production deployments beyond a single shared token (mTLS, per-user OAuth, IP allowlisting), put
 a reverse proxy (e.g. Caddy, nginx, oauth2-proxy) in front of the MCP port instead.
 
+**Agent Plugins**: a downloaded [Agent Plugins](https://agent-plugins.org) directory's `mcp.json`
+servers (`plugins=`/`pluginsroot=`) are auto-converted into these same `$mcp` config shapes — `stdio`
+servers become an array-form `cmd`, `streamable-http`/`sse` servers become `type: remote`/`sse`. The
+same limitation applies here as above: only a `streamable-http`/`sse` server's `Authorization: Bearer
+<token>` header converts to the `auth:` form; any other declared header is dropped with a warning. See
+[docs/AGENT-PLUGINS.md](../docs/AGENT-PLUGINS.md).
+
 ## Auditing MCP tool calls
 
 Every MCP in this catalog (built on `oJobMCP.yaml`'s `httpdMCP`/`stdioMCP`) supports an **optional**

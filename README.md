@@ -91,6 +91,7 @@ Shell access is disabled by default for safety; add `useshell=true` when you exp
 - Custom commands: `~/.openaf-mini-a/commands/*.md` (`extracommands=<path1>,<path2>`)
 - Skills: `~/.openaf-mini-a/skills/<name>/SKILL.md`, `~/.openaf-mini-a/skills/<name>/SKILL.yaml|yml|json`, or `~/.openaf-mini-a/skills/<name>.md|yaml|yml|json` (`extraskills=<path1>,<path2>`).
 - Hooks: `~/.openaf-mini-a/hooks/*.{yaml,yml,json}` with events `before_goal`, `after_goal`, `before_tool`, `after_tool`, `before_shell`, `after_shell` (`extrahooks=<path1>,<path2>`)
+- Agent Plugins ([agent-plugins.org](https://agent-plugins.org)): `plugins=<dir1,dir2>` or `pluginsroot(s)=<dir>` — see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)
 - Starter generators: `mini-a --command`, `mini-a --skill`, `mini-a --hook`, `mini-a --agent`
 - Override the base home directory: `homedir=<path>` (reads `.openaf-mini-a` from `<path>` instead of `~`)
 
@@ -508,21 +509,31 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
 | `memorycompactevery` | Run compaction/summarization every N memory mutations | `8` |
 | `memorydedup` | Deduplicate near-identical memory entries before append | `true` |
+| `memoryartifactttldays` | TTL for normalized tool/network observations before expiry removal | `7` |
+| `memoryindexttldays` | TTL for list/search/index observation snapshots | `1` |
 | `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
 | `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
-| `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch) | `fs` |
+| `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) | `fs` |
 | `wikiroot` | Filesystem wiki directory or local `.zip`/`.okt` archive when `wikibackend=fs`; archives are always read-only | `.` |
 | `wikibucket` | S3 bucket for `s3`/`s3fs` wiki backends | - |
 | `wikiprefix` | S3 key prefix for `s3`/`s3fs`, or Elasticsearch index name for `es` | - |
-| `wikiurl` | S3 endpoint URL, or Elasticsearch/OpenSearch base URL when `wikibackend=es` (internal `esurl`) | - |
+| `wikiurl` | S3 endpoint, Elasticsearch/OpenSearch base URL, or static page-server base URL when `wikibackend=http` | - |
 | `wikiaccesskey` | S3 access key, or Elasticsearch username when `wikibackend=es` | - |
 | `wikisecret` | S3 secret key, or Elasticsearch password when `wikibackend=es` | - |
 | `wikiregion` | S3 region for `s3`/`s3fs` wiki backends | - |
 | `wikiuseversion1` | Use S3 signature v1/path-style compatibility for wiki access | `false` |
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
-| `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; explicit `synonyms` and opt-in enhanced features supported) | `{ language: "english" }` |
+| `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; inline `synonyms` and optional `synonymsFile` rules supported; enhanced features are opt-in) | `{ language: "english" }` |
 | `wikis3artifactprefix` | Optional S3 prefix containing a published `.mini-a-wiki-lucene/` cache and, for `mcp-wiki`, `.mini-a-wiki-graph/graph.json`; downloaded into `wikiindexdir` on startup | - |
+| `s3artifactbundle` | Use `<wikis3artifactprefix>/mini-a-wiki-index.zip` for S3 cache hydration | `false` |
+| `wikihttpindexurl` | Optional HTTP artifact-bundle URL; defaults to `<wikiurl>/mini-a-wiki-index.zip` | - |
+| `wikihttptimeout` | HTTP wiki request timeout in milliseconds | `30000` |
+| `wikiartifactrefreshsecs` | Recheck HTTP or bundled-S3 artifact metadata between wiki requests; `0` disables periodic refresh | `0` |
+
+Static HTTP wikis are read-only: pages are fetched live from `wikiurl`, while `list`, search, and graph use a published `mini-a-wiki-index.zip` containing `.mini-a-wiki-lucene/` and optionally `.mini-a-wiki-graph/graph.json`. Set `wikiartifactrefreshsecs` to refresh a long-running server after republishing; `0` retains startup-only checks. The Lucene-derived catalog excludes pages omitted from the search index.
+
+See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations, mounts, graphs, and publishing static bundles.
 | `wikirestrictprofile` | `mcp-wiki-safe` restricted retrieval defaults profile (`tight`, `moderate`, or `relaxed`); `tight` preserves legacy defaults and individual `wikirestrict*` settings override profile values | `tight` |
 | `wikimetacache` | Enable sharded wiki page metadata cache | `true` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |

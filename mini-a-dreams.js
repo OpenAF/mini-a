@@ -44,6 +44,28 @@ MiniADreams.prototype._setLlm = function(llmInstance) {
   this._llm = llmInstance
 }
 
+// Convert old append-only tool dumps into bounded reviewable observations before
+// asking the dream model to consolidate them. It never discards the original ID.
+MiniADreams.prototype._normalizeLegacyArtifacts = function(snapshot) {
+  if (!isMap(snapshot) || !isMap(snapshot.sections) || !isArray(snapshot.sections.artifacts)) return snapshot
+  snapshot.sections.artifacts = snapshot.sections.artifacts.map(function(entry) {
+    if (!isMap(entry) || isString(entry.kind)) return entry
+    var sourceTool = isString(entry.sourceTool) ? entry.sourceTool : (isMap(entry.provenance) ? entry.provenance.tool : "")
+    if (!isString(sourceTool) || sourceTool.length === 0) return entry
+    var raw = isString(entry.value) ? entry.value : String(entry.value || "")
+    var key = "artifact:legacy:" + sourceTool + ":" + sha1(raw.substring(0, 512)).substring(0, 12)
+    entry.kind = "artifact:legacy"
+    entry.key = key
+    entry.observedAt = isString(entry.updatedAt) ? entry.updatedAt : new Date().toISOString()
+    entry.expiresAt = new Date(Date.now() + 86400000).toISOString()
+    entry.taskScope = "general::" + sourceTool
+    entry.value = "Legacy tool observation: " + sourceTool + " | " + raw.replace(/\s+/g, " ").substring(0, 320)
+    entry.meta = merge(isMap(entry.meta) ? entry.meta : {}, { needsReview: true, legacyRawSize: raw.length })
+    return entry
+  })
+  return snapshot
+}
+
 // ── channel helpers ───────────────────────────────────────────
 
 MiniADreams.prototype._createChannelFromDef = function(rawDef, fallbackName, fallbackType) {
@@ -261,7 +283,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
   // Helper: consolidate one manager's memory via LLM
   var consolidateOne = function(mgr, label, chName, ns) {
-    var snap = mgr.snapshot()
+    var snap = self._normalizeLegacyArtifacts(mgr.snapshot())
     var beforeCounts = {}
     _MEMORY_SECTIONS.forEach(function(s) { beforeCounts[s] = isArray(snap.sections[s]) ? snap.sections[s].length : 0 })
     var totalBefore = _MEMORY_SECTIONS.reduce(function(sum, s) { return sum + beforeCounts[s] }, 0)
@@ -422,6 +444,9 @@ var _WIKI_DREAM_GOAL =
   "IMPORTANT CONSTRAINTS:\n" +
   "- Do NOT edit AGENTS.md, index.md, or log.md. These are regenerated deterministically by the apply pass.\n" +
   "- Do NOT write to mounted wikis (@name/... paths). They are read-only.\n\n" +
+  "- Shell and filesystem tools are unavailable in this pass. Use only wiki operations and result_* tools.\n" +
+  "- A wiki write replaces the whole page. For an existing page, use a bounded line/section edit; do not rewrite a page merely to fix a link or frontmatter.\n" +
+  "- Lint results are paged. Filter by severity/type/page and inspect only the affected issue before changing a page.\n\n" +
   "Follow these steps in order:\n" +
   "1. Discovery: use wiki op=\"context\" for a compact overview, then op=\"lint\" for all issues, op=\"tree\" and op=\"browse\" for structure, op=\"backlinks\" for cross-references.\n" +
   "2. Plan: produce a short reorganisation plan in your context before writing. Folders with index.md are section sub-wikis. Keep existing paths valid unless you intentionally move them.\n" +
@@ -451,10 +476,11 @@ MiniADreams.prototype._wikiLintMemoryManager = function() {
 
 MiniADreams.prototype.dreamWiki = function(opts) {
   var self = this
-  // Modes: plan (propose only) | apply (deterministic fixes) | reorg (full agent loop).
+  // Modes: plan (propose only) | apply (deterministic fixes) | reorg (full agent loop) |
+  // repair (deterministic fixes only, no AGENTS.md upgrade/finalize — the fast, isolated version of apply).
   // 'lint' was dropped — it was 'plan' minus the proposal and duplicated /wiki lint.
   var wikiMode = isString(self._args.dreamwikimode) ? self._args.dreamwikimode.trim().toLowerCase() : ""
-  if (wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg") wikiMode = ""
+  if (wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg" && wikiMode !== "repair") wikiMode = ""
   var effectiveMode = wikiMode.length > 0 ? wikiMode : "apply"
   // apply now runs by default; dreamwikidryrun is the opt-out
   var isDryRun = toBoolean(self._args.dryrun) === true || toBoolean(self._args.dreamwikidryrun) === true
@@ -579,14 +605,16 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       var lintBefore = wmApply.lint(lintMemMgr, { staleDays: staleDays })
       defaultResult.lint_before = lintSummary(lintBefore)
 
-      defaultResult.repairs = self._repairWikiLint(wmApply, lintBefore, { minPages: self._args.dreamwikiminpages })
+      var loopResult = self._runWikiRepairLoop(wmApply, lintBefore, function() {
+        return wmApply.lint(lintMemMgr, { staleDays: staleDays })
+      }, 3, { minPages: self._args.dreamwikiminpages })
+      defaultResult.repairs = loopResult.repairs
+      defaultResult.repair_passes = loopResult.passes
+      defaultResult.pages_changed = loopResult.repairs.pages_changed
       defaultResult.repairs.fixed.forEach(function(issue) {
         defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
         if (issue.type === "missing_index") defaultResult.indexes_created++
-        else {
-          defaultResult.indexes_updated++
-          defaultResult.pages_changed++
-        }
+        else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
       })
       defaultResult.repairs.skipped.forEach(function(issue) {
         if (issue.reason === "below-min-pages") defaultResult.skipped_uncertain_moves.push(
@@ -613,6 +641,42 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     }
   }
 
+  // repair: just the deterministic fixer — no AGENTS.md upgrade, no index/search/graph
+  // finalize. The fast, isolated way to run _repairWikiLint on its own (testing, or a quick
+  // link-repair pass you don't want bundled with a full apply).
+  if (effectiveMode === "repair") {
+    self._log("💤 [dreams] Starting wiki dream repair pass...")
+    try {
+      var wmRepair = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:repair] " + msg) })
+      var repairLintBefore = wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      defaultResult.lint_before = lintSummary(repairLintBefore)
+
+      var repairLoopResult = self._runWikiRepairLoop(wmRepair, repairLintBefore, function() {
+        return wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      }, 3, { minPages: self._args.dreamwikiminpages })
+      defaultResult.repairs = repairLoopResult.repairs
+      defaultResult.repair_passes = repairLoopResult.passes
+      defaultResult.pages_changed = repairLoopResult.repairs.pages_changed
+      defaultResult.repairs.fixed.forEach(function(issue) {
+        defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
+        if (issue.type === "missing_index") defaultResult.indexes_created++
+        else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
+      })
+
+      var repairLintAfter = wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      defaultResult.lint_after = lintSummary(repairLintAfter)
+      wmRepair.close()
+      self._log("💤 [dreams] Wiki dream repair complete — " + defaultResult.repairs.fixed.length + " issues fixed over " +
+        defaultResult.repair_passes + " pass(es), lint " +
+        defaultResult.lint_before.errors + "E/" + defaultResult.lint_before.warnings + "W -> " +
+        defaultResult.lint_after.errors + "E/" + defaultResult.lint_after.warnings + "W.")
+      return defaultResult
+    } catch(repairErr) {
+      self._log("[dreams:wiki] Repair error: " + __miniAErrMsg(repairErr))
+      return { ok: false, reason: "repair-error", error: __miniAErrMsg(repairErr) }
+    }
+  }
+
   self._log("💤 [dreams] Starting wiki dream pass...")
 
   // Build dream agent args — start from a clean copy, strip conversation
@@ -624,6 +688,21 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   })
   dreamArgs.usewiki     = "true"
   dreamArgs.wikiaccess  = "rw"
+  // A reorg should only be able to mutate the wiki through its constrained wiki
+  // operations. In particular, do not let an agent bypass spill-result guards by
+  // reading temporary files with `cat`, or alter the wiki root through shell tools.
+  dreamArgs.useshell    = false
+  dreamArgs.readwrite   = false
+  // Structural edits are never delegated to the low-cost controller. It may be
+  // configured for ordinary runs, but reorg decisions must stay on the main model.
+  dreamArgs.modellock   = "main"
+  // Some MCP catalogs expose a shell tool independently of Mini-A's top-level
+  // shell action. Deny it explicitly for dreams as well.
+  dreamArgs.mcpproxydeny = isString(dreamArgs.mcpproxydeny) && dreamArgs.mcpproxydeny.trim().length > 0
+    ? dreamArgs.mcpproxydeny + ",bash" : "bash"
+  dreamArgs.dreamwikisurgical = true
+  dreamArgs.wikilintresultlimit = isNumber(self._args.dreamwikilintresultlimit) && self._args.dreamwikilintresultlimit > 0
+    ? Math.round(self._args.dreamwikilintresultlimit) : 25
   dreamArgs.usememory   = (isDef(self._args.memorych) && String(self._args.memorych).trim().length > 0) ? "true" : "false"
   dreamArgs.memoryscope = "global"
   dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 60
@@ -666,19 +745,43 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         })
       } catch(ignoreDreamModelAnswerLog) {}
     }
-    // The agent has just moved/merged/rewritten pages; finalize deterministically so the
-    // wiki is left reindexed, re-linked and with a rebuilt graph.
+    // The agent has just moved/merged/rewritten pages, which is exactly the kind of change
+    // that breaks links and leaves frontmatter/heading drift — and it did so working from
+    // its own judgment within a step budget, so it won't have caught everything. Run one
+    // bounded deterministic repair pass to clean up what it left behind, same as apply mode,
+    // before finalizing so the wiki is left reindexed, re-linked and with a rebuilt graph.
     var wmFinal = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:finalize] " + msg) })
+    var reorgLintBefore = wmFinal.lint(lintMemMgr, { staleDays: staleDays })
+    defaultResult.lint_before = lintSummary(reorgLintBefore)
+    var reorgLoopResult = self._runWikiRepairLoop(wmFinal, reorgLintBefore, function() {
+      return wmFinal.lint(lintMemMgr, { staleDays: staleDays })
+    }, 1, { minPages: self._args.dreamwikiminpages })
+    defaultResult.repairs = reorgLoopResult.repairs
+    defaultResult.repair_passes = reorgLoopResult.passes
+    defaultResult.pages_changed += reorgLoopResult.repairs.pages_changed
+    reorgLoopResult.repairs.fixed.forEach(function(issue) {
+      defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
+      if (issue.type === "missing_index") defaultResult.indexes_created++
+      else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
+    })
+
     var reorgFinalize = self._finalizeWiki(wmFinal, defaultResult)
     var reorgLint = lintSummary(wmFinal.lint(lintMemMgr, { staleDays: staleDays }))
     wmFinal.close()
 
     self._log("💤 [dreams] Wiki dream complete.")
+    var unresolvedErrors = reorgLint.errors > 0
     var out = merge(defaultResult, {
-      ok: true,
+      // Agent text is not proof that the pass completed. The fresh lint result is
+      // authoritative and leaves the caller with a machine-readable partial state.
+      ok: !unresolvedErrors,
       mode: "reorg",
       result: isString(result) ? result.substring(0, 500) : String(result || "").substring(0, 500)
     })
+    if (unresolvedErrors) {
+      out.partial = true
+      out.reason = "lint-errors-remain"
+    }
     out.finalize   = reorgFinalize
     out.lint_after = reorgLint
     return out
@@ -688,92 +791,221 @@ MiniADreams.prototype.dreamWiki = function(opts) {
   }
 }
 
-// _repairWikiLint performs only mechanical structure repairs. It intentionally leaves
-// content-dependent findings (especially broken links) for a human or reorg-mode LLM pass.
-// In dry-run mode it returns the same candidates without touching the wiki.
+// _repairWikiLint performs mechanical repairs only — structure, frontmatter, headings, and
+// broken links/anchors resolved with certainty against the page catalogue. Findings that need
+// semantic judgment (near_duplicate, orphan, memory_conflict, ambiguous link targets) are left
+// for a human or reorg-mode LLM pass. In dry-run mode it returns the same candidates without
+// touching the wiki.
 MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
   var opts = isMap(options) ? options : {}
   var dryRun = opts.dryRun === true
-  var result = { fixed: [], skipped: [], candidates: [] }
+  var result = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
   var issues = isMap(lintResult) && isArray(lintResult.issues) ? lintResult.issues : []
-  var pageCount = isArray(wm.list("")) ? wm.list("").length : 0
-  var minPages = isNumber(opts.minPages) ? opts.minPages : Number(opts.minPages)
-  if (isNaN(minPages)) minPages = 5
-  var deterministic = { missing_index: true, index_missing_links: true, stale_index: true }
-  var issueCopy = function(issue, extra) {
-    var out = { type: issue.type, page: issue.page }
-    if (isString(issue.target)) out.target = issue.target
-    if (isString(issue.section)) out.section = issue.section
+  var repairable = {
+    missing_index: true, index_missing_links: true, stale_index: true,
+    missing_frontmatter: true, missing_h1: true, multiple_h1: true,
+    title_h1_mismatch: true, heading_hierarchy: true, broken_link: true,
+    invalid_anchor: true, structural_orphan: true
+  }
+  var copyIssue = function(issue, extra) {
+    var out = {}
+    Object.keys(issue || {}).forEach(function(k) { if (k !== "severity") out[k] = issue[k] })
     if (isMap(extra)) Object.keys(extra).forEach(function(k) { out[k] = extra[k] })
     return out
   }
-
   issues.forEach(function(issue) {
-    if (deterministic[issue.type] === true) result.candidates.push(issueCopy(issue))
-    else result.skipped.push(issueCopy(issue, {
-      reason: issue.type === "broken_link" ? "target-not-resolved-with-certainty" : "requires-semantic-judgment"
-    }))
+    if (repairable[issue.type]) result.candidates.push(copyIssue(issue))
+    else result.skipped.push(copyIssue(issue, { reason: "requires-semantic-judgment" }))
   })
-  if (dryRun || result.candidates.length === 0) return result
-  if (pageCount < minPages) {
-    result.candidates.forEach(function(issue) {
-      result.skipped.push(issueCopy(issue, { reason: "below-min-pages", page_count: pageCount, min_pages: minPages }))
-    })
-    return result
+  if (dryRun) return result
+
+  var changedPages = {}
+  var markFixed = function(issue, extra) {
+    result.fixed.push(copyIssue(issue, merge({ confidence: "certain", changed: true }, extra || {})))
+    var physicalPage = isMap(extra) && isString(extra.physical_page) ? extra.physical_page : issue.page
+    if (isString(physicalPage)) changedPages[physicalPage] = true
   }
 
-  var createIssues = issues.filter(function(issue) { return issue.type === "missing_index" })
-  createIssues.forEach(function(issue) {
-    var created = wm.init(issue.section)
-    if (isMap(created) && created.ok === true && isArray(created.created) && created.created.indexOf(issue.page) >= 0) {
-      result.fixed.push(issueCopy(issue))
-    } else {
-      result.skipped.push(issueCopy(issue, { reason: isMap(created) && isString(created.error) ? created.error : "index-not-created" }))
-    }
-  })
-
-  var targetsByIndex = {}
-  issues.filter(function(issue) { return issue.type === "index_missing_links" }).forEach(function(issue) {
-    if (!isString(issue.page) || !isString(issue.target)) return
-    if (!isArray(targetsByIndex[issue.page])) targetsByIndex[issue.page] = []
-    targetsByIndex[issue.page].push(issue.target)
-  })
-  Object.keys(targetsByIndex).forEach(function(indexPath) {
-    var page = wm.read(indexPath)
-    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) {
-      targetsByIndex[indexPath].forEach(function(target) {
-        result.skipped.push({ type: "index_missing_links", page: indexPath, target: target, reason: "index-not-readable" })
-      })
-      return
-    }
-    var body = page.body
-    var changed = false
-    targetsByIndex[indexPath].forEach(function(target) {
-      var rel = wm._relativePath(indexPath, target)
-      var label = target.replace(/\/index\.md$/i, "").replace(/\.md$/i, "").replace(/.*\//, "").replace(/[-_]/g, " ")
-      if (body.indexOf("(" + rel + ")") < 0) {
-        body += "\n- [" + label + "](" + rel + ")"
-        changed = true
+  // Frontmatter and headings are deliberately coalesced into one physical write per page.
+  var pageIssues = {}
+  issues.filter(function(i) {
+    return i.type === "missing_frontmatter" || i.type === "missing_h1" || i.type === "multiple_h1" ||
+      i.type === "title_h1_mismatch" || i.type === "heading_hierarchy"
+  }).forEach(function(i) { if (!isArray(pageIssues[i.page])) pageIssues[i.page] = []; pageIssues[i.page].push(i) })
+  Object.keys(pageIssues).sort().forEach(function(path) {
+    if (path === "index.md" || path.endsWith("/index.md") || path === "AGENTS.md" || path === "log.md") return
+    var page = wm.read(path)
+    if (!isMap(page) || !isMap(page.meta) || !isString(page.body)) return
+    var meta = clone(page.meta), body = page.body, changed = false
+    var headings = wm._markdownHeadings(body), h1s = headings.filter(function(h) { return h.level === 1 })
+    if (!isString(meta.title) || meta.title.trim().length === 0) {
+      if (h1s.length === 1) meta.title = h1s[0].text
+      else {
+        var name = path.replace(/.*\//, "").replace(/\.md$/i, "").replace(/[-_]+/g, " ")
+        meta.title = name.length > 0 ? name.substring(0, 1).toUpperCase() + name.substring(1) : "Untitled"
       }
-    })
-    var wr = changed ? wm.write(indexPath, page.meta, body) : { ok: true }
-    targetsByIndex[indexPath].forEach(function(target) {
-      if (isMap(wr) && wr.ok === true) result.fixed.push({ type: "index_missing_links", page: indexPath, target: target })
-      else result.skipped.push({ type: "index_missing_links", page: indexPath, target: target, reason: "index-not-updated" })
-    })
+      changed = true
+    }
+    if (!isString(meta.type) || meta.type.trim().length === 0) { meta.type = "concept"; changed = true }
+    if (isUnDef(meta.created) || String(meta.created).trim().length === 0) {
+      meta.created = isDef(meta.timestamp) && String(meta.timestamp).trim().length > 0 ? meta.timestamp : new Date().toISOString()
+      changed = true
+    }
+    var lines = body.split(/\r?\n/)
+    headings = wm._markdownHeadings(body)
+    h1s = headings.filter(function(h) { return h.level === 1 })
+    if (h1s.length === 0 && isString(meta.title) && meta.title.length > 0) {
+      body = "# " + meta.title + (body.length > 0 ? "\n\n" + body.replace(/^\s+/, "") : "")
+      changed = true
+    } else if (h1s.length > 0) {
+      var previous = 0, firstH1 = true
+      headings.forEach(function(h) {
+        var level = h.level
+        if (level === 1) {
+          if (firstH1) { level = 1; firstH1 = false }
+          else level = previous > 1 ? previous : 2
+        }
+        if (previous > 0 && level > previous + 1) level = previous + 1
+        var text = h.line === h1s[0].line ? meta.title : h.text
+        var replacement = new Array(level + 1).join("#") + " " + text
+        if (lines[h.line] !== replacement) { lines[h.line] = replacement; changed = true }
+        previous = level
+      })
+      body = lines.join("\n")
+    }
+    if (changed) {
+      var wr = wm.write(path, meta, body)
+      if (isMap(wr) && wr.ok === true) pageIssues[path].forEach(function(i) { markFixed(i, { reason: "frontmatter-heading-normalized" }) })
+      else pageIssues[path].forEach(function(i) { result.skipped.push(copyIssue(i, { reason: "page-not-updated" })) })
+    }
   })
 
-  var staleByIndex = {}
-  issues.filter(function(issue) { return issue.type === "stale_index" && isString(issue.page) }).forEach(function(issue) { staleByIndex[issue.page] = true })
-  var stalePaths = Object.keys(staleByIndex)
-  if (stalePaths.length > 0) {
-    var refreshed = wm.regenerateIndexes({ paths: stalePaths })
-    issues.filter(function(issue) { return issue.type === "stale_index" }).forEach(function(issue) {
-      if (isMap(refreshed) && isArray(refreshed.regenerated) && refreshed.regenerated.indexOf(issue.page) >= 0) result.fixed.push(issueCopy(issue))
-      else result.skipped.push(issueCopy(issue, { reason: "index-not-regenerated" }))
+  // Build one catalogue for this pass. Resolution classes are tried in strength order;
+  // a class is accepted only when it produces one candidate. This is a full read of every
+  // page, so skip it entirely on passes that have no broken_link/invalid_anchor to resolve.
+  var brokenIssues = issues.filter(function(i) { return i.type === "broken_link" || i.type === "invalid_anchor" })
+  var catalogue = brokenIssues.length === 0 ? [] : wm.list("").filter(function(p) { return /\.md$/i.test(p) && p !== "AGENTS.md" && p !== "log.md" }).map(function(p) {
+    var pg = wm.read(p), meta = isMap(pg) && isMap(pg.meta) ? pg.meta : {}
+    return { path: p, lower: p.toLowerCase(), base: p.replace(/.*\//, ""), stem: p.replace(/.*\//, "").replace(/\.md$/i, ""),
+      title: isString(meta.title) ? meta.title.trim() : "", aliases: isArray(meta.aliases) ? meta.aliases : [],
+      anchors: isMap(pg) ? wm._markdownHeadings(pg.body).map(function(h) { return wm._headingAnchor(h.text) }) : [] }
+  })
+  var slug = function(v) { return String(v || "").toLowerCase().trim().replace(/[^a-z0-9\s_-]/g, "").replace(/[\s_]+/g, "-") }
+  var unique = function(arr) { var seen = {}, out = []; arr.forEach(function(c) { if (!seen[c.path]) { seen[c.path] = true; out.push(c) } }); return out }
+  var resolveBroken = function(issue) {
+    if (String(issue.target || "").startsWith("@")) return { reason: "mounted-wiki-unresolved" }
+    // Wiki-style [[...]] targets are always root-relative (per _wikiLinkTarget/lint), unlike
+    // md-style (label)(target) links which resolveLink resolves relative to the source page's
+    // directory — routing wiki-style targets through resolveLink would wrongly prefix them
+    // with the source page's directory for any page not at wiki root.
+    var isWikiStyle = issue.linkType === "wiki"
+    var bits = String(issue.target || "").split("#"), rawPath = bits.shift(), anchor = bits.join("#")
+    var resolved = rawPath.length === 0 ? issue.page : (isWikiStyle ? rawPath.replace(/^\/+/, "") : wm.resolveLink(issue.page, rawPath))
+    var attempts = []
+    if (isString(resolved)) {
+      attempts.push({ name: "exact-resolved-path", matches: catalogue.filter(function(c) { return c.path === resolved }) })
+      attempts.push({ name: "exact-md-path", matches: catalogue.filter(function(c) { return c.path === resolved + ".md" }) })
+      attempts.push({ name: "directory-index", matches: catalogue.filter(function(c) { return c.path === resolved.replace(/\/$/, "") + "/index.md" }) })
+    } else if (rawPath.length > 0) {
+      resolved = isWikiStyle ? rawPath.replace(/^\/+/, "") + ".md" : wm.resolveLink(issue.page, rawPath + ".md")
+      if (isString(resolved)) attempts.push({ name: "exact-md-path", matches: catalogue.filter(function(c) { return c.path === resolved }) })
+      var dirResolved = isWikiStyle ? rawPath.replace(/^\/+/, "").replace(/\/$/, "") + "/index.md" : wm.resolveLink(issue.page, rawPath.replace(/\/$/, "") + "/index.md")
+      if (isString(dirResolved)) attempts.push({ name: "directory-index", matches: catalogue.filter(function(c) { return c.path === dirResolved }) })
+    }
+    var needle = rawPath.replace(/\/$/, "").replace(/\.md$/i, ""), base = needle.replace(/.*\//, "")
+    attempts.push({ name: "case-insensitive-path", matches: catalogue.filter(function(c) { return c.lower === (String(resolved || needle) + (/\.md$/i.test(String(resolved || needle)) ? "" : ".md")).toLowerCase() }) })
+    attempts.push({ name: "unique-basename", ambiguous: "ambiguous-basename", matches: catalogue.filter(function(c) { return c.stem.toLowerCase() === base.toLowerCase() }) })
+    attempts.push({ name: "unique-title-match", ambiguous: "ambiguous-title", matches: catalogue.filter(function(c) { return c.title.toLowerCase() === needle.toLowerCase() || c.title.toLowerCase() === base.toLowerCase() }) })
+    attempts.push({ name: "unique-alias-match", ambiguous: "ambiguous-alias", matches: catalogue.filter(function(c) { return c.aliases.some(function(a) { return String(a).toLowerCase() === needle.toLowerCase() || String(a).toLowerCase() === base.toLowerCase() }) }) })
+    attempts.push({ name: "unique-slug-title", ambiguous: "ambiguous-title", matches: catalogue.filter(function(c) { return slug(c.title) === slug(base) }) })
+    for (var ai = 0; ai < attempts.length; ai++) {
+      var matches = unique(attempts[ai].matches)
+      if (matches.length > 1) return { reason: attempts[ai].ambiguous || "ambiguous-target" }
+      if (matches.length === 1) {
+        if (anchor.length > 0 && matches[0].anchors.indexOf(anchor.toLowerCase()) < 0) return { reason: "invalid-anchor" }
+        return { candidate: matches[0], strategy: attempts[ai].name, anchor: anchor }
+      }
+    }
+    return { reason: "no-candidate" }
+  }
+  brokenIssues.forEach(function(issue) {
+    var found = resolveBroken(issue)
+    if (!found.candidate) { result.skipped.push(copyIssue(issue, { reason: found.reason })); return }
+    var page = wm.read(issue.page)
+    if (!isMap(page) || !isString(page.body)) { result.skipped.push(copyIssue(issue, { reason: "page-not-readable" })); return }
+    var oldTarget = String(issue.target), replaced = false, body
+    if (issue.linkType === "wiki") {
+      // Wiki-style [[...]] targets are root-relative and anchor-stripped by _wikiLinkTarget
+      // (see lint's link extraction), so the stored target matches the candidate path directly.
+      body = page.body.replace(/\[\[([^\]]+)\]\]/g, function(all, inner) {
+        if (replaced || wm._wikiLinkTarget(inner) !== oldTarget) return all
+        replaced = true
+        var pipeAt = inner.indexOf("|")
+        return "[[" + found.candidate.path + (pipeAt >= 0 ? inner.substring(pipeAt) : "") + "]]"
+      })
+    } else {
+      var rel = found.candidate.path === issue.page && found.anchor.length > 0 ? "" : wm._relativePath(issue.page, found.candidate.path)
+      var newTarget = rel + (found.anchor.length > 0 ? "#" + found.anchor : "")
+      body = page.body.replace(/\[([^\]]*)\]\(([^)]+)\)/g, function(all, label, target) {
+        if (!replaced && String(target).trim() === oldTarget) { replaced = true; return "[" + label + "](" + newTarget + ")" }
+        return all
+      })
+    }
+    if (!replaced || body === page.body) { result.skipped.push(copyIssue(issue, { reason: "link-not-rewritable" })); return }
+    var wr = wm.write(issue.page, page.meta, body)
+    if (isMap(wr) && wr.ok === true) markFixed(issue, { resolved: found.candidate.path, strategy: found.strategy, reason: found.strategy })
+  })
+
+  // Index/orphan repairs use the established generator so there is only one index format.
+  // Scoped to the affected index paths — regenerateIndexes() would otherwise rewrite every
+  // index in the wiki on every pass, and _finalizeWiki already does the unfiltered pass once.
+  var indexIssues = issues.filter(function(i) { return i.type === "missing_index" || i.type === "index_missing_links" || i.type === "stale_index" || i.type === "structural_orphan" })
+  if (indexIssues.length > 0) {
+    // Include every ancestor index up to root, not just the paths lint flagged this pass:
+    // a brand-new nested section only reveals its parent's missing_index/index_missing_links
+    // issue once the child index.md actually exists, so without the ancestor chain a deep
+    // tree needs one repair pass per level to reach root. Adding ancestors here reaches root
+    // in a single regenerateIndexes() call, same as the old unfiltered behavior.
+    var indexPaths = {}
+    indexIssues.forEach(function(issue) {
+      var p = issue.type === "structural_orphan" ? issue.parent : issue.page
+      indexPaths[p] = true
+      var dir = p.replace(/[^\/]*$/, "")
+      while (dir.length > 0) { dir = dir.replace(/[^\/]*\/$/, ""); indexPaths[dir + "index.md"] = true }
+    })
+    var reg = wm.regenerateIndexes({ paths: Object.keys(indexPaths) })
+    indexIssues.forEach(function(issue) {
+      var indexPath = issue.type === "structural_orphan" ? issue.parent : issue.page
+      if (isMap(reg) && isArray(reg.regenerated) && reg.regenerated.indexOf(indexPath) >= 0) markFixed(issue, { reason: "index-regenerated", physical_page: indexPath })
+      else result.skipped.push(copyIssue(issue, { reason: "index-unchanged" }))
     })
   }
+  result.pages_changed = Object.keys(changedPages).length
   return result
+}
+
+// _runWikiRepairLoop: repeatedly calls _repairWikiLint, re-linting only when a pass actually
+// changed pages, up to maxPasses. Shared by apply mode, reorg's post-agent cleanup, and the
+// standalone repair mode so the convergence/aggregation logic exists in one place. lintFn is
+// called to get a fresh lint result between passes — never on the last permitted pass, since
+// that result would just be discarded when the loop ends.
+MiniADreams.prototype._runWikiRepairLoop = function(wm, initialLint, lintFn, maxPasses, repairOpts) {
+  var self = this
+  var passesBound = isNumber(maxPasses) && maxPasses > 0 ? Math.round(maxPasses) : 1
+  var allRepairs = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
+  var changedPageSet = {}, passes = 0, currentLint = initialLint
+  for (var i = 0; i < passesBound; i++) {
+    var passRepairs = self._repairWikiLint(wm, currentLint, repairOpts || {})
+    passes++
+    allRepairs.fixed = allRepairs.fixed.concat(passRepairs.fixed)
+    allRepairs.skipped = allRepairs.skipped.concat(passRepairs.skipped)
+    allRepairs.candidates = allRepairs.candidates.concat(passRepairs.candidates)
+    passRepairs.fixed.forEach(function(issue) { if (isString(issue.page)) changedPageSet[issue.page] = true })
+    if (passRepairs.pages_changed === 0 || i === passesBound - 1) break
+    currentLint = lintFn()
+  }
+  allRepairs.pages_changed = Object.keys(changedPageSet).length
+  return { repairs: allRepairs, passes: passes }
 }
 
 // _finalizeWiki: the deterministic post-pass every write-mode wiki dream ends with, so a
@@ -853,7 +1085,8 @@ MiniADreams.prototype._buildWikiConfig = function() {
   var a = this._args
   if (!toBoolean(a.usewiki)) return __
   var backend = this._argStr(a.wikibackend).length > 0 ? this._argStr(a.wikibackend).toLowerCase() : "fs"
-  var cfg = { access: "rw", backend: backend }
+  if (backend === "https") backend = "http"
+  var cfg = { access: "rw", backend: backend, indexdir: a.wikiindexdir, s3artifactprefix: a.wikis3artifactprefix, s3artifactbundle: toBoolean(a.s3artifactbundle) === true, wikihttpindexurl: a.wikihttpindexurl, wikihttptimeout: a.wikihttptimeout, wikiartifactrefreshsecs: a.wikiartifactrefreshsecs }
   // carry graph settings so _finalizeWiki can rebuild the knowledge graph.
   // The user-facing arg is usewikigraph (usegraph is the wiki-manager config key).
   if (this._wikiGraphEnabled()) {
@@ -888,6 +1121,10 @@ MiniADreams.prototype._buildWikiConfig = function() {
     cfg.esindex = this._argStr(a.wikiprefix).length > 0 ? this._argStr(a.wikiprefix) : "mini_a_wiki"
     cfg.esuser  = a.wikiaccesskey
     cfg.espass  = a.wikisecret
+  } else if (backend === "http") {
+    cfg.url       = this._argStr(a.wikiurl)
+    cfg.accessKey = a.wikiaccesskey
+    cfg.secret    = a.wikisecret
   }
   return cfg
 }
@@ -922,7 +1159,7 @@ MiniADreams.prototype.run = function() {
     self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
     self._log("  dreammode=      Explicit run mode: memory, wiki or both")
     self._log("  dreamwiki=true  Force wiki dream when memorych is also configured")
-    self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg")
+    self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg, repair")
     self._log("  dreammemorymode=Memory mode: plan, apply")
     self._log("  dreamwikidryrun=true  Propose without writing (opt-out of apply)")
     self._log("  dreamwikireorg= Enable the agent-driven structural reorg mode (true/false)")

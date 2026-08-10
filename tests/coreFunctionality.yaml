@@ -342,6 +342,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testSubtaskManagerNormalizesWorkerSkills
 
+- name: MiniA Core Tests::SubtaskWatchdogShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testSubtaskManagerDestroyCancelsWatchdog
+
+- name: MiniA Core Tests::AgentSubtaskManagerShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStopAgentResourcesDestroysSubtaskManager
+
+- name: MiniA Core Tests::AgentResourceShutdownIdempotent
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testStopAgentResourcesIsIdempotentAndUntracksAgent
+
+- name: MiniA Core Tests::ProxyMcpShutdown
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testDestroyMcpProxyConnectionsClosesOwnerClientsOnce
+
 - name: MiniA Core Tests::SubtaskChildArgSanitization
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -531,6 +551,16 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testManagedMemoryRefreshAndStaleMetrics
+
+- name: MiniA Core Tests::MemoryKeyedUpsertAndExpiry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryKeyedUpsertAndExpiry
+
+- name: MiniA Core Tests::ValidatedToolContractsOnly
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testValidatedToolContractsOnly
 
 - name: MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
   from: MiniA Core Tests::Init
@@ -732,6 +762,31 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testInitRethrowsAndRecordsErrorOnFailure
 
+- name: MiniA Core Tests::ResolveLcJsonRetriesDefaultsToOne
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesDefaultsToOne
+
+- name: MiniA Core Tests::ResolveLcJsonRetriesAcceptsExplicitValue
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesAcceptsExplicitValue
+
+- name: MiniA Core Tests::ResolveLcJsonRetriesClampsNegativeToZero
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesClampsNegativeToZero
+
+- name: MiniA Core Tests::ResolveLcJsonRetriesFallsBackOnNonNumeric
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesFallsBackOnNonNumeric
+
+- name: MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testKnownArgumentNamesIncludesLcJsonRetries
+
 include:
 - oJobTest.yaml
 
@@ -808,6 +863,10 @@ todo:
 - MiniA Core Tests::ProxyDispatchRejectsMisplacedDownstreamInputs
 - MiniA Core Tests::UtilsMcpAllowAndDeny
 - MiniA Core Tests::WorkerSkillNormalization
+- MiniA Core Tests::SubtaskWatchdogShutdown
+- MiniA Core Tests::AgentSubtaskManagerShutdown
+- MiniA Core Tests::AgentResourceShutdownIdempotent
+- MiniA Core Tests::ProxyMcpShutdown
 - MiniA Core Tests::SubtaskChildArgSanitization
 - MiniA Core Tests::SubtaskExplicitChildArgs
 - MiniA Core Tests::SubtaskCancelStopsLocalChild
@@ -846,6 +905,8 @@ todo:
 - MiniA Core Tests::MemoryFreshnessRefreshAndSweep
 - MiniA Core Tests::ManagedMemoryMetrics
 - MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
+- MiniA Core Tests::MemoryKeyedUpsertAndExpiry
+- MiniA Core Tests::ValidatedToolContractsOnly
 - MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
 - MiniA Core Tests::AgentCapabilitiesRespectExplicitFalseFlags
 - MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit
@@ -886,3 +947,8 @@ todo:
 - MiniA Core Tests::MaxTotalStepsArgValidationDefaultsToDisabled
 - MiniA Core Tests::MaxTotalStepsArgValidationAcceptsExplicitValue
 - MiniA Core Tests::InitRethrowsAndRecordsErrorOnFailure
+- MiniA Core Tests::ResolveLcJsonRetriesDefaultsToOne
+- MiniA Core Tests::ResolveLcJsonRetriesAcceptsExplicitValue
+- MiniA Core Tests::ResolveLcJsonRetriesClampsNegativeToZero
+- MiniA Core Tests::ResolveLcJsonRetriesFallsBackOnNonNumeric
+- MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries

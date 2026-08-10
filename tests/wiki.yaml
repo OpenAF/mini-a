@@ -59,6 +59,26 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testEsRowsToPathsSkipsUndefinedRows
 
+- name: MiniA Wiki Tests::HttpBundleHelpers
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testHttpBundleHelpers
+
+- name: MiniA Wiki Tests::CliForwardsHttpBundleOptions
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testCliForwardsHttpBundleOptions
+
+- name: MiniA Wiki Tests::PeriodicArtifactBundleRefreshReopensCachedRuntime
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testPeriodicArtifactBundleRefreshReopensCachedRuntime
+
+- name: MiniA Wiki Tests::HttpBackendIsReadOnly
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testHttpBackendIsReadOnly
+
+- name: MiniA Wiki Tests::ArtifactBundleHydratesAtomically
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testArtifactBundleHydratesAtomically
+
 - name: MiniA Wiki Tests::FsBackendReadWrite
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testFsBackendReadWrite
@@ -611,3 +631,8 @@ todo:
 - MiniA Wiki Tests::FalkorReadGateAllowsReadOnlyGraphs
 - MiniA Wiki Tests::ReadOnlySkipsGraphWhenNoneExists
 - MiniA Wiki Tests::S3ArtifactsHydrateLocalSearchAndGraphCache
+- MiniA Wiki Tests::HttpBundleHelpers
+- MiniA Wiki Tests::CliForwardsHttpBundleOptions
+- MiniA Wiki Tests::PeriodicArtifactBundleRefreshReopensCachedRuntime
+- MiniA Wiki Tests::HttpBackendIsReadOnly
+- MiniA Wiki Tests::ArtifactBundleHydratesAtomically

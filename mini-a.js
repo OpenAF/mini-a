@@ -172,6 +172,7 @@ var MiniA = function() {
     shell_commands_approved: $atomic(0, "long"),
     shell_commands_denied: $atomic(0, "long"),
     fallback_to_main_llm: $atomic(0, "long"),
+    lc_json_retries: $atomic(0, "long"),
     unknown_actions: $atomic(0, "long"),
     llm_normal_tokens: $atomic(0, "long"),
     llm_lc_tokens: $atomic(0, "long"),
@@ -277,6 +278,12 @@ var MiniA = function() {
     memory_global_write_failures: $atomic(0, "long"),
     memory_session_writes: $atomic(0, "long"),
     memory_session_write_failures: $atomic(0, "long"),
+    memory_upserts: $atomic(0, "long"),
+    memory_expirations: $atomic(0, "long"),
+    memory_raw_bytes_rejected: $atomic(0, "long"),
+    memory_injected_tokens: $atomic(0, "long"),
+    memory_validated_contracts_used: $atomic(0, "long"),
+    memory_unvalidated_contracts_suppressed: $atomic(0, "long"),
     wiki_ops_list: $atomic(0, "long"),
     wiki_ops_read: $atomic(0, "long"),
     wiki_ops_search: $atomic(0, "long"),
@@ -337,7 +344,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path"{{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path","severity":"error|warning|info","types":"broken_link,invalid_anchor","page":"page.md","limit":N (lint filters/results){{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -659,6 +666,7 @@ Respond as JSON: {"thought":"reasoning","action":"final","answer":"your complete
   this._stopRequested = false
   this._stopReason = ""
   this._stopRequestedAt = __
+  this._resourcesStopped = false
 
   if (isFunction(MiniA._trackInstance)) MiniA._trackInstance(this)
   if (isFunction(MiniA._registerShutdownHook)) MiniA._registerShutdownHook()
@@ -684,23 +692,33 @@ load("mini-a-sandbox.js")
 load("mini-a-tool-selection.js")
 
 MiniA.prototype._stopAgentResources = function() {
+  // This is invoked both by the console finalizer and by the OpenAF shutdown
+  // hook. Destroying an already-stopped stdio MCP client can wait on its
+  // worker promise again, so make resource teardown strictly once-only.
+  if (this._resourcesStopped === true) return
+  this._resourcesStopped = true
+
   if (isFunction(MiniA._releaseMetricsChannel)) MiniA._releaseMetricsChannel(this)
   this._metricschCollecting = false
   this._metricschRegistered = false
 
   if (isObject(this._subtaskManager)) {
-    try {
-      var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
-      if (isArray(subtasks)) {
-        subtasks.forEach(function(subtask) {
-          if (!isMap(subtask) || !isString(subtask.id) || !isString(subtask.status)) return
-          if (MiniA._terminalSubtaskStates[subtask.status] === true) return
-          try {
-            this._subtaskManager.cancel(subtask.id, this._stopReason || "Stop requested")
-          } catch(ignoreCancelErr) {}
-        }.bind(this))
-      }
-    } catch(ignoreSubtaskStop) {}
+    if (isFunction(this._subtaskManager.destroy)) {
+      try { this._subtaskManager.destroy() } catch(ignoreSubtaskDestroy) {}
+    } else {
+      try {
+        var subtasks = isFunction(this._subtaskManager.list) ? this._subtaskManager.list() : []
+        if (isArray(subtasks)) {
+          subtasks.forEach(function(subtask) {
+            if (!isMap(subtask) || !isString(subtask.id) || !isString(subtask.status)) return
+            if (MiniA._terminalSubtaskStates[subtask.status] === true) return
+            try {
+              this._subtaskManager.cancel(subtask.id, this._stopReason || "Stop requested")
+            } catch(ignoreCancelErr) {}
+          }.bind(this))
+        }
+      } catch(ignoreSubtaskStop) {}
+    }
   }
 
   if (isDef(this._regHttpServer) && isDef(ow) && isDef(ow.server) && isDef(ow.server.httpd) && typeof ow.server.httpd.stop === "function") {
@@ -722,11 +740,18 @@ MiniA.prototype._stopAgentResources = function() {
         try { client.destroy() } catch(ignoreMcpDestroyErr) {}
       }
     }.bind(this))
+    this._mcpConnections = {}
+  }
+
+  if (this._useMcpProxy === true && isFunction(MiniA._destroyMcpProxyConnections)) {
+    try { MiniA._destroyMcpProxyConnections(this._id) } catch(ignoreMcpProxyDestroyErr) {}
   }
 
   if (isObject(this._wikiManager) && isFunction(this._wikiManager.close)) {
     try { this._wikiManager.close() } catch(ignoreWikiCloseErr) {}
   }
+
+  if (isFunction(MiniA._untrackInstance)) MiniA._untrackInstance(this)
 }
 
 MiniA.prototype.requestStop = function(reason, options) {
@@ -805,6 +830,13 @@ MiniA._trackInstance = function(instance) {
   if (!isObject(instance)) return
   if (!isArray(MiniA._activeInstances)) MiniA._activeInstances = []
   if (MiniA._activeInstances.indexOf(instance) === -1) MiniA._activeInstances.push(instance)
+}
+
+MiniA._untrackInstance = function(instance) {
+  if (!isObject(instance) || !isArray(MiniA._activeInstances)) return
+  MiniA._activeInstances = MiniA._activeInstances.filter(function(activeInstance) {
+    return activeInstance !== instance
+  })
 }
 
 MiniA._registerMetricsChannel = function(agent, channelName, options) {
@@ -890,6 +922,29 @@ MiniA._destroyAllMcpConnections = function() {
   })
 }
 
+MiniA._destroyMcpProxyConnections = function(ownerId) {
+  var state = global.__mcpProxyState__
+  if (!isObject(state)) return false
+
+  // During normal agent teardown only the agent that configured the proxy may
+  // close it. The process shutdown hook deliberately omits ownerId so it can
+  // clean up a partially initialized proxy as well.
+  if (isString(ownerId) && ownerId.length > 0 && state.ownerId !== ownerId) return false
+
+  var destroyedClients = []
+  Object.keys(state.connections || {}).forEach(function(connectionId) {
+    var entry = state.connections[connectionId]
+    var client = isObject(entry) ? entry.client : __
+    if (!isObject(client) || typeof client.destroy !== "function" || destroyedClients.indexOf(client) >= 0) return
+    destroyedClients.push(client)
+    try { client.destroy() } catch(ignoreProxyClientDestroy) {}
+  })
+
+  delete global.__mcpProxyState__
+  delete global.__mcpProxyHelpers__
+  return true
+}
+
 MiniA._stopAllRegistrationServers = function() {
   if (!isArray(MiniA._activeInstances)) return
   if (isUnDef(ow) || isUnDef(ow.server) || isUnDef(ow.server.httpd) || typeof ow.server.httpd.stop !== "function") return
@@ -936,14 +991,10 @@ MiniA._registerShutdownHook = function() {
     try { MiniA._stopAllAgentResources() } catch(ignoreAgentStopError) {}
     try { MiniA._stopAllRegistrationServers() } catch(ignoreRegStopError) {}
     try { MiniA._destroyAllMcpConnections() } catch(ignoreCleanupError) {}
+    try { MiniA._destroyMcpProxyConnections() } catch(ignoreMcpProxyCleanupError) {}
     try { MiniA._cleanupSandboxTempFiles() } catch(ignoreSandboxTempCleanupError) {}
     try { MiniA._cleanupProxyTempFiles() } catch(ignoreTempCleanupError) {}
     try { MiniA._stopAllProgCallServers() } catch(ignoreProgCallStopError) {}
-    try {
-      if ((typeof $mcp === "function" || isObject($mcp)) && typeof $mcp.destroy === "function") {
-        $mcp.destroy()
-      }
-    } catch(ignoreMcpDestroy) {}
   })
 
   MiniA._shutdownHookRegistered = true
@@ -1633,7 +1684,8 @@ MiniA.prototype.getMetrics = function() {
             low_cost: llmLcCalls,
             validation: llmValCalls,
             total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls,
-            fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get()
+            fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get(),
+            lc_json_retries: global.__mini_a_metrics.lc_json_retries.get()
         },
         goals: {
             achieved: global.__mini_a_metrics.goals_achieved.get(),
@@ -1773,6 +1825,12 @@ MiniA.prototype.getMetrics = function() {
             global_write_failures: global.__mini_a_metrics.memory_global_write_failures.get(),
             session_writes: global.__mini_a_metrics.memory_session_writes.get(),
             session_write_failures: global.__mini_a_metrics.memory_session_write_failures.get(),
+            upserts: global.__mini_a_metrics.memory_upserts.get(),
+            expirations: global.__mini_a_metrics.memory_expirations.get(),
+            raw_bytes_rejected: global.__mini_a_metrics.memory_raw_bytes_rejected.get(),
+            injected_tokens: global.__mini_a_metrics.memory_injected_tokens.get(),
+            validated_contracts_used: global.__mini_a_metrics.memory_validated_contracts_used.get(),
+            unvalidated_contracts_suppressed: global.__mini_a_metrics.memory_unvalidated_contracts_suppressed.get(),
             resolved_entries: memorySnapshot.resolvedEntries,
             session_entries: memorySnapshot.sessionEntries,
             global_entries: memorySnapshot.globalEntries,
@@ -1932,6 +1990,14 @@ MiniA.prototype._createMemoryEventHandler = function(scopeLabel) {
     }
     if (type === "dedup" && isObject(global.__mini_a_metrics.memory_dedup_hits)) {
       global.__mini_a_metrics.memory_dedup_hits.inc()
+      return
+    }
+    if (type === "upsert" && isObject(global.__mini_a_metrics.memory_upserts)) {
+      global.__mini_a_metrics.memory_upserts.inc()
+      return
+    }
+    if (type === "expire" && isObject(global.__mini_a_metrics.memory_expirations)) {
+      if (isNumber(meta.removed) && meta.removed > 0) global.__mini_a_metrics.memory_expirations.getAdd(meta.removed)
       return
     }
     if (type === "compact") {
@@ -7269,7 +7335,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
     scope          : scope,
     sessionId      : sessionId,
     promoteSections: isString(args.memorypromote) ? args.memorypromote : "",
-    staleDays      : isNumber(args.memorystaledays) ? args.memorystaledays : 0
+    staleDays      : isNumber(args.memorystaledays) ? args.memorystaledays : 0,
+    artifactTtlDays: isNumber(args.memoryartifactttldays) ? args.memoryartifactttldays : 7,
+    indexTtlDays   : isNumber(args.memoryindexttldays) ? args.memoryindexttldays : 1
   }
   this._memoryConfig = cfg
   this._memoryScope = scope
@@ -7405,6 +7473,11 @@ MiniA.prototype._initWiki = function(args) {
       backend: args.wikibackend,
       usegraph: wikiGraphEnabled,
       indexdir: args.wikiindexdir,
+      s3artifactprefix: args.wikis3artifactprefix,
+      s3artifactbundle: args.s3artifactbundle,
+      wikihttpindexurl: args.wikihttpindexurl,
+      wikihttptimeout: args.wikihttptimeout,
+      wikiartifactrefreshsecs: args.wikiartifactrefreshsecs,
       wikilexical: args.wikilexical,
       wikimetacache: args.wikimetacache,
       wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
@@ -7439,6 +7512,10 @@ MiniA.prototype._initWiki = function(args) {
       cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
       cfg.esuser = args.wikiaccesskey
       cfg.espass = args.wikisecret
+    } else if (args.wikibackend === "http") {
+      cfg.url = args.wikiurl
+      cfg.accessKey = args.wikiaccesskey
+      cfg.secret = args.wikisecret
     } else {
       cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
     }
@@ -7612,10 +7689,17 @@ MiniA.prototype._memorySearch = function(query, opts) {
         var key = entry.id || entry.v
         if (seen[key]) return
         seen[key] = true
-        var text = String(entry.v || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ")
+        var text = (String(entry.v || "") + " " + String(entry.key || "") + " " + String(entry.scope || "")).toLowerCase().replace(/[^a-z0-9\s]/g, " ")
         var matchCount = 0
         qWords.forEach(function(w) { if (text.indexOf(w) >= 0) matchCount++ })
-        if (matchCount > 0) scored.push({ score: matchCount, entry: entry })
+        if (matchCount > 0) {
+          var score = matchCount
+          if (String(entry.key || "").toLowerCase().indexOf(query.toLowerCase().trim()) >= 0) score += 8
+          if (entry.val === true) score += 4
+          if (isString(entry.scope) && isString(options.taskScope) && entry.scope === options.taskScope) score += 3
+          if (isString(entry.exp) && new Date(entry.exp).getTime() > Date.now()) score += 1
+          scored.push({ score: score, entry: entry })
+        }
       })
     })
     if (scored.length === 0) return
@@ -7725,6 +7809,106 @@ MiniA.prototype._memoryAppend = function(section, value, meta, appendOpts) {
   if (targetManager === this._globalMemoryManager && isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
   if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
   return appended
+}
+
+MiniA.prototype._memoryUpsert = function(section, key, value, meta, upsertOpts) {
+  if (this._memoryConfig.enabled !== true) return __
+  var targetScope = isObject(meta) && isString(meta.memoryScope) ? meta.memoryScope.toLowerCase().trim() : __
+  var targetManager = targetScope === "global" ? this._globalMemoryManager : (targetScope === "session" ? this._sessionMemoryManager : this._getDefaultMemoryWriteManager())
+  if (!isObject(targetManager)) return __
+  var baseEntry = isObject(value) ? merge({}, value) : { value: value }
+  var entry = isObject(meta) ? merge(baseEntry, meta) : baseEntry
+  delete entry.memoryScope
+  var saved = targetManager.upsert(section, key, entry, isObject(upsertOpts) ? upsertOpts : {})
+  if (isObject(saved)) {
+    this._syncWorkingMemoryState()
+    if (targetManager === this._globalMemoryManager) this._persistWorkingMemory("upsert")
+    else if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("upsert")
+  }
+  return saved
+}
+
+MiniA.prototype._deriveMemoryTaskScope = function(args, toolName) {
+  var cfg = isObject(args) ? args : {}
+  var goal = isString(cfg.goal) ? cfg.goal.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(function(w) { return w.length > 2 }).slice(0, 6).join("-") : ""
+  var tool = isString(toolName) && toolName.length > 0 ? toolName.toLowerCase() : "runtime"
+  return (goal.length > 0 ? goal : "general") + "::" + tool
+}
+
+MiniA.prototype._memoryExpiry = function(days) {
+  return new Date(Date.now() + Math.max(0, days || 0) * 86400000).toISOString()
+}
+
+MiniA.prototype._buildToolObservation = function(toolName, params, rawResult, observation, args, stepLabel) {
+  var proxy = toolName === "proxy-dispatch" && isMap(params)
+  var effectiveTool = proxy && isString(params.tool) ? params.tool : toolName
+  var operation = proxy && isString(params.action) ? params.action : "call"
+  var argumentsMap = proxy && isMap(params.arguments) ? params.arguments : (isMap(params) ? params : {})
+  var target = argumentsMap.url || argumentsMap.path || argumentsMap.endpoint || argumentsMap.host || argumentsMap.query || ""
+  var status = isMap(rawResult) && (rawResult.status || rawResult.statusCode) ? (rawResult.status || rawResult.statusCode) : "ok"
+  var kind = /^http/i.test(String(effectiveTool || "")) || isString(argumentsMap.url) ? "artifact:http" : "artifact:tool"
+  var isIndex = /index|list|search/i.test(String(operation) + " " + String(effectiveTool))
+  var ttlDays = isIndex ? this._memoryConfig.indexTtlDays : this._memoryConfig.artifactTtlDays
+  var preview = isString(observation) ? observation.replace(/\s+/g, " ").trim().substring(0, 320) : ""
+  var resultFile = isMap(rawResult) && isString(rawResult.resultFile) ? rawResult.resultFile : __
+  var stableTarget = isString(target) && target.length > 0 ? target : sha1(stringify(argumentsMap, __, "")).substring(0, 12)
+  return {
+    key: kind + ":" + String(operation).toLowerCase() + ":" + String(effectiveTool || "tool").toLowerCase() + ":" + stableTarget,
+    value: "Tool observation: " + effectiveTool + " " + operation + (target ? " " + target : "") + " -> " + status + (preview ? " | " + preview : ""),
+    kind: kind,
+    observedAt: new Date().toISOString(),
+    expiresAt: this._memoryExpiry(ttlDays),
+    taskScope: this._deriveMemoryTaskScope(args, effectiveTool),
+    sourceTool: effectiveTool,
+    sourceParams: af.toSLON(argumentsMap).substring(0, 240),
+    resultFile: resultFile,
+    pendingReadresult: isString(resultFile),
+    meta: { operation: operation, target: target, status: status, requestedFields: Object.keys(argumentsMap), step: stepLabel, preview: preview }
+  }
+}
+
+MiniA.prototype._recordValidatedToolContract = function(toolName, params, evidenceId, args) {
+  if (!isMap(params)) return __
+  var proxy = toolName === "proxy-dispatch" && params.action === "call" && isString(params.tool)
+  var actualTool = proxy ? params.tool : toolName
+  if (!isString(actualTool) || actualTool.length === 0) return __
+  var invocation = proxy ? { action: "proxy-dispatch", params: { action: "call", tool: actualTool, arguments: isMap(params.arguments) ? params.arguments : {} } } : { action: actualTool, params: params }
+  var key = "tool-contract:" + (proxy ? "proxy-dispatch:call:" : "call:") + actualTool
+  var record = this._memoryUpsert("decisions", key, "Validated tool contract for " + actualTool + ": " + stringify(invocation, __, ""), {
+    kind: "tool-contract", validated: true, taskScope: this._deriveMemoryTaskScope(args, actualTool),
+    provenance: { source: "tool", event: "validated-contract", tool: actualTool }, evidenceRefs: isString(evidenceId) ? [evidenceId] : [],
+    meta: { tool: actualTool, action: proxy ? "proxy-dispatch" : actualTool, version: 1, invocation: invocation }
+  })
+  // A confirmed contract makes prior speculative advice for the same key non-authoritative.
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  managers.forEach(function(manager) {
+    manager.getSectionEntries("decisions").forEach(function(entry) {
+      if (entry.id !== (record && record.id) && entry.key === key && entry.validated !== true) manager.mark("decisions", entry.id, "status", "superseded")
+    })
+  })
+  return record
+}
+
+MiniA.prototype._buildValidatedToolContracts = function(args) {
+  if (this._memoryConfig.enabled !== true) return []
+  var scope = this._deriveMemoryTaskScope(args, "")
+  var taskFamily = scope.replace(/::[^:]*$/, "")
+  var contracts = [], seen = {}
+  this._getMemoryReadManagers(this._memoryScope).forEach(function(manager) {
+    manager.getSectionEntries("decisions").forEach(function(entry) {
+      if (entry.kind !== "tool-contract") return
+      if (entry.validated !== true || entry.stale === true || entry.status === "superseded") {
+        if (isObject(global.__mini_a_metrics.memory_unvalidated_contracts_suppressed)) global.__mini_a_metrics.memory_unvalidated_contracts_suppressed.inc()
+        return
+      }
+      if (isString(entry.taskScope) && entry.taskScope.indexOf(taskFamily + "::") !== 0 && entry.taskScope.indexOf("general::") !== 0) return
+      if (!isObject(entry.meta) || !isObject(entry.meta.invocation) || seen[entry.key]) return
+      seen[entry.key] = true
+      contracts.push(entry.meta.invocation)
+    })
+  })
+  if (contracts.length > 0 && isObject(global.__mini_a_metrics.memory_validated_contracts_used)) global.__mini_a_metrics.memory_validated_contracts_used.getAdd(contracts.length)
+  return contracts
 }
 
 MiniA.prototype._clearPendingFetchFlags = function(toolName, params, rawResult, observation) {
@@ -8137,6 +8321,17 @@ MiniA.prototype._appendExecutionNotesToPlan = function(args) {
 /**
  * Process and return final answer based on format requirements
  */
+MiniA.prototype._recordRunOutcome = function(args, status, answer, errorClass) {
+  var goal = isObject(args) && isString(args.goal) ? args.goal : ""
+  var runId = this._id || new Date().toISOString()
+  var key = "run-outcome:" + sha1(goal).substring(0, 16) + ":" + runId
+  return this._memoryUpsert("summaries", key, "Run " + status + (isString(answer) && answer.length > 0 ? ": " + answer.substring(0, 500) : ""), {
+    kind: "run-outcome", taskScope: this._deriveMemoryTaskScope(args, "runtime"), validated: status === "succeeded",
+    observedAt: new Date().toISOString(), expiresAt: status === "succeeded" ? __ : this._memoryExpiry(1),
+    provenance: { source: "runtime", event: "run-outcome" }, meta: { status: status, validation: status === "succeeded" ? "passed" : "not-produced", errorClass: errorClass || __ }
+  })
+}
+
 MiniA.prototype._processFinalAnswer = function(answer, args) {
   var structuredOutput = this._isStructuredOutputFormat(args.format)
 
@@ -8189,11 +8384,14 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     this._startupSubtaskIds = []
   }
 
+  var finalPreview = isString(answer) ? answer.trim() : (isDef(answer) ? String(stringify(answer, __, "") || "").trim() : "")
+  if (finalPreview.length === 0 || finalPreview === "(no final answer)") {
+    this._recordRunOutcome(args, "failed", "", "missing-final-answer")
+    return answer
+  }
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
-  this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" } })
-  this._memoryAppend("summaries", isString(answer) ? answer.substring(0, 500) : stringify(answer, __, "").substring(0, 500), {
-    provenance: { source: "synthesis", event: "final-answer-text" }
-  })
+  this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" }, validated: true })
+  this._recordRunOutcome(args, "succeeded", finalPreview)
   this._persistWorkingMemory("process-final-answer")
   if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("process-final-answer")
   this._autoPromoteSessionToGlobal()
@@ -8786,6 +8984,19 @@ MiniA.prototype._llmRetryOptions = function(label, ctx, overrides) {
   }, overrides || {})
 }
 
+/**
+ * Resolves the number of extra same-step attempts to give the low-cost model
+ * when its response fails to parse as valid JSON, before falling back to the
+ * main model. Defaults to 1 (and fails closed to 1, not NaN, on a bad value).
+ *
+ * @param {object} args - The agent's start() args.
+ */
+MiniA.prototype._resolveLcJsonRetries = function(args) {
+  if (!isDef(args) || !isDef(args.lcjsonretries)) return 1
+  var n = parseInt(args.lcjsonretries)
+  return (isNumber(n) && !isNaN(n)) ? Math.max(0, n) : 1
+}
+
 MiniA.prototype._updateErrorHistory = function(runtime, entry) {
   var target = isObject(runtime) ? runtime : {}
   if (!isArray(target.errorHistory)) target.errorHistory = []
@@ -9031,6 +9242,41 @@ MiniA.prototype._resolveToolInfo = function(toolName) {
   return __
 }
 
+// Discovers Agent Plugins (agent-plugins.org) directories/roots from args.plugins,
+// args.pluginsroot(s), memoized per agent instance so plugin dirs are scanned once
+// regardless of how many call sites need the result (skills wiring + MCP wiring).
+MiniA.prototype._getPluginsDiscovery = function(args) {
+  if (isObject(this._pluginsDiscovery)) return this._pluginsDiscovery
+
+  if (typeof __miniAPluginDiscover !== "function") {
+    loadLib("mini-a-plugins.js")
+  }
+  if (typeof __miniAPluginDiscover !== "function") {
+    this._pluginsDiscovery = { skillsRoots: [], mcpConfigs: [], warnings: [] }
+    return this._pluginsDiscovery
+  }
+
+  var result
+  try {
+    result = __miniAPluginDiscover({
+      plugins     : args.plugins,
+      pluginsroot : args.pluginsroot,
+      pluginsroots: args.pluginsroots,
+      homedir     : args.homedir
+    })
+  } catch (discoverErr) {
+    this.fnI("warn", `Agent Plugins discovery failed: ${__miniAErrMsg(discoverErr)}`)
+    result = { skillsRoots: [], mcpConfigs: [], warnings: [] }
+  }
+
+  if (isArray(result.warnings)) {
+    result.warnings.forEach((w) => this.fnI("warn", `Agent Plugins: ${w}`))
+  }
+
+  this._pluginsDiscovery = result
+  return result
+}
+
 MiniA.prototype._createUtilsMcpConfig = function(args) {
   try {
     var parent = this
@@ -9055,6 +9301,10 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
     if ((isString(args.extraskills) || args.extraskills instanceof java.lang.String) && String(args.extraskills).trim().length > 0) {
       var extraSkillRoots = String(args.extraskills).split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
       if (extraSkillRoots.length > 0) toolOptions.skillsroots = extraSkillRoots
+    }
+    var pluginSkillsRoots = this._getPluginsDiscovery(args).skillsRoots
+    if (isArray(pluginSkillsRoots) && pluginSkillsRoots.length > 0) {
+      toolOptions.pluginskillsroots = pluginSkillsRoots
     }
     var fileTool = new MiniUtilsTool(toolOptions)
     if (fileTool._initialized !== true) {
@@ -10175,6 +10425,7 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
 
     // Initialize all downstream MCP connections
     var state = global.__mcpProxyState__
+    state.ownerId = parent._id
     mcpConfigs.forEach(function(descriptor, index) {
       var configObject = descriptor
       if (isString(descriptor)) {
@@ -13583,16 +13834,16 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
     "historys3secret", "historys3region", "historys3useversion1", "historys3ignorecertcheck", "extracommands",
-    "extraskills", "extrahooks", "workerregurl", "workerskills", "workertags", "workerreginterval", "secpass",
+    "extraskills", "extrahooks", "plugins", "pluginsroot", "pluginsroots", "workerregurl", "workerskills", "workertags", "workerreginterval", "secpass",
     "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
-    "lcescalatedefer", "lcbudget", "llmcomplexity",
-    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix",
+    "lcescalatedefer", "lcbudget", "lcjsonretries", "llmcomplexity",
+    "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
-    "dreamwikiminpages", "dreamwikimaxdepth", "dreamreport"
+    "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport"
   ].forEach(function(name) {
     if (!isDef(name)) return
     var normalized = String(name).trim().toLowerCase()
@@ -14614,6 +14865,15 @@ MiniA.prototype.init = function(args) {
         aggregatedMcpConfigs = aggregatedMcpConfigs.concat(parsedMcpConfigs)
       }
 
+      // Agent Plugins mcp.json servers register independently of useutils/useskills -
+      // a plugin may contribute only an mcp.json with no skills/ at all. Each config
+      // already carries an explicit id ("plugin:<name>:<server>") so the dedup below
+      // (by md5 of config.id) behaves deterministically.
+      var pluginMcpConfigs = this._getPluginsDiscovery(args).mcpConfigs
+      if (isArray(pluginMcpConfigs) && pluginMcpConfigs.length > 0) {
+        aggregatedMcpConfigs = aggregatedMcpConfigs.concat(pluginMcpConfigs)
+      }
+
       if (args.useutils === true || args.useskills === true) {
         var utilsMcpConfig = this._createUtilsMcpConfig(args)
         if (isMap(utilsMcpConfig)) aggregatedMcpConfigs.push(utilsMcpConfig)
@@ -14874,6 +15134,12 @@ MiniA.prototype.init = function(args) {
     var baseRules = rules
       .map(r => isDef(r) ? String(r).trim() : "")
       .filter(r => r.length > 0)
+    var validatedContracts = this._buildValidatedToolContracts(args)
+    if (validatedContracts.length > 0) {
+      var contractText = validatedContracts.slice(0, 8).map(function(contract) { return stringify(contract, __, "") }).join("\n")
+      baseRules.push("Validated tool-call contracts from matching prior runs. Reuse their shape exactly when applicable; do not infer contracts from failed calls:\n" + contractText)
+      if (isObject(global.__mini_a_metrics.memory_injected_tokens)) global.__mini_a_metrics.memory_injected_tokens.getAdd(Math.ceil(contractText.length / 4))
+    }
 
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("Invoke MCP tools via function calling with 'proxy-dispatch'. Never set tool='proxy-dispatch' itself — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}}. Valid 'action' values: status, list, search, call, readresult (never 'shell'/'exec'/'bash' — shell runs via the top-level JSON \"action\":\"shell\" field).")
@@ -15443,6 +15709,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorydedup", type: "boolean", default: true },
       { name: "memorypromote", type: "string", default: __ },
       { name: "memorystaledays", type: "number", default: 0 },
+      { name: "memoryartifactttldays", type: "number", default: 7 },
+      { name: "memoryindexttldays", type: "number", default: 1 },
       { name: "memoryinject", type: "string", default: "summary" },
       { name: "valtools", type: "boolean", default: false }
     ])
@@ -15548,6 +15816,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _memoryStaleDays = isNumber(args.memorystaledays) ? args.memorystaledays : Number(args.memorystaledays)
     if (isNaN(_memoryStaleDays)) _memoryStaleDays = __
     args.memorystaledays = _$( _memoryStaleDays, "args.memorystaledays").isNumber().default(0)
+    args.memoryartifactttldays = _$(args.memoryartifactttldays, "args.memoryartifactttldays").isNumber().default(7)
+    args.memoryindexttldays = _$(args.memoryindexttldays, "args.memoryindexttldays").isNumber().default(1)
+    if (args.memoryartifactttldays < 0) args.memoryartifactttldays = 7
+    if (args.memoryindexttldays < 0) args.memoryindexttldays = 1
     args.memoryinject = _$(args.memoryinject, "args.memoryinject").isString().default("summary")
     if (["full", "summary"].indexOf(args.memoryinject.toLowerCase().trim()) < 0) args.memoryinject = "summary"
     else args.memoryinject = args.memoryinject.toLowerCase().trim()
@@ -15556,8 +15828,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
     else args.wikiaccess = String(args.wikiaccess).toLowerCase().trim()
     args.wikibackend = _$(args.wikibackend, "args.wikibackend").isString().default("fs")
-    if (["fs", "s3", "es", "s3fs"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
-    else args.wikibackend = String(args.wikibackend).toLowerCase().trim()
+    if (["fs", "s3", "es", "s3fs", "http", "https"].indexOf(String(args.wikibackend).toLowerCase().trim()) < 0) args.wikibackend = "fs"
+    else { args.wikibackend = String(args.wikibackend).toLowerCase().trim(); if (args.wikibackend === "https") args.wikibackend = "http" }
     args.wikiroot = _$(args.wikiroot, "args.wikiroot").isString().default(__)
     args.wikibucket = _$(args.wikibucket, "args.wikibucket").isString().default(__)
     args.wikiprefix = _$(args.wikiprefix, "args.wikiprefix").isString().default("wiki/")
@@ -15568,6 +15840,15 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.wikiuseversion1 = _$(toBoolean(args.wikiuseversion1), "args.wikiuseversion1").isBoolean().default(false)
     args.wikiignorecertcheck = _$(toBoolean(args.wikiignorecertcheck), "args.wikiignorecertcheck").isBoolean().default(false)
     args.wikiindexdir = _$(args.wikiindexdir, "args.wikiindexdir").isString().default(__)
+    args.wikis3artifactprefix = _$(args.wikis3artifactprefix, "args.wikis3artifactprefix").isString().default(__)
+    args.s3artifactbundle = _$(toBoolean(args.s3artifactbundle), "args.s3artifactbundle").isBoolean().default(false)
+    args.wikihttpindexurl = _$(args.wikihttpindexurl, "args.wikihttpindexurl").isString().default(__)
+    var _wikiHttpTimeout = isNumber(args.wikihttptimeout) ? args.wikihttptimeout : Number(args.wikihttptimeout)
+    if (isNaN(_wikiHttpTimeout)) _wikiHttpTimeout = __
+    args.wikihttptimeout = _$(_wikiHttpTimeout, "args.wikihttptimeout").isNumber().default(30000)
+    var _wikiArtifactRefreshSecs = isNumber(args.wikiartifactrefreshsecs) ? args.wikiartifactrefreshsecs : Number(args.wikiartifactrefreshsecs)
+    if (isNaN(_wikiArtifactRefreshSecs)) _wikiArtifactRefreshSecs = __
+    args.wikiartifactrefreshsecs = _$(_wikiArtifactRefreshSecs, "args.wikiartifactrefreshsecs").isNumber().default(0)
     if (isUnDef(args.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) args.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
     if (isDef(args.wikilexical) && !isString(args.wikilexical) && !isMap(args.wikilexical)) throw new Error("args.wikilexical must be a SLON/JSON string or object")
     args.wikimetacache = _$(toBoolean(args.wikimetacache), "args.wikimetacache").isBoolean().default(true)
@@ -15580,6 +15861,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiLintMaxPairs = isNumber(args.wikilintmaxpairs) ? args.wikilintmaxpairs : Number(args.wikilintmaxpairs)
     if (isNaN(_wikiLintMaxPairs)) _wikiLintMaxPairs = __
     args.wikilintmaxpairs = _$(_wikiLintMaxPairs, "args.wikilintmaxpairs").isNumber().default(250000)
+    var _wikiLintResultLimit = isNumber(args.wikilintresultlimit) ? args.wikilintresultlimit : Number(args.wikilintresultlimit)
+    if (isNaN(_wikiLintResultLimit)) _wikiLintResultLimit = __
+    args.wikilintresultlimit = _$(_wikiLintResultLimit, "args.wikilintresultlimit").isNumber().default(0)
+    args.dreamwikisurgical = _$(toBoolean(args.dreamwikisurgical), "args.dreamwikisurgical").isBoolean().default(false)
     args.usewikigraph = _$(toBoolean(args.usewikigraph), "args.usewikigraph").isBoolean().default(false)
     args.wikigraphsemantic = _$(toBoolean(args.wikigraphsemantic), "args.wikigraphsemantic").isBoolean().default(false)
     args.wikigraphcommunity = _$(args.wikigraphcommunity, "args.wikigraphcommunity").isString().default("louvain")
@@ -16624,6 +16909,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Issue 5: LC token budget
     var lcBudget = isDef(args.lcbudget) ? parseInt(args.lcbudget) : 0
     var lcBudgetExceeded = false
+    var lcJsonRetries = this._resolveLcJsonRetries(args)
     var modelStrategy = this._normalizeModelStrategy(args.modelstrategy)
     this._modelStrategy = modelStrategy
     var advisorEnabled  = modelStrategy === "advisor"  && this._use_lc && modelLock !== "main"
@@ -16761,7 +17047,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           message : errorMessage,
           context : { toolName: toolName, stepLabel: stepLabel }
         })
-        this._memoryAppend("risks", `Tool '${toolName}' failed: ${errorMessage}`, {
+        var riskKey = "tool-failure:" + String(toolName || "tool") + ":" + sha1(String(errorMessage || "")).substring(0, 12)
+        this._memoryUpsert("risks", riskKey, `Tool '${toolName}' failed: ${errorMessage}`, {
+          kind      : "tool-failure",
+          observedAt: new Date().toISOString(),
+          expiresAt : this._memoryExpiry(1),
+          taskScope : this._deriveMemoryTaskScope(args, toolName),
           status    : "unresolved",
           unresolved: true,
           provenance: { source: "tool", event: "tool-error", step: stepLabel, tool: toolName }
@@ -16802,26 +17093,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
         })
         if (isObject(evidenceEntry) && isString(evidenceEntry.id) && isString(observation) && observation.length > 0) {
-          var _isSpill = isMap(rawResult) && rawResult.autoSpilled === true && isString(rawResult.resultFile)
-          var _isTrunc = !_isSpill && observation.length > 2000
-          var _storedVal = observation.substring(0, 2000)
+          var _observationRecord = this._buildToolObservation(toolName, params, rawResult, observation, args, stepLabel)
+          var _rawBytesRejected = Math.max(0, observation.length - String(_observationRecord.value || "").length)
+          if (_rawBytesRejected > 0 && isObject(global.__mini_a_metrics.memory_raw_bytes_rejected)) global.__mini_a_metrics.memory_raw_bytes_rejected.getAdd(_rawBytesRejected)
           var _artMeta = {
             evidenceRefs: [evidenceEntry.id],
-            provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName }
+            provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName },
+            kind: _observationRecord.kind, observedAt: _observationRecord.observedAt, expiresAt: _observationRecord.expiresAt,
+            taskScope: _observationRecord.taskScope, sourceTool: _observationRecord.sourceTool, sourceParams: _observationRecord.sourceParams,
+            resultFile: _observationRecord.resultFile, pendingReadresult: _observationRecord.pendingReadresult, meta: _observationRecord.meta
           }
-          if (_isSpill) {
-            _artMeta.pendingReadresult = true
-            _artMeta.resultFile        = rawResult.resultFile
-            _artMeta.sourceTool        = isString(rawResult.tool) ? rawResult.tool : toolName
-            _artMeta.sourceParams      = af.toSLON(params || {}).substring(0, 200)
-          } else if (_isTrunc) {
-            _storedVal += " [TRUNCATED: full output was " + observation.length + " bytes; re-call tool '" + toolName + "' with same params to get complete data]"
-            _artMeta.truncated    = true
-            _artMeta.fullSize     = observation.length
-            _artMeta.sourceTool   = toolName
-            _artMeta.sourceParams = af.toSLON(params || {}).substring(0, 200)
-          }
-          this._memoryAppend("artifacts", _storedVal, _artMeta, { noDedup: true })
+          this._memoryUpsert("artifacts", _observationRecord.key, _observationRecord.value, _artMeta)
+          this._recordValidatedToolContract(toolName, params, evidenceEntry.id, args)
         }
         this._clearPendingFetchFlags(toolName, params, rawResult, observation)
         var readresultGuardKey = buildReadresultGuardKey(params, toolName)
@@ -17589,10 +17872,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             global.__mini_a_metrics.finals_made.inc()
             global.__mini_a_metrics.goals_achieved.inc()
             global.__mini_a_metrics.total_session_time.set(now() - sessionStartTime)
-            this._memoryAppend("decisions", "Final answer emitted after native tool call.", { provenance: { source: "synthesis", event: "native-tool-final", step: step + 1 } })
-            this._memoryAppend("summaries", nativeToolAnswer.substring(0, 500), { provenance: { source: "synthesis", event: "native-tool-final-preview" } })
-            this._persistWorkingMemory("native-tool-final")
-            if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("native-tool-final")
             return this._processFinalAnswer(nativeToolAnswer, args)
           }
         }
@@ -17617,12 +17896,103 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           recoveredFromEnvelopeApplied = true
         }
 
-        // If low-cost LLM produced invalid JSON, retry with main LLM
+        // If low-cost LLM produced invalid JSON, give it lcJsonRetries extra same-step
+        // attempts (re-prompted with a corrective note) before falling back to main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
-           var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
-           this.fnI("warn", `Low-cost model produced invalid JSON. Response started with: ${responseSample}. Retrying with main model...`)
-          global.__mini_a_metrics.fallback_to_main_llm.inc()
+          var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
+          this.fnI("warn", `Low-cost model produced invalid JSON. Response started with: ${responseSample}.`)
           global.__mini_a_metrics.json_parse_failures.inc()
+
+          var lcRetryStopRequested = false
+          for (var lcJsonRetryAttempt = 1; lcJsonRetryAttempt <= lcJsonRetries && (isUnDef(msg) || !(isMap(msg) || isArray(msg))); lcJsonRetryAttempt++) {
+            global.__mini_a_metrics.lc_json_retries.inc()
+            global.__mini_a_metrics.retries.inc()
+            this.fnI("retry", `Low-cost model produced invalid JSON; retrying low-cost model (attempt ${lcJsonRetryAttempt}/${lcJsonRetries}) with corrective note...`)
+            var lcRetryPrompt = prompt + "\n\n[JSON RETRY NOTE] Your previous response was not valid JSON. Reply with a SINGLE valid JSON object or array only: matching braces/brackets, quoted keys, no trailing commas, no markdown fences, no extra prose."
+
+            var lcRetryResponseWithStats
+            try {
+              lcRetryResponseWithStats = this._withExponentialBackoff(() => {
+                addCall()
+                var jsonFlag = !noJsonPromptFlag
+                if (args.showthinking) {
+                  if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) return currentLLM.promptJSONWithStatsRaw(lcRetryPrompt)
+                  if (isDef(currentLLM.rawPromptWithStats)) return currentLLM.rawPromptWithStats(lcRetryPrompt, __, __, jsonFlag)
+                }
+                if (jsonFlag && isDef(currentLLM.promptJSONWithStats)) return currentLLM.promptJSONWithStats(lcRetryPrompt)
+                return currentLLM.promptWithStats(lcRetryPrompt)
+              }, this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
+            } catch (lcRetryErr) {
+              if (this.state == "stop" || (isObject(lcRetryErr) && lcRetryErr.miniAStop === true)) {
+                lcRetryStopRequested = true
+                break
+              }
+              var lcRetryErrorInfo = this._categorizeError(lcRetryErr, { source: "llm", llmType: "low-cost", reason: "json-retry" })
+              runtime.context.push(`[OBS ${step + 1}] (error) low-cost JSON-retry attempt ${lcJsonRetryAttempt} failed: ${lcRetryErrorInfo.reason}`)
+              this._registerRuntimeError(runtime, { category: lcRetryErrorInfo.type, message: lcRetryErrorInfo.reason, context: { step: step + 1, llmType: "low-cost", reason: "json-retry" } })
+              continue
+            }
+
+            var lcRetryStats = isObject(lcRetryResponseWithStats) ? lcRetryResponseWithStats.stats : {}
+            var lcRetryEstimatedPromptTokens = this._estimateTokens(lcRetryPrompt)
+            registerCallUsage(this._getTotalTokens(lcRetryStats))
+            var lcRetryTrackedTokens = this._recordLlmStatsMetrics(lcRetryStats, "lc", lcRetryEstimatedPromptTokens)
+            global.__mini_a_metrics.llm_estimated_tokens.getAdd(lcRetryEstimatedPromptTokens)
+            this._attachTokenStatsToConversation(lcRetryStats, currentLLM)
+            if (isMap(this._costTracker)) {
+              this._costTracker.lc.calls++
+              this._costTracker.lc.totalTokens += lcRetryTrackedTokens
+            }
+            if (lcBudget > 0 && !lcBudgetExceeded && isMap(this._costTracker) && this._costTracker.lc.totalTokens >= lcBudget) {
+              lcBudgetExceeded = true
+              this.fnI("warn", `LC token budget (${lcBudget}) exceeded — switching to main model for remainder of session`)
+            }
+
+            var lcRetryRmsg = lcRetryResponseWithStats.response
+            rmsg = lcRetryRmsg
+            responseWithStats = lcRetryResponseWithStats
+            stats = lcRetryStats
+            if (isString(lcRetryRmsg)) {
+              var _lcRetryThinkStrip = this._stripThinkingTagsFromString(lcRetryRmsg)
+              if (_lcRetryThinkStrip.blocks.length > 0) {
+                if (!args.showthinking) {
+                  _lcRetryThinkStrip.blocks.forEach(b => {
+                    this._logMessageWithCounter("thought", b)
+                    global.__mini_a_metrics.thoughts_made.inc()
+                  })
+                }
+                lcRetryRmsg = _lcRetryThinkStrip.cleaned
+                rmsg = lcRetryRmsg
+              }
+              var lcRetryMsg = this._parseModelJsonResponse(lcRetryRmsg)
+              var lcRetryRecoveredMsgFromEnvelope = __
+              if (isObject(lcRetryResponseWithStats) && isMap(lcRetryResponseWithStats.response)) {
+                lcRetryRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(lcRetryResponseWithStats.response)
+              }
+              recoveredMsgFromEnvelope = lcRetryRecoveredMsgFromEnvelope
+              if ((isUnDef(lcRetryMsg) || !(isMap(lcRetryMsg) || isArray(lcRetryMsg))) && (isMap(lcRetryRecoveredMsgFromEnvelope) || isArray(lcRetryRecoveredMsgFromEnvelope))) {
+                lcRetryMsg = lcRetryRecoveredMsgFromEnvelope
+                recoveredFromEnvelopeApplied = true
+              }
+              if (isMap(lcRetryMsg) || isArray(lcRetryMsg)) {
+                msg = lcRetryMsg
+                this.fnI("output", `Low-cost model responded on retry ${lcJsonRetryAttempt}/${lcJsonRetries}. ${this._formatTokenStats(lcRetryStats)}`)
+              } else {
+                global.__mini_a_metrics.json_parse_failures.inc()
+                var lcRetryResponseSample = lcRetryRmsg.length > 200 ? lcRetryRmsg.substring(0, 200) + "..." : lcRetryRmsg
+                this.fnI("warn", `Low-cost model retry ${lcJsonRetryAttempt}/${lcJsonRetries} still produced invalid JSON. Response started with: ${lcRetryResponseSample}.`)
+              }
+            }
+          }
+
+          if (lcRetryStopRequested || this.state == "stop") break
+        }
+
+        // If low-cost LLM still produced invalid JSON after retries, fall back to main LLM
+        if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
+          var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
+          this.fnI("warn", `Low-cost model still produced invalid JSON after ${lcJsonRetries} retry attempt(s). Response started with: ${responseSample}. Retrying with main model...`)
+          global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.retries.inc()
           this._syncConversationForModelSwitch("main")
             // Add explicit retry context about JSON formatting
@@ -18619,10 +18989,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           if (args.debug || args.verbose) {
             this.fnI("info", `[STATE after step ${step + 1}] ${getStateSnapshot()}`)
           }
-          this._memoryAppend("decisions", "Final answer emitted by agent.", { provenance: { source: "synthesis", event: "final-answer", step: stepLabel } })
-          this._memoryAppend("summaries", String(answerValue).substring(0, 500), { provenance: { source: "synthesis", event: "final-answer-preview" } })
-          this._persistWorkingMemory("final-answer")
-          if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("final-answer")
           return this._processFinalAnswer(answerValue, args)
         }
 
@@ -18728,7 +19094,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             } else if (wkOp === "lint") {
               global.__mini_a_metrics.wiki_ops_lint.inc()
               var wkLint = this._wikiManager.lint(this._memoryManager, { staleDays: this._wikiLintStaleDays })
-              wkResult = af.toTOON(wkLint)
+              var wkLintLimit = isNumber(wkParams.limit) && wkParams.limit > 0
+                ? Math.floor(wkParams.limit)
+                : (isNumber(args.wikilintresultlimit) && args.wikilintresultlimit > 0 ? args.wikilintresultlimit : 0)
+              var wkLintIssues = isArray(wkLint.issues) ? wkLint.issues : []
+              var wkLintSeverity = isString(wkParams.severity) ? wkParams.severity.trim().toLowerCase() : ""
+              var wkLintTypes = isString(wkParams.types) ? wkParams.types.split(",").map(function(v) { return v.trim() }).filter(function(v) { return v.length > 0 }) : []
+              var wkLintPage = isString(wkParams.page) ? wkParams.page.trim() : ""
+              var wkFilteredIssues = wkLintIssues.filter(function(issue) {
+                if (wkLintSeverity.length > 0 && String(issue.severity || "").toLowerCase() !== wkLintSeverity) return false
+                if (wkLintTypes.length > 0 && wkLintTypes.indexOf(String(issue.type || "")) < 0) return false
+                return wkLintPage.length === 0 || String(issue.page || "") === wkLintPage
+              })
+              if (wkLintLimit > 0) {
+                wkResult = af.toTOON({ summary: wkLint.summary, issues: wkFilteredIssues.slice(0, wkLintLimit), shown: Math.min(wkLintLimit, wkFilteredIssues.length), total: wkFilteredIssues.length, next: wkFilteredIssues.length > wkLintLimit ? "Refine severity, types, or page to inspect more issues." : __ })
+              } else wkResult = af.toTOON(wkLint)
             } else if (wkOp === "write") {
               global.__mini_a_metrics.wiki_ops_write.inc()
               if (args.wikiaccess !== "rw") {
@@ -18737,6 +19117,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
                 wkResult = "[ERROR] wiki write requires 'path'"
               } else if (wkContent.length === 0 && !wkWriteOpts.append) {
                 wkResult = "[ERROR] wiki write requires 'content'"
+              } else if (args.dreamwikisurgical === true && !wkWriteOpts.append && isUnDef(wkWriteOpts.lineInsert) && isUnDef(wkWriteOpts.lineStart) && isUnDef(wkWriteOpts.lineEnd) && isUnDef(wkWriteOpts.section) && isObject(this._wikiManager.read(wkPath))) {
+                wkResult = "[ERROR] dream wiki writes to an existing page require append, lineStart/lineEnd, lineInsert, or section; full-page replacement is disabled"
               } else {
                 var wkWrite = this._wikiManager.write(wkPath, wkContent, __, wkWriteOpts)
                 wkResult = isObject(wkWrite) && wkWrite.ok ? "Wrote " + wkPath : "[ERROR] " + (isObject(wkWrite) ? wkWrite.error : "write failed")
@@ -19017,10 +19399,6 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var totalTime = now() - sessionStartTime
     global.__mini_a_metrics.total_session_time.set(totalTime)
     global.__mini_a_metrics.goals_stopped.inc()
-    this._memoryAppend("decisions", "Fallback final answer requested due to execution limits.", { provenance: { source: "synthesis", event: "fallback-final" } })
-    this._memoryAppend("summaries", String(res.answer || "(no final answer)").substring(0, 500), { provenance: { source: "synthesis", event: "fallback-final-preview" } })
-    this._persistWorkingMemory("fallback-final")
-    if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("fallback-final")
     return this._processFinalAnswer(res.answer || "(no final answer)", args)
 }
 

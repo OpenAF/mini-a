@@ -2,6 +2,18 @@
 
 ## Recent Updates
 
+### Low-cost model gets a JSON-retry before falling back to the main model
+
+**Change**: Previously, when the low-cost model's response failed to parse as valid JSON, Mini-A fell back to the main model immediately (zero retries). It now gives the low-cost model `lcjsonretries` (default: `1`) extra same-step attempts, re-prompted with a corrective note about valid JSON formatting, before escalating to the main model. Retries are "free" — they don't consume a step from `maxsteps` — and each retry attempt's token usage is tracked against `lcbudget` and the session's LC cost tracker like any other low-cost call. Set `lcjsonretries=0` to restore the previous immediate-fallback behavior.
+
+New metric: `lc_json_retries` (surfaced via `getMetrics().llm_calls.lc_json_retries`). `fallback_to_main_llm` now only increments once retries are exhausted.
+
+**Related parameters**: `lcjsonretries`, `lcbudget`, `lcescalatedefer`, `modellock`
+
+### Wiki: static HTTP(S) backend and artifact bundles
+
+**Change**: Read-only `wikibackend=http` wikis fetch pages from a static server while consuming a published `mini-a-wiki-index.zip` for catalog, Lucene search, and graph state. S3 can opt into the same bundle with `s3artifactbundle=true`; set `wikiartifactrefreshsecs` to periodically recheck remote ETag/Last-Modified metadata in long-lived processes.
+
 ### Wiki: automated knowledge ingestion (`mini-a-ingest.js`)
 
 **Change**: New ingestion pipeline that turns a documentation folder, a git repository (local checkout or clone URL) or a web page into distilled, linked, indexed wiki pages.

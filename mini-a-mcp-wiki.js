@@ -366,7 +366,8 @@ function __miniAMcpWikiBuildConfig(args, options) {
   options = isMap(options) ? options : {}
 
   var backend = isDef(args.wikibackend) ? String(args.wikibackend).toLowerCase().trim() : "fs"
-  if (["fs", "s3", "es", "s3fs"].indexOf(backend) < 0) backend = "fs"
+  if (backend === "https") backend = "http"
+  if (["fs", "s3", "es", "s3fs", "http"].indexOf(backend) < 0) backend = "fs"
 
   var access = isString(options.access) ? options.access.toLowerCase().trim() : "ro"
   if (access !== "rw") access = "ro"
@@ -383,6 +384,10 @@ function __miniAMcpWikiBuildConfig(args, options) {
     indexdir            : isString(args.wikiindexdir) && args.wikiindexdir.trim().length > 0 ? args.wikiindexdir.trim() : __,
     wikilexical         : isDef(args.wikilexical) ? args.wikilexical : __,
     s3artifactprefix    : isString(args.wikis3artifactprefix) && args.wikis3artifactprefix.trim().length > 0 ? args.wikis3artifactprefix.trim() : __,
+    s3artifactbundle    : toBoolean(args.s3artifactbundle) === true,
+    wikihttpindexurl    : isString(args.wikihttpindexurl) && args.wikihttpindexurl.trim().length > 0 ? args.wikihttpindexurl.trim() : __,
+    wikihttptimeout     : isNumber(Number(args.wikihttptimeout)) ? Number(args.wikihttptimeout) : 30000,
+    wikiartifactrefreshsecs: isNumber(Number(args.wikiartifactrefreshsecs)) ? Number(args.wikiartifactrefreshsecs) : 0,
     wikimetacache       : isDef(args.wikimetacache) ? toBoolean(args.wikimetacache) : true,
     usegraph            : (isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false) || isString(wikiGraphFalkorHost),
     wikigraphcommunity  : isString(args.wikigraphcommunity) && args.wikigraphcommunity.trim().length > 0 ? args.wikigraphcommunity.trim() : __,
@@ -418,6 +423,10 @@ function __miniAMcpWikiBuildConfig(args, options) {
     cfg.esindex = isString(args.wikiprefix) && args.wikiprefix.trim().length > 0 ? args.wikiprefix.trim() : "mini_a_wiki"
     cfg.esuser  = args.wikiaccesskey
     cfg.espass  = args.wikisecret
+  } else if (backend === "http") {
+    cfg.url       = args.wikiurl
+    cfg.accessKey = args.wikiaccesskey
+    cfg.secret    = args.wikisecret
   } else {
     cfg.root = isString(args.wikiroot) && args.wikiroot.trim().length > 0 ? args.wikiroot.trim() : "."
   }
@@ -434,6 +443,7 @@ function __miniAMcpWikiDefaultLabel(args, cfg) {
     if (isString(args.wikibucket) && args.wikibucket.length > 0) return "s3://" + args.wikibucket + "/" + args.wikiprefix
     return "S3 wiki"
   }
+  if (cfg.backend === "http") return cfg.url || "HTTP wiki"
   return cfg.root || "wiki"
 }
 
@@ -449,6 +459,9 @@ function __miniAMcpWikiCreateTool(cfg, wikiManager) {
       if (parent) toolRoot = String(parent.getCanonicalPath())
     }
   }
+  // The facade needs a local root for its general utility initialization, but
+  // HTTP wiki reads are routed exclusively through _wikiManager.
+  if (cfg.backend === "http") toolRoot = "."
   var tool = new MiniUtilsTool({
     root     : toolRoot,
     readwrite: String(cfg.access || "").toLowerCase() === "rw"
@@ -471,6 +484,32 @@ function __miniAMcpWikiAttachMounts(wikiManager, mountsRaw, logPrefix) {
   }
 }
 
+// Same opt-in precedence as oJobMCP.yaml's per-tool-call audit (args.audit,
+// falling back to env OJOB_MCP_AUDIT): args.audit is a raw/uncoerced value
+// here since Init's check.in only declares it as default(__).
+function __miniAMcpWikiAuditEnabled(args) {
+  var raw = isDef(args.audit) ? args.audit : (getEnv("OJOB_MCP_AUDIT") || "false")
+  return toBoolean(raw) === true
+}
+
+// Backend-resolved retrieval audit: logs every page actually fetched from a
+// remote wiki store (s3/http/es), independent of and complementary to
+// oJobMCP.yaml's per-tool-call audit -- which only sees the top-level MCP
+// tool call, not internal fetches made while serving search/lint/list/etc.
+function __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix) {
+  if (!auditEnabled) return function() {}
+  return function(event) {
+    try { log("[audit] " + logPrefix + " retrieve " + af.toSLON({ backend: event.backend, id: event.identifier, path: event.path, ok: event.ok, bytes: event.bytes })) } catch(e) {}
+  }
+}
+
+function __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix) {
+  if (!auditEnabled) return function() {}
+  return function(level, msg) {
+    try { log("[" + logPrefix + "] " + level + ": " + msg) } catch(e) {}
+  }
+}
+
 function __miniAMcpWikiInit(args, options) {
   args = isMap(args) ? args : {}
   options = isMap(options) ? options : {}
@@ -490,7 +529,10 @@ function __miniAMcpWikiInit(args, options) {
   }
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
   var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"
-  global.__wikiManager = new MiniAWikiManager(cfg)
+  var auditEnabled = __miniAMcpWikiAuditEnabled(args)
+  global.__wikiManager = new MiniAWikiManager(cfg,
+    __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix),
+    __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix))
   global.__wikiTool = __miniAMcpWikiCreateTool(cfg, global.__wikiManager)
   args.label = __miniAMcpWikiDefaultLabel(args, cfg)
   __miniAMcpWikiAttachMounts(global.__wikiManager, args.wikimounts, logPrefix)

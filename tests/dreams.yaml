@@ -3,6 +3,10 @@ include:
 
 jobs:
 
+- name: MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyFrontmatterHeadingsLinksAndFixpoint
+
 - name: MiniA Dreams Tests::DreamMemoryMergesDuplicates
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamMemoryMergesDuplicates
@@ -111,11 +115,20 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiRepairDryRunAndIdempotence
 
+- name: MiniA Dreams Tests::DreamWikiRepairModeFixesWithoutFinalizing
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairModeFixesWithoutFinalizing
+
+- name: MiniA Dreams Tests::DreamWikiRepairModeReachesRootOnDeepNewTree
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairModeReachesRootOnDeepNewTree
+
 - name: MiniA Dreams Tests::DreamWikiLintModeIsGone
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiLintModeIsGone
 
 todo:
+- MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
 - MiniA Dreams Tests::DreamMemoryMergesDuplicates
 - MiniA Dreams Tests::DreamMemoryMarksStale
 - MiniA Dreams Tests::DreamMemoryPreservesIds
@@ -143,4 +156,6 @@ todo:
 - MiniA Dreams Tests::FinalizePreservesAuthoredIndexContent
 - MiniA Dreams Tests::DreamWikiApplyRepairsCertainLintOnly
 - MiniA Dreams Tests::DreamWikiRepairDryRunAndIdempotence
+- MiniA Dreams Tests::DreamWikiRepairModeFixesWithoutFinalizing
+- MiniA Dreams Tests::DreamWikiRepairModeReachesRootOnDeepNewTree
 - MiniA Dreams Tests::DreamWikiLintModeIsGone

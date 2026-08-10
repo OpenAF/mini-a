@@ -92,6 +92,15 @@ To load skills from additional directories, pass `extraskills=<path1>,<path2>`. 
 mini-a extraskills=/path/to/shared-skills,/path/to/project-skills
 ```
 
+### Agent Plugins
+
+Mini-A can also load skills (and MCP servers) bundled as an [Agent Plugins](https://agent-plugins.org) directory (`plugin.json` + `skills/` + `mcp.json`). Use `plugins=<dir1,dir2>` for explicit plugin directories, or `pluginsroot=<dir>` / `pluginsroots=<dir1,dir2>` for directories that each contain many plugin subfolders (default: `.openaf-mini-a/plugins`). These compose with `extraskills`/`mcp=` — they don't replace them — and a plugin's skills never win a name conflict over the default/extra skill directories. See **[docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)** for the full directory layout, the `PLUGIN_ROOT`/`PLUGIN_DATA` contract, and current limitations.
+
+```bash
+mini-a goal="..." plugins=/path/to/my-plugin
+mini-a goal="..." pluginsroot=/path/to/plugins-folder
+```
+
 To invoke one template directly from the command line (without entering the console), use `exec=`:
 
 ```bash
@@ -229,7 +238,7 @@ By default, Mini-A reads all configuration (commands, skills, hooks, modes, hist
 mini-a homedir=/opt/shared/mini-a-config goal="..."
 ```
 
-This replaces `~` in all `.openaf-mini-a` lookups — custom commands, skills, hooks, modes, agent profiles, history, and memory files all resolve relative to the provided path. The `extracommands`, `extraskills`, and `extrahooks` parameters continue to work as additional directories on top of whichever base is active.
+This replaces `~` in all `.openaf-mini-a` lookups — custom commands, skills, hooks, modes, agent profiles, history, and memory files all resolve relative to the provided path. The `extracommands`, `extraskills`, and `extrahooks` parameters continue to work as additional directories on top of whichever base is active. It also affects the default Agent Plugins `pluginsroot` and where per-plugin `PLUGIN_DATA` directories are created (see [docs/AGENT-PLUGINS.md](docs/AGENT-PLUGINS.md)).
 
 For conversation management, two history compaction commands mirror the behavior implemented in [`mini-a-con.js`](mini-a-con.js):
 
@@ -868,12 +877,14 @@ The `start()` method accepts various configuration options:
 - **`memorymaxentries`** (number, default: 500): Global cap across all sections; compaction preserves decisions/evidence preferentially.
 - **`memorycompactevery`** (number, default: 8): Trigger compaction every N memory mutations.
 - **`memorydedup`** (boolean, default: true): Deduplicate near-identical entries during append.
+- **`memoryartifactttldays`** (number, default: `7`): Expiry window for normalized tool and network observations. Expired entries are excluded from search and prompt injection, then removed during maintenance.
+- **`memoryindexttldays`** (number, default: `1`): Shorter expiry window for list, search, and index snapshots.
 - **`memorypromote`** (string, default: `""`): Comma-separated list of memory sections to auto-promote from the session store to the global store at session end. Uses a refresh-or-append strategy: near-duplicate global entries have their `confirmedAt` and `confirmCount` updated rather than duplicated; entirely new entries are appended. `memoryuser=true` sets this to `facts,decisions,summaries`. Set to `""` to disable promotion.
 - **`memorystaledays`** (number, default: `0`): Number of days after which a global memory entry that has not been re-confirmed by any session is marked `stale=true`. The sweep runs automatically after each auto-promotion pass. Stale entries are not deleted immediately — they are evicted by compaction when a section overflows `memorymaxpersection`, giving recently confirmed entries priority. Set to `0` to disable staleness tracking. `memoryuser=true` sets this to `30`.
-- **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
+- **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. Matching validated tool contracts are injected in both modes. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
 - **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
 - **`wikiaccess`** (string, default: `ro`): Wiki access mode, `ro` or `rw`.
-- **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, or `es` (Elasticsearch/OpenSearch).
+- **`wikibackend`** (string, default: `fs`): Wiki backend, one of `fs`, `s3`, `s3fs`, `es` (Elasticsearch/OpenSearch), or read-only `http` (`https` is accepted as an alias).
 - **`wikiroot`** (string, default: `.`): Filesystem directory or local `.zip`/`.okt` archive for `wikibackend=fs`. Archive roots are always read-only, even with `wikiaccess=rw`. When `usewikigraph=true`, an archive may provide its existing `.mini-a-wiki-graph/graph.json` for read-only graph commands and search hints; Mini-A never rebuilds or writes it.
 - **`wikibucket`** (string, optional): S3 bucket for `wikibackend=s3` or `wikibackend=s3fs`.
 - **`wikiprefix`** (string, optional): S3 key prefix for `s3`/`s3fs`; Elasticsearch index name for `es` (defaults to `mini_a_wiki`).
@@ -884,9 +895,12 @@ The `start()` method accepts various configuration options:
 - **`wikiuseversion1`** (boolean, default: `false`): Use S3 path-style/signature-v1 compatibility for `s3`/`s3fs`.
 - **`wikiignorecertcheck`** (boolean, default: `false`): Disable TLS certificate checks for the S3 endpoint.
 - **`wikiindexdir`** (string, optional): Override the local index/cache directory used for non-filesystem wiki indexes.
-- **`wikilexical`** (SLON/JSON, optional): Lucene lexical configuration. It defaults to `{ language: "english" }`; choose another supported Lucene language and add explicit synonym rules (for example `{ language: "portuguese", synonyms: [["carro", "automovel"]] }`). `shingles`, `ngrams`, `queryExpansion`, and `pseudoRelevanceFeedback` are disabled unless explicitly enabled. The matching configuration is recorded in `.mini-a-wiki-lucene/mini-a-lexical.json`; run writable `/wiki reindex` after changing it. Read-only or hydrated legacy indexes continue ordinary Lucene retrieval and log one publisher-reindex warning.
+- **`wikilexical`** (SLON/JSON, optional): Lucene lexical configuration. It defaults to `{ language: "english" }`; choose another supported Lucene language and add explicit synonym rules (for example `{ language: "portuguese", synonyms: [["carro", "automovel"]] }`). To keep a larger dictionary outside command-line configuration, set `synonymsFile` (for example `{ synonymsFile: "synonyms.txt" }`); relative paths resolve from a filesystem wiki root, while other backends require an absolute path. The file may be a SLON/JSON array of rules or plain text with one comma-separated rule per line; blank lines and lines beginning with `#` are ignored. File rules are added to any inline `synonyms`. `shingles`, `ngrams`, `queryExpansion`, and `pseudoRelevanceFeedback` are disabled unless explicitly enabled. The matching configuration is recorded in `.mini-a-wiki-lucene/mini-a-lexical.json`; run writable `/wiki reindex` after changing it. Read-only or hydrated legacy indexes continue ordinary Lucene retrieval and log one publisher-reindex warning.
 - **`OAF_MINI_A_WIKI_LEXICAL`** (environment variable, optional): Environment equivalent of `wikilexical`; an explicit runtime `wikilexical` value takes precedence.
 - **`wikis3artifactprefix`** (string, optional): For an `s3` wiki, download a separately published artifact tree into `wikiindexdir` at startup. Place Lucene files below `.mini-a-wiki-lucene/`; `mcp-wiki` can also consume `.mini-a-wiki-graph/graph.json` when `usewikigraph=true`. The MCP servers remain read-only and never publish artifacts back to S3.
+- **`s3artifactbundle`** (boolean, default: `false`): Use one `<wikis3artifactprefix>/mini-a-wiki-index.zip` artifact bundle instead of individual S3 objects.
+- **`wikihttpindexurl`** / **`wikihttptimeout`**: Optional HTTP bundle URL (default `<wikiurl>/mini-a-wiki-index.zip`) and request timeout in milliseconds (default `30000`). HTTP wikis fetch page content live, but require a published bundle containing `.mini-a-wiki-lucene/` and `.mini-a-wiki-graph/graph.json` for catalog/search/graph. The catalog only contains indexed pages.
+- **`wikiartifactrefreshsecs`** (number, default: `0`): For HTTP bundles and S3 bundles (`s3artifactbundle=true`), probe bundle metadata at most once per interval between wiki requests. A changed ETag/last-modified value downloads and atomically replaces the local cache, then reopens Lucene/graph state. `0` retains startup-only hydration. Individual S3 artifact trees are intentionally not refreshed because a partial update could mix Lucene generations.
 - **`wikirestrictprofile`** (string, default: `tight`): For `mcp-wiki-safe`, selects restricted retrieval defaults: `tight`, `moderate`, or `relaxed` (case-insensitive). `tight` preserves the previous defaults; individual `wikirestrict*` settings override profile values; hard disclosure ceilings remain enforced and the safe server stays read-only with only `search` and `read`.
 - **`wikimetacache`** (boolean, default: `true`): Enable the sharded metadata cache used by wiki search/list/read helpers.
 - **`wikilintstaleddays`** (number, default: `90`): Age threshold used by wiki lint stale-page checks.
@@ -938,6 +952,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`evidencegatestrictness`** (string, one of `"low"`, `"medium"`, `"high"`, default: `"medium"`): Tuning level for evidence gate heuristics.
 - **`lcescalatedefer`** (boolean, default: `true`): When enabled, if an escalation trigger fires but the current LC model response has a confidence score ≥ 0.7 (based on JSON validity, completeness, and action specificity), Mini-A defers the escalation by one additional step. If the next step also triggers escalation, it escalates immediately. Set to `false` to disable deferral and escalate as soon as the trigger fires.
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
+- **`lcjsonretries`** (number, default: `1`): Number of extra same-step attempts to give the low-cost model when its response fails to parse as valid JSON, before falling back to the main model. Each retry re-prompts the low-cost model with a corrective note about valid JSON formatting and does not consume a step from `maxsteps`. Set to `0` to restore the previous behavior of falling back to the main model immediately on the first invalid-JSON response.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
 - **`memoryman`** (boolean, default: false): Launch the interactive working-memory manager TUI (`mini-a-memoryman.js`) instead of the normal console. Designed for operators using `usememory=true` with `memorych`/`memorysessionch`.
@@ -2380,7 +2395,9 @@ When using dual-model configuration, you'll see clear indicators of which model 
 ℹ️  Main model responded. Usage: 1250 tokens prompted, 45 tokens generated
 ℹ️  Interacting with low-cost model (context ~890 tokens)...
 ℹ️  Low-cost model responded. Usage: 890 tokens prompted, 23 tokens generated
-⚠️  Low-cost model produced invalid JSON, retrying with main model...
+⚠️  Low-cost model produced invalid JSON.
+  retry Low-cost model produced invalid JSON; retrying low-cost model (attempt 1/1) with corrective note...
+⚠️  Low-cost model still produced invalid JSON after 1 retry attempt(s). Retrying with main model...
 ```
 
 ### 8. Real-Time Streaming Examples
@@ -2929,6 +2946,8 @@ By default (`memoryinject=summary`), the step context contains only a compact se
 - `limit` (optional, default `10`) — max results per section
 
 Results are keyword-scored (word overlap) and returned as TOON text in the step context. Use `memoryinject=full` to restore the previous behaviour of embedding all compact entries in every step prompt.
+
+Tool output is retained as a keyed, bounded observation rather than a raw response. Repeating the same operation and target refreshes that record; large output remains in the existing temporary spill file. A successful call may create a validated procedural contract in `decisions`; schema failures only create short-lived risks and never teach an invocation shape.
 
 ### Extension Points
 
