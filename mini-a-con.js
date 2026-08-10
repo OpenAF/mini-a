@@ -6942,7 +6942,7 @@ try {
   }
 
   finalizeSession("exit")
-  if (isDef(ow.oJob)) ow.oJob.stop()
+  //if (isDef(ow.oJob)) ow.oJob.stop()
   exit(0, true)
 } catch(_ge) {
   $err(_ge)
