@@ -952,6 +952,7 @@ For the Elasticsearch/OpenSearch wiki backend, there is no separate top-level `e
 - **`evidencegatestrictness`** (string, one of `"low"`, `"medium"`, `"high"`, default: `"medium"`): Tuning level for evidence gate heuristics.
 - **`lcescalatedefer`** (boolean, default: `true`): When enabled, if an escalation trigger fires but the current LC model response has a confidence score ≥ 0.7 (based on JSON validity, completeness, and action specificity), Mini-A defers the escalation by one additional step. If the next step also triggers escalation, it escalates immediately. Set to `false` to disable deferral and escalate as soon as the trigger fires.
 - **`lcbudget`** (number, default: `0` = unlimited): Maximum total LC model token usage for the session. When the cumulative LC token count reaches this threshold, Mini-A permanently locks to the main model for the remainder of the session, logging a warning. Set to `0` to disable the budget cap.
+- **`lcjsonretries`** (number, default: `1`): Number of extra same-step attempts to give the low-cost model when its response fails to parse as valid JSON, before falling back to the main model. Each retry re-prompts the low-cost model with a corrective note about valid JSON formatting and does not consume a step from `maxsteps`. Set to `0` to restore the previous behavior of falling back to the main model immediately on the first invalid-JSON response.
 - **`llmcomplexity`** (boolean, default: `false`): When enabled, if the static heuristic assessment returns `"medium"` complexity, Mini-A fires a single short LC model call to validate the result before selecting escalation thresholds. This adds a small upfront cost but may improve threshold accuracy for ambiguous goals.
 - **`secpass`** (string): Password used to unlock OpenAF sBucket model secrets when loading saved model definitions (for example, encrypted entries managed through `modelman=true`).
 - **`memoryman`** (boolean, default: false): Launch the interactive working-memory manager TUI (`mini-a-memoryman.js`) instead of the normal console. Designed for operators using `usememory=true` with `memorych`/`memorysessionch`.
@@ -2394,7 +2395,9 @@ When using dual-model configuration, you'll see clear indicators of which model 
 ℹ️  Main model responded. Usage: 1250 tokens prompted, 45 tokens generated
 ℹ️  Interacting with low-cost model (context ~890 tokens)...
 ℹ️  Low-cost model responded. Usage: 890 tokens prompted, 23 tokens generated
-⚠️  Low-cost model produced invalid JSON, retrying with main model...
+⚠️  Low-cost model produced invalid JSON.
+  retry Low-cost model produced invalid JSON; retrying low-cost model (attempt 1/1) with corrective note...
+⚠️  Low-cost model still produced invalid JSON after 1 retry attempt(s). Retrying with main model...
 ```
 
 ### 8. Real-Time Streaming Examples

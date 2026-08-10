@@ -145,6 +145,7 @@ mini-a goal="generate project report" outfile=report.md useshell=true
 | `modellock` | Lock model tier: `"main"`, `"lc"`, or `"auto"` (default) | `modellock=lc` |
 | `lcescalatedefer` | Defer escalation 1 step when LC confidence ≥ 0.7 (default: `true`) | `lcescalatedefer=false` |
 | `lcbudget` | Max LC tokens before switching permanently to main model (0=unlimited) | `lcbudget=50000` |
+| `lcjsonretries` | Extra same-step LC retries on invalid JSON before falling back to main (default: `1`) | `lcjsonretries=2` |
 | `llmcomplexity` | Use LC model to validate "medium" complexity heuristic (default: `false`) | `llmcomplexity=true` |
 | `promptprofile` | System prompt verbosity profile: `minimal`, `balanced`, or `verbose` (default when unset: `minimal` in chatbot mode, `verbose` with `debug=true` outside chatbot mode, otherwise `balanced`) | `promptprofile=minimal` |
 | `systempromptbudget` | Maximum estimated token size for the system prompt. When exceeded, Mini-A drops lower-priority sections such as examples and detailed tool guidance | `systempromptbudget=4000` |

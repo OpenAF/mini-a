@@ -762,6 +762,31 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testInitRethrowsAndRecordsErrorOnFailure
 
+- name: MiniA Core Tests::ResolveLcJsonRetriesDefaultsToOne
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesDefaultsToOne
+
+- name: MiniA Core Tests::ResolveLcJsonRetriesAcceptsExplicitValue
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesAcceptsExplicitValue
+
+- name: MiniA Core Tests::ResolveLcJsonRetriesClampsNegativeToZero
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesClampsNegativeToZero
+
+- name: MiniA Core Tests::ResolveLcJsonRetriesFallsBackOnNonNumeric
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveLcJsonRetriesFallsBackOnNonNumeric
+
+- name: MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testKnownArgumentNamesIncludesLcJsonRetries
+
 include:
 - oJobTest.yaml
 
@@ -922,3 +947,8 @@ todo:
 - MiniA Core Tests::MaxTotalStepsArgValidationDefaultsToDisabled
 - MiniA Core Tests::MaxTotalStepsArgValidationAcceptsExplicitValue
 - MiniA Core Tests::InitRethrowsAndRecordsErrorOnFailure
+- MiniA Core Tests::ResolveLcJsonRetriesDefaultsToOne
+- MiniA Core Tests::ResolveLcJsonRetriesAcceptsExplicitValue
+- MiniA Core Tests::ResolveLcJsonRetriesClampsNegativeToZero
+- MiniA Core Tests::ResolveLcJsonRetriesFallsBackOnNonNumeric
+- MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries

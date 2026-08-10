@@ -172,6 +172,7 @@ var MiniA = function() {
     shell_commands_approved: $atomic(0, "long"),
     shell_commands_denied: $atomic(0, "long"),
     fallback_to_main_llm: $atomic(0, "long"),
+    lc_json_retries: $atomic(0, "long"),
     unknown_actions: $atomic(0, "long"),
     llm_normal_tokens: $atomic(0, "long"),
     llm_lc_tokens: $atomic(0, "long"),
@@ -1683,7 +1684,8 @@ MiniA.prototype.getMetrics = function() {
             low_cost: llmLcCalls,
             validation: llmValCalls,
             total: llmNormalCalls + llmLcCalls + llmValCalls + advisorCalls,
-            fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get()
+            fallback_to_main: global.__mini_a_metrics.fallback_to_main_llm.get(),
+            lc_json_retries: global.__mini_a_metrics.lc_json_retries.get()
         },
         goals: {
             achieved: global.__mini_a_metrics.goals_achieved.get(),
@@ -8982,6 +8984,19 @@ MiniA.prototype._llmRetryOptions = function(label, ctx, overrides) {
   }, overrides || {})
 }
 
+/**
+ * Resolves the number of extra same-step attempts to give the low-cost model
+ * when its response fails to parse as valid JSON, before falling back to the
+ * main model. Defaults to 1 (and fails closed to 1, not NaN, on a bad value).
+ *
+ * @param {object} args - The agent's start() args.
+ */
+MiniA.prototype._resolveLcJsonRetries = function(args) {
+  if (!isDef(args) || !isDef(args.lcjsonretries)) return 1
+  var n = parseInt(args.lcjsonretries)
+  return (isNumber(n) && !isNaN(n)) ? Math.max(0, n) : 1
+}
+
 MiniA.prototype._updateErrorHistory = function(runtime, entry) {
   var target = isObject(runtime) ? runtime : {}
   if (!isArray(target.errorHistory)) target.errorHistory = []
@@ -13823,7 +13838,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "showdelegate", "usea2a", "modellock", "modelstrategy", "advisormaxuses", "advisorenable",
     "advisoronrisk", "advisoronambiguity", "advisoronharddecision", "advisorcooldownsteps",
     "advisorbudgetratio", "emergencyreserve", "harddecision", "evidencegate", "evidencegatestrictness",
-    "lcescalatedefer", "lcbudget", "llmcomplexity",
+    "lcescalatedefer", "lcbudget", "lcjsonretries", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
     "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
@@ -16894,6 +16909,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     // Issue 5: LC token budget
     var lcBudget = isDef(args.lcbudget) ? parseInt(args.lcbudget) : 0
     var lcBudgetExceeded = false
+    var lcJsonRetries = this._resolveLcJsonRetries(args)
     var modelStrategy = this._normalizeModelStrategy(args.modelstrategy)
     this._modelStrategy = modelStrategy
     var advisorEnabled  = modelStrategy === "advisor"  && this._use_lc && modelLock !== "main"
@@ -17880,12 +17896,103 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           recoveredFromEnvelopeApplied = true
         }
 
-        // If low-cost LLM produced invalid JSON, retry with main LLM
+        // If low-cost LLM produced invalid JSON, give it lcJsonRetries extra same-step
+        // attempts (re-prompted with a corrective note) before falling back to main LLM
         if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
-           var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
-           this.fnI("warn", `Low-cost model produced invalid JSON. Response started with: ${responseSample}. Retrying with main model...`)
-          global.__mini_a_metrics.fallback_to_main_llm.inc()
+          var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
+          this.fnI("warn", `Low-cost model produced invalid JSON. Response started with: ${responseSample}.`)
           global.__mini_a_metrics.json_parse_failures.inc()
+
+          var lcRetryStopRequested = false
+          for (var lcJsonRetryAttempt = 1; lcJsonRetryAttempt <= lcJsonRetries && (isUnDef(msg) || !(isMap(msg) || isArray(msg))); lcJsonRetryAttempt++) {
+            global.__mini_a_metrics.lc_json_retries.inc()
+            global.__mini_a_metrics.retries.inc()
+            this.fnI("retry", `Low-cost model produced invalid JSON; retrying low-cost model (attempt ${lcJsonRetryAttempt}/${lcJsonRetries}) with corrective note...`)
+            var lcRetryPrompt = prompt + "\n\n[JSON RETRY NOTE] Your previous response was not valid JSON. Reply with a SINGLE valid JSON object or array only: matching braces/brackets, quoted keys, no trailing commas, no markdown fences, no extra prose."
+
+            var lcRetryResponseWithStats
+            try {
+              lcRetryResponseWithStats = this._withExponentialBackoff(() => {
+                addCall()
+                var jsonFlag = !noJsonPromptFlag
+                if (args.showthinking) {
+                  if (jsonFlag && isDef(currentLLM.promptJSONWithStatsRaw)) return currentLLM.promptJSONWithStatsRaw(lcRetryPrompt)
+                  if (isDef(currentLLM.rawPromptWithStats)) return currentLLM.rawPromptWithStats(lcRetryPrompt, __, __, jsonFlag)
+                }
+                if (jsonFlag && isDef(currentLLM.promptJSONWithStats)) return currentLLM.promptJSONWithStats(lcRetryPrompt)
+                return currentLLM.promptWithStats(lcRetryPrompt)
+              }, this._llmRetryOptions("Low-cost JSON-retry model", { llmType: "low-cost", step: step + 1, reason: "json-retry" }, { maxDelay: 6000 }))
+            } catch (lcRetryErr) {
+              if (this.state == "stop" || (isObject(lcRetryErr) && lcRetryErr.miniAStop === true)) {
+                lcRetryStopRequested = true
+                break
+              }
+              var lcRetryErrorInfo = this._categorizeError(lcRetryErr, { source: "llm", llmType: "low-cost", reason: "json-retry" })
+              runtime.context.push(`[OBS ${step + 1}] (error) low-cost JSON-retry attempt ${lcJsonRetryAttempt} failed: ${lcRetryErrorInfo.reason}`)
+              this._registerRuntimeError(runtime, { category: lcRetryErrorInfo.type, message: lcRetryErrorInfo.reason, context: { step: step + 1, llmType: "low-cost", reason: "json-retry" } })
+              continue
+            }
+
+            var lcRetryStats = isObject(lcRetryResponseWithStats) ? lcRetryResponseWithStats.stats : {}
+            var lcRetryEstimatedPromptTokens = this._estimateTokens(lcRetryPrompt)
+            registerCallUsage(this._getTotalTokens(lcRetryStats))
+            var lcRetryTrackedTokens = this._recordLlmStatsMetrics(lcRetryStats, "lc", lcRetryEstimatedPromptTokens)
+            global.__mini_a_metrics.llm_estimated_tokens.getAdd(lcRetryEstimatedPromptTokens)
+            this._attachTokenStatsToConversation(lcRetryStats, currentLLM)
+            if (isMap(this._costTracker)) {
+              this._costTracker.lc.calls++
+              this._costTracker.lc.totalTokens += lcRetryTrackedTokens
+            }
+            if (lcBudget > 0 && !lcBudgetExceeded && isMap(this._costTracker) && this._costTracker.lc.totalTokens >= lcBudget) {
+              lcBudgetExceeded = true
+              this.fnI("warn", `LC token budget (${lcBudget}) exceeded — switching to main model for remainder of session`)
+            }
+
+            var lcRetryRmsg = lcRetryResponseWithStats.response
+            rmsg = lcRetryRmsg
+            responseWithStats = lcRetryResponseWithStats
+            stats = lcRetryStats
+            if (isString(lcRetryRmsg)) {
+              var _lcRetryThinkStrip = this._stripThinkingTagsFromString(lcRetryRmsg)
+              if (_lcRetryThinkStrip.blocks.length > 0) {
+                if (!args.showthinking) {
+                  _lcRetryThinkStrip.blocks.forEach(b => {
+                    this._logMessageWithCounter("thought", b)
+                    global.__mini_a_metrics.thoughts_made.inc()
+                  })
+                }
+                lcRetryRmsg = _lcRetryThinkStrip.cleaned
+                rmsg = lcRetryRmsg
+              }
+              var lcRetryMsg = this._parseModelJsonResponse(lcRetryRmsg)
+              var lcRetryRecoveredMsgFromEnvelope = __
+              if (isObject(lcRetryResponseWithStats) && isMap(lcRetryResponseWithStats.response)) {
+                lcRetryRecoveredMsgFromEnvelope = this._recoverMessageFromProviderError(lcRetryResponseWithStats.response)
+              }
+              recoveredMsgFromEnvelope = lcRetryRecoveredMsgFromEnvelope
+              if ((isUnDef(lcRetryMsg) || !(isMap(lcRetryMsg) || isArray(lcRetryMsg))) && (isMap(lcRetryRecoveredMsgFromEnvelope) || isArray(lcRetryRecoveredMsgFromEnvelope))) {
+                lcRetryMsg = lcRetryRecoveredMsgFromEnvelope
+                recoveredFromEnvelopeApplied = true
+              }
+              if (isMap(lcRetryMsg) || isArray(lcRetryMsg)) {
+                msg = lcRetryMsg
+                this.fnI("output", `Low-cost model responded on retry ${lcJsonRetryAttempt}/${lcJsonRetries}. ${this._formatTokenStats(lcRetryStats)}`)
+              } else {
+                global.__mini_a_metrics.json_parse_failures.inc()
+                var lcRetryResponseSample = lcRetryRmsg.length > 200 ? lcRetryRmsg.substring(0, 200) + "..." : lcRetryRmsg
+                this.fnI("warn", `Low-cost model retry ${lcJsonRetryAttempt}/${lcJsonRetries} still produced invalid JSON. Response started with: ${lcRetryResponseSample}.`)
+              }
+            }
+          }
+
+          if (lcRetryStopRequested || this.state == "stop") break
+        }
+
+        // If low-cost LLM still produced invalid JSON after retries, fall back to main LLM
+        if ((isUnDef(msg) || !(isMap(msg) || isArray(msg))) && useLowCost) {
+          var responseSample = isString(rmsg) && rmsg.length > 200 ? rmsg.substring(0, 200) + "..." : rmsg
+          this.fnI("warn", `Low-cost model still produced invalid JSON after ${lcJsonRetries} retry attempt(s). Response started with: ${responseSample}. Retrying with main model...`)
+          global.__mini_a_metrics.fallback_to_main_llm.inc()
           global.__mini_a_metrics.retries.inc()
           this._syncConversationForModelSwitch("main")
             // Add explicit retry context about JSON formatting

@@ -796,6 +796,10 @@ help:
     desc     : Maximum total LC token usage before permanently switching to the main model for the session (0 = unlimited)
     example  : "50000"
     mandatory: false
+  - name     : lcjsonretries
+    desc     : Extra same-step low-cost model retries on invalid JSON before falling back to the main model (0 disables)
+    example  : "1"
+    mandatory: false
   - name     : llmcomplexity
     desc     : When true, fire a quick LC model call to validate "medium" complexity heuristic results
     example  : "false"
@@ -1247,6 +1251,7 @@ jobs:
         evidencegatestrictness: evidencegatestrictness
         lcescalatedefer: lcescalatedefer
         lcbudget       : lcbudget
+        lcjsonretries  : lcjsonretries
         llmcomplexity  : llmcomplexity
         autodelegation : autodelegation
         autodelegationthreshold: autodelegationthreshold
@@ -1487,6 +1492,7 @@ jobs:
       evidencegatestrictness: isString.default("medium")
       lcescalatedefer: toBoolean.isBoolean.default(true)
       lcbudget       : toNumber.isNumber.default(0)
+      lcjsonretries  : toNumber.isNumber.default(1)
       llmcomplexity  : toBoolean.isBoolean.default(false)
       autodelegation : toBoolean.isBoolean.default(false)
       autodelegationthreshold: toNumber.isNumber.default(__)

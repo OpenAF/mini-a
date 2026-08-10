@@ -677,6 +677,7 @@ try {
     evidencegatestrictness: { type: "string", default: "medium", description: "Evidence gate strictness: low, medium, or high." },
     lcescalatedefer: { type: "boolean", default: true, description: "Defer low-cost escalation decisions when the LC tier is near a handoff." },
     lcbudget       : { type: "number", default: 0, description: "Maximum total low-cost model tokens for the session (0 disables)." },
+    lcjsonretries  : { type: "number", default: 1, description: "Extra same-step low-cost model retries on invalid JSON before falling back to main model (0 disables)." },
     llmcomplexity  : { type: "boolean", default: false, description: "Use an extra low-cost complexity check for medium-complexity goals." },
     mcplazy        : { type: "boolean", default: false, description: "Defer MCP connection initialization" },
     mcpdynamic     : { type: "boolean", default: false, description: "Select MCP tools dynamically per goal" },
@@ -6942,6 +6943,7 @@ try {
 
   finalizeSession("exit")
   if (isDef(ow.oJob)) ow.oJob.stop()
+  exit(0, true)
 } catch(_ge) {
   $err(_ge)
 }

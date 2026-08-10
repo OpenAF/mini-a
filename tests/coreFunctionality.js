@@ -3568,4 +3568,28 @@
     ow.test.assert(agent._isInitialized, false, "agent should not be marked initialized after a failed init")
     ow.test.assert(isDef(agent._initError), true, "agent should record the init error for diagnostics")
   }
+
+  exports.testResolveLcJsonRetriesDefaultsToOne = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._resolveLcJsonRetries({}), 1, "lcjsonretries should default to 1 when not provided")
+  }
+
+  exports.testResolveLcJsonRetriesAcceptsExplicitValue = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._resolveLcJsonRetries({ lcjsonretries: 3 }), 3, "lcjsonretries should accept an explicit value")
+  }
+
+  exports.testResolveLcJsonRetriesClampsNegativeToZero = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._resolveLcJsonRetries({ lcjsonretries: -5 }), 0, "lcjsonretries should clamp negative values to 0")
+  }
+
+  exports.testResolveLcJsonRetriesFallsBackOnNonNumeric = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._resolveLcJsonRetries({ lcjsonretries: "abc" }), 1, "lcjsonretries should fall back to the default of 1 on a non-numeric value instead of NaN")
+  }
+
+  exports.testKnownArgumentNamesIncludesLcJsonRetries = function() {
+    ow.test.assert(MiniA._KNOWN_ARGUMENT_NAMES.lcjsonretries, true, "lcjsonretries should be registered in the known-args whitelist")
+  }
 })()
