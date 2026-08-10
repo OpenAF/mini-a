@@ -872,10 +872,10 @@ help:
     mandatory: false
     options  : ["ro", "rw"]
   - name     : wikibackend
-    desc     : Wiki backend (fs, s3, s3fs or es)
+    desc     : Wiki backend (fs, s3, s3fs, es or read-only http)
     example  : "fs"
     mandatory: false
-    options  : ["fs", "s3", "s3fs", "es"]
+    options  : ["fs", "s3", "s3fs", "es", "http", "https"]
   - name     : wikiroot
     desc     : Root directory or local .zip/.okt archive for the filesystem wiki backend (archives are read-only)
     example  : "/shared/wiki"
@@ -889,7 +889,7 @@ help:
     example  : "wiki/"
     mandatory: false
   - name     : wikiurl
-    desc     : S3 endpoint URL for s3/s3fs, or Elasticsearch/OpenSearch base URL for es (internal esurl)
+    desc     : S3 endpoint URL, Elasticsearch/OpenSearch base URL, or static page-server base URL for http
     example  : "https://s3.amazonaws.com"
     mandatory: false
   - name     : wikiaccesskey
@@ -914,6 +914,31 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : wikiindexdir
+    desc     : Local cache directory for remote wiki search and graph artifacts
+    example  : "/var/cache/mini-a/wiki"
+    mandatory: false
+  - name     : wikis3artifactprefix
+    desc     : S3 prefix containing published wiki search and graph artifacts
+    example  : "wiki-artifacts/"
+    mandatory: false
+  - name     : s3artifactbundle
+    desc     : Use one mini-a-wiki-index.zip artifact bundle for S3
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : wikihttpindexurl
+    desc     : HTTP artifact-bundle URL (defaults to <wikiurl>/mini-a-wiki-index.zip)
+    example  : "https://docs.example/wiki/mini-a-wiki-index.zip"
+    mandatory: false
+  - name     : wikihttptimeout
+    desc     : HTTP wiki page and artifact-bundle timeout in milliseconds
+    example  : "30000"
+    mandatory: false
+  - name     : wikiartifactrefreshsecs
+    desc     : Seconds between HTTP/S3 artifact-bundle metadata refresh checks (0 disables refresh)
+    example  : "300"
+    mandatory: false
   - name     : wikilexical
     desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
@@ -1253,6 +1278,12 @@ jobs:
         wikiregion     : wikiregion
         wikiuseversion1: wikiuseversion1
         wikiignorecertcheck: wikiignorecertcheck
+        wikiindexdir   : wikiindexdir
+        wikis3artifactprefix: wikis3artifactprefix
+        s3artifactbundle: s3artifactbundle
+        wikihttpindexurl: wikihttpindexurl
+        wikihttptimeout: wikihttptimeout
+        wikiartifactrefreshsecs: wikiartifactrefreshsecs
         wikilexical    : wikilexical
         wikilintstaleddays: wikilintstaleddays
         wikimounts     : wikimounts
@@ -1487,6 +1518,12 @@ jobs:
       wikiregion     : isString.default(__)
       wikiuseversion1: toBoolean.isBoolean.default(false)
       wikiignorecertcheck: toBoolean.isBoolean.default(false)
+      wikiindexdir   : isString.default(__)
+      wikis3artifactprefix: isString.default(__)
+      s3artifactbundle: toBoolean.isBoolean.default(false)
+      wikihttpindexurl: isString.default(__)
+      wikihttptimeout: toNumber.isNumber.default(__)
+      wikiartifactrefreshsecs: toNumber.isNumber.default(__)
       wikilexical    : isString.default(__)
       wikilintstaleddays: toNumber.isNumber.default(__)
       wikimounts     : isString.default(__)

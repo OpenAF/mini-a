@@ -2140,11 +2140,11 @@ MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
   }
   return this._hydrateArtifactBundle(function() {
     var conn = connect("HEAD"), code = Number(conn.getResponseCode())
-    if (code < 200 || code >= 300) throw "HTTP bundle metadata returned " + code
+    if (code < 200 || code >= 300) throw "HTTP HEAD " + bundleUrl + " for bundle metadata returned " + code
     return { etag: String(conn.getHeaderField("ETag") || ""), lastModified: String(conn.getHeaderField("Last-Modified") || "") }
   }, function() {
     var conn = connect("GET"), code = Number(conn.getResponseCode())
-    if (code < 200 || code >= 300) throw "HTTP bundle download returned " + code
+    if (code < 200 || code >= 300) throw "HTTP GET " + bundleUrl + " for bundle download returned " + code
     return conn.getInputStream()
   }, "http", bundleUrl)
 }

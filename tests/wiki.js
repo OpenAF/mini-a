@@ -298,6 +298,14 @@
     ow.test.assert(__miniAWikiBasicAuth("user", "pass"), "Basic dXNlcjpwYXNz", "HTTP basic auth should be correctly encoded")
   }
 
+  exports.testCliForwardsHttpBundleOptions = function() {
+    var job = io.readFileString("mini-a.yaml")
+    ;["wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs"].forEach(function(option) {
+      ow.test.assert((new RegExp("\\b" + option + "\\s*:\\s*" + option + "\\b")).test(job), true, "CLI job should forward " + option + " to Mini-A")
+    })
+    ow.test.assert(job.indexOf('options  : ["fs", "s3", "s3fs", "es", "http", "https"]') >= 0, true, "CLI job should accept HTTP wiki backends")
+  }
+
   exports.testPeriodicArtifactBundleRefreshReopensCachedRuntime = function() {
     var searchesClosed = 0, graphsClosed = 0, graphsOpened = 0, hydrations = 0
     var fake = {
