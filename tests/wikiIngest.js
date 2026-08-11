@@ -88,6 +88,15 @@
     } finally { cleanup(src, wiki) }
   }
 
+  exports.testIngestDiscoversHtmlSources = function() {
+    var src = makeSourceDir(), wiki = String(io.createTempDir("miniingest_wiki_"))
+    try {
+      io.writeFileString(src + "/docs/guide.html", "<html><body><h1>Guide</h1><p>Widgets in the browser.</p></body></html>")
+      var res = makeIngest(src, wiki, { ingestdryrun: "true" }).run()
+      ow.test.assert(res.discovered, 4, "should discover README + 2 docs + the html guide")
+    } finally { cleanup(src, wiki) }
+  }
+
   exports.testIngestSkipsOversizedSources = function() {
     var src = makeSourceDir(), wiki = String(io.createTempDir("miniingest_wiki_"))
     try {
@@ -204,6 +213,33 @@
     var chunks = ing._chunk(paras.join("\n\n"), 3000)
     ow.test.assert(chunks.length > 1, true, "headingless prose should still split on paragraphs")
     ow.test.assert(chunks.every(function(c) { return c.length <= 3000 }), true, "no chunk may exceed the limit")
+  }
+
+  // ─── html conversion ────────────────────────────────────────
+
+  exports.testReadSourceConvertsLocalHtmlToText = function() {
+    var dir = String(io.createTempDir("miniingest_html_"))
+    try {
+      var htmlPath = dir + "/page.html"
+      io.writeFileString(htmlPath, "<html><body><h1>Widget Toolkit</h1><p>Install with <code>npm i widgets</code>.</p></body></html>")
+      var ing = new MiniAIngest({}, function() {})
+      var content = ing._readSource({ path: htmlPath, rel: "page.html" })
+      ow.test.assert(isString(content), true, "html source should be readable")
+      ow.test.assert(content.indexOf("<h1>") < 0 && content.indexOf("<p>") < 0 && content.indexOf("<body>") < 0, true, "html tags should not leak into the distilled content")
+      ow.test.assert(content.indexOf("Widget Toolkit") >= 0, true, "text content should be preserved")
+      ow.test.assert(content.indexOf("npm i widgets") >= 0, true, "inline text should be preserved")
+    } finally { cleanup(dir) }
+  }
+
+  exports.testReadSourceLeavesMarkdownUnconverted = function() {
+    var dir = String(io.createTempDir("miniingest_md_"))
+    try {
+      var mdPath = dir + "/page.md"
+      io.writeFileString(mdPath, "# Widget Toolkit\n\nInstall with `npm i widgets`.")
+      var ing = new MiniAIngest({}, function() {})
+      var content = ing._readSource({ path: mdPath, rel: "page.md" })
+      ow.test.assert(content, "# Widget Toolkit\n\nInstall with `npm i widgets`.", "markdown sources must pass through unchanged")
+    } finally { cleanup(dir) }
   }
 
   // ─── resolve ────────────────────────────────────────────────

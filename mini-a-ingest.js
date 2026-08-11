@@ -154,7 +154,7 @@ MiniAIngest.prototype._discover = function(resolved) {
       if (rel.length === 0) return
       if (self._shouldSkipPath(rel)) return
       if (f.isDirectory) { walk(full); return }
-      if (!/\.(md|markdown|mdx|txt|rst|adoc)$/i.test(rel)) return
+      if (!/\.(md|markdown|mdx|txt|rst|adoc|html?)$/i.test(rel)) return
       var kb = Number(f.size || 0) / 1024
       if (kb > maxKb) {
         // skip rather than silently truncate: a half-read document distills into a lie
@@ -566,7 +566,18 @@ MiniAIngest.prototype._readSource = function(src) {
       return __
     }
   }
-  try { return io.readFileString(src.path) } catch(e) { return __ }
+  var raw
+  try { raw = io.readFileString(src.path) } catch(e) { return __ }
+  if (/\.html?$/i.test(String(src.rel || src.path))) {
+    try {
+      loadLib("mini-a-utils.js")
+      var tool = new MiniUtilsTool({ readwrite: false })
+      return tool._renderWebfetchBody(raw, "markdown")
+    } catch(eh) {
+      return raw
+    }
+  }
+  return raw
 }
 
 // _finalize: reuse the dream finalize pass so an ingested wiki is left indexed and linked.

@@ -15,6 +15,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testIngestRespectsIncludeAndExclude
 
+- name: MiniA Wiki Ingest Tests::IngestDiscoversHtmlSources
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testIngestDiscoversHtmlSources
+
 - name: MiniA Wiki Ingest Tests::IngestSkipsOversizedSources
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testIngestSkipsOversizedSources
@@ -55,6 +59,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testChunkerHandlesHeadinglessProse
 
+- name: MiniA Wiki Ingest Tests::ReadSourceConvertsLocalHtmlToText
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testReadSourceConvertsLocalHtmlToText
+
+- name: MiniA Wiki Ingest Tests::ReadSourceLeavesMarkdownUnconverted
+  to  : oJob Test
+  exec: args.func = require("tests/wikiIngest.js").testReadSourceLeavesMarkdownUnconverted
+
 - name: MiniA Wiki Ingest Tests::SourceTypeDetection
   to  : oJob Test
   exec: args.func = require("tests/wikiIngest.js").testSourceTypeDetection
@@ -71,6 +83,7 @@ todo:
 - MiniA Wiki Ingest Tests::IngestDiscoversMarkdownAndSkipsVendorDirs
 - MiniA Wiki Ingest Tests::IngestDryRunWritesNoPages
 - MiniA Wiki Ingest Tests::IngestRespectsIncludeAndExclude
+- MiniA Wiki Ingest Tests::IngestDiscoversHtmlSources
 - MiniA Wiki Ingest Tests::IngestSkipsOversizedSources
 - MiniA Wiki Ingest Tests::IngestWritesOnePagePerSourceWithProvenance
 - MiniA Wiki Ingest Tests::IngestFinalizesIndexesAndSearchIndex
@@ -81,6 +94,8 @@ todo:
 - MiniA Wiki Ingest Tests::IngestReportsDistillationFailuresAsBatchesComplete
 - MiniA Wiki Ingest Tests::ChunkerSplitsOnHeadingsWithinLimit
 - MiniA Wiki Ingest Tests::ChunkerHandlesHeadinglessProse
+- MiniA Wiki Ingest Tests::ReadSourceConvertsLocalHtmlToText
+- MiniA Wiki Ingest Tests::ReadSourceLeavesMarkdownUnconverted
 - MiniA Wiki Ingest Tests::SourceTypeDetection
 - MiniA Wiki Ingest Tests::IngestRefusesReadOnlyWiki
 - MiniA Wiki Ingest Tests::IngestRequiresASource
