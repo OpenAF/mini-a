@@ -506,7 +506,11 @@ function __miniAMcpWikiBuildAuditFn(auditEnabled, logPrefix) {
 function __miniAMcpWikiBuildLoggerFn(auditEnabled, logPrefix) {
   if (!auditEnabled) return function() {}
   return function(level, msg) {
-    try { log("[" + logPrefix + "] " + level + ": " + msg) } catch(e) {}
+    if (level == "warn") {
+      try { logWarn("[" + logPrefix + "] " + level + ": " + msg) } catch(e) {}
+    } else {
+      try { log("[" + logPrefix + "] " + level + ": " + msg) } catch(e) {}
+    }
   }
 }
 

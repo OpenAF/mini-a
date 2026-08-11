@@ -1429,7 +1429,8 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
       extra = "  "
     }
 
-    log("[" + this._id + "] " + extra + _e + " " + _m)
+    if (e === "warn") logWarn("[" + this._id + "] " + extra + _e + " " + _m)
+    else log("[" + this._id + "] " + extra + _e + " " + _m)
   })
 
   // Handle streaming output directly without formatting
