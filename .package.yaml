@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260810'
+version: '20260811'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -235,7 +235,7 @@ filesHash:
   mini-a-graph.js: 6c5df4335cf2e0b365816280a42b8b98e36432cd
   mini-a-ingest.js: 99c09bf253e4004991604afe07707697c56d0e8a
   mini-a-ingest.yaml: cf5a318d4a4bba6ff548d5400cf741d577c011e8
-  mini-a-mcp-wiki.js: 90660c83a4d5801976d181324f5b4f9aead7368d
+  mini-a-mcp-wiki.js: ecad9064d95e7c805b18a979297645b530f3b2bf
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 01bc74a06b685b1507d2ecd690e73bf8f3fe474c
   mini-a-memoryman.js: dfdb7aaa16d0bed845da27d19d825b7965590046
@@ -253,7 +253,7 @@ filesHash:
   mini-a-web.yaml: bb278692f8533b41053ebc3dc2d70f5c0c20d731
   mini-a-wiki.js: 7921e9bb212d45d34b7e9ff5e5e8933b41f427fe
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: 2a878775b882b34486c1d2d282d2a65d1eef6d04
+  mini-a.js: 508802398cdf6bd99bb6bbc36bb090f1142103e9
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
   mini-a.yaml: ca4f11a1e29932cb40430c0e8073e1e744edceee
   public/index.md: ff492f66c8bfafb8534ba74f95c76c1c0401c46f
