@@ -6292,6 +6292,11 @@ try {
 
     var dreamArgs = merge({}, dreamSessionOptions)
     dreamArgs.dryrun = dryrun ? "true" : "false"
+    // sessionOptions always carries wikigraphsemantic (schema default: false) whether or not the
+    // user ever set it, which would defeat MiniADreams' own apply/plan default (usewikigraph=true
+    // implies wikigraphsemantic=true unless explicitly overridden) by making "unset" indistinguishable
+    // from "explicitly false". Only forward it here when the user actually set it.
+    if (sessionExplicitOptions.wikigraphsemantic !== true) delete dreamArgs.wikigraphsemantic
 
     try {
       if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0 ||

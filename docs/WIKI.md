@@ -29,21 +29,21 @@ Beyond interactive `/wiki` commands, maintenance work can also run unattended vi
 entry point for wiki maintenance. Built-in console commands like `/wiki reindex` are interactive-only:
 `exec="/wiki reindex"` is rejected (`exec=` only supports custom commands/skills, not built-ins).
 
-| Operation | Console command | Agent tool op | Batch (`dream=true`) |
-| --- | --- | --- | --- |
-| Rebuild search index | `/wiki reindex` | `reindex` | `dreamwikimode=reindex` |
-| Rebuild knowledge graph | `/graph build` (if `usewikigraph`) | `graph` op `build` | `dreamwikimode=graph` |
-| Regenerate index.md pages | — | — | `dreamwikimode=indexes` |
-| Fix lint issues (links, indexes, headings) | `/wiki lint` (report only) | `lint` | `dreamwikimode=repair` |
-| Full deterministic pass | — | — | `dreamwikimode=apply` (default) |
-| Structural reorg (LLM agent) | — | — | `dreamwikimode=reorg` (requires `dreamwikireorg=true`) |
-| Dry-run proposal | — | — | `dreamwikimode=plan` |
+| Operation | Console command | Agent tool op | Batch (`dream=true`) | Uses LLM? |
+| --- | --- | --- | --- | --- |
+| Rebuild search index | `/wiki reindex` | `reindex` | `dreamwikimode=reindex` | No |
+| Rebuild knowledge graph | `/graph build` (if `usewikigraph`) | `graph` op `build` | `dreamwikimode=graph` | No (Yes if `wikigraphsemantic=true`) |
+| Regenerate index.md pages | — | — | `dreamwikimode=indexes` | No |
+| Fix lint issues (links, indexes, headings) | `/wiki lint` (report only) | `lint` | `dreamwikimode=repair` | No |
+| Full deterministic pass | — | — | `dreamwikimode=apply` (default) | Yes if `usewikigraph=true` (defaults `wikigraphsemantic=true`; pass `wikigraphsemantic=false` to opt out) — otherwise No |
+| Structural reorg (LLM agent) | — | — | `dreamwikimode=reorg` (requires `dreamwikireorg=true`) | Yes |
+| Dry-run proposal | — | — | `dreamwikimode=plan` | Preview only if `usewikigraph=true` — computes (but never persists) the same semantic stats `apply` would write; otherwise No |
 
 `repair`, `reindex`, `graph`, and `indexes` are the isolated building blocks that `apply` composes: `repair`
 fixes lint-flagged issues only; `reindex` rebuilds only the Lucene search index; `graph` rebuilds only the
 `usewikigraph` knowledge graph; `indexes` unconditionally regenerates every section/root `index.md` from
 current structure. Run them individually — e.g. a cheap nightly `reindex`, a separate weekly `graph` pass —
-or let `apply` run all of them together. None of these four modes call an LLM. `reindex`/`graph`/`indexes`
+or let `apply` run all of them together. None of these four modes call an LLM by default. `reindex`/`graph`/`indexes`
 all require a `wikiaccess=rw`-capable backend (archive/http roots stay read-only regardless).
 
 ```sh
@@ -56,6 +56,33 @@ mini-a dream=true usewiki=true usewikigraph=true wikiroot=/shared/wiki dreamwiki
 
 See [`USAGE.md`](../USAGE.md#dreams-sleep-pass) for the full dream-mode reference (gating rules, all
 `dreamwikimode` values, the `/dream` console table, and complete standalone examples).
+
+### What each operation affects
+
+| Operation | Reads | Writes / rebuilds | Leaves untouched |
+| --- | --- | --- | --- |
+| `reindex` | Every page's raw content | `.mini-a-wiki-lucene/` search index; also refreshes `MiniAWikiManager`'s lightweight internal graph-hint index used for related-page search hints | Page content, `index.md` files, lint issues, `.mini-a-wiki-graph/graph.json` |
+| `graph` | Every page's raw content, plus the existing `.mini-a-wiki-graph/graph.json` (to preserve prior LLM-derived edges across structural rebuilds) | `.mini-a-wiki-graph/graph.json` — document/concept nodes, structural edges, communities; also adds/refreshes LLM-derived semantic edges when `wikigraphsemantic=true` | Lucene search index, page content, `index.md` files |
+| `indexes` | Current page tree | Every section/root `index.md` — content is regenerated from live directory structure, independent of what lint flags | Lucene search index, `.mini-a-wiki-graph/graph.json`, non-index page content |
+| `repair` | `lint()` findings | Only the pages lint flagged: broken-link targets get corrected, missing/stale index links get added, heading-hierarchy violations get fixed | Lucene search index, `.mini-a-wiki-graph/graph.json`, pages lint didn't flag |
+| `apply` (default) | Everything above | `repair`'s page-level fixes, then the deterministic finalize pass: full `index.md` regeneration, `reindex()`, and — when `usewikigraph=true` — a `graph build` that now defaults `wikigraphsemantic=true` (an explicit `wikigraphsemantic=false` still opts back out) | Nothing structural — `apply` never moves, merges, or deletes pages |
+| `reorg` | A full read/write agent loop over the whole wiki (hierarchy, backlinks, lint, near-duplicates) | Any page it moves, merges, deletes, or corrects, then the same finalize pass as `apply` — but `wikigraphsemantic` stays opt-in here (defaulting the finalize pass's semantic edges is only done for `apply`/`plan`, not the already-LLM-driven `reorg`) | Nothing — this is the only mode that performs structural moves/merges/deletes |
+| `plan` | Same reads as `repair` plus a graph preview when `usewikigraph=true` | Nothing on disk — dry-run only. The returned proposal now includes a graph preview (structural stats, and semantic stats when `wikigraphsemantic` would default/resolve to `true`) computed in memory and discarded; `graph.json` is never written | All wiki state, including `graph.json` and the Lucene index |
+
+`wikigraphsemantic` (default `false`) gates the one LLM-touching part of graph rebuilds — extracting cross-page
+concept relationships via an LLM call per changed page. It stays strictly opt-in for `graph` and `reorg`. For
+`apply` and `plan`, it now defaults to `true` whenever `usewikigraph=true` (pass `wikigraphsemantic=false`
+explicitly to keep those two modes structural-only). This applies uniformly whether you invoke `apply`/`plan`
+from the CLI (`mini-a dream=true ...`) or from an interactive console's `/dream apply`/`/dream plan`. Note that
+`plan`'s preview still makes the real LLM calls to compute what it would extract — only the write to
+`graph.json` is skipped — so a `usewikigraph=true` plan run costs the same LLM calls as the `apply` run it's
+previewing.
+
+The dream pass resolves its own LLM the same way `model=`/`OAF_MODEL` works for memory dreams (see
+[Parameters](../USAGE.md#dreams-sleep-pass)). If neither is set when a semantic pass runs, extraction silently
+falls back to a deterministic regex/heuristic extractor (headings, `[[links]]`, markdown links, capitalized
+phrases) instead of erroring — the graph still gets semantic-style edges, just not LLM-derived ones. This is
+also what `graph`/`reorg` use if you opt them into `wikigraphsemantic=true` without a model configured.
 
 ## Search and graph state
 

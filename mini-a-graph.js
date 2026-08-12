@@ -457,7 +457,8 @@ MiniAWikiGraph.prototype._persist = function(diff) {
   return syncResult
 }
 
-MiniAWikiGraph.prototype.buildStructural = function(pages) {
+MiniAWikiGraph.prototype.buildStructural = function(pages, opts) {
+  var options = isMap(opts) ? opts : {}
   var list = isArray(pages) ? pages : []
   var oldSemanticEdges = []
   var semanticNodeIds = {}
@@ -492,7 +493,7 @@ MiniAWikiGraph.prototype.buildStructural = function(pages) {
   }
   this._markDerivedDirty()
   this._ensureDerived()
-  this._persist()
+  if (options.preview !== true) this._persist()
   return this.stats()
 }
 
@@ -588,7 +589,7 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
 
   this._markDerivedDirty()
   this._ensureDerived()
-  this._persist()
+  if (options.preview !== true) this._persist()
   return { ok: true, changed: changed, stats: this.stats() }
 }
 

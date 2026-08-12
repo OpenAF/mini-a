@@ -194,6 +194,31 @@ MiniADreams.prototype._buildLlm = function() {
   try { return $llm(modelCfg) } catch(ignoreLlmCreate) { return __ }
 }
 
+// _graphLlmExtract: the llmExtractFn MiniAWikiGraph.buildSemantic() calls per changed page when
+// wikigraphsemantic is on. Mirrors the interactive agent's version (mini-a.js ~7525) but built
+// around MiniADreams' own model/OAF_MODEL resolution (_buildLlm), since a dream pass has no live
+// MiniA agent instance to borrow an LLM from. Same prompt/parse shape as dreamMemory's LLM call.
+MiniADreams.prototype._graphLlmExtract = function(llm, payload) {
+  var prompt = "Extract relationships from a wiki page and return ONLY a valid JSON object — no " +
+    "commentary, no markdown fences — with keys: summary (string), relationships (array of " +
+    "{from,to,type,provenance,confidence}).\nPage:\n" + stringify(payload, __, "  ")
+  try {
+    var resp = isFunction(llm.promptJSONWithStats) ? llm.promptJSONWithStats(prompt)
+             : isFunction(llm.promptWithStats)     ? llm.promptWithStats(prompt)
+             : { response: llm.prompt(prompt) }
+    var raw = isMap(resp) && isDef(resp.response) ? resp.response : resp
+    if (isString(raw)) {
+      var cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim()
+      var parsed = jsonParse(cleaned, __, __, true)
+      return isMap(parsed) ? parsed : { relationships: [] }
+    }
+    return isMap(raw) ? raw : { relationships: [] }
+  } catch(graphLlmErr) {
+    this._log("[dreams:wiki:graph] LLM semantic extraction failed: " + __miniAErrMsg(graphLlmErr))
+    return { relationships: [] }
+  }
+}
+
 // ── schema validation ─────────────────────────────────────────
 
 var _MEMORY_SECTIONS = ["facts", "evidence", "openQuestions", "hypotheses", "decisions", "artifacts", "risks", "summaries"]
@@ -569,6 +594,18 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       defaultResult.repairs = self._repairWikiLint(wmDry, lintBeforeDry, { dryRun: true, minPages: self._args.dreamwikiminpages })
       defaultResult.issues_fixed = defaultResult.repairs.fixed.map(function(issue) { return issue.type + ":" + issue.page })
       proposal.repairs = defaultResult.repairs
+      // Preview-only graph build: same structural (+ semantic, if defaulted/enabled) pass apply
+      // would run, but buildStructural/buildSemantic skip _persist() when preview:true so the
+      // dry-run never touches graph.json.
+      if (self._wikiGraphEnabled()) {
+        try {
+          var wantSemantic = self._effectiveWikiGraphSemantic("plan")
+          proposal.graph_preview = { semantic: wantSemantic, result: wmDry.graph("build", { preview: true, semantic: wantSemantic }) }
+        } catch(graphPreviewErr) {
+          self._log("[dreams:wiki] Graph preview error: " + __miniAErrMsg(graphPreviewErr))
+          proposal.graph_preview = { ok: false, error: __miniAErrMsg(graphPreviewErr) }
+        }
+      }
       defaultResult.proposal = proposal
       wmDry.close()
       self._log("[dreams:wiki] Dry-run complete — proposal generated with " + proposal.indexes_to_create.length + " index creates and " + proposal.indexes_to_update.length + " index updates.")
@@ -626,7 +663,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
 
       // Always finalize, even when the deterministic fixes were skipped: a small wiki
       // still deserves a correct index, a fresh search index and a rebuilt graph.
-      var fin = self._finalizeWiki(wmApply, defaultResult, { appendLog: false })
+      var fin = self._finalizeWiki(wmApply, defaultResult, { appendLog: false, mode: "apply" })
       defaultResult.finalize = fin
 
       var lintAfter = wmApply.lint(lintMemMgr, { staleDays: staleDays })
@@ -706,7 +743,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Starting wiki dream graph pass...")
     try {
       var wmGraph = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:graph] " + msg) })
-      var graphResult = wmGraph.graph("build", { semantic: toBoolean(self._args.wikigraphsemantic) === true })
+      var graphResult = wmGraph.graph("build", { semantic: self._effectiveWikiGraphSemantic("graph") })
       wmGraph.close()
       if (!isMap(graphResult) || graphResult.ok !== true) {
         var graphErr = isMap(graphResult) && isString(graphResult.error) ? graphResult.error : "graph build failed"
@@ -833,7 +870,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
     })
 
-    var reorgFinalize = self._finalizeWiki(wmFinal, defaultResult)
+    var reorgFinalize = self._finalizeWiki(wmFinal, defaultResult, { mode: "reorg" })
     var reorgLint = lintSummary(wmFinal.lint(lintMemMgr, { staleDays: staleDays }))
     wmFinal.close()
 
@@ -1112,7 +1149,7 @@ MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
 
   if (self._wikiGraphEnabled()) {
     try {
-      var gr = wm.graph("build", { semantic: toBoolean(self._args.wikigraphsemantic) === true })
+      var gr = wm.graph("build", { semantic: self._effectiveWikiGraphSemantic(opts.mode) })
       report.graph = isMap(gr) && gr.ok === false ? ("failed: " + gr.error) : "rebuilt"
       if (report.graph === "rebuilt") self._log("[dreams:wiki] Knowledge graph rebuilt.")
     } catch(eG) {
@@ -1139,6 +1176,17 @@ MiniADreams.prototype._wikiGraphEnabled = function() {
          (isString(a.wikigraphfalkorhost) && a.wikigraphfalkorhost.trim().length > 0)
 }
 
+// _effectiveWikiGraphSemantic: wikigraphsemantic is opt-in everywhere except for the
+// deterministic apply/plan passes, where it defaults to true once usewikigraph is on
+// (an explicit wikigraphsemantic=false still overrides). apply/plan already spend the I/O
+// to walk every page for structural graph work, so folding in the LLM-driven semantic pass
+// there is cheap incremental value; reorg/graph stay opt-in since they're already
+// LLM-driven (reorg) or meant as a cheap structural-only rebuild (graph).
+MiniADreams.prototype._effectiveWikiGraphSemantic = function(mode) {
+  if (isDef(this._args.wikigraphsemantic)) return toBoolean(this._args.wikigraphsemantic) === true
+  return (mode === "apply" || mode === "plan") && this._wikiGraphEnabled()
+}
+
 // _argStr: string args may arrive as java.lang.String (e.g. from getCanonicalPath()), for
 // which isString() is false. Coercing here stops wikiroot from silently defaulting to "."
 // and dreaming the current working directory.
@@ -1159,6 +1207,16 @@ MiniADreams.prototype._buildWikiConfig = function() {
   // The user-facing arg is usewikigraph (usegraph is the wiki-manager config key).
   if (this._wikiGraphEnabled()) {
     cfg.usegraph = true
+    // Wire a real LLM extractor when a model is configured (model= or OAF_MODEL), so
+    // wikigraphsemantic=true does genuine LLM-based relationship extraction here too, not just
+    // in an interactive agent session. Left unset (MiniAWikiGraph's own deterministic
+    // heuristic fallback applies) when no model is available — semantic build then still runs,
+    // just without an LLM, same as before this was wired up.
+    var graphLlm = this._buildLlm()
+    if (isObject(graphLlm)) {
+      var self = this
+      cfg.llmExtractFn = function(payload) { return self._graphLlmExtract(graphLlm, payload) }
+    }
     if (isString(a.wikigraphcommunity)) cfg.wikigraphcommunity = a.wikigraphcommunity
     if (isString(a.wikigraphautosave))  cfg.wikigraphautosave  = a.wikigraphautosave
     if (isString(a.wikigraphfalkorhost) && a.wikigraphfalkorhost.trim().length > 0) {

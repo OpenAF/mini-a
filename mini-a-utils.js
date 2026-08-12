@@ -2506,93 +2506,100 @@ MiniUtilsTool.prototype.textUtilities = function(params) {
       var encoding = params.encoding || "utf-8"
 
       var connection = new java.net.URL(String(url)).openConnection()
-      if (timeout > 0) {
-        connection.setConnectTimeout(timeout)
-        connection.setReadTimeout(timeout)
-      }
-
-      if (connection instanceof java.net.HttpURLConnection) {
-        connection.setInstanceFollowRedirects(true)
-        connection.setRequestMethod(method)
-      }
-
-      if (isMap(params.headers)) {
-        Object.keys(params.headers).forEach(function(key) {
-          connection.setRequestProperty(String(key), String(params.headers[key]))
-        })
-      }
-
-      if (isDef(params.body)) {
-        connection.setDoOutput(true)
-        var out = connection.getOutputStream()
-        out.write(af.fromString2Bytes(String(params.body)))
-        out.close()
-      }
-
-      var status = null
-      var statusText = null
-      if (connection instanceof java.net.HttpURLConnection) {
-        status = Number(connection.getResponseCode())
-        statusText = String(connection.getResponseMessage())
-      }
-
       var stream = null
-      if (connection instanceof java.net.HttpURLConnection && status !== null && status >= 400) {
-        stream = connection.getErrorStream()
-      } else {
-        stream = connection.getInputStream()
-      }
-      if (isUnDef(stream)) return "[ERROR] Unable to read response stream"
-
-      var buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
-      var output = new java.io.ByteArrayOutputStream()
-      var total = 0
-      var truncated = false
-
-      while (true) {
-        var read = stream.read(buffer)
-        if (read === -1) break
-        if (maxBytes > 0 && total + read > maxBytes) {
-          var remaining = maxBytes - total
-          if (remaining > 0) {
-            output.write(buffer, 0, remaining)
-            total += remaining
-          }
-          truncated = true
-          break
-        }
-        output.write(buffer, 0, read)
-        total += read
-      }
-      stream.close()
-
-      var resultBytes = output.toByteArray()
-      var body = String(new java.lang.String(resultBytes, encoding))
-      var headers = {}
       try {
-        var headerFields = connection.getHeaderFields()
-        if (isDef(headerFields)) {
-          var iterator = headerFields.entrySet().iterator()
-          while (iterator.hasNext()) {
-            var entry = iterator.next()
-            var key = entry.getKey()
-            if (isUnDef(key)) continue
-            headers[String(key)] = String(entry.getValue())
+        if (timeout > 0) {
+          connection.setConnectTimeout(timeout)
+          connection.setReadTimeout(timeout)
+        }
+
+        if (connection instanceof java.net.HttpURLConnection) {
+          connection.setInstanceFollowRedirects(true)
+          connection.setRequestMethod(method)
+        }
+
+        if (isMap(params.headers)) {
+          Object.keys(params.headers).forEach(function(key) {
+            connection.setRequestProperty(String(key), String(params.headers[key]))
+          })
+        }
+
+        if (isDef(params.body)) {
+          connection.setDoOutput(true)
+          var out = connection.getOutputStream()
+          try {
+            out.write(af.fromString2Bytes(String(params.body)))
+          } finally {
+            try { out.close() } catch(ignoreOutClose) {}
           }
         }
-      } catch (e) {
-      }
 
-      var outputFormat = isString(params.format) ? params.format : "html"
-      return {
-        url: String(url),
-        status: status,
-        statusText: statusText,
-        headers: headers,
-        bytes: total,
-        truncated: truncated,
-        format: outputFormat,
-        body: this._renderWebfetchBody(body, outputFormat)
+        var status = null
+        var statusText = null
+        if (connection instanceof java.net.HttpURLConnection) {
+          status = Number(connection.getResponseCode())
+          statusText = String(connection.getResponseMessage())
+        }
+
+        if (connection instanceof java.net.HttpURLConnection && status !== null && status >= 400) {
+          stream = connection.getErrorStream()
+        } else {
+          stream = connection.getInputStream()
+        }
+        if (isUnDef(stream)) return "[ERROR] Unable to read response stream"
+
+        var buffer = java.lang.reflect.Array.newInstance(java.lang.Byte.TYPE, 8192)
+        var output = new java.io.ByteArrayOutputStream()
+        var total = 0
+        var truncated = false
+
+        while (true) {
+          var read = stream.read(buffer)
+          if (read === -1) break
+          if (maxBytes > 0 && total + read > maxBytes) {
+            var remaining = maxBytes - total
+            if (remaining > 0) {
+              output.write(buffer, 0, remaining)
+              total += remaining
+            }
+            truncated = true
+            break
+          }
+          output.write(buffer, 0, read)
+          total += read
+        }
+
+        var resultBytes = output.toByteArray()
+        var body = String(new java.lang.String(resultBytes, encoding))
+        var headers = {}
+        try {
+          var headerFields = connection.getHeaderFields()
+          if (isDef(headerFields)) {
+            var iterator = headerFields.entrySet().iterator()
+            while (iterator.hasNext()) {
+              var entry = iterator.next()
+              var key = entry.getKey()
+              if (isUnDef(key)) continue
+              headers[String(key)] = String(entry.getValue())
+            }
+          }
+        } catch (e) {
+        }
+
+        var outputFormat = isString(params.format) ? params.format : "html"
+        return {
+          url: String(url),
+          status: status,
+          statusText: statusText,
+          headers: headers,
+          bytes: total,
+          truncated: truncated,
+          format: outputFormat,
+          body: this._renderWebfetchBody(body, outputFormat)
+        }
+      } finally {
+        try { if (isDef(stream) && stream != null) stream.close() } catch(ignoreStreamClose) {}
+        try { if (connection instanceof java.net.HttpURLConnection) connection.disconnect() } catch(ignoreDisconnect) {}
       }
 
     } else if (op === "diff") {

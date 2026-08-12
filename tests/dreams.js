@@ -677,6 +677,53 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  var _stubGraphExtractResponse = function() {
+    return { summary: "stub summary", relationships: [
+      { from: "Alpha", to: "Beta", type: "RELATES_TO", provenance: "INFERRED", confidence: 0.8 }
+    ] }
+  }
+
+  exports.testDreamWikiApplyDefaultsSemanticWhenGraphEnabled = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply", usewikigraph: "true" }, function() {})
+      runner._setLlm(makeStubLlm(_stubGraphExtractResponse()))
+      var res = runner.dreamWiki()
+      ow.test.assert(res.ok, true, "apply should still succeed with the semantic default on")
+      var graph = io.readFileJSON(dir + "/.mini-a-wiki-graph/graph.json")
+      var conceptNodes = Object.keys(graph.nodes).filter(function(id) { return graph.nodes[id].type === "concept" })
+      ow.test.assert(conceptNodes.length > 0, true, "usewikigraph=true should default wikigraphsemantic=true for apply, adding LLM-derived concept nodes")
+      var inferredEdge = graph.edges.filter(function(e) { return e.provenance === "INFERRED" })
+      ow.test.assert(inferredEdge.length > 0, true, "the injected stub LLM (not the built-in heuristic) should have produced the semantic edge")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiApplyWikigraphsemanticFalseOptsOut = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply", usewikigraph: "true", wikigraphsemantic: "false" }, function() {})
+      runner._setLlm(makeStubLlm(_stubGraphExtractResponse()))
+      var res = runner.dreamWiki()
+      ow.test.assert(res.ok, true, "apply should succeed with semantic explicitly disabled")
+      var graph = io.readFileJSON(dir + "/.mini-a-wiki-graph/graph.json")
+      var conceptNodes = Object.keys(graph.nodes).filter(function(id) { return graph.nodes[id].type === "concept" })
+      ow.test.assert(conceptNodes.length, 0, "an explicit wikigraphsemantic=false should override the apply default")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiPlanPreviewsGraphWithoutPersisting = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var runner = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "plan", usewikigraph: "true" }, function() {})
+      runner._setLlm(makeStubLlm(_stubGraphExtractResponse()))
+      var res = runner.dreamWiki()
+      ow.test.assert(res.mode, "plan", "mode should be plan")
+      ow.test.assert(isMap(res.proposal.graph_preview), true, "plan should include a graph preview when usewikigraph is enabled")
+      ow.test.assert(res.proposal.graph_preview.semantic, true, "the preview should resolve the same apply/plan semantic default")
+      ow.test.assert(io.fileExists(dir + "/.mini-a-wiki-graph/graph.json"), false, "plan must never persist graph.json")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testDreamWikiIndexesModeRegeneratesAllIndexes = function() {
     var dir = seedWiki(makeWikiDir())
     try {

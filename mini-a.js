@@ -2488,6 +2488,15 @@ MiniA.prototype._startWorkerRegistrationServer = function(args) {
   var parent = this
   var subtaskMgr = this._subtaskManager
   var regHs = ow.server.httpd.start(args.workerreg)
+  try {
+    this._setupWorkerRegistrationRoutes(args, regHs, parent, subtaskMgr)
+  } catch(setupErr) {
+    try { ow.server.httpd.stop(regHs) } catch(ignoreStopOnSetupErr) {}
+    throw setupErr
+  }
+}
+
+MiniA.prototype._setupWorkerRegistrationRoutes = function(args, regHs, parent, subtaskMgr) {
   var regToken = isString(args.workerregtoken) ? args.workerregtoken.trim() : ""
 
   if (!isArray(MiniA._registeredWorkers)) MiniA._registeredWorkers = []

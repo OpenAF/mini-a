@@ -143,6 +143,18 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiIndexesModeRegeneratesAllIndexes
 
+- name: MiniA Dreams Tests::DreamWikiApplyDefaultsSemanticWhenGraphEnabled
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyDefaultsSemanticWhenGraphEnabled
+
+- name: MiniA Dreams Tests::DreamWikiApplyWikigraphsemanticFalseOptsOut
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyWikigraphsemanticFalseOptsOut
+
+- name: MiniA Dreams Tests::DreamWikiPlanPreviewsGraphWithoutPersisting
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiPlanPreviewsGraphWithoutPersisting
+
 todo:
 - MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
 - MiniA Dreams Tests::DreamMemoryMergesDuplicates
@@ -179,3 +191,6 @@ todo:
 - MiniA Dreams Tests::DreamWikiGraphModeRebuildsGraph
 - MiniA Dreams Tests::DreamWikiGraphModeFailsWhenGraphNotEnabled
 - MiniA Dreams Tests::DreamWikiIndexesModeRegeneratesAllIndexes
+- MiniA Dreams Tests::DreamWikiApplyDefaultsSemanticWhenGraphEnabled
+- MiniA Dreams Tests::DreamWikiApplyWikigraphsemanticFalseOptsOut
+- MiniA Dreams Tests::DreamWikiPlanPreviewsGraphWithoutPersisting

@@ -1336,8 +1336,8 @@ MiniAWikiManager.prototype.graph = function(op, params) {
     if (mutating) return { ok: false, error: "wiki is read-only: graph '" + action + "' requires wikiaccess=rw" }
   }
   if (action === "build") {
-    var st = this._graph.buildStructural(this._graphPages())
-    if (p.report === true && isFunction(this._graph.saveReport)) this._graph.saveReport()
+    var st = this._graph.buildStructural(this._graphPages(), p)
+    if (p.report === true && p.preview !== true && isFunction(this._graph.saveReport)) this._graph.saveReport()
     // F5: wikigraphsemantic=true makes graph build default semantic:true (still emits corpus warning)
     if (p.semantic === true || toBoolean(this._config.wikigraphsemantic) === true) return this._graph.buildSemantic(this._graphPages(), p)
     return { ok: true, structural: st }
@@ -2192,9 +2192,15 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
     list: function(prefix) { return parent._luceneListAllReadOnly(prefix) },
     read: function(path) {
       var identifier = __miniAWikiUrlJoin(base, path)
+      var conn = __
       try {
-        var conn = open(path, "GET")
-        if (Number(conn.getResponseCode()) < 200 || Number(conn.getResponseCode()) >= 300) {
+        conn = open(path, "GET")
+        var code = Number(conn.getResponseCode())
+        if (code < 200 || code >= 300) {
+          try {
+            var errStream = conn.getErrorStream()
+            if (isDef(errStream) && errStream != null) { af.fromInputStream2String(errStream); errStream.close() }
+          } catch(ignoreErrStream) {}
           parent._auditRetrieval("http", identifier, path, false, 0)
           return __
         }
@@ -2207,10 +2213,21 @@ MiniAWikiManager.prototype._makeHttpBackend = function(cfg) {
       } catch(e) {
         parent._auditRetrieval("http", identifier, path, false, 0)
         return __
+      } finally {
+        try { if (isDef(conn) && conn instanceof java.net.HttpURLConnection) conn.disconnect() } catch(ignoreDisconnect) {}
       }
     },
     exists: function(path) {
-      try { var code = Number(open(path, "HEAD").getResponseCode()); return code >= 200 && code < 300 } catch(e) { return false }
+      var conn = __
+      try {
+        conn = open(path, "HEAD")
+        var code = Number(conn.getResponseCode())
+        return code >= 200 && code < 300
+      } catch(e) {
+        return false
+      } finally {
+        try { if (isDef(conn) && conn instanceof java.net.HttpURLConnection) conn.disconnect() } catch(ignoreDisconnect) {}
+      }
     },
     write: function() { throw "http wiki is read-only" },
     delete: function() { throw "http wiki is read-only" },
@@ -2234,12 +2251,18 @@ MiniAWikiManager.prototype._hydrateHttpArtifacts = function() {
     return conn
   }
   return this._hydrateArtifactBundle(function() {
-    var conn = connect("HEAD"), code = Number(conn.getResponseCode())
-    if (code < 200 || code >= 300) throw "HTTP HEAD " + bundleUrl + " for bundle metadata returned " + code
-    return { etag: String(conn.getHeaderField("ETag") || ""), lastModified: String(conn.getHeaderField("Last-Modified") || "") }
+    var conn = connect("HEAD")
+    try {
+      var code = Number(conn.getResponseCode())
+      if (code < 200 || code >= 300) throw "HTTP HEAD " + bundleUrl + " for bundle metadata returned " + code
+      return { etag: String(conn.getHeaderField("ETag") || ""), lastModified: String(conn.getHeaderField("Last-Modified") || "") }
+    } finally { try { conn.disconnect() } catch(ignoreDisconnect) {} }
   }, function() {
     var conn = connect("GET"), code = Number(conn.getResponseCode())
-    if (code < 200 || code >= 300) throw "HTTP GET " + bundleUrl + " for bundle download returned " + code
+    if (code < 200 || code >= 300) {
+      try { conn.disconnect() } catch(ignoreDisconnect) {}
+      throw "HTTP GET " + bundleUrl + " for bundle download returned " + code
+    }
     return conn.getInputStream()
   }, "http", bundleUrl)
 }
