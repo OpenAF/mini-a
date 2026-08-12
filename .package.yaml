@@ -179,7 +179,7 @@ filesHash:
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
   docs/WHATS-NEW.md: 73102d5f71b69ba58e99dace49c55533d3acd166
-  docs/WIKI.md: 902f3979fccc985308d35f507bdd19e5f5a720fe
+  docs/WIKI.md: b17d6e2fef1026089ed5b0d25d302ad5b13c6baf
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -230,7 +230,7 @@ filesHash:
   mcps/mcp-wiki-safe.yaml: c449a76831d3509d976e275b24b0a8a9ab9fa003
   mcps/mcp-wiki.yaml: d794688929fb23f7e84f5e53b723fee3f29c6bf8
   mini-a-common.js: ec309a9abd82a1b6a3473db950cf06e38b34ceae
-  mini-a-con.js: b04b54631ec7b077d648331f86dc6e02eeb0d102
+  mini-a-con.js: 8b6b8a191d20104131d11e8e3fc6a40ba3ff7713
   mini-a-dreams.js: 89a8e51480d9306ce5ee8176ce6b69d256541093
   mini-a-graph.js: 61609f80b9e7de30edc03ca21454b667ad8af0f2
   mini-a-ingest.js: 1c0978a3d06abba374e2df79d046cee5b08a9c81
