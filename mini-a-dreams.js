@@ -477,10 +477,13 @@ MiniADreams.prototype._wikiLintMemoryManager = function() {
 MiniADreams.prototype.dreamWiki = function(opts) {
   var self = this
   // Modes: plan (propose only) | apply (deterministic fixes) | reorg (full agent loop) |
-  // repair (deterministic fixes only, no AGENTS.md upgrade/finalize — the fast, isolated version of apply).
+  // repair (deterministic lint fixes only) | reindex (search index rebuild only) |
+  // graph (knowledge graph rebuild only) | indexes (index.md regeneration only).
+  // repair/reindex/graph/indexes are the isolated building blocks apply composes together.
   // 'lint' was dropped — it was 'plan' minus the proposal and duplicated /wiki lint.
   var wikiMode = isString(self._args.dreamwikimode) ? self._args.dreamwikimode.trim().toLowerCase() : ""
-  if (wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg" && wikiMode !== "repair") wikiMode = ""
+  if (wikiMode !== "plan" && wikiMode !== "apply" && wikiMode !== "reorg" && wikiMode !== "repair" &&
+      wikiMode !== "reindex" && wikiMode !== "graph" && wikiMode !== "indexes") wikiMode = ""
   var effectiveMode = wikiMode.length > 0 ? wikiMode : "apply"
   // apply now runs by default; dreamwikidryrun is the opt-out
   var isDryRun = toBoolean(self._args.dryrun) === true || toBoolean(self._args.dreamwikidryrun) === true
@@ -674,6 +677,71 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     } catch(repairErr) {
       self._log("[dreams:wiki] Repair error: " + __miniAErrMsg(repairErr))
       return { ok: false, reason: "repair-error", error: __miniAErrMsg(repairErr) }
+    }
+  }
+
+  // reindex: just the search/lexical index rebuild (also rebuilds wm's internal graph-hint
+  // index used for search hints) — no lint, no repair, no AGENTS.md upgrade.
+  if (effectiveMode === "reindex") {
+    self._log("💤 [dreams] Starting wiki dream reindex pass...")
+    try {
+      var wmReindex = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:reindex] " + msg) })
+      var reindexResult = wmReindex.reindex()
+      wmReindex.close()
+      if (!isMap(reindexResult) || reindexResult.ok !== true) {
+        var reindexErr = isMap(reindexResult) && isString(reindexResult.error) ? reindexResult.error : "reindex failed"
+        self._log("[dreams:wiki] Reindex failed: " + reindexErr)
+        return { ok: false, reason: "reindex-failed", error: reindexErr }
+      }
+      self._log("💤 [dreams] Wiki dream reindex complete.")
+      return defaultResult
+    } catch(reindexErr2) {
+      self._log("[dreams:wiki] Reindex error: " + __miniAErrMsg(reindexErr2))
+      return { ok: false, reason: "reindex-error", error: __miniAErrMsg(reindexErr2) }
+    }
+  }
+
+  // graph: just the usewikigraph knowledge-graph rebuild — no lint, no repair, no search reindex.
+  if (effectiveMode === "graph") {
+    self._log("💤 [dreams] Starting wiki dream graph pass...")
+    try {
+      var wmGraph = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:graph] " + msg) })
+      var graphResult = wmGraph.graph("build", { semantic: toBoolean(self._args.wikigraphsemantic) === true })
+      wmGraph.close()
+      if (!isMap(graphResult) || graphResult.ok !== true) {
+        var graphErr = isMap(graphResult) && isString(graphResult.error) ? graphResult.error : "graph build failed"
+        self._log("[dreams:wiki] Graph build failed: " + graphErr)
+        return { ok: false, reason: "graph-failed", error: graphErr }
+      }
+      self._log("💤 [dreams] Wiki dream graph rebuild complete.")
+      defaultResult.graph = "rebuilt"
+      return defaultResult
+    } catch(graphErr2) {
+      self._log("[dreams:wiki] Graph error: " + __miniAErrMsg(graphErr2))
+      return { ok: false, reason: "graph-error", error: __miniAErrMsg(graphErr2) }
+    }
+  }
+
+  // indexes: just the unconditional index.md regeneration pass — no lint, no repair, no
+  // search/graph rebuild. Broader than repair's lint-driven missing_index/stale_index fixes:
+  // this regenerates every directory's index unconditionally from current structure.
+  if (effectiveMode === "indexes") {
+    self._log("💤 [dreams] Starting wiki dream indexes pass...")
+    try {
+      var wmIdx = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:indexes] " + msg) })
+      var idxResult = wmIdx.regenerateIndexes()
+      wmIdx.close()
+      if (!isMap(idxResult) || idxResult.ok !== true) {
+        var idxErr = isMap(idxResult) && isString(idxResult.error) ? idxResult.error : "regenerate indexes failed"
+        self._log("[dreams:wiki] Regenerate indexes failed: " + idxErr)
+        return { ok: false, reason: "indexes-failed", error: idxErr }
+      }
+      defaultResult.indexes_regenerated = idxResult.regenerated.length
+      self._log("💤 [dreams] Wiki dream indexes complete — " + idxResult.regenerated.length + " page(s) regenerated.")
+      return defaultResult
+    } catch(idxErr2) {
+      self._log("[dreams:wiki] Indexes error: " + __miniAErrMsg(idxErr2))
+      return { ok: false, reason: "indexes-error", error: __miniAErrMsg(idxErr2) }
     }
   }
 
@@ -1159,7 +1227,7 @@ MiniADreams.prototype.run = function() {
     self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
     self._log("  dreammode=      Explicit run mode: memory, wiki or both")
     self._log("  dreamwiki=true  Force wiki dream when memorych is also configured")
-    self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg, repair")
+    self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg, repair, reindex, graph, indexes")
     self._log("  dreammemorymode=Memory mode: plan, apply")
     self._log("  dreamwikidryrun=true  Propose without writing (opt-out of apply)")
     self._log("  dreamwikireorg= Enable the agent-driven structural reorg mode (true/false)")

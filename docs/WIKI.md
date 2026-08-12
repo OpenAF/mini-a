@@ -22,6 +22,41 @@ Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `li
 
 All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml`) accept `audit=true` (or `OJOB_MCP_AUDIT`) to log every tool call. For `s3`, `http`, and `es` backends this also logs each page actually fetched — backend, resolved location (`s3://bucket/key`, the joined URL, or `es:index/path`), and byte count — including internal fetches made while serving `search`, `lint`, `list`, or `reindex`, not just the top-level tool call. Local `fs` reads are not covered. `mcp-wiki-safe.yaml` only ever logs the resolved location, never the opaque reference exposed to restricted-mode callers.
 
+## Operational and maintenance modes
+
+Beyond interactive `/wiki` commands, maintenance work can also run unattended via
+`mini-a dream=true usewiki=true dreamwikimode=<mode>` — this is the only supported batch/non-interactive
+entry point for wiki maintenance. Built-in console commands like `/wiki reindex` are interactive-only:
+`exec="/wiki reindex"` is rejected (`exec=` only supports custom commands/skills, not built-ins).
+
+| Operation | Console command | Agent tool op | Batch (`dream=true`) |
+| --- | --- | --- | --- |
+| Rebuild search index | `/wiki reindex` | `reindex` | `dreamwikimode=reindex` |
+| Rebuild knowledge graph | `/graph build` (if `usewikigraph`) | `graph` op `build` | `dreamwikimode=graph` |
+| Regenerate index.md pages | — | — | `dreamwikimode=indexes` |
+| Fix lint issues (links, indexes, headings) | `/wiki lint` (report only) | `lint` | `dreamwikimode=repair` |
+| Full deterministic pass | — | — | `dreamwikimode=apply` (default) |
+| Structural reorg (LLM agent) | — | — | `dreamwikimode=reorg` (requires `dreamwikireorg=true`) |
+| Dry-run proposal | — | — | `dreamwikimode=plan` |
+
+`repair`, `reindex`, `graph`, and `indexes` are the isolated building blocks that `apply` composes: `repair`
+fixes lint-flagged issues only; `reindex` rebuilds only the Lucene search index; `graph` rebuilds only the
+`usewikigraph` knowledge graph; `indexes` unconditionally regenerates every section/root `index.md` from
+current structure. Run them individually — e.g. a cheap nightly `reindex`, a separate weekly `graph` pass —
+or let `apply` run all of them together. None of these four modes call an LLM. `reindex`/`graph`/`indexes`
+all require a `wikiaccess=rw`-capable backend (archive/http roots stay read-only regardless).
+
+```sh
+# Nightly search reindex only
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=reindex
+
+# Weekly knowledge-graph rebuild only
+mini-a dream=true usewiki=true usewikigraph=true wikiroot=/shared/wiki dreamwikimode=graph
+```
+
+See [`USAGE.md`](../USAGE.md#dreams-sleep-pass) for the full dream-mode reference (gating rules, all
+`dreamwikimode` values, the `/dream` console table, and complete standalone examples).
+
 ## Search and graph state
 
 Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers backlinks, community information, and optional related-page search hints. `wikilexical` selects language and optional explicit enhancements. Lucene-backed search results also carry a numeric `score` field (Lucene's native relevance score); results served from the scan fallback (no index available) omit it.

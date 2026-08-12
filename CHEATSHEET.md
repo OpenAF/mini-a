@@ -1160,7 +1160,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 For `wikibackend=http`, host pages plus `mini-a-wiki-index.zip` (Lucene and optional graph cache). It is read-only; use `wikihttpindexurl` to override the bundle URL, `wikihttptimeout` to set its timeout, and `wikiartifactrefreshsecs` to refresh a long-lived instance between requests. `s3artifactbundle=true` uses the same zip format under `wikis3artifactprefix`.
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Report what would change without writing anything back |
-| `dreamwikimode` | string | `apply` | Wiki mode: `lint`, `plan`, `apply`, `reorg` |
+| `dreamwikimode` | string | `apply` | Wiki mode: `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
 | `dreammemorymode` | string | `apply` | Memory mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of apply) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
@@ -1197,6 +1197,10 @@ The `/dream` command is available in the interactive console when at least one o
 | `/dream wiki plan` | Explicit wiki proposal mode (same path as `dryrun` today) |
 | `/dream wiki apply` | Safe wiki apply mode (write gate on) |
 | `/dream wiki reorg` | Structural wiki reorg mode (gates on) |
+| `/dream wiki repair` | Deterministic-only lint fixes (no finalize) |
+| `/dream wiki reindex` | Search-index-only rebuild (no lint/repair/graph) |
+| `/dream wiki graph` | Knowledge-graph-only rebuild (requires `usewikigraph=true`) |
+| `/dream wiki indexes` | Index.md-only regeneration (no lint/repair/search/graph) |
 
 Notes:
 - For wiki dreams, `dreamwikimode=plan` and `dryrun=true` currently run the same no-write proposal flow.
@@ -1242,6 +1246,12 @@ mini-a dream=true \
   dreamwikimode=apply \
   dreamreport=/var/log/mini-a/dream-wiki-apply.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Isolated batch modes (no LLM): repair, reindex, graph, indexes
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=repair
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=reindex
+mini-a dream=true usewiki=true usewikigraph=true wikiroot=/shared/wiki dreamwikimode=graph
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=indexes
 ```
 
 ### Examples (interactive)

@@ -371,7 +371,7 @@ The tester includes automatic cleanup with shutdown handlers to properly close M
 - **ASCII Sketch Guidance** - Encourage text-based sketch outputs in responses (`useascii=true`)
 - **Interactive Maps** - Ask the agent to return Leaflet map snippets for geographic prompts, rendered directly in the console transcript and web UI (`usemaps=true`)
 - **Math Formula Rendering** - Encourage LaTeX formulas rendered with KaTeX in the web UI (`usemath=true`)
-- **Dreams (Sleep Pass)** - LLM-powered off-line consolidation with explicit modes: memory `plan|apply`, wiki `lint|plan|apply|reorg`, proposal-first dry runs, and optional JSON reports — run via `/dream` or `mini-a dream=true`
+- **Dreams (Sleep Pass)** - Off-line consolidation with explicit modes: memory `plan|apply`, wiki `plan|apply|reorg|repair|reindex|graph|indexes`, proposal-first dry runs, and optional JSON reports — run via `/dream` or `mini-a dream=true`
 
 ## Documentation
 

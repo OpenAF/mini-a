@@ -824,7 +824,7 @@ try {
     dream          : { type: "boolean", default: false, description: "Run a dream (sleep) pass — LLM-powered memory and/or wiki consolidation — instead of the console." },
     dreammode      : { type: "string", description: "Dream mode selector for dream=true: memory, wiki, or both (default auto: memory when memory is configured, otherwise wiki)." },
     dreamwiki      : { type: "boolean", default: false, description: "Force wiki dream when dream=true and memory is also configured." },
-    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), reorg, or repair." },
+    dreamwikimode  : { type: "string", description: "Wiki dream mode: plan, apply (default), reorg, repair, reindex, graph, or indexes." },
     dreammemorymode: { type: "string", description: "Memory dream mode: plan or apply." },
     dreamwikidryrun: { type: "boolean", default: false, description: "Propose wiki changes without writing (opt-out of apply)." },
     dreamwikiapproval: { type: "string", description: "Wiki reorg approval mode: auto, ask, or never." },
@@ -2359,8 +2359,8 @@ try {
 
           // Handle /dream command completions
           if (lookupName === "dream") {
-            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "repair"]
-            var dreamWikiModes = ["plan", "apply", "reorg", "repair", "dryrun"]
+            var dreamSubcmds = ["memory", "wiki", "dryrun", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"]
+            var dreamWikiModes = ["plan", "apply", "reorg", "repair", "reindex", "graph", "indexes", "dryrun"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
             var insertionPoint = cursor - trimmedRemainder.length
@@ -5853,7 +5853,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
-      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, dryrun" },
+      { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
       { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
     helpCommands.push(
@@ -6271,7 +6271,7 @@ try {
     var hasMemory = isString(dreamSessionOptions.memorych) && dreamSessionOptions.memorych.trim().length > 0
     var hasWiki   = toBoolean(dreamSessionOptions.usewiki) === true && isObject(getConsoleWikiManager())
 
-    var isWikiMode = ["wiki", "plan", "apply", "reorg", "repair"].indexOf(mode) >= 0
+    var isWikiMode = ["wiki", "plan", "apply", "reorg", "repair", "reindex", "graph", "indexes"].indexOf(mode) >= 0
     if (mode === "memory" && !hasMemory) {
       print(colorifyText("No memory channel configured. Start with memorych=...", errorColor)); return
     }
@@ -6294,10 +6294,14 @@ try {
     dreamArgs.dryrun = dryrun ? "true" : "false"
 
     try {
-      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0) {
+      if (parts.indexOf("plan") >= 0 || parts.indexOf("apply") >= 0 || parts.indexOf("reorg") >= 0 || parts.indexOf("repair") >= 0 ||
+          parts.indexOf("reindex") >= 0 || parts.indexOf("graph") >= 0 || parts.indexOf("indexes") >= 0) {
         if (parts.indexOf("plan") >= 0) dreamArgs.dreamwikimode = "plan"
         if (parts.indexOf("apply") >= 0) dreamArgs.dreamwikimode = "apply"
         if (parts.indexOf("repair") >= 0) dreamArgs.dreamwikimode = "repair"
+        if (parts.indexOf("reindex") >= 0) dreamArgs.dreamwikimode = "reindex"
+        if (parts.indexOf("graph") >= 0) dreamArgs.dreamwikimode = "graph"
+        if (parts.indexOf("indexes") >= 0) dreamArgs.dreamwikimode = "indexes"
         if (parts.indexOf("reorg") >= 0) {
           dreamArgs.dreamwikimode = "reorg"
           dreamArgs.dreamwikireorg = "true"
@@ -6346,7 +6350,8 @@ try {
       }
 
       if ((mode === "" || mode === "memory") && hasMemory) reportDream("memory", runner.dreamMemory())
-      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair") && hasWiki) reportDream("wiki", runner.dreamWiki())
+      if ((mode === "" || mode === "wiki" || mode === "plan" || mode === "apply" || mode === "reorg" || mode === "repair" ||
+           mode === "reindex" || mode === "graph" || mode === "indexes") && hasWiki) reportDream("wiki", runner.dreamWiki())
     } catch(dreamErr) {
       printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Dream error: " + dreamErr, errorColor))
     }

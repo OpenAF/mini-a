@@ -127,6 +127,22 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiLintModeIsGone
 
+- name: MiniA Dreams Tests::DreamWikiReindexModeRebuildsSearchIndex
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiReindexModeRebuildsSearchIndex
+
+- name: MiniA Dreams Tests::DreamWikiGraphModeRebuildsGraph
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiGraphModeRebuildsGraph
+
+- name: MiniA Dreams Tests::DreamWikiGraphModeFailsWhenGraphNotEnabled
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiGraphModeFailsWhenGraphNotEnabled
+
+- name: MiniA Dreams Tests::DreamWikiIndexesModeRegeneratesAllIndexes
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiIndexesModeRegeneratesAllIndexes
+
 todo:
 - MiniA Dreams Tests::WikiApplyFrontmatterHeadingsLinksAndFixpoint
 - MiniA Dreams Tests::DreamMemoryMergesDuplicates
@@ -159,3 +175,7 @@ todo:
 - MiniA Dreams Tests::DreamWikiRepairModeFixesWithoutFinalizing
 - MiniA Dreams Tests::DreamWikiRepairModeReachesRootOnDeepNewTree
 - MiniA Dreams Tests::DreamWikiLintModeIsGone
+- MiniA Dreams Tests::DreamWikiReindexModeRebuildsSearchIndex
+- MiniA Dreams Tests::DreamWikiGraphModeRebuildsGraph
+- MiniA Dreams Tests::DreamWikiGraphModeFailsWhenGraphNotEnabled
+- MiniA Dreams Tests::DreamWikiIndexesModeRegeneratesAllIndexes

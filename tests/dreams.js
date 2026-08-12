@@ -636,6 +636,65 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testDreamWikiReindexModeRebuildsSearchIndex = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      load("mini-a-wiki.js")
+      // Write a page directly through the backend, bypassing wm.write() (which updates the
+      // live index incrementally) — so it's absent from the index and proves reindex mode
+      // actually re-scans rather than being a no-op.
+      io.mkdir(dir + "/offindex")
+      io.writeFileString(dir + "/offindex/page.md",
+        "---\ntitle: Offindex\ndescription: Offindex page\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\n---\n\n# Offindex\n\nzyxwvutmarker content")
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "reindex" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, true, "reindex mode should succeed")
+      ow.test.assert(res.mode, "reindex", "mode should be reindex")
+
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
+      var hits = wm.search("zyxwvutmarker", { limit: 5 })
+      wm.close()
+      ow.test.assert(hits.length > 0, true, "reindex should have picked up the directly-written page")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiGraphModeRebuildsGraph = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "graph", usewikigraph: "true" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, true, "graph mode should succeed when usewikigraph is enabled")
+      ow.test.assert(res.mode, "graph", "mode should be graph")
+      ow.test.assert(res.graph, "rebuilt", "graph mode should report the graph as rebuilt")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiGraphModeFailsWhenGraphNotEnabled = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "graph" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, false, "graph mode should fail when usewikigraph is not set")
+      ow.test.assert(res.reason, "graph-failed", "reason should be graph-failed")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiIndexesModeRegeneratesAllIndexes = function() {
+    var dir = seedWiki(makeWikiDir())
+    try {
+      load("mini-a-wiki.js")
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "indexes" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, true, "indexes mode should succeed")
+      ow.test.assert(res.mode, "indexes", "mode should be indexes")
+      ow.test.assert(res.indexes_regenerated > 0, true, "indexes mode should report regenerated pages")
+
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
+      var idx = wm.read("index.md")
+      ow.test.assert(idx.body.indexOf("| Section | Pages | Updated |") >= 0, true, "root index should carry the generated sections table")
+      var sect = wm.read("notes/index.md")
+      ow.test.assert(sect.body.indexOf("| Page | Updated | Summary |") >= 0, true, "section index should carry the generated page table")
+      wm.close()
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testDreamWikiLintModeIsGone = function() {
     var dir = seedWiki(makeWikiDir())
     try {

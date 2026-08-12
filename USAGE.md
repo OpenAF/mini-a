@@ -3063,7 +3063,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `wikiroot` / `wikibucket` / `wikibackend` | string | - | Same wiki backend settings as the regular agent |
 | `model` | string | - | SLON/JSON model config used for the memory consolidation LLM call |
 | `dryrun` | boolean | `false` | Preview what would change without writing anything back |
-| `dreamwikimode` | string | `apply` | Wiki dream mode: `plan`, `apply`, `reorg` |
+| `dreamwikimode` | string | `apply` | Wiki dream mode: `plan`, `apply`, `reorg`, `repair`, `reindex`, `graph`, `indexes` |
 | `dreammemorymode` | string | `apply` | Memory dream mode: `plan` or `apply` |
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
@@ -3096,6 +3096,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 5. `dreamwikimode=apply` is the default. It performs safe non-structural index work and needs no extra write gate; use `dreamwikidryrun=true` to opt out.
 6. `dreamwikimode=reorg` is structural and still gated: it requires `dreamwikireorg=true` and `dreamwikiapproval=auto`.
 6b. Every `apply` and `reorg` run finishes with a deterministic finalize pass: root and section `index.md` are regenerated from live page metadata, the metadata shards and full-text index are rebuilt, and the knowledge graph is rebuilt when `usegraph=true`.
+6c. `repair`, `reindex`, `graph`, and `indexes` are isolated building blocks that `apply`'s finalize pass composes together — none of them call an LLM. `dreamwikimode=repair` runs only the deterministic lint fixer (no AGENTS.md upgrade, no index/search/graph finalize). `dreamwikimode=reindex` rebuilds only the Lucene search index (`wm.reindex()`, which also rebuilds its own lightweight internal graph-hint index). `dreamwikimode=graph` rebuilds only the `usewikigraph` knowledge graph (fails with `reason: "graph-failed"` when `usewikigraph` isn't configured). `dreamwikimode=indexes` unconditionally regenerates every section/root `index.md` from current directory structure, independent of what lint happens to flag.
 7. A `MiniAWikiManager` exposes hierarchy-aware `tree`, `browse`, `backlinks`, `move`, and `lint()` operations.
 8. A full `MiniA` agent is spawned with `maxsteps=60` and the following goal:
    - Discover the hierarchy with `tree`/`browse`, search related content, inspect backlinks, and list lint issues.
@@ -3164,6 +3165,18 @@ mini-a dream=true \
   dreamwikiapproval=auto \
   dreamreport=/var/log/mini-a/dream-wiki-reorg.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Non-interactive deterministic repair only (lint fixes, no index/search/graph work; no LLM)
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=repair
+
+# Non-interactive search index rebuild only (no LLM)
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=reindex
+
+# Non-interactive knowledge graph rebuild only (no LLM)
+mini-a dream=true usewiki=true usewikigraph=true wikiroot=/shared/wiki dreamwikimode=graph
+
+# Non-interactive index.md regeneration only (no LLM)
+mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=indexes
 ```
 
 ### Console command (`/dream`)
@@ -3181,6 +3194,10 @@ The `/dream` slash command is available in interactive console sessions when at 
 | `/dream wiki plan` | Explicit wiki proposal mode (same execution path as `dryrun` today) |
 | `/dream wiki apply` | Safe wiki apply mode (enables write gate) |
 | `/dream wiki reorg` | Structural wiki reorg mode (enables gates + auto approval in console) |
+| `/dream wiki repair` | Deterministic-only wiki repair: lint fixes, no AGENTS.md upgrade, no index/search/graph finalize |
+| `/dream wiki reindex` | Search-index-only rebuild: no lint, no repair, no graph rebuild |
+| `/dream wiki graph` | Knowledge-graph-only rebuild (requires `usewikigraph=true`): no lint, no repair, no search reindex |
+| `/dream wiki indexes` | Index.md-only regeneration: no lint, no repair, no search/graph rebuild |
 
 Sub-commands and `dryrun` complete with Tab.
 

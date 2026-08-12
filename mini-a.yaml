@@ -1015,7 +1015,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : dreamwikimode
-    desc     : Wiki dream mode (plan, apply, reorg) - defaults to apply
+    desc     : Wiki dream mode (plan, apply, reorg, repair, reindex, graph, indexes) - defaults to apply
     example  : "plan"
     mandatory: false
   - name     : dreammemorymode
