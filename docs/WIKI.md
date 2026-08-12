@@ -22,6 +22,62 @@ Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `li
 
 All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml`) accept `audit=true` (or `OJOB_MCP_AUDIT`) to log every tool call. For `s3`, `http`, and `es` backends this also logs each page actually fetched — backend, resolved location (`s3://bucket/key`, the joined URL, or `es:index/path`), and byte count — including internal fetches made while serving `search`, `lint`, `list`, or `reindex`, not just the top-level tool call. Local `fs` reads are not covered. `mcp-wiki-safe.yaml` only ever logs the resolved location, never the opaque reference exposed to restricted-mode callers.
 
+## Console command reference
+
+### `/wiki [op] [args]`
+
+| Op | Functionality | Equivalent to / overlaps |
+| --- | --- | --- |
+| `context` | Overview: page count, sections, mounts, recent activity | Superset of `mounts` (also lists mounts, with less detail) |
+| `list [prefix] [--meta]` | List pages; `--meta` adds title/description per page | |
+| `tree` | Hierarchical view with per-section index status | Coarser-grained view of the same structure as `browse` |
+| `browse` | One level of a path: child sections, direct pages, suggested next reads | |
+| `read <path>` | Print a page's body | |
+| `search <query>` | Full-text search (Lucene, falls back to scan) | |
+| `backlinks <path>` | Pages linking to a page | Run before `move`/`delete` to see what would break |
+| `lint` | Report-only consistency checks (broken links, missing/stale indexes, heading issues) | Read-only counterpart of `dreamwikimode=repair`, which applies the same checks' fixes |
+| `write <path> [content]` *(rw)* | Create/update a page | |
+| `move <from> <to>` *(rw)*, alias `mv` | Rename/move a page and rewrite inbound links | |
+| `delete <path>` *(rw)*, aliases `remove`, `rm` | Delete a page | |
+| `init` *(rw)* | Scaffold the initial wiki structure (`AGENTS.md`, root `index.md`) | |
+| `reindex` *(rw)* | Rebuild the Lucene search index | Same call as `dreamwikimode=reindex`; also runs as one step of `dreamwikimode=apply` |
+| `mounts` | List attached external wikis | Subset of `context` |
+| `attach <name> [backend=] [root=] ...` | Attach a read-only external wiki under `@name/` | |
+| `detach <name>` | Remove a mount | |
+
+### `/graph [op] [args]` (requires `usewikigraph=true`)
+
+| Op | Functionality | Equivalent to / overlaps |
+| --- | --- | --- |
+| `build [semantic=true]` *(rw)* | Build/refresh the structural (+ semantic) graph | Same call as `dreamwikimode=graph`; also runs as the last step of `dreamwikimode=apply` |
+| `report` *(rw)* | Save a graph report to disk | |
+| `query <text>` | Keyword search over all graph nodes (documents and concepts) | Base operation `retrieve` and `answer` are built on |
+| `retrieve <query>` | `query()` filtered to document-page nodes, with summaries, capped to a few results | Thin wrapper over `query` |
+| `answer <question>` | Same as `retrieve`, phrased as a question | Wraps `retrieve` — despite the name, it does **not** call an LLM; no synthesis happens |
+| `neighbors <node>` | Edges touching a node | |
+| `path <from> <to>` | Shortest path between two nodes | |
+| `communities` | Cluster detection (`wikigraphcommunity`, default Louvain) | |
+| `surprise` | Cross-document "surprising" connections | |
+| `export [format]` | Export the graph (`mermaid` default, `graphml`, `neo4j`, `html`, `svg`) | |
+| `stats` | Node/edge counts summary | |
+| `falkor [cypher]` *(rw for sync)* | Sync the graph to, or run a Cypher query against, an external FalkorDB (`wikigraphfalkor`) | |
+
+### `/dream [memory|wiki|mode] [dryrun]`
+
+| Mode | Functionality | Equivalent to / overlaps |
+| --- | --- | --- |
+| *(no args)* | Runs the memory dream (if `memorych` is set) **and** the wiki dream in `apply` mode (if `usewiki` is set) | |
+| `memory` | Consolidate/prune the memory channel only | |
+| `wiki` | Run the wiki dream only, effective mode defaults to `apply` | Functionally identical to `dream apply` — same code path, both skip the memory dream |
+| `plan` | Dry-run: builds a proposal (index creates/updates, repair candidates, graph preview) without writing anything | |
+| `apply` *(default effective mode)* | Deterministic composite pass: `AGENTS.md` upgrade + repair loop + reindex + graph rebuild + index regeneration | Composes `repair` + `reindex` + `graph` + `indexes` |
+| `reorg` | Full LLM-agent structural reorg (move/merge/delete pages) | Gated by `dreamwikireorg=true` and `dreamwikiapproval` |
+| `repair` | Deterministic lint-fix loop only | Same lint rules as `/wiki lint`, but applies fixes instead of just reporting |
+| `reindex` | Search-index rebuild only | Same call as `/wiki reindex` |
+| `graph` | Knowledge-graph rebuild only | Same call as `/graph build` |
+| `indexes` | Unconditional `index.md` regeneration for every directory | Broader than the `missing_index`/`stale_index` fixes `repair` applies |
+| `dryrun` | Modifier flag, not a mode on its own — combine with another mode, e.g. `/dream apply dryrun` | |
+
 ## Operational and maintenance modes
 
 Beyond interactive `/wiki` commands, maintenance work can also run unattended via
@@ -83,6 +139,58 @@ The dream pass resolves its own LLM the same way `model=`/`OAF_MODEL` works for 
 falls back to a deterministic regex/heuristic extractor (headings, `[[links]]`, markdown links, capitalized
 phrases) instead of erroring — the graph still gets semantic-style edges, just not LLM-derived ones. This is
 also what `graph`/`reorg` use if you opt them into `wikigraphsemantic=true` without a model configured.
+
+### Maintenance examples
+
+Renaming a page safely — check what points at it first, move it, then confirm nothing broke:
+
+```
+/wiki backlinks guides/old-setup.md
+/wiki move guides/old-setup.md guides/setup.md
+/wiki lint
+```
+
+Publishing structural edits — lint before and after, so you can see exactly what a batch of writes introduced:
+
+```
+/wiki lint
+/wiki write guides/new-topic.md
+... (finish content with a line containing only """)
+/wiki lint
+/wiki reindex
+```
+
+Previewing a full maintenance pass before committing to it, then running it for real:
+
+```
+/dream plan
+/dream apply
+```
+
+Rebuilding just the search index after a bulk external edit (e.g. pages changed outside the console), without
+touching the graph or `index.md` files:
+
+```
+/wiki reindex
+```
+
+Rebuilding just the knowledge graph, with semantic (LLM-derived) edges, after `usewikigraph=true`:
+
+```
+/graph build semantic=true
+```
+
+Attaching a shared read-only reference wiki alongside your writable one, using it, then detaching it:
+
+```
+/wiki attach docs backend=fs root=/shared/reference-wiki
+/wiki search "rate limiting"
+/wiki detach docs
+```
+
+Both `/wiki reindex` and `/graph build` are interactive-only; unattended equivalents use `dream=true` from the
+CLI (see the table above and the `sh` examples earlier in this section) — e.g. `mini-a dream=true usewiki=true
+wikiroot=/shared/wiki dreamwikimode=reindex` for a cron job that only needs the search index refreshed.
 
 ## Search and graph state
 

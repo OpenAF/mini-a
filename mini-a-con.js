@@ -2409,7 +2409,7 @@ try {
           // Handle /graph command completions
           if (lookupName === "graph") {
             if (toBoolean(sessionOptions.usewikigraph) !== true) return -1
-            var graphSubcmds = ["build", "query", "neighbors", "path", "communities", "surprise", "export", "stats"]
+            var graphSubcmds = ["build", "report", "query", "retrieve", "answer", "neighbors", "path", "communities", "surprise", "export", "stats", "falkor"]
             var graphExportFmts = ["mermaid", "graphml", "neo4j", "html", "svg"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
@@ -5852,7 +5852,7 @@ try {
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
-      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, query, neighbors, path, communities, surprise, export, stats (requires usewikigraph=true)" },
+      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
       { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
@@ -6197,6 +6197,7 @@ try {
       params.to = p[1]
     }
     if (sub === "build" && rest.indexOf("semantic=true") >= 0) params.semantic = true
+    if (sub === "falkor" && rest.length > 0) params.query = rest
     try {
       var out = wm.graph(sub, params)
       if (isString(out)) print(out)
