@@ -545,7 +545,10 @@ MiniAWikiManager.prototype._metaFor = function(path, rawOpt, parsedOpt) {
   return built
 }
 
-MiniAWikiManager.prototype._metaUpdate = function(path, raw, parsed) {
+// deferSave skips the per-call _saveMetaShard flush — batch callers (e.g.
+// _readAllPageDocs) set it and flush each touched shard once afterwards, instead
+// of rewriting the whole shard JSON on every single page.
+MiniAWikiManager.prototype._metaUpdate = function(path, raw, parsed, deferSave) {
   this._ensureIndexRuntime()
   if (this._config.wikimetacache === false) return __
   var built = this._buildPageRecord(path, raw, parsed).record
@@ -557,7 +560,7 @@ MiniAWikiManager.prototype._metaUpdate = function(path, raw, parsed) {
   var shardKey = this._metaShardKey(path)
   this._loadMetaShard(shardKey)[path] = built
   this._metaDirty[shardKey] = true
-  this._saveMetaShard(shardKey)
+  if (deferSave !== true) this._saveMetaShard(shardKey)
   return built
 }
 
@@ -791,19 +794,68 @@ MiniAWikiManager.prototype._mountGraph = function(mount) {
   }
 }
 
-MiniAWikiManager.prototype._rebuildSearchIndex = function(options) {
+// _readAllPageDocs: single read pass shared by reindex()'s search + graph rebuild
+// so every page is fetched from the backend once instead of once per index — this
+// alone halves the backend I/O regardless of concurrency. Reads are serial: an
+// earlier pForEach-based version deadlocked the shared OpenAF thread pool under
+// this file's own test suite (MiniAWikiManager's constructor calls
+// listFilesRecursive, which blocks forever waiting on a pool worker occupied by a
+// stuck nested read) — see reindex() call sites before reintroducing parallel reads.
+MiniAWikiManager.prototype._readAllPageDocs = function() {
+  var self = this
+  var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
+  var readOne = function(p) {
+    var raw = self._backend.read(p)
+    if (!isString(raw)) return __
+    var parsed = self.parseFrontmatter(raw)
+    var body = isString(parsed.body) ? parsed.body : ""
+    return {
+      path  : p,
+      raw   : raw,
+      parsed: parsed,
+      title : isString(parsed.meta.title) ? parsed.meta.title : p,
+      body  : body,
+      meta  : isMap(parsed.meta) ? parsed.meta : {},
+      links : self.extractLinks(body)
+    }
+  }
+  var results = pages.map(readOne)
+  var docs = []
+  var touchedShards = {}
+  ;(isArray(results) ? results : []).forEach(function(r) {
+    if (!isMap(r)) return
+    docs.push(r)
+    self._metaUpdate(r.path, r.raw, r.parsed, true)
+    touchedShards[self._metaShardKey(r.path)] = true
+  })
+  // Each shard file holds many pages' metadata; flush once per shard instead of
+  // once per page (_metaUpdate above deferred the save for exactly this reason).
+  Object.keys(touchedShards).forEach(function(shardKey) { self._saveMetaShard(shardKey) })
+  return docs
+}
+
+// _rebuildSearchIndex: pass a pre-read `pageDocs` (from _readAllPageDocs) to skip
+// this function's own read pass entirely — used by reindex() to share one backend
+// fetch with _rebuildGraphIndex. Falls back to reading pages itself when omitted,
+// preserving the original single-caller behaviour (e.g. bootstrap/init).
+MiniAWikiManager.prototype._rebuildSearchIndex = function(options, pageDocs) {
   if (this._access !== 'rw') return { ok: false, error: "wiki is read-only" }
   try {
     var opts = isObject(options) ? options : {}
     var self = this
-    var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
-    var docs = []
-    for (var i=0;i<pages.length;i++) {
-      var raw = this._backend.read(pages[i])
-      if (!isString(raw)) continue
-      var parsed = this.parseFrontmatter(raw)
-      docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
-      this._metaUpdate(pages[i], raw, parsed)
+    var docs
+    if (isArray(pageDocs)) {
+      docs = pageDocs.map(function(r) { return { path: r.path, title: r.title, raw: r.raw, body: r.body } })
+    } else {
+      var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
+      docs = []
+      for (var i=0;i<pages.length;i++) {
+        var raw = this._backend.read(pages[i])
+        if (!isString(raw)) continue
+        var parsed = this.parseFrontmatter(raw)
+        docs.push({ path: pages[i], title: isString(parsed.meta.title) ? parsed.meta.title : pages[i], raw: raw, body: isString(parsed.body) ? parsed.body : "" })
+        this._metaUpdate(pages[i], raw, parsed)
+      }
     }
     return this._ensureSearchIndex().rebuild(docs, opts)
   } catch(e) {
@@ -929,7 +981,16 @@ MiniAWikiManager.prototype._hydrateArtifactBundle = function(remoteMetaFn, downl
   } finally { try { zipFile.delete(); if (!installed) { remove(luceneNew); remove(graphNew) } } catch(ignoreClean) {} }
 }
 
-MiniAWikiManager.prototype._graphPages = function() {
+// _graphPages: pass a pre-read `pageDocs` (from _readAllPageDocs) to build the
+// graph shape from it directly instead of re-reading every page from the backend.
+// Falls back to its own read pass when omitted, preserving behaviour for the
+// standalone `graph build`/`graph answer` callers.
+MiniAWikiManager.prototype._graphPages = function(pageDocs) {
+  if (isArray(pageDocs)) {
+    return pageDocs.map(function(r) {
+      return { path: r.path, meta: r.meta, body: r.body, links: r.links }
+    })
+  }
   var self = this
   var pages = this._safeListPages("").filter(function(p) { return !self._isSearchExcludedPath(p) })
   var out = []
@@ -947,10 +1008,10 @@ MiniAWikiManager.prototype._graphPages = function() {
   return out
 }
 
-MiniAWikiManager.prototype._rebuildGraphIndex = function() {
+MiniAWikiManager.prototype._rebuildGraphIndex = function(pageDocs) {
   if (!isObject(this._graph)) return
   try {
-    this._graph.buildStructural(this._graphPages())
+    this._graph.buildStructural(this._graphPages(pageDocs))
   } catch(e) {
     this._logFn("warn", "Failed to rebuild graph index: " + __miniAErrMsg(e))
   }
@@ -1200,10 +1261,11 @@ MiniAWikiManager.prototype.reindex = function() {
   try {
     if (!this._ensureLucene() || !this._hasEnhancedLexicalSupport()) return { ok: false, error: "Lucene oPack does not support lexicalEnhanced search; upgrade the lucene oPack before publishing an enhanced wiki index." }
     var manifestStatus = this._lexicalManifestStatus()
-    var rebuilt = this._rebuildSearchIndex({ resetLucene: !manifestStatus.compatible })
+    var pageDocs = this._readAllPageDocs()
+    var rebuilt = this._rebuildSearchIndex({ resetLucene: !manifestStatus.compatible }, pageDocs)
     if (!isMap(rebuilt) || rebuilt.ok !== true) return isMap(rebuilt) ? rebuilt : { ok: false, error: "failed to rebuild lexical index" }
     this._writeLexicalManifest()
-    this._rebuildGraphIndex()
+    this._rebuildGraphIndex(pageDocs)
     return { ok: true }
   } catch(e) {
     return { ok: false, error: __miniAErrMsg(e) }
@@ -1380,6 +1442,12 @@ MiniAWikiManager.prototype.configure = function(config) {
   this._mounts  = isArray(this._mounts) ? this._mounts : []
   this._ensureIndexRuntime()
   this._backend = this._backendType === "s3" ? this._makeS3Backend(cfg) : (this._backendType === "es" ? this._makeEsBackend(cfg) : (this._backendType === "s3fs" ? this._makeS3FsBackend(cfg) : (this._backendType === "http" ? this._makeHttpBackend(cfg) : this._makeFsBackend(cfg))))
+  // true per-instance nonce, not just the backend-identity hash: $cache(name) is a
+  // process-global registry, and two managers can share the same backend identity
+  // (e.g. tests constructing several managers against the same fixture root) — without
+  // this, the second instance's cache setup would silently reuse the first instance's
+  // loader closure/backend reference.
+  this._instanceNonce = sha1(this._getBackendIdentity() + "|" + String(new Date().getTime()) + "|" + String(Math.random())).substring(0, 12)
   this._hydrateS3Artifacts()
   if (this._backendType === "http") this._hydrateHttpArtifacts()
   this._artifactLastCheckAt = new Date().getTime()
@@ -1800,8 +1868,9 @@ MiniAWikiManager.prototype.init = function(path) {
   var created = []
   var skipped = []
   try {
-    this._rebuildSearchIndex()
-    this._rebuildGraphIndex()
+    var bootstrapPageDocs = this._readAllPageDocs()
+    this._rebuildSearchIndex(__, bootstrapPageDocs)
+    this._rebuildGraphIndex(bootstrapPageDocs)
     if (!hasAgents) {
       this._backend.write("AGENTS.md", __miniAWikiAgentsTemplate(now))
       created.push("AGENTS.md")
@@ -2196,6 +2265,12 @@ MiniAWikiManager.prototype._maybeRefreshArtifactBundle = function() {
     this._searchIndex = __
     if (isObject(this._graph) && isFunction(this._graph.close)) this._graph.close()
     this._graph = __
+    // a refreshed artifact bundle means backend.read() would now return different
+    // content for the same paths — drop the read cache so it doesn't keep serving
+    // pre-refresh bodies for up to wikisearchcachettlms. Guarded by isFunction, not just
+    // called directly: this method is unit-tested via .call() against a plain-object
+    // fake that doesn't implement every MiniAWikiManager prototype method.
+    if (isFunction(this._invalidateReadCache)) this._invalidateReadCache()
     this._initializeGraph()
     this._logFn("info", "Refreshed wiki search/graph artifact bundle")
     return true
@@ -2280,8 +2355,17 @@ MiniAWikiManager.prototype.close = function() {
   if (isObject(this._graph) && isFunction(this._graph.close)) {
     try { this._graph.close() } catch(ignoreGraphClose) {}
   }
+  this._invalidateReadCache()
   if (isObject(this._backend) && isFunction(this._backend.close)) {
     this._backend.close()
+  }
+  // pre-existing gap: mounts were never cascaded (only detach() closed a mount's
+  // manager) — now more consequential since every mount also owns its own read-cache
+  // channel in the process-global $cache registry
+  if (isArray(this._mounts)) {
+    this._mounts.forEach(function(m) {
+      try { if (isObject(m.manager) && isFunction(m.manager.close)) m.manager.close() } catch(ignoreMountClose) {}
+    })
   }
 }
 
@@ -2618,6 +2702,7 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
     try {
       var updatedRaw = this._serializeFrontmatter(updatedMeta, reparsed.body)
       this._backend.write(path, updatedRaw)
+      this._invalidateReadCache()
       this._updatePageIndexes(path, updatedRaw, this.parseFrontmatter(updatedRaw))
       this._logWrite(path, updatedMeta)
       return { ok: true, path: path }
@@ -2656,6 +2741,7 @@ MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {
   try {
     var content = this._serializeFrontmatter(meta, bodyText)
     this._backend.write(path, content)
+    this._invalidateReadCache()
     this._updatePageIndexes(path, content, this.parseFrontmatter(content))
     this._logWrite(path, meta)
     return { ok: true, path: path }
@@ -2687,6 +2773,7 @@ MiniAWikiManager.prototype.delete = function(path) {
 
   try {
     this._backend.delete(path)
+    this._invalidateReadCache()
     this._removePageIndexes(path)
     try { this.appendLog("delete", path, path) } catch(le) {}
     return { ok: true, path: path }
@@ -2720,6 +2807,90 @@ MiniAWikiManager.prototype._snippetFromContent = function(content, pattern, cont
   var firstBody = lines.filter(function(l) { return String(l).trim().length > 0 })[0] || ""
   empty.snippet = String(firstBody).substring(0, 180).trim()
   return empty
+}
+
+// Keep Lucene result fields together at the adapter boundary. `score` is the
+// native Lucene relevance score; graph/recentness ranking can consume it later
+// without changing the Lucene index adapter or the public result shape again.
+MiniAWikiManager.prototype._resultFromLuceneHit = function(hit, compact, pattern, contextN) {
+  var hitPath = hit.id || (isMap(hit.payload) ? hit.payload.path : __)
+  var hitTitle = isMap(hit.payload) && isString(hit.payload.title) ? hit.payload.title : (hit.id || "")
+  var result
+  if (compact) {
+    result = { path: hitPath, title: hitTitle, description: "" }
+  } else {
+    // extract a real matching line out of the stored content instead of echoing the query
+    var loc = this._snippetFromContent(hit.content, pattern, contextN)
+    result = { path: hitPath, title: hitTitle, line: isNumber(hit.line) ? hit.line : loc.line, snippet: loc.snippet }
+    if (contextN > 0) {
+      result.contextBefore = loc.contextBefore
+      result.contextAfter  = loc.contextAfter
+    }
+  }
+  // Do not manufacture a score: only expose a finite score supplied by Lucene.
+  if (isDef(hit.score) && hit.score != null && isFinite(Number(hit.score))) result.score = Number(hit.score)
+  return result
+}
+
+// ── Scan-fallback read cache & budget ──────────────────────────────────────────
+// Both exist for the same reason: search()'s scan-fallback path (forceScan/regex/scoped
+// path, or an unavailable index) reads pages one at a time via backend.read() — cheap for
+// local fs, but each call is a real network round-trip for s3/http backends, with only a
+// per-request timeout (wikihttptimeout) and no cap on the total number/duration of reads.
+
+MiniAWikiManager.prototype._ensureReadCache = function() {
+  if (isObject(this._readCache)) return this._readCache
+  var self = this
+  var ttl = isNumber(Number(this._config.wikisearchcachettlms)) && Number(this._config.wikisearchcachettlms) > 0
+    ? Number(this._config.wikisearchcachettlms) : 15000
+  var maxSize = isNumber(Number(this._config.wikisearchcachemaxsize)) && Number(this._config.wikisearchcachemaxsize) > 0
+    ? Number(this._config.wikisearchcachemaxsize) : 500
+  // process-global $cache registry keyed by name: the identity hash is only for
+  // debuggability, this._instanceNonce (set once in configure()) is what actually keeps
+  // two managers from colliding on the same cache/loader closure.
+  var name = "miniawikiread_" + sha1(this._getBackendIdentity()).substring(0, 8) + "_" + this._instanceNonce
+  // $cache's "cache" channel type wraps the key it hands to .fn() as {key: <rawKey>} —
+  // confirmed empirically (jstack-style probing, not documented), so the loader must
+  // unwrap it back to a plain path.
+  var c = $cache(name).ttl(ttl).maxSize(maxSize).fn(function(k) {
+    return self._backend.read(isMap(k) && isString(k.key) ? k.key : k)
+  }).create()
+  this._readCache = c
+  return c
+}
+
+// cacheEnabledFor: default the read cache on only for backends where each read is a
+// real network round-trip (s3/http/es) — for fs/archive it would just add up to
+// wikisearchcachettlms of staleness for pages edited outside this manager with no
+// latency benefit to justify it. wikisearchcache, if explicitly set, always wins.
+MiniAWikiManager.prototype._cacheEnabledFor = function() {
+  // isDef/toBoolean, not === true/false: config can arrive as a CLI-supplied string
+  // ("false"), same as wikisearchparallel's toBoolean() check elsewhere in this file.
+  if (isDef(this._config.wikisearchcache)) return toBoolean(this._config.wikisearchcache) === true
+  return this._backendType === "s3" || this._backendType === "http" || this._backendType === "es"
+}
+
+MiniAWikiManager.prototype._cachedBackendRead = function(path) {
+  if (!this._cacheEnabledFor()) return this._backend.read(path)
+  // .set()/.unset() on a "cache"-type channel do not reliably invalidate .get() (verified
+  // empirically — neither raw nor {key:...}-wrapped forms round-trip); only destroying and
+  // recreating the whole channel does, which is what write()/delete() do below instead.
+  var entry = this._ensureReadCache().get(path)
+  return isMap(entry) ? entry.result : entry
+}
+
+// _invalidateReadCache: the only proven-reliable way to invalidate this cache type is to
+// destroy the whole channel and let the next _cachedBackendRead() call lazily recreate
+// it — coarser than per-key invalidation, but write()/delete() are rare relative to
+// reads, and per-key .set()/.unset() do not actually work against .get()'s cache state.
+MiniAWikiManager.prototype._invalidateReadCache = function() {
+  if (!isObject(this._readCache)) return
+  try { this._readCache.destroy() } catch(e) {}
+  this._readCache = __
+}
+
+MiniAWikiManager.prototype._scanBudgetExceeded = function(scanState) {
+  return scanState.scanned >= scanState.budget || new Date().getTime() >= scanState.deadline
 }
 
 MiniAWikiManager.prototype.search = function(query, options) {
@@ -2756,6 +2927,21 @@ MiniAWikiManager.prototype.search = function(query, options) {
   }
   var results = []
 
+  // Shared count+time budget for the scan-fallback path, propagated through mount
+  // fan-out (not reset per mount) via opts.__scanState. Constructed unconditionally,
+  // before the Lucene branch, because a mount can fall back to scanning even when the
+  // root call hit its own index — the shared budget must be live in both branches.
+  var scanState = isObject(opts.__scanState) && isNumber(opts.__scanState.budget) && isNumber(opts.__scanState.deadline)
+    ? opts.__scanState
+    : {
+        scanned: 0,
+        budget: isNumber(Number(this._config.wikisearchscanbudget)) && Number(this._config.wikisearchscanbudget) > 0
+          ? Number(this._config.wikisearchscanbudget) : 1000,
+        deadline: new Date().getTime() + (isNumber(Number(this._config.wikisearchscanmaxms)) && Number(this._config.wikisearchscanmaxms) > 0
+          ? Number(this._config.wikisearchscanmaxms) : 15000),
+        truncated: false
+      }
+
   var searchIdx = this._ensureSearchIndex()
   var useIndex  = searchIdx.available() && (searchIdx.writable || searchIdx.exists())
   if (!forceScan && !opts.regex && scopedPath.length === 0 && useIndex) {
@@ -2765,19 +2951,7 @@ MiniAWikiManager.prototype.search = function(query, options) {
       if (isArray(luceneHits) && luceneHits.length > 0) {
         var self = this
         var validHits = luceneHits.map(function(h) {
-          var hitPath = h.id || (isMap(h.payload) ? h.payload.path : __)
-          var hitTitle = isMap(h.payload) && isString(h.payload.title) ? h.payload.title : (h.id || "")
-          if (compact) {
-            return { path: hitPath, title: hitTitle, description: "" }
-          }
-          // extract a real matching line out of the stored content instead of echoing the query
-          var loc = self._snippetFromContent(h.content, pattern, contextN)
-          var full = { path: hitPath, title: hitTitle, line: isNumber(h.line) ? h.line : loc.line, snippet: loc.snippet }
-          if (contextN > 0) {
-            full.contextBefore = loc.contextBefore
-            full.contextAfter  = loc.contextAfter
-          }
-          return full
+          return self._resultFromLuceneHit(h, compact, pattern, contextN)
         }).map(function(r) {
           if (!compact) return r
           var hitMeta = self._metaFor(r.path)
@@ -2786,8 +2960,10 @@ MiniAWikiManager.prototype.search = function(query, options) {
         }).filter(function(r) { return isString(r.path) && r.path.length > 0 && !self._isSearchExcludedPath(r.path) })
         if (validHits.length > 0) {
           // Fan out to mounts after primary results
-          var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length)
-          return this._withGraphHints(validHits.concat(mountResults), opts)
+          var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length, scanState)
+          var luceneOut = this._withGraphHints(validHits.concat(mountResults), opts)
+          if (scanState.truncated === true) { luceneOut.truncated = true; luceneOut.scanned = scanState.scanned; luceneOut.scanBudget = scanState.budget }
+          return luceneOut
         }
       }
     } catch(le) {
@@ -2799,26 +2975,75 @@ MiniAWikiManager.prototype.search = function(query, options) {
   pages = pages.filter(function(p) { return !self._isSearchExcludedPath(p) })
 
   var seenPaths = {}  // for compact dedup
-  for (var i = 0; i < pages.length && results.length < limit; i++) {
-    var raw = this._backend.read(pages[i])
-    if (!isString(raw)) continue
-    var parsed = this.parseFrontmatter(raw)
-    var title  = isString(parsed.meta.title) ? parsed.meta.title : pages[i]
-    var lines  = raw.split("\n")
 
-    var bodyStartLine = 0
-    if (searchIn === "body" && raw.startsWith("---\n")) {
-      var fmEnd = raw.indexOf("\n---\n", 4)
-      if (fmEnd >= 0) {
-        bodyStartLine = raw.substring(0, fmEnd + 5).split("\n").length - 1
+  if (toBoolean(this._config.wikisearchparallel) === true) {
+    // PARALLEL SCAN CAVEAT (wikisearchparallel, default false): this pForEach call submits
+    // work to the shared ForkJoinPool (__getThreadPool(), non-virtual) — the same pool an
+    // earlier pForEach-based read path used before it was reverted to serial reads after a
+    // deadlock reproduced only on the SECOND consecutive full `ojob tests/wiki.yaml` run in
+    // the same JVM (see the comment above _readAllPageDocs, ~line 797). That incident's root
+    // cause was never conclusively isolated: a jstack capture showed a stuck worker from an
+    // earlier pForEach batch starving a later listFilesRecursive call — but listFilesRecursive
+    // actually runs on a SEPARATE virtual-thread executor ($doV / __getThreadPool(true)), not
+    // the pool pForEach uses, so the literal "same pool" explanation does not cleanly match the
+    // runtime. A companion fix is proposed upstream (see openaf/PFOREACH_PLAN.md: pForEach's
+    // completion wait is currently unbounded in two places, and cancellation on timeout is
+    // best-effort). Until that lands, treat this as an unconfirmed-root-cause, empirically
+    // reproducible failure class — NOT something this design "fixes" or "avoids." This is why
+    // wikisearchparallel defaults to false, and why any locking here uses only bounded
+    // tryLock()/atomic primitives, never a blocking lock. Before flipping the default, or
+    // trusting this path in a long-lived process, run the full test suite twice in one JVM
+    // (see tests/wiki.yaml verification notes) and inspect a jstack after the second run.
+    var scanCounter   = $atomic(0)   // pages read, for the budget
+    var hitsCounter   = $atomic(0)   // results contributed, for early stop near `limit`
+    var localBudget   = scanState.budget - scanState.scanned
+    var localDeadline = scanState.deadline
+    // workers only ever read scanState.budget/deadline (captured above as immutable
+    // locals) and never write to scanState itself — only this single-threaded merge
+    // phase, after pForEach returns, updates scanState.scanned/.truncated
+    var perPageResults = pForEach(pages, function(p) {
+      if (scanCounter.get() >= localBudget || new Date().getTime() >= localDeadline) return __
+      if (hitsCounter.get() >= limit) return __
+      scanCounter.inc()
+      var raw = self._cachedBackendRead(p)
+      if (!isString(raw)) return __
+      var parsed = self.parseFrontmatter(raw)
+      // per-worker RegExp clone: pattern.lastIndex is stateful and racy if shared, and
+      // pattern.flags is unreliable under Rhino, so rebuild explicitly from caseSens
+      var localPattern = new RegExp(pattern.source, caseSens ? "g" : "gi")
+      var hit = self._scanPageForMatches(p, raw, parsed, localPattern, searchIn, compact, contextN)
+      if (!hit) return __
+      if (compact) { hitsCounter.inc(); return { path: p, raw: raw, parsed: parsed, hit: hit } }
+      hitsCounter.getAdd(hit.length)
+      return { path: p, hit: hit }
+    }, function(perr) { self._logFn("warn", "Parallel wiki scan read failed: " + __miniAErrMsg(perr)) }, false)
+
+    // single-threaded merge, preserves original page order — no lock needed here since
+    // nothing else runs concurrently with this loop
+    for (var pi = 0; pi < perPageResults.length && results.length < limit; pi++) {
+      var pr = perPageResults[pi]
+      if (!pr) continue
+      if (compact) {
+        if (!seenPaths[pr.path]) {
+          seenPaths[pr.path] = true
+          var cm = this._metaFor(pr.path, pr.raw, pr.parsed)
+          results.push({ path: pr.path, title: pr.hit.title, description: isMap(cm) && isString(cm.description) ? cm.description : "" })
+        }
+      } else {
+        for (var sj = 0; sj < pr.hit.length && results.length < limit; sj++) results.push(pr.hit[sj])
       }
     }
-
-    var matched = false
-    for (var li = bodyStartLine; li < lines.length && (compact ? !matched : results.length < limit); li++) {
-      pattern.lastIndex = 0
-      var m = pattern.exec(lines[li])
-      if (!m) continue
+    scanState.scanned += scanCounter.get()
+    if (scanCounter.get() >= localBudget || new Date().getTime() >= localDeadline) scanState.truncated = true
+  } else {
+    for (var i = 0; i < pages.length && results.length < limit; i++) {
+      if (this._scanBudgetExceeded(scanState)) { scanState.truncated = true; break }
+      scanState.scanned++
+      var raw = this._cachedBackendRead(pages[i])
+      if (!isString(raw)) continue
+      var parsed = this.parseFrontmatter(raw)
+      var hit = this._scanPageForMatches(pages[i], raw, parsed, pattern, searchIn, compact, contextN)
+      if (!hit) continue
 
       if (compact) {
         if (!seenPaths[pages[i]]) {
@@ -2826,39 +3051,78 @@ MiniAWikiManager.prototype.search = function(query, options) {
           var cachedMeta = this._metaFor(pages[i], raw, parsed)
           results.push({
             path: pages[i],
-            title: title,
+            title: hit.title,
             description: isMap(cachedMeta) && isString(cachedMeta.description) ? cachedMeta.description : ""
           })
         }
-        matched = true
       } else {
-        var matchIdx = m.index
-        var snippet  = lines[li].substring(Math.max(0, matchIdx - 60), matchIdx + 120).replace(/\n/g, " ").trim()
-        if (snippet.length === 0) snippet = lines[li].substring(0, 180).trim()
-
-        var result = { path: pages[i], title: title, line: li + 1, snippet: snippet }
-        if (contextN > 0) {
-          result.contextBefore = lines.slice(Math.max(0, li - contextN), li)
-          result.contextAfter  = lines.slice(li + 1, Math.min(lines.length, li + 1 + contextN))
-        }
-        results.push(result)
+        for (var si = 0; si < hit.length && results.length < limit; si++) results.push(hit[si])
       }
     }
   }
 
-  var mountResults = this._searchMounts(query, opts, compact, limit - results.length)
-  return this._withGraphHints(results.concat(mountResults), opts)
+  var mountResults = this._searchMounts(query, opts, compact, limit - results.length, scanState)
+  var out = this._withGraphHints(results.concat(mountResults), opts)
+  if (scanState.truncated === true) { out.truncated = true; out.scanned = scanState.scanned; out.scanBudget = scanState.budget }
+  return out
 }
 
-// _searchMounts: fan search out to all mounts, prefix paths with @name/
-MiniAWikiManager.prototype._searchMounts = function(query, opts, compact, remaining) {
+// _scanPageForMatches: shared per-page match logic used by both the sequential and
+// (wikisearchparallel) parallel scan paths — kept in exactly one place so they can't
+// silently diverge (see testSearchParallelMatchesSequentialResults). Returns, for
+// compact mode, {path,title} on the first matching line (or __ if none); for non-compact
+// mode, the full array of per-line snippet results (or __ if none). Non-compact mode
+// intentionally scans every matching line in the page rather than stopping at the
+// caller's overall `limit` mid-page — the caller truncates on push — trading a little
+// wasted scanning on the last matched page for one shared implementation.
+MiniAWikiManager.prototype._scanPageForMatches = function(path, raw, parsed, localPattern, searchIn, compact, contextN) {
+  var title = isString(parsed.meta.title) ? parsed.meta.title : path
+  var lines = raw.split("\n")
+  var bodyStartLine = 0
+  if (searchIn === "body" && raw.startsWith("---\n")) {
+    var fmEnd = raw.indexOf("\n---\n", 4)
+    if (fmEnd >= 0) bodyStartLine = raw.substring(0, fmEnd + 5).split("\n").length - 1
+  }
+  if (compact) {
+    for (var li = bodyStartLine; li < lines.length; li++) {
+      localPattern.lastIndex = 0
+      if (localPattern.exec(lines[li])) return { path: path, title: title }
+    }
+    return __
+  }
+  var snippetResults = []
+  for (var lj = bodyStartLine; lj < lines.length; lj++) {
+    localPattern.lastIndex = 0
+    var m = localPattern.exec(lines[lj])
+    if (!m) continue
+    var matchIdx = m.index
+    var snippet  = lines[lj].substring(Math.max(0, matchIdx - 60), matchIdx + 120).replace(/\n/g, " ").trim()
+    if (snippet.length === 0) snippet = lines[lj].substring(0, 180).trim()
+    var result = { path: path, title: title, line: lj + 1, snippet: snippet }
+    if (contextN > 0) {
+      result.contextBefore = lines.slice(Math.max(0, lj - contextN), lj)
+      result.contextAfter  = lines.slice(lj + 1, Math.min(lines.length, lj + 1 + contextN))
+    }
+    snippetResults.push(result)
+  }
+  return snippetResults.length > 0 ? snippetResults : __
+}
+
+// _searchMounts: fan search out to all mounts, prefix paths with @name/. The scanState
+// budget is shared across the whole fan-out, not reset per mount.
+MiniAWikiManager.prototype._searchMounts = function(query, opts, compact, remaining, scanState) {
   if (remaining <= 0) return []
   var mounts = isArray(this._mounts) ? this._mounts : []
   if (mounts.length === 0) return []
+  if (isObject(scanState) && this._scanBudgetExceeded(scanState)) { scanState.truncated = true; return [] }
   var combined = []
   var mountOpts = merge({}, opts)
   mountOpts.limit = remaining
+  // assigned AFTER merge(), not folded into it — relying on merge()'s recursive clone to
+  // pass this object through by reference for this shape is unverified and fragile
+  mountOpts.__scanState = scanState
   for (var mi = 0; mi < mounts.length && combined.length < remaining; mi++) {
+    if (isObject(scanState) && this._scanBudgetExceeded(scanState)) { scanState.truncated = true; break }
     var m = mounts[mi]
     try {
       var hits = m.manager.search(query, mountOpts)

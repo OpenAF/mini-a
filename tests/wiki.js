@@ -1091,6 +1091,26 @@
     }
   }
 
+  exports.testMcpWikiRestrictedReadAcceptsReferenceAlias = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "secret-page.md", "---\ntitle: Target\ndescription: A useful answer\n---\n# Target\nThe distinctive answer is saffron-owl.\nSecond line.")
+      global.__wikiManager = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikigraphsearchhints: false })
+      global.__wikiTool = __miniAMcpWikiCreateTool({ root: dir, access: "ro" }, global.__wikiManager)
+      global.__miniAMcpWiki = { restriction: new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictminquerychars: 4, wikirestrictpagecooldown: 1 }, { backend: "fs", root: dir }) }
+      var result = __miniAMcpWikiRestrictedSearch({ query: "saffron", limit: 20, regex: true, path: "secret-page.md" })
+      var ref = result.results[0].reference
+      // Models without a native tool-calling schema only ever see the "reference"
+      // field in search results, so they frequently call read with {"reference": ref}
+      // instead of {"path": ref}. This must resolve the same as {"path": ref}.
+      var read = __miniAMcpWikiRestrictedRead({ reference: ref })
+      ow.test.assert(read.content.indexOf("saffron-owl") >= 0, true, "read should accept 'reference' as an alias for 'path'")
+      ow.test.assert(isUnDef(read.error), true, "read via 'reference' alias should not error")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
 
   var assertRestrictedPolicy = function(policy, expected, message) {
     for(var key in expected) {
@@ -1817,6 +1837,137 @@
     } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
   }
 
+  // ── Scan budget / read cache / gated parallel scan ────────────────────────────
+
+  exports.testSearchScanBudgetCountCutoff = function() {
+    var dir = createTestDir()
+    try {
+      for (var i = 1; i <= 10; i++) {
+        var n = i < 10 ? "0" + i : String(i)
+        writePage(dir, "n" + n + ".md", "---\ntitle: N" + i + "\n---\nNothing relevant here.")
+      }
+      writePage(dir, "zzzmatch.md", "---\ntitle: Match\n---\nbudget-cutoff-keyword")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, wikisearchscanbudget: 3 })
+      var hits = wm.search("budget-cutoff-keyword", { forceScan: true })
+      ow.test.assert(hits.length, 0, "matching page sorts after the budget so it should not be reached")
+      ow.test.assert(hits.truncated, true, "result should be marked truncated")
+      ow.test.assert(hits.scanned, 3, "should have scanned exactly the budgeted number of pages")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchScanBudgetTimeCutoff = function() {
+    var dir = createTestDir()
+    try {
+      for (var i = 1; i <= 50; i++) {
+        var n = i < 10 ? "0" + i : String(i)
+        writePage(dir, "p" + n + ".md", "---\ntitle: P" + i + "\n---\nNothing relevant here.")
+      }
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, wikisearchscanmaxms: 1 })
+      var hits = wm.search("zzznomatchzzz", { forceScan: true })
+      ow.test.assert(hits.length, 0, "no matches expected")
+      ow.test.assert(hits.truncated, true, "result should be marked truncated by the time budget")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchCacheAvoidsRepeatedBackendRead = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "cachetest.md", "---\ntitle: Cache\n---\ncache-avoid-keyword")
+      // wikisearchcache defaults on only for s3/http/es; force it on here to exercise
+      // the cache mechanism itself regardless of that fs-specific default
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, wikisearchcache: true })
+      var calls = 0
+      var orig = wm._backend.read
+      wm._backend.read = function(p) { calls++; return orig(p) }
+      var hits1 = wm.search("cache-avoid-keyword", { forceScan: true })
+      ow.test.assert(hits1.length > 0, true, "first search should find the page")
+      var callsAfterFirst = calls
+      ow.test.assert(callsAfterFirst > 0, true, "first search should have read the backend")
+      var hits2 = wm.search("cache-avoid-keyword", { forceScan: true })
+      ow.test.assert(hits2.length > 0, true, "second search should still find the page")
+      ow.test.assert(calls, callsAfterFirst, "second search within the TTL window should not re-read the backend")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchCacheInvalidatedOnWrite = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisearchcache: true })
+      wm.write("page.md", { title: "Page" }, "# Page\noriginal-content-keyword")
+      var hits1 = wm.search("original-content-keyword", { forceScan: true, path: "page.md" })
+      ow.test.assert(hits1.length > 0, true, "should find original content")
+      wm.write("page.md", { title: "Page" }, "# Page\nupdated-content-keyword")
+      var hits2 = wm.search("updated-content-keyword", { forceScan: true, path: "page.md" })
+      ow.test.assert(hits2.length > 0, true, "should find updated content right after write, not a stale cached read")
+      var staleHits = wm.search("original-content-keyword", { forceScan: true, path: "page.md" })
+      ow.test.assert(staleHits.length, 0, "old content should no longer match after write")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testSearchCacheInvalidatedOnDelete = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisearchcache: true })
+      wm.write("page.md", { title: "Page" }, "# Page\ndelete-me-keyword")
+      var hits1 = wm.search("delete-me-keyword", { forceScan: true, path: "page.md" })
+      ow.test.assert(hits1.length > 0, true, "should find the page before delete (also populates the read cache)")
+      wm.delete("page.md")
+      var hits2 = wm.search("delete-me-keyword", { forceScan: true, path: "page.md" })
+      ow.test.assert(hits2.length, 0, "should not find stale cached content after delete")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
+  exports.testMountSearchFanoutSharesBudget = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir()
+    try {
+      for (var i = 1; i <= 5; i++) writePage(dir1, "a" + i + ".md", "---\ntitle: A" + i + "\n---\nnothing relevant")
+      for (var j = 1; j <= 5; j++) writePage(dir2, "b" + j + ".md", "---\ntitle: B" + j + "\n---\nnothing relevant")
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw", wikisearchscanbudget: 3 })
+      primary.attach("ext", { backend: "fs", root: dir2 })
+      var hits = primary.search("zzznomatchzzz", { forceScan: true })
+      ow.test.assert(hits.length, 0, "no matches expected")
+      ow.test.assert(hits.truncated, true, "combined scan should be marked truncated")
+      ow.test.assert(hits.scanned, 3, "budget should be exhausted by the primary scan alone, none left for the mount")
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  exports.testSearchParallelMatchesSequentialResults = function() {
+    var dir = createTestDir()
+    try {
+      for (var i = 1; i <= 20; i++) {
+        var n = i < 10 ? "0" + i : String(i)
+        var content = (i % 3 === 0)
+          ? "---\ntitle: Page" + i + "\n---\nParallel Match Keyword line " + i + "\nSecond match keyword line " + i
+          : "---\ntitle: Page" + i + "\n---\nNothing relevant here " + i
+        writePage(dir, "p" + n + ".md", content)
+      }
+      var wmSeq = new MiniAWikiManager({ backend: "fs", root: dir, wikisearchparallel: false })
+      var wmPar = new MiniAWikiManager({ backend: "fs", root: dir, wikisearchparallel: true })
+
+      var seqCompact = wmSeq.search("keyword", { forceScan: true, caseSensitive: false, limit: 100 })
+      var parCompact = wmPar.search("keyword", { forceScan: true, caseSensitive: false, limit: 100 })
+      ow.test.assert(parCompact.length > 0, true, "parallel compact search should find matches")
+      ow.test.assert(parCompact, seqCompact, "compact parallel results should exactly match sequential results")
+
+      var seqSnippets = wmSeq.search("keyword", { forceScan: true, caseSensitive: false, contextLines: 2, limit: 100 })
+      var parSnippets = wmPar.search("keyword", { forceScan: true, caseSensitive: false, contextLines: 2, limit: 100 })
+      ow.test.assert(parSnippets.length > 0, true, "parallel snippet search should find matches")
+      ow.test.assert(parSnippets, seqSnippets, "snippet parallel results should exactly match sequential results")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testAtPrefixRejectedByNormalizePath = function() {
     var dir = createTestDir()
     try {
@@ -2054,7 +2205,35 @@
       var hits = ro.search("zebrafish", { limit: 5 })
       ow.test.assert(hits.length > 0, true, "ro search should return index hits")
       ow.test.assert(hits[0].path, "notes/alpha.md", "ro search should find the right page")
+      ow.test.assert(isNumber(hits[0].score), true, "real Lucene search should expose a numeric relevance score")
       ro.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testLuceneSearchPreservesScoresAndOrder = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "alpha.md", "---\ntitle: Alpha\ndescription: Alpha page\n---\nalpha needle")
+      writePage(dir, "beta.md", "---\ntitle: Beta\ndescription: Beta page\n---\nbeta needle")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" })
+      var luceneHits = [
+        { id: "beta.md", content: "beta needle", payload: { title: "Beta" }, score: 4.25 },
+        { id: "alpha.md", content: "alpha needle", payload: { title: "Alpha" }, score: 1.5 }
+      ]
+      wm._ensureSearchIndex = function() {
+        return { type: "lucene", available: function() { return true }, writable: false, exists: function() { return true }, query: function() { return luceneHits } }
+      }
+
+      var compact = wm.search("needle", { limit: 5 })
+      ow.test.assert(compact.map(function(hit) { return hit.path }).join(","), "beta.md,alpha.md", "Lucene result order should be retained")
+      ow.test.assert(isNumber(compact[0].score), true, "compact Lucene results should expose numeric scores")
+      ow.test.assert(compact[0].score, 4.25, "compact result should preserve the Lucene score")
+
+      var detailed = wm.search("needle", { limit: 5, compact: false })
+      ow.test.assert(detailed.map(function(hit) { return hit.path }).join(","), "beta.md,alpha.md", "detailed Lucene result order should be retained")
+      ow.test.assert(isNumber(detailed[1].score), true, "detailed Lucene results should expose numeric scores")
+      ow.test.assert(detailed[1].score, 1.5, "detailed result should preserve the Lucene score")
+      wm.close()
     } finally { cleanupTestDir(dir) }
   }
 
@@ -2091,6 +2270,7 @@
       var hits = ro.search("platypus", { limit: 5 })
       ow.test.assert(hits.length > 0, true, "scan fallback should still find the page")
       ow.test.assert(hits[0].path, "notes/gamma.md", "scan fallback should find the right page")
+      ow.test.assert(isDef(hits[0].score), false, "scan fallback should not fabricate a relevance score")
       ro.list("", { withMeta: true })
       ro.tree("", 3)
       ro.browse("")

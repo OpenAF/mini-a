@@ -334,6 +334,11 @@ function __miniAMcpWikiRestrictedSearch(args) {
 }
 
 function __miniAMcpWikiRestrictedRead(args) {
+  // "reference" is an alias for "path": search results advertise the opaque token
+  // under a "reference" field, so callers -- especially models without native
+  // function-calling schemas, which never see the inputSchema's "path" property
+  // name -- frequently send it back as "reference" instead. Accept either.
+  if (isMap(args) && !isString(args.path) && isString(args.reference)) args.path = args.reference
   var state = global.__miniAMcpWiki && global.__miniAMcpWiki.restriction
   if (!state || !state.enabled) return global.__wikiTool.wiki({ operation: "read", path: args.path, lineStart: args.startLine, lineEnd: args.endLine, section: args.section, countLines: args.countLines, compact: args.compact })
   if (args.countLines === true) return __miniAMcpWikiRestrictedError("invalid-or-expired-reference")

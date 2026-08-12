@@ -19084,6 +19084,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               } else {
                 var wkHits = this._wikiManager.search(wkQuery, wkSearchOpts)
                 wkResult = wkHits.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
+                if (wkHits.truncated === true) {
+                  wkResult += "\n[NOTE] Search stopped early: scanned " + wkHits.scanned + " of the wiki's page budget (" + wkHits.scanBudget + "). Results may be incomplete; narrow the query or scope with path= to see more."
+                }
               }
             } else if (wkOp === "backlinks") {
               global.__mini_a_metrics.wiki_ops_search.inc()

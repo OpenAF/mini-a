@@ -947,6 +947,12 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikiartifactrefreshsecs` | number | `0` | Recheck HTTP or bundled-S3 artifact metadata between wiki requests; `0` disables periodic refresh |
 | `wikilexical` | SLON/JSON | `{ language: "english" }` | Lucene lexical configuration: language, synonym rules, and opt-in enhanced retrieval features |
 | `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
+| `wikisearchscanbudget` | number | `1000` | Max pages the wiki search scan-fallback path reads (shared across mounts) |
+| `wikisearchscanmaxms` | number | `15000` | Wall-clock budget in milliseconds for the scan-fallback path (shared across mounts) |
+| `wikisearchcache` | boolean | `true` for `s3`/`http`/`es`, `false` for `fs`/archive | Cache `backend.read()` results used by wiki search's scan-fallback path |
+| `wikisearchcachettlms` | number | `15000` | TTL in milliseconds for the wiki search read cache |
+| `wikisearchcachemaxsize` | number | `500` | Max entries retained in the wiki search read cache |
+| `wikisearchparallel` | boolean | `false` | Parallelize scan-fallback backend reads via `pForEach` (opt-in; see the wiki guide for the risk caveat) |
 | `wikilintstaleddays` | number | `90` | Days before a page without a recent update is flagged stale in lint |
 | `wikilintstreamthreshold` | number | `2000` | Switch lint into streaming mode above this many pages |
 | `wikilintmaxpairs` | number | `250000` | Max near-duplicate comparisons during streaming lint |

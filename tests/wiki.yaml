@@ -255,6 +255,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRetrieval
 
+- name: MiniA Wiki Tests::McpWikiRestrictedReadAcceptsReferenceAlias
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedReadAcceptsReferenceAlias
+
 - name: MiniA Wiki Tests::McpWikiRestrictedProfiles
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedProfiles
@@ -425,6 +429,34 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMountSearchFanout
 
+- name: MiniA Wiki Tests::SearchScanBudgetCountCutoff
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testSearchScanBudgetCountCutoff
+
+- name: MiniA Wiki Tests::SearchScanBudgetTimeCutoff
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testSearchScanBudgetTimeCutoff
+
+- name: MiniA Wiki Tests::SearchCacheAvoidsRepeatedBackendRead
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testSearchCacheAvoidsRepeatedBackendRead
+
+- name: MiniA Wiki Tests::SearchCacheInvalidatedOnWrite
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testSearchCacheInvalidatedOnWrite
+
+- name: MiniA Wiki Tests::SearchCacheInvalidatedOnDelete
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testSearchCacheInvalidatedOnDelete
+
+- name: MiniA Wiki Tests::MountSearchFanoutSharesBudget
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMountSearchFanoutSharesBudget
+
+- name: MiniA Wiki Tests::SearchParallelMatchesSequentialResults
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testSearchParallelMatchesSequentialResults
+
 - name: MiniA Wiki Tests::AtPrefixRejectedByNormalizePath
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testAtPrefixRejectedByNormalizePath
@@ -464,6 +496,10 @@ jobs:
 - name: MiniA Wiki Tests::ReadOnlyConsumesExistingLuceneIndex
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testReadOnlyConsumesExistingLuceneIndex
+
+- name: MiniA Wiki Tests::LuceneSearchPreservesScoresAndOrder
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneSearchPreservesScoresAndOrder
 
 - name: MiniA Wiki Tests::LexicalConfigDefaultsAndValidation
   to  : oJob Test
@@ -568,6 +604,7 @@ todo:
 - MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
 - MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
 - MiniA Wiki Tests::McpWikiRestrictedRetrieval
+- MiniA Wiki Tests::McpWikiRestrictedReadAcceptsReferenceAlias
 - MiniA Wiki Tests::McpWikiRestrictedProfiles
 - MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
 - MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences
@@ -610,6 +647,13 @@ todo:
 - MiniA Wiki Tests::MountReadRouted
 - MiniA Wiki Tests::ArchiveMountFederatesAndStaysReadOnly
 - MiniA Wiki Tests::MountSearchFanout
+- MiniA Wiki Tests::SearchScanBudgetCountCutoff
+- MiniA Wiki Tests::SearchScanBudgetTimeCutoff
+- MiniA Wiki Tests::SearchCacheAvoidsRepeatedBackendRead
+- MiniA Wiki Tests::SearchCacheInvalidatedOnWrite
+- MiniA Wiki Tests::SearchCacheInvalidatedOnDelete
+- MiniA Wiki Tests::MountSearchFanoutSharesBudget
+- MiniA Wiki Tests::SearchParallelMatchesSequentialResults
 - MiniA Wiki Tests::AtPrefixRejectedByNormalizePath
 - MiniA Wiki Tests::DetachRemovesMount
 - MiniA Wiki Tests::TypeAutoFilledOnWrite
@@ -620,6 +664,7 @@ todo:
 - MiniA Wiki Tests::MovePreservesRootedLinks
 - MiniA Wiki Tests::DriftGuard
 - MiniA Wiki Tests::ReadOnlyConsumesExistingLuceneIndex
+- MiniA Wiki Tests::LuceneSearchPreservesScoresAndOrder
 - MiniA Wiki Tests::LexicalConfigDefaultsAndValidation
 - MiniA Wiki Tests::LexicalManifestUpgradeContract
 - MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenIndexExists

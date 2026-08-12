@@ -536,6 +536,12 @@ Static HTTP wikis are read-only: pages are fetched live from `wikiurl`, while `l
 See [the complete wiki guide](docs/WIKI.md) for backends, console/MCP operations, mounts, graphs, and publishing static bundles.
 | `wikirestrictprofile` | `mcp-wiki-safe` restricted retrieval defaults profile (`tight`, `moderate`, or `relaxed`); `tight` preserves legacy defaults and individual `wikirestrict*` settings override profile values | `tight` |
 | `wikimetacache` | Enable sharded wiki page metadata cache | `true` |
+| `wikisearchscanbudget` | Max pages the wiki search scan-fallback path reads (shared across mounts) | `1000` |
+| `wikisearchscanmaxms` | Wall-clock budget in milliseconds for the scan-fallback path (shared across mounts) | `15000` |
+| `wikisearchcache` | Cache `backend.read()` results used by wiki search's scan-fallback path | `true` for `s3`/`http`/`es`, `false` for `fs`/archive |
+| `wikisearchcachettlms` | TTL in milliseconds for the wiki search read cache | `15000` |
+| `wikisearchcachemaxsize` | Max entries retained in the wiki search read cache | `500` |
+| `wikisearchparallel` | Parallelize scan-fallback backend reads via `pForEach` (opt-in; see [the wiki guide](docs/WIKI.md) for the risk caveat) | `false` |
 | `wikilintstaleddays` | Stale-page age threshold used by wiki lint | `90` |
 | `wikilintstreamthreshold` | Page-count threshold that switches lint into streaming mode | `2000` |
 | `wikilintmaxpairs` | Max near-duplicate pairs checked during streaming lint | `250000` |
