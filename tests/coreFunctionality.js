@@ -3592,4 +3592,33 @@
   exports.testKnownArgumentNamesIncludesLcJsonRetries = function() {
     ow.test.assert(MiniA._KNOWN_ARGUMENT_NAMES.lcjsonretries, true, "lcjsonretries should be registered in the known-args whitelist")
   }
+
+  exports.testParallelToolBatchReconcilesTimedOutPlaceholders = function() {
+    var agent = createAgent()
+    var prepared = []
+    var finalized = []
+    var warnings = []
+    agent._useTools = false
+    agent._prepareToolExecution = function(info) {
+      prepared.push(info)
+      return merge({}, info, { contextId: "timeout-context-" + prepared.length })
+    }
+    agent._finalizeToolExecution = function(info) { finalized.push(info) }
+    agent.fnI = function(level, message) { if (level === "warn") warnings.push(message) }
+
+    var completed = { toolName: "first", result: { ok: true }, error: false }
+    var results = agent._reconcileParallelToolBatchResults([
+      { toolName: "first", params: { id: 1 }, stepLabel: "1.1", updateContext: true },
+      { toolName: "retry-me", params: { id: 2 }, stepLabel: "1.2", updateContext: true }
+    ], [completed, __])
+
+    ow.test.assert(results.length, 2, "reconciliation should retain one result slot per requested tool")
+    ow.test.assert(results[0], completed, "completed tool results must be preserved unchanged")
+    ow.test.assert(results[1].error, true, "a missing pForEach result must become a tool failure")
+    ow.test.assert(results[1].timedOut, true, "a missing pForEach result must be marked as timed out")
+    ow.test.assert(finalized.length, 1, "only the missing tool should receive synthetic finalization")
+    ow.test.assert(finalized[0].toolName, "retry-me", "the synthetic failure must name the missing tool")
+    ow.test.assert(finalized[0].observation.indexOf("retry this call") >= 0, true, "the model observation should provide retry guidance")
+    ow.test.assert(warnings.length, 1, "the missing result should emit one diagnostic warning")
+  }
 })()

@@ -12282,6 +12282,53 @@ MiniA.prototype._getCachedSystemPrompt = function(templateKey, payload, template
   return prompt
 }
 
+// pForEach returns placeholders for entries belonging to a timed-out partition. Convert
+// those placeholders into ordinary tool failures so the model sees precisely which calls
+// it may retry, while preserving observations that completed in other partitions.
+MiniA.prototype._reconcileParallelToolBatchResults = function(batch, batchResults) {
+  var entries = isArray(batch) ? batch : []
+  var results = isArray(batchResults) ? batchResults.slice() : []
+  var parent = this
+
+  entries.forEach(function(entry, index) {
+    if (isObject(results[index])) return
+
+    var toolName = isMap(entry) && isString(entry.toolName) ? entry.toolName : "(unknown tool)"
+    var params = isMap(entry) ? entry.params : __
+    var stepLabel = isMap(entry) ? entry.stepLabel : __
+    var message = "Parallel MCP result unavailable for '" + toolName +
+      "' (its pForEach partition did not complete; retry this call if it is still needed)."
+    var context = parent._prepareToolExecution({
+      action       : toolName,
+      params       : params,
+      stepLabel    : stepLabel,
+      updateContext: isMap(entry) && isBoolean(entry.updateContext) ? entry.updateContext : !parent._useTools
+    })
+
+    parent.fnI("warn", message)
+    parent._finalizeToolExecution({
+      toolName     : toolName,
+      params       : params,
+      result       : { error: message, timedOut: true },
+      observation  : message,
+      stepLabel    : stepLabel,
+      updateContext: context.updateContext,
+      error        : true,
+      context      : context,
+      contextId    : context.contextId
+    })
+    results[index] = {
+      toolName : toolName,
+      result   : { error: message, timedOut: true },
+      error    : true,
+      timedOut : true,
+      contextId: context.contextId
+    }
+  })
+
+  return results
+}
+
 MiniA.prototype._executeParallelToolBatch = function(batch, options) {
   var entries = isArray(batch) ? batch : []
   if (entries.length === 0) return []
@@ -12419,7 +12466,7 @@ MiniA.prototype._executeParallelToolBatch = function(batch, options) {
 
   var seq = entries.length <= 1
   results = pForEach(entries, execFn, errFn, seq)
-  return results
+  return this._reconcileParallelToolBatchResults(entries, results)
 }
 
 MiniA.prototype._deduplicateContext = function(contextArray) {

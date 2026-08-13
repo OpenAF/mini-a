@@ -187,6 +187,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testNormalizeToolResultVariants
 
+- name: MiniA Core Tests::ParallelToolBatchReconcilesTimedOutPlaceholders
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testParallelToolBatchReconcilesTimedOutPlaceholders
+
 - name: MiniA Core Tests::ToolStepLabelFallback
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -832,6 +837,7 @@ todo:
 - MiniA Core Tests::CategorizeError
 - MiniA Core Tests::ErrorHistory
 - MiniA Core Tests::NormalizeToolResult
+- MiniA Core Tests::ParallelToolBatchReconcilesTimedOutPlaceholders
 - MiniA Core Tests::ToolStepLabelFallback
 - MiniA Core Tests::HookFinalizationSkipsPreparedToolContexts
 - MiniA Core Tests::PromptProfileHelpers
