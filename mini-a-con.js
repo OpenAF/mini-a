@@ -325,36 +325,36 @@ try {
       // Start model management mode
       global._args = args
       load("mini-a-modelman.js")
-      exit(0)
+      exit(0, true)
     } else if (toBoolean(args.mcptest) === true) {
       // Start MCP test mode
       global._args = args
       load("mini-a-mcptest.js")
-      exit(0)
+      exit(0, true)
     } else if (toBoolean(args.memoryman) === true) {
       // Start memory management mode
       global._args = args
       load("mini-a-memoryman.js")
-      exit(0)
+      exit(0, true)
     } else if (toBoolean(args.dream) === true) {
       // Start dream (sleep) pass
       global._args = args
       load("mini-a-dreams.js")
-      exit(0)
+      exit(0, true)
     } else if (toBoolean(args.workermode) === true) {
       // Start worker mode
       oJobRunFile(miniABasePath + "/mini-a-worker.yaml", args, genUUID(), __, false)
-      exit(0)
+      exit(0, true)
     } else if (toBoolean(args.web) === true || toBoolean(args.onport) === true) {
       // Start web mode
       oJobRunFile(miniABasePath + "/mini-a-web.yaml", args, genUUID(), __, false)
-      exit(0)
+      exit(0, true)
     } else if ((isDef(args.goal) || isDef(args.agent) || isDef(args.agentfile)) && hasRunnableExecArg !== true) {
       // Start cli mode
       if (!isString(args.goal)) args.goal = String(args.goal)
       if (!isDef(args.goal) || args.goal === "undefined" || args.goal === "null") args.goal = ""
       oJobRunFile(miniABasePath + "/mini-a.yaml", args, genUUID(), __, false)
-      exit(0)
+      exit(0, true)
     }
   }
 
@@ -6401,7 +6401,7 @@ try {
     var execSuccess = executeCustomSlashTemplate(String(execArgValue))
     finalizeSession(execSuccess ? "exec" : "exec-error")
     if (isDef(ow.oJob)) ow.oJob.stop()
-    exit(execSuccess ? 0 : 1)
+    exit(execSuccess ? 0 : 1, true)
   }
 
   bootstrapWorkerRegistration()
@@ -6954,9 +6954,11 @@ try {
 
   finalizeSession("exit")
   //if (isDef(ow.oJob)) ow.oJob.stop()
-  // Use a regular JVM exit so Mini-A's global MCP cleanup hook also runs.
+  // force=true runs OpenAF's registered shutdown hooks (including Mini-A's global MCP cleanup
+  // hook) synchronously and then exits at the OS level, avoiding a JVM teardown stall that can
+  // otherwise take several seconds when a JIT compilation is still in flight.
   // oJob.stop() remains disabled above because it can wait on unrelated jobs.
-  exit(0)
+  exit(0, true)
 } catch(_ge) {
   $err(_ge)
 }
