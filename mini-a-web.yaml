@@ -719,7 +719,7 @@ help:
     mandatory: false
     options  : ["true", "false"]
   - name     : wikilexical
-    desc     : SLON/JSON Lucene lexical configuration (default `{language: 'english'}`)
+    desc     : "SLON/JSON Lucene lexical configuration (default `{language: 'english'}`)"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
     mandatory: false
   - name     : wikilintstaleddays
