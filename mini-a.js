@@ -354,7 +354,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • Set "action" to an array — each entry needs "action" + "thought" + its payload field:{{#if useshell}}
   Shell: [{"action":"shell","thought":"why","command":"ls"},{"action":"shell","thought":"why","command":"pwd"}]{{/if}}{{#if actionsList}}
   Custom: [{"action":"read_file","thought":"why","params":{"path":"a.txt"}},{"action":"read_file","thought":"why","params":{"path":"b.txt"}}]{{/if}}
-• Use "action"/"command"/"params" — NOT "name".{{#if useMcpProxy}} For a proxy-dispatch call, put downstream tool inputs in params.arguments; do not put them beside tool or connection.{{else}} Do not use a function-calling arguments envelope.{{/if}}
+• Use "action"/"command"/"params" — NOT "name".{{#if useMcpProxy}} For a proxy-dispatch call, put downstream tool inputs in params.arguments; do not put them beside tool or connection. Identify the downstream tool with params.tool (a string, e.g. "tool": "apply_patch") — NEVER params.name.{{else}} Do not use a function-calling arguments envelope.{{/if}}
 • Add top-level "parallel": true to run all actions simultaneously{{#if useshell}} (shell commands execute in parallel){{/if}}
 {{#if usetoolsActual}}• **NOTE**: MCP tools are NOT called through action arrays - use function calling instead (see MCP TOOL ACCESS section below){{/if}}
 
@@ -393,7 +393,7 @@ Arguments: {
 {{/if}}
 {{#if useMcpProxy}}• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}{{/if}}
 {{else}}
-• Call MCP tools through the JSON "action" field{{#if useMcpProxy}}, using "proxy-dispatch" (a nested "action":"call" is required inside params even though the top-level action is already "proxy-dispatch"){{else}}, just like shell or custom actions{{/if}}
+• Call MCP tools through the JSON "action" field{{#if useMcpProxy}}, using "proxy-dispatch" (a nested "action":"call" is required inside params even though the top-level action is already "proxy-dispatch"; name the downstream tool with params.tool, e.g. {"action":"call","tool":"apply_patch","arguments":{...}}){{else}}, just like shell or custom actions{{/if}}
 • The JSON "action" field can be: {{{actionFieldValues}}}{{#if useMcpProxy}} | proxy-dispatch{{/if}}
 {{#if includeExamples}}
 ### How to call MCP tools:
