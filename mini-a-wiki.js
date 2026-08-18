@@ -1721,6 +1721,22 @@ MiniAWikiManager.prototype.regenerateIndexes = function(options) {
   var dirs = Object.keys(byDir)
   if (dirs.indexOf("") < 0) dirs.push("")
 
+  // A directory that holds only nested subdirectories (no direct page of its own, e.g. "a/"
+  // when the only page is "a/b/c/page.md") would otherwise never get an index — synthesize a
+  // pass-through entry (no direct pages, just child-section links) for every such ancestor, so
+  // the index chain reaches root instead of permanently stranding lint's missing_index checks
+  // on directories this function could never actually produce.
+  var dirSet = {}
+  dirs.forEach(function(d) { dirSet[d] = true })
+  dirs.slice().forEach(function(d) {
+    var parts = d.replace(/\/$/, "").split("/").filter(function(s) { return s.length > 0 })
+    var acc = ""
+    for (var pi = 0; pi < parts.length - 1; pi++) {
+      acc += parts[pi] + "/"
+      if (!dirSet[acc]) { dirSet[acc] = true; dirs.push(acc) }
+    }
+  })
+
   var infoFor = function(p) {
     var m = self._metaFor(p)
     return {
