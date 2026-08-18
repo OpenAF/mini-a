@@ -591,7 +591,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       defaultResult.mode = "plan"
       defaultResult.lint_before = lintSummary(lintBeforeDry)
       defaultResult.lint_after = lintSummary(lintBeforeDry)
-      defaultResult.repairs = self._repairWikiLint(wmDry, lintBeforeDry, { dryRun: true, minPages: self._args.dreamwikiminpages })
+      defaultResult.repairs = self._repairWikiLint(wmDry, lintBeforeDry, { dryRun: true })
       defaultResult.issues_fixed = defaultResult.repairs.fixed.map(function(issue) { return issue.type + ":" + issue.page })
       proposal.repairs = defaultResult.repairs
       // Preview-only graph build: same structural (+ semantic, if defaulted/enabled) pass apply
@@ -647,7 +647,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
 
       var loopResult = self._runWikiRepairLoop(wmApply, lintBefore, function() {
         return wmApply.lint(lintMemMgr, { staleDays: staleDays })
-      }, 3, { minPages: self._args.dreamwikiminpages })
+      }, 3, {})
       defaultResult.repairs = loopResult.repairs
       defaultResult.repair_passes = loopResult.passes
       defaultResult.pages_changed = loopResult.repairs.pages_changed
@@ -655,10 +655,6 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         defaultResult.issues_fixed.push(issue.type + ":" + issue.page)
         if (issue.type === "missing_index") defaultResult.indexes_created++
         else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
-      })
-      defaultResult.repairs.skipped.forEach(function(issue) {
-        if (issue.reason === "below-min-pages") defaultResult.skipped_uncertain_moves.push(
-          "apply skipped: page count " + issue.page_count + " is below dreamwikiminpages " + issue.min_pages)
       })
 
       // Always finalize, even when the deterministic fixes were skipped: a small wiki
@@ -693,7 +689,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
 
       var repairLoopResult = self._runWikiRepairLoop(wmRepair, repairLintBefore, function() {
         return wmRepair.lint(lintMemMgr, { staleDays: staleDays })
-      }, 3, { minPages: self._args.dreamwikiminpages })
+      }, 3, {})
       defaultResult.repairs = repairLoopResult.repairs
       defaultResult.repair_passes = repairLoopResult.passes
       defaultResult.pages_changed = repairLoopResult.repairs.pages_changed
@@ -860,7 +856,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     defaultResult.lint_before = lintSummary(reorgLintBefore)
     var reorgLoopResult = self._runWikiRepairLoop(wmFinal, reorgLintBefore, function() {
       return wmFinal.lint(lintMemMgr, { staleDays: staleDays })
-    }, 1, { minPages: self._args.dreamwikiminpages })
+    }, 1, {})
     defaultResult.repairs = reorgLoopResult.repairs
     defaultResult.repair_passes = reorgLoopResult.passes
     defaultResult.pages_changed += reorgLoopResult.repairs.pages_changed
@@ -919,6 +915,13 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     return out
   }
   issues.forEach(function(issue) {
+    // description is never synthesized (would just be an invented, low-quality guess) — report
+    // it as an honest, explicit skip distinct from "issue type never attempted" so callers can
+    // tell "field we chose not to auto-fill" apart from "we didn't even try this issue type".
+    if (issue.type === "missing_frontmatter" && issue.field === "description") {
+      result.skipped.push(copyIssue(issue, { reason: "no-deterministic-value" }))
+      return
+    }
     if (repairable[issue.type]) result.candidates.push(copyIssue(issue))
     else result.skipped.push(copyIssue(issue, { reason: "requires-semantic-judgment" }))
   })
@@ -933,8 +936,9 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
 
   // Frontmatter and headings are deliberately coalesced into one physical write per page.
   var pageIssues = {}
+  var renamedAnchors = {}
   issues.filter(function(i) {
-    return i.type === "missing_frontmatter" || i.type === "missing_h1" || i.type === "multiple_h1" ||
+    return (i.type === "missing_frontmatter" && i.field !== "description") || i.type === "missing_h1" || i.type === "multiple_h1" ||
       i.type === "title_h1_mismatch" || i.type === "heading_hierarchy"
   }).forEach(function(i) { if (!isArray(pageIssues[i.page])) pageIssues[i.page] = []; pageIssues[i.page].push(i) })
   Object.keys(pageIssues).sort().forEach(function(path) {
@@ -956,9 +960,13 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
       meta.created = isDef(meta.timestamp) && String(meta.timestamp).trim().length > 0 ? meta.timestamp : new Date().toISOString()
       changed = true
     }
+    // wm.write() always unconditionally stamps meta.updated on every write, unlike created
+    // (only set if missing) — so forcing a write here is sufficient, no explicit assignment needed.
+    if (isUnDef(meta.updated) || String(meta.updated).trim().length === 0) { changed = true }
     var lines = body.split(/\r?\n/)
     headings = wm._markdownHeadings(body)
     h1s = headings.filter(function(h) { return h.level === 1 })
+    var h1OldAnchor = h1s.length > 0 ? wm._headingAnchor(h1s[0].text) : null
     if (h1s.length === 0 && isString(meta.title) && meta.title.length > 0) {
       body = "# " + meta.title + (body.length > 0 ? "\n\n" + body.replace(/^\s+/, "") : "")
       changed = true
@@ -980,10 +988,50 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     }
     if (changed) {
       var wr = wm.write(path, meta, body)
-      if (isMap(wr) && wr.ok === true) pageIssues[path].forEach(function(i) { markFixed(i, { reason: "frontmatter-heading-normalized" }) })
+      if (isMap(wr) && wr.ok === true) {
+        pageIssues[path].forEach(function(i) { markFixed(i, { reason: "frontmatter-heading-normalized" }) })
+        if (h1s.length > 0) {
+          var h1NewAnchor = wm._headingAnchor(meta.title)
+          if (h1OldAnchor && h1NewAnchor && h1OldAnchor !== h1NewAnchor) renamedAnchors[path] = { oldAnchor: h1OldAnchor, newAnchor: h1NewAnchor }
+        }
+      }
       else pageIssues[path].forEach(function(i) { result.skipped.push(copyIssue(i, { reason: "page-not-updated" })) })
     }
   })
+
+  // A retitled H1 changes its anchor slug, which would otherwise strand every inbound
+  // [...](page.md#old-slug) link as a permanently-unfixable invalid_anchor (the anchor
+  // check has no way to know the heading was renamed, not removed). Rewrite inbound
+  // md-style anchors to the new slug in the same pass, before that can happen. Wiki-style
+  // [[...]] links never carry anchor fragments through _wikiLinkTarget/lint today, so only
+  // md-style links need handling here.
+  if (Object.keys(renamedAnchors).length > 0) {
+    var anchorScanPages = wm.list("").filter(function(p) { return /\.md$/i.test(p) && p !== "AGENTS.md" && p !== "log.md" })
+    anchorScanPages.forEach(function(srcPage) {
+      var pg = wm.read(srcPage)
+      if (!isMap(pg) || !isString(pg.body)) return
+      var rewrites = []
+      var newBody = pg.body.replace(/\[([^\]]*)\]\(([^)]+)\)/g, function(all, label, target) {
+        var trimmed = String(target).trim(), bits = trimmed.split("#")
+        if (bits.length < 2) return all
+        var linkPath = bits.shift(), anchorPart = bits.join("#")
+        var resolvedTarget = linkPath.length === 0 ? srcPage : wm.resolveLink(srcPage, linkPath)
+        var rn = isString(resolvedTarget) ? renamedAnchors[resolvedTarget] : null
+        if (!rn || anchorPart.toLowerCase() !== rn.oldAnchor) return all
+        rewrites.push({ target: trimmed, resolved: resolvedTarget, from: rn.oldAnchor, to: rn.newAnchor })
+        return "[" + label + "](" + linkPath + "#" + rn.newAnchor + ")"
+      })
+      if (rewrites.length > 0 && newBody !== pg.body) {
+        var wrAnchor = wm.write(srcPage, pg.meta, newBody)
+        if (isMap(wrAnchor) && wrAnchor.ok === true) {
+          rewrites.forEach(function(rw) {
+            markFixed({ type: "inbound_anchor_rewrite", page: srcPage, target: rw.target },
+              { resolved: rw.resolved, from: rw.from, to: rw.to, reason: "heading-renamed" })
+          })
+        }
+      }
+    })
+  }
 
   // Build one catalogue for this pass. Resolution classes are tried in strength order;
   // a class is accepted only when it produces one candidate. This is a full read of every
@@ -1025,10 +1073,31 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     attempts.push({ name: "unique-slug-title", ambiguous: "ambiguous-title", matches: catalogue.filter(function(c) { return slug(c.title) === slug(base) }) })
     for (var ai = 0; ai < attempts.length; ai++) {
       var matches = unique(attempts[ai].matches)
+      if (matches.length > 1 && attempts[ai].ambiguous) {
+        // Narrow to a same-directory candidate before giving up as ambiguous — a single,
+        // easily-explainable rule (no recency/similarity scoring) for the common case of
+        // same-named pages living in different sections.
+        var sameDir = matches.filter(function(c) { return wm._pageDir(c.path) === wm._pageDir(issue.page) })
+        if (sameDir.length === 1) matches = sameDir
+      }
       if (matches.length > 1) return { reason: attempts[ai].ambiguous || "ambiguous-target" }
       if (matches.length === 1) {
-        if (anchor.length > 0 && matches[0].anchors.indexOf(anchor.toLowerCase()) < 0) return { reason: "invalid-anchor" }
-        return { candidate: matches[0], strategy: attempts[ai].name, anchor: anchor }
+        // Always write back the canonical (already-lowercase) slug, not the link's original
+        // casing, whether it matched exact or only after normalization below.
+        var resolvedAnchor = anchor.length > 0 ? anchor.toLowerCase() : anchor
+        if (anchor.length > 0 && matches[0].anchors.indexOf(anchor.toLowerCase()) < 0) {
+          // The exact-text check just failed — the same computation lint used to raise this
+          // issue in the first place, so retrying it verbatim would always fail again. Widen
+          // (not force) the match: normalize the link's own anchor text through the same
+          // slugifier used to build heading anchors, so raw heading text, case, punctuation,
+          // or %-encoding differences still resolve to the real heading's canonical slug.
+          var decodedAnchor = anchor
+          try { decodedAnchor = decodeURIComponent(anchor) } catch(eDecode) {}
+          var normalizedAnchor = wm._headingAnchor(decodedAnchor)
+          if (matches[0].anchors.indexOf(normalizedAnchor) < 0) return { reason: "invalid-anchor" }
+          resolvedAnchor = normalizedAnchor
+        }
+        return { candidate: matches[0], strategy: attempts[ai].name, anchor: resolvedAnchor }
       }
     }
     return { reason: "no-candidate" }
@@ -1038,13 +1107,17 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     if (!found.candidate) { result.skipped.push(copyIssue(issue, { reason: found.reason })); return }
     var page = wm.read(issue.page)
     if (!isMap(page) || !isString(page.body)) { result.skipped.push(copyIssue(issue, { reason: "page-not-readable" })); return }
-    var oldTarget = String(issue.target), replaced = false, body
+    var oldTarget = String(issue.target), replacedCount = 0, body
     if (issue.linkType === "wiki") {
       // Wiki-style [[...]] targets are root-relative and anchor-stripped by _wikiLinkTarget
       // (see lint's link extraction), so the stored target matches the candidate path directly.
+      // Rewrite every occurrence of this target in one write (not just the first) — lint dedups
+      // link issues by raw target text per page, so a page with the same broken target 2+ times
+      // only ever produces one issue; without this, reorg mode (1 repair pass) would never
+      // converge such a page at all.
       body = page.body.replace(/\[\[([^\]]+)\]\]/g, function(all, inner) {
-        if (replaced || wm._wikiLinkTarget(inner) !== oldTarget) return all
-        replaced = true
+        if (wm._wikiLinkTarget(inner) !== oldTarget) return all
+        replacedCount++
         var pipeAt = inner.indexOf("|")
         return "[[" + found.candidate.path + (pipeAt >= 0 ? inner.substring(pipeAt) : "") + "]]"
       })
@@ -1052,11 +1125,12 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
       var rel = found.candidate.path === issue.page && found.anchor.length > 0 ? "" : wm._relativePath(issue.page, found.candidate.path)
       var newTarget = rel + (found.anchor.length > 0 ? "#" + found.anchor : "")
       body = page.body.replace(/\[([^\]]*)\]\(([^)]+)\)/g, function(all, label, target) {
-        if (!replaced && String(target).trim() === oldTarget) { replaced = true; return "[" + label + "](" + newTarget + ")" }
-        return all
+        if (String(target).trim() !== oldTarget) return all
+        replacedCount++
+        return "[" + label + "](" + newTarget + ")"
       })
     }
-    if (!replaced || body === page.body) { result.skipped.push(copyIssue(issue, { reason: "link-not-rewritable" })); return }
+    if (replacedCount === 0 || body === page.body) { result.skipped.push(copyIssue(issue, { reason: "link-not-rewritable" })); return }
     var wr = wm.write(issue.page, page.meta, body)
     if (isMap(wr) && wr.ok === true) markFixed(issue, { resolved: found.candidate.path, strategy: found.strategy, reason: found.strategy })
   })
@@ -1110,6 +1184,27 @@ MiniADreams.prototype._runWikiRepairLoop = function(wm, initialLint, lintFn, max
     currentLint = lintFn()
   }
   allRepairs.pages_changed = Object.keys(changedPageSet).length
+  // A persistently-unresolvable issue (e.g. a genuinely broken anchor, or a page still
+  // ambiguous) is re-emitted on every pass that re-lints it, once per pass — dedup by full
+  // issue identity (not just type+page+target, which would wrongly collapse e.g. distinct
+  // missing_frontmatter fields on the same page into one entry) so a caller's count reflects
+  // distinct issues, not repeated re-detections of the same one. Keeps the last (most
+  // informative) occurrence of each key.
+  var dedupKey = function(i) {
+    return [i.type, i.page || "", i.target || "", i.field || "", i.line || "", i.parent || ""].join("|")
+  }
+  var dedupList = function(arr) {
+    var seen = {}, out = []
+    arr.forEach(function(i) {
+      var k = dedupKey(i), idx = seen[k]
+      if (isUnDef(idx)) { seen[k] = out.length; out.push(i) }
+      else out[idx] = i
+    })
+    return out
+  }
+  allRepairs.fixed = dedupList(allRepairs.fixed)
+  allRepairs.skipped = dedupList(allRepairs.skipped)
+  allRepairs.candidates = dedupList(allRepairs.candidates)
   return { repairs: allRepairs, passes: passes }
 }
 

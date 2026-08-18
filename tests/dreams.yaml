@@ -119,9 +119,41 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiRepairModeFixesWithoutFinalizing
 
+- name: MiniA Dreams Tests::DreamWikiRepairFixesNormalizableInvalidAnchor
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairFixesNormalizableInvalidAnchor
+
+- name: MiniA Dreams Tests::DreamWikiRepairAmbiguousLinkPrefersSameDirectory
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairAmbiguousLinkPrefersSameDirectory
+
+- name: MiniA Dreams Tests::DreamWikiRepairRewritesAllOccurrencesOfSameBrokenLink
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairRewritesAllOccurrencesOfSameBrokenLink
+
+- name: MiniA Dreams Tests::DreamWikiRepairRewritesInboundAnchorsOnH1Rename
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairRewritesInboundAnchorsOnH1Rename
+
+- name: MiniA Dreams Tests::DreamWikiRepairFixesMissingUpdatedOnlyIssue
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairFixesMissingUpdatedOnlyIssue
+
+- name: MiniA Dreams Tests::DreamWikiRepairDescriptionNeverPhantomFixed
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairDescriptionNeverPhantomFixed
+
+- name: MiniA Dreams Tests::DreamWikiRepairLoopDedupsSkipsAcrossPasses
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiRepairLoopDedupsSkipsAcrossPasses
+
 - name: MiniA Dreams Tests::DreamWikiRepairModeReachesRootOnDeepNewTree
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiRepairModeReachesRootOnDeepNewTree
+
+- name: MiniA Dreams Tests::DreamWikiApplyFinalizeSynthesizesAncestorIndexesOnDeepTree
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiApplyFinalizeSynthesizesAncestorIndexesOnDeepTree
 
 - name: MiniA Dreams Tests::DreamWikiLintModeIsGone
   to  : oJob Test
@@ -185,7 +217,15 @@ todo:
 - MiniA Dreams Tests::DreamWikiApplyRepairsCertainLintOnly
 - MiniA Dreams Tests::DreamWikiRepairDryRunAndIdempotence
 - MiniA Dreams Tests::DreamWikiRepairModeFixesWithoutFinalizing
+- MiniA Dreams Tests::DreamWikiRepairFixesNormalizableInvalidAnchor
+- MiniA Dreams Tests::DreamWikiRepairAmbiguousLinkPrefersSameDirectory
+- MiniA Dreams Tests::DreamWikiRepairRewritesAllOccurrencesOfSameBrokenLink
+- MiniA Dreams Tests::DreamWikiRepairRewritesInboundAnchorsOnH1Rename
+- MiniA Dreams Tests::DreamWikiRepairFixesMissingUpdatedOnlyIssue
+- MiniA Dreams Tests::DreamWikiRepairDescriptionNeverPhantomFixed
+- MiniA Dreams Tests::DreamWikiRepairLoopDedupsSkipsAcrossPasses
 - MiniA Dreams Tests::DreamWikiRepairModeReachesRootOnDeepNewTree
+- MiniA Dreams Tests::DreamWikiApplyFinalizeSynthesizesAncestorIndexesOnDeepTree
 - MiniA Dreams Tests::DreamWikiLintModeIsGone
 - MiniA Dreams Tests::DreamWikiReindexModeRebuildsSearchIndex
 - MiniA Dreams Tests::DreamWikiGraphModeRebuildsGraph

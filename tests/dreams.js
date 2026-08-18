@@ -610,6 +610,156 @@
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
+  exports.testDreamWikiRepairFixesNormalizableInvalidAnchor = function() {
+    // The anchor check that raises invalid_anchor and the check that would repair it used to be
+    // the exact same computation, so it always re-failed. A raw (unslugified) heading-text
+    // anchor should now resolve via normalization and get rewritten to the canonical slug.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("target.md", { title: "Target", description: "d" }, "# Target\n\n## Real Heading\n\nBody.")
+      wm.write("source.md", { title: "Source", description: "d" }, "# Source\n\nSee [link](target.md#Real Heading).")
+      wm.close()
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.repairs.fixed.some(function(i) { return i.type === "invalid_anchor" && i.page === "source.md" }), true, "a normalizable anchor should be fixed")
+      ow.test.assert(io.readFileString(dir + "/source.md").indexOf("target.md#real-heading") >= 0, true, "the rewritten link should use the canonical slug")
+      ow.test.assert(res.lint_after.errors, 0, "no lint errors should remain")
+
+      // A genuinely nonexistent heading must still be skipped — normalization widens matching,
+      // it does not force success.
+      var dir2 = makeWikiDir()
+      try {
+        var wm2 = new MiniAWikiManager({ backend: "fs", root: dir2, access: "rw" }, function() {})
+        wm2.write("target2.md", { title: "Target2", description: "d" }, "# Target2\n\n## Real Heading\n\nBody.")
+        wm2.write("source2.md", { title: "Source2", description: "d" }, "# Source2\n\nSee [link](target2.md#does-not-exist).")
+        wm2.close()
+        var res2 = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir2, dreamwikimode: "repair" }, function() {}).dreamWiki()
+        ow.test.assert(res2.repairs.skipped.some(function(i) { return i.type === "invalid_anchor" && i.reason === "invalid-anchor" }), true, "a genuinely nonexistent anchor must still be skipped")
+      } finally { try { io.rm(dir2) } catch(e) {} }
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairAmbiguousLinkPrefersSameDirectory = function() {
+    // Two same-titled/aliased pages in different directories create an ambiguous basename
+    // match; a linking page in the same directory as one of them should resolve to that one.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("docs/setup.md", { title: "Setup", description: "d" }, "# Setup\n\nDocs setup.")
+      wm.write("guide/setup.md", { title: "Setup", description: "d" }, "# Setup\n\nGuide setup.")
+      wm.write("docs/source.md", { title: "Source", description: "d" }, "# Source\n\nSee [setup](old/setup.md).")
+      wm.write("root-source.md", { title: "RootSource", description: "d" }, "# RootSource\n\nSee [setup](old/setup.md).")
+      wm.close()
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.repairs.fixed.some(function(i) { return i.page === "docs/source.md" && i.resolved === "docs/setup.md" }), true, "the same-directory candidate should be preferred over the ambiguous one")
+      ow.test.assert(res.repairs.skipped.some(function(i) { return i.page === "root-source.md" && i.reason === "ambiguous-basename" }), true, "a linking page in neither candidate's directory must still report ambiguous")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairRewritesAllOccurrencesOfSameBrokenLink = function() {
+    // lint dedups link issues by raw target text per page, so a page with the same broken
+    // target 2+ times only ever produces one issue. Without rewriting every occurrence in one
+    // write, reorg mode (which allows only 1 repair pass) would never converge such a page.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("actual-target.md", { title: "Actual Target", description: "d", aliases: ["missing"] }, "# Actual Target")
+      wm.write("md-source.md", { title: "MdSource", description: "d" }, "# MdSource\n\nSee [a](missing.md) and also [b](missing.md).")
+      wm.write("wiki-source.md", { title: "WikiSource", description: "d" }, "# WikiSource\n\nWiki: [[missing.md|Label A]] and [[missing.md|Label B]].")
+      wm.close()
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.lint_after.errors, 0, "both broken pages should fully resolve in a single pass")
+      var mdBody = io.readFileString(dir + "/md-source.md")
+      ow.test.assert(mdBody.indexOf("[a](actual-target.md)") >= 0 && mdBody.indexOf("[b](actual-target.md)") >= 0, true, "both md-style occurrences should be rewritten")
+      var wikiBody = io.readFileString(dir + "/wiki-source.md")
+      ow.test.assert(wikiBody.indexOf("[[actual-target.md|Label A]]") >= 0 && wikiBody.indexOf("[[actual-target.md|Label B]]") >= 0, true, "both wiki-style occurrences should be rewritten, preserving their distinct per-occurrence labels")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairRewritesInboundAnchorsOnH1Rename = function() {
+    // Retitling a page's H1 to match its frontmatter title changes that heading's anchor
+    // slug — any inbound link's anchor must be rewritten in the same pass, or it would become
+    // a permanently-unfixable invalid_anchor issue.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("target.md", { title: "New Title", description: "d" }, "# Old Title\n\nBody.")
+      wm.write("source.md", { title: "Source", description: "d" }, "# Source\n\nSee [link](target.md#old-title).")
+      wm.close()
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.repairs.fixed.some(function(i) { return i.type === "title_h1_mismatch" && i.page === "target.md" }), true, "the H1 should be retitled to match the frontmatter title")
+      var sourceBody = io.readFileString(dir + "/source.md")
+      ow.test.assert(sourceBody.indexOf("target.md#new-title") >= 0, true, "the inbound link should now point at the new slug")
+      ow.test.assert(sourceBody.indexOf("#old-title") < 0, true, "the stale anchor should no longer appear")
+      ow.test.assert(res.lint_after.errors, 0, "no invalid_anchor should be introduced by the retitle")
+
+      var res2 = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res2.pages_changed, 0, "a second identical repair should not rewrite anything (the anchor rewrite must not fire every pass)")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairFixesMissingUpdatedOnlyIssue = function() {
+    // write() always unconditionally stamps meta.updated on every write, but the coalescing
+    // block previously never triggered a write when a missing `updated` field was a page's
+    // only issue — silently dropping it from both fixed and skipped every pass.
+    var dir = makeWikiDir()
+    try {
+      io.writeFileString(dir + "/page.md",
+        "---\ntitle: Page\ndescription: d\ncreated: 2020-01-01T00:00:00.000Z\ntype: concept\n---\n\n# Page\n\nBody.")
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.repairs.fixed.some(function(i) { return i.type === "missing_frontmatter" && i.field === "updated" && i.page === "page.md" }), true, "a missing updated field should be reported fixed even when it's the page's only issue")
+      ow.test.assert(io.readFileString(dir + "/page.md").indexOf("updated:") >= 0, true, "the updated field should now be present on disk")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairDescriptionNeverPhantomFixed = function() {
+    // description is deliberately never synthesized. Even when the page gets written for an
+    // unrelated reason (here, missing updated), the description issue must be reported as an
+    // honest skip, never falsely bundled into fixed as a side effect of that unrelated write.
+    var dir = makeWikiDir()
+    try {
+      io.writeFileString(dir + "/page.md",
+        "---\ntitle: Page\ncreated: 2020-01-01T00:00:00.000Z\ntype: concept\n---\n\n# Page\n\nBody.")
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.repairs.skipped.some(function(i) { return i.type === "missing_frontmatter" && i.field === "description" && i.reason === "no-deterministic-value" }), true, "missing description should be an honest, explicit skip")
+      ow.test.assert(res.repairs.fixed.every(function(i) { return !(i.type === "missing_frontmatter" && i.field === "description") }), true, "missing description must never appear in fixed")
+      ow.test.assert(io.readFileString(dir + "/page.md").indexOf("description:") < 0, true, "no description should have been invented on disk")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiRepairLoopDedupsSkipsAcrossPasses = function() {
+    // A persistently-unresolvable issue (a genuine anchor typo, not fixable by normalization)
+    // must be reported exactly once per repair run, not once per internal pass.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("target.md", { title: "Target", description: "d" }, "# Target\n\n## Real Heading\n\nBody.")
+      wm.write("source.md", { title: "Source", description: "d" }, "# Source\n\nSee [link](target.md#typo-heading).")
+      wm.close()
+      // Two distinct missing_frontmatter fields on the same page must not collapse into one
+      // dedup entry. Seed via raw frontmatter (not wm.write, which auto-derives a missing
+      // title from the path) so title is genuinely absent.
+      io.writeFileString(dir + "/pageA.md", "---\ndescription: d\n---\n\n# Different H1\n\nBody.")
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
+      ow.test.assert(res.repairs.skipped.filter(function(i) { return i.type === "invalid_anchor" && i.page === "source.md" }).length, 1, "the unresolvable anchor should be reported exactly once, not once per internal pass")
+      var pageAFixed = res.repairs.fixed.filter(function(i) { return i.page === "pageA.md" && i.type === "missing_frontmatter" })
+      ow.test.assert(pageAFixed.some(function(i) { return i.field === "title" }), true, "missing title should be its own fixed entry")
+      ow.test.assert(pageAFixed.some(function(i) { return i.field === "created" }), true, "missing created should be a distinct fixed entry, not collapsed with title")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
   exports.testDreamWikiRepairModeReachesRootOnDeepNewTree = function() {
     // Repair mode has no finalize step to fall back on, so this exercises the scoped
     // regenerateIndexes() call directly: a brand-new 3-level-deep section only reveals its
@@ -617,11 +767,9 @@
     // ancestor-chain fix takes one repair pass per level — root would never be reached
     // within the 3-pass bound.
     //
-    // regenerateIndexes() derives its directory set from the immediate parent dir of each real
-    // page plus root, so intermediate directories with no page of their own (a/, a/b/) are never
-    // in that universe regardless of what paths are requested — that's a pre-existing structural
-    // limitation of regenerateIndexes(), not something the ancestor-chain fix changes. Only assert
-    // the two indexes regenerateIndexes() can actually produce: root and the leaf's own directory.
+    // regenerateIndexes() now synthesizes a pass-through index for every ancestor directory of
+    // an index-bearing directory (even ones with no direct page of their own, like a/ and a/b/
+    // here), so the full chain — root, a/, a/b/, and the leaf's own a/b/c/ — should all exist.
     var dir = makeWikiDir()
     try {
       load("mini-a-wiki.js")
@@ -632,7 +780,34 @@
       var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "repair" }, function() {}).dreamWiki()
       ow.test.assert(res.ok, true, "repair mode should succeed on a fresh nested tree")
       ow.test.assert(io.fileExists(dir + "/index.md"), true, "root index should be created in a single repair run")
+      ow.test.assert(io.fileExists(dir + "/a/index.md"), true, "ancestor index a/ should now be synthesized")
+      ow.test.assert(io.fileExists(dir + "/a/b/index.md"), true, "ancestor index a/b/ should now be synthesized")
       ow.test.assert(io.fileExists(dir + "/a/b/c/index.md"), true, "leaf index a/b/c/ should be created")
+    } finally { try { io.rm(dir) } catch(e) {} }
+  }
+
+  exports.testDreamWikiApplyFinalizeSynthesizesAncestorIndexesOnDeepTree = function() {
+    // Exercises _finalizeWiki's unfiltered regenerateIndexes() call (apply mode), not just
+    // repair's scoped one, since both funnel through the same shared function.
+    var dir = makeWikiDir()
+    try {
+      load("mini-a-wiki.js")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" }, function() {})
+      wm.write("a/b/c/page.md", { title: "Page", description: "Deep page" }, "# Page")
+      wm.close()
+
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      ow.test.assert(res.ok, true, "apply should succeed on a fresh nested tree")
+      ow.test.assert(io.fileExists(dir + "/index.md"), true, "root index should be created")
+      ow.test.assert(io.fileExists(dir + "/a/index.md"), true, "ancestor index a/ should be synthesized by finalize")
+      ow.test.assert(io.fileExists(dir + "/a/b/index.md"), true, "ancestor index a/b/ should be synthesized by finalize")
+      ow.test.assert(io.fileExists(dir + "/a/b/c/index.md"), true, "leaf index a/b/c/ should be created")
+      var aIndex = io.readFileString(dir + "/a/index.md")
+      ow.test.assert(aIndex.indexOf("b/index.md") >= 0, true, "synthesized a/index.md should link its child section")
+      ow.test.assert(res.lint_after.errors, 0, "the full ancestor chain should leave no lint errors")
+
+      var res2 = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "apply" }, function() {}).dreamWiki()
+      ow.test.assert(res2.pages_changed, 0, "a second identical apply should not rewrite the synthesized indexes")
     } finally { try { io.rm(dir) } catch(e) {} }
   }
 
