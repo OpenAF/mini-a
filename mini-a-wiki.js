@@ -2456,24 +2456,27 @@ MiniAWikiManager.prototype._wikiLinkTarget = function(value) {
 MiniAWikiManager.prototype._extractLinkEntries = function(body) {
   if (!isString(body)) return []
   var entries = []
-  var seen    = {}
+  var seenMd   = {}
+  var seenWiki = {}
   var m
   var mdRe = /\[([^\]]*)\]\(([^)]+)\)/g
   while ((m = mdRe.exec(body)) !== null) {
     var target = m[2].trim()
     var pathPart = target.split("#")[0]
     var internal = target.charAt(0) === "#" || /\.md$/i.test(pathPart) || /\/$/.test(pathPart) || !/\.[a-z0-9]+$/i.test(pathPart)
-    if (target.length > 0 && internal && !/^[a-z][a-z0-9+.-]*:/i.test(target) && !seen[target]) {
-      seen[target] = true
+    if (target.length > 0 && internal && !/^[a-z][a-z0-9+.-]*:/i.test(target) && !seenMd[target]) {
+      seenMd[target] = true
       entries.push({ raw: target, type: "md" })
     }
   }
   // Wiki-style links: [[Page Name]] and [[path.md|label]] — always root-relative.
+  // Uses its own dedup set (seenWiki) — separate from the md-style pass above — so a
+  // page mixing [text](target) and [[target]] to the same raw target reports both.
   var wikiRe = /\[\[([^\]]+)\]\]/g
   while ((m = wikiRe.exec(body)) !== null) {
     var target = this._wikiLinkTarget(m[1])
     if (target.length > 0) {
-      if (!seen[target]) { seen[target] = true; entries.push({ raw: target, type: "wiki" }) }
+      if (!seenWiki[target]) { seenWiki[target] = true; entries.push({ raw: target, type: "wiki" }) }
     }
   }
   return entries
@@ -3460,6 +3463,10 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
 
     // Check 1: Broken internal links
     // md links are page-relative; wiki-style links are always root-relative; @name/... are cross-wiki
+    // linkedTargetsFromThisPage: incomingCount counts distinct source pages linking to a target,
+    // not raw link occurrences — a page linking to the same target via both [text](t.md) and
+    // [[t.md]] (now two separate linkEntries, see _extractLinkEntries) must still only count once.
+    var linkedTargetsFromThisPage = {}
     pd.linkEntries.forEach(function(entry) {
       var bits = String(entry.raw).split("#"), linkPath = bits.shift(), anchor = bits.join("#")
       var resolved = linkPath.length === 0 ? p : (entry.type === "wiki" ? linkPath : self.resolveLink(p, linkPath))
@@ -3488,8 +3495,11 @@ MiniAWikiManager.prototype.lint = function(memoryManager, options) {
       if (!exists) {
         issues.push({ severity: "error", type: "broken_link", page: p, target: entry.raw, resolved: resolved, linkType: entry.type })
       } else {
-        if (!isNumber(incomingCount[resolved])) incomingCount[resolved] = 0
-        incomingCount[resolved]++
+        if (!linkedTargetsFromThisPage[resolved]) {
+          linkedTargetsFromThisPage[resolved] = true
+          if (!isNumber(incomingCount[resolved])) incomingCount[resolved] = 0
+          incomingCount[resolved]++
+        }
         if (anchor.length > 0 && pageData[resolved]) {
           var wanted = anchor.toLowerCase(), anchors = self._markdownHeadings(pageData[resolved].body).map(function(h) { return self._headingAnchor(h.text) })
           if (anchors.indexOf(wanted) < 0) issues.push({ severity: "error", type: "invalid_anchor", page: p, target: entry.raw, resolved: resolved, anchor: anchor, linkType: entry.type })

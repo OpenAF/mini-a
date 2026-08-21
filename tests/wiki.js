@@ -93,6 +93,15 @@
     ow.test.assert(links.length, 1, "duplicate links should be deduplicated")
   }
 
+  exports.testExtractLinksMixedSyntaxToSameTargetBothCounted = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: "." })
+    var body = "See [a](page.md) and also [[page.md]]."
+    var entries = wm._extractLinkEntries(body)
+    ow.test.assert(entries.length, 2, "md-style and wiki-style links to the same raw target must both be reported (one per syntax), not collapsed into one")
+    ow.test.assert(entries.some(function(e) { return e.type === "md" }), true, "should keep the md-style entry")
+    ow.test.assert(entries.some(function(e) { return e.type === "wiki" }), true, "should keep the wiki-style entry")
+  }
+
   // ── ResolveLink ──────────────────────────────────────────────────────────────
 
   exports.testResolveLinkSameDir = function() {
@@ -141,6 +150,37 @@
   exports.testNearDuplicateDifferent = function() {
     var wm = new MiniAWikiManager({ backend: "fs", root: "." })
     ow.test.assert(wm._isNearDuplicate("the quick brown fox", "completely different content here"), false, "different strings are not duplicates")
+  }
+
+  // ── Knowledge state ────────────────────────────────────────────────────────────
+
+  exports.testKnowledgeLoadStateMergesPartialManifestWithDefaults = function() {
+    load("mini-a-wiki-knowledge.js")
+    var dir = createTestDir()
+    try {
+      writePage(dir, "index.md", "# Index")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      var statePath = wm._knowledgeStatePath()
+      var parent = statePath.substring(0, statePath.lastIndexOf("/"))
+      if (!io.fileExists(parent)) io.mkdir(parent)
+      // A manifest from an older/partial schema — only `sources` present, missing
+      // chunks/dependencies/telemetry/summaries/facts that downstream code
+      // (knowledgeDirtySet, knowledgeRecordTelemetry, knowledgeStats, assembleContext)
+      // dereferences without an isDef/isMap guard.
+      io.writeFileString(statePath, stringify({ sources: { x: { chunks: [] } } }, __, ""))
+      var state = wm.knowledgeLoadState()
+      ow.test.assert(isMap(state.chunks), true, "loaded state should always have a chunks map, even from a partial manifest")
+      ow.test.assert(isMap(state.dependencies), true, "loaded state should always have a dependencies map")
+      ow.test.assert(isMap(state.telemetry) && isMap(state.telemetry.queries), true, "loaded state should always have a telemetry.queries map")
+      ow.test.assert(isMap(state.summaries) && isMap(state.summaries.pages), true, "loaded state should always have a summaries.pages map")
+      ow.test.assert(state.sources.x.chunks.length, 0, "the partial manifest's own data should still be preserved")
+      var stats = wm.knowledgeStats()
+      ow.test.assert(isNumber(stats.chunks), true, "knowledgeStats should not throw on a partial manifest")
+      var dirty = wm.knowledgeDirtySet(["x"])
+      ow.test.assert(isArray(dirty.affected), true, "knowledgeDirtySet should not throw on a partial manifest")
+    } finally {
+      cleanupTestDir(dir)
+    }
   }
 
   // ── Filesystem backend ────────────────────────────────────────────────────────
@@ -738,6 +778,24 @@
     }
   }
 
+  exports.testLintSemanticOrphanNotDoubleCountedByMixedLinkSyntax = function() {
+    var dir = createTestDir()
+    try {
+      // index links to child.md via BOTH syntaxes: one page, two link entries, one real
+      // incoming link. incomingCount must count distinct source pages, not raw link
+      // occurrences, or this legitimate semantic_orphan (child has no OTHER incoming link)
+      // is missed because the duplicate syntax makes it look doubly-linked.
+      writePage(dir, "index.md", "---\ntitle: Index\n---\nSee [child](child.md) and also [[child.md]].")
+      writePage(dir, "child.md", "---\ntitle: Child\n---\nNo links out.")
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir })
+      var report = wm.lint()
+      var orphans = report.issues.filter(function(i) { return i.type === "semantic_orphan" && i.page === "child.md" })
+      ow.test.assert(orphans.length, 1, "child linked twice (two syntaxes) from only its parent index should still be a semantic orphan")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testLintMissingFrontmatter = function() {
     var dir = createTestDir()
     try {
@@ -1091,6 +1149,29 @@
     }
   }
 
+  exports.testMcpWikiRestrictedSearchBudgetExhaustionDoesNotConsumeCooldowns = function() {
+    var dir = createTestDir()
+    try {
+      writePage(dir, "page-one.md", "---\ntitle: Page One\ndescription: apricot marker one\n---\n# Page One\napricot marker one content.")
+      writePage(dir, "page-two.md", "---\ntitle: Page Two\ndescription: apricot marker two\n---\n# Page Two\napricot marker two content.")
+      global.__wikiManager = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikigraphsearchhints: false })
+      global.__wikiTool = __miniAMcpWikiCreateTool({ root: dir, access: "ro" }, global.__wikiManager)
+      // maxChars is far too small for even one result's title+description+reference:
+      // the whole search must fail as one budget-exhausted error, WITHOUT having
+      // started either page's cooldown window or issued a reference for it — those
+      // are side effects of issue(), which must only run after the aggregate charge
+      // for the results actually being returned succeeds.
+      var restriction = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictminquerychars: 4, wikirestrictsearchlimit: 5, wikirestrictmaxchars: 10, wikirestrictpagecooldown: 3600 }, { backend: "fs", root: dir })
+      global.__miniAMcpWiki = { restriction: restriction }
+      var result = __miniAMcpWikiRestrictedSearch({ query: "apricot", limit: 20 })
+      ow.test.assert(result.error, "restricted-budget-exhausted", "a result set that in aggregate exceeds maxChars should fail as a whole")
+      ow.test.assert(Object.keys(restriction.cooldowns).length, 0, "a budget-exhausted search must not have started any page's cooldown window")
+      ow.test.assert(Object.keys(restriction.refs).length, 0, "a budget-exhausted search must not have issued any reference")
+    } finally {
+      cleanupTestDir(dir)
+    }
+  }
+
   exports.testMcpWikiRestrictedReadAcceptsReferenceAlias = function() {
     var dir = createTestDir()
     try {
@@ -1111,6 +1192,26 @@
     }
   }
 
+
+  exports.testMcpWikiRestrictedChargeRollsBackOnPersistFailure = function() {
+    var dir = createTestDir()
+    var stateDir = createTestDir()
+    try {
+      // "blocker" is a plain file, not a directory: writing statePath underneath it
+      // makes _saveState()'s io.writeFileString throw, forcing the persist-failure
+      // path in charge() without depending on filesystem permissions.
+      var blocker = stateDir + java.io.File.separator + "blocker"
+      io.writeFileString(blocker, "not a directory")
+      var statePath = blocker + java.io.File.separator + "state.json"
+      var r = new MiniAMcpWikiRestriction({ wikirestrict: true, wikirestrictstate: statePath }, { backend: "fs", root: dir })
+      ow.test.assert(r.charge("search", 5), false, "a charge whose persist step fails must itself be reported as failed")
+      ow.test.assert(r.usage.searches, 0, "a failed charge must not leave the search counter incremented")
+      ow.test.assert(r.usage.chars, 0, "a failed charge must not leave the character counter incremented")
+    } finally {
+      cleanupTestDir(dir)
+      cleanupTestDir(stateDir)
+    }
+  }
 
   var assertRestrictedPolicy = function(policy, expected, message) {
     for(var key in expected) {

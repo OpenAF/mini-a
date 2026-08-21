@@ -29,7 +29,14 @@ MiniAWikiManager.prototype._knowledgeStatePath = function() { return this._ensur
 MiniAWikiManager.prototype._knowledgeEmptyState = function() { return { version: MINI_A_WIKI_KNOWLEDGE.manifest, versions: MINI_A_WIKI_KNOWLEDGE, sources: {}, chunks: {}, pages: {}, dependencies: {}, facts: {}, summaries: { pages: {}, sections: {} }, telemetry: { queries: {}, zero_results: 0 }, updated: new Date().toISOString() } }
 MiniAWikiManager.prototype.knowledgeLoadState = function() {
   if (this._access !== "rw" && !io.fileExists(this._knowledgeStatePath())) return this._knowledgeEmptyState()
-  try { var v = af.fromJson(io.readFileString(this._knowledgeStatePath())); return isMap(v) && isMap(v.sources) ? v : this._knowledgeEmptyState() } catch(e) { this._logFn("warn", "[wiki] manifest unreadable; starting with safe empty state: " + __miniAErrMsg(e)); return this._knowledgeEmptyState() }
+  try {
+    var v = af.fromJson(io.readFileString(this._knowledgeStatePath()))
+    if (!isMap(v) || !isMap(v.sources)) return this._knowledgeEmptyState()
+    // Merge onto a fresh empty state so a manifest from an older schema version (missing
+    // e.g. dependencies/telemetry/summaries) still has every key downstream code
+    // dereferences without a guard (knowledgeDirtySet's state.dependencies[id], etc.).
+    return merge(this._knowledgeEmptyState(), v)
+  } catch(e) { this._logFn("warn", "[wiki] manifest unreadable; starting with safe empty state: " + __miniAErrMsg(e)); return this._knowledgeEmptyState() }
 }
 MiniAWikiManager.prototype.knowledgeSaveState = function(state) {
   if (this._access !== "rw") return false
