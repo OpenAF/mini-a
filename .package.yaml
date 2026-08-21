@@ -99,6 +99,7 @@ files:
 - mcps/EXTERNAL-MCPS.md
 - mcps/README.md
 - mcps/mcp-a2a.yaml
+- mcps/mcp-aws-athena.yaml
 - mcps/mcp-ch.yaml
 - mcps/mcp-db.yaml
 - mcps/mcp-email.yaml
@@ -201,8 +202,9 @@ filesHash:
   examples/summary.yaml: 335a9a581b5bb0561b2d5db19d39f04830f31209
   mcps/CREATING.md: 96bae262502f3fc47b4431a4234253f03cc3366a
   mcps/EXTERNAL-MCPS.md: 152d0db701bc3ee259d4184f08fdce3ca2b0d332
-  mcps/README.md: f3813aeb3c6dbbf265dd1e804ef9b97f07bf005b
+  mcps/README.md: 687342b2f607509c96bd74afc284650e795b767b
   mcps/mcp-a2a.yaml: 9601fe0562cf9b0ead111d9e2d2c00764192e86a
+  mcps/mcp-aws-athena.yaml: 93d863b3c49f58194610367c2b73d6a2fe73e6b1
   mcps/mcp-ch.yaml: 4f9c7c4529904a68cfe59bdc402b418d5b43ff0c
   mcps/mcp-db.yaml: aae81e65ae3543e5d54ee37cd55d0c13dc6e4c14
   mcps/mcp-email.yaml: b9636f74c162f4fcb170067576c4a362e329525c
