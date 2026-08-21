@@ -22,6 +22,34 @@ Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `li
 
 All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml`) accept `audit=true` (or `OJOB_MCP_AUDIT`) to log every tool call. For `s3`, `http`, and `es` backends this also logs each page actually fetched — backend, resolved location (`s3://bucket/key`, the joined URL, or `es:index/path`), and byte count — including internal fetches made while serving `search`, `lint`, `list`, or `reindex`, not just the top-level tool call. Local `fs` reads are not covered. `mcp-wiki-safe.yaml` only ever logs the resolved location, never the opaque reference exposed to restricted-mode callers.
 
+## Agentic retrieval
+
+The agent-facing retrieval layer is a small, incremental protocol layered on the existing Lucene index, scan fallback, hierarchy, mounts, backends, backlinks, and optional graph. It does not create another index or document store. Its purpose is to keep irrelevant Markdown out of model context.
+
+1. `search(query)` finds a small set of candidates. It returns metadata, a `wiki:path` reference, and the native Lucene `score` when Lucene supplied one; scan fallback deliberately does not invent a score.
+2. `open(path|ref)` returns cheap structure: front matter, title/description, byte size, links, headings, and deterministic line ranges. It never returns the Markdown body.
+3. `navigate(path|ref, section=...)` browses a directory through existing hierarchy logic, or describes a heading's parent, children, adjacent headings, and ranges.
+4. `read(path|ref, section|startLine/endLine)` returns the selected evidence. Agent reads default to a bounded character chunk and report `truncated` plus a deterministic `next.startLine` continuation instead of silently flooding context.
+5. `grep(path|ref, pattern)` searches one known page or directory and returns bounded matching lines with a little context.
+
+`related(path|ref)` is optional follow-up discovery: it preserves backlinks and uses graph neighbors only when graph state is available. It is useful after lexical retrieval leaves a real gap, not as a mandatory first step. `mcp-wiki-safe.yaml` remains intentionally restricted to its opaque, budgeted search/read contract and does not expose structural enumeration.
+
+An agent should normally iterate, rather than follow a rigid pipeline:
+
+```text
+Question: Why can OpenAF memory increase during heavy processing?
+search("OpenAF memory increase")
+  -> open("troubleshooting/memory.md")
+  -> navigate("troubleshooting/memory.md", section="Heap pressure")
+  -> read("troubleshooting/memory.md", section="Heap pressure")
+  -> grep("troubleshooting/memory.md", "GC")
+  -> open("runtime/garbage-collection.md")
+  -> read("runtime/garbage-collection.md", section="Heap sizing")
+  -> answer from the collected evidence
+```
+
+Do not read every search hit, retrieve whole long documents merely because they matched, or keep issuing broad searches after a promising page is open. Prefer `grep` for exact configuration names, identifiers, and errors; use `related` only if normal lexical and structural evidence is insufficient. In debug/verbose mode the manager logs retrieval metadata (engine, result count/top score, section and character count, and grep match count) without logging page contents.
+
 ## Console command reference
 
 ### `/wiki [op] [args]`
@@ -230,6 +258,30 @@ When either limit is hit, the search returns early with whatever it already foun
 Scan-fallback reads are also cached per `MiniAWikiManager` instance (`wikisearchcache`, default `true` for `s3`/`http`/`es` backends and `false` for `fs`/archive, TTL `wikisearchcachettlms`, default `15000`ms, capped to `wikisearchcachemaxsize` entries, default `500`), so repeated searches against a slow backend don't keep re-fetching unchanged pages; `fs`/archive default to uncached since a local read has no latency to amortize. `write()` and `delete()` invalidate the whole per-instance cache (not a per-page unset — OpenAF's `$cache` per-key `.set()`/`.unset()` do not reliably invalidate its own `.get()` state, confirmed empirically), so neither is served stale within the TTL window.
 
 `wikisearchparallel` (default `false`, opt-in) parallelizes the scan-fallback path's `backend.read()` calls via OpenAF's `pForEach`. **Read this before enabling it in a long-lived process:** an earlier, unrelated `pForEach`-based read path in the wiki manager (the shared read pass behind `reindex()`) deadlocked OpenAF's shared thread pool, reproducing only on the *second* consecutive full test-suite run within the same JVM — a `jstack` capture showed a worker thread from an earlier `pForEach` batch that never returned, permanently occupying a pool slot and starving a later, unrelated call. That incident's root cause was never conclusively isolated, and a companion investigation found the literal explanation in the original code comment ("blocked on the same pool") doesn't cleanly match the runtime, since the specific call implicated actually runs on a separate virtual-thread executor. A fix to `pForEach` itself is proposed upstream (see the `openaf` project's `PFOREACH_PLAN.md`), but until that lands, `wikisearchparallel` should be treated as carrying the same class of unconfirmed risk. If you enable it, validate with two consecutive full `ojob tests/wiki.yaml` runs in one JVM process before trusting it in production.
+
+## Utility oJobs (`utils/`)
+
+Two standalone oJobs report statistics on an existing wiki's on-disk state without going through `mini-a` or the `MiniAWikiManager` API. Both are read-only and safe to run against a live wiki (no writer lock is taken). Add `top=<n>` to change how many entries each ranked list includes (default `10`); `__format=json` prints machine-readable output instead of the default table/text rendering.
+
+### `utils/indexStats.yaml`
+
+Given a wiki root folder (or its `.mini-a-wiki-meta` folder directly), reports page-level statistics assembled from the meta shards — counts by type, tag frequency, link totals and top inbound-referenced pages, orphan pages (no outbound links), heading/alias counts, oldest/newest `updated` timestamps, and the largest pages by size. It also summarizes the sibling `.mini-a-wiki-lucene`, `.mini-a-wiki-graph`, and `.mini-a-wiki-ingest` folders (file counts, total size, and — where readable — graph node/edge counts and ingest ledger entry counts).
+
+```sh
+ojob utils/indexStats.yaml dir="/path/to/wiki"
+ojob utils/indexStats.yaml dir="/path/to/wiki" top=5 __format=json
+```
+
+### `utils/graphStats.yaml`
+
+Given a `.mini-a-wiki-graph/graph.json` file, reports node/edge/community/surprise-link statistics — node counts by type, edge counts by type and provenance (`EXTRACTED`/`INFERRED`/`AMBIGUOUS`), per-node degree (top-N, average, max, isolated-node count, graph density), the largest communities, and the top cross-document surprise links by score.
+
+```sh
+ojob utils/graphStats.yaml file="/path/to/.mini-a-wiki-graph/graph.json"
+ojob utils/graphStats.yaml file="/path/to/graph.json" top=5 __format=json
+```
+
+`graphStats.yaml` also accepts `key=<channel-key>` instead of `file` to read graph data already loaded into an oJob pipeline/channel (falls back to `__pm`/`__pm._map` when neither `file` nor `key` is given), which is how `utils/indexStats.yaml`-style tooling can chain into it in a larger pipeline.
 
 ## Examples
 

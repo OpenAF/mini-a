@@ -494,6 +494,9 @@ function __miniAMcpWikiCreateTool(cfg, wikiManager) {
     readwrite: String(cfg.access || "").toLowerCase() === "rw"
   })
   tool._wikiManager = wikiManager
+  // Only the normal read-only MCP opts into the agentic defaults. The safe
+  // server owns a stricter opaque-reference contract and keeps its own path.
+  tool._wikiAgenticRetrieval = cfg.agenticRetrieval === true
   return tool
 }
 
@@ -551,6 +554,7 @@ function __miniAMcpWikiInit(args, options) {
     options.readonly = true
   }
   var cfg = __miniAMcpWikiBuildConfig(args, options)
+  cfg.agenticRetrieval = options.agenticRetrieval === true
   if (restricted) {
     cfg.access = "ro"
     // Restricted retrieval never enables graph traversal implicitly. The safe

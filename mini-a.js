@@ -345,7 +345,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path","severity":"error|warning|info","types":"broken_link,invalid_anchor","page":"page.md","limit":N (lint filters/results){{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -394,7 +394,7 @@ Arguments: {
 {{/if}}
 {{#if useMcpProxy}}• To list available tools: call proxy-dispatch with {"action":"list","includeTools":true}{{/if}}
 {{else}}
-• Call MCP tools through the JSON "action" field{{#if useMcpProxy}}, using "proxy-dispatch" (a nested "action":"call" is required inside params even though the top-level action is already "proxy-dispatch"; name the downstream tool with params.tool, e.g. {"action":"call","tool":"apply_patch","arguments":{...}}){{else}}, just like shell or custom actions{{/if}}
+• Call MCP tools through the JSON "action" field{{#if useMcpProxy}}, using "proxy-dispatch". For a downstream MCP tool use params {"action":"call","tool":"tool-name","arguments":{...}}. To read a spilled result, use params {"action":"readresult","resultFile":"...","op":"stat"} directly — do not wrap readresult in "call" or "arguments".{{else}}, just like shell or custom actions{{/if}}
 • The JSON "action" field can be: {{{actionFieldValues}}}{{#if useMcpProxy}} | proxy-dispatch{{/if}}
 {{#if includeExamples}}
 ### How to call MCP tools:
@@ -7177,6 +7177,34 @@ MiniA.prototype._normalizeActionAlias = function(actionName) {
     complete: "final"
   }
   return isString(aliases[normalized]) ? aliases[normalized] : trimmed
+}
+
+// Models sometimes flatten action arguments despite the response schema requiring
+// params. Preserve that information for built-in actions instead of silently
+// applying their defaults (for example, wiki/list instead of wiki/search).
+MiniA.prototype._normalizeActionParams = function(actionName, message, params) {
+  if (isMap(params)) return params
+  if (!isMap(message)) return params
+
+  var action = isString(actionName) ? actionName.toLowerCase().trim() : ""
+  var keysByAction = {
+    wiki: ["op", "path", "query", "pattern", "section", "lineStart", "lineEnd", "maxLines", "maxChars", "countLines", "limit", "offset", "regex", "caseSensitive", "contextLines", "searchIn", "depth", "withMeta", "content", "append", "lineInsert", "to", "leaveRedirect", "redirect", "overwrite", "name", "backend", "root", "bucket", "prefix", "url", "accessKey", "secret", "region", "severity", "types", "page"],
+    graph: ["op", "path", "query", "limit", "semantic", "community", "format"],
+    memory_search: ["query", "section", "limit"]
+  }
+  var keys = keysByAction[action]
+  if (!isArray(keys)) return params
+
+  var normalized = {}
+  keys.forEach(function(key) {
+    if (isDef(message[key])) normalized[key] = message[key]
+  })
+  return Object.keys(normalized).length > 0 ? normalized : params
+}
+
+MiniA.prototype._canReadSpilledResults = function(args) {
+  if (toBoolean(isMap(args) ? args.usestdutils : false) === true) return true
+  return isObject(this.mcpToolToConnection) && isDef(this.mcpToolToConnection["proxy-dispatch"])
 }
 
 MiniA.prototype._snapshotDebugChannel = function(channelSpec, defaultName) {
@@ -15260,7 +15288,11 @@ MiniA.prototype.init = function(args) {
 
     var promptProfile = this._getPromptProfile(args)
     var shellViaActionPreferred = args.useshell === true && this._useTools === true
-    var promptUseMcpProxy = this._useMcpProxy === true || toBoolean(args.mcpproxy) === true
+    // mcpproxy may be requested with no downstream MCP configuration. In that
+    // case only the JSON compatibility shim is registered, so advertising a
+    // proxy-dispatch action would give the model an action the dispatcher cannot run.
+    var hasProxyDispatchAction = isObject(this.mcpToolToConnection) && isDef(this.mcpToolToConnection["proxy-dispatch"])
+    var promptUseMcpProxy = hasProxyDispatchAction && this._useMcpProxy === true
     var proxyToolsList = ""
     var proxyToolCount = this.mcpTools.length
     if (promptUseMcpProxy === true && isObject(global.__mcpProxyState__)) {
@@ -16822,9 +16854,16 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           compressed = compressed.replace(/Output: [\s\S]{500,}/g, (match) => {
             return "Output: " + match.substring(0, 150) + "... [truncated]"
           })
+          var canReadSpilledResults = this._canReadSpilledResults(args)
           // Compress long tool responses — retroactively spill to a temp file so
           // the model can recover the full data via proxy-dispatch readresult.
           compressed = compressed.replace(/(\[OBS [^\]]+\]) ([\s\S]{400,})/g, (match, label, obsContent) => {
+            // Do not replace the only useful observation with an inaccessible file
+            // reference. This occurs when mcpproxy was requested but no proxy MCP
+            // connection was created (only the JSON compatibility shim is present).
+            if (!canReadSpilledResults) {
+              return label + " " + obsContent.substring(0, 2000) + "... [output truncated; result retrieval is unavailable in this session]"
+            }
             // Don't retro-spill an entry that already references a spilled file —
             // a proxy spill notice can exceed 400 chars and would otherwise cascade.
             // Regex covers both YAML-style (action='readresult') and JSON-style ("action": "readresult").
@@ -18697,6 +18736,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
         // Fallback: model used {"action":"shell","arguments":{"command":"..."}} (function-calling style)
         if (action === "shell" && commandValue.length === 0 && isMap(currentMsg.arguments) && isString(currentMsg.arguments.command)) commandValue = currentMsg.arguments.command.trim()
+        paramsValue = this._normalizeActionParams(action, currentMsg, paramsValue)
 
         if (origActionRaw.length == 0) {
           var canInferFinalAction = isString(answerValue) && answerValue.trim().length > 0 && commandValue.length == 0 && isUnDef(paramsValue)
@@ -19126,21 +19166,33 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             } else if (wkOp === "browse") {
               global.__mini_a_metrics.wiki_ops_list.inc()
               wkResult = af.toTOON(this._wikiManager.browse(wkPath))
+            } else if (wkOp === "open") {
+              global.__mini_a_metrics.wiki_ops_read.inc()
+              wkResult = wkPath.length === 0 ? "[ERROR] wiki open requires 'path'" : af.toTOON(this._wikiManager.open(wkPath, { maxHeadings: wkParams.maxHeadings }))
+            } else if (wkOp === "navigate") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              wkResult = wkPath.length === 0 ? "[ERROR] wiki navigate requires 'path'" : af.toTOON(this._wikiManager.navigate(wkPath, { section: wkParams.section }))
             } else if (wkOp === "read") {
               global.__mini_a_metrics.wiki_ops_read.inc()
               if (wkPath.length === 0) {
                 wkResult = "[ERROR] wiki read requires 'path'"
               } else {
-                var wkPage = this._wikiManager.read(wkPath, wkReadOpts)
+                var wkPage = this._wikiManager.agenticRead(wkPath, merge({}, wkReadOpts, { maxChars: wkParams.maxChars }))
                 wkResult = isObject(wkPage) ? af.toTOON(wkPage) : "[ERROR] Page not found: " + wkPath
               }
-            } else if (wkOp === "search" || wkOp === "grep") {
+            } else if (wkOp === "grep") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              wkResult = wkPath.length === 0 || !isString(wkParams.pattern) ? "[ERROR] wiki grep requires 'path' and 'pattern'" : af.toTOON(this._wikiManager.grep(wkPath, wkParams.pattern, wkSearchOpts))
+            } else if (wkOp === "related") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              wkResult = wkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(wkPath, { limit: wkParams.limit }))
+            } else if (wkOp === "search") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               if (wkQuery.length === 0) {
                 wkResult = "[ERROR] wiki search requires 'query'"
               } else {
-                var wkHits = this._wikiManager.search(wkQuery, wkSearchOpts)
-                wkResult = wkHits.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
+                var wkHits = this._wikiManager.agenticSearch(wkQuery, wkSearchOpts)
+                wkResult = wkHits.results.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
                 if (wkHits.truncated === true) {
                   wkResult += "\n[NOTE] Search stopped early: scanned " + wkHits.scanned + " of the wiki's page budget (" + wkHits.scanBudget + "). Results may be incomplete; narrow the query or scope with path= to see more."
                 }
@@ -19246,7 +19298,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               global.__mini_a_metrics.wiki_ops_write.inc()
               wkResult = af.toTOON(this._wikiManager.reindex())
             } else {
-              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use context, list, tree, browse, read, search, grep, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
             this._trace("wiki_result", { op: wkOp, params: wkParams, result: wkResult, error: isString(wkResult) && wkResult.indexOf("[ERROR]") === 0 })
@@ -19879,17 +19931,25 @@ MiniA.prototype._runChatbotMode = function(options) {
                 cbWkResult = af.toTOON(this._wikiManager.tree(cbWkPath, isNumber(cbWkParams.depth) ? cbWkParams.depth : 3))
               } else if (cbWkOp === "browse") {
                 cbWkResult = af.toTOON(this._wikiManager.browse(cbWkPath))
+              } else if (cbWkOp === "open") {
+                cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki open requires 'path'" : af.toTOON(this._wikiManager.open(cbWkPath, { maxHeadings: cbWkParams.maxHeadings }))
+              } else if (cbWkOp === "navigate") {
+                cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki navigate requires 'path'" : af.toTOON(this._wikiManager.navigate(cbWkPath, { section: cbWkParams.section }))
               } else if (cbWkOp === "read") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki read requires 'path'" }
                 else {
-                  var cbWkPage = this._wikiManager.read(cbWkPath, cbWkReadOpts)
+                  var cbWkPage = this._wikiManager.agenticRead(cbWkPath, merge({}, cbWkReadOpts, { maxChars: cbWkParams.maxChars }))
                   cbWkResult = isObject(cbWkPage) ? af.toTOON(cbWkPage) : "[ERROR] Page not found: " + cbWkPath
                 }
-              } else if (cbWkOp === "search" || cbWkOp === "grep") {
+              } else if (cbWkOp === "grep") {
+                cbWkResult = cbWkPath.length === 0 || !isString(cbWkParams.pattern) ? "[ERROR] wiki grep requires 'path' and 'pattern'" : af.toTOON(this._wikiManager.grep(cbWkPath, cbWkParams.pattern, cbWkSearchOpts))
+              } else if (cbWkOp === "related") {
+                cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(cbWkPath, { limit: cbWkParams.limit }))
+              } else if (cbWkOp === "search") {
                 if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
                 else {
-                  var cbWkHits = this._wikiManager.search(cbWkQuery, cbWkSearchOpts)
-                  cbWkResult = cbWkHits.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
+                  var cbWkHits = this._wikiManager.agenticSearch(cbWkQuery, cbWkSearchOpts)
+                  cbWkResult = cbWkHits.results.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
                 }
               } else if (cbWkOp === "backlinks") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki backlinks requires 'path'" }

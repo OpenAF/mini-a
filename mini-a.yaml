@@ -948,7 +948,7 @@ help:
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
     mandatory: false
   - name     : ingestmode
-    desc     : Wiki ingestion mode: auto (deterministic first), normalize, distill or raw
+    desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
     example  : "auto"
     mandatory: false
     options  : ["auto", "normalize", "distill", "raw"]

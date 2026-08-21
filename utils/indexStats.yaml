@@ -1,0 +1,187 @@
+# Author: Nuno Aguiar
+help:
+  text   : |
+    Given a mini-a wiki index folder (see ojob.io/mini-a) produces statistics about the
+    indexed pages (title, type, tags, links, headings, aliases, updates) as well as the
+    underlying lexical (lucene), graph and ingest indexes stored alongside it.
+
+    The folder can either be the root of the wiki (containing the ".mini-a-wiki-meta",
+    ".mini-a-wiki-lucene", ".mini-a-wiki-graph" and ".mini-a-wiki-ingest" folders) or the
+    ".mini-a-wiki-meta" folder itself.
+
+    Examples:
+      ojob ojob.io/mini-a/indexStats dir="/path/to/wiki"
+      ojob ojob.io/mini-a/indexStats dir="/path/to/wiki" top=5 __format=json
+  expects:
+  - name     : dir
+    desc     : The path to the mini-a wiki root folder (or directly to its .mini-a-wiki-meta folder)
+    example  : "/path/to/wiki"
+    mandatory: true
+  - name     : top
+    desc     : "Number of top entries to include in each ranked list (default: 10)"
+    example  : "5"
+    mandatory: false
+
+todo:
+- Index statistics
+
+ojob:
+  opacks      :
+  - openaf: 20230512
+  catch       : printErrnl("[" + job.name + "] "); if (isDef(exception.javaException)) exception.javaException.printStackTrace(); else printErr(exception)
+  logToConsole: false   # to change when finished
+
+
+jobs:
+# ----------------------------
+- name : Index statistics
+  check:
+    in:
+      dir: isString
+      top: toNumber.isNumber.default(10)
+  exec : |
+    var root = args.dir.replace(/[\\\/]+$/, "")
+    if (!io.fileExists(root)) throw "Folder not found: " + root
+
+    var metaDir = root + "/.mini-a-wiki-meta"
+    if (!io.fileExists(metaDir)) {
+      // args.dir might already point directly at the meta folder
+      if (root.match(/\.mini-a-wiki-meta$/)) {
+        metaDir = root
+        root = root.replace(/\/\.mini-a-wiki-meta$/, "")
+      } else {
+        throw "No mini-a wiki index found at '" + args.dir + "' (expecting a '.mini-a-wiki-meta' folder)."
+      }
+    }
+
+    // Merge all meta shards into a single path -> record map
+    var pages = {}
+    io.listFiles(metaDir).files
+      .filter(f => f.isFile && f.filename.match(/\.json$/))
+      .forEach(f => {
+        try {
+          var shard = io.readFileJSON(metaDir + "/" + f.filename)
+          if (isMap(shard)) pages = merge(pages, shard)
+        } catch(e) {}
+      })
+
+    var paths = Object.keys(pages)
+
+    var totalSize       = 0
+    var byType          = {}
+    var tagCounts       = {}
+    var totalLinks      = 0
+    var totalHeadings   = 0
+    var totalAliases    = 0
+    var supersedesCount = 0
+    var orphanPages     = []
+    var inbound         = {}
+    var updatedDates    = []
+
+    paths.forEach(p => {
+      var r = pages[p]
+      if (!isMap(r)) return
+
+      totalSize += isNumber(r.size) ? r.size : 0
+
+      var t = isString(r.type) && r.type.length > 0 ? r.type : "(untyped)"
+      byType[t] = (byType[t] || 0) + 1
+
+      ;(isArray(r.tags) ? r.tags : []).forEach(tag => {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1
+      })
+
+      var links = isArray(r.links) ? r.links : []
+      totalLinks += links.length
+      if (links.length == 0) orphanPages.push(p)
+      links.forEach(l => { inbound[l] = (inbound[l] || 0) + 1 })
+
+      totalHeadings += isArray(r.headings) ? r.headings.length : 0
+      totalAliases  += isArray(r.aliases)  ? r.aliases.length  : 0
+      if (isString(r.supersedes) && r.supersedes.length > 0) supersedesCount++
+      if (isString(r.updated) && r.updated.length > 0) {
+        var ts = Date.parse(r.updated)
+        if (!isNaN(ts)) updatedDates.push({ value: r.updated, ts: ts })
+      }
+    })
+
+    updatedDates.sort((a, b) => a.ts - b.ts)
+
+    var topTags = Object.keys(tagCounts)
+      .map(t => ({ tag: t, count: tagCounts[t] }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, args.top)
+
+    var largestPages = paths
+      .map(p => ({ path: p, size: pages[p].size || 0, title: pages[p].title || p }))
+      .sort((a, b) => b.size - a.size)
+      .slice(0, args.top)
+
+    var mostReferenced = Object.keys(inbound)
+      .map(p => ({ path: p, references: inbound[p] }))
+      .sort((a, b) => b.references - a.references)
+      .slice(0, args.top)
+
+    // Stats for a sibling ".mini-a-wiki-*" support folder (lucene/graph/ingest)
+    var folderStats = name => {
+      var p = root + "/" + name
+      if (!io.fileExists(p)) return { present: false }
+      var info = io.fileInfo(p)
+      if (!info.isDirectory) return { present: true, sizeBytes: info.size }
+      var files = io.listFiles(p).files.filter(f => f.isFile)
+      return { present: true, files: files.length, sizeBytes: files.reduce((a, f) => a + (f.size || 0), 0) }
+    }
+
+    var graphInfo = folderStats(".mini-a-wiki-graph")
+    if (graphInfo.present && io.fileExists(root + "/.mini-a-wiki-graph/graph.json")) {
+      try {
+        var g = io.readFileJSON(root + "/.mini-a-wiki-graph/graph.json")
+        graphInfo.nodes = isMap(g.nodes) ? Object.keys(g.nodes).length : 0
+        graphInfo.edges = isArray(g.edges) ? g.edges.length : 0
+      } catch(e) {}
+    }
+
+    var lexicalInfo = folderStats(".mini-a-wiki-lucene")
+
+    var ingestInfo = folderStats(".mini-a-wiki-ingest")
+    if (ingestInfo.present && io.fileExists(root + "/.mini-a-wiki-ingest/ledger.json")) {
+      try {
+        var ledger = io.readFileJSON(root + "/.mini-a-wiki-ingest/ledger.json")
+        ingestInfo.entries = isMap(ledger) ? Object.keys(ledger).length : 0
+      } catch(e) {}
+    }
+
+    var result = {
+      root : root,
+      pages: {
+        total         : paths.length,
+        totalSizeBytes: totalSize,
+        byType        : byType,
+        orphans       : orphanPages.length,
+        oldestUpdate  : updatedDates.length > 0 ? updatedDates[0].value : __,
+        newestUpdate  : updatedDates.length > 0 ? updatedDates[updatedDates.length - 1].value : __,
+        largest       : largestPages
+      },
+      links: {
+        total        : totalLinks,
+        average      : paths.length > 0 ? Number((totalLinks / paths.length).toFixed(2)) : 0,
+        topReferenced: mostReferenced
+      },
+      headings: {
+        total  : totalHeadings,
+        average: paths.length > 0 ? Number((totalHeadings / paths.length).toFixed(2)) : 0
+      },
+      tags: {
+        distinct: Object.keys(tagCounts).length,
+        top     : topTags
+      },
+      aliases   : totalAliases,
+      supersedes: supersedesCount,
+      indexes: {
+        graph  : graphInfo,
+        lexical: lexicalInfo,
+        ingest : ingestInfo
+      }
+    }
+
+    ow.oJob.output(result, args)

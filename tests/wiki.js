@@ -2466,5 +2466,58 @@
     } finally { cleanupTestDir(dir) }
   }
 
+  // ── Agentic retrieval: compact discovery, structural inspection, bounded evidence ──
+
+  exports.testAgenticRetrievalFiveOperations = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisearchscanbudget: 20 })
+      wm.write("troubleshooting/memory.md", { title: "Memory troubleshooting", description: "OpenAF heap pressure and GC." }, "# Memory troubleshooting\n\n## Symptoms\n\nMemory grows during processing.\n\n## Heap pressure\n\nSet -Xmx carefully. GC can lag behind allocation.\n\n### Tuning\n\nInspect GC logs.\n\n## Other\n\nUnrelated.")
+      wm.write("troubleshooting/runtime.md", { title: "Runtime", description: "Runtime GC settings." }, "# Runtime\n\nGC configuration uses -Xmx.")
+
+      var search = wm.agenticSearch("memory", { forceScan: true, limit: 1 })
+      ow.test.assert(search.results.length, 1, "agentic search should apply compact result limit")
+      ow.test.assert(search.results[0].ref, "wiki:troubleshooting/memory.md", "search should issue stateless stable reference")
+      ow.test.assert(isUnDef(search.results[0].body), true, "search must not return document body")
+      wm._ensureSearchIndex = function() { return { type: "lucene", available: function() { return true }, writable: false, exists: function() { return true }, query: function() { return [{ id: "troubleshooting/memory.md", content: "memory", payload: { title: "Memory troubleshooting" }, score: 8.73 }] } } }
+      var scored = wm.agenticSearch("memory", { limit: 2 })
+      ow.test.assert(scored.results[0].score, 8.73, "agentic search should preserve the native Lucene score")
+
+      var opened = wm.open(search.results[0].ref)
+      ow.test.assert(opened.title, "Memory troubleshooting", "open should expose metadata")
+      ow.test.assert(opened.headings.length >= 3, true, "open should expose deterministic headings")
+      ow.test.assert(isUnDef(opened.body), true, "open must not expose body")
+
+      var nav = wm.navigate("troubleshooting/memory.md", { section: "Heap pressure" })
+      ow.test.assert(nav.children[0].title, "Tuning", "navigate should expose child headings")
+      ow.test.assert(nav.next.title, "Other", "navigate should expose adjacent heading")
+
+      var read = wm.agenticRead(search.results[0].ref, { section: "Heap pressure", maxChars: 80 })
+      ow.test.assert(read.body.indexOf("Xmx") >= 0, true, "bounded read should contain requested section")
+      ow.test.assert(read.truncated, true, "large section should expose deterministic continuation")
+      ow.test.assert(read.next.startLine > read.lineStart, true, "continuation should advance by line")
+
+      var grep = wm.grep("troubleshooting/", "Xmx", { contextLines: 1, limit: 5 })
+      ow.test.assert(grep.matches.length, 2, "grep should search a known directory without returning pages")
+      ow.test.assert(grep.matches[0].text.indexOf("Xmx") >= 0, true, "grep should return matching line")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testAgenticOpenAndReadEdgeCases = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("plain.md", { title: "Plain", description: "No headings" }, "ordinary text only")
+      var opened = wm.open("plain.md")
+      ow.test.assert(opened.headings.length, 0, "open should support pages without headings")
+      var missing = wm.agenticRead("plain.md", { section: "missing" })
+      ow.test.assert(missing.error, "section not found: missing", "read should report invalid sections explicitly")
+      var noMatches = wm.grep("plain.md", "absent", {})
+      ow.test.assert(noMatches.matches.length, 0, "grep should report no matches compactly")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
   return exports
 })()

@@ -355,6 +355,14 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testReadMaxLines
 
+- name: MiniA Wiki Tests::AgenticRetrievalFiveOperations
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testAgenticRetrievalFiveOperations
+
+- name: MiniA Wiki Tests::AgenticOpenAndReadEdgeCases
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testAgenticOpenAndReadEdgeCases
+
 - name: MiniA Wiki Tests::WriteAppend
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testWriteAppend
@@ -649,6 +657,8 @@ todo:
 - MiniA Wiki Tests::ReadCountLines
 - MiniA Wiki Tests::ReadSection
 - MiniA Wiki Tests::ReadMaxLines
+- MiniA Wiki Tests::AgenticRetrievalFiveOperations
+- MiniA Wiki Tests::AgenticOpenAndReadEdgeCases
 - MiniA Wiki Tests::WriteAppend
 - MiniA Wiki Tests::WriteLineInsert
 - MiniA Wiki Tests::WriteReplaceLineRange
