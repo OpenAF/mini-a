@@ -1,0 +1,146 @@
+# Author: Nuno Aguiar
+help:
+  text   : |
+    Given a mini-a wiki knowledge graph JSON file (see ojob.io/mini-a) produces statistics
+    about its nodes, edges, communities and cross-document surprise links.
+
+    The graph file is typically stored under "<wiki>/.mini-a-wiki-graph/graph.json".
+
+    Examples:
+      ojob ojob.io/mini-a/graphStats file="/path/to/.mini-a-wiki-graph/graph.json"
+      ojob ojob.io/mini-a/graphStats file="/path/to/graph.json" top=5 __format=json
+  expects:
+  - name     : file
+    desc     : The path to the mini-a graph.json file (if not provided defaults to key/pipeline data)
+    example  : "/path/to/.mini-a-wiki-graph/graph.json"
+    mandatory: false
+  - name     : key
+    desc     : The key where the graph data is stored (if not provided defaults to file or __pm)
+    example  : graph
+    mandatory: false
+  - name     : top
+    desc     : "Number of top entries to include in each ranked list (default: 10)"
+    example  : "5"
+    mandatory: false
+
+todo:
+- Graph statistics
+
+ojob:
+  opacks      :
+  - openaf: 20230512
+  catch       : printErrnl("[" + job.name + "] "); if (isDef(exception.javaException)) exception.javaException.printStackTrace(); else printErr(exception)
+  logToConsole: false   # to change when finished
+
+
+jobs:
+# ----------------------------
+- name : Graph statistics
+  check:
+    in:
+      key : isString.default(__)
+      file: isString.default(__)
+      top : toNumber.isNumber.default(10)
+  exec : |
+    var graph
+    if (isUnDef(args.key)) {
+      if (isDef(args.file)) {
+        if (!io.fileExists(args.file)) throw "Graph file not found: " + args.file
+        graph = io.readFileJSON(args.file)
+      } else {
+        graph = __pm
+        if (isDef(__pm._map)) graph = __pm._map
+      }
+    } else {
+      graph = $get(args.key)
+    }
+
+    if (!isMap(graph) || !isMap(graph.nodes)) throw "No mini-a graph data found (expecting a map with 'nodes' and 'edges')."
+
+    var nodes       = graph.nodes
+    var edges       = (isArray(graph.edges) ? graph.edges : []).filter(e => isMap(e) && e._deleted !== true)
+    var communities = isArray(graph.communities) ? graph.communities : []
+    var surprise    = isArray(graph.surprise) ? graph.surprise : []
+    var nodeIds     = Object.keys(nodes)
+
+    // Nodes by type
+    var nodesByType = {}
+    nodeIds.forEach(id => {
+      var t = (isMap(nodes[id]) && isString(nodes[id].type) && nodes[id].type.length > 0) ? nodes[id].type : "unknown"
+      nodesByType[t] = (nodesByType[t] || 0) + 1
+    })
+
+    // Edges by type/provenance + node degree
+    var edgesByType = {}, edgesByProvenance = {}, degree = {}
+    edges.forEach(e => {
+      var t = isString(e.type) && e.type.length > 0 ? e.type : "unknown"
+      edgesByType[t] = (edgesByType[t] || 0) + 1
+
+      var p = String(e.provenance || "").toUpperCase()
+      if (["EXTRACTED", "INFERRED", "AMBIGUOUS"].indexOf(p) < 0) p = "AMBIGUOUS"
+      edgesByProvenance[p] = (edgesByProvenance[p] || 0) + 1
+
+      if (isString(e.from) && e.from.length > 0) degree[e.from] = (degree[e.from] || 0) + 1
+      if (isString(e.to)   && e.to.length   > 0) degree[e.to]   = (degree[e.to]   || 0) + 1
+    })
+
+    var labelFor = id => {
+      var n = isMap(nodes[id]) ? nodes[id] : {}
+      var p = isMap(n.props) ? n.props : {}
+      return p.title || p.name || p.label || p.heading || id
+    }
+
+    var degreeList = nodeIds.map(id => ({
+      id    : id,
+      type  : isMap(nodes[id]) ? (nodes[id].type || "unknown") : "unknown",
+      label : labelFor(id),
+      degree: degree[id] || 0
+    }))
+    var topDegree    = degreeList.slice().sort((a, b) => b.degree - a.degree).slice(0, args.top)
+    var isolated     = degreeList.filter(n => n.degree == 0).length
+    var totalDegree  = degreeList.reduce((a, n) => a + n.degree, 0)
+    var avgDegree    = nodeIds.length > 0 ? Number((totalDegree / nodeIds.length).toFixed(2)) : 0
+    var maxPossible  = nodeIds.length > 1 ? nodeIds.length * (nodeIds.length - 1) : 0
+    var density      = maxPossible > 0 ? Number((edges.length / maxPossible).toFixed(6)) : 0
+
+    var topCommunities = communities.slice()
+      .sort((a, b) => (isArray(b.members) ? b.members.length : 0) - (isArray(a.members) ? a.members.length : 0))
+      .slice(0, args.top)
+      .map(c => ({
+        id      : c.id,
+        label   : c.label,
+        members : isArray(c.members) ? c.members.length : 0,
+        coverage: c.coverage
+      }))
+
+    var topSurprise = surprise.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, args.top)
+
+    var result = {
+      generatedAt: graph.created_at,
+      nodes: {
+        total : nodeIds.length,
+        byType: nodesByType
+      },
+      edges: {
+        total       : edges.length,
+        byType      : edgesByType,
+        byProvenance: edgesByProvenance
+      },
+      degree: {
+        average : avgDegree,
+        max     : topDegree.length > 0 ? topDegree[0].degree : 0,
+        isolated: isolated,
+        density : density,
+        top     : topDegree
+      },
+      communities: {
+        total: communities.length,
+        top  : topCommunities
+      },
+      surprise: {
+        total: surprise.length,
+        top  : topSurprise
+      }
+    }
+
+    ow.oJob.output(result, args)

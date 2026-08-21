@@ -414,6 +414,7 @@ Mini-A ships with complementary components:
 - **`mini-a-web.sh` / `mini-a-web.yaml`** - Lightweight HTTP server for browser UI — launched via `mini-a web=true` or `mini-a onport=<port>` (or directly with `./mini-a-web.sh onport=<port>`)
 - **`mini-a-worker.yaml`** - Headless HTTP API server for programmatic agent delegation (launch with `mini-a workermode=true`)
 - **`mini-a-modes.yaml`** - Built-in configuration presets for common use cases (can be extended with `~/.openaf-mini-a_modes.yaml` or `~/.openaf-mini-a/modes.yaml`)
+- **`utils/`** - Standalone read-only oJobs for wiki index/graph statistics (`ojob utils/indexStats.yaml dir=...`, `ojob utils/graphStats.yaml file=...`) — see [Wiki Guide](docs/WIKI.md#utility-ojobs-utils)
 - **`public/`** - Browser interface assets
 
 ## Common Configuration Options

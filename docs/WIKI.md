@@ -259,6 +259,30 @@ Scan-fallback reads are also cached per `MiniAWikiManager` instance (`wikisearch
 
 `wikisearchparallel` (default `false`, opt-in) parallelizes the scan-fallback path's `backend.read()` calls via OpenAF's `pForEach`. **Read this before enabling it in a long-lived process:** an earlier, unrelated `pForEach`-based read path in the wiki manager (the shared read pass behind `reindex()`) deadlocked OpenAF's shared thread pool, reproducing only on the *second* consecutive full test-suite run within the same JVM — a `jstack` capture showed a worker thread from an earlier `pForEach` batch that never returned, permanently occupying a pool slot and starving a later, unrelated call. That incident's root cause was never conclusively isolated, and a companion investigation found the literal explanation in the original code comment ("blocked on the same pool") doesn't cleanly match the runtime, since the specific call implicated actually runs on a separate virtual-thread executor. A fix to `pForEach` itself is proposed upstream (see the `openaf` project's `PFOREACH_PLAN.md`), but until that lands, `wikisearchparallel` should be treated as carrying the same class of unconfirmed risk. If you enable it, validate with two consecutive full `ojob tests/wiki.yaml` runs in one JVM process before trusting it in production.
 
+## Utility oJobs (`utils/`)
+
+Two standalone oJobs report statistics on an existing wiki's on-disk state without going through `mini-a` or the `MiniAWikiManager` API. Both are read-only and safe to run against a live wiki (no writer lock is taken). Add `top=<n>` to change how many entries each ranked list includes (default `10`); `__format=json` prints machine-readable output instead of the default table/text rendering.
+
+### `utils/indexStats.yaml`
+
+Given a wiki root folder (or its `.mini-a-wiki-meta` folder directly), reports page-level statistics assembled from the meta shards — counts by type, tag frequency, link totals and top inbound-referenced pages, orphan pages (no outbound links), heading/alias counts, oldest/newest `updated` timestamps, and the largest pages by size. It also summarizes the sibling `.mini-a-wiki-lucene`, `.mini-a-wiki-graph`, and `.mini-a-wiki-ingest` folders (file counts, total size, and — where readable — graph node/edge counts and ingest ledger entry counts).
+
+```sh
+ojob utils/indexStats.yaml dir="/path/to/wiki"
+ojob utils/indexStats.yaml dir="/path/to/wiki" top=5 __format=json
+```
+
+### `utils/graphStats.yaml`
+
+Given a `.mini-a-wiki-graph/graph.json` file, reports node/edge/community/surprise-link statistics — node counts by type, edge counts by type and provenance (`EXTRACTED`/`INFERRED`/`AMBIGUOUS`), per-node degree (top-N, average, max, isolated-node count, graph density), the largest communities, and the top cross-document surprise links by score.
+
+```sh
+ojob utils/graphStats.yaml file="/path/to/.mini-a-wiki-graph/graph.json"
+ojob utils/graphStats.yaml file="/path/to/graph.json" top=5 __format=json
+```
+
+`graphStats.yaml` also accepts `key=<channel-key>` instead of `file` to read graph data already loaded into an oJob pipeline/channel (falls back to `__pm`/`__pm._map` when neither `file` nor `key` is given), which is how `utils/indexStats.yaml`-style tooling can chain into it in a larger pipeline.
+
 ## Examples
 
 ```sh
