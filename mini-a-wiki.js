@@ -4,7 +4,7 @@
 
 // ── Template version & helpers ────────────────────────────────────────────────
 
-var __MINI_A_WIKI_AGENTS_VERSION = 4
+var __MINI_A_WIKI_AGENTS_VERSION = 5
 var __MINI_A_WIKI_LEXICAL_SCHEMA_VERSION = 1
 var __MINI_A_WIKI_LEXICAL_LANGUAGES = [
   "arabic", "armenian", "basque", "bengali", "brazilian", "bulgarian", "catalan", "chinese", "cjk", "czech", "danish", "dutch", "english", "estonian", "finnish", "french", "galician", "german", "greek", "hindi", "hungarian", "indonesian", "irish", "italian", "latvian", "lithuanian", "norwegian", "persian", "polish", "portuguese", "romanian", "russian", "sorani", "spanish", "swedish", "tamil", "telugu", "thai", "turkish"
@@ -128,20 +128,25 @@ var __miniAWikiAgentsTemplate = function(now) {
     "## Quick start",
     "",
     "1. **`context`** — call once to get a compact wiki overview before anything else.",
-    "2. **`search`** — find candidates first, always. Call before read or write.",
-    "3. **`read`** — read the best match. For long pages: `countLines=true` first, then `section=` for the heading you need.",
-    "4. **`write`** — distil and save knowledge. Fill all required frontmatter fields.",
-    "5. **`lint`** — fix all error-severity issues before finishing.",
-    "6. Never edit AGENTS.md, index.md, or log.md directly.",
+    "2. **`search`** — find compact candidates first. Do not read every hit.",
+    "3. **`open` / `navigate`** — inspect metadata and headings before asking for content.",
+    "4. **`read`** — retrieve one relevant section or range; use `grep` for exact names, IDs, and errors.",
+    "5. **`write`** — distil and save knowledge. Fill all required frontmatter fields.",
+    "6. **`lint`** — fix all error-severity issues before finishing.",
+    "7. Never edit AGENTS.md, index.md, or log.md directly.",
     "",
     "## Operations in this surface",
     "",
     "Available agent action ops (`wiki op=\"...\"`):  ",
-    "`context` · `search` · `read` · `list` · `browse` · `tree` · `backlinks` · `write` · `delete` · `move` · `init` · `lint` · `reindex` · `attach` · `detach` · `mounts`",
+    "`context` · `search` · `open` · `navigate` · `read` · `grep` · `related` · `list` · `browse` · `tree` · `backlinks` · `write` · `delete` · `move` · `init` · `lint` · `reindex` · `attach` · `detach` · `mounts`",
     "",
     "- `wiki op=\"context\"` — compact wiki overview (page count, sections, mounts, recent changes).",
-    "- `wiki op=\"search\" query=\"...\"` — search pages; returns path+title+description by default.",
-    "- `wiki op=\"read\" path=\"...\"` — read a page; add `section=` for one heading only.",
+    "- `wiki op=\"search\" query=\"...\"` — compact candidates with path/reference/title/summary and Lucene score when available.",
+    "- `wiki op=\"open\" path=\"...\"` — inspect front matter, links, headings and ranges without body content.",
+    "- `wiki op=\"navigate\" path=\"...\" section=\"...\"` — browse folders or heading relationships without body content.",
+    "- `wiki op=\"read\" path=\"...\" section=\"...\"` — read one heading or range; bounded output has a continuation.",
+    "- `wiki op=\"grep\" path=\"...\" pattern=\"...\"` — exact matching in a known page/folder with small context.",
+    "- `wiki op=\"related\" path=\"...\"` — optional backlinks/graph follow-up when lexical evidence is insufficient.",
     "- `wiki op=\"list\"` — list pages; add `withMeta=true` for path+title+description+type+updated.",
     "- `wiki op=\"browse\"` — navigate section structure.",
     "- `wiki op=\"tree\"` — full hierarchy tree.",
@@ -2659,6 +2664,148 @@ MiniAWikiManager.prototype.read = function(path, options) {
     linesTotal: sliced.linesTotal,
     linesRead : sliced.linesRead
   }
+}
+
+// ── Agentic retrieval ───────────────────────────────────────────────────────
+// These are deliberately thin views over the established read/search/tree/graph
+// APIs. They neither maintain a second index nor change the compatibility of
+// read(), whose historical default is a full page.
+MiniAWikiManager.prototype._agenticPath = function(value) {
+  var path = isString(value) ? value.trim() : ""
+  return path.indexOf("wiki:") === 0 ? path.substring(5) : path
+}
+
+MiniAWikiManager.prototype._agenticRef = function(path) {
+  return "wiki:" + String(path || "")
+}
+
+MiniAWikiManager.prototype._agenticLog = function(name, details) {
+  if (toBoolean(this._config.debug) !== true && toBoolean(this._config.verbose) !== true) return
+  var fields = []
+  Object.keys(details || {}).forEach(function(k) { if (isDef(details[k])) fields.push(k + "=" + JSON.stringify(details[k])) })
+  this._logFn("info", "wiki." + name + " " + fields.join(" "))
+}
+
+// search is compact by construction: the original Lucene score is retained but
+// bodies/snippets are never included. `ref` is a stateless stable convenience;
+// paths remain valid (including @mount paths).
+MiniAWikiManager.prototype.agenticSearch = function(query, options) {
+  var opts = isObject(options) ? options : {}
+  var limit = isNumber(opts.limit) && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 20) : 8
+  var hits = this.search(query, merge({}, opts, { limit: limit, compact: true, contextLines: 0 }))
+  var results = hits.map(function(hit) {
+    var out = { ref: this._agenticRef(hit.path), path: hit.path, title: hit.title || hit.path, summary: hit.description || "" }
+    if (isDef(hit.score)) out.score = hit.score // native Lucene relevance; scan results intentionally have none
+    if (isDef(hit.mount)) out.mount = hit.mount
+    return out
+  }.bind(this))
+  var engine = this._searchIndexStatus()
+  this._agenticLog("search", { query: query, backend: engine, results: results.length, topScore: results.length > 0 ? results[0].score : __ })
+  var out = { query: query, backend: engine, results: results }
+  if (hits.truncated === true) { out.truncated = true; out.scanned = hits.scanned; out.scanBudget = hits.scanBudget }
+  return out
+}
+
+MiniAWikiManager.prototype.open = function(pathOrRef, options) {
+  var path = this._agenticPath(pathOrRef)
+  var page = this.read(path)
+  if (!isObject(page)) return __
+  var opts = isObject(options) ? options : {}
+  var maxHeadings = isNumber(opts.maxHeadings) && opts.maxHeadings > 0 ? Math.min(Math.floor(opts.maxHeadings), 100) : 40
+  var rawLines = String(page.raw || "").split("\n")
+  var headings = this._markdownHeadings(page.body).map(function(h, i, all) {
+    var next = rawLines.length
+    for (var j = i + 1; j < all.length; j++) if (all[j].level <= h.level) { next = all[j].line; break }
+    // body headings are offset by any front matter in raw content.
+    var bodyOffset = rawLines.length - String(page.body || "").split("\n").length
+    return { id: this._headingAnchor(h.text), title: h.text, level: h.level, lineStart: h.line + bodyOffset + 1, lineEnd: next + bodyOffset }
+  }.bind(this))
+  var links = isArray(page.links) ? page.links.slice(0, 40) : []
+  var size = new java.lang.String(String(page.raw || "")).getBytes("UTF-8").length
+  var out = { ref: this._agenticRef(page.path), path: page.path, title: (page.meta && page.meta.title) || page.path, description: (page.meta && page.meta.description) || "", size: size, frontmatter: page.meta || {}, headings: headings.slice(0, maxHeadings), links: links }
+  if (headings.length > maxHeadings) out.headingsTruncated = true
+  if (links.length < (page.links || []).length) out.linksTruncated = true
+  this._agenticLog("open", { path: page.path, size: size, headings: headings.length })
+  return out
+}
+
+MiniAWikiManager.prototype.navigate = function(pathOrRef, options) {
+  var path = this._agenticPath(pathOrRef)
+  var opts = isObject(options) ? options : {}
+  if (!/\.md$/i.test(path)) return this.browse(path)
+  var descriptor = this.open(path, { maxHeadings: 100 })
+  if (!isObject(descriptor)) return __
+  var section = isString(opts.section) ? opts.section.trim() : ""
+  var headings = descriptor.headings
+  var index = -1
+  if (section.length > 0) for (var i = 0; i < headings.length; i++) if (headings[i].title.toLowerCase() === section.toLowerCase() || headings[i].id === this._headingAnchor(section)) { index = i; break }
+  if (section.length > 0 && index < 0) return { path: descriptor.path, error: "section not found: " + section, headings: headings }
+  if (index < 0) return { path: descriptor.path, headings: headings }
+  var current = headings[index], parent = __, children = [], previous = __, next = __
+  for (var p = index - 1; p >= 0; p--) if (headings[p].level < current.level) { parent = headings[p]; break }
+  for (var c = index + 1; c < headings.length && headings[c].lineStart <= current.lineEnd; c++) if (headings[c].level === current.level + 1) children.push(headings[c])
+  for (var a = index - 1; a >= 0; a--) if (headings[a].level === current.level) { previous = headings[a]; break }
+  for (var n = index + 1; n < headings.length; n++) if (headings[n].level === current.level) { next = headings[n]; break }
+  return { path: descriptor.path, section: current, parent: parent, children: children, previous: previous, next: next }
+}
+
+MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
+  var path = this._agenticPath(pathOrRef), opts = isObject(options) ? options : {}
+  var readOpts = { section: opts.section, lineStart: opts.startLine || opts.lineStart, lineEnd: opts.endLine || opts.lineEnd, maxLines: opts.maxLines }
+  var page = this.read(path, readOpts)
+  if (!isObject(page)) return __
+  if (isString(readOpts.section) && readOpts.section.length > 0 && page.linesRead === 0) return { path: path, error: "section not found: " + readOpts.section }
+  var maxChars = isNumber(opts.maxChars) && opts.maxChars > 0 ? Math.min(Math.floor(opts.maxChars), 32000) : 8000
+  var body = String(page.body || ""), truncated = body.length > maxChars
+  if (truncated) {
+    var chunk = body.substring(0, maxChars), breakAt = chunk.lastIndexOf("\n")
+    if (breakAt > 0) chunk = chunk.substring(0, breakAt)
+    body = chunk
+  }
+  var out = { ref: this._agenticRef(page.path), path: page.path, title: (page.meta && page.meta.title) || page.path, body: body, lineStart: page.lineStart || 1, lineEnd: page.lineStart ? page.lineStart + body.split("\n").length - 1 : __, linesTotal: page.linesTotal, chars: body.length }
+  if (truncated) { out.truncated = true; out.next = { path: this._agenticRef(page.path), startLine: out.lineEnd + 1, maxChars: maxChars } }
+  this._agenticLog("read", { path: page.path, section: opts.section, chars: body.length, truncated: truncated })
+  return out
+}
+
+MiniAWikiManager.prototype.grep = function(pathOrRef, pattern, options) {
+  var path = this._agenticPath(pathOrRef), opts = isObject(options) ? options : {}
+  if (!isString(pattern) || pattern.length === 0) return { error: "pattern is required", matches: [] }
+  if (path.startsWith("@") && !/\.md$/i.test(path)) {
+    var mr = this._resolveMountPath(path.endsWith("/") ? path + "_dummy.md" : path + "/_dummy.md")
+    if (!mr || !mr.mount) return { error: "mount not found", matches: [] }
+    var mounted = mr.mount.manager.grep(mr.localPath.replace(/_dummy\.md$/, ""), pattern, opts)
+    mounted.matches.forEach(function(m) { m.path = "@" + mr.name + "/" + m.path })
+    return mounted
+  }
+  var pages = /\.md$/i.test(path) ? [path] : this.list(path || "")
+  var limit = isNumber(opts.limit) && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 50) : 20
+  var context = isNumber(opts.contextLines) && opts.contextLines >= 0 ? Math.min(Math.floor(opts.contextLines), 5) : 1
+  var rx
+  try { rx = new RegExp(opts.regex === true ? pattern : pattern.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"), opts.caseSensitive === true ? "" : "i") } catch(e) { return { error: "invalid pattern", matches: [] } }
+  var matches = [], scanned = 0, budget = Number(this._config.wikisearchscanbudget) > 0 ? Number(this._config.wikisearchscanbudget) : 1000
+  for (var i = 0; i < pages.length && matches.length < limit && scanned < budget; i++) {
+    scanned++; var page = this.read(pages[i]); if (!isObject(page)) continue
+    var lines = String(page.raw || "").split("\n")
+    for (var l = 0; l < lines.length && matches.length < limit; l++) {
+      rx.lastIndex = 0
+      if (rx.test(lines[l])) matches.push({ path: page.path, ref: this._agenticRef(page.path), line: l + 1, text: lines[l], contextBefore: lines.slice(Math.max(0, l - context), l), contextAfter: lines.slice(l + 1, Math.min(lines.length, l + 1 + context)) })
+    }
+  }
+  var out = { path: path, pattern: pattern, matches: matches, scanned: scanned }
+  if (matches.length >= limit || scanned < pages.length) { out.truncated = true; out.next = { path: pathOrRef, pattern: pattern, offset: matches.length } }
+  this._agenticLog("grep", { path: path, pattern: pattern, matches: matches.length })
+  return out
+}
+
+MiniAWikiManager.prototype.related = function(pathOrRef, options) {
+  var path = this._agenticPath(pathOrRef), links = this.backlinks(path)
+  var out = { path: path, backlinks: links.backlinks.map(function(b) { return { ref: this._agenticRef(b.path), path: b.path, title: b.title } }.bind(this)), graph: [] }
+  try {
+    var neighbors = this.graph("neighbors", { path: path })
+    if (isArray(neighbors)) out.graph = neighbors.slice(0, isNumber(options && options.limit) ? options.limit : 10)
+  } catch(e) { out.graphAvailable = false }
+  return out
 }
 
 MiniAWikiManager.prototype.write = function(path, metaOrRaw, body, options) {

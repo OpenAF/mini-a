@@ -1565,7 +1565,7 @@ MiniUtilsTool.prototype.skills = function(params) {
  * <key>MiniUtilsTool.wiki(params) : Object|String</key>
  * Interact with the wiki knowledge base configured in the agent.
  * The `params` object supports:
- * - `operation` (string): list, tree, browse, read, search, backlinks, write, move, delete, lint, init.
+ * - `operation` (string): search, open, navigate, read, grep, related, plus legacy wiki operations.
  * - `path` (string): Page path for read/write operations.
  * - `to` (string): Target page path for operation=move.
  * - `query` (string): Search query for operation=search.
@@ -1646,6 +1646,32 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return wm.browse(isString(params.path) ? params.path : "")
     }
 
+    // Agentic retrieval is intentionally a separate view, so legacy `read`
+    // continues to return full documents for existing callers.
+    if (op === "open") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path or ref is required for open"
+      var opened = wm.open(params.path.trim(), { maxHeadings: isNumber(params.maxHeadings) ? params.maxHeadings : __ })
+      return isObject(opened) ? opened : "[ERROR] Page not found: " + params.path
+    }
+
+    if (op === "navigate") {
+      var navPath = isString(params.path) ? params.path.trim() : ""
+      if (navPath.length === 0) return "[ERROR] path or ref is required for navigate"
+      var navigated = wm.navigate(navPath, { section: isString(params.section) ? params.section : __ })
+      return isObject(navigated) ? navigated : "[ERROR] Path not found: " + navPath
+    }
+
+    if (op === "grep") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path or ref is required for grep"
+      if (!isString(params.pattern) || params.pattern.length === 0) return "[ERROR] pattern is required for grep"
+      return wm.grep(params.path.trim(), params.pattern, { limit: isNumber(params.limit) ? params.limit : __, contextLines: isNumber(params.contextLines) ? params.contextLines : __, regex: params.regex === true, caseSensitive: params.caseSensitive === true })
+    }
+
+    if (op === "related") {
+      if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path or ref is required for related"
+      return wm.related(params.path.trim(), { limit: isNumber(params.limit) ? params.limit : __ })
+    }
+
     if (op === "read") {
       if (!isString(params.path) || params.path.trim().length === 0) return "[ERROR] path is required for read"
       var readOpts = {
@@ -1655,7 +1681,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
         countLines: params.countLines === true,
         section   : isString(params.section)   ? params.section   : __
       }
-      var page = wm.read(params.path.trim(), readOpts)
+      var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? wm.agenticRead(params.path.trim(), merge({}, readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __ })) : wm.read(params.path.trim(), readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
       if (params.compact === true) return { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
       return page
@@ -1671,6 +1697,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
         searchIn    : isString(params.searchIn) ? params.searchIn : "all",
         compact     : params.compact !== false
       }
+      if (params.agentic === true || this._wikiAgenticRetrieval === true) return wm.agenticSearch(params.query.trim(), searchOpts)
       var hits = wm.search(params.query.trim(), searchOpts)
       return { count: hits.length, results: hits }
     }
@@ -1719,7 +1746,7 @@ MiniUtilsTool.prototype.wiki = function(params) {
       return wm.reindex()
     }
 
-    return "[ERROR] Unknown wiki operation: " + op + ". Use context, list, tree, browse, read, search, backlinks, write, move, delete, lint, init, mounts, attach, detach, reindex."
+    return "[ERROR] Unknown wiki operation: " + op + ". Use search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, write, move, delete, lint, init, mounts, attach, detach, reindex."
   } catch (e) {
     return "[ERROR] " + __miniAErrMsg(e)
   }

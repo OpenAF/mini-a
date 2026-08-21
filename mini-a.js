@@ -345,7 +345,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"context|list|tree|browse|read|search|grep|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md","to":"new/path.md","query":"...","content":"...","withMeta":bool,"lineStart":N,"lineEnd":N,"maxLines":N,"countLines":bool,"section":"Heading Name","lineInsert":N,"append":bool,"regex":bool,"caseSensitive":bool,"contextLines":N,"searchIn":"body|all","depth":N,"name":"mountName","backend":"fs|s3","root":"path","severity":"error|warning|info","types":"broken_link,invalid_anchor","page":"page.md","limit":N (lint filters/results){{#if wikiRw}} (write/move/delete/init/reindex require wikiaccess=rw){{/if}}"}); ALWAYS start with op=context for a compact overview{{#if wikiRw}}; before write/move/delete read AGENTS.md for rules{{/if}}.{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -19126,21 +19126,33 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             } else if (wkOp === "browse") {
               global.__mini_a_metrics.wiki_ops_list.inc()
               wkResult = af.toTOON(this._wikiManager.browse(wkPath))
+            } else if (wkOp === "open") {
+              global.__mini_a_metrics.wiki_ops_read.inc()
+              wkResult = wkPath.length === 0 ? "[ERROR] wiki open requires 'path'" : af.toTOON(this._wikiManager.open(wkPath, { maxHeadings: wkParams.maxHeadings }))
+            } else if (wkOp === "navigate") {
+              global.__mini_a_metrics.wiki_ops_list.inc()
+              wkResult = wkPath.length === 0 ? "[ERROR] wiki navigate requires 'path'" : af.toTOON(this._wikiManager.navigate(wkPath, { section: wkParams.section }))
             } else if (wkOp === "read") {
               global.__mini_a_metrics.wiki_ops_read.inc()
               if (wkPath.length === 0) {
                 wkResult = "[ERROR] wiki read requires 'path'"
               } else {
-                var wkPage = this._wikiManager.read(wkPath, wkReadOpts)
+                var wkPage = this._wikiManager.agenticRead(wkPath, merge({}, wkReadOpts, { maxChars: wkParams.maxChars }))
                 wkResult = isObject(wkPage) ? af.toTOON(wkPage) : "[ERROR] Page not found: " + wkPath
               }
-            } else if (wkOp === "search" || wkOp === "grep") {
+            } else if (wkOp === "grep") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              wkResult = wkPath.length === 0 || !isString(wkParams.pattern) ? "[ERROR] wiki grep requires 'path' and 'pattern'" : af.toTOON(this._wikiManager.grep(wkPath, wkParams.pattern, wkSearchOpts))
+            } else if (wkOp === "related") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              wkResult = wkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(wkPath, { limit: wkParams.limit }))
+            } else if (wkOp === "search") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               if (wkQuery.length === 0) {
                 wkResult = "[ERROR] wiki search requires 'query'"
               } else {
-                var wkHits = this._wikiManager.search(wkQuery, wkSearchOpts)
-                wkResult = wkHits.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
+                var wkHits = this._wikiManager.agenticSearch(wkQuery, wkSearchOpts)
+                wkResult = wkHits.results.length === 0 ? "No results for: " + wkQuery : af.toTOON(wkHits)
                 if (wkHits.truncated === true) {
                   wkResult += "\n[NOTE] Search stopped early: scanned " + wkHits.scanned + " of the wiki's page budget (" + wkHits.scanBudget + "). Results may be incomplete; narrow the query or scope with path= to see more."
                 }
@@ -19246,7 +19258,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               global.__mini_a_metrics.wiki_ops_write.inc()
               wkResult = af.toTOON(this._wikiManager.reindex())
             } else {
-              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use context, list, tree, browse, read, search, grep, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
             this._trace("wiki_result", { op: wkOp, params: wkParams, result: wkResult, error: isString(wkResult) && wkResult.indexOf("[ERROR]") === 0 })
@@ -19879,17 +19891,25 @@ MiniA.prototype._runChatbotMode = function(options) {
                 cbWkResult = af.toTOON(this._wikiManager.tree(cbWkPath, isNumber(cbWkParams.depth) ? cbWkParams.depth : 3))
               } else if (cbWkOp === "browse") {
                 cbWkResult = af.toTOON(this._wikiManager.browse(cbWkPath))
+              } else if (cbWkOp === "open") {
+                cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki open requires 'path'" : af.toTOON(this._wikiManager.open(cbWkPath, { maxHeadings: cbWkParams.maxHeadings }))
+              } else if (cbWkOp === "navigate") {
+                cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki navigate requires 'path'" : af.toTOON(this._wikiManager.navigate(cbWkPath, { section: cbWkParams.section }))
               } else if (cbWkOp === "read") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki read requires 'path'" }
                 else {
-                  var cbWkPage = this._wikiManager.read(cbWkPath, cbWkReadOpts)
+                  var cbWkPage = this._wikiManager.agenticRead(cbWkPath, merge({}, cbWkReadOpts, { maxChars: cbWkParams.maxChars }))
                   cbWkResult = isObject(cbWkPage) ? af.toTOON(cbWkPage) : "[ERROR] Page not found: " + cbWkPath
                 }
-              } else if (cbWkOp === "search" || cbWkOp === "grep") {
+              } else if (cbWkOp === "grep") {
+                cbWkResult = cbWkPath.length === 0 || !isString(cbWkParams.pattern) ? "[ERROR] wiki grep requires 'path' and 'pattern'" : af.toTOON(this._wikiManager.grep(cbWkPath, cbWkParams.pattern, cbWkSearchOpts))
+              } else if (cbWkOp === "related") {
+                cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(cbWkPath, { limit: cbWkParams.limit }))
+              } else if (cbWkOp === "search") {
                 if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
                 else {
-                  var cbWkHits = this._wikiManager.search(cbWkQuery, cbWkSearchOpts)
-                  cbWkResult = cbWkHits.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
+                  var cbWkHits = this._wikiManager.agenticSearch(cbWkQuery, cbWkSearchOpts)
+                  cbWkResult = cbWkHits.results.length === 0 ? "No results for: " + cbWkQuery : af.toTOON(cbWkHits)
                 }
               } else if (cbWkOp === "backlinks") {
                 if (cbWkPath.length === 0) { cbWkResult = "[ERROR] wiki backlinks requires 'path'" }

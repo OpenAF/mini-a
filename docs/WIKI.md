@@ -22,6 +22,34 @@ Use `tree` and `browse` for hierarchy, `backlinks` before moving a page, and `li
 
 All three MCP servers (`mcp-wiki.yaml`, `mcp-wiki-safe.yaml`, `mcp-wiki-ops.yaml`) accept `audit=true` (or `OJOB_MCP_AUDIT`) to log every tool call. For `s3`, `http`, and `es` backends this also logs each page actually fetched — backend, resolved location (`s3://bucket/key`, the joined URL, or `es:index/path`), and byte count — including internal fetches made while serving `search`, `lint`, `list`, or `reindex`, not just the top-level tool call. Local `fs` reads are not covered. `mcp-wiki-safe.yaml` only ever logs the resolved location, never the opaque reference exposed to restricted-mode callers.
 
+## Agentic retrieval
+
+The agent-facing retrieval layer is a small, incremental protocol layered on the existing Lucene index, scan fallback, hierarchy, mounts, backends, backlinks, and optional graph. It does not create another index or document store. Its purpose is to keep irrelevant Markdown out of model context.
+
+1. `search(query)` finds a small set of candidates. It returns metadata, a `wiki:path` reference, and the native Lucene `score` when Lucene supplied one; scan fallback deliberately does not invent a score.
+2. `open(path|ref)` returns cheap structure: front matter, title/description, byte size, links, headings, and deterministic line ranges. It never returns the Markdown body.
+3. `navigate(path|ref, section=...)` browses a directory through existing hierarchy logic, or describes a heading's parent, children, adjacent headings, and ranges.
+4. `read(path|ref, section|startLine/endLine)` returns the selected evidence. Agent reads default to a bounded character chunk and report `truncated` plus a deterministic `next.startLine` continuation instead of silently flooding context.
+5. `grep(path|ref, pattern)` searches one known page or directory and returns bounded matching lines with a little context.
+
+`related(path|ref)` is optional follow-up discovery: it preserves backlinks and uses graph neighbors only when graph state is available. It is useful after lexical retrieval leaves a real gap, not as a mandatory first step. `mcp-wiki-safe.yaml` remains intentionally restricted to its opaque, budgeted search/read contract and does not expose structural enumeration.
+
+An agent should normally iterate, rather than follow a rigid pipeline:
+
+```text
+Question: Why can OpenAF memory increase during heavy processing?
+search("OpenAF memory increase")
+  -> open("troubleshooting/memory.md")
+  -> navigate("troubleshooting/memory.md", section="Heap pressure")
+  -> read("troubleshooting/memory.md", section="Heap pressure")
+  -> grep("troubleshooting/memory.md", "GC")
+  -> open("runtime/garbage-collection.md")
+  -> read("runtime/garbage-collection.md", section="Heap sizing")
+  -> answer from the collected evidence
+```
+
+Do not read every search hit, retrieve whole long documents merely because they matched, or keep issuing broad searches after a promising page is open. Prefer `grep` for exact configuration names, identifiers, and errors; use `related` only if normal lexical and structural evidence is insufficient. In debug/verbose mode the manager logs retrieval metadata (engine, result count/top score, section and character count, and grep match count) without logging page contents.
+
 ## Console command reference
 
 ### `/wiki [op] [args]`
