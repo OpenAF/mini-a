@@ -1231,22 +1231,27 @@ todo:
               }
               var _subtaskId = global._mini_a_web_extractSubtaskId(m)
               if (e == "subagent" || isString(_subtaskId)) {
-                var _sid = isString(_subtaskId) ? _subtaskId : sha1(m || "").substring(0, 8)
-                var _title = "Sub-agent " + _sid
-                if (isString(m) && m.indexOf(":") >= 0) {
-                  var _parts = m.split(":")
-                  var _candidate = _parts.slice(1).join(":").trim()
-                  if (_candidate.length > 0) _title = _candidate.substring(0, 120)
+                // Subtask/subagent events are always kept out of the main answer
+                // transcript (global.__res) so raw "[subtask:xxxx]" markers never
+                // leak into the web answer view. When showdelegate=true they are
+                // still tracked as separate lines in the dedicated subagent panel
+                // (global.__subagentState / _res.subagents) instead.
+                if (global.__showdelegate) {
+                  var _sid = isString(_subtaskId) ? _subtaskId : sha1(m || "").substring(0, 8)
+                  var _title = "Sub-agent " + _sid
+                  if (isString(m) && m.indexOf(":") >= 0) {
+                    var _parts = m.split(":")
+                    var _candidate = _parts.slice(1).join(":").trim()
+                    if (_candidate.length > 0) _title = _candidate.substring(0, 120)
+                  }
+                  var _status = global._mini_a_web_statusFromSubtaskMessage(m)
+                  global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, m)
+                  if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
+                    global._mini_a_web_ssePush(uuid, "subagents", { subagents: global.__subagentState[uuid] })
+                  }
                 }
-                var _status = global._mini_a_web_statusFromSubtaskMessage(m)
-                global._mini_a_web_upsertSubtaskEvent(uuid, _sid, _title, _status, m)
-                if (global.__usestream && isFunction(global._mini_a_web_ssePush)) {
-                  global._mini_a_web_ssePush(uuid, "subagents", { subagents: global.__subagentState[uuid] })
-                }
-                if (!global.__showdelegate) {
-                  log("[" + uuid + "] 🤝 " + m)
-                  return
-                }
+                log("[" + uuid + "] 🤝 " + m)
+                return
               }
               global.__res[uuid].push({ event: _e, message: m })
               if (global.__usestream && isFunction(global._mini_a_web_ssePush) && _e != "🗺️") {
