@@ -1994,3 +1994,8 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 - **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Issues**: https://github.com/openaf/mini-a/issues
 - **Email**: openaf@openaf.io
+# Wiki
+
+`mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto`
+
+`mini-a dream=true usewiki=true dreamwikimode=plan` — estimates only; never calls a model.

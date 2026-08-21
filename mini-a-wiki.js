@@ -2986,6 +2986,8 @@ MiniAWikiManager.prototype.search = function(query, options) {
           var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length, scanState)
           var luceneOut = this._withGraphHints(validHits.concat(mountResults), opts)
           if (scanState.truncated === true) { luceneOut.truncated = true; luceneOut.scanned = scanState.scanned; luceneOut.scanBudget = scanState.budget }
+          if (isFunction(this.knowledgeRank)) luceneOut = this.knowledgeRank(query, luceneOut, opts.debug === true)
+          if (isFunction(this.knowledgeRecordTelemetry)) this.knowledgeRecordTelemetry(query, luceneOut, toBoolean(this._config.wikitelemetry) === true)
           return luceneOut
         }
       }
@@ -3087,6 +3089,8 @@ MiniAWikiManager.prototype.search = function(query, options) {
   var mountResults = this._searchMounts(query, opts, compact, limit - results.length, scanState)
   var out = this._withGraphHints(results.concat(mountResults), opts)
   if (scanState.truncated === true) { out.truncated = true; out.scanned = scanState.scanned; out.scanBudget = scanState.budget }
+  if (isFunction(this.knowledgeRank)) out = this.knowledgeRank(query, out, opts.debug === true)
+  if (isFunction(this.knowledgeRecordTelemetry)) this.knowledgeRecordTelemetry(query, out, toBoolean(this._config.wikitelemetry) === true)
   return out
 }
 

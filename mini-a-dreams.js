@@ -13,6 +13,7 @@ __initializeCon()
 loadLib("mini-a-common.js")
 loadLib("mini-a-memory.js")
 loadLib("mini-a-wiki.js")
+loadLib("mini-a-wiki-knowledge.js")
 loadLib("mini-a.js")
 
 if (isDef(args.libs) && String(args.libs).trim().length > 0) {
@@ -599,7 +600,9 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       // dry-run never touches graph.json.
       if (self._wikiGraphEnabled()) {
         try {
-          var wantSemantic = self._effectiveWikiGraphSemantic("plan")
+          // Plan/dry-run is intentionally model-free. It reports semantic work as an
+          // estimate below instead of invoking the graph extractor.
+          var wantSemantic = false
           proposal.graph_preview = { semantic: wantSemantic, result: wmDry.graph("build", { preview: true, semantic: wantSemantic }) }
         } catch(graphPreviewErr) {
           self._log("[dreams:wiki] Graph preview error: " + __miniAErrMsg(graphPreviewErr))
@@ -607,6 +610,13 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         }
       }
       defaultResult.proposal = proposal
+      if (isFunction(wmDry.knowledgeDirtySet)) {
+        var stateDry = wmDry.knowledgeLoadState()
+        var changedDry = Object.keys(stateDry.chunks || {})
+        defaultResult.dirty_set = wmDry.knowledgeDirtySet(changedDry, { maxAffected: self._args.dreamwikimaxaffected, maxDepth: self._args.dreamwikimaxdepth })
+        defaultResult.estimated_llm_calls = changedDry.length
+        defaultResult.estimated_input_tokens = changedDry.reduce(function(n, id) { var c = stateDry.chunks[id]; return n + (Number(c.estimatedTokens) || 0) }, 0)
+      }
       wmDry.close()
       self._log("[dreams:wiki] Dry-run complete — proposal generated with " + proposal.indexes_to_create.length + " index creates and " + proposal.indexes_to_update.length + " index updates.")
       return defaultResult
