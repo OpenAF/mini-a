@@ -121,6 +121,20 @@ MiniAWikiGraph.prototype._semanticSummaryFor = function(payload) {
   return fallback.substring(0, 300)
 }
 
+// Semantic work starts from a compact, deterministic page representation. The optional
+// second call is deliberately opt-in from the extractor (`needsContext:true`).
+MiniAWikiGraph.prototype._compactSemanticPayload = function(page) {
+  var body = isString(page.body) ? page.body : "", lines = body.split(/\r?\n/), headings = [], digests = [], links = [], ids = []
+  lines.forEach(function(line) {
+    var h = line.match(/^#{1,6}\s+(.+)/); if (h) headings.push(h[1].trim())
+    var l = line.match(/\[\[([^\]|#]+)/g) || []; l.forEach(function(x) { links.push(x.replace(/^\[\[|\]\]$/g, "")) })
+    var q = line.match(/\b[A-Z][A-Z0-9_]{2,}\b/g) || []; q.forEach(function(x) { ids.push(x) })
+    if (!/^\s*#/.test(line) && line.trim().length > 20 && digests.length < 8) digests.push(line.trim().substring(0, 240))
+  })
+  var meta = isMap(page.meta) ? page.meta : {}
+  return { path: page.path, title: isString(meta.title) ? meta.title : page.path, description: isString(meta.description) ? meta.description : "", headings: headings.slice(0, 20), tags: isArray(meta.tags) ? meta.tags : [], explicitLinks: links.filter(function(v, i, a) { return a.indexOf(v) === i }).slice(0, 30), identifiers: ids.filter(function(v, i, a) { return a.indexOf(v) === i }).slice(0, 30), sectionDigests: digests, compact: true }
+}
+
 MiniAWikiGraph.prototype._defaultSemanticExtract = function(payload) {
   var title = this._normalizeConceptName(payload && payload.title)
   var body = isString(payload && payload.body) ? payload.body : ""
@@ -555,15 +569,22 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
   for (var p = 0; p < list.length; p++) {
     var page = list[p]
     if (!isMap(page) || !isString(page.path)) continue
-    var hash = this._pageHash(page)
+    var compact = this._compactSemanticPayload(page)
+    var hash = sha1(stringify(compact, __, ""))
     var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
-    if (isMap(cache) && cache.hash === hash && options.force !== true) continue
+    if (isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true) continue
 
     this._removePageState(page.path)
     this._indexPageStructural(page)
 
-    var payload = { path: page.path, title: isMap(page.meta) && isString(page.meta.title) ? page.meta.title : page.path, body: page.body || "" }
+    var payload = compact
     var res = this._llmExtractFn(payload)
+    if (res && res.needsContext === true && options.maxChunks !== 0) {
+      var maxChunks = isNumber(options.maxChunks) ? options.maxChunks : 3
+      payload.selectedChunks = String(page.body || "").split(/\n\s*\n/).slice(0, maxChunks)
+      payload.compact = false
+      res = this._llmExtractFn(payload)
+    }
     var rels = isArray(res && res.relationships) ? res.relationships : []
     for (var r = 0; r < rels.length; r++) {
       var rel = rels[r]
@@ -583,7 +604,7 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
       if (!isMap(this._state.summaries.pages[page.path])) this._state.summaries.pages[page.path] = {}
       this._state.summaries.pages[page.path].summary = summary.substring(0, 300)
     }
-    this._state.semantic_cache[page.path] = { hash: hash, updated_at: new Date().toISOString() }
+    this._state.semantic_cache[page.path] = { hash: hash, compact_hash: hash, schema_version: 1, prompt_version: 1, model: options.model || "", updated_at: new Date().toISOString() }
     changed++
   }
 

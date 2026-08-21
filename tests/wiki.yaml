@@ -23,6 +23,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testExtractLinksDeduplicates
 
+- name: MiniA Wiki Tests::ExtractLinksMixedSyntaxToSameTargetBothCounted
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testExtractLinksMixedSyntaxToSameTargetBothCounted
+
 - name: MiniA Wiki Tests::NearDuplicateIdentical
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testNearDuplicateIdentical
@@ -30,6 +34,10 @@ jobs:
 - name: MiniA Wiki Tests::NearDuplicateDifferent
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testNearDuplicateDifferent
+
+- name: MiniA Wiki Tests::KnowledgeLoadStateMergesPartialManifestWithDefaults
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testKnowledgeLoadStateMergesPartialManifestWithDefaults
 
 - name: MiniA Wiki Tests::FsBackendList
   to  : oJob Test
@@ -175,6 +183,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testLintOrphan
 
+- name: MiniA Wiki Tests::LintSemanticOrphanNotDoubleCountedByMixedLinkSyntax
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLintSemanticOrphanNotDoubleCountedByMixedLinkSyntax
+
 - name: MiniA Wiki Tests::LintMissingFrontmatter
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testLintMissingFrontmatter
@@ -255,9 +267,17 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedRetrieval
 
+- name: MiniA Wiki Tests::McpWikiRestrictedSearchBudgetExhaustionDoesNotConsumeCooldowns
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedSearchBudgetExhaustionDoesNotConsumeCooldowns
+
 - name: MiniA Wiki Tests::McpWikiRestrictedReadAcceptsReferenceAlias
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedReadAcceptsReferenceAlias
+
+- name: MiniA Wiki Tests::McpWikiRestrictedChargeRollsBackOnPersistFailure
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiRestrictedChargeRollsBackOnPersistFailure
 
 - name: MiniA Wiki Tests::McpWikiRestrictedProfiles
   to  : oJob Test
@@ -551,8 +571,10 @@ todo:
 - MiniA Wiki Tests::ExtractMarkdownLinks
 - MiniA Wiki Tests::ExtractWikiStyleLinks
 - MiniA Wiki Tests::ExtractLinksDeduplicates
+- MiniA Wiki Tests::ExtractLinksMixedSyntaxToSameTargetBothCounted
 - MiniA Wiki Tests::NearDuplicateIdentical
 - MiniA Wiki Tests::NearDuplicateDifferent
+- MiniA Wiki Tests::KnowledgeLoadStateMergesPartialManifestWithDefaults
 - MiniA Wiki Tests::FsBackendList
 - MiniA Wiki Tests::FsBackendListRealFiles
 - MiniA Wiki Tests::FsBackendListWithPrefixKeepsPrefix
@@ -584,6 +606,7 @@ todo:
 - MiniA Wiki Tests::LintDotDotLinkValid
 - MiniA Wiki Tests::ReadIncludesResolvedLinks
 - MiniA Wiki Tests::LintOrphan
+- MiniA Wiki Tests::LintSemanticOrphanNotDoubleCountedByMixedLinkSyntax
 - MiniA Wiki Tests::LintMissingFrontmatter
 - MiniA Wiki Tests::LintHeadingHierarchy
 - MiniA Wiki Tests::LintStalePage
@@ -604,7 +627,9 @@ todo:
 - MiniA Wiki Tests::McpWikiSafeIsRestrictedByDefaultWithExplicitOffEscape
 - MiniA Wiki Tests::McpWikiSafeOffProfileDisablesRestriction
 - MiniA Wiki Tests::McpWikiRestrictedRetrieval
+- MiniA Wiki Tests::McpWikiRestrictedSearchBudgetExhaustionDoesNotConsumeCooldowns
 - MiniA Wiki Tests::McpWikiRestrictedReadAcceptsReferenceAlias
+- MiniA Wiki Tests::McpWikiRestrictedChargeRollsBackOnPersistFailure
 - MiniA Wiki Tests::McpWikiRestrictedProfiles
 - MiniA Wiki Tests::McpWikiRestrictedBudgetAndConfig
 - MiniA Wiki Tests::McpWikiRestrictedGraphHintsAreOptInOpaqueReferences

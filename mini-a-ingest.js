@@ -262,6 +262,29 @@ MiniAIngest.prototype._chunk = function(text, maxChars) {
   return out.filter(function(s) { return String(s).trim().length > 0 })
 }
 
+// Wiki keeps the source-to-page mapping compatible, but makes the work unit a stable
+// heading-aware chunk.  The manager owns the shared implementation used by retrieval too.
+MiniAIngest.prototype._chunkRecords = function(wm, source, text) {
+  if (isFunction(wm.knowledgeChunks)) return wm.knowledgeChunks(String(source.rel || source.id), text, { maxChars: this._num("ingestchunkchars", 24000) })
+  return this._chunk(text).map(function(t, i) { return { id: sha1(String(source.id) + "#" + i), hash: sha1(t), normalizedHash: sha1(t), text: t, estimatedTokens: Math.ceil(t.length / 4), ordinal: i + 1 } })
+}
+
+MiniAIngest.prototype._ingestMode = function() {
+  // An injected test/custom LLM historically meant “distill”; retain that explicit caller
+  // intent while production defaults remain deterministic auto.
+  var mode = isString(this._args.ingestmode) ? this._args.ingestmode.trim().toLowerCase() : (isObject(this._llm) ? "distill" : "auto")
+  return ["auto", "normalize", "distill", "raw"].indexOf(mode) >= 0 ? mode : "auto"
+}
+
+MiniAIngest.prototype._normalizedPage = function(wm, source, content, mode) {
+  var raw = mode === "raw" ? String(content) : (isFunction(wm.knowledgeNormalize) ? wm.knowledgeNormalize(content) : String(content))
+  var title = String(source.rel || source.id || "source").replace(/\.[^.]+$/, "").replace(/[-_]/g, " ")
+  var m = raw.match(/^#\s+(.+)$/m); if (m) title = m[1].trim()
+  var desc = raw.replace(/^---[\s\S]*?---\s*/m, "").replace(/^#.*$/m, "").replace(/```[\s\S]*?```/g, "").replace(/\s+/g, " ").trim().substring(0, 280)
+  if (!/^#\s+/m.test(raw)) raw = "# " + title + "\n\n" + raw
+  return { title: title, description: desc, tags: [], type: "reference", body: raw }
+}
+
 // ── phase 5: distill ─────────────────────────────────────────
 
 MiniAIngest.prototype._distillPrompt = function(source, chunks, siblings) {
@@ -354,7 +377,8 @@ MiniAIngest.prototype.run = function() {
     this._log("  ingestsection=   Wiki section to write into (default: derived from the source name)")
     this._log("  ingestinclude=   Comma-separated path fragments to include")
     this._log("  ingestexclude=   Comma-separated path fragments to exclude")
-    this._log("  ingestchunkchars=Maximum characters per distillation chunk (default: 24000)")
+    this._log("  ingestmode=      auto (default), normalize, distill or raw")
+    this._log("  ingestchunkchars=Maximum characters per structural chunk (default: 24000)")
     this._log("  ingestmaxfilekb= Skip sources larger than this (default: 512)")
     this._log("  ingestconcurrency=Parallel distillations (default: 4)")
     this._log("  ingestdryrun=true Report what would be ingested without writing")
@@ -385,6 +409,16 @@ MiniAIngest.prototype.run = function() {
     dryrun: isDryRun,
     discovered: 0,
     skipped_unchanged: 0,
+    sources_changed: 0,
+    chunks_discovered: 0,
+    chunks_reused: 0,
+    chunks_added: 0,
+    chunks_changed: 0,
+    chunks_removed: 0,
+    llm_candidates: 0,
+    llm_calls: 0,
+    estimated_input_tokens: 0,
+    deferred: [],
     skipped_oversized: [],
     written: [],
     failed: [],
@@ -412,6 +446,7 @@ MiniAIngest.prototype.run = function() {
     var wikiCfg = this._buildWikiConfig()
     if (!isMap(wikiCfg)) return merge(result, { ok: false, reason: "no-wiki-config" })
     loadLib("mini-a-wiki.js")
+    loadLib("mini-a-wiki-knowledge.js")
     var wm = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[ingest:wiki] " + msg) })
     if (wm._access !== "rw") {
       wm.close()
@@ -422,6 +457,9 @@ MiniAIngest.prototype.run = function() {
     var section = this._defaultSection(resolved, source)
     result.section = section
     var ledger = this._loadLedger(wm)
+    var manifest = isFunction(wm.knowledgeLoadState) ? wm.knowledgeLoadState() : { sources: {}, chunks: {}, pages: {}, dependencies: {} }
+    var ingestMode = this._ingestMode()
+    var budget = isDef(MiniAWikiKnowledgeBudget) ? new MiniAWikiKnowledgeBudget(this._args, "ingest") : __
 
     // ---- read + ledger filter ----
     var pending = []
@@ -434,11 +472,20 @@ MiniAIngest.prototype.run = function() {
       var hash = sha1(content)
       var key  = sha1(resolved.type + "|" + (resolved.origin || resolved.root || "") + "|" + src.id)
       var prev = ledger[key]
+      var chunks = self._chunkRecords(wm, src, content)
+      result.chunks_discovered += chunks.length
+      var oldChunks = isMap(manifest.sources[key]) && isArray(manifest.sources[key].chunks) ? manifest.sources[key].chunks : []
+      var oldByHash = {}; oldChunks.forEach(function(c) { oldByHash[c.normalizedHash] = c })
+      var changedChunks = []
+      chunks.forEach(function(c) { if (oldByHash[c.normalizedHash]) result.chunks_reused++; else { changedChunks.push(c); if (isMap(manifest.chunks[c.id])) result.chunks_changed++; else result.chunks_added++ } })
+      oldChunks.forEach(function(c) { if (!chunks.some(function(n) { return n.normalizedHash === c.normalizedHash })) result.chunks_removed++ })
       if (!force && isMap(prev) && prev.sha1 === hash) {
         result.skipped_unchanged++
         return
       }
-      pending.push({ src: src, content: content, hash: hash, key: key })
+      result.sources_changed++
+      var llmChunks = ingestMode === "distill" ? changedChunks : (ingestMode === "auto" ? changedChunks.filter(function(c) { return wm.knowledgeNeedsDistillation(c).needs }) : [])
+      pending.push({ src: src, content: content, hash: hash, key: key, chunks: chunks, changedChunks: changedChunks, llmChunks: llmChunks })
     })
 
     if (pending.length === 0) {
@@ -455,17 +502,28 @@ MiniAIngest.prototype.run = function() {
       return result
     }
 
-    // ---- distill (LLM, fanned out) ----
-    var llm = this._buildLlm()
-    if (!isObject(llm)) {
-      wm.close()
-      this._log("[ingest] No LLM configured (set OAF_MODEL or pass model=).")
-      return merge(result, { ok: false, reason: "no-llm" })
+    // Deterministic modes never construct a model. In auto mode only low-quality changed
+    // chunks are candidates; a structured Markdown repository normally reaches this branch
+    // with zero candidates and zero API calls.
+    var deterministic = [], llmPending = []
+    pending.forEach(function(p) {
+      if (ingestMode === "raw" || ingestMode === "normalize" || (ingestMode === "auto" && p.llmChunks.length === 0)) deterministic.push({ ok: true, src: p.src, hash: p.hash, key: p.key, chunks: p.chunks, page: self._normalizedPage(wm, p.src, p.content, ingestMode) })
+      else {
+        p.chunks = p.llmChunks.length > 0 ? p.llmChunks : p.changedChunks
+        var estimate = p.chunks.reduce(function(n, c) { return n + c.estimatedTokens }, 0)
+        result.llm_candidates += p.chunks.length; result.estimated_input_tokens += estimate
+        if (budget && !budget.reserve(p.src.rel, estimate, Math.ceil(estimate / 5))) result.deferred.push({ source: p.src.rel, reason: "budget" })
+        else llmPending.push(p)
+      }
+    })
+    var distilled = deterministic
+    if (llmPending.length > 0) {
+      var llm = this._buildLlm()
+      if (!isObject(llm)) { wm.close(); return merge(result, { ok: false, reason: "no-llm", deferred: result.deferred }) }
+      var siblingTitles = pending.map(function(p) { return String(p.src.rel) })
+      distilled = distilled.concat(this._distillAll(llm, llmPending, siblingTitles, Math.max(1, Math.round(this._num("ingestconcurrency", 4)))))
+      result.llm_calls = llmPending.length
     }
-
-    var siblingTitles = pending.map(function(p) { return String(p.src.rel) })
-    var concurrency = Math.max(1, Math.round(this._num("ingestconcurrency", 4)))
-    var distilled = this._distillAll(llm, pending, siblingTitles, concurrency)
 
     // ---- write (serial: the wiki manager and its indexes are not thread-safe) ----
     distilled.forEach(function(d) {
@@ -496,6 +554,8 @@ MiniAIngest.prototype.run = function() {
             commit   : isString(resolved.ref) ? resolved.ref : "",
             ingestedAt: nowIso
           }
+          manifest.sources[d.key] = { source: d.src.rel, sourceHash: d.hash, normalizedHash: sha1(self._normalizedPage(wm, d.src, d.chunks ? d.chunks.map(function(c) { return c.text }).join("\n") : "", "normalize").body), chunks: d.chunks || [], page: wikiPath, updated: nowIso }
+          ;(d.chunks || []).forEach(function(c) { c.page = wikiPath; manifest.chunks[c.id] = c })
         } else {
           result.failed.push({ source: d.src.rel, error: isMap(wr) && isString(wr.error) ? wr.error : "write failed" })
         }
@@ -508,7 +568,9 @@ MiniAIngest.prototype.run = function() {
 
     // ---- finalize ----
     this._saveLedger(wm, ledger)
+    if (isFunction(wm.knowledgeSaveState) && !wm.knowledgeSaveState(manifest)) result.failed.push({ source: "manifest", error: "manifest write failed" })
     try { wm.appendLog("ingest", section, result.written.length + " page(s) from " + source) } catch(el) {}
+    if (budget) result.budget = budget.stats()
     result.finalize = this._finalize(wm)
     wm.close()
     return result
@@ -531,16 +593,16 @@ MiniAIngest.prototype._distillAll = function(llm, pending, siblings, concurrency
     var results = []
     try {
       results = parallel4Array(batch, function(p) {
-        var chunks = self._chunk(p.content)
+        var chunks = isArray(p.chunks) ? p.chunks.map(function(c) { return c.text }) : self._chunk(p.content)
         var d = self._distill(llm, p.src, chunks, siblings)
-        return merge(d, { src: p.src, hash: p.hash, key: p.key })
+        return merge(d, { src: p.src, hash: p.hash, key: p.key, chunks: p.chunks })
       })
     } catch(pe) {
       // parallel execution unavailable or failed: fall back to serial
       results = batch.map(function(p) {
-        var chunks = self._chunk(p.content)
+        var chunks = isArray(p.chunks) ? p.chunks.map(function(c) { return c.text }) : self._chunk(p.content)
         var d = self._distill(llm, p.src, chunks, siblings)
-        return merge(d, { src: p.src, hash: p.hash, key: p.key })
+        return merge(d, { src: p.src, hash: p.hash, key: p.key, chunks: p.chunks })
       })
     }
     ;(isArray(results) ? results : []).forEach(function(r) {

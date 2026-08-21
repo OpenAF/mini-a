@@ -947,6 +947,40 @@ help:
     desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
     mandatory: false
+  - name     : ingestmode
+    desc     : Wiki ingestion mode: auto (deterministic first), normalize, distill or raw
+    example  : "auto"
+    mandatory: false
+    options  : ["auto", "normalize", "distill", "raw"]
+  - name     : wikillmbudget
+    desc     : Maximum estimated tokens for all Wiki LLM work (-1/unset is unlimited)
+    example  : "20000"
+    mandatory: false
+  - name     : wikiingestbudget
+    desc     : Maximum estimated tokens used by wiki ingestion LLM work
+    example  : "10000"
+    mandatory: false
+  - name     : wikidreambudget
+    desc     : Maximum estimated tokens used by wiki dream LLM work
+    example  : "10000"
+    mandatory: false
+  - name     : wikimaxprompttokens
+    desc     : Maximum estimated tokens in one Wiki LLM prompt
+    example  : "24000"
+    mandatory: false
+  - name     : dreamwikemaxaffected
+    desc     : Bound Wiki dream affected-set propagation
+    example  : "100"
+    mandatory: false
+  - name     : dreamwikilevel
+    desc     : Dream level 0 housekeeping, 1 structural, 2 semantic, 3 reorganisation
+    example  : "1"
+    mandatory: false
+  - name     : wikitelemetry
+    desc     : Persist local aggregate retrieval telemetry (off by default)
+    example  : "false"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : wikilintstaleddays
     desc     : Default stale-days threshold for wiki lint
     example  : "90"

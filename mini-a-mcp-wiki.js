@@ -251,10 +251,16 @@ MiniAMcpWikiRestriction.prototype._can = function(kind, chars) {
 
 MiniAMcpWikiRestriction.prototype.charge = function(kind, chars) {
   if (!this._can(kind, chars)) return false
+  var searchesBefore = this.usage.searches, readsBefore = this.usage.reads, charsBefore = this.usage.chars
   if (kind === "search") this.usage.searches++
   if (kind === "read") this.usage.reads++
   this.usage.chars += Math.max(0, Number(chars || 0))
-  try { this._saveState() } catch(e) { return false }
+  try { this._saveState() } catch(e) {
+    // Roll back: a failed persist must not leave this charge counted in memory —
+    // otherwise a denied call would still silently consume its slice of the budget.
+    this.usage.searches = searchesBefore; this.usage.reads = readsBefore; this.usage.chars = charsBefore
+    return false
+  }
   return true
 }
 
@@ -315,21 +321,37 @@ function __miniAMcpWikiRestrictedSearch(args) {
   state._event("search", q)
   var hits
   try { hits = global.__wikiManager.search(q, { limit: state.policy.searchLimit, regex: false, caseSensitive: false, contextLines: 0, compact: true, path: "" }) } catch(e) { return __miniAMcpWikiRestrictedError("restricted-unavailable") }
-  var results = [], chars = 0
-  hits.forEach(function(hit) {
-    if (results.length >= state.policy.searchLimit || !isMap(hit) || !isString(hit.path)) return
-    var ref = state.issue(hit.path)
-    if (!ref) return
+  // Two-phase on purpose: compute every candidate's title/description/char cost and charge
+  // the aggregate BEFORE issuing any ref/cooldown. issue() has a side effect (it starts the
+  // page's pageCooldown window) — issuing it per-hit inside the loop that decides the final
+  // char total, as before, meant a search that ultimately failed the budget check still spent
+  // real pages' cooldowns and reference slots on results the caller never received. Computing
+  // the total first keeps the original all-or-nothing budget contract (one clean
+  // restricted-budget-exhausted error, no partial/truncated success) with no such side effect
+  // on rejection. Reference tokens are a fixed-length sha256-truncated hex string (see
+  // MiniAMcpWikiRestriction.prototype.issue) so their length can be counted before issuing.
+  var REF_LEN = 32
+  var candidates = [], chars = 0
+  for (var hi = 0; hi < hits.length && candidates.length < state.policy.searchLimit; hi++) {
+    var hit = hits[hi]
+    if (!isMap(hit) || !isString(hit.path)) continue
+    if (state._cooldownActive(sha1(String(hit.path)))) continue
     var title = __miniAMcpWikiSafeChars(hit.title, state.policy.metaChars)
     // Graph-derived hits are an explicit opt-in in mcp-wiki-safe. Keep their
     // relationship, provenance, digest, and underlying path private; callers
     // receive the same opaque reference flow as for a direct search result.
     var isGraphHint = isString(hit.description) && hit.description.indexOf("[Related pages (graph") === 0
     var description = isGraphHint ? "Related page" : __miniAMcpWikiSafeChars(hit.description, Math.max(0, state.policy.metaChars - title.length))
-    chars += title.length + description.length + ref.length
-    results.push({ title: title, description: description, reference: ref })
-  })
+    chars += title.length + description.length + REF_LEN
+    candidates.push({ path: hit.path, title: title, description: description })
+  }
   if (!state.charge("search", chars)) return __miniAMcpWikiRestrictedBudgetError(state, "search", chars)
+  var results = []
+  candidates.forEach(function(c) {
+    var ref = state.issue(c.path)
+    if (!ref) return   // lost a race with a cooldown set between the check above and here
+    results.push({ title: c.title, description: c.description, reference: ref })
+  })
   return { results: results }
 }
 

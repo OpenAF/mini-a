@@ -7,6 +7,7 @@ loadLib("mini-a-common.js")
 loadLib("mini-a-router.js")
 loadLib("mini-a-memory.js")
 loadLib("mini-a-wiki.js")
+loadLib("mini-a-wiki-knowledge.js")
 
 // Shared thinking-tag list and normalizer used across streaming filter,
 // block extraction, and tag stripping.

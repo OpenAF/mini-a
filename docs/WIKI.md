@@ -249,3 +249,28 @@ mini-a usewiki=true wikibackend=http wikiurl=https://docs.example/wiki
 mini-a usewiki=true wikiaccess=ro wikibackend=s3 wikibucket=team-wiki \
   wikis3artifactprefix=published/ s3artifactbundle=true
 ```
+# Wiki incremental knowledge
+
+Wiki stores its private, content-addressed manifest under the index cache as
+`.mini-a-wiki-state/manifest.json`; it is excluded from page search. Sources are split at
+headings (then paragraphs only when a section is too large), so hashes, provenance and token
+estimates are tracked per section. A later ingest reuses matching normalized chunks even when
+they moved in the document. Missing/corrupt state safely starts fresh; read-only wikis never
+attempt to create it.
+
+`ingestmode=auto` is deterministic-first and is the default: well-structured Markdown is
+normalized without a model call. Use `normalize` or `raw` to guarantee no LLM use, and
+`distill` to preserve legacy LLM distillation. `wikillmbudget`, `wikiingestbudget`,
+`wikidreambudget`, and `wikimaxprompttokens` defer work rather than dropping it.
+
+```sh
+mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto
+mini-a dream=true usewiki=true dreamwikimode=plan
+```
+
+Dream plans are strictly zero-LLM: they report dirty/affected candidates and estimated calls
+and tokens. Runtime semantic extraction starts with title, headings, tags, links, identifiers,
+and section digests; it asks for selected context only when the extractor requests it. Search
+retains page compatibility while adding deterministic title/path/heading/recency score details
+with `debug=true`; `assembleContext()` returns token-bounded chunk context. Set
+`wikitelemetry=true` only to retain local aggregate query hashes/frequencies.

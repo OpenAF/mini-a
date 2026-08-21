@@ -3248,3 +3248,10 @@ var overall = runner.run()
 // Inject a stub LLM for testing
 runner._setLlm(myStubLlm)
 ```
+# Wiki incremental ingestion
+
+Use `ingestmode=auto` (the default) to normalize well-structured Markdown without model
+tokens; choose `normalize`, `raw`, or `distill` explicitly when needed. Wiki state is private
+to `.mini-a-wiki-state/manifest.json` and tracks section hashes, allowing a small edit to reuse
+unchanged chunks. `wikillmbudget`, `wikiingestbudget`, and `wikimaxprompttokens` defer
+over-budget enrichment. `/dream plan` is always zero-LLM and returns estimates.
