@@ -231,6 +231,7 @@ mini-a goal="generate summaries for 50 documents" \
 | Bedrock    | nova-pro-v1             | ```export OAF_MODEL="(type: bedrock, timeout: 900000, options: (model: 'amazon.nova-pro-v1:0', temperature: 0))" ``` |
 | Bedrock    | gpt-oss-120b | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'openai.gpt-oss-120b-1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
 | Bedrock    | opus-4.5                | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: 'global.anthropic.claude-opus-4-5-20251101-v1:0', temperature: 0, params: (max_tokens: 65535)), timeout: 900000)"``` |
+| Bedrock    | gpt-5.6-luna            | ```export OAF_MODEL="(type: bedrock, options: (region: eu-west-1, model: global.openai.gpt-5.6-luna), timeout: 900000)"``` |
 | Cerebras   | gpt-oss-120b            | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.cerebras.ai', model: gpt-oss-120b, timeout: 900000, temperature: 0, noSystem: false)``` |
 | Cerebras   | zai-glm-4.7             | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.cerebras.ai', model: zai-glm-4.7, timeout: 900000, temperature: 0, noSystem: false)``` |
 | EuQuai     | euquai-fusion-v1 | ```export OAF_MODEL="(type: openai, key: '...', url: 'https://api.euqai.eu', model: euqai-fusion-v1, timeout: 900000, temperature: 0)"``` |
