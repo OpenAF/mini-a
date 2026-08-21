@@ -287,6 +287,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMcpToolAccessHowToGatedByExamples
 
+- name: MiniA Core Tests::NormalizesTopLevelBuiltInActionParams
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testNormalizesTopLevelBuiltInActionParams
+
 - name: MiniA Core Tests::PromptSnapshotGraphAction
   from: MiniA Core Tests::Init
   to  : oJob Test

@@ -1322,6 +1322,28 @@
     }, {})
     ow.test.assert(actionProxy.prompt.indexOf("For a proxy-dispatch call, put downstream tool inputs in params.arguments") >= 0, true, "Action-based proxy prompt should require the nested arguments envelope")
     ow.test.assert(actionProxy.prompt.indexOf("NOT \"name\"/\"arguments\"") < 0, true, "Action-based proxy prompt must not contradict its required arguments envelope")
+    ow.test.assert(actionProxy.prompt.indexOf("do not wrap readresult in \"call\" or \"arguments\"") >= 0, true, "Action-based proxy prompt should distinguish readresult from downstream calls")
+  }
+
+  exports.testNormalizesTopLevelBuiltInActionParams = function() {
+    var agent = createAgent()
+
+    var wikiParams = agent._normalizeActionParams("wiki", {
+      action: "wiki", op: "search", query: "opencli", limit: 1
+    })
+    ow.test.assert(isMap(wikiParams), true, "Top-level wiki fields should be normalized into params")
+    ow.test.assert(wikiParams.op, "search", "Top-level wiki op should be preserved")
+    ow.test.assert(wikiParams.query, "opencli", "Top-level wiki query should be preserved")
+    ow.test.assert(wikiParams.limit, 1, "Top-level wiki limit should be preserved")
+
+    var supplied = { op: "read", path: "opencli.md" }
+    ow.test.assert(agent._normalizeActionParams("wiki", { op: "search", query: "ignored" }, supplied), supplied, "Explicit params must take precedence over flattened fields")
+    ow.test.assert(isUnDef(agent._normalizeActionParams("final", { answer: "done" })), true, "Non-action payload fields must not become params")
+
+    agent.mcpToolToConnection = {}
+    ow.test.assert(agent._canReadSpilledResults({ usestdutils: false }), false, "A JSON shim alone must not advertise inaccessible spilled results")
+    agent.mcpToolToConnection["proxy-dispatch"] = "proxy-1"
+    ow.test.assert(agent._canReadSpilledResults({ usestdutils: false }), true, "A registered proxy dispatcher should make spilled results readable")
   }
 
   exports.testPromptSnapshotGraphAction = function() {
