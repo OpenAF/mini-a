@@ -22,6 +22,7 @@
 | mcp-wiki-safe | Mini-A wiki MCP restricted to opaque-reference search and bounded read excerpts (safe for untrusted clients) | STDIO/HTTP | (included) | [mcp-wiki-safe.yaml](mcp-wiki-safe.yaml) |
 | mcp-wiki-ops | Mini-A wiki maintenance MCP (lint and readwrite operations) | STDIO/HTTP | (included) | [mcp-wiki-ops.yaml](mcp-wiki-ops.yaml) |
 | mcp-a2a    | A2A agent bridge MCP (consume external A2A agents as tools) | STDIO/HTTP | (included) | [mcp-a2a.yaml](mcp-a2a.yaml) |
+| mcp-aws-athena | AWS Athena query MCP (run queries sync or async, poll status, fetch results) | STDIO/HTTP | AWS | [mcp-aws-athena.yaml](mcp-aws-athena.yaml) |
 | mcp-proxy  | MCP proxy aggregating multiple downstream MCP connections | STDIO/HTTP | (included) | [mcp-proxy.yaml](mcp-proxy.yaml) |
 | mcp-oaf    | OpenAF / oJob / oAFp documentation MCP | STDIO/HTTP | (included) | [mcp-oaf.yaml](mcp-oaf.yaml)       |
 | mcp-oaf-browse | Generic browse MCP backed by the oJob-common HTTP Browse API | STDIO/HTTP | (included) | [mcp-oaf-browse.yaml](mcp-oaf-browse.yaml) |
@@ -181,6 +182,43 @@ ojob mcps/mcp-a2a.yaml \
   pollinterval=500 \
   timeout=60 \
   onport=8888
+```
+
+#### mcp-aws-athena
+
+`mcp-aws-athena` wraps the OpenAF `AWS` opack's `aws_athena.js` helpers so the agent can run Amazon Athena SQL queries either synchronously (wait for completion and get the results back in one call) or asynchronously (start, then poll status and fetch results separately). It uses the same lightweight AWS request signing as the rest of the `AWS` opack (no heavy AWS Java SDK).
+
+Key arguments:
+
+- `accessKey`, `secret`, `sessionToken`, `region`: AWS credentials/region (fall back to the environment or an instance role when omitted).
+- `database`, `catalog`, `workGroup`, `outputLocation`: Defaults used when a tool call doesn't provide them.
+- `readwrite`: Enable state-mutating/destructive operations — cancelling a query and deleting its results (`false` by default).
+
+Primary tools:
+
+- `athena-query`: Synchronous helper — starts a query, polls until it finishes and returns the results (unless `fetchResults=false`).
+- `athena-start-query-execution`: Asynchronous — starts a query and immediately returns its `QueryExecutionId`.
+- `athena-get-query-execution`: Retrieves status/statistics for a query execution (poll this after an async start).
+- `athena-get-query-results`: Fetches all (paginated) result rows for a finished query execution as an array of column-labelled objects.
+- `athena-stop-query-execution`: Cancels a running query execution (requires `readwrite=true`).
+- `athena-delete-query-results`: Deletes the query's S3 result object(s), since Athena has no native delete API (requires `readwrite=true`).
+- `athena-list-query-executions`: Lists recent query execution IDs, optionally scoped to a work group.
+
+Example — run a query synchronously and get the results back directly:
+
+```bash
+mini-a goal="how many orders were placed last month" \
+  mcp="(cmd: 'ojob mcps/mcp-aws-athena.yaml region=eu-west-1 database=sales workGroup=primary', timeout: 5000)" rpm=20
+```
+
+Example — fire-and-forget an async query, then poll for status and fetch results:
+
+```bash
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-aws-athena.yaml region=eu-west-1 database=sales', tool: athena-start-query-execution, params: (query: 'SELECT count(*) FROM orders'))"
+
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-aws-athena.yaml region=eu-west-1', tool: athena-get-query-execution, params: (queryExecutionId: '<id-from-above>'))"
+
+oafp in=mcp data="(cmd: 'ojob mcps/mcp-aws-athena.yaml region=eu-west-1', tool: athena-get-query-results, params: (queryExecutionId: '<id-from-above>'))"
 ```
 
 #### mcp-proxy
