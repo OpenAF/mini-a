@@ -222,7 +222,7 @@ filesHash:
   mcps/mcp-proxy.yaml: 05450b1153b07aa22d4cd9aea2299bd620de7a22
   mcps/mcp-random.yaml: ac2ee99722a6ae2baeb14e19d4f881ce03e369c4
   mcps/mcp-rss.yaml: 42413cd8146ce049d9e8aeb82265be23ef17213e
-  mcps/mcp-s3.yaml: 845a363c5ca9d291a1ab24dad80972b6651b1a29
+  mcps/mcp-s3.yaml: ed029b4cb9c54e396c6d551abdc578e7e337abd7
   mcps/mcp-shell.yaml: cfadb9aa818a81045424bc9012892c5702c5b97e
   mcps/mcp-ssh.yaml: 3a6003d57c345d0503654355c24865e1efc0debe
   mcps/mcp-telco.yaml: ec228f93cf7bfa9dfe73a2417d45370327463cdb
