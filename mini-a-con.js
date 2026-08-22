@@ -309,6 +309,8 @@ try {
           "mini-a": true,
           exec: true,
           agent: true,
+          useeditor: true,
+          editor: true,
           init: true,
           "__id": true,
           objid: true,
@@ -425,7 +427,7 @@ try {
   var consoleReader         = __
   var commandHistory        = __
   var lastConversationStats = __
-  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "wiki", "graph", "dream", "ingest", "delegate", "subtasks", "subtask", "exit", "quit"]
+  var slashCommands         = ["help", "set", "toggle", "unset", "show", "reset", "restore", "last", "save", "clear", "cls", "context", "compact", "summarize", "rewind", "history", "model", "models", "stats", "debug", "skills", "edit", "editor", "wiki", "graph", "dream", "ingest", "delegate", "subtasks", "subtask", "exit", "quit"]
   var builtInSlashCommands  = {}
   slashCommands.forEach(function(cmd) { builtInSlashCommands[cmd] = true })
   var customSlashCommands      = {}
@@ -605,6 +607,8 @@ try {
     usetools       : { type: "boolean", default: __, description: "Register MCP tools directly on the model" },
     usetoolslc     : { type: "boolean", default: __, description: "Register MCP tools directly only on the low-cost model" },
     useutils       : { type: "boolean", default: __, description: "Enable bundled Mini Utils Tool utilities" },
+    useeditor      : { type: "boolean", default: false, description: "Compose each console goal in an external editor ($EDITOR or vi)" },
+    editor         : { type: "string", description: "External editor command used when useeditor=true (overrides $EDITOR)" },
     utilsallow     : { type: "string", description: "Comma-separated allowlist of Mini Utils Tool names to expose when useutils=true" },
     utilsdeny      : { type: "string", description: "Comma-separated denylist of Mini Utils Tool names to hide when useutils=true (applied after utilsallow)" },
     "mini-a-docs"  : { type: "boolean", default: false, description: "When true (with useutils=true), point utilsroot to the Mini-A opack path so the LLM can inspect Mini-A documentation files." },
@@ -2160,6 +2164,7 @@ try {
       var statsCompletions = ["detailed", "tools", "memory", "wiki", "out=", "file=", "save=", "json="]
       var debugFilterCompletions = ["all", "calls", "answers", "memory", "system", "prompts", "responses", "thinking", "problems"]
       var lastCompletions = ["md"]
+      var editCompletions = ["last"]
       var modelCompletions = ["model", "modellc", "modelval"]
       var contextCompletions = ["llm", "analyze"]
       var wikiReadPathCommands = { list: true, tree: true, browse: true, read: true, write: true, backlinks: true, move: true }
@@ -2282,6 +2287,18 @@ try {
               if (mode.indexOf(trimmedRemainder) === 0) candidates.add(mode)
             })
             return candidates.isEmpty() ? -1 : Number(insertionPoint)
+          }
+
+          // Handle /edit and /editor command completions
+          if (lookupName === "edit" || lookupName === "editor") {
+            var editRemainder = uptoCursor.substring(firstSpace + 1)
+            var editOption = editRemainder.replace(/^\s*/, "")
+            var editInsertionPoint = cursor - editOption.length
+            if (/\s/.test(editOption)) return -1
+            editCompletions.forEach(function(option) {
+              if (option.indexOf(editOption.toLowerCase()) === 0) candidates.add(option)
+            })
+            return candidates.isEmpty() ? -1 : Number(editInsertionPoint)
           }
 
           // Handle /model command completions
@@ -3634,7 +3651,7 @@ try {
   })
   var lastResult = __, lastOrigResult = __, lastGoalPrompt = __
   var lastDebugTrace = __
-  var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true }
+  var internalParameters = { goalprefix: true, usehistory: true, historykeep: true, historykeepperiod: true, historykeepcount: true, useeditor: true, editor: true }
   var activeAgent = __
   var shutdownHandled = false
   var subtaskLogsByShortId = {}
@@ -3667,6 +3684,83 @@ try {
       lines.push(nextLine)
     }
     return lines.join("\n")
+  }
+
+  function parseEditorCommand(command) {
+    if (!isString(command) || command.trim().length === 0) return []
+    var parts = []
+    var current = ""
+    var quote = ""
+    var escaped = false
+    for (var i = 0; i < command.length; i++) {
+      var ch = command.charAt(i)
+      if (escaped) {
+        current += ch
+        escaped = false
+      } else if (ch === "\\") {
+        escaped = true
+      } else if (quote.length > 0) {
+        if (ch === quote) quote = ""
+        else current += ch
+      } else if (ch === "'" || ch === '"') {
+        quote = ch
+      } else if (/\s/.test(ch)) {
+        if (current.length > 0) {
+          parts.push(current)
+          current = ""
+        }
+      } else {
+        current += ch
+      }
+    }
+    if (escaped) current += "\\"
+    if (quote.length > 0) return []
+    if (current.length > 0) parts.push(current)
+    return parts
+  }
+
+  function collectEditorGoal(initialGoal) {
+    var editorCommand = isString(sessionOptions.editor) && sessionOptions.editor.trim().length > 0
+      ? sessionOptions.editor.trim()
+      : (isString(getEnv("EDITOR")) && getEnv("EDITOR").trim().length > 0 ? getEnv("EDITOR").trim() : "vi")
+    var editorArgs = parseEditorCommand(editorCommand)
+    if (editorArgs.length === 0) {
+      print(colorifyText("Invalid editor command. Set editor=<command> or EDITOR to a command with balanced quotes.", errorColor))
+      return __
+    }
+
+    var editorFile = __
+    try {
+      var originalGoal = isString(initialGoal) ? initialGoal : ""
+      editorFile = io.createTempFile("mini-a-prompt-", ".md")
+      io.writeFileString(editorFile, originalGoal)
+      var command = new java.util.ArrayList()
+      editorArgs.forEach(function(arg) { command.add(arg) })
+      command.add(editorFile)
+      var process = new java.lang.ProcessBuilder(command).inheritIO().start()
+      var exitCode = process.waitFor()
+      if (exitCode !== 0) {
+        print(colorifyText("Editor exited with status " + exitCode + ". Goal cancelled.", errorColor))
+        return __
+      }
+      var goal = io.readFileString(editorFile)
+      // Vim's :q! exits with status 0, just like :wq.  Since :q! leaves the
+      // temporary file untouched, only submit an editor result that changed it.
+      if (isString(goal) && goal === originalGoal) return __
+      return isString(goal) ? goal : ""
+    } catch(editorError) {
+      printErr(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Unable to open editor '" + editorCommand + "': " + editorError, errorColor))
+      return __
+    } finally {
+      if (isDef(editorFile)) {
+        try { io.rm(editorFile) } catch(ignoreEditorCleanup) { }
+      }
+    }
+  }
+
+  function printEditorGoal(goal) {
+    printnl(colorifyText("👤 ", accentColor))
+    print(colorifyText(goal, hintColor + ",ITALIC"))
   }
 
   function unwrapConsoleQuotedValue(value) {
@@ -5851,6 +5945,7 @@ try {
       { command: "/stats [mode] [out=file.json]", description: "Show session statistics (modes: detailed, tools, memory, wiki)" },
       { command: "/debug [filter]", description: "Inspect previous-goal events; filters: all, calls, answers, memory, system, prompts, responses, thinking, problems" },
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
+      { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
       { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
@@ -6408,7 +6503,7 @@ try {
   
   while(true) {
     _miniaConReset()
-    var input = con.readLinePrompt(promptLabel())
+    var input = toBoolean(sessionOptions.useeditor) === true ? collectEditorGoal() : con.readLinePrompt(promptLabel())
     if (isUnDef(input)) break
     var trimmed = String(input)
     if (trimmed.trim().length === 0) continue
@@ -6466,6 +6561,23 @@ try {
         printHelp()
         continue
       }
+      if (parsedSlashCommand.name === "edit" || parsedSlashCommand.name === "editor") {
+        var editOption = parsedSlashCommand.argsRaw.toLowerCase()
+        if (editOption.length > 0 && editOption !== "last") {
+          print(colorifyText("Usage: /" + parsedSlashCommand.name + " [last]", errorColor))
+          continue
+        }
+        if (editOption === "last" && (!isString(lastGoalPrompt) || lastGoalPrompt.trim().length === 0)) {
+          print(colorifyText("No previous goal to edit.", hintColor))
+          continue
+        }
+        var editorGoal = collectEditorGoal(editOption === "last" ? lastGoalPrompt : __)
+        if (isDef(editorGoal) && editorGoal.trim().length > 0) {
+          printEditorGoal(editorGoal)
+          runGoal(editorGoal)
+        }
+        continue
+      }
       if (commandLower === "exit" || commandLower === "quit") {
         break
       }
@@ -6508,7 +6620,7 @@ try {
 
         if (isString(lastGoalPrompt) && lastGoalPrompt.trim().length > 0) {
           print(colorifyText("👤 Previous goal:", accentColor))
-          print(lastGoalPrompt)
+          print(colorifyText(lastGoalPrompt, hintColor + ",ITALIC"))
           print()
         }
 

@@ -56,6 +56,8 @@ Need starter files quickly? Use the built-in template printers:
 
 Inside the console, use slash commands for quick configuration checks. `/show` prints every parameter, and `/show plan` (for example) narrows the list to options whose names start with `plan`. Use `/debug` after a goal to browse its full event trace (LLM prompts/responses, thoughts, and tool activity); its picker can filter MCP/tool calls and answers, memory, system prompts, LLM prompts/responses, thinking, and problems, or pass the filter directly (for example `/debug calls`). Set `debugtrace=false` to disable the temporary trace file. Use `/skills [prefix]` to list discovered skills and optionally filter by skill name prefix.
 
+For long prompts, start the console with `useeditor=true` (or run `/set useeditor true`). Each goal opens in the command from `editor=...`, then `$EDITOR`, then `vi`. Alternatively, run `/edit` (or `/editor`) to compose just the next goal externally; `/edit last` opens the previous goal for revision. The editor is launched directly rather than through a shell; quoted arguments such as `editor="vim -f"` are supported. Closing the editor without changing the text, including Vim's `:q!`, cancels that goal.
+
 Custom slash commands are supported through markdown templates in `~/.openaf-mini-a/commands/`. Typing `/<name> ...args...` looks for `~/.openaf-mini-a/commands/<name>.md`, renders placeholders, and submits the result as the goal text.
 
 To print a starter command template instead of writing one from scratch, run:
