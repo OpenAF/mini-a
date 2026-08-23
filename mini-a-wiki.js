@@ -240,6 +240,7 @@ var __miniAWikiAgentsTemplate = function(now) {
     "- Writes always go to the primary wiki. `write @name/...` is rejected.",
     "- See `## Attached wikis` in `index.md` for a list of active mounts.",
     "- Each mount's home is readable via `read \"@name/index.md\"`.",
+    "- When the wiki graph is enabled, related-page hints and `graph op=\"cross\"` can surface pages inside a mount via shared links, tags, aliases, or concepts — even without a lexical hit there.",
     "",
     "## Linking",
     "",
@@ -799,6 +800,114 @@ MiniAWikiManager.prototype._mountGraph = function(mount) {
   }
 }
 
+// _crossWikiExpand: join this wiki's graph with its mounts' graphs at query time. Never
+// persists anything (mount graphs stay readOnly:true) and never touches a backend — every
+// input is already-loaded in-memory graph state (this._graph, plus each mount's
+// TTL-cached _mountGraph()) — so this does NOT consume the shared search scan budget
+// (wikisearchscanbudget/wikisearchscanmaxms). Joins on three kinds, controlled by
+// wikigraphcrossjoin: explicit @name/ links already present as doc:@name/local nodes
+// (score 2.0, "cross_link"), and shared tag: (1.0) / alias: (1.5) / concept: (0.75) keys
+// via MiniAWikiGraph#docsForKeys. See mount fan-out prohibition on parallelizing this
+// mount loop — mini-a-wiki.js:800-807 below.
+MiniAWikiManager.prototype._crossWikiExpand = function(localPaths, opts) {
+  var options = isObject(opts) ? opts : {}
+  if (this._config.wikigraphcross === false) return []
+  if (this._config.wikigraphmounts === false) return []
+  if (!isObject(this._graph)) return []
+  var mounts = isArray(this._mounts) ? this._mounts : []
+  if (mounts.length === 0) return []
+  var paths = (isArray(localPaths) ? localPaths : []).filter(function(p) { return isString(p) && !p.startsWith("@") })
+  if (paths.length === 0) return []
+
+  var joinCsv = isString(options.join) ? options.join : (isString(this._config.wikigraphcrossjoin) ? this._config.wikigraphcrossjoin : "link,tag,alias,concept")
+  var joinKinds = {}
+  joinCsv.split(",").forEach(function(k) { joinKinds[String(k || "").trim().toLowerCase()] = true })
+  var cap       = isNumber(options.cap)       ? options.cap       : (isNumber(this._config.wikigraphcrosscap)       ? this._config.wikigraphcrosscap       : 5)
+  var depth     = isNumber(options.depth)     ? options.depth     : (isNumber(this._config.wikigraphcrossdepth)     ? this._config.wikigraphcrossdepth     : 1)
+  var maxDf     = isNumber(options.maxDf)     ? options.maxDf     : (isNumber(this._config.wikigraphcrossmaxdf)     ? this._config.wikigraphcrossmaxdf     : 0.25)
+  var minKeyLen = isNumber(options.minKeyLen) ? options.minKeyLen : (isNumber(this._config.wikigraphcrossminkeylen) ? this._config.wikigraphcrossminkeylen : 3)
+
+  var self = this
+  var byMountName = {}
+  mounts.forEach(function(m) { byMountName[m.name] = m })
+
+  // scores keyed by "@name/localPath" so link + key-overlap joins to the same page merge.
+  var scores = {}
+  var add = function(mountName, localPath, type, score, digest, title) {
+    if (!isString(localPath) || localPath.length === 0) return
+    var key = "@" + mountName + "/" + localPath
+    if (!isMap(scores[key])) scores[key] = { mountName: mountName, localPath: localPath, score: 0, connection_types: {}, digest: localPath, title: __ }
+    scores[key].score += score
+    scores[key].connection_types[type] = true
+    if (isString(digest) && digest.length > 0) scores[key].digest = digest
+    if (isString(title) && title.length > 0) scores[key].title = title
+  }
+
+  // 1. Explicit @name/ links: already-present doc:@name/local nodes in the LOCAL graph
+  //    (from resolveLink passing @-targets through as-is, mini-a-wiki.js:2518). The
+  //    @name/ prefix must be stripped before looking the page up in the mount's OWN
+  //    graph (which only ever holds doc:local, never doc:@name/local) and re-added on
+  //    the way out — mirrors the existing graph() "neighbors" mount branch above.
+  if (joinKinds.link) {
+    paths.forEach(function(localPath) {
+      var neighbors = self._graph.neighbors("doc:" + localPath)
+      neighbors.forEach(function(e) {
+        var otherId = e.from === ("doc:" + localPath) ? e.to : e.from
+        var m = String(otherId).match(/^doc:@([^/]+)\/(.+)$/)
+        if (!m) return
+        var mount = byMountName[m[1]]
+        if (!mount) return
+        var mountGraph = self._mountGraph(mount)
+        var info = isObject(mountGraph) && isFunction(mountGraph.docInfo) ? mountGraph.docInfo(m[2]) : { title: __, digest: m[2] }
+        add(m[1], m[2], "cross_link", 2.0, info.digest, info.title)
+        if (depth >= 2 && isObject(mountGraph) && isFunction(mountGraph.relatedFor)) {
+          mountGraph.relatedFor([m[2]], { cap: cap }).forEach(function(r) {
+            add(m[1], r.path, "cross_link_depth2", r.score * 0.5, r.digest, __)
+          })
+        }
+      })
+    })
+  }
+
+  // 2. Shared join keys: this wiki's own tag/alias/concept keys for the seed docs, then
+  //    ask each mount's graph which of ITS docs carry any of those same keys.
+  var keyKinds = []
+  if (joinKinds.tag) keyKinds.push("tags")
+  if (joinKinds.alias) keyKinds.push("aliases")
+  if (joinKinds.concept) keyKinds.push("concepts")
+  if (keyKinds.length > 0 && isFunction(this._graph.keysForDocs)) {
+    var localKeys = this._graph.keysForDocs(paths)
+    var seedKeys = {}
+    var hasAnyKey = false
+    keyKinds.forEach(function(kind) {
+      seedKeys[kind] = localKeys[kind]
+      if (isArray(localKeys[kind]) && localKeys[kind].length > 0) hasAnyKey = true
+    })
+    if (hasAnyKey) {
+      mounts.forEach(function(mount) {
+        var mountGraph = self._mountGraph(mount)
+        if (!isObject(mountGraph) || !isFunction(mountGraph.docsForKeys)) return
+        mountGraph.docsForKeys(seedKeys, { maxDf: maxDf, minKeyLen: minKeyLen, cap: cap * 3 }).forEach(function(r) {
+          add(mount.name, r.path, r.connection, r.score, r.digest, __)
+        })
+      })
+    }
+  }
+
+  return Object.keys(scores).map(function(key) {
+    var info = scores[key]
+    return {
+      path: "@" + info.mountName + "/" + info.localPath,
+      title: isString(info.title) && info.title.length > 0 ? info.title : info.localPath.replace(/\.md$/i, "").replace(/[-_/]/g, " "),
+      score: Number(info.score.toFixed(4)),
+      connection: Object.keys(info.connection_types).join(","),
+      provenance: "EXTRACTED",
+      digest: isString(info.digest) ? info.digest : info.localPath,
+      mount: info.mountName
+    }
+  }).sort(function(a, b) { return b.score - a.score }).slice(0, cap)
+}
+
 // _readAllPageDocs: single read pass shared by reindex()'s search + graph rebuild
 // so every page is fetched from the backend once instead of once per index — this
 // alone halves the backend I/O regardless of concurrency. Reads are serial: an
@@ -1325,6 +1434,22 @@ MiniAWikiManager.prototype._withGraphHints = function(hits, options) {
       })
     }.bind(this))
   }
+  // Cross-wiki: seeded from LOCAL hits (unlike the per-mount block above, which is seeded
+  // from hits already landed inside that mount) — this is what lets a query that only
+  // text-matches locally still surface related pages in a mount it never lexically hit.
+  if (this._config.wikigraphcross !== false && this._config.wikigraphmounts !== false && primaryPaths.length > 0) {
+    var cross = this._crossWikiExpand(primaryPaths, { cap: cap })
+    if (isArray(cross) && cross.length > 0) {
+      combined = combined.concat(cross.map(function(r) {
+        return {
+          path: r.path,
+          title: r.title,
+          description: "[Related pages (graph @" + r.mount + ")] " + r.connection + " score=" + r.score + " provenance=" + r.provenance + " - " + r.digest,
+          mount: r.mount
+        }
+      }))
+    }
+  }
   return isNumber(lim) ? combined.slice(0, lim) : combined
 }
 
@@ -1378,6 +1503,18 @@ MiniAWikiManager.prototype.graph = function(op, params) {
   if (action === "falkor") return isString(p.query) ? this._graph.falkorQuery(p.query) : this._graph.falkorSync()
   if (action === "retrieve") return this._graph.retrieve(p.concepts || p.query || "", p)
   if (action === "answer") return this._graph.answer(p.question || p.query || "", p)
+  if (action === "cross") {
+    var seeds
+    if (isString(p.path) && p.path.length > 0 && !p.path.startsWith("@")) {
+      seeds = [p.path]
+    } else if (isString(p.query) && p.query.length > 0) {
+      seeds = this._graph.query(p.query).filter(function(h) { return isString(h.id) && h.id.startsWith("doc:") })
+        .map(function(h) { return h.id.substring(4) }).slice(0, isNumber(p.cap) ? p.cap : 5)
+    } else {
+      return { ok: false, error: "graph op=\"cross\" requires path or query" }
+    }
+    return { ok: true, entries: this._crossWikiExpand(seeds, p) }
+  }
   return { ok: false, error: "unknown graph op: " + action }
 }
 
@@ -2816,11 +2953,18 @@ MiniAWikiManager.prototype.grep = function(pathOrRef, pattern, options) {
 
 MiniAWikiManager.prototype.related = function(pathOrRef, options) {
   var path = this._agenticPath(pathOrRef), links = this.backlinks(path)
+  var limit = isNumber(options && options.limit) ? options.limit : 10
   var out = { path: path, backlinks: links.backlinks.map(function(b) { return { ref: this._agenticRef(b.path), path: b.path, title: b.title } }.bind(this)), graph: [] }
   try {
     var neighbors = this.graph("neighbors", { path: path })
-    if (isArray(neighbors)) out.graph = neighbors.slice(0, isNumber(options && options.limit) ? options.limit : 10)
+    if (isArray(neighbors)) out.graph = neighbors.slice(0, limit)
   } catch(e) { out.graphAvailable = false }
+  try {
+    if (isObject(this._graph) && isArray(this._mounts) && this._mounts.length > 0) {
+      var cross = this._crossWikiExpand([path], { cap: limit })
+      if (isArray(cross) && cross.length > 0) out.cross = cross
+    }
+  } catch(e) {}
   return out
 }
 

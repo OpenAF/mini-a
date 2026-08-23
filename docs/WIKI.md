@@ -89,6 +89,7 @@ Do not read every search hit, retrieve whole long documents merely because they 
 | `export [format]` | Export the graph (`mermaid` default, `graphml`, `neo4j`, `html`, `svg`) | |
 | `stats` | Node/edge counts summary | |
 | `falkor [cypher]` *(rw for sync)* | Sync the graph to, or run a Cypher query against, an external FalkorDB (`wikigraphfalkor`) | |
+| `cross <path>` | Join this wiki's graph with mounted wikis' graphs at query time: explicit `@name/` links, plus shared `tag:`/`alias:`/`concept:` keys | See "Cross-wiki graph connections" below |
 
 ### `/dream [memory|wiki|mode] [dryrun]`
 
@@ -225,6 +226,23 @@ wikiroot=/shared/wiki dreamwikimode=reindex` for a cron job that only needs the 
 Writable wikis maintain a Lucene index in `.mini-a-wiki-lucene/` and can maintain graph data in `.mini-a-wiki-graph/`. The index powers lexical search; graph state powers backlinks, community information, and optional related-page search hints. `wikilexical` selects language and optional explicit enhancements. Lucene-backed search results also carry a numeric `score` field (Lucene's native relevance score); results served from the scan fallback (no index available) omit it.
 
 Read-only wikis consume an existing Lucene index without taking a writer lock. If no index is available, local backends can fall back to scanning page contents. Static HTTP has no directory listing, so it requires the published artifact bundle described below for catalog and search.
+
+## Cross-wiki graph connections
+
+Mounts (`wikimounts`, see "Core operations" above) already let `search`, `read`, `grep`, `tree`, `browse`, and `list` span every attached wiki. When both the local wiki and a mount have a graph (`usewikigraph=true`), that graph traversal spans mounts too, at query time only — nothing is ever merged or persisted across wikis.
+
+Two mechanisms feed this, controlled by `wikigraphcross` (default `true`, requires `wikigraphmounts=true`):
+
+- **Explicit `@name/` links.** A Markdown or `[[wiki]]` link to `@team/setup.md` already becomes a graph edge to the mounted page; cross-wiki expansion resolves it against the mount's own graph so it carries a real title and summary instead of a bare path, and (`wikigraphcrossdepth=2`) can pull that page's own related pages one hop further.
+- **Shared join keys.** A page's `tags:`/`aliases:` front matter, and any `concept:` nodes from a semantic graph build (`wikigraphsemantic=true`), are wiki-agnostic names. If both wikis use the same tag, alias, or concept, cross-wiki expansion joins on it — even when the query never lexically matched anything in the mount. A key present on more than `wikigraphcrossmaxdf` (default `0.25`, i.e. 25%) of a mount's pages is skipped as too generic to be a useful join (e.g. a boilerplate tag like `docs`).
+
+Relevant settings: `wikigraphcross`, `wikigraphcrossjoin` (CSV of `link,tag,alias,concept`), `wikigraphcrosscap` (default `5`), `wikigraphcrossdepth` (default `1`), `wikigraphcrossmaxdf` (default `0.25`), `wikigraphcrossminkeylen` (default `3`).
+
+Results appear as `[Related pages (graph @name)] ...` hints in search (same prefix as an ordinary mount-graph hint — `mcp-wiki-safe.yaml` opaques both identically), in `related()`'s `cross` field, and via `/graph cross <path>` / the `graph` agent action's `op:"cross"`.
+
+Cross-wiki expansion touches no backend: it only reads each mount's already-loaded, TTL-cached (`wikimountgraphttlms`) read-only graph state, so it does not consume the search scan budget described below. Mounts stay strictly directional and read-only — a wiki traverses into what it mounts, never the reverse, and cross-wiki edges are never written back into either wiki's `graph.json`.
+
+**FalkorDB is not a cross-wiki mechanism.** Pointing two wikis at the same FalkorDB instance does not connect their graphs — `falkor` sync (`/graph falkor`) begins by deleting the target graph before rewriting it, and the default graph name (`wikigraphfalkor.graph`, `"mini_a_wiki"`) is shared across configs unless set explicitly per wiki. Two wikis sharing a FalkorDB graph name will clobber each other's data, not merge it.
 
 ## Publishing a static HTTP wiki
 

@@ -1,0 +1,71 @@
+include:
+- oJobTest.yaml
+
+jobs:
+
+- name: MiniA WikiCross Tests::ExplicitLinkResolvesTitleAndDigest
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossExplicitLinkResolvesTitleAndDigest
+
+- name: MiniA WikiCross Tests::DepthTwoReachesUnlinkedMountPage
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossDepthTwoReachesUnlinkedMountPage
+
+- name: MiniA WikiCross Tests::SharedTagJoinsWithLowDf
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossSharedTagJoinsWithLowDf
+
+- name: MiniA WikiCross Tests::SharedAliasJoinsWithLowDf
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossSharedAliasJoinsWithLowDf
+
+- name: MiniA WikiCross Tests::SharedConceptJoins
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossSharedConceptJoins
+
+- name: MiniA WikiCross Tests::MaxDfExcludesGenericTag
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossMaxDfExcludesGenericTag
+
+- name: MiniA WikiCross Tests::ExpandsLocalOnlyHitIntoMount
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossExpandsLocalOnlyHitIntoMount
+
+- name: MiniA WikiCross Tests::DisabledByWikigraphcrossFalse
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossDisabledByWikigraphcrossFalse
+
+- name: MiniA WikiCross Tests::DisabledByWikigraphmountsFalse
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossDisabledByWikigraphmountsFalse
+
+- name: MiniA WikiCross Tests::MountWithoutGraphDegradesSilently
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossMountWithoutGraphDegradesSilently
+
+- name: MiniA WikiCross Tests::ExpandDoesNotReadBackend
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testCrossExpandDoesNotReadBackend
+
+- name: MiniA WikiCross Tests::GraphOpCrossReturnsEntries
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testGraphOpCrossReturnsEntries
+
+- name: MiniA WikiCross Tests::RelatedIncludesCrossField
+  to  : oJob Test
+  exec: args.func = require("tests/wikiCross.js").testRelatedIncludesCrossField
+
+todo:
+- MiniA WikiCross Tests::ExplicitLinkResolvesTitleAndDigest
+- MiniA WikiCross Tests::DepthTwoReachesUnlinkedMountPage
+- MiniA WikiCross Tests::SharedTagJoinsWithLowDf
+- MiniA WikiCross Tests::SharedAliasJoinsWithLowDf
+- MiniA WikiCross Tests::SharedConceptJoins
+- MiniA WikiCross Tests::MaxDfExcludesGenericTag
+- MiniA WikiCross Tests::ExpandsLocalOnlyHitIntoMount
+- MiniA WikiCross Tests::DisabledByWikigraphcrossFalse
+- MiniA WikiCross Tests::DisabledByWikigraphmountsFalse
+- MiniA WikiCross Tests::MountWithoutGraphDegradesSilently
+- MiniA WikiCross Tests::ExpandDoesNotReadBackend
+- MiniA WikiCross Tests::GraphOpCrossReturnsEntries
+- MiniA WikiCross Tests::RelatedIncludesCrossField

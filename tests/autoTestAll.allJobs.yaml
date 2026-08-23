@@ -11,4 +11,5 @@ include:
 - tests/outerLoop.yaml
 - tests/progToolCall.yaml
 - tests/wiki.yaml
+- tests/wikiCross.yaml
 - tests/wikiIngest.yaml
