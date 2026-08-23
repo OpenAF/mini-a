@@ -1072,7 +1072,7 @@ mini-a goal="search the product knowledge base" \
 # Wiki with a mounted read-only reference wiki
 mini-a goal="write docs based on our standards" \
   usewiki=true wikiaccess=rw wikiroot=/shared/wiki \
-  wikimounts="[{name: 'standards', backend: 'fs', root: '/shared/standards-wiki'}]"
+  wikimounts="[(name: standards, backend: fs, root: /shared/standards-wiki)|(name: reference, backend: fs, root: /shared/reference-wiki)]"
 
 # S3-backed wiki (shared across machines or containers)
 mini-a goal="analyze and wiki" \
