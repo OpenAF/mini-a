@@ -303,6 +303,7 @@ var MiniA = function() {
     graph_ops_falkor: $atomic(0, "long"),
     graph_ops_retrieve: $atomic(0, "long"),
     graph_ops_answer: $atomic(0, "long"),
+    graph_ops_cross: $atomic(0, "long"),
     graph_ops_errors: $atomic(0, "long"),
     llm_cache_creation_tokens: $atomic(0, "long"),
     llm_cache_read_tokens: $atomic(0, "long"),
@@ -346,7 +347,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
 • "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{/if}}{{#if useWikiGraph}}
-• "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search{{/if}}{{#if actionsList}}
+• "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
 • "final" - Provide your complete "answer" when goal is achieved
@@ -7525,6 +7526,12 @@ MiniA.prototype._initWiki = function(args) {
       wikigraphsearchhints: args.wikigraphsearchhints,
       wikigraphmounts: args.wikigraphmounts,
       wikimountgraphttlms: args.wikimountgraphttlms,
+      wikigraphcross: args.wikigraphcross,
+      wikigraphcrossjoin: args.wikigraphcrossjoin,
+      wikigraphcrosscap: args.wikigraphcrosscap,
+      wikigraphcrossdepth: args.wikigraphcrossdepth,
+      wikigraphcrossmaxdf: args.wikigraphcrossmaxdf,
+      wikigraphcrossminkeylen: args.wikigraphcrossminkeylen,
       wikigraphautosave: args.wikigraphautosave,
       wikigraphsavedebouncems: args.wikigraphsavedebouncems,
       wikilintstreamthreshold: args.wikilintstreamthreshold,
@@ -13927,7 +13934,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "lcjsonretries", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport"
   ].forEach(function(name) {
@@ -15966,6 +15973,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     var _wikiMountGraphTtlMs = isNumber(args.wikimountgraphttlms) ? args.wikimountgraphttlms : Number(args.wikimountgraphttlms)
     if (isNaN(_wikiMountGraphTtlMs)) _wikiMountGraphTtlMs = __
     args.wikimountgraphttlms = _$(_wikiMountGraphTtlMs, "args.wikimountgraphttlms").isNumber().default(60000)
+    args.wikigraphcross = _$(toBoolean(args.wikigraphcross), "args.wikigraphcross").isBoolean().default(true)
+    args.wikigraphcrossjoin = _$(args.wikigraphcrossjoin, "args.wikigraphcrossjoin").isString().default("link,tag,alias,concept")
+    var _wikiGraphCrossCap = isNumber(args.wikigraphcrosscap) ? args.wikigraphcrosscap : Number(args.wikigraphcrosscap)
+    if (isNaN(_wikiGraphCrossCap)) _wikiGraphCrossCap = __
+    args.wikigraphcrosscap = _$(_wikiGraphCrossCap, "args.wikigraphcrosscap").isNumber().default(5)
+    var _wikiGraphCrossDepth = isNumber(args.wikigraphcrossdepth) ? args.wikigraphcrossdepth : Number(args.wikigraphcrossdepth)
+    if (isNaN(_wikiGraphCrossDepth)) _wikiGraphCrossDepth = __
+    args.wikigraphcrossdepth = _$(_wikiGraphCrossDepth, "args.wikigraphcrossdepth").isNumber().default(1)
+    var _wikiGraphCrossMaxDf = isNumber(args.wikigraphcrossmaxdf) ? args.wikigraphcrossmaxdf : Number(args.wikigraphcrossmaxdf)
+    if (isNaN(_wikiGraphCrossMaxDf)) _wikiGraphCrossMaxDf = __
+    args.wikigraphcrossmaxdf = _$(_wikiGraphCrossMaxDf, "args.wikigraphcrossmaxdf").isNumber().default(0.25)
+    var _wikiGraphCrossMinKeyLen = isNumber(args.wikigraphcrossminkeylen) ? args.wikigraphcrossminkeylen : Number(args.wikigraphcrossminkeylen)
+    if (isNaN(_wikiGraphCrossMinKeyLen)) _wikiGraphCrossMinKeyLen = __
+    args.wikigraphcrossminkeylen = _$(_wikiGraphCrossMinKeyLen, "args.wikigraphcrossminkeylen").isNumber().default(3)
     args.wikigraphautosave = _$(args.wikigraphautosave, "args.wikigraphautosave").isString().default("always")
     if (["always", "debounced", "off"].indexOf(String(args.wikigraphautosave).toLowerCase().trim()) < 0) args.wikigraphautosave = "always"
     else args.wikigraphautosave = String(args.wikigraphautosave).toLowerCase().trim()
@@ -19333,6 +19354,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             else if (gOp === "falkor") global.__mini_a_metrics.graph_ops_falkor.inc()
             else if (gOp === "retrieve") global.__mini_a_metrics.graph_ops_retrieve.inc()
             else if (gOp === "answer") global.__mini_a_metrics.graph_ops_answer.inc()
+            else if (gOp === "cross") global.__mini_a_metrics.graph_ops_cross.inc()
             var gResult = this._wikiManager.graph(gOp, gParams)
             runtime.context.push(`[OBS ${stepLabel}] (graph/${gOp}) ${af.toTOON(gResult)}`)
             if (isString(gResult) && gResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.graph_ops_errors.inc()

@@ -430,6 +430,7 @@ MiniAWikiGraph.prototype._markDerivedDirty = function() {
   this._ensureIndexes()
   this._dirty.communities = true
   this._dirty.surprise = true
+  this._joinKeysDirty = true
 }
 
 MiniAWikiGraph.prototype._ensureDerived = function() {
@@ -442,8 +443,8 @@ MiniAWikiGraph.prototype._scheduleSave = function(diff) {
   if (this._readOnly) return { ok: true, readOnly: true }
   if (this._autosave === "off") return { ok: true, autosave: "off" }
   if (this._autosave === "debounced") {
-    var now = now()
-    if (this._lastSaveAt > 0 && (now - this._lastSaveAt) < this._saveDebounceMs) {
+    var nowMs = now()
+    if (this._lastSaveAt > 0 && (nowMs - this._lastSaveAt) < this._saveDebounceMs) {
       this._pendingSave = true
       return { ok: true, debounced: true }
     }
@@ -773,6 +774,118 @@ MiniAWikiGraph.prototype.relatedFor = function(paths, opts) {
   }).sort(function(a, b) { return b.score - a.score }).slice(0, cap)
 }
 
+// ── Cross-wiki join keys (tags / aliases / concepts) ──────────────────────
+// These three methods are the read-only surface a parent MiniAWikiManager uses to bridge
+// its own graph with a mounted wiki's graph at query time (see _crossWikiExpand in
+// mini-a-wiki.js). No cross-wiki edges are ever persisted here — joinKeys()/docsForKeys()
+// only ever read this graph's own state, whichever wiki it belongs to.
+
+// joinKeys: every tag/alias/concept key in this graph, mapped to the doc paths that carry
+// it. Cached and invalidated by _markDerivedDirty (same trigger as communities/surprise).
+MiniAWikiGraph.prototype.joinKeys = function() {
+  this._ensureIndexes()
+  if (isMap(this._joinKeysCache) && this._joinKeysDirty !== true) return this._joinKeysCache
+  var tags = {}, aliases = {}, concepts = {}
+  var docCount = 0
+  var nodes = this._state.nodes
+  Object.keys(nodes).forEach(function(id) {
+    if (isMap(nodes[id]) && nodes[id].type === "document" && id.indexOf("doc:") === 0) docCount++
+  })
+  var addKey = function(map, key, path) {
+    if (!isString(key) || key.length === 0 || !isString(path) || path.length === 0) return
+    if (!isArray(map[key])) map[key] = []
+    if (map[key].indexOf(path) < 0) map[key].push(path)
+  }
+  // Tags/aliases: doc-side of HAS_TAG (doc→tag) and ALIAS_OF (alias→doc) edges.
+  // Concepts: buildSemantic emits concept→concept edges (mini-a-graph.js:596-607) — there
+  // is no doc→concept edge to walk. The source page instead lives on the edge itself as
+  // props.page, so a concept's docs are collected from every edge that mentions it.
+  ;(isArray(this._state.edges) ? this._state.edges : []).forEach(function(e) {
+    if (!isMap(e) || e._deleted === true) return
+    if (e.type === "HAS_TAG" && String(e.from).indexOf("doc:") === 0 && String(e.to).indexOf("tag:") === 0) {
+      addKey(tags, String(e.to).substring(4), String(e.from).substring(4))
+    } else if (e.type === "ALIAS_OF" && String(e.from).indexOf("alias:") === 0 && String(e.to).indexOf("doc:") === 0) {
+      addKey(aliases, String(e.from).substring(6), String(e.to).substring(4))
+    } else if (String(e.from).indexOf("concept:") === 0 && String(e.to).indexOf("concept:") === 0) {
+      var page = isMap(e.props) && isString(e.props.page) ? e.props.page : ""
+      if (page.length > 0) {
+        addKey(concepts, String(e.from).substring(8), page)
+        addKey(concepts, String(e.to).substring(8), page)
+      }
+    }
+  })
+  this._joinKeysCache = { tags: tags, aliases: aliases, concepts: concepts, docCount: docCount }
+  this._joinKeysDirty = false
+  return this._joinKeysCache
+}
+
+// keysForDocs: inverse of joinKeys — the join keys carried by a given set of doc paths.
+MiniAWikiGraph.prototype.keysForDocs = function(paths) {
+  var jk = this.joinKeys()
+  var pathSet = {}
+  ;(isArray(paths) ? paths : []).forEach(function(p) { if (isString(p)) pathSet[p] = true })
+  var pick = function(map) {
+    var out = []
+    Object.keys(map).forEach(function(key) {
+      var docs = isArray(map[key]) ? map[key] : []
+      for (var i = 0; i < docs.length; i++) {
+        if (pathSet[docs[i]]) { out.push(key); break }
+      }
+    })
+    return out
+  }
+  return { tags: pick(jk.tags), aliases: pick(jk.aliases), concepts: pick(jk.concepts) }
+}
+
+// docsForKeys: docs in THIS graph carrying any of the given join keys, scored and shaped
+// like relatedFor()'s output ({path, score, connection, provenance, digest}) so callers
+// need no branching between within-graph and cross-graph results. A key present on more
+// than opts.maxDf of this graph's docs (e.g. a boilerplate tag like "docs") is skipped —
+// otherwise it would join every page to every other page.
+MiniAWikiGraph.prototype.docsForKeys = function(keys, opts) {
+  this._ensureDerived()
+  var jk = this.joinKeys()
+  var options = isMap(opts) ? opts : {}
+  var maxDf = isNumber(options.maxDf) ? options.maxDf : 0.25
+  var minKeyLen = isNumber(options.minKeyLen) ? options.minKeyLen : 3
+  var cap = isNumber(options.cap) ? Math.max(1, options.cap) : 5
+  var excludeSet = {}
+  ;(isArray(options.exclude) ? options.exclude : []).forEach(function(p) { if (isString(p)) excludeSet[p] = true })
+  var docCount = Math.max(1, jk.docCount)
+  var scores = {}
+  var self = this
+  var weight = { tags: 1.0, aliases: 1.5, concepts: 0.75 }
+  var connName = { tags: "shared_tag", aliases: "shared_alias", concepts: "shared_concept" }
+  var kindsInput = isMap(keys) ? keys : {}
+  ;["tags", "aliases", "concepts"].forEach(function(kind) {
+    var list = isArray(kindsInput[kind]) ? kindsInput[kind] : []
+    var map = jk[kind]
+    list.forEach(function(key) {
+      if (!isString(key) || key.length < minKeyLen) return
+      var docs = isArray(map[key]) ? map[key] : []
+      if (docs.length === 0) return
+      if ((docs.length / docCount) > maxDf) return
+      docs.forEach(function(path) {
+        if (excludeSet[path]) return
+        if (!isMap(scores[path])) scores[path] = { path: path, score: 0, connection_types: {} }
+        scores[path].score += weight[kind]
+        scores[path].connection_types[connName[kind]] = true
+      })
+    })
+  })
+  return Object.keys(scores).map(function(path) {
+    var info = scores[path]
+    var sum = isMap(self._state.summaries.pages[path]) ? self._state.summaries.pages[path] : {}
+    return {
+      path: path,
+      score: Number(info.score.toFixed(4)),
+      connection: Object.keys(info.connection_types).join(","),
+      provenance: "EXTRACTED",
+      digest: isString(sum.summary) ? sum.summary : (isString(sum.digest) ? sum.digest : path)
+    }
+  }).sort(function(a, b) { return b.score - a.score }).slice(0, cap)
+}
+
 MiniAWikiGraph.prototype.retrieve = function(concepts, opts) {
   this._ensureDerived()
   var hits = this.query(isArray(concepts) ? concepts.join(" ") : String(concepts || ""))
@@ -812,6 +925,19 @@ MiniAWikiGraph.prototype.neighbors = function(node) {
   return (isArray(this._adj[id]) ? this._adj[id] : []).filter(function(e) { return e._deleted !== true }).map(function(e) {
     return { from: e.from, to: e.to, type: e.type, provenance: e.provenance, props: isMap(e.props) ? clone(e.props) : {} }
   })
+}
+
+// docInfo: title + digest for a doc path in THIS graph. Used by a parent manager
+// resolving an explicit cross-wiki link into a mount's graph (see _crossWikiExpand in
+// mini-a-wiki.js) so it doesn't need to reach into _state directly.
+MiniAWikiGraph.prototype.docInfo = function(path) {
+  var p = String(path || "")
+  var node = this._state.nodes["doc:" + p]
+  var sum = isMap(this._state.summaries.pages[p]) ? this._state.summaries.pages[p] : {}
+  return {
+    title: isMap(node) && isMap(node.props) && isString(node.props.title) ? node.props.title : p,
+    digest: isString(sum.summary) ? sum.summary : (isString(sum.digest) ? sum.digest : p)
+  }
 }
 
 MiniAWikiGraph.prototype.path = function(a, b) {

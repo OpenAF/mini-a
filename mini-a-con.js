@@ -653,6 +653,14 @@ try {
     wikigraphcommunity: { type: "string", description: "Community detection algorithm for the wiki graph (louvain|leiden)." },
     wikigraphsearchhints: { type: "boolean", description: "Append graph-related pages to wiki search results." },
     wikigraphhintcap: { type: "number", description: "Maximum graph-hint pages appended to search results." },
+    wikigraphmounts: { type: "boolean", default: true, description: "Expand graph hints into mounted wikis' graphs." },
+    wikimountgraphttlms: { type: "number", default: 60000, description: "Cache TTL in milliseconds for a mounted wiki's read-only graph handle." },
+    wikigraphcross: { type: "boolean", default: true, description: "Join this wiki's graph with mounted wikis' graphs at query time (explicit @-links, shared tags/aliases/concepts). Requires wikigraphmounts." },
+    wikigraphcrossjoin: { type: "string", default: "link,tag,alias,concept", description: "CSV of enabled cross-wiki join kinds: link, tag, alias, concept." },
+    wikigraphcrosscap: { type: "number", default: 5, description: "Maximum cross-wiki entries appended per query." },
+    wikigraphcrossdepth: { type: "number", default: 1, description: "Cross-wiki traversal depth: 1 resolves explicit links, 2 also pulls the target's in-mount related pages." },
+    wikigraphcrossmaxdf: { type: "number", default: 0.25, description: "Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs." },
+    wikigraphcrossminkeylen: { type: "number", default: 3, description: "Minimum length for a shared join key to be used for cross-wiki matching." },
     wikigraphfalkorhost: { type: "string", description: "FalkorDB host for wiki graph." },
     wikigraphfalkorport: { type: "number", description: "FalkorDB port for wiki graph." },
     wikigraphfalkorgraph: { type: "string", description: "FalkorDB graph name for wiki graph." },
@@ -1445,6 +1453,14 @@ try {
         wikigraphcommunity: sessionOptions.wikigraphcommunity,
         wikigraphsearchhints: sessionOptions.wikigraphsearchhints,
         wikigraphhintcap: sessionOptions.wikigraphhintcap,
+        wikigraphmounts: sessionOptions.wikigraphmounts,
+        wikimountgraphttlms: sessionOptions.wikimountgraphttlms,
+        wikigraphcross: sessionOptions.wikigraphcross,
+        wikigraphcrossjoin: sessionOptions.wikigraphcrossjoin,
+        wikigraphcrosscap: sessionOptions.wikigraphcrosscap,
+        wikigraphcrossdepth: sessionOptions.wikigraphcrossdepth,
+        wikigraphcrossmaxdf: sessionOptions.wikigraphcrossmaxdf,
+        wikigraphcrossminkeylen: sessionOptions.wikigraphcrossminkeylen,
         wikigraphfalkor: {
           host: sessionOptions.wikigraphfalkorhost,
           port: sessionOptions.wikigraphfalkorport,
@@ -2426,7 +2442,7 @@ try {
           // Handle /graph command completions
           if (lookupName === "graph") {
             if (toBoolean(sessionOptions.usewikigraph) !== true) return -1
-            var graphSubcmds = ["build", "report", "query", "retrieve", "answer", "neighbors", "path", "communities", "surprise", "export", "stats", "falkor"]
+            var graphSubcmds = ["build", "report", "query", "retrieve", "answer", "neighbors", "path", "communities", "surprise", "export", "stats", "falkor", "cross"]
             var graphExportFmts = ["mermaid", "graphml", "neo4j", "html", "svg"]
             var remainder = uptoCursor.substring(firstSpace + 1)
             var trimmedRemainder = remainder.replace(/^\s*/, "")
@@ -5947,7 +5963,7 @@ try {
       { command: "/skills [prefix]", description: "List discovered skills (optionally filtered by prefix)" },
       { command: "/edit [last]", description: "Compose and submit one goal in the configured external editor (last pre-fills the previous goal; /editor also works)" },
       { command: "/wiki [op] [args]", description: "Interact with wiki; ops: context, list, tree, browse, read, search, backlinks, delete, lint, write, move, init, reindex, mounts, attach, detach" },
-      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor (requires usewikigraph=true)" },
+      { command: "/graph [op] [args]", description: "Interact with wiki graph; ops: build, report, query, retrieve, answer, neighbors, path, communities, surprise, export, stats, falkor, cross (requires usewikigraph=true)" },
       { command: "/dream [memory|wiki] [mode]", description: "Consolidate memory/wiki in dream mode; modes: plan, apply (default), reorg, repair, reindex, graph, indexes, dryrun" },
       { command: "/ingest <source> [section]", description: "Ingest a docs folder, git repo or web page into the wiki; flags: dryrun, force" }
     ]
@@ -6293,6 +6309,7 @@ try {
     }
     if (sub === "build" && rest.indexOf("semantic=true") >= 0) params.semantic = true
     if (sub === "falkor" && rest.length > 0) params.query = rest
+    if (sub === "cross") params.path = rest
     try {
       var out = wm.graph(sub, params)
       if (isString(out)) print(out)

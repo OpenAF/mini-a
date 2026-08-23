@@ -109,6 +109,30 @@ help:
     desc     : Maximum graph-hint pages appended to search results
     example  : "5"
     mandatory: false
+  - name     : wikigraphcross
+    desc     : Join this wiki's graph with mounted wikis' graphs at query time (explicit @-links, shared tags/aliases/concepts). Requires wikigraphmounts.
+    example  : "true"
+    mandatory: false
+  - name     : wikigraphcrossjoin
+    desc     : "CSV of enabled cross-wiki join kinds: link,tag,alias,concept"
+    example  : "link,tag,alias,concept"
+    mandatory: false
+  - name     : wikigraphcrosscap
+    desc     : Maximum cross-wiki entries appended per query
+    example  : "5"
+    mandatory: false
+  - name     : wikigraphcrossdepth
+    desc     : "Cross-wiki traversal depth: 1 resolves explicit links, 2 also pulls the target's in-mount related pages"
+    example  : "1"
+    mandatory: false
+  - name     : wikigraphcrossmaxdf
+    desc     : Skip a shared tag/alias/concept join key present on more than this fraction of a mount's docs
+    example  : "0.25"
+    mandatory: false
+  - name     : wikigraphcrossminkeylen
+    desc     : Minimum length for a shared join key to be used for cross-wiki matching
+    example  : "3"
+    mandatory: false
   - name     : audit
     desc     : "If true (or env OJOB_MCP_AUDIT), logs every MCP tool call (tool name and arguments, handled generically by oJobMCP.yaml) plus every page actually fetched from a remote wikibackend (s3, http, es) -- backend, resolved location (s3://bucket/key, URL, or es:index/path), and byte count -- via OpenAF's log() function. The latter also covers pages fetched internally while serving search/lint/list, not just the top-level read tool call."
     example  : "false"
@@ -267,7 +291,7 @@ todo:
 
       related:
         name       : related
-        description: "Optional follow-up discovery from backlinks and the existing graph. Use only when lexical search and page structure leave a gap."
+        description: "Optional follow-up discovery from backlinks and the existing graph, including related pages in mounted wikis (@name/path.md) reached via explicit links or shared tags/aliases/concepts. Use only when lexical search and page structure leave a gap."
         inputSchema:
           type       : object
           properties:
@@ -424,6 +448,12 @@ jobs:
       wikigraphfalkorpass : isString.default(__)
       wikigraphsearchhints: toBoolean.isBoolean.default(__)
       wikigraphhintcap    : toNumber.isNumber.default(__)
+      wikigraphcross      : toBoolean.isBoolean.default(__)
+      wikigraphcrossjoin  : isString.default(__)
+      wikigraphcrosscap   : toNumber.isNumber.default(__)
+      wikigraphcrossdepth : toNumber.isNumber.default(__)
+      wikigraphcrossmaxdf : toNumber.isNumber.default(__)
+      wikigraphcrossminkeylen: toNumber.isNumber.default(__)
       label               : isString.default("wiki")
       wikimounts          : isString.default(__)
       audit               : default(__)
