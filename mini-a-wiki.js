@@ -1156,6 +1156,29 @@ MiniAWikiManager.prototype._lexicalManifestStatus = function() {
   return { compatible: true, manifest: manifest }
 }
 
+MiniAWikiManager.prototype._lexicalManifestWarning = function(status) {
+  var scope = isString(this._config.wikiMountName) && this._config.wikiMountName.length > 0
+    ? "mount @" + this._config.wikiMountName
+    : "wiki root '" + String(this._config.root || ".") + "'"
+  var reason = isMap(status) && isString(status.reason) ? status.reason : "unknown"
+  var configDetail = "the runtime lexical configuration differs from the published artifact"
+  if (reason === "configuration") {
+    var manifest = this._lexicalManifest()
+    var published = isMap(manifest) && isMap(manifest.lexical) ? manifest.lexical : {}
+    var fields = ["language", "synonyms", "shingles", "ngrams", "queryExpansion", "pseudoRelevanceFeedback"]
+    var differences = fields.filter(function(field) {
+      return stringify(published[field], __, "") !== stringify(this._lexicalConfig[field], __, "")
+    }.bind(this)).map(function(field) {
+      return field + " published=" + stringify(published[field], __, "") + ", runtime=" + stringify(this._lexicalConfig[field], __, "")
+    }.bind(this))
+    if (differences.length > 0) configDetail += " (" + differences.join("; ") + ")"
+  }
+  var detail = reason === "missing" ? "the lexical manifest is missing (legacy artifact)" :
+    (reason === "schema" ? "the lexical manifest schema version is unsupported" :
+      (reason === "configuration" ? configDetail : "the lexical manifest is incompatible"))
+  return "Wiki Lucene index for " + scope + " cannot use enhanced lexical search because " + detail + "; using ordinary Lucene search. The publisher must run writable reindex with the runtime wikilexical configuration and republish the artifacts."
+}
+
 MiniAWikiManager.prototype._writeLexicalManifest = function() {
   if (this._access !== "rw") return false
   var indexPath = this._getLuceneIndexPath()
@@ -1276,7 +1299,7 @@ MiniAWikiManager.prototype._makeLuceneSearchIndex = function() {
       if (self._access !== "rw") {
         if (!manifestStatus.compatible) {
           if (self._luceneIndexExists() && self._lexicalReadOnlyWarned !== true) {
-            self._logFn("warn", "Wiki Lucene index uses a legacy or mismatched lexical schema; using ordinary Lucene search. The publisher must run writable reindex and republish the artifacts.")
+            self._logFn("warn", self._lexicalManifestWarning(manifestStatus))
             self._lexicalReadOnlyWarned = true
           }
           return self._luceneQueryReadOnly(q, limit)
@@ -4100,6 +4123,7 @@ MiniAWikiManager.prototype.attach = function(name, config) {
   // another language/rule set. This makes a single wikilexical setting apply
   // consistently to federated retrieval.
   if (isUnDef(cfg.wikilexical)) cfg.wikilexical = this._lexicalConfig
+  cfg.wikiMountName = name
   try {
     var manager = new MiniAWikiManager(cfg, this._logFn, this._auditFn)
     var count   = manager._safeListPages("").length

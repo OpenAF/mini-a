@@ -822,9 +822,11 @@
       io.writeFileString(dir + "/offindex/page.md",
         "---\ntitle: Offindex\ndescription: Offindex page\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\n---\n\n# Offindex\n\nzyxwvutmarker content")
 
-      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "reindex" }, function() {}).dreamWiki()
+      var res = new MiniADreams({ usewiki: "true", wikibackend: "fs", wikiroot: dir, dreamwikimode: "reindex", wikilexical: "(language: english, ngrams: true)" }, function() {}).dreamWiki()
       ow.test.assert(res.ok, true, "reindex mode should succeed")
       ow.test.assert(res.mode, "reindex", "mode should be reindex")
+      var manifest = af.fromJson(io.readFileString(dir + "/.mini-a-wiki-lucene/mini-a-lexical.json"))
+      ow.test.assert(manifest.lexical.ngrams, true, "reindex mode should preserve the requested lexical configuration")
 
       var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro" }, function() {})
       var hits = wm.search("zyxwvutmarker", { limit: 5 })

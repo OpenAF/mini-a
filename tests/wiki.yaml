@@ -537,6 +537,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testLexicalManifestUpgradeContract
 
+- name: MiniA Wiki Tests::ReadOnlyLexicalManifestWarningIdentifiesMountAndReason
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testReadOnlyLexicalManifestWarningIdentifiesMountAndReason
+
 - name: MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenIndexExists
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testReadOnlySessionWritesNothingWhenIndexExists
@@ -702,6 +706,7 @@ todo:
 - MiniA Wiki Tests::LuceneSearchPreservesScoresAndOrder
 - MiniA Wiki Tests::LexicalConfigDefaultsAndValidation
 - MiniA Wiki Tests::LexicalManifestUpgradeContract
+- MiniA Wiki Tests::ReadOnlyLexicalManifestWarningIdentifiesMountAndReason
 - MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenIndexExists
 - MiniA Wiki Tests::ReadOnlySessionWritesNothingWhenNoIndexExists
 - MiniA Wiki Tests::ReadOnlySearchWorksWhileWriterLockHeld

@@ -2292,6 +2292,24 @@
     } finally { cleanupTestDir(dir) }
   }
 
+  exports.testReadOnlyLexicalManifestWarningIdentifiesMountAndReason = function() {
+    var warnings = []
+    var wm = new MiniAWikiManager({ backend: "fs", root: "/published/slon", access: "ro", wikiMountName: "slon" }, function(level, msg) {
+      if (level === "warn") warnings.push(msg)
+    })
+    wm._lexicalManifestStatus = function() { return { compatible: false, reason: "configuration" } }
+    wm._lexicalManifest = function() { return { lexical: { language: "english", synonyms: [], shingles: false, ngrams: false, queryExpansion: false, pseudoRelevanceFeedback: false } } }
+    wm._lexicalConfig.ngrams = true
+    wm._luceneIndexExists = function() { return true }
+    wm._luceneQueryReadOnly = function() { return [] }
+    wm._makeLuceneSearchIndex().query("arrays", 5)
+    ow.test.assert(warnings.length, 1, "an incompatible read-only index should warn once")
+    ow.test.assert(warnings[0].indexOf("mount @slon") >= 0, true, "warning should identify the mounted wiki")
+    ow.test.assert(warnings[0].indexOf("runtime lexical configuration differs") >= 0, true, "warning should identify a configuration mismatch")
+    ow.test.assert(warnings[0].indexOf("ngrams published=false, runtime=true") >= 0, true, "warning should identify the mismatched lexical setting")
+    ow.test.assert(warnings[0].indexOf("writable reindex with the runtime wikilexical configuration") >= 0, true, "warning should state the required publication fix")
+  }
+
   exports.testReadOnlyConsumesExistingLuceneIndex = function() {
     var dir = createTestDir()
     try {
