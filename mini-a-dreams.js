@@ -40,6 +40,17 @@ MiniADreams.prototype._log = function(msg) {
   try { this._logFn(out) } catch(ignoreLogErr) {}
 }
 
+// Builds an onProgress callback for MiniAWikiGraph.buildSemantic() (threaded through
+// MiniAWikiManager.graph("build", {onProgress}) unmodified). Only actual extractions are
+// logged, not cache-hit skips, so output stays proportional to real (slow, per-page LLM) work.
+MiniADreams.prototype._wikiGraphProgressFn = function() {
+  var self = this
+  return function(info) {
+    if (!isMap(info) || info.status !== "processed") return
+    self._log("[dreams:wiki] Graph: page " + info.index + "/" + info.total + " extracted (" + info.path + ")")
+  }
+}
+
 // Allow tests (and callers) to inject a stub LLM so no real API keys are needed.
 MiniADreams.prototype._setLlm = function(llmInstance) {
   this._llm = llmInstance
@@ -309,11 +320,12 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
   // Helper: consolidate one manager's memory via LLM
   var consolidateOne = function(mgr, label, chName, ns) {
+    var tConsolidate = Date.now()
     var snap = self._normalizeLegacyArtifacts(mgr.snapshot())
     var beforeCounts = {}
     _MEMORY_SECTIONS.forEach(function(s) { beforeCounts[s] = isArray(snap.sections[s]) ? snap.sections[s].length : 0 })
     var totalBefore = _MEMORY_SECTIONS.reduce(function(sum, s) { return sum + beforeCounts[s] }, 0)
-    self._log("[dreams:memory:" + label + "] " + totalBefore + " entries before consolidation.")
+    self._log("[dreams:memory:" + label + "] " + totalBefore + " entries before consolidation. Consolidating via LLM...")
 
     var systemPrompt = "You are performing a memory dream pass for a Mini-A agent.\n" +
       "Return ONLY a valid JSON object — no commentary, no markdown fences.\n" +
@@ -400,7 +412,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
     var droppedCount = Math.max(totalBefore - totalAfter, 0)
     var addedCount = Math.max(totalAfter - totalBefore, 0)
 
-    self._log("[dreams:memory:" + label + "] Consolidated: " + totalAfter + " entries (" +
+    self._log("[dreams:memory:" + label + "] Consolidated in " + ((Date.now() - tConsolidate) / 1000).toFixed(1) + "s: " + totalAfter + " entries (" +
       droppedCount + " dropped, " + addedCount + " added, " + staleCount + " stale-marked).")
 
     if (isDryRun) {
@@ -555,6 +567,17 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     }
   }
 
+  // Bracket every lint() call (run up to 5x per apply) with a start log and an elapsed-time
+  // result so a wiki-wide scan doesn't read as silence during a long dream run.
+  var timedLint = function(wm) {
+    self._log("[dreams:wiki] Linting wiki...")
+    var t0 = Date.now()
+    var result = wm.lint(lintMemMgr, { staleDays: staleDays })
+    var s = lintSummary(result)
+    self._log("[dreams:wiki] Lint complete in " + ((Date.now() - t0) / 1000).toFixed(1) + "s — " + s.errors + "E/" + s.warnings + "W")
+    return result
+  }
+
   var _unique = function(arr) {
     var out = []
     var seen = {}
@@ -587,7 +610,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Wiki dream dry-run: building proposal package...")
     try {
       var wmDry = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:plan] " + msg) })
-      var lintBeforeDry = wmDry.lint(lintMemMgr, { staleDays: staleDays })
+      var lintBeforeDry = timedLint(wmDry)
       var proposal = buildProposal(wmDry, lintBeforeDry)
       defaultResult.mode = "plan"
       defaultResult.lint_before = lintSummary(lintBeforeDry)
@@ -652,11 +675,11 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         self._log("[dreams:wiki] AGENTS.md upgrade error (non-fatal): " + __miniAErrMsg(upgradeErr))
       }
 
-      var lintBefore = wmApply.lint(lintMemMgr, { staleDays: staleDays })
+      var lintBefore = timedLint(wmApply)
       defaultResult.lint_before = lintSummary(lintBefore)
 
       var loopResult = self._runWikiRepairLoop(wmApply, lintBefore, function() {
-        return wmApply.lint(lintMemMgr, { staleDays: staleDays })
+        return timedLint(wmApply)
       }, 3, {})
       defaultResult.repairs = loopResult.repairs
       defaultResult.repair_passes = loopResult.passes
@@ -672,7 +695,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
       var fin = self._finalizeWiki(wmApply, defaultResult, { appendLog: false, mode: "apply" })
       defaultResult.finalize = fin
 
-      var lintAfter = wmApply.lint(lintMemMgr, { staleDays: staleDays })
+      var lintAfter = timedLint(wmApply)
       defaultResult.lint_after = lintSummary(lintAfter)
       wmApply.close()
       self._log("💤 [dreams] Wiki dream apply complete — " +
@@ -694,11 +717,11 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Starting wiki dream repair pass...")
     try {
       var wmRepair = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:repair] " + msg) })
-      var repairLintBefore = wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      var repairLintBefore = timedLint(wmRepair)
       defaultResult.lint_before = lintSummary(repairLintBefore)
 
       var repairLoopResult = self._runWikiRepairLoop(wmRepair, repairLintBefore, function() {
-        return wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+        return timedLint(wmRepair)
       }, 3, {})
       defaultResult.repairs = repairLoopResult.repairs
       defaultResult.repair_passes = repairLoopResult.passes
@@ -709,7 +732,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         else if (issue.type === "index_missing_links" || issue.type === "stale_index" || issue.type === "structural_orphan") defaultResult.indexes_updated++
       })
 
-      var repairLintAfter = wmRepair.lint(lintMemMgr, { staleDays: staleDays })
+      var repairLintAfter = timedLint(wmRepair)
       defaultResult.lint_after = lintSummary(repairLintAfter)
       wmRepair.close()
       self._log("💤 [dreams] Wiki dream repair complete — " + defaultResult.repairs.fixed.length + " issues fixed over " +
@@ -729,6 +752,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Starting wiki dream reindex pass...")
     try {
       var wmReindex = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:reindex] " + msg) })
+      var tReindex = Date.now()
       var reindexResult = wmReindex.reindex()
       wmReindex.close()
       if (!isMap(reindexResult) || reindexResult.ok !== true) {
@@ -736,7 +760,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         self._log("[dreams:wiki] Reindex failed: " + reindexErr)
         return { ok: false, reason: "reindex-failed", error: reindexErr }
       }
-      self._log("💤 [dreams] Wiki dream reindex complete.")
+      self._log("💤 [dreams] Wiki dream reindex complete in " + ((Date.now() - tReindex) / 1000).toFixed(1) + "s.")
       return defaultResult
     } catch(reindexErr2) {
       self._log("[dreams:wiki] Reindex error: " + __miniAErrMsg(reindexErr2))
@@ -749,14 +773,16 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Starting wiki dream graph pass...")
     try {
       var wmGraph = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:graph] " + msg) })
-      var graphResult = wmGraph.graph("build", { semantic: self._effectiveWikiGraphSemantic("graph") })
+      var tGraph = Date.now()
+      var graphSemanticOn = self._effectiveWikiGraphSemantic("graph")
+      var graphResult = wmGraph.graph("build", { semantic: graphSemanticOn, onProgress: graphSemanticOn ? self._wikiGraphProgressFn() : __ })
       wmGraph.close()
       if (!isMap(graphResult) || graphResult.ok !== true) {
         var graphErr = isMap(graphResult) && isString(graphResult.error) ? graphResult.error : "graph build failed"
         self._log("[dreams:wiki] Graph build failed: " + graphErr)
         return { ok: false, reason: "graph-failed", error: graphErr }
       }
-      self._log("💤 [dreams] Wiki dream graph rebuild complete.")
+      self._log("💤 [dreams] Wiki dream graph rebuild complete in " + ((Date.now() - tGraph) / 1000).toFixed(1) + "s.")
       defaultResult.graph = "rebuilt"
       return defaultResult
     } catch(graphErr2) {
@@ -772,6 +798,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     self._log("💤 [dreams] Starting wiki dream indexes pass...")
     try {
       var wmIdx = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:indexes] " + msg) })
+      var tIdxMode = Date.now()
       var idxResult = wmIdx.regenerateIndexes()
       wmIdx.close()
       if (!isMap(idxResult) || idxResult.ok !== true) {
@@ -780,7 +807,8 @@ MiniADreams.prototype.dreamWiki = function(opts) {
         return { ok: false, reason: "indexes-failed", error: idxErr }
       }
       defaultResult.indexes_regenerated = idxResult.regenerated.length
-      self._log("💤 [dreams] Wiki dream indexes complete — " + idxResult.regenerated.length + " page(s) regenerated.")
+      self._log("💤 [dreams] Wiki dream indexes complete — " + idxResult.regenerated.length + " page(s) regenerated in " +
+        ((Date.now() - tIdxMode) / 1000).toFixed(1) + "s.")
       return defaultResult
     } catch(idxErr2) {
       self._log("[dreams:wiki] Indexes error: " + __miniAErrMsg(idxErr2))
@@ -862,10 +890,10 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     // bounded deterministic repair pass to clean up what it left behind, same as apply mode,
     // before finalizing so the wiki is left reindexed, re-linked and with a rebuilt graph.
     var wmFinal = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[dreams:wiki:finalize] " + msg) })
-    var reorgLintBefore = wmFinal.lint(lintMemMgr, { staleDays: staleDays })
+    var reorgLintBefore = timedLint(wmFinal)
     defaultResult.lint_before = lintSummary(reorgLintBefore)
     var reorgLoopResult = self._runWikiRepairLoop(wmFinal, reorgLintBefore, function() {
-      return wmFinal.lint(lintMemMgr, { staleDays: staleDays })
+      return timedLint(wmFinal)
     }, 1, {})
     defaultResult.repairs = reorgLoopResult.repairs
     defaultResult.repair_passes = reorgLoopResult.passes
@@ -877,7 +905,7 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     })
 
     var reorgFinalize = self._finalizeWiki(wmFinal, defaultResult, { mode: "reorg" })
-    var reorgLint = lintSummary(wmFinal.lint(lintMemMgr, { staleDays: staleDays }))
+    var reorgLint = lintSummary(timedLint(wmFinal))
     wmFinal.close()
 
     self._log("💤 [dreams] Wiki dream complete.")
@@ -935,6 +963,10 @@ MiniADreams.prototype._repairWikiLint = function(wm, lintResult, options) {
     if (repairable[issue.type]) result.candidates.push(copyIssue(issue))
     else result.skipped.push(copyIssue(issue, { reason: "requires-semantic-judgment" }))
   })
+  if (issues.length > 0) {
+    this._log("[dreams:wiki] " + issues.length + " issue(s) this pass — " +
+      result.candidates.length + " repairable, " + result.skipped.length + " require semantic judgment")
+  }
   if (dryRun) return result
 
   var changedPages = {}
@@ -1184,12 +1216,17 @@ MiniADreams.prototype._runWikiRepairLoop = function(wm, initialLint, lintFn, max
   var allRepairs = { fixed: [], skipped: [], candidates: [], pages_changed: 0 }
   var changedPageSet = {}, passes = 0, currentLint = initialLint
   for (var i = 0; i < passesBound; i++) {
+    var issueCount = isMap(currentLint) && isArray(currentLint.issues) ? currentLint.issues.length : 0
+    self._log("[dreams:wiki] Repair pass " + (i + 1) + "/" + passesBound + " — " + issueCount + " issue(s) to consider")
     var passRepairs = self._repairWikiLint(wm, currentLint, repairOpts || {})
     passes++
     allRepairs.fixed = allRepairs.fixed.concat(passRepairs.fixed)
     allRepairs.skipped = allRepairs.skipped.concat(passRepairs.skipped)
     allRepairs.candidates = allRepairs.candidates.concat(passRepairs.candidates)
     passRepairs.fixed.forEach(function(issue) { if (isString(issue.page)) changedPageSet[issue.page] = true })
+    self._log("[dreams:wiki] Repair pass " + (i + 1) + "/" + passesBound + " complete — " +
+      passRepairs.fixed.length + " fixed, " + passRepairs.skipped.length + " skipped, " +
+      passRepairs.pages_changed + " page(s) changed")
     if (passRepairs.pages_changed === 0 || i === passesBound - 1) break
     currentLint = lintFn()
   }
@@ -1230,12 +1267,15 @@ MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
   var report = { ok: true, indexes_regenerated: 0, reindexed: false, graph: "skipped", errors: [] }
   if (!isObject(wm)) return { ok: false, errors: ["no wiki manager"] }
 
+  self._log("[dreams:wiki] Finalizing wiki (indexes, search, graph)...")
+
   try {
+    var tIdx = Date.now()
     var reg = wm.regenerateIndexes()
     if (isMap(reg) && isArray(reg.regenerated)) {
       report.indexes_regenerated = reg.regenerated.length
       if (isMap(result)) result.indexes_updated += reg.regenerated.length
-      self._log("[dreams:wiki] Regenerated " + reg.regenerated.length + " index pages.")
+      self._log("[dreams:wiki] Regenerated " + reg.regenerated.length + " index pages in " + ((Date.now() - tIdx) / 1000).toFixed(1) + "s.")
     } else if (isMap(reg) && isString(reg.error)) {
       report.errors.push("indexes: " + reg.error)
     }
@@ -1244,19 +1284,22 @@ MiniADreams.prototype._finalizeWiki = function(wm, result, options) {
   }
 
   try {
+    var tRe = Date.now()
     var ri = wm.reindex()
     report.reindexed = isMap(ri) && ri.ok === true
     if (!report.reindexed && isMap(ri) && isString(ri.error)) report.errors.push("reindex: " + ri.error)
-    else self._log("[dreams:wiki] Search index rebuilt.")
+    else self._log("[dreams:wiki] Search index rebuilt in " + ((Date.now() - tRe) / 1000).toFixed(1) + "s.")
   } catch(eRe) {
     report.errors.push("reindex: " + __miniAErrMsg(eRe))
   }
 
   if (self._wikiGraphEnabled()) {
     try {
-      var gr = wm.graph("build", { semantic: self._effectiveWikiGraphSemantic(opts.mode) })
+      var tG = Date.now()
+      var semanticOn = self._effectiveWikiGraphSemantic(opts.mode)
+      var gr = wm.graph("build", { semantic: semanticOn, onProgress: semanticOn ? self._wikiGraphProgressFn() : __ })
       report.graph = isMap(gr) && gr.ok === false ? ("failed: " + gr.error) : "rebuilt"
-      if (report.graph === "rebuilt") self._log("[dreams:wiki] Knowledge graph rebuilt.")
+      if (report.graph === "rebuilt") self._log("[dreams:wiki] Knowledge graph rebuilt in " + ((Date.now() - tG) / 1000).toFixed(1) + "s.")
     } catch(eG) {
       report.graph = "failed"
       report.errors.push("graph: " + __miniAErrMsg(eG))

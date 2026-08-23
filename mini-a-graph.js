@@ -559,20 +559,41 @@ MiniAWikiGraph.prototype.removePage = function(path) {
 
 MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
   var options = isMap(opts) ? opts : {}
+  var onProgress = isFunction(options.onProgress) ? options.onProgress : __
   if (!isFunction(this._llmExtractFn)) return { ok: false, error: "semantic extraction function not configured" }
   var list = isArray(pages) ? pages : []
   var chars = 0
   for (var i = 0; i < list.length; i++) chars += isString(list[i].body) ? list[i].body.length : 0
   this._log("warn", "[graph] semantic build corpus-check: pages=" + list.length + ", approx_chars=" + chars + ", est_tokens=" + this._estimateTokens("x".repeat(Math.min(chars, 10000))) * Math.max(1, Math.ceil(chars / 10000)))
 
-  var changed = 0
+  // Precompute which pages actually need extraction (i.e. will not hit the cache-check
+  // below) so a progress-reporting caller can show an accurate "N/M need extraction" count
+  // instead of one that includes pages skipped instantly on a cache hit. Only done when a
+  // caller actually wants progress — skip the extra pass entirely otherwise.
+  var totalToExtract = 0
+  if (isFunction(onProgress)) {
+    var needsExtraction = list.filter(function(page) {
+      if (!isMap(page) || !isString(page.path)) return false
+      var compact = this._compactSemanticPayload(page)
+      var hash = sha1(stringify(compact, __, ""))
+      var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
+      return !(isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true)
+    }.bind(this))
+    totalToExtract = needsExtraction.length
+    if (totalToExtract > 0) this._log("warn", "[graph] semantic build: " + totalToExtract + "/" + list.length + " page(s) need extraction")
+  }
+
+  var changed = 0, extracted = 0
   for (var p = 0; p < list.length; p++) {
     var page = list[p]
     if (!isMap(page) || !isString(page.path)) continue
     var compact = this._compactSemanticPayload(page)
     var hash = sha1(stringify(compact, __, ""))
     var cache = isMap(this._state.semantic_cache[page.path]) ? this._state.semantic_cache[page.path] : __
-    if (isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true) continue
+    if (isMap(cache) && cache.hash === hash && cache.schema_version === 1 && cache.prompt_version === 1 && cache.model === (options.model || "") && options.force !== true) {
+      if (isFunction(onProgress)) onProgress({ index: extracted, total: totalToExtract, path: page.path, status: "skipped" })
+      continue
+    }
 
     this._removePageState(page.path)
     this._indexPageStructural(page)
@@ -606,6 +627,8 @@ MiniAWikiGraph.prototype.buildSemantic = function(pages, opts) {
     }
     this._state.semantic_cache[page.path] = { hash: hash, compact_hash: hash, schema_version: 1, prompt_version: 1, model: options.model || "", updated_at: new Date().toISOString() }
     changed++
+    extracted++
+    if (isFunction(onProgress)) onProgress({ index: extracted, total: totalToExtract, path: page.path, status: "processed" })
   }
 
   this._markDerivedDirty()
