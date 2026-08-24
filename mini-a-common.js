@@ -11,6 +11,114 @@ function __miniAErrMsg(e) {
 }
 
 /**
+ * Buffers a Markdown stream until it has complete renderable units. Markdown
+ * renderers are line-oriented, so handing them provider-sized token fragments
+ * loses inline formatting such as emphasis and links.
+ */
+function __miniAMarkdownStream(opts) {
+  opts = isObject(opts) ? opts : {}
+  var pending = "", inCode = false, code = "", inTable = false, table = "", header = ""
+  var separator = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+
+  function cellCount(line) {
+    var value = String(line || "").trim()
+    if (value.charAt(0) === "|") value = value.substring(1)
+    if (value.charAt(value.length - 1) === "|") value = value.substring(0, value.length - 1)
+    return value.length === 0 ? 0 : value.split("|").length
+  }
+  function isSeparator(line) { return separator.test(String(line || "").trim()) }
+  function isRow(line) {
+    var value = String(line || "").trim()
+    if (value.length === 0 || isSeparator(value)) return false
+    var pipes = (value.match(/\|/g) || []).length
+    return (value.charAt(0) === "|" || pipes >= 2) && cellCount(value) >= 2
+  }
+  function emit(text, kind) {
+    if (text.length > 0 && isFunction(opts.onUnit)) opts.onUnit(text, kind)
+  }
+  function preview() {
+    if (isFunction(opts.onPreview)) opts.onPreview(pending)
+  }
+  function process(line) {
+    var withNl = line + "\n"
+    if (inCode) {
+      code += withNl
+      if (line.trim() === "```") { emit(code, "code"); code = ""; inCode = false }
+      return
+    }
+    if (line.trim().indexOf("```") === 0) {
+      if (inTable) { emit(table, "table"); table = ""; inTable = false }
+      if (header.length > 0) { emit(header, "line"); header = "" }
+      inCode = true; code = withNl; return
+    }
+    if (inTable) {
+      if (isRow(line) && cellCount(line) === cellCount(table.split("\n")[0])) { table += withNl; return }
+      emit(table, "table"); table = ""; inTable = false
+    }
+    if (header.length > 0) {
+      if (isSeparator(line) && cellCount(line) === cellCount(header)) {
+        inTable = true; table = header + withNl; header = ""; return
+      }
+      emit(header, "line"); header = ""
+    }
+    if (isRow(line)) header = withNl
+    else emit(withNl, "line")
+  }
+  return {
+    feed: function(text) {
+      pending += isDef(text) ? String(text) : ""
+      var idx
+      while ((idx = pending.indexOf("\n")) >= 0) {
+        var line = pending.substring(0, idx)
+        pending = pending.substring(idx + 1)
+        process(line)
+      }
+      preview()
+    },
+    end: function() {
+      if (pending.length > 0) {
+        if (inCode) code += pending
+        else if (inTable) table += pending
+        else if (header.length > 0) { emit(header, "line"); header = ""; emit(pending, "line") }
+        else emit(pending, "line")
+      }
+      pending = ""
+      if (code.length > 0) emit(code, "code")
+      if (table.length > 0) emit(table, "table")
+      if (header.length > 0) emit(header, "line")
+      inCode = false; code = ""; inTable = false; table = ""; header = ""
+      preview()
+    },
+    reset: function() { pending = ""; inCode = false; code = ""; inTable = false; table = ""; header = ""; preview() }
+  }
+}
+
+/** Render a complete Markdown unit without losing literal tags or list wraps. */
+function __miniAMarkdownRender(text, width, opts) {
+  var value = isDef(text) ? String(text) : ""
+  opts = isObject(opts) ? opts : {}
+  var ansi = opts.ansi === true || (typeof __conAnsi !== "undefined" && __conAnsi === true)
+  if (ansi !== true || value.length === 0) return value
+  if (opts.kind !== "code" && opts.kind !== "table") value = value.replace(/^( {0,3})[-+]\s+/gm, "$1* ")
+  if (/<\?xml\b/i.test(value) || /^\s*<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?>\s*$/m.test(value)) return value
+  // OpenAF's second withMD argument is an ANSI style, not a render width.
+  // Passing a number here throws "defaultAnsi is not a string" mid-stream.
+  if (!isObject(__flags) || !isObject(__flags.WITHMD)) return ow.format.withMD(value)
+  var oldHtmlFilter = __flags.WITHMD.htmlFilter
+  try {
+    __flags.WITHMD.htmlFilter = false
+    return ow.format.withMD(value)
+  } finally {
+    __flags.WITHMD.htmlFilter = oldHtmlFilter
+  }
+}
+
+function __miniAMarkdownPreviewRows(text, width) {
+  var wrapped = ow.format.string.wordWrap(String(text || ""), width)
+  return String(wrapped || "").replace(/\r/g, "").split("\n").length
+}
+
+/**
  * Normalizes `askChoose` results into a safe zero-based index.
  * Returns -1 for blank, invalid, negative, or out-of-range values.
  *

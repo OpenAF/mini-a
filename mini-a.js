@@ -1424,6 +1424,7 @@ MiniA.prototype._resolveShellActionAlias = function(actionName, opts) {
  * </odoc>
  */
 MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
+  var hasCustomInteraction = isFunction(cFn)
   cFn = _$(cFn, "cFn").or().isFunction().default((_e, _m) => {
     var extra = ""
 
@@ -1437,7 +1438,16 @@ MiniA.prototype.defaultInteractionFn = function(e, m, cFn) {
 
   // Handle streaming output directly without formatting
   if (e === "stream" || e === "planner_stream") {
-    cFn("", m, this._id)
+    var streamMessage = isDef(m) ? String(m).replace(/^\[subtask:[^\]]+\]\s*/, "") : ""
+    // The plain CLI used to send every delta to log(), producing timestamped
+    // noise. Interactive clients provide their own sink; the default sink only
+    // writes rendered complete units when ANSI output has explicitly been enabled.
+    if (hasCustomInteraction) {
+      cFn("", streamMessage, this._id)
+    } else if (this._useAnsiLogging === true && java.lang.System.console() !== null) {
+      printnl(__miniAMarkdownRender(streamMessage, 80, { ansi: true }))
+      this._streamOutputProduced = true
+    }
     return
   }
 
@@ -2890,6 +2900,12 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     var tableBuffer = ""        // Buffer table rows until complete
     var tableHeaderCandidate = "" // Buffer first row until separator confirms a table
     var firstOutput = true      // Track if first output (for initial newline)
+    var isConsoleStream = isObject(args) && args.__interaction_source === "mini-a-con"
+    var addStreamSpacing = opts.streamSpacing !== false && !isConsoleStream
+    // The interactive console owns the pending-tail preview and repaint cycle.
+    // Feeding it only completed lines leaves it with nothing to preview until
+    // the model happens to emit a newline, which feels like no streaming at all.
+    var bufferMarkdown = opts.bufferMarkdown !== false && !isConsoleStream
     
     // Match markdown table separator rows with or without outer pipes.
     var TABLE_SEPARATOR_REGEX = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
@@ -2985,10 +3001,9 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
         for (var i = 0; i < text.length; i++) {
             filterChar(text.charAt(i))
         }
-        if (!inCodeBlock && !inTable && tableHeaderCandidate.length === 0 && contentBuffer.length > 0) {
-            flushContent(contentBuffer)
-            contentBuffer = ""
-        }
+        // Plain-delta providers have no closing JSON quote to signal end of an
+        // answer. Non-console sinks therefore need their current tail released.
+        if (bufferMarkdown) markdownStream.end()
     }
 
     function shouldFallbackToPlainText(buffer) {
@@ -3012,123 +3027,31 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
     function flushContent(text) {
         if (text.length > 0) {
             // Add initial newline before first output
-            if (firstOutput) {
+            if (firstOutput && addStreamSpacing) {
                 self.fnI(eventName, "\n")
-                firstOutput = false
             }
+            firstOutput = false
             self.fnI(eventName, text)
         }
     }
 
+    // Keep stream units independent of provider chunk boundaries. The console can
+    // preview the pending tail, while every real Markdown render sees complete lines.
+    var markdownStream = __miniAMarkdownStream({
+        onUnit: function(text) { flushContent(text) }
+    })
+
     // Process decoded content with markdown awareness
     function processContent(decoded) {
-        contentBuffer += decoded
-
-        // Process line by line
-        while (true) {
-            var newlineIdx = contentBuffer.indexOf("\n")
-            if (newlineIdx === -1) break
-
-            var line = contentBuffer.substring(0, newlineIdx)
-            contentBuffer = contentBuffer.substring(newlineIdx + 1)
-            var trimmedLine = line.trim()
-
-            // Check for code block start/end
-            if (trimmedLine.indexOf("```") === 0) {
-                if (!inCodeBlock) {
-                    // Starting a code block - buffer it (may include language specifier)
-                    inCodeBlock = true
-                    codeBlockBuffer = line + "\n"
-                    continue
-                }
-
-                // We are inside a code block already. Only treat a bare ``` as the closing fence.
-                if (trimmedLine === "```") {
-                    // Ending a code block - flush entire block
-                    codeBlockBuffer += line + "\n"
-                    flushContent(codeBlockBuffer)
-                    codeBlockBuffer = ""
-                    inCodeBlock = false
-                    continue
-                }
-                // Lines starting with ``` but not exactly ``` inside a code block
-                // are treated as normal content.
-            }
-
-            // If inside code block, buffer the line
-            if (inCodeBlock) {
-                codeBlockBuffer += line + "\n"
-                continue
-            }
-
-            var isTableLine = isTableRowLine(line)
-            var isSeparatorLine = isTableSeparatorLine(line)
-
-            if (inTable) {
-                if (isTableLine || isSeparatorLine) {
-                    tableBuffer += line + "\n"
-                    continue
-                }
-                flushContent(tableBuffer)
-                tableBuffer = ""
-                inTable = false
-            }
-
-            if (tableHeaderCandidate.length > 0) {
-                if (isSeparatorLine) {
-                    inTable = true
-                    tableBuffer = tableHeaderCandidate + line + "\n"
-                    tableHeaderCandidate = ""
-                    continue
-                }
-                flushContent(tableHeaderCandidate)
-                tableHeaderCandidate = ""
-                if (isTableLine) {
-                    tableHeaderCandidate = line + "\n"
-                } else {
-                    flushContent(line + "\n")
-                }
-                continue
-            }
-
-            if (isTableLine) {
-                tableHeaderCandidate = line + "\n"
-                continue
-            }
-
-            flushContent(line + "\n")
-        }
+        if (!isString(decoded) || decoded.length === 0) return
+        if (bufferMarkdown) markdownStream.feed(decoded)
+        else flushContent(decoded)
     }
 
     // Flush remaining buffers at end of answer
     function flushRemaining() {
         flushPendingEscapes()
-        if (contentBuffer.length > 0 && inCodeBlock) {
-            // If stream ended without a trailing newline, keep any pending
-            // fence/content attached to the current fenced block.
-            codeBlockBuffer += contentBuffer
-            contentBuffer = ""
-        }
-        if (codeBlockBuffer.length > 0) {
-            flushContent(codeBlockBuffer)
-            codeBlockBuffer = ""
-            inCodeBlock = false
-        }
-        if (contentBuffer.length > 0) {
-            if (inTable && (isTableRowLine(contentBuffer) || isTableSeparatorLine(contentBuffer))) {
-                tableBuffer += contentBuffer
-                contentBuffer = ""
-            } else if (!inTable && tableHeaderCandidate.length > 0 && isTableSeparatorLine(contentBuffer)) {
-                inTable = true
-                tableBuffer = tableHeaderCandidate + contentBuffer
-                tableHeaderCandidate = ""
-                contentBuffer = ""
-            }
-        }
-        if (tableBuffer.length > 0) flushContent(tableBuffer)
-        if (tableHeaderCandidate.length > 0) flushContent(tableHeaderCandidate)
-        if (contentBuffer.length > 0) flushContent(contentBuffer)
-        flushContent("\n\n")
+        if (bufferMarkdown) markdownStream.end()
         // Flush any partial thinking-tag state on stream end
         if (tfState === "in_content" && tfContentBuf.length > 0) {
             // Incomplete thinking block: discard silently in both modes
@@ -3136,6 +3059,7 @@ MiniA.prototype._createStreamDeltaHandler = function(args, opts) {
         } else if (tfState === "tag_opening" && tfPreBuf.length > 0) {
             // Ambiguous opening tag that never resolved: pass through as content
             processContent(tfPreBuf)
+            if (bufferMarkdown) markdownStream.end()
             tfPreBuf = ""; tfState = "idle"
         } else if (tfState === "tag_closing") {
             // Incomplete closing tag: discard in both modes

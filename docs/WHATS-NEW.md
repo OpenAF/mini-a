@@ -609,7 +609,7 @@ mini-a goal="deep code analysis" useshell=true \
 
 **What's New**:
 - When `usestream=true` and the agent is in the planning phase, streaming tokens are emitted as `planner_stream` events instead of the normal `stream` events.
-- **Console**: `planner_stream` tokens render in a distinct color so users can immediately see that the agent is generating a plan rather than an answer.
+- **Console**: `planner_stream` tokens render in a distinct color so users can immediately see that the agent is generating a plan rather than an answer. Streaming Markdown is buffered to complete lines/blocks, so inline formatting remains intact across provider token boundaries.
 - **Web UI (SSE)**: The `/stream` endpoint now emits `planner_stream` SSE events alongside the existing `stream` and `interaction` events. Clients can listen for this event type to render planner output differently (e.g., a collapsible "Planning…" pane).
 
 **Example** (EventSource client):
