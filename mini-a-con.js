@@ -4188,256 +4188,62 @@ try {
   var _stringifyFinalResult = function(v, pretty) {
     return stringify(v, __, pretty ? "  " : "")
   }
-  var _streamMdState = {
-    pending: "",
-    inCodeBlock: false,
-    codeBlockBuffer: "",
-    inTable: false,
-    tableBuffer: "",
-    tableHeaderCandidate: ""
-  }
-  var _streamTableSeparatorRegex = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/
+  var _streamPreviewLines = 0
+  var _streamRenderer = __
+  var _streamCueStopped = false
+  var _streamNeedsTerminator = false
 
-  function _isStreamTableSeparator(lineText) {
-    if (!isString(lineText)) return false
-    return _streamTableSeparatorRegex.test(lineText.trim())
-  }
-
-  function _isStreamTableRow(lineText) {
-    if (!isString(lineText)) return false
-    var trimmed = lineText.trim()
-    if (trimmed.length === 0) return false
-    if (_isStreamTableSeparator(trimmed)) return false
-    return trimmed.indexOf("|") >= 0
-  }
-
-  function _isStreamCodeFenceLine(lineText) {
-    if (!isString(lineText)) return false
-    return lineText.trim().indexOf("```") === 0
-  }
-
-  function _isStreamCodeFenceCloseLine(lineText) {
-    if (!isString(lineText)) return false
-    return lineText.trim() === "```"
-  }
-
-  function _streamTableCellCount(lineText) {
-    if (!isString(lineText)) return 0
-    var normalized = lineText.trim()
-    if (normalized.length === 0) return 0
-    if (normalized.indexOf("|") === 0) normalized = normalized.substring(1)
-    if (normalized.lastIndexOf("|") === normalized.length - 1) normalized = normalized.substring(0, normalized.length - 1)
-    if (normalized.length === 0) return 0
-    return normalized.split("|").length
-  }
-
-  function _containsStreamTableSyntax(text) {
-    if (!isString(text) || text.length === 0) return false
-    var lines = text.split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      if (_isStreamTableSeparator(lines[i]) || _isStreamTableRow(lines[i])) return true
-    }
-    return false
-  }
-
-  function _isStreamValidMarkdownTableText(text) {
-    if (!isString(text) || text.length === 0) return false
-    var lines = text.split("\n").filter(function(line) { return line.trim().length > 0 })
-    if (lines.length < 2) return false
-
-    var separatorIdx = -1
-    for (var i = 0; i < lines.length; i++) {
-      if (_isStreamTableSeparator(lines[i])) {
-        separatorIdx = i
-        break
-      }
-    }
-    if (separatorIdx <= 0) return false
-    if (separatorIdx > 1) return false
-
-    var headerLine = lines[separatorIdx - 1]
-    var separatorLine = lines[separatorIdx]
-    if (!_isStreamTableRow(headerLine)) return false
-
-    var headerCols = _streamTableCellCount(headerLine)
-    var separatorCols = _streamTableCellCount(separatorLine)
-    if (headerCols < 2 || separatorCols < 2 || headerCols !== separatorCols) return false
-
-    for (var j = separatorIdx + 1; j < lines.length; j++) {
-      if (!_isStreamTableRow(lines[j])) return false
-      if (_streamTableCellCount(lines[j]) !== headerCols) return false
-    }
-    return true
-  }
-
-  function _looksLikeXmlOrHtmlSnippet(text) {
-    if (!isString(text) || text.length === 0) return false
-    if (/<\?xml\b/i.test(text)) return true
-    // Match any XML/HTML-like tag, including opening-only lines such as "<catalog>".
-    return /<\/?[A-Za-z_][A-Za-z0-9_.:-]*(?:\s+[^<>]*?)?\s*>/.test(text)
-  }
-
-  function renderMarkdownPreservingTags(text) {
-    if (String(text || "").indexOf("<") < 0 && String(text || "").indexOf("```") < 0) return ow.format.withMD(text)
-    if (!isObject(__flags) || !isObject(__flags.WITHMD)) return ow.format.withMD(text)
-    var oldHtmlFilter = __flags.WITHMD.htmlFilter
-    try {
-      __flags.WITHMD.htmlFilter = false
-      return ow.format.withMD(text)
-    } finally {
-      __flags.WITHMD.htmlFilter = oldHtmlFilter
-    }
-  }
-
-  function _printStreamMarkdown(text) {
+  function _printStreamMarkdown(text, kind, palette) {
     if (!isString(text) || text.length === 0) return
-    _streamHasRendered = true
-    var unwrappedCode = unwrapSingleMarkdownCodeBlock(text)
-    if (unwrappedCode !== text) {
-      // Preserve literal code content (e.g. XML/HTML tags) in console output.
-      print(unwrappedCode)
-      return
-    }
-    if (_looksLikeXmlOrHtmlSnippet(text)) {
-      // Avoid markdown rendering swallowing XML/HTML tags in console output.
-      print(text)
-      return
-    }
-    if (_containsStreamTableSyntax(text) && !_isStreamValidMarkdownTableText(text)) {
-      print(text)
-      return
-    }
-    printnl(renderMarkdownPreservingTags(text))
+    // A leading cosmetic newline is not user-visible streamed content. Treating
+    // it as such suppresses the final-answer fallback when a provider does not
+    // actually deliver any stream deltas.
+    if (text.replace(/\s/g, "").length > 0) _streamHasRendered = true
+    var rendered = __miniAMarkdownRender(text, _getConsoleRenderWidth(), { ansi: __conAnsi === true, kind: kind })
+    if (isString(palette) && palette !== "RESET") rendered = colorifyText(rendered, palette)
+    printnl(rendered)
   }
 
-  function _flushStreamTableBuffer() {
-    if (_streamMdState.tableBuffer.length === 0) return
-    _printStreamMarkdown(_streamMdState.tableBuffer)
-    _streamMdState.tableBuffer = ""
-    _streamMdState.inTable = false
+  function _clearStreamPreview() {
+    if (_streamPreviewLines > 0) _eraseRenderedLines(_streamPreviewLines)
+    _streamPreviewLines = 0
   }
 
-  function _flushStreamCodeBlockBuffer() {
-    if (_streamMdState.codeBlockBuffer.length === 0) return
-    _printStreamMarkdown(_streamMdState.codeBlockBuffer)
-    _streamMdState.codeBlockBuffer = ""
-    _streamMdState.inCodeBlock = false
-  }
-
-  function _flushStreamTableHeaderCandidate() {
-    if (_streamMdState.tableHeaderCandidate.length === 0) return
-    _printStreamMarkdown(_streamMdState.tableHeaderCandidate)
-    _streamMdState.tableHeaderCandidate = ""
+  function _previewStreamMarkdown(text, palette) {
+    _clearStreamPreview()
+    if (__conAnsi !== true || !isString(text) || text.length === 0) return
+    var width = _getConsoleRenderWidth()
+    var preview = ow.format.string.wordWrap(text, width)
+    var termHeight = __con.getTerminal().getHeight()
+    var lines = __miniAMarkdownPreviewRows(text, width)
+    if (lines >= termHeight) return
+    printnl(colorifyText(preview, "FAINT," + (palette || "RESET")))
+    _streamPreviewLines = lines
   }
 
   function _resetStreamRenderState() {
     _streamHasRendered = false
-    _streamMdState.pending = ""
-    _streamMdState.inCodeBlock = false
-    _streamMdState.codeBlockBuffer = ""
-    _streamMdState.inTable = false
-    _streamMdState.tableBuffer = ""
-    _streamMdState.tableHeaderCandidate = ""
+    _streamCueStopped = false
+    _streamNeedsTerminator = false
+    _clearStreamPreview()
+    if (isDef(_streamRenderer)) _streamRenderer.reset()
+    _streamRenderer = __
   }
 
   function _flushStreamRemainder() {
-    if (_streamMdState.pending.length > 0) {
-      if (_streamMdState.inCodeBlock) {
-        _streamMdState.codeBlockBuffer += _streamMdState.pending
-        _streamMdState.pending = ""
-      } else if (_streamMdState.inTable && (_isStreamTableRow(_streamMdState.pending) || _isStreamTableSeparator(_streamMdState.pending))) {
-        _streamMdState.tableBuffer += _streamMdState.pending
-        _streamMdState.pending = ""
-      } else if (!_streamMdState.inTable && _streamMdState.tableHeaderCandidate.length > 0 && _isStreamTableSeparator(_streamMdState.pending)) {
-        _streamMdState.inTable = true
-        _streamMdState.tableBuffer = _streamMdState.tableHeaderCandidate + _streamMdState.pending
-        _streamMdState.tableHeaderCandidate = ""
-        _streamMdState.pending = ""
-      }
-    }
-    _flushStreamCodeBlockBuffer()
-    _flushStreamTableBuffer()
-    _flushStreamTableHeaderCandidate()
-    if (_streamMdState.pending.length > 0) {
-      _printStreamMarkdown(_streamMdState.pending)
-      _streamMdState.pending = ""
-    }
+    if (isDef(_streamRenderer)) _streamRenderer.end()
   }
 
-  function _renderStreamChunk(streamText) {
+  function _renderStreamChunk(streamText, type) {
     if (!isString(streamText) || streamText.length === 0) return
-    _clearWorkingIndicator()
-    _streamMdState.pending += streamText
-
-    while (true) {
-      var newlineIdx = _streamMdState.pending.indexOf("\n")
-      if (newlineIdx < 0) break
-
-      var line = _streamMdState.pending.substring(0, newlineIdx)
-      _streamMdState.pending = _streamMdState.pending.substring(newlineIdx + 1)
-      var lineWithNl = line + "\n"
-      var isCodeFenceLine = _isStreamCodeFenceLine(line)
-      var isTableLine = _isStreamTableRow(line)
-      var isTableSeparatorLine = _isStreamTableSeparator(line)
-
-      if (_streamMdState.inCodeBlock) {
-        _streamMdState.codeBlockBuffer += lineWithNl
-        if (_isStreamCodeFenceCloseLine(line)) _flushStreamCodeBlockBuffer()
-        continue
-      }
-
-      if (isCodeFenceLine) {
-        _flushStreamTableBuffer()
-        _flushStreamTableHeaderCandidate()
-        _streamMdState.inCodeBlock = true
-        _streamMdState.codeBlockBuffer = lineWithNl
-        continue
-      }
-
-      if (_streamMdState.inTable) {
-        if (isTableLine || isTableSeparatorLine) {
-          _streamMdState.tableBuffer += lineWithNl
-        } else {
-          _flushStreamTableBuffer()
-          _printStreamMarkdown(lineWithNl)
-        }
-        continue
-      }
-
-      if (_streamMdState.tableHeaderCandidate.length > 0) {
-        if (isTableSeparatorLine) {
-          _streamMdState.inTable = true
-          _streamMdState.tableBuffer = _streamMdState.tableHeaderCandidate + lineWithNl
-          _streamMdState.tableHeaderCandidate = ""
-        } else {
-          _flushStreamTableHeaderCandidate()
-          if (isTableLine) {
-            _streamMdState.tableHeaderCandidate = lineWithNl
-          } else {
-            _printStreamMarkdown(lineWithNl)
-          }
-        }
-        continue
-      }
-
-      if (isTableLine) {
-        _streamMdState.tableHeaderCandidate = lineWithNl
-      } else {
-        _printStreamMarkdown(lineWithNl)
-      }
+    var palette = type === "planner_stream" ? eventPalette.planner_stream : eventPalette.stream
+    if (!isDef(_streamRenderer)) {
+      _streamRenderer = __miniAMarkdownStream({
+        onUnit: function(text, kind) { _clearStreamPreview(); _printStreamMarkdown(text, kind, palette) },
+        onPreview: function(text) { _previewStreamMarkdown(text, palette) }
+      })
     }
-
-    // Keep partial lines pending. If we're in a table and receive a separator
-    // line without trailing newline, hold it until the next chunk completes it.
-    if (!_streamMdState.inCodeBlock && !_streamMdState.inTable && _streamMdState.pending.length > 0) {
-      var pendingTrimmed = _streamMdState.pending.trim()
-      var looksLikeTablePiece = _isStreamTableRow(pendingTrimmed) || _isStreamTableSeparator(pendingTrimmed)
-      var looksLikeCodeFence = _isStreamCodeFenceLine(pendingTrimmed)
-      if (!looksLikeTablePiece && !looksLikeCodeFence) {
-        _printStreamMarkdown(_streamMdState.pending)
-        _streamMdState.pending = ""
-      }
-    }
+    _streamRenderer.feed(streamText)
   }
   function _parseDelegateSubtaskMessage(message) {
     if (!isString(message)) return __
@@ -4476,15 +4282,12 @@ try {
 
   function _eraseRenderedLines(lineCount) {
     if (!isNumber(lineCount) || lineCount <= 0) return
-    var termWidth = _getConsoleRenderWidth()
     for (var i = 0; i < lineCount; i++) {
-      printnl("\r" + repeat(termWidth, " "))
+      printnl("\r\u001b[2K")
       if (i < lineCount - 1) printnl("\u001b[1A")
     }
     printnl("\r")
   }
-
-  function _clearWorkingIndicator() {}
 
   function _nextActivityCueSymbol() {
     var symbol = _activityCueFrames[_activityCueFrameIdx % _activityCueFrames.length]
@@ -4622,8 +4425,21 @@ try {
       var streamText = isString(message) ? message : String(message || "")
       _streamOutputStats.totalChars += streamText.length
       _streamOutputStats.contentChars += streamText.replace(/\s/g, "").length
-      _renderStreamChunk(streamText)
+      _streamNeedsTerminator = !/\n$/.test(streamText)
+      if (_activityCueActive === true && !_streamCueStopped) {
+        _stopActivityCueLoop()
+        _streamCueStopped = true
+      }
+      _renderStreamChunk(streamText, type)
       return
+    }
+    // Status/cost/thought events can arrive immediately after a final token.
+    // Commit its pending preview and end its terminal line before rendering the
+    // side-line event, otherwise the two outputs are glued together.
+    if (_streamNeedsTerminator) {
+      _flushStreamRemainder()
+      print()
+      _streamNeedsTerminator = false
     }
     // Ignore user events
     if (type == "user") return
@@ -4664,14 +4480,12 @@ try {
     }
 
     if (args.verbose != true && !inline) {
-      _clearWorkingIndicator()
       _erasePrev()
       print(_msg)
       _prevEventRenderLines = __
       _prevEventLastUpdate = 0
       _prevEventAnimatedRenderer = __
     } else {
-      _clearWorkingIndicator()
       _erasePrev()
       printnl(_msg)
       _prevEventRenderLines = _getRenderedLineCount(_msg)
@@ -5042,6 +4856,10 @@ try {
       }
       lastResult = agentResult
       lastOrigResult = agentOrigResult
+      // `$o(..., __format:"md")` may return undefined in an oJob console
+      // context even though _processFinalAnswer retained the answer. `/last`
+      // already uses this raw value; use it for the live fallback as well.
+      var displayResult = isDef(lastResult) ? lastResult : lastOrigResult
       if (isObject(lastDebugTrace)) lastDebugTrace.status = "completed"
       persistConversationSnapshot(agent)
       refreshConversationStats(agent)
@@ -5052,24 +4870,29 @@ try {
         if (!_args.usestream) {
           //print(colorifyText("\n🏁 Final answer", successColor))
           print()
-          if (isObject(lastResult) || isArray(lastResult)) {
-            print(_stringifyFinalResult(lastResult, true))
-          } else if (isString(lastResult)) {
-            print(unwrapSingleMarkdownCodeBlock(lastResult))
-          } else if (isDef(lastResult)) {
-            print(_stringifyFinalResult(lastResult, false))
+          if (isObject(displayResult) || isArray(displayResult)) {
+            print(_stringifyFinalResult(displayResult, true))
+          } else if (isString(displayResult)) {
+            print(__miniAMarkdownRender(unwrapSingleMarkdownCodeBlock(displayResult), _getConsoleRenderWidth(), { ansi: __conAnsi === true }))
+          } else if (isDef(displayResult)) {
+            print(_stringifyFinalResult(displayResult, false))
           }
         } else {
           _flushStreamRemainder()
-          // If streaming was enabled but no visible content was streamed, fallback to final result output.
-          if (!_streamHasRendered && _streamOutputStats.contentChars === 0 && isDef(lastResult)) {
+          if (_streamNeedsTerminator) {
             print()
-            if (isObject(lastResult) || isArray(lastResult)) {
-              print(_stringifyFinalResult(lastResult, true))
-            } else if (isString(lastResult)) {
-              print(unwrapSingleMarkdownCodeBlock(lastResult))
+            _streamNeedsTerminator = false
+          }
+          // Fall back only when no non-whitespace stream content reached the
+          // console. A visible stream is already the canonical answer.
+          if (!_streamHasRendered && _streamOutputStats.contentChars === 0 && isDef(displayResult)) {
+            print()
+            if (isObject(displayResult) || isArray(displayResult)) {
+              print(_stringifyFinalResult(displayResult, true))
+            } else if (isString(displayResult)) {
+              print(__miniAMarkdownRender(unwrapSingleMarkdownCodeBlock(displayResult), _getConsoleRenderWidth(), { ansi: __conAnsi === true }))
             } else {
-              print(_stringifyFinalResult(lastResult, false))
+              print(_stringifyFinalResult(displayResult, false))
             }
           }
           // Add newline after streaming output before prompt
@@ -6417,12 +6240,10 @@ try {
           var modelText = isString(msg.text) ? msg.text : String(msg.text || "")
           if (modelText.length === 0) return
           if (msg.event === "stream" || msg.event === "planner_stream") {
-            _renderStreamChunk(modelText)
+            _renderStreamChunk(modelText, msg.event)
           } else {
-            _flushStreamTableBuffer()
-            _flushStreamCodeBlockBuffer()
-            _flushStreamTableHeaderCandidate()
-            _printStreamMarkdown(modelText)
+            _flushStreamRemainder()
+            _printStreamMarkdown(modelText, "line")
           }
           return
         }

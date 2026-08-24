@@ -3643,4 +3643,42 @@
     ow.test.assert(finalized[0].observation.indexOf("retry this call") >= 0, true, "the model observation should provide retry guidance")
     ow.test.assert(warnings.length, 1, "the missing result should emit one diagnostic warning")
   }
+
+  exports.testMarkdownStreamIsChunkSizeInvariant = function() {
+    var fixture = "A **bold value**, *italic*, `code`, and [link](https://example.test).\n- first item\n+ second item\n\n| one | two |\n| --- | --- |\n| a | b |\n\n```txt\npipe | and <tag>\n```\nprose x | y remains prose\n"
+    var sizes = [1, 3, 7, 50]
+    var outputs = []
+    sizes.forEach(function(size) {
+      var units = []
+      var stream = __miniAMarkdownStream({ onUnit: function(text) { units.push(text) } })
+      for (var i = 0; i < fixture.length; i += size) stream.feed(fixture.substring(i, i + size))
+      stream.end()
+      outputs.push(units.join(""))
+    })
+    outputs.forEach(function(output) { ow.test.assert(output, fixture, "Markdown stream output must preserve every byte regardless of chunk size") })
+  }
+
+  exports.testMarkdownStreamPreviewGeometry = function() {
+    var text = "a pending preview line that wraps at a known width"
+    var width = 12
+    var expected = String(ow.format.string.wordWrap(text, width)).replace(/\r/g, "").split("\n").length
+    ow.test.assert(__miniAMarkdownPreviewRows(text, width), expected, "preview erase rows must match the self-wrapped preview rows")
+  }
+
+  exports.testConsoleStreamReceivesPartialDeltasForPreview = function() {
+    var agent = createAgent()
+    var events = []
+    agent._fnI = function(event, message) { events.push({ event: event, message: message }) }
+    var onDelta = agent._createStreamDeltaHandler({ __interaction_source: "mini-a-con", showthinking: false }, { fieldName: "answer", eventName: "stream" })
+    onDelta('{"answer":"This is **partial')
+    var visible = events.filter(function(evt) { return evt.event === "stream" }).map(function(evt) { return evt.message }).join("")
+    ow.test.assert(visible.indexOf("This is **partial") >= 0, true, "console streaming must receive partial deltas for live preview before a newline")
+  }
+
+  exports.testMarkdownStreamRenderDoesNotPassWidthAsAnsiStyle = function() {
+    var rendered, thrown = __
+    try { rendered = __miniAMarkdownRender("A **rendered** line", 80, { ansi: true }) } catch(e) { thrown = String(e) }
+    ow.test.assert(isUnDef(thrown), true, "Markdown stream rendering must not pass width as OpenAF's defaultAnsi argument: " + thrown)
+    ow.test.assert(isString(rendered), true, "Markdown stream rendering should return text")
+  }
 })()
