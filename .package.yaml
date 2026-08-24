@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260823'
+version: '20260824'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -182,7 +182,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: 73102d5f71b69ba58e99dace49c55533d3acd166
+  docs/WHATS-NEW.md: 63118eecfcc6cacc2706efd9d7c80e422e746340
   docs/WIKI.md: 87deb353608e07c3b03b2c39d9b3383161acb179
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
@@ -234,8 +234,8 @@ filesHash:
   mcps/mcp-wiki-ops.yaml: 80e6437842a152917a30f4e391b2c1b124c48218
   mcps/mcp-wiki-safe.yaml: c449a76831d3509d976e275b24b0a8a9ab9fa003
   mcps/mcp-wiki.yaml: 11dd4bbdfca988dfbfe2dca425cc920592623280
-  mini-a-common.js: ec309a9abd82a1b6a3473db950cf06e38b34ceae
-  mini-a-con.js: 3afbad4d9d474f2d83b70514112d0e41350641b9
+  mini-a-common.js: fdb355a5c5e8c56f22a98aeeaec38daba6f3189c
+  mini-a-con.js: 64892059f150daae9365ff0e2004da7ef1b0aa90
   mini-a-dreams.js: e8165f9243474e429d8ac34482b8bd525d45c11c
   mini-a-graph.js: 0feadb999bf18d5e4c1a00010f1be4f49f4e3745
   mini-a-ingest.js: d6b9b66ba8e187b112fccb802c22c77782982482
@@ -259,9 +259,9 @@ filesHash:
   mini-a-wiki-knowledge.js: e829fee9d76c16715c10415752a964166e023cd5
   mini-a-wiki.js: 57790405c0af07333caeaa4891d67a9ddce5c1c7
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: 65649744c6d4195b4e691c719ce337b0cf1b924d
+  mini-a.js: 54a6b2e83495483af3604f50f14109ce619ffc8e
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 1a559a31c7b7c82bb310716ddfc4419f2435ed85
+  mini-a.yaml: eac027fcfa77ede56791392503a5690a1cadb7ec
   public/index.md: ff492f66c8bfafb8534ba74f95c76c1c0401c46f
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   utils/graphStats.yaml: ab05b70a991ac6d5440ea12487ab8d10db53ec69
