@@ -1746,12 +1746,20 @@ jobs:
     }
     var _r = __
     try {
+      // Keep token streaming interactive only. Piped stdout receives the final
+      // answer once below, without cursor control sequences or duplicate text.
+      if (isFunction(_ma.setAnsiLogging)) _ma.setAnsiLogging(java.lang.System.console() !== null)
       _ma.init(args)
       _r = _ma.start(args)
       var resultPreview = isString(_r) ? _r.substring(0, 2000) : (isDef(_r) ? stringify(_r, __, "").substring(0, 2000) : "")
       runHooks("after_goal", { MINI_A_GOAL: originalGoalText, MINI_A_RESULT: resultPreview })
       if (isUnDef(args.outfile)) {
-        if (isObject(_r)) 
+        // Streaming is rendered by an interactive default sink only. Avoid
+        // printing the returned answer a second time in that case; non-TTY
+        // sinks deliberately fall back to this single final write.
+        if (args.usestream === true && _ma._streamOutputProduced === true) {
+          // already rendered
+        } else if (isObject(_r))
           ow.oJob.output(_r, args)
         else
           print(_r)

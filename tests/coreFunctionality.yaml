@@ -107,6 +107,26 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testDefaultInteractionFnForwardsPlannerStreamEvents
 
+- name: MiniA Core Tests::MarkdownStreamIsChunkSizeInvariant
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMarkdownStreamIsChunkSizeInvariant
+
+- name: MiniA Core Tests::MarkdownStreamPreviewGeometry
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMarkdownStreamPreviewGeometry
+
+- name: MiniA Core Tests::ConsoleStreamReceivesPartialDeltasForPreview
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleStreamReceivesPartialDeltasForPreview
+
+- name: MiniA Core Tests::MarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
+
 - name: MiniA Core Tests::TraceFnReceivesEventsAndPayloads
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -836,6 +856,10 @@ todo:
 - MiniA Core Tests::CanonicalThoughtEmitterTreatsEmptyObjectPlaceholderAsMissing
 - MiniA Core Tests::StreamThinkingTagsDoNotEmitCanonicalThoughtEvents
 - MiniA Core Tests::DefaultInteractionFnForwardsPlannerStreamEvents
+- MiniA Core Tests::MarkdownStreamIsChunkSizeInvariant
+- MiniA Core Tests::MarkdownStreamPreviewGeometry
+- MiniA Core Tests::ConsoleStreamReceivesPartialDeltasForPreview
+- MiniA Core Tests::MarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
 - MiniA Core Tests::TraceFnReceivesEventsAndPayloads
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
