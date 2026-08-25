@@ -308,6 +308,15 @@ var MiniA = function() {
     llm_cache_creation_tokens: $atomic(0, "long"),
     llm_cache_read_tokens: $atomic(0, "long"),
     llm_cached_tokens: $atomic(0, "long"),
+    llm_normal_cache_creation_tokens: $atomic(0, "long"),
+    llm_normal_cache_read_tokens: $atomic(0, "long"),
+    llm_normal_cached_tokens: $atomic(0, "long"),
+    llm_lc_cache_creation_tokens: $atomic(0, "long"),
+    llm_lc_cache_read_tokens: $atomic(0, "long"),
+    llm_lc_cached_tokens: $atomic(0, "long"),
+    llm_val_cache_creation_tokens: $atomic(0, "long"),
+    llm_val_cache_read_tokens: $atomic(0, "long"),
+    llm_val_cached_tokens: $atomic(0, "long"),
     per_tool_stats: {},
     autodelegation_triggered: $atomic(0, "long"),
     startup_subtasks_submitted: $atomic(0, "long"),
@@ -1751,6 +1760,15 @@ MiniA.prototype.getMetrics = function() {
             llm_cache_creation_tokens: global.__mini_a_metrics.llm_cache_creation_tokens.get(),
             llm_cache_read_tokens: global.__mini_a_metrics.llm_cache_read_tokens.get(),
             llm_cached_tokens: global.__mini_a_metrics.llm_cached_tokens.get(),
+            llm_normal_cache_creation_tokens: global.__mini_a_metrics.llm_normal_cache_creation_tokens.get(),
+            llm_normal_cache_read_tokens: global.__mini_a_metrics.llm_normal_cache_read_tokens.get(),
+            llm_normal_cached_tokens: global.__mini_a_metrics.llm_normal_cached_tokens.get(),
+            llm_lc_cache_creation_tokens: global.__mini_a_metrics.llm_lc_cache_creation_tokens.get(),
+            llm_lc_cache_read_tokens: global.__mini_a_metrics.llm_lc_cache_read_tokens.get(),
+            llm_lc_cached_tokens: global.__mini_a_metrics.llm_lc_cached_tokens.get(),
+            llm_val_cache_creation_tokens: global.__mini_a_metrics.llm_val_cache_creation_tokens.get(),
+            llm_val_cache_read_tokens: global.__mini_a_metrics.llm_val_cache_read_tokens.get(),
+            llm_val_cached_tokens: global.__mini_a_metrics.llm_val_cached_tokens.get(),
             prompt_context_selections: global.__mini_a_metrics.prompt_context_selections.get(),
             prompt_context_compressed: global.__mini_a_metrics.prompt_context_compressed.get(),
             prompt_context_tokens_saved: global.__mini_a_metrics.prompt_context_tokens_saved.get(),
@@ -2679,19 +2697,43 @@ MiniA.prototype._formatTokenStats = function(stats) {
 }
 
 /**
+ * Format the per-tier prompt-cache token counters ("main" | "lc" | "val") as a suffix
+ * for a cost line. Returns "" when the provider reported no cache figures for that tier.
+ * Note: cache_write/cache_read are additional to input tokens (Anthropic-style) while
+ * 'cached' is a subset of them (OpenAI/Gemini-style) - so these are never folded into totals.
+ */
+MiniA.prototype._formatTierCacheTokens = function(tier) {
+  var prefix = tier === "lc" ? "llm_lc_" : (tier === "val" ? "llm_val_" : "llm_normal_")
+  var read = function(name) {
+    var metric = global.__mini_a_metrics[prefix + name]
+    return isObject(metric) ? metric.get() : 0
+  }
+  var parts = []
+  var cacheWrite = read("cache_creation_tokens")
+  var cacheRead  = read("cache_read_tokens")
+  var cached     = read("cached_tokens")
+  if (cacheWrite > 0) parts.push(`cache_write: ${cacheWrite}`)
+  if (cacheRead > 0)  parts.push(`cache_read: ${cacheRead}`)
+  if (cached > 0)     parts.push(`cached: ${cached}`)
+  return parts.length > 0 ? ", " + parts.join(", ") : ""
+}
+
+/**
  * Print a one-line LC cost summary if dual-model is enabled and both token buckets are non-zero.
  */
 MiniA.prototype._logLcCostSummary = function() {
   var mainTokens = global.__mini_a_metrics.llm_normal_tokens.get()
   var mainIn     = global.__mini_a_metrics.llm_normal_input_tokens.get()
   var mainOut    = global.__mini_a_metrics.llm_normal_output_tokens.get()
+  var mainCache  = this._formatTierCacheTokens("main")
   var valTokens  = this._use_val ? global.__mini_a_metrics.llm_val_tokens.get() : 0
   var valIn      = this._use_val ? global.__mini_a_metrics.llm_val_input_tokens.get() : 0
   var valOut     = this._use_val ? global.__mini_a_metrics.llm_val_output_tokens.get() : 0
-  var valPart    = valTokens > 0 ? ` | Val: ${valTokens} tokens (in: ${valIn}, out: ${valOut})` : ""
+  var valCache   = this._use_val ? this._formatTierCacheTokens("val") : ""
+  var valPart    = valTokens > 0 ? ` | Val: ${valTokens} tokens (in: ${valIn}, out: ${valOut}${valCache})` : ""
   if (!this._use_lc) {
     if (mainTokens > 0) {
-      this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut})${valPart}`)
+      this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}${mainCache})${valPart}`)
     }
     return
   }
@@ -2701,7 +2743,8 @@ MiniA.prototype._logLcCostSummary = function() {
     var lcShare = Math.round(lcTokens / total * 100)
     var lcIn    = global.__mini_a_metrics.llm_lc_input_tokens.get()
     var lcOut   = global.__mini_a_metrics.llm_lc_output_tokens.get()
-    this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}) | LC: ${lcTokens} tokens (in: ${lcIn}, out: ${lcOut}) | LC share: ${lcShare}%${valPart}`)
+    var lcCache = this._formatTierCacheTokens("lc")
+    this.fnI("info", `[cost] Main: ${mainTokens} tokens (in: ${mainIn}, out: ${mainOut}${mainCache}) | LC: ${lcTokens} tokens (in: ${lcIn}, out: ${lcOut}${lcCache}) | LC share: ${lcShare}%${valPart}`)
   }
 }
 
@@ -3503,14 +3546,28 @@ MiniA.prototype._recordLlmStatsMetrics = function(stats, tier, fallbackTokens) {
 
     if (isObject(stats) && isObject(stats.tokens)) {
         var tokensObj = stats.tokens
+        // Per-tier prefix so main/lc/val reports can show their own cache figures. Untiered
+        // tiers (e.g. advisor) still land on the aggregate counters below.
+        var tierCachePrefix = __
+        if (normalizedTier === "main") tierCachePrefix = "llm_normal_"
+        if (normalizedTier === "lc")   tierCachePrefix = "llm_lc_"
+        if (normalizedTier === "val")  tierCachePrefix = "llm_val_"
+        var addTierCache = function(suffix, value) {
+            if (isUnDef(tierCachePrefix)) return
+            var metric = global.__mini_a_metrics[tierCachePrefix + suffix]
+            if (isObject(metric)) metric.getAdd(value)
+        }
         if (isNumber(tokensObj.cacheCreation) && tokensObj.cacheCreation > 0 && isObject(global.__mini_a_metrics.llm_cache_creation_tokens)) {
             global.__mini_a_metrics.llm_cache_creation_tokens.getAdd(tokensObj.cacheCreation)
+            addTierCache("cache_creation_tokens", tokensObj.cacheCreation)
         }
         if (isNumber(tokensObj.cacheRead) && tokensObj.cacheRead > 0 && isObject(global.__mini_a_metrics.llm_cache_read_tokens)) {
             global.__mini_a_metrics.llm_cache_read_tokens.getAdd(tokensObj.cacheRead)
+            addTierCache("cache_read_tokens", tokensObj.cacheRead)
         }
         if (isNumber(tokensObj.cached) && tokensObj.cached > 0 && isObject(global.__mini_a_metrics.llm_cached_tokens)) {
             global.__mini_a_metrics.llm_cached_tokens.getAdd(tokensObj.cached)
+            addTierCache("cached_tokens", tokensObj.cached)
         }
     }
 
