@@ -5490,6 +5490,15 @@ try {
         var lcTotalTokens = lcInputTokens + lcOutputTokens
         var mainAndLcTotalTokens = mainTotalTokens + lcTotalTokens
         var lcSharePct = mainAndLcTotalTokens > 0 ? ((lcTotalTokens / mainAndLcTotalTokens) * 100).toFixed(1) : "0.0"
+        // Prompt-cache counters are reported separately from the In+Out totals on purpose:
+        // cache_write/cache_read are additional to the input tokens (Anthropic-style) while
+        // 'cached' is a subset of them (OpenAI/Gemini-style), so neither can be summed safely.
+        var mainCacheWriteTokens = metrics.performance.llm_normal_cache_creation_tokens || 0
+        var mainCacheReadTokens = metrics.performance.llm_normal_cache_read_tokens || 0
+        var mainCachedTokens = metrics.performance.llm_normal_cached_tokens || 0
+        var lcCacheWriteTokens = metrics.performance.llm_lc_cache_creation_tokens || 0
+        var lcCacheReadTokens = metrics.performance.llm_lc_cache_read_tokens || 0
+        var lcCachedTokens = metrics.performance.llm_lc_cached_tokens || 0
 
         summaryExport.performance = {
           steps_taken: metrics.performance.steps_taken || 0
@@ -5506,6 +5515,12 @@ try {
         if (mainTotalTokens > 0) summaryExport.performance.llm_main_total_tokens = mainTotalTokens
         if (lcTotalTokens > 0) summaryExport.performance.llm_lc_total_tokens = lcTotalTokens
         if (mainAndLcTotalTokens > 0) summaryExport.performance.llm_lc_share_pct = Number(lcSharePct)
+        if (mainCacheWriteTokens > 0) summaryExport.performance.llm_normal_cache_creation_tokens = mainCacheWriteTokens
+        if (mainCacheReadTokens > 0) summaryExport.performance.llm_normal_cache_read_tokens = mainCacheReadTokens
+        if (mainCachedTokens > 0) summaryExport.performance.llm_normal_cached_tokens = mainCachedTokens
+        if (lcCacheWriteTokens > 0) summaryExport.performance.llm_lc_cache_creation_tokens = lcCacheWriteTokens
+        if (lcCacheReadTokens > 0) summaryExport.performance.llm_lc_cache_read_tokens = lcCacheReadTokens
+        if (lcCachedTokens > 0) summaryExport.performance.llm_lc_cached_tokens = lcCachedTokens
         if ((metrics.performance.llm_val_input_tokens || 0) > 0) summaryExport.performance.llm_val_input_tokens = metrics.performance.llm_val_input_tokens || 0
         if ((metrics.performance.llm_val_output_tokens || 0) > 0) summaryExport.performance.llm_val_output_tokens = metrics.performance.llm_val_output_tokens || 0
         if ((metrics.performance.max_context_tokens || 0) > 0) summaryExport.performance.max_context_tokens = metrics.performance.max_context_tokens || 0
@@ -5581,6 +5596,22 @@ try {
             value: lcSharePct
           })
         }
+        var cacheRowsAdded = false
+        var pushCacheRow = function(metricName, value) {
+          if (!(value > 0)) return
+          summaryRows.push({
+            category: cacheRowsAdded ? "" : "Cache Tokens",
+            metric: metricName,
+            value: value
+          })
+          cacheRowsAdded = true
+        }
+        pushCacheRow("Main Cache Write", mainCacheWriteTokens)
+        pushCacheRow("Main Cache Read", mainCacheReadTokens)
+        pushCacheRow("Main Cached (of Input)", mainCachedTokens)
+        pushCacheRow("LC Cache Write", lcCacheWriteTokens)
+        pushCacheRow("LC Cache Read", lcCacheReadTokens)
+        pushCacheRow("LC Cached (of Input)", lcCachedTokens)
         if ((metrics.performance.llm_val_input_tokens || 0) > 0) {
           summaryRows.push({
             category: "",

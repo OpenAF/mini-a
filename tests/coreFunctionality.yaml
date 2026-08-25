@@ -797,6 +797,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testKnownArgumentNamesIncludesLcJsonRetries
 
+- name: MiniA Core Tests::RecordTokenUsageTracksCacheTokensPerTier
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRecordTokenUsageTracksCacheTokensPerTier
+
+- name: MiniA Core Tests::FormatTierCacheTokensRendersOnlyNonZeroCounters
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFormatTierCacheTokensRendersOnlyNonZeroCounters
+
 include:
 - oJobTest.yaml
 
@@ -963,3 +973,5 @@ todo:
 - MiniA Core Tests::ResolveLcJsonRetriesClampsNegativeToZero
 - MiniA Core Tests::ResolveLcJsonRetriesFallsBackOnNonNumeric
 - MiniA Core Tests::KnownArgumentNamesIncludesLcJsonRetries
+- MiniA Core Tests::RecordTokenUsageTracksCacheTokensPerTier
+- MiniA Core Tests::FormatTierCacheTokensRendersOnlyNonZeroCounters

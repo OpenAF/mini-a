@@ -3643,4 +3643,74 @@
     ow.test.assert(finalized[0].observation.indexOf("retry this call") >= 0, true, "the model observation should provide retry guidance")
     ow.test.assert(warnings.length, 1, "the missing result should emit one diagnostic warning")
   }
+
+  exports.testRecordTokenUsageTracksCacheTokensPerTier = function() {
+    resetMiniAMetrics()
+
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    agent._recordLlmStatsMetrics({
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120,
+      tokens: { prompt: 100, completion: 20, total: 120, cacheCreation: 11, cacheRead: 22, cached: 33 }
+    }, "main")
+    agent._recordLlmStatsMetrics({
+      prompt_tokens: 50,
+      completion_tokens: 10,
+      total_tokens: 60,
+      tokens: { prompt: 50, completion: 10, total: 60, cacheCreation: 4, cacheRead: 5, cached: 6 }
+    }, "lc")
+    agent._recordLlmStatsMetrics({
+      prompt_tokens: 5,
+      completion_tokens: 1,
+      total_tokens: 6,
+      tokens: { prompt: 5, completion: 1, total: 6, cacheCreation: 1, cacheRead: 2, cached: 3 }
+    }, "val")
+
+    var metrics = agent.getMetrics()
+    ow.test.assert(metrics.performance.llm_normal_cache_creation_tokens, 11, "main cache-write tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_normal_cache_read_tokens, 22, "main cache-read tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_normal_cached_tokens, 33, "main cached tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_lc_cache_creation_tokens, 4, "lc cache-write tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_lc_cache_read_tokens, 5, "lc cache-read tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_lc_cached_tokens, 6, "lc cached tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_val_cache_creation_tokens, 1, "val cache-write tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_val_cache_read_tokens, 2, "val cache-read tokens should be tracked per tier")
+    ow.test.assert(metrics.performance.llm_val_cached_tokens, 3, "val cached tokens should be tracked per tier")
+
+    // The tier-agnostic aggregates must keep summing every tier.
+    ow.test.assert(metrics.performance.llm_cache_creation_tokens, 16, "aggregate cache-write tokens should still sum all tiers")
+    ow.test.assert(metrics.performance.llm_cache_read_tokens, 29, "aggregate cache-read tokens should still sum all tiers")
+    ow.test.assert(metrics.performance.llm_cached_tokens, 42, "aggregate cached tokens should still sum all tiers")
+
+    // Cache counters must never be folded into the In+Out totals.
+    ow.test.assert(metrics.performance.llm_normal_input_tokens, 100, "main input tokens must exclude cache counters")
+    ow.test.assert(metrics.performance.llm_normal_output_tokens, 20, "main output tokens must exclude cache counters")
+    ow.test.assert(metrics.performance.llm_lc_input_tokens, 50, "lc input tokens must exclude cache counters")
+    ow.test.assert(metrics.performance.llm_lc_output_tokens, 10, "lc output tokens must exclude cache counters")
+
+    resetMiniAMetrics()
+  }
+
+  exports.testFormatTierCacheTokensRendersOnlyNonZeroCounters = function() {
+    resetMiniAMetrics()
+
+    var agent = createAgent()
+    agent.fnI = function() {}
+
+    ow.test.assert(agent._formatTierCacheTokens("main"), "", "no cache figures should render an empty suffix")
+
+    agent._recordLlmStatsMetrics({
+      prompt_tokens: 10,
+      completion_tokens: 2,
+      tokens: { prompt: 10, completion: 2, cacheRead: 77 }
+    }, "main")
+
+    ow.test.assert(agent._formatTierCacheTokens("main"), ", cache_read: 77", "only the reported cache counters should be rendered")
+    ow.test.assert(agent._formatTierCacheTokens("lc"), "", "an untouched tier should still render an empty suffix")
+
+    resetMiniAMetrics()
+  }
 })()

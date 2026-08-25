@@ -92,6 +92,21 @@ They accumulate across goals within a session and reset only when `/clear` is ru
 
 **Nuance — estimated vs. actual:** Estimated tokens are a fast local approximation used for budget gating; actual tokens come from the API response. The delta between them reflects how accurate the estimator is. Advisor tokens are in `llm_actual_tokens` but **not** broken out into `llm_normal_tokens` or `llm_lc_tokens`.
 
+### Prompt cache accounting
+
+Reported only when the provider returns cache figures in its usage block.
+
+| Key | Description |
+|-----|-------------|
+| `llm_cache_creation_tokens` | Tokens written to the prompt cache across **all tiers** (Anthropic `cache_creation_input_tokens`). |
+| `llm_cache_read_tokens` | Tokens served from the prompt cache across **all tiers** (Anthropic `cache_read_input_tokens`). |
+| `llm_cached_tokens` | Cached prompt tokens across **all tiers** (OpenAI `prompt_tokens_details.cached_tokens`, Gemini `cachedContentTokenCount`). |
+| `llm_normal_cache_creation_tokens` / `llm_normal_cache_read_tokens` / `llm_normal_cached_tokens` | Same three counters, main-LLM calls only. |
+| `llm_lc_cache_creation_tokens` / `llm_lc_cache_read_tokens` / `llm_lc_cached_tokens` | Same three counters, low-cost LLM calls only. |
+| `llm_val_cache_creation_tokens` / `llm_val_cache_read_tokens` / `llm_val_cached_tokens` | Same three counters, validation LLM calls only. |
+
+**Nuance — never add these to the input/output totals.** `cache_creation`/`cache_read` are billed *in addition to* the reported input tokens (Anthropic-style), while `cached` is a *subset* of them (OpenAI/Gemini-style). Summing either into `llm_normal_input_tokens` or `llm_lc_input_tokens` double-counts on one provider family and undercounts on the other, which is why `mini-a-con`'s `/stats` lists them as their own `Cache Tokens` rows and leaves `Main Total (In+Out)` / `LC Total (In+Out)` / `LC Share (%)` unchanged. Tiers without a dedicated bucket (e.g. advisor) land only on the three aggregate counters.
+
 ### Prompt context compression
 
 | Key | Description |
