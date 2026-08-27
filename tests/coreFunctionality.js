@@ -191,6 +191,7 @@
   exports.testToolCallingFailureFallbackEscalatesLowCostOnly = function() {
     var agent = createAgent()
     agent.fnI = function() {}
+    agent._toolArgCheckEnabled = false
     agent._restoreNoToolsModels = function() {
       throw new Error("Low-cost fallback should not rebuild both models without tools")
     }
@@ -971,17 +972,20 @@
           alpha: { type: "string", description: "Alpha value" },
           beta: { type: "number", description: "Beta value" },
           gamma: { type: "boolean", description: "Gamma flag" },
-          delta: { type: "string", description: "Delta text" }
+          delta: { type: "string", description: "Delta text" },
+          epsilon: { type: "string", description: "Epsilon text" },
+          zeta: { type: "string", description: "Zeta text" }
         }
       }
     }
 
     var compact = agent._getToolSchemaSummary(tool, { summaryMode: "compact" })
-    ow.test.assert(compact.params.length === 2, true, "Compact summaries should limit exposed params")
+    ow.test.assert(compact.params.length === 4, true, "Compact summaries should keep required params plus the compact optional tail")
+    ow.test.assert(compact.params.filter(function(param) { return param.required }).length === 2, true, "Compact summaries must retain every required parameter")
     ow.test.assert(compact.compactParamsText.indexOf("...") >= 0, true, "Compact summaries should indicate hidden params")
 
     var full = agent._getToolSchemaSummary(tool, { summaryMode: "full" })
-    ow.test.assert(full.params.length === 4, true, "Full summaries should keep all params")
+    ow.test.assert(full.params.length === 6, true, "Full summaries should keep all params")
     ow.test.assert(full.compactParamsText.indexOf("alpha*") >= 0, true, "Compact param text should mark required params")
   }
 
@@ -1541,6 +1545,7 @@
   exports.testProxyDispatchPropagatesDownstreamToolErrors = function() {
     var agent = createAgent()
     agent.fnI = function() {}
+    agent._toolArgCheckEnabled = false
 
     var utilsConfig = agent._createUtilsMcpConfig({ useutils: true, __interaction_source: "mini-a-con" })
     ow.test.assert(isMap(utilsConfig) && isMap(utilsConfig.options), true, "Should build utils config for proxy test")
@@ -2978,13 +2983,46 @@
     var agent = createAgent()
     agent._agentState = {}
     agent._initWorkingMemory({ usememory: true, memoryscope: "session", goal: "daily report", debug: false, verbose: false }, agent._agentState)
+    agent.mcpTools = [{ name: "http-request" }]
     agent._memoryUpsert("decisions", "tool-contract:proxy-dispatch:call:http-request", "unvalidated guess", {
       kind: "tool-contract", validated: false, taskScope: "daily-report::http-request", meta: { invocation: { action: "wrong" } }
     })
     agent._recordValidatedToolContract("proxy-dispatch", { action: "call", tool: "http-request", arguments: { method: "HEAD", url: "https://example.invalid" } }, "evidence-1", { goal: "daily report" })
     var contracts = agent._buildValidatedToolContracts({ goal: "daily report" })
     ow.test.assert(contracts.length === 1, true, "Only the validated contract should be injected")
-    ow.test.assert(contracts[0].params.action === "call" && contracts[0].params.tool === "http-request", true, "Proxy contract must use nested call/tool/arguments shape")
+    ow.test.assert(contracts[0].invocation.params.action === "call" && contracts[0].invocation.params.tool === "http-request", true, "Proxy contract must use nested call/tool/arguments shape")
+  }
+
+  exports.testToolArgsPrevalidationAndRepair = function() {
+    var agent = createAgent()
+    var schema = { type: "object", additionalProperties: false, required: ["path"], properties: {
+      path: { type: "string" }, options: { type: "object" }, tags: { type: "array" }
+    } }
+    var missing = agent._prepareToolArgs(schema, {})
+    ow.test.assert(missing.ok, false, "Missing required parameters must be rejected")
+    var unknown = agent._prepareToolArgs(schema, { paht: "/tmp" })
+    ow.test.assert(unknown.ok, true, "An unambiguous typo should be repaired before strict rejection")
+    ow.test.assert(unknown.params.path, "/tmp", "Typo repair should preserve the value")
+    var loose = agent._prepareToolArgs({ type: "object", additionalProperties: true, required: ["path"], properties: schema.properties }, { extra: 1, path: "/tmp" })
+    ow.test.assert(loose.ok, true, "Loose schemas must pass unknown keys through")
+    var wrapped = agent._prepareToolArgs(schema, { arguments: { path: "/tmp", options: "{\"x\":1}", tags: "[\"a\"]" } })
+    ow.test.assert(wrapped.ok, true, "A sole arguments wrapper should be unwrapped")
+    ow.test.assert(wrapped.params.options.x, 1, "Object JSON strings should be parsed")
+    ow.test.assert(wrapped.params.tags[0], "a", "Array JSON strings should be parsed")
+    agent._toolArgCheckEnabled = false
+    ow.test.assert(agent._prepareToolArgs(schema, {}).ok, true, "toolargcheck=false must disable rejections")
+    agent._toolArgRepairEnabled = false
+    ow.test.assert(agent._prepareToolArgs(schema, { arguments: { path: "/tmp" } }).params.arguments.path, "/tmp", "toolargrepair=false must disable wrapper repair")
+  }
+
+  exports.testToolContractSurvivesGoalRewording = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    agent.mcpTools = [{ name: "http-request" }]
+    agent._recordValidatedToolContract("proxy-dispatch", { action: "call", tool: "http-request", arguments: { url: "https://example.invalid" } }, "evidence-1", { goal: "collect daily report" })
+    var contracts = agent._buildValidatedToolContracts({ goal: "check an unrelated endpoint" })
+    ow.test.assert(contracts.length, 1, "General tool contracts must survive goal rewording")
   }
 
   exports.testAgentCapabilitiesEnableUndefinedFlags = function() {

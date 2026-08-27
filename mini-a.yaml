@@ -865,6 +865,16 @@ help:
     desc     : Memory context injection mode (summary or full)
     example  : "summary"
     mandatory: false
+  - name     : toolargcheck
+    desc     : Reject schema-declared missing parameters and unknown parameters when additionalProperties is false
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : toolargrepair
+    desc     : Repair obvious tool argument typos, wrappers, and JSON strings before dispatch
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
   - name     : usewiki
     desc     : Enable the wiki knowledge base
     example  : "true"
@@ -1305,6 +1315,8 @@ jobs:
         memorypromote  : memorypromote
         memorystaledays: memorystaledays
         memoryinject   : memoryinject
+        toolargcheck    : toolargcheck
+        toolargrepair   : toolargrepair
         usewiki        : usewiki
         wikiaccess     : wikiaccess
         wikibackend    : wikibackend
@@ -1546,6 +1558,8 @@ jobs:
       memorypromote  : isString.default(__)
       memorystaledays: toNumber.isNumber.default(__)
       memoryinject   : isString.default(__)
+      toolargcheck    : toBoolean.isBoolean.default(true)
+      toolargrepair   : toBoolean.isBoolean.default(true)
       usewiki        : toBoolean.isBoolean.default(false)
       wikiaccess     : isString.default(__)
       wikibackend    : isString.default(__)
