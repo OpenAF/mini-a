@@ -285,6 +285,7 @@ var MiniA = function() {
     memory_injected_tokens: $atomic(0, "long"),
     memory_validated_contracts_used: $atomic(0, "long"),
     memory_unvalidated_contracts_suppressed: $atomic(0, "long"),
+    tool_args_prevalidation_failures: $atomic(0, "long"),
     wiki_ops_list: $atomic(0, "long"),
     wiki_ops_read: $atomic(0, "long"),
     wiki_ops_search: $atomic(0, "long"),
@@ -990,6 +991,11 @@ MiniA._registerShutdownHook = function() {
   if (typeof addOnOpenAFShutdown !== "function") return
 
   addOnOpenAFShutdown(function() {
+    try {
+      if (isArray(MiniA._activeInstances)) MiniA._activeInstances.forEach(function(agent) {
+        if (isObject(agent) && isFunction(agent._finalizeRunMemory)) agent._finalizeRunMemory(agent._lastStartArgs || {})
+      })
+    } catch(ignoreMemoryFinalizeError) {}
     try {
       if (isArray(MiniA._activeInstances)) {
         MiniA._activeInstances.forEach(agent => {
@@ -7339,6 +7345,8 @@ MiniA.prototype._validateArgs = function(args, validations) {
 }
 
 MiniA.prototype._initWorkingMemory = function(args, seedState) {
+  this._runMemoryFinalized = false
+  this._runMemoryOutcomeRecorded = false
   var rawScope = isString(args.memoryscope) ? args.memoryscope : (isString(args.memoryScope) ? args.memoryScope : "both")
   var scope = String(rawScope || "both").toLowerCase().trim()
   if (["session", "global", "both"].indexOf(scope) < 0) scope = "both"
@@ -7901,10 +7909,17 @@ MiniA.prototype._recordValidatedToolContract = function(toolName, params, eviden
   if (!isString(actualTool) || actualTool.length === 0) return __
   var invocation = proxy ? { action: "proxy-dispatch", params: { action: "call", tool: actualTool, arguments: isMap(params.arguments) ? params.arguments : {} } } : { action: actualTool, params: params }
   var key = "tool-contract:" + (proxy ? "proxy-dispatch:call:" : "call:") + actualTool
+  var existingRejected = []
+  this._getMemoryReadManagers(this._memoryScope).forEach(function(manager) {
+    manager.getSectionEntries("decisions").forEach(function(entry) {
+      if (entry.key === key && isObject(entry.meta) && isArray(entry.meta.rejected)) existingRejected = entry.meta.rejected
+    })
+  })
   var record = this._memoryUpsert("decisions", key, "Validated tool contract for " + actualTool + ": " + stringify(invocation, __, ""), {
-    kind: "tool-contract", validated: true, taskScope: this._deriveMemoryTaskScope(args, actualTool),
+    kind: "tool-contract", validated: true, taskScope: "general::" + actualTool,
     provenance: { source: "tool", event: "validated-contract", tool: actualTool }, evidenceRefs: isString(evidenceId) ? [evidenceId] : [],
-    meta: { tool: actualTool, action: proxy ? "proxy-dispatch" : actualTool, version: 1, invocation: invocation }
+    meta: { tool: actualTool, action: proxy ? "proxy-dispatch" : actualTool, version: 1, invocation: invocation, rejected: existingRejected,
+      goalScope: this._deriveMemoryTaskScope(args, actualTool) }, replaceKeys: ["meta.invocation"]
   })
   // A confirmed contract makes prior speculative advice for the same key non-authoritative.
   var managers = this._getMemoryReadManagers(this._memoryScope)
@@ -7930,12 +7945,35 @@ MiniA.prototype._buildValidatedToolContracts = function(args) {
       }
       if (isString(entry.taskScope) && entry.taskScope.indexOf(taskFamily + "::") !== 0 && entry.taskScope.indexOf("general::") !== 0) return
       if (!isObject(entry.meta) || !isObject(entry.meta.invocation) || seen[entry.key]) return
+      var toolName = isString(entry.meta.tool) ? entry.meta.tool : ""
+      if (toolName.length > 0 && !isObject(this._resolveToolInfo(toolName)) && !(isArray(this.mcpTools) && this.mcpTools.some(function(tool) { return tool.name === toolName }))) return
       seen[entry.key] = true
-      contracts.push(entry.meta.invocation)
-    })
-  })
+      contracts.push({ invocation: entry.meta.invocation, rejected: isArray(entry.meta.rejected) ? entry.meta.rejected : [], confirmCount: entry.confirmCount || 1, tool: toolName })
+    }.bind(this))
+  }.bind(this))
+  contracts.sort(function(a, b) { return b.confirmCount - a.confirmCount })
   if (contracts.length > 0 && isObject(global.__mini_a_metrics.memory_validated_contracts_used)) global.__mini_a_metrics.memory_validated_contracts_used.getAdd(contracts.length)
   return contracts
+}
+
+MiniA.prototype._recordRejectedToolArgs = function(toolName, params, message, args) {
+  if (!isString(message) || (message.indexOf("Unrecognized parameters provided:") < 0 && message.indexOf("Still missing required:") < 0)) return
+  var proxy = toolName === "proxy-dispatch" && isMap(params) && isString(params.tool)
+  var actualTool = proxy ? params.tool : toolName
+  if (!isString(actualTool) || actualTool.length === 0) return
+  var key = "tool-contract:" + (proxy ? "proxy-dispatch:call:" : "call:") + actualTool
+  var rejectedKeys = isMap(params) ? Object.keys(proxy && isMap(params.arguments) ? params.arguments : params).sort() : []
+  var manager = this._getDefaultMemoryWriteManager()
+  if (!isObject(manager)) return
+  var previous = manager.getSectionEntries("decisions").filter(function(entry) { return entry.key === key })[0]
+  var rejected = previous && isObject(previous.meta) && isArray(previous.meta.rejected) ? previous.meta.rejected : []
+  var signature = rejectedKeys.join(",") + "::" + (message.indexOf("Unrecognized parameters provided:") >= 0 ? "unknown-parameter" : "missing-required")
+  if (!rejected.some(function(item) { return item.signature === signature })) rejected.push({ keys: rejectedKeys, errorClass: signature.split("::")[1], signature: signature })
+  if (rejected.length > 5) rejected = rejected.slice(-5)
+  this._memoryUpsert("decisions", key, previous && isString(previous.value) ? previous.value : "Pending corrective tool contract for " + actualTool + ".", {
+    kind: "tool-contract", validated: previous && previous.validated === true, taskScope: "general::" + actualTool,
+    meta: merge(previous && isObject(previous.meta) ? previous.meta : {}, { tool: actualTool, rejected: rejected, goalScope: this._deriveMemoryTaskScope(args, actualTool) })
+  })
 }
 
 MiniA.prototype._clearPendingFetchFlags = function(toolName, params, rawResult, observation) {
@@ -8100,6 +8138,13 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
   promoteSections.forEach(function(section) {
     var entries = this._sessionMemoryManager.getSectionEntries(section)
     entries.forEach(function(entry) {
+      if (isString(entry.key) && entry.key.length > 0) {
+        var existing = this._globalMemoryManager.getSectionEntries(section).filter(function(globalEntry) { return globalEntry.key === entry.key })[0]
+        this._globalMemoryManager.upsert(section, entry.key, entry, { silent: true, replaceKeys: ["meta.invocation"] })
+        if (isObject(existing)) totalRefreshed++
+        else totalNew++
+        return
+      }
       var match = this._globalMemoryManager.findNearDuplicate(section, entry.value)
       if (match) {
         this._globalMemoryManager.refresh(section, match.id)
@@ -8131,6 +8176,15 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
     this._syncWorkingMemoryState()
     this._persistWorkingMemory("auto-promotion")
   }
+}
+
+MiniA.prototype._finalizeRunMemory = function(args) {
+  if (this._runMemoryFinalized === true || !isObject(this._memoryConfig) || this._memoryConfig.enabled !== true) return
+  this._runMemoryFinalized = true
+  if (this._runMemoryOutcomeRecorded !== true) this._recordRunOutcome(args, "failed", "", "abnormal-termination")
+  this._persistWorkingMemory("run-finalize")
+  this._persistSessionMemory("run-finalize")
+  this._autoPromoteSessionToGlobal()
 }
 
 MiniA.prototype.clearSessionMemory = function(sessionId) {
@@ -8349,6 +8403,7 @@ MiniA.prototype._appendExecutionNotesToPlan = function(args) {
  * Process and return final answer based on format requirements
  */
 MiniA.prototype._recordRunOutcome = function(args, status, answer, errorClass) {
+  this._runMemoryOutcomeRecorded = true
   var goal = isObject(args) && isString(args.goal) ? args.goal : ""
   var runId = this._id || new Date().toISOString()
   var key = "run-outcome:" + sha1(goal).substring(0, 16) + ":" + runId
@@ -8414,14 +8469,13 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
   var finalPreview = isString(answer) ? answer.trim() : (isDef(answer) ? String(stringify(answer, __, "") || "").trim() : "")
   if (finalPreview.length === 0 || finalPreview === "(no final answer)") {
     this._recordRunOutcome(args, "failed", "", "missing-final-answer")
+    this._finalizeRunMemory(args)
     return answer
   }
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
   this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" }, validated: true })
   this._recordRunOutcome(args, "succeeded", finalPreview)
-  this._persistWorkingMemory("process-final-answer")
-  if (isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("process-final-answer")
-  this._autoPromoteSessionToGlobal()
+  this._finalizeRunMemory(args)
 
   this._recordPlanActivity("final", {
     step       : this._runtime && this._runtime.currentStepNumber,
@@ -9692,6 +9746,15 @@ MiniA.prototype._createUtilsMcpConfig = function(args) {
       fns[name] = function(params) {
         var payload = params
         if (isUnDef(payload)) payload = {}
+        var prepared = parent._prepareToolArgs(meta.inputSchema, payload)
+        payload = prepared.params
+        if (prepared.repairs.length > 0) parent._trace("tool_call", { name: name, params: payload, source: "mini-utils", repairs: prepared.repairs })
+        if (!prepared.ok) {
+          if (isObject(global.__mini_a_metrics.tool_args_prevalidation_failures)) global.__mini_a_metrics.tool_args_prevalidation_failures.inc()
+          var rejected = { error: prepared.message, content: [{ type: "text", text: prepared.message }] }
+          parent._trace("tool_result", { name: name, params: payload, result: rejected, error: true, source: "mini-utils", prevalidation: true })
+          return rejected
+        }
         try {
           parent.fnI("exec", _buildUtilsIntentMessage(name, payload))
           parent._trace("tool_call", { name: name, params: payload, source: "mini-utils" })
@@ -11074,6 +11137,13 @@ MiniA.prototype._createMcpProxyConfig = function(mcpConfigs, args) {
             var _tm = target.tools.find(function(t) { return t.name === toolName })
             return isMap(_tm) ? _tm.inputSchema : __
           })()
+          var _preparedCall = parent._prepareToolArgs(_callToolSchema, inputArgs)
+          inputArgs = _preparedCall.params
+          if (_preparedCall.repairs.length > 0) parent._trace("tool_call", { name: toolName, params: inputArgs, source: "mcp-proxy", repairs: _preparedCall.repairs })
+          if (!_preparedCall.ok) {
+            if (isObject(global.__mini_a_metrics.tool_args_prevalidation_failures)) global.__mini_a_metrics.tool_args_prevalidation_failures.inc()
+            return { action: "call", tool: toolName, error: _preparedCall.message, content: [{ type: "text", text: _preparedCall.message }] }
+          }
 
           try {
             var result = isDef(meta)
@@ -11525,7 +11595,16 @@ MiniA.prototype._executeToolWithCache = function(connectionId, toolName, params,
     throw new Error(`MCP client for tool '${toolName}' not available.`)
   }
 
-  var callParams = params
+  var toolInfo = this._resolveToolInfo(toolName)
+  var prepared = this._prepareToolArgs(isObject(toolInfo) ? toolInfo.inputSchema : __, params)
+  if (prepared.repairs.length > 0) this._trace("tool_call", { name: toolName, params: prepared.params, source: "mcp", repairs: prepared.repairs })
+  if (!prepared.ok) {
+    if (isObject(global.__mini_a_metrics.tool_args_prevalidation_failures)) global.__mini_a_metrics.tool_args_prevalidation_failures.inc()
+    var prevalidationResult = { error: prepared.message, content: [{ type: "text", text: prepared.message }] }
+    this._logToolUsage(toolName, prepared.params, prevalidationResult, { connectionId: connectionId, error: true, fromCache: false })
+    return prevalidationResult
+  }
+  var callParams = prepared.params
   if (toolName === "visualize" && isMap(params) && params.returnOutput !== true) {
     callParams = merge({}, params)
     callParams.returnOutput = true
@@ -12243,8 +12322,11 @@ MiniA.prototype._getToolSchemaSummary = function(tool, options) {
   var params = []
   var paramNames = Object.keys(properties).sort()
   var paramLimit = summaryMode === "full" ? paramNames.length : summaryMode === "standard" ? 3 : 2
+  var requiredNames = paramNames.filter(function(name) { return requiredList.indexOf(name) >= 0 })
+  var optionalNames = paramNames.filter(function(name) { return requiredList.indexOf(name) < 0 })
+  var displayedNames = summaryMode === "full" ? paramNames : requiredNames.concat(optionalNames.slice(0, paramLimit))
 
-  paramNames.slice(0, paramLimit).forEach(paramName => {
+  displayedNames.forEach(paramName => {
     var paramInfo = properties[paramName] || {}
     var paramDescription = isString(paramInfo.description) && paramInfo.description.length > 0
       ? paramInfo.description
@@ -13883,7 +13965,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "rpm", "tpm", "rtm", "maxsteps", "knowledge", "chatyouare", "youare", "homedir",
     "promptprofile", "systempromptbudget", "outfile", "outfileall", "libs", "model", "modellc", "modelval",
     "conversation", "shell", "usesandbox", "sandboxprofile", "sandboxnonetwork", "shellallow", "shellbanextra",
-    "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold",
+    "shelltimeout", "shellmaxbytes", "toolcachettl", "mcplazy", "mcpdynamic", "mcpproxy", "mcpproxythreshold", "toolargcheck", "toolargrepair",
     "mcpproxytoon", "contextguard", "contextguardbudget", "toolresultmaxinline", "readresultmaxmatches",
     "auditch", "toollog", "metricsch", "debugch", "debuglcch", "debugvalch", "planfile",
     "planformat", "plancontent", "planstyle", "forceplanning", "saveplannotes", "outputfile", "updatefreq",
@@ -14014,26 +14096,72 @@ MiniA.findClosestKnownArg = function(name, knownNames, maxDistance) {
   return { match: bestMatch, distance: bestDistance }
 }
 
-MiniA._enrichToolCallError = function(rawError, schema, providedParams) {
-  if (!isString(rawError) || rawError.indexOf("Unrecognized parameters provided:") >= 0) return rawError
-  if (!isMap(schema) || !isMap(schema.properties)) return rawError
+MiniA._toolArgValidationDetails = function(schema, providedParams) {
+  if (!isMap(schema) || !isMap(schema.properties)) return { validParams: [], unrecognized: [], missing: [] }
   var validParams  = Object.keys(schema.properties)
   var provided     = isMap(providedParams) ? Object.keys(providedParams) : []
   var unrecognized = provided.filter(function(k) { return validParams.indexOf(k) < 0 })
-  if (unrecognized.length === 0) return rawError
   var required = isArray(schema.required) ? schema.required : []
   var missing  = required.filter(function(k) { return !(k in (providedParams || {})) })
-  var lines = [rawError]
-  var hints = unrecognized.map(function(u) {
-    var s = MiniA.findClosestKnownArg(u, validParams)
+  return { validParams: validParams, unrecognized: unrecognized, missing: missing }
+}
+
+MiniA._toolArgValidationMessage = function(schema, providedParams, prefix) {
+  var details = MiniA._toolArgValidationDetails(schema, providedParams)
+  if (details.unrecognized.length === 0 && details.missing.length === 0) return prefix || ""
+  var lines = []
+  if (isString(prefix) && prefix.length > 0) lines.push(prefix)
+  var hints = details.unrecognized.map(function(u) {
+    var s = MiniA.findClosestKnownArg(u, details.validParams)
     return "'" + u + "'" + (s ? " (did you mean '" + s.match + "'?)" : " (not in schema)")
   })
-  lines.push("Unrecognized parameters provided: " + hints.join(", ") + ".")
-  if (missing.length > 0) {
-    lines.push("Still missing required: " + missing.map(function(k) { return "'" + k + "'" }).join(", ") + ".")
-  }
-  lines.push("Valid parameters: " + validParams.join(", ") + ".")
+  if (hints.length > 0) lines.push("Unrecognized parameters provided: " + hints.join(", ") + ".")
+  if (details.missing.length > 0) lines.push("Still missing required: " + details.missing.map(function(k) { return "'" + k + "'" }).join(", ") + ".")
+  if (details.validParams.length > 0) lines.push("Valid parameters: " + details.validParams.join(", ") + ".")
   return lines.join(" ")
+}
+
+MiniA._enrichToolCallError = function(rawError, schema, providedParams) {
+  if (!isString(rawError) || rawError.indexOf("Unrecognized parameters provided:") >= 0) return rawError
+  var details = MiniA._toolArgValidationDetails(schema, providedParams)
+  if (details.unrecognized.length === 0) return rawError
+  return MiniA._toolArgValidationMessage(schema, providedParams, rawError)
+}
+
+MiniA.prototype._prepareToolArgs = function(schema, providedParams) {
+  var params = isMap(providedParams) ? merge({}, providedParams) : {}
+  var repairs = []
+  if (!isMap(schema) || !isMap(schema.properties)) return { ok: true, params: params, repairs: repairs, message: "" }
+  if (this._toolArgRepairEnabled !== false) {
+    var wrapperKeys = Object.keys(params)
+    if (wrapperKeys.length === 1 && ["arguments", "params", "input"].indexOf(wrapperKeys[0]) >= 0 && isMap(params[wrapperKeys[0]])) {
+      params = merge({}, params[wrapperKeys[0]])
+      repairs.push("unwrapped '" + wrapperKeys[0] + "'")
+    }
+    var validParams = Object.keys(schema.properties)
+    Object.keys(params).forEach(function(key) {
+      if (validParams.indexOf(key) >= 0) return
+      var closest = MiniA.findClosestKnownArg(key, validParams)
+      if (isObject(closest) && closest.distance <= 2 && !isDef(params[closest.match])) {
+        params[closest.match] = params[key]
+        delete params[key]
+        repairs.push("renamed '" + key + "' to '" + closest.match + "'")
+      }
+    })
+    Object.keys(schema.properties).forEach(function(key) {
+      var prop = schema.properties[key]
+      if (!isMap(prop) || ["object", "array"].indexOf(prop.type) < 0 || !isString(params[key])) return
+      var parsed = jsonParse(params[key], __, __, true)
+      if ((prop.type === "object" && isMap(parsed)) || (prop.type === "array" && isArray(parsed))) {
+        params[key] = parsed
+        repairs.push("parsed JSON for '" + key + "'")
+      }
+    })
+  }
+  var details = MiniA._toolArgValidationDetails(schema, params)
+  var reject = this._toolArgCheckEnabled !== false && (details.missing.length > 0 || (schema.additionalProperties === false && details.unrecognized.length > 0))
+  return { ok: !reject, params: params, repairs: repairs, unrecognized: details.unrecognized, missing: details.missing,
+    message: reject ? MiniA._toolArgValidationMessage(schema, params, "Invalid tool parameters.") : "" }
 }
 
 MiniA.applyLibEnvDefault = function(args) {
@@ -14253,6 +14381,8 @@ MiniA.prototype.init = function(args) {
       { name: "mcpproxy", type: "boolean", default: false },
       { name: "mcpproxythreshold", type: "number", default: 0 },
       { name: "mcpproxytoon", type: "boolean", default: false },
+      { name: "toolargcheck", type: "boolean", default: true },
+      { name: "toolargrepair", type: "boolean", default: true },
       { name: "auditch", type: "string", default: __ },
       { name: "toollog", type: "string", default: __ },
       { name: "metricsch", type: "string", default: __ },
@@ -14378,6 +14508,10 @@ MiniA.prototype.init = function(args) {
     args.contextguard = _$(toBoolean(args.contextguard), "args.contextguard").isBoolean().default(false)
     args.mcpproxy = _$(toBoolean(args.mcpproxy), "args.mcpproxy").isBoolean().default(false)
     args.mcpproxytoon = _$(toBoolean(args.mcpproxytoon), "args.mcpproxytoon").isBoolean().default(false)
+    args.toolargcheck = _$(toBoolean(args.toolargcheck), "args.toolargcheck").isBoolean().default(true)
+    args.toolargrepair = _$(toBoolean(args.toolargrepair), "args.toolargrepair").isBoolean().default(true)
+    this._toolArgCheckEnabled = args.toolargcheck
+    this._toolArgRepairEnabled = args.toolargrepair
     args.saveplannotes = _$(toBoolean(args.saveplannotes), "args.saveplannotes").isBoolean().default(false)
     args.forceupdates = _$(toBoolean(args.forceupdates), "args.forceupdates").isBoolean().default(false)
     args.nosetmcpwd = _$(toBoolean(args.nosetmcpwd), "args.nosetmcpwd").isBoolean().default(false)
@@ -15210,8 +15344,14 @@ MiniA.prototype.init = function(args) {
       .filter(r => r.length > 0)
     var validatedContracts = this._buildValidatedToolContracts(args)
     if (validatedContracts.length > 0) {
-      var contractText = validatedContracts.slice(0, 8).map(function(contract) { return stringify(contract, __, "") }).join("\n")
-      baseRules.push("Validated tool-call contracts from matching prior runs. Reuse their shape exactly when applicable; do not infer contracts from failed calls:\n" + contractText)
+      var contractText = validatedContracts.slice(0, 8).map(function(contract) {
+        var text = stringify(contract.invocation, __, "")
+        if (isArray(contract.rejected) && contract.rejected.length > 0) {
+          text += "\nDo NOT use keys: " + contract.rejected.map(function(item) { return item.keys.join(", ") + " (rejected: " + item.errorClass + ")" }).join("; ")
+        }
+        return text
+      }).join("\n")
+      baseRules.push("Validated tool-call contracts from prior runs. Reuse their shape exactly when applicable. The listed rejected keys are known-bad; never re-send them:\n" + contractText)
       if (isObject(global.__mini_a_metrics.memory_injected_tokens)) global.__mini_a_metrics.memory_injected_tokens.getAdd(Math.ceil(contractText.length / 4))
     }
 
@@ -15571,6 +15711,7 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
  * </odoc>
  */
 MiniA.prototype.start = function(args) {
+    this._lastStartArgs = args
     var sessionStartTime = now()
     try {
         var outerLoopResult = this._runOuterLoop(args, sessionStartTime)
@@ -15650,6 +15791,8 @@ MiniA.prototype.start = function(args) {
         var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
         this.fnI("error", `Agent failed: ${errMsg}`)
         return
+    } finally {
+        try { this._finalizeRunMemory(args) } catch(ignoreFinalizeErr) {}
     }
 }
 
@@ -17156,6 +17299,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           unresolved: true,
           provenance: { source: "tool", event: "tool-error", step: stepLabel, tool: toolName }
         })
+        this._recordRejectedToolArgs(toolName, params, errorMessage, args)
+        var knownContracts = this._buildValidatedToolContracts(args)
+        var effectiveToolName = toolName === "proxy-dispatch" && isMap(params) ? params.tool : toolName
+        var knownContract = knownContracts.filter(function(contract) { return contract.tool === effectiveToolName })[0]
+        if (isObject(knownContract) && isObject(knownContract.invocation)) {
+          var knownGood = "Last known-good invocation for '" + effectiveToolName + "': " + stringify(knownContract.invocation, __, "")
+          observation = (isString(observation) && observation.length > 0 ? observation + "\n" : "") + knownGood
+        }
       }
       if (!hasError && isString(observation) && observation.length > 0) {
         var inlineLimit = this._getToolResultInlineLimit(args, 0)

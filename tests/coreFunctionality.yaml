@@ -592,6 +592,16 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testValidatedToolContractsOnly
 
+- name: MiniA Core Tests::ToolArgsPrevalidationAndRepair
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolArgsPrevalidationAndRepair
+
+- name: MiniA Core Tests::ToolContractSurvivesGoalRewording
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolContractSurvivesGoalRewording
+
 - name: MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -952,6 +962,8 @@ todo:
 - MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
 - MiniA Core Tests::MemoryKeyedUpsertAndExpiry
 - MiniA Core Tests::ValidatedToolContractsOnly
+- MiniA Core Tests::ToolArgsPrevalidationAndRepair
+- MiniA Core Tests::ToolContractSurvivesGoalRewording
 - MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
 - MiniA Core Tests::AgentCapabilitiesRespectExplicitFalseFlags
 - MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit

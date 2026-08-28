@@ -247,6 +247,18 @@ MiniAMemoryManager.prototype.upsert = function(section, key, entry, options) {
     var preservedId = list[i].id
     var createdAt = list[i].createdAt
     var confirmCount = (isNumber(list[i].confirmCount) ? list[i].confirmCount : 1) + 1
+    if (isArray(opts.replaceKeys)) {
+      opts.replaceKeys.forEach(function(path) {
+        if (!isString(path) || path.length === 0) return
+        var parts = path.split(".")
+        var target = list[i]
+        for (var p = 0; p < parts.length - 1; p++) {
+          if (!isObject(target[parts[p]])) return
+          target = target[parts[p]]
+        }
+        delete target[parts[parts.length - 1]]
+      })
+    }
     list[i] = merge(list[i], normalized)
     list[i].id = preservedId
     list[i].createdAt = createdAt
