@@ -109,7 +109,7 @@ function _resolveMemoryArgs(baseArgs) {
   return cfg
 }
 
-function _createManager(kind, channelCfg, namespace) {
+function _createManager(kind, channelCfg, namespace, mdRoot) {
   var mgr = new MiniAMemoryManager({
     enabled: true,
     maxPerSection: 200,
@@ -121,7 +121,9 @@ function _createManager(kind, channelCfg, namespace) {
   mgr.init({})
 
   var loaded = false
-  if (isObject(channelCfg) && isString(channelCfg.name) && channelCfg.name.length > 0) {
+  if (isString(mdRoot) && mdRoot.length > 0) {
+    loaded = mgr.loadFromMarkdown(mdRoot) === true
+  } else if (isObject(channelCfg) && isString(channelCfg.name) && channelCfg.name.length > 0) {
     loaded = mgr.loadFromChannel(channelCfg.name, namespace) === true
   }
 
@@ -130,12 +132,14 @@ function _createManager(kind, channelCfg, namespace) {
     manager: mgr,
     channel: channelCfg,
     namespace: namespace,
+    mdRoot: isString(mdRoot) && mdRoot.length > 0 ? mdRoot : __,
     loaded: loaded
   }
 }
 
 function _persistStore(store) {
   if (!isObject(store) || !isObject(store.manager)) return false
+  if (isString(store.mdRoot) && store.mdRoot.length > 0) return store.manager.saveToMarkdown(store.mdRoot) === true
   if (!isObject(store.channel) || !isString(store.channel.name) || store.channel.name.length === 0) return false
   return store.manager.saveToChannel(store.channel.name, store.namespace) === true
 }
@@ -507,12 +511,13 @@ function mainMemoryManager(rawArgs) {
   try { sessionChannel = _parseChannelDef(cfg.memorysessionch, "_mini_a_session_memory_channel", "simple") } catch(eSessionCh) { printErr("Failed to parse memorysessionch: " + eSessionCh.message) }
 
   var effectiveSessionChannel = isObject(sessionChannel) ? sessionChannel : globalChannel
+  var globalMdRoot = _trim(cfg.memorymdroot)
 
   var stores = {}
-  stores.global = _createManager("global", globalChannel, "")
+  stores.global = _createManager("global", globalChannel, "", globalMdRoot)
   stores.session = _createManager("session", effectiveSessionChannel, cfg._memorySessionId)
 
-  if (!isObject(globalChannel) && !isObject(effectiveSessionChannel)) {
+  if (globalMdRoot.length === 0 && !isObject(globalChannel) && !isObject(effectiveSessionChannel)) {
     print(ansiColor("FG(214)", "⚠ No memory channel provided. Changes will be in-memory only for this run."))
     print()
   }

@@ -20,6 +20,17 @@ var _MINI_A_THINKING_TAGS = {
 }
 var _MINI_A_TAG_NORM = function(tag) { return String(tag || "").toLowerCase().replace(/[^a-z0-9]/g, "") }
 
+// Model-authored durable memory kinds (written via the memory_write action) and the
+// working-memory section each defaults to. Distinct from runtime-generated kinds like
+// "tool-contract"/"run-outcome"/"artifact:tool"/"tool-failure".
+var _MINI_A_DURABLE_MEMORY_KINDS = {
+  preference : "decisions",
+  environment: "facts",
+  procedure  : "decisions",
+  pitfall    : "risks",
+  reference  : "artifacts"
+}
+
 /**
  * <odoc>
  * <key>MinA</key>
@@ -285,6 +296,9 @@ var MiniA = function() {
     memory_injected_tokens: $atomic(0, "long"),
     memory_validated_contracts_used: $atomic(0, "long"),
     memory_unvalidated_contracts_suppressed: $atomic(0, "long"),
+    memory_relevant_injected: $atomic(0, "long"),
+    memory_writes: $atomic(0, "long"),
+    memory_writes_rejected: $atomic(0, "long"),
     tool_args_prevalidation_failures: $atomic(0, "long"),
     wiki_ops_list: $atomic(0, "long"),
     wiki_ops_read: $atomic(0, "long"),
@@ -355,7 +369,8 @@ Always respond with exactly one valid JSON object adhering to this schema:
 ## ACTION USAGE:
 • "think" - Plan your next step (no external tools needed){{#if useshell}}
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
-• "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useWiki}}
+• "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useMemoryWrite}}
+• "memory_write" - Record durable knowledge that should survive across runs (params: {"kind":"preference|environment|procedure|pitfall|reference","value":"...","key":"optional stable key","tags":["optional"],"ttlDays":N}); use "preference" for what the user/team wants, "environment" for how this machine/repo/service is set up, "procedure" for a validated how-to, "pitfall" for something that failed and why, "reference" for a pointer to a doc/URL. Only write things worth remembering next time, not step-by-step narration.{{/if}}{{#if useWiki}}
 • "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
@@ -1868,6 +1883,9 @@ MiniA.prototype.getMetrics = function() {
             injected_tokens: global.__mini_a_metrics.memory_injected_tokens.get(),
             validated_contracts_used: global.__mini_a_metrics.memory_validated_contracts_used.get(),
             unvalidated_contracts_suppressed: global.__mini_a_metrics.memory_unvalidated_contracts_suppressed.get(),
+            relevant_injected: global.__mini_a_metrics.memory_relevant_injected.get(),
+            writes: global.__mini_a_metrics.memory_writes.get(),
+            writes_rejected: global.__mini_a_metrics.memory_writes_rejected.get(),
             resolved_entries: memorySnapshot.resolvedEntries,
             session_entries: memorySnapshot.sessionEntries,
             global_entries: memorySnapshot.globalEntries,
@@ -7347,6 +7365,8 @@ MiniA.prototype._validateArgs = function(args, validations) {
 MiniA.prototype._initWorkingMemory = function(args, seedState) {
   this._runMemoryFinalized = false
   this._runMemoryOutcomeRecorded = false
+  this._memoryWriteCount = 0
+  this._memoryWriteMax = isNumber(args.memorywritemax) ? args.memorywritemax : 20
   var rawScope = isString(args.memoryscope) ? args.memoryscope : (isString(args.memoryScope) ? args.memoryScope : "both")
   var scope = String(rawScope || "both").toLowerCase().trim()
   if (["session", "global", "both"].indexOf(scope) < 0) scope = "both"
@@ -7374,6 +7394,11 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
   this._memoryManager = __
   this._sessionMemoryManager = __
   this._globalMemoryManager = __
+  // When set, the global (durable) store persists to one markdown file per record under
+  // this directory instead of the memorych channel. Session memory is unaffected -- it
+  // stays on $ch, which is the right fit for its higher write frequency.
+  var _memoryMdRootRaw = isDef(args.memorymdroot) ? String(args.memorymdroot).trim() : ""
+  this._memoryMdRoot = _memoryMdRootRaw.length > 0 ? _memoryMdRootRaw : __
   if (!isObject(this._sessionMemoryManagers)) this._sessionMemoryManagers = {}
 
   // Initialize OpenAF channel for memory persistence when memorych is provided
@@ -7477,14 +7502,21 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
       if (isUnDef(seededGlobal) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "global" || (scope === "both" && !isObject(seedState.workingMemorySession)))) {
         seededGlobal = seedState.workingMemory
       }
-      var _loadedGlobal = this._globalMemoryManager.loadFromChannel(this._memorychName)
-      if (_loadedGlobal !== true) this._globalMemoryManager.init(seededGlobal)
-      else if (isString(this._memorychName) && this._memorychName.length > 0) this.fnI("info", `📼 [mem:read] global loaded from channel '${this._memorychName}'`)
+      if (isString(this._memoryMdRoot)) {
+        var _loadedGlobalMd = this._globalMemoryManager.loadFromMarkdown(this._memoryMdRoot)
+        if (_loadedGlobalMd !== true) this._globalMemoryManager.init(seededGlobal)
+        else this.fnI("info", `📼 [mem:read] global loaded from markdown '${this._memoryMdRoot}'`)
+      } else {
+        var _loadedGlobal = this._globalMemoryManager.loadFromChannel(this._memorychName)
+        if (_loadedGlobal !== true) this._globalMemoryManager.init(seededGlobal)
+        else if (isString(this._memorychName) && this._memorychName.length > 0) this.fnI("info", `📼 [mem:read] global loaded from channel '${this._memorychName}'`)
+      }
     } else {
       var globalMemoryReconfigure = merge({}, cfg)
       globalMemoryReconfigure.onEvent = this._createMemoryEventHandler("global")
       this._globalMemoryManager.configure(globalMemoryReconfigure)
-      if (isString(this._memorychName) && this._memorychName.length > 0) this._globalMemoryManager.loadFromChannel(this._memorychName)
+      if (isString(this._memoryMdRoot)) this._globalMemoryManager.loadFromMarkdown(this._memoryMdRoot)
+      else if (isString(this._memorychName) && this._memorychName.length > 0) this._globalMemoryManager.loadFromChannel(this._memorychName)
     }
   }
 
@@ -7606,7 +7638,7 @@ MiniA.prototype._getDefaultMemoryWriteManager = function() {
   if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
   if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
   if (isString(this._memorysessionchName) && this._memorysessionchName.length > 0 && isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
-  if (isString(this._memorychName) && this._memorychName.length > 0 && isObject(this._globalMemoryManager)) return this._globalMemoryManager
+  if ((isString(this._memoryMdRoot) || (isString(this._memorychName) && this._memorychName.length > 0)) && isObject(this._globalMemoryManager)) return this._globalMemoryManager
   if (isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
   return this._globalMemoryManager
 }
@@ -7702,6 +7734,7 @@ MiniA.prototype._memorySearch = function(query, opts) {
   var options = isObject(opts) ? opts : {}
   var maxPerSection = isNumber(options.maxPerSection) && options.maxPerSection > 0 ? options.maxPerSection : 10
   var filterSection = isString(options.section) && options.section.length > 0 ? options.section.toLowerCase().trim() : null
+  var filterKind = isString(options.kind) && options.kind.length > 0 ? options.kind.toLowerCase().trim() : null
   if (!isString(query) || query.trim().length === 0) return {}
 
   var managers = this._getMemoryReadManagers(this._memoryScope)
@@ -7709,6 +7742,8 @@ MiniA.prototype._memorySearch = function(query, opts) {
 
   var qWords = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(function(w) { return w.length > 2 })
   if (qWords.length === 0) return {}
+  var qWordSet = {}
+  qWords.forEach(function(w) { qWordSet[w] = true })
 
   var sectionNames = managers[0]._sections()
   var results = {}
@@ -7720,10 +7755,16 @@ MiniA.prototype._memorySearch = function(query, opts) {
     managers.forEach(function(manager) {
       var compact = manager.snapshotCompact()
       var entries = isArray(compact[section]) ? compact[section] : []
+      if (entries.length === 0) return
+      // Full entries carry confirmCount/confirmedAt, which are deliberately omitted
+      // from the compact/LLM-facing shape to save tokens; fetched only for scoring.
+      var fullById = {}
+      manager.getSectionEntries(section).forEach(function(fe) { if (isString(fe.id)) fullById[fe.id] = fe })
       entries.forEach(function(entry) {
         var key = entry.id || entry.v
         if (seen[key]) return
         seen[key] = true
+        if (filterKind && String(entry.k || "").toLowerCase() !== filterKind) return
         var text = (String(entry.v || "") + " " + String(entry.key || "") + " " + String(entry.scope || "")).toLowerCase().replace(/[^a-z0-9\s]/g, " ")
         var matchCount = 0
         qWords.forEach(function(w) { if (text.indexOf(w) >= 0) matchCount++ })
@@ -7733,6 +7774,19 @@ MiniA.prototype._memorySearch = function(query, opts) {
           if (entry.val === true) score += 4
           if (isString(entry.scope) && isString(options.taskScope) && entry.scope === options.taskScope) score += 3
           if (isString(entry.exp) && new Date(entry.exp).getTime() > Date.now()) score += 1
+          var full = fullById[entry.id]
+          if (isObject(full)) {
+            if (isNumber(full.confirmCount) && full.confirmCount > 1) score += Math.min(4, Math.log2(full.confirmCount) * 2)
+            if (isString(full.confirmedAt)) {
+              var ageDays = (Date.now() - new Date(full.confirmedAt).getTime()) / 86400000
+              if (ageDays >= 0 && ageDays < 30) score += (1 - ageDays / 30) * 2
+            }
+          }
+          if (isArray(entry.tg) && entry.tg.length > 0) {
+            var tagHits = entry.tg.filter(function(t) { return qWordSet[String(t).toLowerCase()] === true }).length
+            if (tagHits > 0) score += tagHits * 2
+          }
+          if (entry.stale === true) score -= 5
           scored.push({ score: score, entry: entry })
         }
       })
@@ -7777,6 +7831,15 @@ MiniA.prototype._persistWorkingMemory = function(reason) {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._globalMemoryManager)) return
   this._syncWorkingMemoryState()
+  if (isString(this._memoryMdRoot)) {
+    try {
+      this._globalMemoryManager.saveToMarkdown(this._memoryMdRoot)
+      if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted to markdown '${this._memoryMdRoot}' (${reason || "update"})`)
+    } catch(e) {
+      this.fnI("warn", `[memory] markdown persistence failed: ${__miniAErrMsg(e)}`)
+    }
+    return
+  }
   if (!isString(this._memorychName) || this._memorychName.length === 0) return
   try {
     this._globalMemoryManager.saveToChannel(this._memorychName)
@@ -7841,7 +7904,7 @@ MiniA.prototype._memoryAppend = function(section, value, meta, appendOpts) {
     this.fnI("info", `📝 [mem:write] ${_wscope}/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
   }
   this._syncWorkingMemoryState()
-  if (targetManager === this._globalMemoryManager && isString(this._memorychName) && this._memorychName.length > 0) this._persistWorkingMemory("append")
+  if (targetManager === this._globalMemoryManager && (isString(this._memoryMdRoot) || (isString(this._memorychName) && this._memorychName.length > 0))) this._persistWorkingMemory("append")
   if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
   return appended
 }
@@ -7872,6 +7935,63 @@ MiniA.prototype._deriveMemoryTaskScope = function(args, toolName) {
 
 MiniA.prototype._memoryExpiry = function(days) {
   return new Date(Date.now() + Math.max(0, days || 0) * 86400000).toISOString()
+}
+
+MiniA.prototype._slugifyMemoryValue = function(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").substring(0, 60)
+}
+
+// "relevant" is the default under usememory=true so goal-relevant durable memory reaches
+// the model without it having to guess to call memory_search; usememory=false keeps the
+// pre-existing "summary" default.
+MiniA.prototype._resolveMemoryInjectMode = function(usememory, requested) {
+  var fallback = usememory ? "relevant" : "summary"
+  var mode = isString(requested) && requested.trim().length > 0 ? requested.toLowerCase().trim() : fallback
+  if (["full", "summary", "relevant"].indexOf(mode) < 0) mode = fallback
+  return mode
+}
+
+// Model-facing durable memory write (the "memory_write" action). Always session-scoped
+// and keyed, so it only reaches global storage via _autoPromoteSessionToGlobal's
+// confirmCount>=2 gate on provenance.source==="model" entries — a single call from a
+// run reading untrusted tool output cannot plant a permanent global "fact".
+MiniA.prototype._memoryWrite = function(params, args) {
+  if (this._memoryConfig.enabled !== true) return { ok: false, message: "Memory is disabled (usememory=false)." }
+  var p = isObject(params) ? params : {}
+  var kind = isString(p.kind) ? p.kind.trim().toLowerCase() : ""
+  var section = _MINI_A_DURABLE_MEMORY_KINDS[kind]
+  if (!isString(section)) {
+    if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
+    return { ok: false, message: `Invalid 'kind'. Must be one of: ${Object.keys(_MINI_A_DURABLE_MEMORY_KINDS).join(", ")}.` }
+  }
+  var value = isString(p.value) ? p.value.trim() : (isDef(p.value) ? String(p.value).trim() : "")
+  if (value.length === 0) {
+    if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
+    return { ok: false, message: "Missing 'value' to remember." }
+  }
+  if (this._memoryWriteCount >= this._memoryWriteMax) {
+    if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
+    return { ok: false, message: `memory_write limit reached for this run (${this._memoryWriteMax}).` }
+  }
+  var key = isString(p.key) && p.key.trim().length > 0 ? p.key.trim() : (kind + "::" + this._slugifyMemoryValue(value))
+  var tags = isArray(p.tags) ? p.tags.filter(isString).map(function(t) { return t.trim().toLowerCase() }).filter(function(t) { return t.length > 0 }) : []
+  var meta = {
+    memoryScope: "session",
+    kind        : kind,
+    key         : key,
+    tags        : tags,
+    observedAt  : new Date().toISOString(),
+    provenance  : { source: "model", event: "memory-write" }
+  }
+  if (isNumber(p.ttlDays) && p.ttlDays > 0) meta.expiresAt = this._memoryExpiry(p.ttlDays)
+  var saved = this._memoryUpsert(section, key, value, meta)
+  if (!isObject(saved)) {
+    if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
+    return { ok: false, message: "Memory write failed." }
+  }
+  this._memoryWriteCount++
+  if (isObject(global.__mini_a_metrics.memory_writes)) global.__mini_a_metrics.memory_writes.inc()
+  return { ok: true, section: section, key: key, id: saved.id, confirmCount: saved.confirmCount }
 }
 
 MiniA.prototype._buildToolObservation = function(toolName, params, rawResult, observation, args, stepLabel) {
@@ -7954,6 +8074,31 @@ MiniA.prototype._buildValidatedToolContracts = function(args) {
   contracts.sort(function(a, b) { return b.confirmCount - a.confirmCount })
   if (contracts.length > 0 && isObject(global.__mini_a_metrics.memory_validated_contracts_used)) global.__mini_a_metrics.memory_validated_contracts_used.getAdd(contracts.length)
   return contracts
+}
+
+// Goal-relevant durable memory, auto-injected at run start so the model doesn't have to
+// guess to call memory_search. Mirrors _buildValidatedToolContracts: same cap, same
+// metric. Only durable model-authored kinds and validated entries are eligible — never
+// runtime bookkeeping (e.g. "tool-failure" risks, tool-observation artifacts).
+MiniA.prototype._buildRelevantMemoryBlock = function(args) {
+  if (this._memoryConfig.enabled !== true) return []
+  var goal = isString(args.goal) ? args.goal.trim() : ""
+  if (goal.length === 0) return []
+  var cap = isNumber(args.memoryrelevantcap) && args.memoryrelevantcap > 0 ? args.memoryrelevantcap : 8
+  var results = this._memorySearch(goal, { maxPerSection: cap })
+  var picked = []
+  Object.keys(results).forEach(function(section) {
+    results[section].forEach(function(entry) {
+      if (picked.length >= cap) return
+      var isDurableKind = isString(entry.k) && isString(_MINI_A_DURABLE_MEMORY_KINDS[entry.k])
+      if (!isDurableKind && entry.val !== true) return
+      if (entry.stale === true) return
+      if (isString(entry.sup) && entry.sup.length > 0) return
+      picked.push({ section: section, kind: isString(entry.k) ? entry.k : __, key: entry.key, value: entry.v })
+    })
+  })
+  if (picked.length > 0 && isObject(global.__mini_a_metrics.memory_relevant_injected)) global.__mini_a_metrics.memory_relevant_injected.getAdd(picked.length)
+  return picked
 }
 
 MiniA.prototype._recordRejectedToolArgs = function(toolName, params, message, args) {
@@ -8127,17 +8272,36 @@ MiniA.prototype.promoteSessionMemory = function(section, ids) {
 MiniA.prototype._autoPromoteSessionToGlobal = function() {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._sessionMemoryManager) || !isObject(this._globalMemoryManager)) return
-  if (!isString(this._memorychName) || this._memorychName.length === 0) return
+  if (!isString(this._memoryMdRoot) && (!isString(this._memorychName) || this._memorychName.length === 0)) return
   var promoteSections = isString(this._memoryConfig.promoteSections) && this._memoryConfig.promoteSections.length > 0
     ? this._memoryConfig.promoteSections.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
     : []
-  if (promoteSections.length === 0) return
+
+  // Durable model-authored kinds (memory_write) promote across runs regardless of
+  // memorypromote — but only from their own section, and never bypassing the
+  // confirmCount gate below. This does not widen promotion of runtime-generated
+  // entries (e.g. "tool-failure" risks) that happen to share a section.
+  var sectionsToScan = promoteSections.slice()
+  Object.keys(_MINI_A_DURABLE_MEMORY_KINDS).forEach(function(k) {
+    var s = _MINI_A_DURABLE_MEMORY_KINDS[k]
+    if (sectionsToScan.indexOf(s) < 0) sectionsToScan.push(s)
+  })
+  if (sectionsToScan.length === 0) return
 
   var totalNew = 0
   var totalRefreshed = 0
-  promoteSections.forEach(function(section) {
+  var totalGated = 0
+  sectionsToScan.forEach(function(section) {
+    var inConfiguredList = promoteSections.indexOf(section) >= 0
     var entries = this._sessionMemoryManager.getSectionEntries(section)
     entries.forEach(function(entry) {
+      var isDurableKind = isString(entry.kind) && isString(_MINI_A_DURABLE_MEMORY_KINDS[entry.kind])
+      if (!inConfiguredList && !isDurableKind) return
+      var isModelAuthored = isObject(entry.provenance) && entry.provenance.source === "model"
+      if (isModelAuthored && (!isNumber(entry.confirmCount) || entry.confirmCount < 2)) {
+        totalGated++
+        return
+      }
       if (isString(entry.key) && entry.key.length > 0) {
         var existing = this._globalMemoryManager.getSectionEntries(section).filter(function(globalEntry) { return globalEntry.key === entry.key })[0]
         this._globalMemoryManager.upsert(section, entry.key, entry, { silent: true, replaceKeys: ["meta.invocation"] })
@@ -8473,7 +8637,7 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     return answer
   }
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
-  this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" }, validated: true })
+  if (args.debug || args.verbose) this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" }, validated: true })
   this._recordRunOutcome(args, "succeeded", finalPreview)
   this._finalizeRunMemory(args)
 
@@ -13984,7 +14148,9 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "state", "maxcontent", "earlystopthreshold", "adaptiverouting", "routerorder",
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
     "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
-    "memorypromote", "memorystaledays", "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
+    "memorypromote", "memorystaledays", "memoryartifactttldays", "memoryindexttldays", "memoryinject",
+    "usememorywrite", "memorywritemax", "memorymdroot", "memoryrelevantcap",
+    "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
@@ -14330,6 +14496,38 @@ MiniA.prototype.init = function(args) {
   this._enablePlanning = (!initChatbotMode && initUsePlanning)
   args.chatbotmode = initChatbotMode
   args.useplanning = initUsePlanning
+
+  // Memory must be ready before the system prompt is built below (validated tool contracts,
+  // and memoryinject=relevant's goal-relevant durable memory, both read from
+  // this._globalMemoryManager/this._sessionMemoryManager). This runs unconditionally, ahead
+  // of the _isInitialized short-circuit below, because init() is also called directly by
+  // some embedders (e.g. the interactive console) before start()/_startInternal -- putting
+  // memory setup only in _startInternal would miss that path. _initWorkingMemory does its
+  // own arg coercion (toBoolean/isString on the raw args), so it doesn't need this function's
+  // later, fuller arg validation to have run first.
+  // Guarded by reference-equality against the same args object, not just _isInitialized below:
+  // the console calls init(_args) directly and then start(_args), and start()/_startInternal
+  // calls this.init(args) again with that same reference -- without this guard the global
+  // manager would be torn down and reloaded a second time on every turn. A genuinely new run
+  // (a different args object) still re-initializes as expected.
+  if (this._memoryInitializedArgs !== args) {
+    var initialState = {}
+    if (isDef(args.state)) {
+      var providedState = args.state
+      if (isString(providedState)) {
+        var parsedState = jsonParse(providedState, __, __, true)
+        if (isObject(parsedState)) providedState = parsedState
+      }
+      if (isObject(providedState)) {
+        var clonedState = jsonParse(stringify(providedState, __, ""), __, __, true)
+        initialState = isObject(clonedState) ? clonedState : providedState
+      }
+    }
+    this._agentState = isObject(initialState) ? initialState : {}
+    this._initWorkingMemory(args, this._agentState)
+    this._memoryInitializedArgs = args
+  }
+
   if (this._isInitialized) return
   /*if (this._isInitializing) {
     do {
@@ -15355,6 +15553,17 @@ MiniA.prototype.init = function(args) {
       if (isObject(global.__mini_a_metrics.memory_injected_tokens)) global.__mini_a_metrics.memory_injected_tokens.getAdd(Math.ceil(contractText.length / 4))
     }
 
+    if (args.usememory && args.memoryinject === "relevant") {
+      var relevantMemory = this._buildRelevantMemoryBlock(args)
+      if (relevantMemory.length > 0) {
+        var relevantMemoryText = relevantMemory.map(function(m) {
+          return "[" + m.section + (m.kind ? "/" + m.kind : "") + "] " + m.value
+        }).join("\n")
+        baseRules.push("Durable knowledge remembered from prior runs, relevant to this goal. Treat as background; verify before acting on anything time-sensitive:\n" + relevantMemoryText)
+        if (isObject(global.__mini_a_metrics.memory_injected_tokens)) global.__mini_a_metrics.memory_injected_tokens.getAdd(Math.ceil(relevantMemoryText.length / 4))
+      }
+    }
+
     if (toBoolean(args.mcpproxy) === true && this._useToolsActual === true) {
       baseRules.push("Invoke MCP tools via function calling with 'proxy-dispatch'. Never set tool='proxy-dispatch' itself — use {\"action\":\"call\",\"tool\":\"actual-tool-name\",\"arguments\":{...}}. Valid 'action' values: status, list, search, call, readresult (never 'shell'/'exec'/'bash' — shell runs via the top-level JSON \"action\":\"shell\" field).")
       if (toBoolean(args.usejsontool) !== true) {
@@ -15502,6 +15711,7 @@ MiniA.prototype.init = function(args) {
         if (isString(name) && name.length > 0) chatActionSet[name] = true
       })
       if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
+      if (args.usememory && args.usememorywrite) chatActionSet["memory_write"] = true
       if (args.usewiki && isObject(this._wikiManager)) chatActionSet["wiki"] = true
       if ((args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)) chatActionSet["graph"] = true
       this._actionsList = Object.keys(chatActionSet).join(" | ")
@@ -15538,10 +15748,11 @@ MiniA.prototype.init = function(args) {
       })
 
       var promptUseWikiGraph = (args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)
-      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if useWikiGraph}} | graph{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
+      this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useMemoryWrite}} | memory_write{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if useWikiGraph}} | graph{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
         useMemorySearch : args.usememory && args.memoryinject !== "full",
+        useMemoryWrite  : args.usememory && args.usememorywrite,
         useWiki         : args.usewiki && isObject(this._wikiManager),
         useWikiGraph    : promptUseWikiGraph
       })
@@ -15615,6 +15826,7 @@ MiniA.prototype.init = function(args) {
         availableSkills    : skillPromptEntries.length > 0,
         availableSkillsList: skillPromptEntries,
         useMemorySearch    : args.usememory && args.memoryinject !== "full",
+        useMemoryWrite     : args.usememory && args.usememorywrite,
         useWiki            : args.usewiki && isObject(this._wikiManager),
         useWikiGraph       : promptUseWikiGraph,
         wikiRw             : args.usewiki && args.wikiaccess === "rw" && isObject(this._wikiManager)
@@ -15933,6 +16145,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memoryartifactttldays", type: "number", default: 7 },
       { name: "memoryindexttldays", type: "number", default: 1 },
       { name: "memoryinject", type: "string", default: "summary" },
+      { name: "memoryrelevantcap", type: "number", default: 8 },
+      { name: "usememorywrite", type: "boolean", default: true },
+      { name: "memorywritemax", type: "number", default: 20 },
+      { name: "memorymdroot", type: "string", default: __ },
       { name: "valtools", type: "boolean", default: false }
     ])
 
@@ -16041,9 +16257,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.memoryindexttldays = _$(args.memoryindexttldays, "args.memoryindexttldays").isNumber().default(1)
     if (args.memoryartifactttldays < 0) args.memoryartifactttldays = 7
     if (args.memoryindexttldays < 0) args.memoryindexttldays = 1
-    args.memoryinject = _$(args.memoryinject, "args.memoryinject").isString().default("summary")
-    if (["full", "summary"].indexOf(args.memoryinject.toLowerCase().trim()) < 0) args.memoryinject = "summary"
-    else args.memoryinject = args.memoryinject.toLowerCase().trim()
+    args.memoryinject = this._resolveMemoryInjectMode(args.usememory, args.memoryinject)
+    args.memoryrelevantcap = _$(args.memoryrelevantcap, "args.memoryrelevantcap").isNumber().default(8)
+    if (args.memoryrelevantcap < 1) args.memoryrelevantcap = 8
+    args.usememorywrite = _$(toBoolean(args.usememorywrite), "args.usememorywrite").isBoolean().default(true)
+    args.memorywritemax = _$(args.memorywritemax, "args.memorywritemax").isNumber().default(20)
+    if (args.memorywritemax < 1) args.memorywritemax = 20
+    args.memorymdroot = _$(args.memorymdroot, "args.memorymdroot").isString().default(__)
     args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
     args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
@@ -16631,22 +16851,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return this._processFinalAnswer(blockedAnswer, args)
     }
 
-    var initialState = {}
-    if (isDef(args.state)) {
-      var providedState = args.state
-      if (isString(providedState)) {
-        var parsedState = jsonParse(providedState, __, __, true)
-        if (isObject(parsedState)) providedState = parsedState
-      }
-      if (isObject(providedState)) {
-        var clonedState = jsonParse(stringify(providedState, __, ""), __, __, true)
-        initialState = isObject(clonedState) ? clonedState : providedState
-      }
-    }
-    this._agentState = isObject(initialState) ? initialState : {}
-    this._initWorkingMemory(args, this._agentState)
     this._registerMcpToolsForGoal(args)
-    this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
+    if (args.debug || args.verbose) this._memoryAppend("facts", "Runtime started for new execution loop", { provenance: { source: "runtime", event: "run-start" } })
     if (this._hasExternalPlan) {
       this._memoryAppend("facts", "Loaded external plan for execution.", { provenance: { source: "planning", event: "plan-loaded", path: isObject(preloadedPlan) ? (preloadedPlan.path || "") : "" } })
     }
@@ -18604,7 +18810,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           updatedStateSnapshot = getStateSnapshot()
           stateUpdatedThisStep = true
           if (this._enablePlanning) this._handlePlanUpdate()
-          this._memoryAppend("facts", "Model updated runtime state.", { provenance: { source: "model", event: "state-update", step: step + 1 } })
+          if (args.debug || args.verbose) this._memoryAppend("facts", "Model updated runtime state.", { provenance: { source: "runtime", event: "state-update", step: step + 1 } })
         }
       }
       var actionMessages = []
@@ -19259,6 +19465,23 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               var msSummary = msSections.map(function(s) { return s + "(" + msResults[s].length + ")" }).join(", ")
               runtime.context.push(`[OBS ${stepLabel}] (memory_search) Results for "${msQuery}" [${msSummary}]:\n${af.toTOON(msResults)}`)
             }
+          }
+          runtime.consecutiveThoughts = 0
+          runtime.stepsWithoutAction = 0
+          global.__mini_a_metrics.consecutive_thoughts.set(0)
+          runtime.successfulActionDetected = true
+          if (runtime.hasEscalated) runtime.successfulStepsSinceEscalation++
+          flushAll()
+          continue
+        }
+
+        if (action == "memory_write" && args.usememory && args.usememorywrite) {
+          var mwParams = isMap(currentMsg.params) ? currentMsg.params : {}
+          var mwResult = this._memoryWrite(mwParams, args)
+          if (mwResult.ok) {
+            runtime.context.push(`[OBS ${stepLabel}] (memory_write) Saved ${mwResult.section}/${mwResult.key} (confirmed ${mwResult.confirmCount}x).`)
+          } else {
+            runtime.context.push(`[OBS ${stepLabel}] (memory_write) ${mwResult.message}`)
           }
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
@@ -20042,6 +20265,18 @@ MiniA.prototype._runChatbotMode = function(options) {
                 var cbMsSummary = cbMsSections.map(function(s) { return s + "(" + cbMsResults[s].length + ")" }).join(", ")
                 pendingPrompt = `memory_search results for "${cbMsQuery}" [${cbMsSummary}]:\n${af.toTOON(cbMsResults)}\nUse this information to continue.`
               }
+            }
+            handled = true
+            break
+          }
+
+          if (lowerAction === "memory_write" && args.usememory && args.usememorywrite) {
+            var cbMwParams = isMap(currentMsg.params) ? currentMsg.params : {}
+            var cbMwResult = this._memoryWrite(cbMwParams, args)
+            if (cbMwResult.ok) {
+              pendingPrompt = `Saved ${cbMwResult.section}/${cbMwResult.key} (confirmed ${cbMwResult.confirmCount}x). Continue.`
+            } else {
+              pendingPrompt = `memory_write failed: ${cbMwResult.message}`
             }
             handled = true
             break

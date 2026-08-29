@@ -190,6 +190,12 @@ function __miniAExtractFrontMatterMeta(markdownText) {
   }
 }
 
+function __miniASerializeFrontMatter(meta, body) {
+  var yaml = ""
+  try { yaml = af.toYAML(isObject(meta) ? meta : {}) } catch(ignoreSerializeErr) { yaml = "" }
+  return "---\n" + yaml + "---\n" + (isString(body) ? body : "")
+}
+
 function __miniASanitizeVirtualSkillPath(pathValue) {
   if (!isString(pathValue)) return __
   var normalized = pathValue.trim().replace(/\\/g, "/")

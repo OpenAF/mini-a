@@ -862,8 +862,26 @@ help:
     example  : "30"
     mandatory: false
   - name     : memoryinject
-    desc     : Memory context injection mode (summary or full)
-    example  : "summary"
+    desc     : "Memory context injection mode: summary (counts only), relevant (counts + goal-relevant durable memory auto-injected into rules, default when usememory=true), or full (all compact entries every step)"
+    example  : "relevant"
+    mandatory: false
+    options  : ["summary", "relevant", "full"]
+  - name     : memoryrelevantcap
+    desc     : Maximum durable memory entries auto-injected when memoryinject=relevant
+    example  : "8"
+    mandatory: false
+  - name     : usememorywrite
+    desc     : Let the model record durable typed memory via the memory_write action (preference, environment, procedure, pitfall, reference)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memorywritemax
+    desc     : Maximum memory_write calls allowed per run
+    example  : "20"
+    mandatory: false
+  - name     : memorymdroot
+    desc     : Directory root for markdown-backed global memory persistence (one .md file per record, front-matter metadata); when set, replaces memorych for the global store
+    example  : "/tmp/mini-a-memory"
     mandatory: false
   - name     : toolargcheck
     desc     : Reject schema-declared missing parameters and unknown parameters when additionalProperties is false
@@ -1315,6 +1333,10 @@ jobs:
         memorypromote  : memorypromote
         memorystaledays: memorystaledays
         memoryinject   : memoryinject
+        memoryrelevantcap: memoryrelevantcap
+        usememorywrite : usememorywrite
+        memorywritemax : memorywritemax
+        memorymdroot   : memorymdroot
         toolargcheck    : toolargcheck
         toolargrepair   : toolargrepair
         usewiki        : usewiki
@@ -1558,6 +1580,10 @@ jobs:
       memorypromote  : isString.default(__)
       memorystaledays: toNumber.isNumber.default(__)
       memoryinject   : isString.default(__)
+      memoryrelevantcap: toNumber.isNumber.default(__)
+      usememorywrite : toBoolean.isBoolean.default(__)
+      memorywritemax : toNumber.isNumber.default(__)
+      memorymdroot   : isString.default(__)
       toolargcheck    : toBoolean.isBoolean.default(true)
       toolargrepair   : toBoolean.isBoolean.default(true)
       usewiki        : toBoolean.isBoolean.default(false)
