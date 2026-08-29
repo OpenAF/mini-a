@@ -587,6 +587,31 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMemoryKeyedUpsertAndExpiry
 
+- name: MiniA Core Tests::MemoryMarkdownRoundTrip
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryMarkdownRoundTrip
+
+- name: MiniA Core Tests::MemoryMarkdownSurvivesHandEditsAndSkipsCorruptFiles
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryMarkdownSurvivesHandEditsAndSkipsCorruptFiles
+
+- name: MiniA Core Tests::MemoryMarkdownOnlyRewritesChangedFiles
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryMarkdownOnlyRewritesChangedFiles
+
+- name: MiniA Core Tests::MemoryMarkdownDeletesFilesForRemovedEntries
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryMarkdownDeletesFilesForRemovedEntries
+
+- name: MiniA Core Tests::AgentMarkdownGlobalMemoryPersistsAndReloads
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAgentMarkdownGlobalMemoryPersistsAndReloads
+
 - name: MiniA Core Tests::ValidatedToolContractsOnly
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -601,6 +626,51 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testToolContractSurvivesGoalRewording
+
+- name: MiniA Core Tests::MemoryWriteRecordsDurableKindWithTags
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryWriteRecordsDurableKindWithTags
+
+- name: MiniA Core Tests::MemoryWriteRejectsInvalidKindAndEnforcesPerRunCap
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryWriteRejectsInvalidKindAndEnforcesPerRunCap
+
+- name: MiniA Core Tests::MemoryWriteDerivesStableKeyAndConfirms
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryWriteDerivesStableKeyAndConfirms
+
+- name: MiniA Core Tests::AutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testAutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice
+
+- name: MiniA Core Tests::BuildRelevantMemoryBlockFiltersDurableAndCaps
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testBuildRelevantMemoryBlockFiltersDurableAndCaps
+
+- name: MiniA Core Tests::ResolveMemoryInjectModeDefaultsToRelevantWhenUseMemory
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testResolveMemoryInjectModeDefaultsToRelevantWhenUseMemory
+
+- name: MiniA Core Tests::MemorySearchScorerRanksConfirmedRecentOverSingleOld
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemorySearchScorerRanksConfirmedRecentOverSingleOld
+
+- name: MiniA Core Tests::MemoryInitializationOrderInjectsRelevantMemoryIntoSystemPrompt
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryInitializationOrderInjectsRelevantMemoryIntoSystemPrompt
+
+- name: MiniA Core Tests::MemoryInitSkipsReloadWhenInitCalledTwiceWithSameArgs
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryInitSkipsReloadWhenInitCalledTwiceWithSameArgs
 
 - name: MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
   from: MiniA Core Tests::Init
@@ -961,9 +1031,23 @@ todo:
 - MiniA Core Tests::ManagedMemoryMetrics
 - MiniA Core Tests::ManagedMemoryRefreshAndStaleMetrics
 - MiniA Core Tests::MemoryKeyedUpsertAndExpiry
+- MiniA Core Tests::MemoryMarkdownRoundTrip
+- MiniA Core Tests::MemoryMarkdownSurvivesHandEditsAndSkipsCorruptFiles
+- MiniA Core Tests::MemoryMarkdownOnlyRewritesChangedFiles
+- MiniA Core Tests::MemoryMarkdownDeletesFilesForRemovedEntries
+- MiniA Core Tests::AgentMarkdownGlobalMemoryPersistsAndReloads
 - MiniA Core Tests::ValidatedToolContractsOnly
 - MiniA Core Tests::ToolArgsPrevalidationAndRepair
 - MiniA Core Tests::ToolContractSurvivesGoalRewording
+- MiniA Core Tests::MemoryWriteRecordsDurableKindWithTags
+- MiniA Core Tests::MemoryWriteRejectsInvalidKindAndEnforcesPerRunCap
+- MiniA Core Tests::MemoryWriteDerivesStableKeyAndConfirms
+- MiniA Core Tests::AutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice
+- MiniA Core Tests::BuildRelevantMemoryBlockFiltersDurableAndCaps
+- MiniA Core Tests::ResolveMemoryInjectModeDefaultsToRelevantWhenUseMemory
+- MiniA Core Tests::MemorySearchScorerRanksConfirmedRecentOverSingleOld
+- MiniA Core Tests::MemoryInitializationOrderInjectsRelevantMemoryIntoSystemPrompt
+- MiniA Core Tests::MemoryInitSkipsReloadWhenInitCalledTwiceWithSameArgs
 - MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags
 - MiniA Core Tests::AgentCapabilitiesRespectExplicitFalseFlags
 - MiniA Core Tests::AgentMiniAOverridesApplyWhenCliDefaultsAreNotExplicit

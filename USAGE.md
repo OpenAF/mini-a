@@ -2889,7 +2889,7 @@ Mini-A exposes one structured working-memory system. The common memory types are
 |-------------|--------------------------|-----------------|
 | Working memory | The live structured store the agent reads and writes during a run | `usememory`, `memoryinject`, `memorymaxpersection`, `memorymaxentries`, `memorycompactevery`, `memorydedup` |
 | Episodic memory | Session-scoped state for a specific conversation or run | `memorysessionid`, `memoryscope=session|both`, `memorysessionch` |
-| Semantic memory | Durable knowledge the agent can reuse across runs | `memorych`, `memoryscope=global|both`, `memorypromote`, `memorystaledays` |
+| Semantic memory | Durable knowledge the agent can reuse across runs | `memorych` (or `memorymdroot` for markdown), `memoryscope=global|both`, `memorypromote`, `memorystaledays`, `usememorywrite` |
 | Procedural memory | Instructions and workflow rules that tell Mini-A how to behave | `agent`, `mode`, skills, AGENTS.md, prompts; not a dedicated memory store |
 
 `memoryuser=true` is the convenience preset for both global and session working memory. `memoryusersession=true` is the session-only version.
@@ -2912,7 +2912,37 @@ Mini-A exposes one structured working-memory system. The common memory types are
 }
 ```
 
-Each entry carries metadata (`id`, `value`, timestamps, `status`, optional `provenance`, optional `evidenceRefs`, and stale/unresolved flags).
+Each entry carries metadata (`id`, `value`, timestamps, `status`, optional `provenance`, optional `evidenceRefs`, optional `tags`, and stale/unresolved flags).
+
+### Durable Knowledge (`memory_write`)
+
+By default, almost every memory write is runtime bookkeeping — tool observations, run outcomes, validated tool-call contracts. None of that is knowledge the model chose to remember. When `usememory=true` and `usememorywrite=true` (the default), the model also gets a **`memory_write`** action for deliberately recording durable, typed knowledge:
+
+```json
+{
+  "thought": "The user always wants commits squashed before merging",
+  "action": "memory_write",
+  "params": { "kind": "preference", "value": "Always squash commits before merging to keep history clean", "tags": ["git", "workflow"] }
+}
+```
+
+`memory_write` params:
+- `kind` (required) — one of:
+
+  | kind | Holds | Section |
+  |------|-------|---------|
+  | `preference` | What the user/team wants, and how | `decisions` |
+  | `environment` | How this machine/repo/service is set up | `facts` |
+  | `procedure` | A validated how-to (peer of the runtime's own `tool-contract` entries) | `decisions` |
+  | `pitfall` | Negative knowledge — what failed and why | `risks` |
+  | `reference` | A pointer to a doc, URL, or wiki page | `artifacts` |
+
+- `value` (required) — the knowledge to remember.
+- `key` (optional) — a stable identifier; when omitted, one is derived from `kind` + a slug of `value` so repeated writes refresh the same record instead of duplicating it.
+- `tags` (optional array) — free-form labels, used by `memory_search`'s scorer.
+- `ttlDays` (optional) — expire the record after N days.
+
+**Writes are always session-scoped and gated before reaching global storage.** A `memory_write` call can be driven by untrusted tool output (a web page, an MCP response), so a single call is never enough to plant a permanent global "fact": `_autoPromoteSessionToGlobal` only promotes a model-authored (`provenance.source==="model"`) entry once its `confirmCount` reaches 2 — i.e. the same keyed record was written independently in two separate runs. Durable kinds promote regardless of `memorypromote` (so `pitfall`→`risks` and `reference`→`artifacts` promote even though those sections aren't in the default promote list), but always subject to that confirmation gate. `usememorywrite=false` disables the action entirely; `memorywritemax` (default `20`) caps writes per run.
 
 ### Lifecycle Hooks
 
@@ -2937,7 +2967,13 @@ Mini-A then updates memory incrementally after:
 
 ### Context Injection and `memory_search`
 
-By default (`memoryinject=summary`), the step context contains only a compact section-count map — e.g. `workingMemory:{facts:12,decisions:3}` — instead of all entry content. This reduces per-step memory token overhead by ~95% while letting the model fetch entries on demand using the built-in `memory_search` action:
+`memoryinject` controls how much of working memory reaches the model automatically, and defaults to `relevant` when `usememory=true` (explicitly passing `summary` keeps the older behaviour byte-for-byte):
+
+- **`summary`** — the step context carries only a compact section-count map, e.g. `workingMemory:{facts:12,decisions:3}`. Nothing is auto-injected; the model must call `memory_search`.
+- **`relevant`** (default under `usememory=true`) — same lean state block, **plus** a one-time block of goal-relevant durable memory injected into the system rules at run start (mirrors how validated tool-call contracts are injected), so the model doesn't have to guess to search for what it already knows. Only durable `memory_write` kinds and validated entries are eligible — runtime bookkeeping (tool observations, run outcomes) is never auto-injected. Stale and superseded entries are excluded. Capped by `memoryrelevantcap` (default `8`). On a cold store with no durable records this costs nothing.
+- **`full`** — every compact entry is embedded in every step prompt (the pre-`relevant` behaviour for users who want the whole store visible at all times).
+
+`memory_search` remains available in `summary` and `relevant` modes for on-demand lookups beyond what was auto-injected:
 
 ```json
 {
@@ -2952,7 +2988,7 @@ By default (`memoryinject=summary`), the step context contains only a compact se
 - `section` (optional) — restrict to one section (`facts`, `decisions`, `evidence`, `openQuestions`, `hypotheses`, `artifacts`, `risks`, `summaries`)
 - `limit` (optional, default `10`) — max results per section
 
-Results are keyword-scored (word overlap) and returned as TOON text in the step context. Use `memoryinject=full` to restore the previous behaviour of embedding all compact entries in every step prompt.
+Results are keyword-scored (word overlap, plus bonuses for key match, `validated`, matching `taskScope`, tag overlap, confirmation count, and recency; a `stale` penalty) and returned as TOON text in the step context.
 
 Tool output is retained as a keyed, bounded observation rather than a raw response. Repeating the same operation and target refreshes that record; large output remains in the existing temporary spill file. A successful call may create a validated procedural contract in `decisions`; schema failures only create short-lived risks and never teach an invocation shape.
 
@@ -2964,11 +3000,47 @@ Runtime helpers available in code:
 - `_memoryRemove(section, id)`
 - `_memoryAttachEvidence(section, id, evidenceId)`
 - `_memoryMarkStatus(section, id, status, supersededBy)`
-- `_memorySearch(query, { section, maxPerSection })` — keyword search across all active managers; returns `{ sectionName: [compactEntries] }`
+- `_memorySearch(query, { section, maxPerSection, kind, taskScope })` — keyword search across all active managers; returns `{ sectionName: [compactEntries] }`
+- `_memoryWrite(params, args)` — the `memory_write` action's implementation; always session-scoped and keyed
+- `_buildRelevantMemoryBlock(args)` — the goal-relevant durable-memory block injected under `memoryinject=relevant`
 - `promoteSessionMemory(section, ids)` (explicit session → global promotion)
 - `clearSessionMemory(sessionId)` (session cleanup hook)
 
 These wrappers keep state sync/persistence centralized (instead of ad-hoc direct writes).
+
+### Markdown Persistence For The Durable Store
+
+By default the durable (global) store persists to the `memorych` channel — a JSON dump, not meant to be hand-read. Setting `memorymdroot=<directory>` switches the global store to markdown instead (session memory is unaffected — it stays on `memorych`/`memorysessionch`, which fits its higher write frequency better):
+
+```bash
+# persisted session memory, via an explicit dedicated channel — needed for memory_write
+# records to ever promote: promotion requires the same keyed record to be written in two
+# separate runs (confirmCount >= 2), which can't happen if session memory resets each run
+mini-a goal="..." usememory=true memorymdroot=/path/to/memory \
+  memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))'
+
+# global store is markdown, session memory is in-process only (no persistence across runs) --
+# fine for read-only use of existing durable memory, but model-authored memory_write records
+# can never reach confirmCount >= 2 and so never promote to the global store
+mini-a goal="..." usememory=true memorymdroot=/path/to/memory
+```
+
+`memoryuser=true` is the convenience preset for *channel-backed* global+session memory (it auto-configures `memorych`); it isn't meant to be combined with `memorymdroot` — that would still create the unused global channel file. Set `memorymdroot` directly with plain `usememory=true` instead, as above.
+
+Layout:
+```
+<memorymdroot>/
+  MEMORY.md                    # generated index, one line per record — do not hand-edit
+  .mini-a-memory-meta.json     # schemaVersion/revision/createdAt/updatedAt
+  facts/<id>.md
+  decisions/<id>.md
+  evidence/<id>.md
+  ...one directory per section, one file per record
+```
+
+Each record file is YAML front matter (every non-default field: `kind`, `key`, `status`, `tags`, timestamps, `confirmCount`, `stale`, `supersededBy`, `validated`, `taskScope`, `provenance`, `evidenceRefs`, `meta`, …) followed by the entry's `value` as the body. Files are only rewritten when their content actually changes, and a file for any entry no longer in the in-memory store is deleted on the next save — so a git diff of the directory reflects real changes, not save-cycle noise. **This includes entries dropped by normal compaction** (`memorymaxpersection`, `memorymaxentries`): once an entry is evicted, its `.md` file is removed on the next save, the same as an explicit `_memoryRemove`. That loss was invisible inside a JSON channel dump; with markdown it deletes a file that may have been hand-edited, so raise `memorymaxpersection`/`memorymaxentries` if the durable store needs to hold more than the defaults (80/500). Loading tolerates hand-edits: a file's body can be edited freely, and a file with missing or unparsable front matter is skipped (with a warning) rather than failing the whole load.
+
+`memorymdroot` replaces `memorych` for the global store — set one or the other, not both, for the global tier. It also works with `mini-a dream=true` (the memory dream reads/writes the markdown root, and backs up the pre-dream state under `<memorymdroot>/.predream-<timestamp>/`) and with the `/memoryman` TUI.
 
 ---
 
@@ -3057,7 +3129,8 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `memorych` | string | - | SLON/JSON global memory channel definition (required for memory dream) |
+| `memorych` | string | - | SLON/JSON global memory channel definition (required for memory dream unless `memorymdroot` is set) |
+| `memorymdroot` | string | - | Markdown root for the global store — replaces `memorych` for the memory dream when set |
 | `memorysessionch` | string | - | SLON/JSON session memory channel |
 | `memorysessionid` | string | - | Session namespace string — use the same value as `conversation=` during the goal |
 | `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to help surface insights |
@@ -3077,8 +3150,8 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 
 ### Memory dream internals
 
-1. Channels are opened using the provided SLON/JSON definitions.
-2. Global memory (and optionally session memory) is loaded via `MiniAMemoryManager.loadFromChannel`.
+1. Channels are opened using the provided SLON/JSON definitions (skipped for the global store when `memorymdroot` is set).
+2. Global memory (and optionally session memory) is loaded via `MiniAMemoryManager.loadFromChannel`, or `loadFromMarkdown` for the global store when `memorymdroot` is set.
 3. If `auditch` is provided, the most recent `maxauditrecords` audit entries are loaded.
 4. The LLM receives a system prompt describing the consolidation rules, the full memory snapshot, and the audit events.
 5. Consolidation rules:
@@ -3088,7 +3161,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
    - **SURFACE** new cross-cutting insights as new `summaries` entries.
    - **PRESERVE** all IDs of retained entries unchanged; assign new 16-char hex IDs to new entries.
 6. The consolidated snapshot is validated against the `MiniAMemoryManager` schema.
-7. Unless `dryrun=true`, the pre-dream state is backed up to a sibling namespace (`<ns>::predream-<ISO-timestamp>`), then the consolidated snapshot is written back.
+7. Unless `dryrun=true`, the pre-dream state is backed up — to a sibling namespace (`<ns>::predream-<ISO-timestamp>`) for the channel-backed store, or to `<memorymdroot>/.predream-<ISO-timestamp>/` for the markdown-backed store — then the consolidated snapshot is written back.
 8. A summary is printed: entries before/after, dropped count, stale-marked count.
 
 ### Wiki dream internals
@@ -3137,6 +3210,11 @@ mini-a dream=true \
   memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
   memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))' \
   memorysessionid='research-2026' \
+  model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Memory dream against a markdown-backed global store (memorymdroot instead of memorych)
+mini-a dream=true \
+  memorymdroot=/path/to/memory \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Wiki dream

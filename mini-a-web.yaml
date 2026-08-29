@@ -664,8 +664,26 @@ help:
     example  : "30"
     mandatory: false
   - name     : memoryinject
-    desc     : Memory context injection mode (summary or full)
-    example  : "summary"
+    desc     : "Memory context injection mode: summary, relevant (default when usememory=true), or full"
+    example  : "relevant"
+    mandatory: false
+    options  : ["summary", "relevant", "full"]
+  - name     : memoryrelevantcap
+    desc     : Maximum durable memory entries auto-injected when memoryinject=relevant
+    example  : "8"
+    mandatory: false
+  - name     : usememorywrite
+    desc     : Let the model record durable typed memory via the memory_write action
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memorywritemax
+    desc     : Maximum memory_write calls allowed per run
+    example  : "20"
+    mandatory: false
+  - name     : memorymdroot
+    desc     : Directory root for markdown-backed global memory persistence; replaces memorych for the global store when set
+    example  : "/tmp/mini-a-memory"
     mandatory: false
   - name     : usewiki
     desc     : Enable the wiki knowledge base
@@ -1881,6 +1899,10 @@ jobs:
       memorypromote  : isString().default(__)
       memorystaledays: toNumber().isNumber().default(__)
       memoryinject   : isString().default(__)
+      memoryrelevantcap: toNumber().isNumber().default(__)
+      usememorywrite : toBoolean().isBoolean().default(__)
+      memorywritemax : toNumber().isNumber().default(__)
+      memorymdroot   : isString().default(__)
       usewiki        : toBoolean().isBoolean().default(false)
       wikiaccess     : isString().default(__)
       wikibackend    : isString().default(__)

@@ -2979,6 +2979,116 @@
     ow.test.assert(mgr.purgeExpired() === 1, true, "Expired record should be purged")
   }
 
+  exports.testMemoryMarkdownRoundTrip = function() {
+    var root = java.io.File.createTempFile("mini-a-memory-md-", "").getCanonicalPath()
+    io.rm(root)
+    try {
+      var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      mgr.append("facts", { value: "The staging DB runs on port 5433", kind: "environment", key: "env::staging-db-port", tags: ["db", "staging"] })
+      mgr.upsert("decisions", "pref::squash", {
+        value: "Always squash commits before merging", kind: "preference", provenance: { source: "model" }
+      })
+
+      ow.test.assert(mgr.saveToMarkdown(root), true, "saveToMarkdown should succeed")
+      ow.test.assert(io.fileExists(root + "/MEMORY.md"), true, "A generated MEMORY.md index should exist")
+      ow.test.assert(io.fileExists(root + "/.mini-a-memory-meta.json"), true, "A meta file should exist")
+
+      var mgr2 = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      ow.test.assert(mgr2.loadFromMarkdown(root), true, "loadFromMarkdown should succeed")
+      var facts = mgr2.getSectionEntries("facts")
+      ow.test.assert(facts.length, 1, "One fact should round-trip")
+      ow.test.assert(facts[0].value, "The staging DB runs on port 5433", "Fact value should round-trip")
+      ow.test.assert(facts[0].kind, "environment", "kind should round-trip")
+      ow.test.assert(isArray(facts[0].tags) && facts[0].tags.indexOf("staging") >= 0, true, "tags should round-trip")
+      var decisions = mgr2.getSectionEntries("decisions")
+      ow.test.assert(decisions[0].key, "pref::squash", "key should round-trip")
+      ow.test.assert(decisions[0].kind, "preference", "kind should round-trip")
+      ow.test.assert(decisions[0].provenance.source, "model", "provenance should round-trip")
+    } finally {
+      try { io.rm(root) } catch(ignoreRm) {}
+    }
+  }
+
+  exports.testMemoryMarkdownSurvivesHandEditsAndSkipsCorruptFiles = function() {
+    var root = java.io.File.createTempFile("mini-a-memory-md-edit-", "").getCanonicalPath()
+    io.rm(root)
+    try {
+      var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      var e1 = mgr.append("facts", { value: "original value" })
+      mgr.saveToMarkdown(root)
+
+      var factFile = root + "/facts/" + e1.id + ".md"
+      io.writeFileString(factFile, io.readFileString(factFile).replace("original value", "hand-edited value"))
+
+      var mgr2 = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      mgr2.loadFromMarkdown(root)
+      ow.test.assert(mgr2.getSectionEntries("facts")[0].value, "hand-edited value", "A hand-edited file's body should survive reload")
+
+      io.writeFileString(root + "/facts/corrupt.md", "no front matter here, just plain text")
+      var mgr3 = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      var okDespiteCorruption = mgr3.loadFromMarkdown(root)
+      ow.test.assert(okDespiteCorruption, true, "loadFromMarkdown should not fail when one file has no front matter")
+      ow.test.assert(mgr3.getSectionEntries("facts").length, 1, "The corrupt file should be skipped, not loaded as a record")
+    } finally {
+      try { io.rm(root) } catch(ignoreRm) {}
+    }
+  }
+
+  exports.testMemoryMarkdownOnlyRewritesChangedFiles = function() {
+    var root = java.io.File.createTempFile("mini-a-memory-md-diff-", "").getCanonicalPath()
+    io.rm(root)
+    try {
+      var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      var e1 = mgr.append("facts", { value: "stable fact" })
+      mgr.saveToMarkdown(root)
+      var factFile = root + "/facts/" + e1.id + ".md"
+      var before = io.fileInfo(factFile).lastModified
+      sleep(1100)
+      mgr.saveToMarkdown(root)
+      var after = io.fileInfo(factFile).lastModified
+      ow.test.assert(before, after, "Re-saving with no changes should not rewrite an unchanged record's file")
+    } finally {
+      try { io.rm(root) } catch(ignoreRm) {}
+    }
+  }
+
+  exports.testMemoryMarkdownDeletesFilesForRemovedEntries = function() {
+    var root = java.io.File.createTempFile("mini-a-memory-md-remove-", "").getCanonicalPath()
+    io.rm(root)
+    try {
+      var mgr = new MiniAMemoryManager({ enabled: true, compactEvery: 100 })
+      var e1 = mgr.append("facts", { value: "fact one" })
+      var e2 = mgr.append("facts", { value: "fact two" })
+      mgr.saveToMarkdown(root)
+      mgr.remove("facts", e1.id)
+      mgr.saveToMarkdown(root)
+      ow.test.assert(io.fileExists(root + "/facts/" + e1.id + ".md"), false, "Removing an entry should delete its markdown file")
+      ow.test.assert(io.fileExists(root + "/facts/" + e2.id + ".md"), true, "Other entries' files should be untouched")
+    } finally {
+      try { io.rm(root) } catch(ignoreRm) {}
+    }
+  }
+
+  exports.testAgentMarkdownGlobalMemoryPersistsAndReloads = function() {
+    var root = java.io.File.createTempFile("mini-a-agent-memory-md-", "").getCanonicalPath()
+    io.rm(root)
+    try {
+      var agent = createAgent()
+      agent._agentState = {}
+      agent._initWorkingMemory({ usememory: true, memoryscope: "global", memorymdroot: root, debug: false, verbose: false }, agent._agentState)
+      agent._memoryAppend("decisions", "Persist this decision via markdown", { provenance: { source: "test" } })
+
+      ow.test.assert(io.fileExists(root + "/MEMORY.md"), true, "A markdown-backed agent write should persist to the configured root")
+
+      var second = createAgent()
+      second._agentState = {}
+      second._initWorkingMemory({ usememory: true, memoryscope: "global", memorymdroot: root, debug: false, verbose: false }, second._agentState)
+      ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(d) { return d.value === "Persist this decision via markdown" }), true, "A second agent pointed at the same markdown root should see the persisted decision")
+    } finally {
+      try { io.rm(root) } catch(ignoreRm) {}
+    }
+  }
+
   exports.testValidatedToolContractsOnly = function() {
     var agent = createAgent()
     agent._agentState = {}
@@ -3023,6 +3133,209 @@
     agent._recordValidatedToolContract("proxy-dispatch", { action: "call", tool: "http-request", arguments: { url: "https://example.invalid" } }, "evidence-1", { goal: "collect daily report" })
     var contracts = agent._buildValidatedToolContracts({ goal: "check an unrelated endpoint" })
     ow.test.assert(contracts.length, 1, "General tool contracts must survive goal rewording")
+  }
+
+  exports.testMemoryWriteRecordsDurableKindWithTags = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    var result = agent._memoryWrite({ kind: "preference", value: "Always run tests before committing", tags: ["Testing", "Workflow"] }, { usememory: true })
+    ow.test.assert(result.ok, true, "memory_write should succeed for a valid durable kind")
+    ow.test.assert(result.section, "decisions", "preference should default to the decisions section")
+    var entries = agent._sessionMemoryManager.getSectionEntries("decisions")
+    var entry = entries.filter(function(e) { return e.key === result.key })[0]
+    ow.test.assert(isObject(entry), true, "Written entry should be in session memory")
+    ow.test.assert(entry.kind, "preference", "kind should be stored on the entry")
+    ow.test.assert(entry.provenance.source, "model", "provenance.source should record the model as author")
+    ow.test.assert(entry.tags.indexOf("testing") >= 0, true, "tags should be normalized to lowercase and round-trip")
+    var compactEntry = agent._sessionMemoryManager.snapshotCompact().decisions.filter(function(e) { return e.key === result.key })[0]
+    ow.test.assert(isArray(compactEntry.tg) && compactEntry.tg.indexOf("testing") >= 0, true, "tags should appear in the compact snapshot as 'tg'")
+  }
+
+  exports.testMemoryWriteRejectsInvalidKindAndEnforcesPerRunCap = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    agent._memoryWriteMax = 2
+    var bad = agent._memoryWrite({ kind: "nonsense", value: "x" }, {})
+    ow.test.assert(bad.ok, false, "An unknown kind must be rejected")
+    var ok1 = agent._memoryWrite({ kind: "environment", value: "first environment fact" }, {})
+    var ok2 = agent._memoryWrite({ kind: "environment", value: "second environment fact" }, {})
+    ow.test.assert(ok1.ok && ok2.ok, true, "Writes within the per-run cap should succeed")
+    var ok3 = agent._memoryWrite({ kind: "environment", value: "third environment fact" }, {})
+    ow.test.assert(ok3.ok, false, "A write past the per-run cap should be rejected")
+  }
+
+  exports.testMemoryWriteDerivesStableKeyAndConfirms = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    var first = agent._memoryWrite({ kind: "pitfall", value: "Never run rm -rf in the repo root" }, {})
+    var second = agent._memoryWrite({ kind: "pitfall", value: "Never run rm -rf in the repo root" }, {})
+    ow.test.assert(first.key, second.key, "The same value should derive the same key when none is supplied")
+    ow.test.assert(second.confirmCount, 2, "Re-writing the same key should bump confirmCount rather than duplicate")
+  }
+
+  exports.testAutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice = function() {
+    var channelName = "__mini_a_test_gate_memory_" + nowNano()
+    var sessionChannelName = "__mini_a_test_gate_session_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    try { $ch(sessionChannelName).create("simple") } catch(ignoreCreate) {}
+
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "gate-1",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memorysessionch: stringify({ name: sessionChannelName, type: "simple" }, __, ""),
+      debug: false, verbose: false
+    }, agent._agentState)
+
+    var write1 = agent._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
+    ow.test.assert(write1.ok, true, "First memory_write should succeed")
+    agent._autoPromoteSessionToGlobal()
+    var globalAfterFirst = agent._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })
+    ow.test.assert(globalAfterFirst.length === 0, true, "A single model-authored write must not promote to global (confirmCount<2 gate)")
+
+    var write2 = agent._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
+    ow.test.assert(write2.confirmCount, 2, "A second identical write should bump confirmCount to 2")
+    agent._autoPromoteSessionToGlobal()
+    var globalAfterSecond = agent._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })
+    ow.test.assert(globalAfterSecond.length === 1, true, "A twice-confirmed model-authored entry should promote to global")
+
+    // "pitfall" -> risks is not in the default (empty) memorypromote list; it must still
+    // promote once confirmed, because durable kinds promote regardless of memorypromote.
+    var pitfall1 = agent._memoryWrite({ kind: "pitfall", value: "Do not deploy on Fridays" }, {})
+    agent._autoPromoteSessionToGlobal()
+    ow.test.assert(agent._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.key === pitfall1.key }).length === 0, true, "An unconfirmed pitfall must not promote")
+    agent._memoryWrite({ kind: "pitfall", value: "Do not deploy on Fridays" }, {})
+    agent._autoPromoteSessionToGlobal()
+    ow.test.assert(agent._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.key === pitfall1.key }).length === 1, true, "A confirmed pitfall should promote to the risks section despite not being in memorypromote")
+
+    // Runtime-generated risks (e.g. tool-failure) must not be swept up by the pitfall promotion path
+    agent._memoryUpsert("risks", "tool-failure:some-tool", "Tool 'some-tool' failed: timeout", { kind: "tool-failure", memoryScope: "session" })
+    agent._autoPromoteSessionToGlobal()
+    ow.test.assert(agent._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.kind === "tool-failure" }).length === 0, true, "Non-durable-kind risks entries must not be promoted")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+    try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testBuildRelevantMemoryBlockFiltersDurableAndCaps = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+
+    agent._memoryWrite({ kind: "environment", value: "The staging database runs on port 5433 not 5432" }, {})
+    agent._memoryWrite({ kind: "pitfall", value: "Database migrations fail silently on port 5432" }, {})
+    agent._memoryAppend("facts", "database port scan completed", { provenance: { source: "tool", event: "tool-output" } })
+    var staleWrite = agent._memoryWrite({ kind: "environment", value: "The old database port was 5431" }, {})
+    agent._memoryMarkStatus("facts", staleWrite.id, "superseded", "n/a")
+
+    var block = agent._buildRelevantMemoryBlock({ goal: "why does the database migration fail on port 5432", memoryrelevantcap: 8 })
+    var values = block.map(function(b) { return b.value })
+    ow.test.assert(values.indexOf("The staging database runs on port 5433 not 5432") >= 0, true, "Durable environment entry matching the goal should be included")
+    ow.test.assert(values.indexOf("Database migrations fail silently on port 5432") >= 0, true, "Durable pitfall entry matching the goal should be included")
+    ow.test.assert(values.indexOf("database port scan completed") < 0, true, "Non-durable runtime noise must not be auto-injected")
+    ow.test.assert(values.indexOf("The old database port was 5431") < 0, true, "Stale durable entries must be excluded")
+
+    var capped = agent._buildRelevantMemoryBlock({ goal: "database migration port", memoryrelevantcap: 1 })
+    ow.test.assert(capped.length <= 1, true, "Result should respect memoryrelevantcap")
+  }
+
+  exports.testResolveMemoryInjectModeDefaultsToRelevantWhenUseMemory = function() {
+    var agent = createAgent()
+    ow.test.assert(agent._resolveMemoryInjectMode(true, __), "relevant", "usememory=true with no explicit mode should default to 'relevant'")
+    ow.test.assert(agent._resolveMemoryInjectMode(false, __), "summary", "usememory=false with no explicit mode should keep defaulting to 'summary'")
+    ow.test.assert(agent._resolveMemoryInjectMode(true, "full"), "full", "An explicit mode should be respected")
+    ow.test.assert(agent._resolveMemoryInjectMode(true, "bogus"), "relevant", "An invalid mode should fall back to the usememory-based default")
+    ow.test.assert(agent._resolveMemoryInjectMode(false, "bogus"), "summary", "An invalid mode with usememory=false should fall back to 'summary'")
+  }
+
+  exports.testMemorySearchScorerRanksConfirmedRecentOverSingleOld = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+
+    var oldEntry = agent._memoryWrite({ kind: "environment", value: "The deploy pipeline uses a canary rollout strategy" }, {})
+    var oldDate = new Date(Date.now() - 20 * 86400000).toISOString()
+    agent._sessionMemoryManager.update("facts", oldEntry.id, { confirmedAt: oldDate })
+
+    agent._memoryWrite({ kind: "environment", value: "The deploy pipeline uses a canary rollout strategy variant" }, {})
+    agent._memoryWrite({ kind: "environment", value: "The deploy pipeline uses a canary rollout strategy variant" }, {}) // confirmCount=2, recent
+
+    var results = agent._memorySearch("deploy pipeline canary rollout strategy", { section: "facts", maxPerSection: 5 })
+    ow.test.assert(isArray(results.facts) && results.facts.length >= 2, true, "Both entries should match the query")
+    ow.test.assert(results.facts[0].v.indexOf("variant") >= 0, true, "A recently-confirmed (confirmCount=2) entry should outrank an old single-confirmation entry")
+  }
+
+  // Regression test: init() must initialize memory (_initWorkingMemory) BEFORE it builds the
+  // system prompt, or the relevant-memory (and validated tool contract) injections silently
+  // see no memory managers and never fire. This must hold for init() called on its own --
+  // the interactive console (mini-a-con.js) calls agent.init(args) directly, before start()
+  // -- not just for the _startInternal->init() path.
+  exports.testMemoryInitializationOrderInjectsRelevantMemoryIntoSystemPrompt = function() {
+    var channelName = "__mini_a_test_order_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    var seedMgr = new MiniAMemoryManager({})
+    seedMgr.upsert("decisions", "preference::squash", {
+      value: "Always squash commits before merging", kind: "preference",
+      provenance: { source: "model" }, confirmCount: 2
+    })
+    seedMgr.saveToChannel(channelName, "")
+
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var args = {
+      goal: "please squash the commits before merging",
+      usememory: true,
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memoryscope: "global",
+      memoryinject: "relevant"
+    }
+    // No manual _initWorkingMemory call here -- init() must do it internally.
+    agent.init(args)
+
+    ow.test.assert(isString(agent._systemInst) && agent._systemInst.indexOf("Durable knowledge remembered") >= 0, true, "Relevant durable memory should reach the system prompt when memory is initialized before init()")
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testMemoryInitSkipsReloadWhenInitCalledTwiceWithSameArgs = function() {
+    // Mirrors mini-a-con.js, which calls agent.init(_args) directly and then
+    // agent.start(_args) (whose _startInternal calls this.init(args) again with the
+    // same reference). Memory init must run only once per args object, not reload the
+    // global manager (and re-read the channel/markdown root) a second time.
+    var channelName = "__mini_a_test_reinit_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+    var seedMgr = new MiniAMemoryManager({})
+    seedMgr.upsert("decisions", "preference::squash", {
+      value: "Always squash commits before merging", kind: "preference",
+      provenance: { source: "model" }, confirmCount: 2
+    })
+    seedMgr.saveToChannel(channelName, "")
+
+    var agent = createAgent()
+    agent.fnI = function() {}
+    var args = {
+      goal: "please squash the commits before merging",
+      usememory: true,
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      memoryscope: "global",
+      memoryinject: "relevant"
+    }
+
+    agent.init(args)
+    var managerAfterFirstInit = agent._globalMemoryManager
+
+    agent.init(args)
+    ow.test.assert(agent._globalMemoryManager === managerAfterFirstInit, true, "Calling init() twice with the same args reference must not rebuild the global memory manager")
+    ow.test.assert(agent._memoryInitializedArgs === args, true, "_memoryInitializedArgs should track the args object memory was initialized for")
+
+    var otherArgs = merge({}, args)
+    agent.init(otherArgs)
+    ow.test.assert(agent._memoryInitializedArgs === otherArgs, true, "A genuinely different args object must still re-run memory init")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
   }
 
   exports.testAgentCapabilitiesEnableUndefinedFlags = function() {
