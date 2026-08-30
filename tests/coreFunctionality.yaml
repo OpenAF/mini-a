@@ -607,10 +607,10 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMemoryMarkdownDeletesFilesForRemovedEntries
 
-- name: MiniA Core Tests::AgentMarkdownGlobalMemoryPersistsAndReloads
+- name: MiniA Core Tests::AgentMarkdownChannelGlobalMemoryPersistsAndReloads
   from: MiniA Core Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testAgentMarkdownGlobalMemoryPersistsAndReloads
+  exec: args.func = args.tests.testAgentMarkdownChannelGlobalMemoryPersistsAndReloads
 
 - name: MiniA Core Tests::ValidatedToolContractsOnly
   from: MiniA Core Tests::Init
@@ -1035,7 +1035,7 @@ todo:
 - MiniA Core Tests::MemoryMarkdownSurvivesHandEditsAndSkipsCorruptFiles
 - MiniA Core Tests::MemoryMarkdownOnlyRewritesChangedFiles
 - MiniA Core Tests::MemoryMarkdownDeletesFilesForRemovedEntries
-- MiniA Core Tests::AgentMarkdownGlobalMemoryPersistsAndReloads
+- MiniA Core Tests::AgentMarkdownChannelGlobalMemoryPersistsAndReloads
 - MiniA Core Tests::ValidatedToolContractsOnly
 - MiniA Core Tests::ToolArgsPrevalidationAndRepair
 - MiniA Core Tests::ToolContractSurvivesGoalRewording

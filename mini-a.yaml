@@ -879,10 +879,11 @@ help:
     desc     : Maximum memory_write calls allowed per run
     example  : "20"
     mandatory: false
-  - name     : memorymdroot
-    desc     : Directory root for markdown-backed global memory persistence (one .md file per record, front-matter metadata); when set, replaces memorych for the global store
-    example  : "/tmp/mini-a-memory"
+  - name     : memorymd
+    desc     : Store global memory as path-keyed markdown strings in memorych (one .md record per entry)
+    example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : toolargcheck
     desc     : Reject schema-declared missing parameters and unknown parameters when additionalProperties is false
     example  : "true"
@@ -1336,7 +1337,7 @@ jobs:
         memoryrelevantcap: memoryrelevantcap
         usememorywrite : usememorywrite
         memorywritemax : memorywritemax
-        memorymdroot   : memorymdroot
+        memorymd       : memorymd
         toolargcheck    : toolargcheck
         toolargrepair   : toolargrepair
         usewiki        : usewiki
@@ -1583,7 +1584,7 @@ jobs:
       memoryrelevantcap: toNumber.isNumber.default(__)
       usememorywrite : toBoolean.isBoolean.default(__)
       memorywritemax : toNumber.isNumber.default(__)
-      memorymdroot   : isString.default(__)
+      memorymd       : toBoolean.isBoolean.default(false)
       toolargcheck    : toBoolean.isBoolean.default(true)
       toolargrepair   : toBoolean.isBoolean.default(true)
       usewiki        : toBoolean.isBoolean.default(false)

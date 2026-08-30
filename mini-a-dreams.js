@@ -273,6 +273,15 @@ MiniADreams.prototype._backupMemoryToMarkdown = function(manager, backupRoot) {
   } catch(ignoreBackup) { return false }
 }
 
+MiniADreams.prototype._backupMemoryToMarkdownChannel = function(manager, chName, backupPrefix) {
+  try {
+    var snap = manager.snapshot()
+    var tmpMgr = new MiniAMemoryManager({})
+    tmpMgr.init(snap)
+    return tmpMgr.saveToMarkdownChannel(chName, backupPrefix)
+  } catch(ignoreBackup) { return false }
+}
+
 // ── memory dream ──────────────────────────────────────────────
 
 MiniADreams.prototype.dreamMemory = function(opts) {
@@ -285,16 +294,12 @@ MiniADreams.prototype.dreamMemory = function(opts) {
   self._log("💤 [dreams] Starting memory dream pass" + (isDryRun ? " (dry-run)" : "") + "...")
 
   // ── 1. Set up channels ────────────────────────────────────
-  // memorymdroot replaces memorych for the global store only -- same "instead of" rule
-  // as the regular agent run (mini-a.js _initWorkingMemory/_persistWorkingMemory).
-  var mdRoot = isString(self._args.memorymdroot) && self._args.memorymdroot.trim().length > 0 ? self._args.memorymdroot.trim() : __
-  var globalChDef = __
-  if (isUnDef(mdRoot)) {
-    globalChDef = self._createChannelFromDef(self._args.memorych, "_mini_a_memory_channel", "simple")
-    if (!isMap(globalChDef)) {
-      self._log("[dreams:memory] No global memory channel configured (memorych). Skipping.")
-      return { ok: false, reason: "no-memorych" }
-    }
+  // memorymd serializes the global store as path-keyed markdown strings in memorych.
+  var memoryMd = toBoolean(self._args.memorymd) === true
+  var globalChDef = self._createChannelFromDef(self._args.memorych, "_mini_a_memory_channel", "simple")
+  if (!isMap(globalChDef)) {
+    self._log("[dreams:memory] No global memory channel configured (memorych). Skipping.")
+    return { ok: false, reason: "no-memorych" }
   }
 
   var sessionChDef  = self._createChannelFromDef(self._args.memorysessionch, "_mini_a_session_memory_channel", "simple")
@@ -303,9 +308,9 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
   // ── 2. Load memory ────────────────────────────────────────
   var globalMgr = new MiniAMemoryManager({})
-  var globalLoaded = isString(mdRoot) ? globalMgr.loadFromMarkdown(mdRoot) : globalMgr.loadFromChannel(globalChDef.name, "")
+  var globalLoaded = memoryMd ? globalMgr.loadFromMarkdownChannel(globalChDef.name) : globalMgr.loadFromChannel(globalChDef.name, "")
   if (!globalLoaded) {
-    self._log("[dreams:memory] Global memory " + (isString(mdRoot) ? "markdown root" : "channel") + " is empty or unreadable — nothing to consolidate.")
+    self._log("[dreams:memory] Global memory " + (memoryMd ? "markdown channel records" : "channel") + " is empty or unreadable — nothing to consolidate.")
     return { ok: false, reason: "empty-source" }
   }
 
@@ -333,9 +338,9 @@ MiniADreams.prototype.dreamMemory = function(opts) {
     return { ok: false, reason: "no-llm" }
   }
 
-  // Helper: consolidate one manager's memory via LLM. mdRootParam is only set for the
-  // global pass when memorymdroot is configured; session memory always uses chName/ns.
-  var consolidateOne = function(mgr, label, chName, ns, mdRootParam) {
+  // Helper: consolidate one manager's memory via LLM. memoryMdParam is only set for the
+  // global pass; session memory always uses ordinary channel records.
+  var consolidateOne = function(mgr, label, chName, ns, memoryMdParam) {
     var tConsolidate = Date.now()
     var snap = self._normalizeLegacyArtifacts(mgr.snapshot())
     var beforeCounts = {}
@@ -438,11 +443,11 @@ MiniADreams.prototype.dreamMemory = function(opts) {
 
     // Backup pre-dream state
     var backedUp
-    if (isString(mdRootParam)) {
-      var backupRoot = mdRootParam + "/.predream-" + new Date().toISOString().replace(/[:.]/g, "-")
-      backedUp = self._backupMemoryToMarkdown(mgr, backupRoot)
+    if (memoryMdParam === true) {
+      var backupPrefix = ".predream-" + new Date().toISOString().replace(/[:.]/g, "-")
+      backedUp = self._backupMemoryToMarkdownChannel(mgr, chName, backupPrefix)
       if (backedUp) {
-        self._log("[dreams:memory:" + label + "] Pre-dream backup saved to '" + backupRoot + "'.")
+        self._log("[dreams:memory:" + label + "] Pre-dream backup saved under channel path '" + backupPrefix + "/'.")
       } else {
         self._log("[dreams:memory:" + label + "] WARNING: pre-dream backup failed — proceeding without backup.")
       }
@@ -472,10 +477,10 @@ MiniADreams.prototype.dreamMemory = function(opts) {
     }
 
     var saved
-    if (isString(mdRootParam)) {
-      saved = saveMgr.saveToMarkdown(mdRootParam)
+    if (memoryMdParam === true) {
+      saved = saveMgr.saveToMarkdownChannel(chName)
       if (saved) {
-        self._log("[dreams:memory:" + label + "] Written to markdown root '" + mdRootParam + "'.")
+        self._log("[dreams:memory:" + label + "] Written as markdown records to channel '" + chName + "'.")
       } else {
         self._log("[dreams:memory:" + label + "] WARNING: saveToMarkdown returned false.")
       }
@@ -493,7 +498,7 @@ MiniADreams.prototype.dreamMemory = function(opts) {
   var results = {}
 
   // Global memory
-  results.global = consolidateOne(globalMgr, "global", isMap(globalChDef) ? globalChDef.name : __, "", mdRoot)
+  results.global = consolidateOne(globalMgr, "global", globalChDef.name, "", memoryMd)
   if (!isObject(results.global) || results.global.ok !== true) {
     self._log("💤 [dreams] Memory dream complete with errors.")
     return { ok: false, results: results }
@@ -536,11 +541,12 @@ var _WIKI_DREAM_GOAL =
 // the two passes run together, otherwise loads one from memorych for a standalone wiki dream.
 MiniADreams.prototype._wikiLintMemoryManager = function() {
   if (isObject(this._lintMemoryManager)) return this._lintMemoryManager
-  var mdRoot = isString(this._args.memorymdroot) && this._args.memorymdroot.trim().length > 0 ? this._args.memorymdroot.trim() : __
+  var memoryMd = toBoolean(this._args.memorymd) === true
   try {
     var mgr = new MiniAMemoryManager({})
-    if (isString(mdRoot)) {
-      if (mgr.loadFromMarkdown(mdRoot) !== true) return __
+    if (memoryMd) {
+      var markdownChDef = this._createChannelFromDef(this._args.memorych, "_mini_a_global_memory_channel", "simple")
+      if (!isMap(markdownChDef) || mgr.loadFromMarkdownChannel(markdownChDef.name) !== true) return __
     } else {
       var chDef = this._createChannelFromDef(this._args.memorych, "_mini_a_global_memory_channel", "simple")
       if (!isMap(chDef)) return __

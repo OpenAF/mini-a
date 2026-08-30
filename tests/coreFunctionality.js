@@ -3069,23 +3069,28 @@
     }
   }
 
-  exports.testAgentMarkdownGlobalMemoryPersistsAndReloads = function() {
-    var root = java.io.File.createTempFile("mini-a-agent-memory-md-", "").getCanonicalPath()
-    io.rm(root)
+  exports.testAgentMarkdownChannelGlobalMemoryPersistsAndReloads = function() {
+    var channelName = "__mini_a_test_markdown_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
     try {
       var agent = createAgent()
       agent._agentState = {}
-      agent._initWorkingMemory({ usememory: true, memoryscope: "global", memorymdroot: root, debug: false, verbose: false }, agent._agentState)
+      agent._initWorkingMemory({ usememory: true, memoryscope: "global", memorymd: true, memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, agent._agentState)
       agent._memoryAppend("decisions", "Persist this decision via markdown", { provenance: { source: "test" } })
 
-      ow.test.assert(io.fileExists(root + "/MEMORY.md"), true, "A markdown-backed agent write should persist to the configured root")
-
+      var keys = $ch(channelName).getKeys().map(MiniAMemoryManager.parseChannelKey)
+      var decisionPath = keys.filter(function(key) { return isMap(key) && isString(key.p) && key.p.indexOf("decisions/") === 0 })[0].p
+      var record = $ch(channelName).get({ p: decisionPath })
+      ow.test.assert(isString(record.md), true, "A markdown-backed agent write should persist a markdown string")
+      ow.test.assert(record.p, decisionPath, "The channel value should repeat its path key")
       var second = createAgent()
       second._agentState = {}
-      second._initWorkingMemory({ usememory: true, memoryscope: "global", memorymdroot: root, debug: false, verbose: false }, second._agentState)
-      ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(d) { return d.value === "Persist this decision via markdown" }), true, "A second agent pointed at the same markdown root should see the persisted decision")
+      second._initWorkingMemory({ usememory: true, memoryscope: "global", memorymd: true, memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false }, second._agentState)
+      ow.test.assert(second._agentState.workingMemory.sections.decisions.some(function(d) { return d.value === "Persist this decision via markdown" }), true, "A second agent pointed at the same markdown channel should see the persisted decision")
+      agent._memoryRemove("decisions", decisionPath.substring("decisions/".length).replace(/\.md$/, ""))
+      ow.test.assert(isUnDef($ch(channelName).get({ p: decisionPath })), true, "Removing an entry should remove its markdown channel record")
     } finally {
-      try { io.rm(root) } catch(ignoreRm) {}
+      try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
     }
   }
 

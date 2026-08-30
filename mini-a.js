@@ -7394,11 +7394,9 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
   this._memoryManager = __
   this._sessionMemoryManager = __
   this._globalMemoryManager = __
-  // When set, the global (durable) store persists to one markdown file per record under
-  // this directory instead of the memorych channel. Session memory is unaffected -- it
-  // stays on $ch, which is the right fit for its higher write frequency.
-  var _memoryMdRootRaw = isDef(args.memorymdroot) ? String(args.memorymdroot).trim() : ""
-  this._memoryMdRoot = _memoryMdRootRaw.length > 0 ? _memoryMdRootRaw : __
+  // memorymd stores the durable/global store as path-keyed markdown strings in
+  // memorych. Session memory remains ordinary channel records.
+  this._memoryMd = toBoolean(args.memorymd) === true
   if (!isObject(this._sessionMemoryManagers)) this._sessionMemoryManagers = {}
 
   // Initialize OpenAF channel for memory persistence when memorych is provided
@@ -7502,10 +7500,10 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
       if (isUnDef(seededGlobal) && isObject(seedState) && isObject(seedState.workingMemory) && (scope === "global" || (scope === "both" && !isObject(seedState.workingMemorySession)))) {
         seededGlobal = seedState.workingMemory
       }
-      if (isString(this._memoryMdRoot)) {
-        var _loadedGlobalMd = this._globalMemoryManager.loadFromMarkdown(this._memoryMdRoot)
+      if (this._memoryMd === true) {
+        var _loadedGlobalMd = this._globalMemoryManager.loadFromMarkdownChannel(this._memorychName)
         if (_loadedGlobalMd !== true) this._globalMemoryManager.init(seededGlobal)
-        else this.fnI("info", `📼 [mem:read] global loaded from markdown '${this._memoryMdRoot}'`)
+        else this.fnI("info", `📼 [mem:read] global loaded from markdown records in channel '${this._memorychName}'`)
       } else {
         var _loadedGlobal = this._globalMemoryManager.loadFromChannel(this._memorychName)
         if (_loadedGlobal !== true) this._globalMemoryManager.init(seededGlobal)
@@ -7515,7 +7513,7 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
       var globalMemoryReconfigure = merge({}, cfg)
       globalMemoryReconfigure.onEvent = this._createMemoryEventHandler("global")
       this._globalMemoryManager.configure(globalMemoryReconfigure)
-      if (isString(this._memoryMdRoot)) this._globalMemoryManager.loadFromMarkdown(this._memoryMdRoot)
+      if (this._memoryMd === true) this._globalMemoryManager.loadFromMarkdownChannel(this._memorychName)
       else if (isString(this._memorychName) && this._memorychName.length > 0) this._globalMemoryManager.loadFromChannel(this._memorychName)
     }
   }
@@ -7638,7 +7636,7 @@ MiniA.prototype._getDefaultMemoryWriteManager = function() {
   if (this._memoryScope === "global") return isObject(this._globalMemoryManager) ? this._globalMemoryManager : this._sessionMemoryManager
   if (this._memoryScope === "session") return isObject(this._sessionMemoryManager) ? this._sessionMemoryManager : this._globalMemoryManager
   if (isString(this._memorysessionchName) && this._memorysessionchName.length > 0 && isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
-  if ((isString(this._memoryMdRoot) || (isString(this._memorychName) && this._memorychName.length > 0)) && isObject(this._globalMemoryManager)) return this._globalMemoryManager
+  if ((this._memoryMd === true || (isString(this._memorychName) && this._memorychName.length > 0)) && isObject(this._globalMemoryManager)) return this._globalMemoryManager
   if (isObject(this._sessionMemoryManager)) return this._sessionMemoryManager
   return this._globalMemoryManager
 }
@@ -7831,12 +7829,13 @@ MiniA.prototype._persistWorkingMemory = function(reason) {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._globalMemoryManager)) return
   this._syncWorkingMemoryState()
-  if (isString(this._memoryMdRoot)) {
+  if (this._memoryMd === true) {
     try {
-      this._globalMemoryManager.saveToMarkdown(this._memoryMdRoot)
-      if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted to markdown '${this._memoryMdRoot}' (${reason || "update"})`)
+      if (!isString(this._memorychName) || this._memorychName.length === 0) return
+      this._globalMemoryManager.saveToMarkdownChannel(this._memorychName)
+      if (this._memoryConfig.debug) this.fnI("info", `[memory] persisted as markdown records in channel '${this._memorychName}' (${reason || "update"})`)
     } catch(e) {
-      this.fnI("warn", `[memory] markdown persistence failed: ${__miniAErrMsg(e)}`)
+      this.fnI("warn", `[memory] markdown channel persistence failed: ${__miniAErrMsg(e)}`)
     }
     return
   }
@@ -7904,7 +7903,7 @@ MiniA.prototype._memoryAppend = function(section, value, meta, appendOpts) {
     this.fnI("info", `📝 [mem:write] ${_wscope}/${section}: "${String(appended.value || "").substring(0, 80)}" (id=${appended.id})`)
   }
   this._syncWorkingMemoryState()
-  if (targetManager === this._globalMemoryManager && (isString(this._memoryMdRoot) || (isString(this._memorychName) && this._memorychName.length > 0))) this._persistWorkingMemory("append")
+  if (targetManager === this._globalMemoryManager && (this._memoryMd === true || (isString(this._memorychName) && this._memorychName.length > 0))) this._persistWorkingMemory("append")
   if (targetManager === this._sessionMemoryManager && isString(this._memorysessionChEffective) && this._memorysessionChEffective.length > 0) this._persistSessionMemory("append")
   return appended
 }
@@ -8272,7 +8271,7 @@ MiniA.prototype.promoteSessionMemory = function(section, ids) {
 MiniA.prototype._autoPromoteSessionToGlobal = function() {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._sessionMemoryManager) || !isObject(this._globalMemoryManager)) return
-  if (!isString(this._memoryMdRoot) && (!isString(this._memorychName) || this._memorychName.length === 0)) return
+  if (this._memoryMd !== true && (!isString(this._memorychName) || this._memorychName.length === 0)) return
   var promoteSections = isString(this._memoryConfig.promoteSections) && this._memoryConfig.promoteSections.length > 0
     ? this._memoryConfig.promoteSections.split(",").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
     : []
@@ -14149,7 +14148,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
     "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memoryartifactttldays", "memoryindexttldays", "memoryinject",
-    "usememorywrite", "memorywritemax", "memorymdroot", "memoryrelevantcap",
+    "usememorywrite", "memorywritemax", "memorymd", "memoryrelevantcap",
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
@@ -16148,7 +16147,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memoryrelevantcap", type: "number", default: 8 },
       { name: "usememorywrite", type: "boolean", default: true },
       { name: "memorywritemax", type: "number", default: 20 },
-      { name: "memorymdroot", type: "string", default: __ },
+      { name: "memorymd", type: "boolean", default: false },
       { name: "valtools", type: "boolean", default: false }
     ])
 
@@ -16263,7 +16262,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.usememorywrite = _$(toBoolean(args.usememorywrite), "args.usememorywrite").isBoolean().default(true)
     args.memorywritemax = _$(args.memorywritemax, "args.memorywritemax").isNumber().default(20)
     if (args.memorywritemax < 1) args.memorywritemax = 20
-    args.memorymdroot = _$(args.memorymdroot, "args.memorymdroot").isString().default(__)
+    args.memorymd = _$(toBoolean(args.memorymd), "args.memorymd").isBoolean().default(false)
     args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
     args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"

@@ -2889,7 +2889,7 @@ Mini-A exposes one structured working-memory system. The common memory types are
 |-------------|--------------------------|-----------------|
 | Working memory | The live structured store the agent reads and writes during a run | `usememory`, `memoryinject`, `memorymaxpersection`, `memorymaxentries`, `memorycompactevery`, `memorydedup` |
 | Episodic memory | Session-scoped state for a specific conversation or run | `memorysessionid`, `memoryscope=session|both`, `memorysessionch` |
-| Semantic memory | Durable knowledge the agent can reuse across runs | `memorych` (or `memorymdroot` for markdown), `memoryscope=global|both`, `memorypromote`, `memorystaledays`, `usememorywrite` |
+| Semantic memory | Durable knowledge the agent can reuse across runs | `memorych`, `memorymd=true` for markdown records, `memoryscope=global|both`, `memorypromote`, `memorystaledays`, `usememorywrite` |
 | Procedural memory | Instructions and workflow rules that tell Mini-A how to behave | `agent`, `mode`, skills, AGENTS.md, prompts; not a dedicated memory store |
 
 `memoryuser=true` is the convenience preset for both global and session working memory. `memoryusersession=true` is the session-only version.
@@ -3010,37 +3010,35 @@ These wrappers keep state sync/persistence centralized (instead of ad-hoc direct
 
 ### Markdown Persistence For The Durable Store
 
-By default the durable (global) store persists to the `memorych` channel — a JSON dump, not meant to be hand-read. Setting `memorymdroot=<directory>` switches the global store to markdown instead (session memory is unaffected — it stays on `memorych`/`memorysessionch`, which fits its higher write frequency better):
+By default the durable (global) store persists to the `memorych` channel as JSON records. Setting `memorymd=true` switches the global store to Markdown strings in that same channel (session memory is unaffected — it stays on ordinary `memorych`/`memorysessionch` records, which fits its higher write frequency better):
 
 ```bash
 # persisted session memory, via an explicit dedicated channel — needed for memory_write
 # records to ever promote: promotion requires the same keyed record to be written in two
 # separate runs (confirmCount >= 2), which can't happen if session memory resets each run
-mini-a goal="..." usememory=true memorymdroot=/path/to/memory \
+mini-a goal="..." usememory=true memorymd=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
   memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))'
 
 # global store is markdown, session memory is in-process only (no persistence across runs) --
 # fine for read-only use of existing durable memory, but model-authored memory_write records
 # can never reach confirmCount >= 2 and so never promote to the global store
-mini-a goal="..." usememory=true memorymdroot=/path/to/memory
+mini-a goal="..." usememory=true memorymd=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))'
 ```
 
-`memoryuser=true` is the convenience preset for *channel-backed* global+session memory (it auto-configures `memorych`); it isn't meant to be combined with `memorymdroot` — that would still create the unused global channel file. Set `memorymdroot` directly with plain `usememory=true` instead, as above.
+`memoryuser=true` can be combined with `memorymd=true`: it provides the global channel in which the Markdown strings are stored.
 
 Layout:
 ```
-<memorymdroot>/
-  MEMORY.md                    # generated index, one line per record — do not hand-edit
-  .mini-a-memory-meta.json     # schemaVersion/revision/createdAt/updatedAt
-  facts/<id>.md
-  decisions/<id>.md
-  evidence/<id>.md
-  ...one directory per section, one file per record
+$ch(memorych).set({ p: 'facts/<id>.md' }, { p: 'facts/<id>.md', md: '<markdown string>' })
+$ch(memorych).set({ p: 'MEMORY.md' }, { p: 'MEMORY.md', md: '<markdown string>' })
+$ch(memorych).set({ p: '.mini-a-memory-meta.json' }, { p: '.mini-a-memory-meta.json', md: '<json string>' })
 ```
 
-Each record file is YAML front matter (every non-default field: `kind`, `key`, `status`, `tags`, timestamps, `confirmCount`, `stale`, `supersededBy`, `validated`, `taskScope`, `provenance`, `evidenceRefs`, `meta`, …) followed by the entry's `value` as the body. Files are only rewritten when their content actually changes, and a file for any entry no longer in the in-memory store is deleted on the next save — so a git diff of the directory reflects real changes, not save-cycle noise. **This includes entries dropped by normal compaction** (`memorymaxpersection`, `memorymaxentries`): once an entry is evicted, its `.md` file is removed on the next save, the same as an explicit `_memoryRemove`. That loss was invisible inside a JSON channel dump; with markdown it deletes a file that may have been hand-edited, so raise `memorymaxpersection`/`memorymaxentries` if the durable store needs to hold more than the defaults (80/500). Loading tolerates hand-edits: a file's body can be edited freely, and a file with missing or unparsable front matter is skipped (with a warning) rather than failing the whole load.
+Each record's `md` value is YAML front matter (every non-default field: `kind`, `key`, `status`, `tags`, timestamps, `confirmCount`, `stale`, `supersededBy`, `validated`, `taskScope`, `provenance`, `evidenceRefs`, `meta`, …) followed by the entry's `value` as the body. Records are only rewritten when their content actually changes, and a path for any entry no longer in the in-memory store is deleted on the next save. **This includes entries dropped by normal compaction** (`memorymaxpersection`, `memorymaxentries`): once an entry is evicted, its `.md` record is removed on the next save, the same as an explicit `_memoryRemove`. Loading skips records with missing or unparsable front matter (with a warning) rather than failing the whole load.
 
-`memorymdroot` replaces `memorych` for the global store — set one or the other, not both, for the global tier. It also works with `mini-a dream=true` (the memory dream reads/writes the markdown root, and backs up the pre-dream state under `<memorymdroot>/.predream-<timestamp>/`) and with the `/memoryman` TUI.
+`memorymd=true` changes only the global record format in `memorych`. It also works with `mini-a dream=true` (the memory dream backs up the pre-dream state beneath the `.predream-<timestamp>/` channel path) and with the `/memoryman` TUI.
 
 ---
 
@@ -3129,8 +3127,8 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `memorych` | string | - | SLON/JSON global memory channel definition (required for memory dream unless `memorymdroot` is set) |
-| `memorymdroot` | string | - | Markdown root for the global store — replaces `memorych` for the memory dream when set |
+| `memorych` | string | - | SLON/JSON global memory channel definition (required for memory dream) |
+| `memorymd` | boolean | `false` | Store global memory as path-keyed Markdown strings in `memorych` |
 | `memorysessionch` | string | - | SLON/JSON session memory channel |
 | `memorysessionid` | string | - | Session namespace string — use the same value as `conversation=` during the goal |
 | `auditch` | string | - | SLON/JSON audit channel — recent events are included as context to help surface insights |
@@ -3150,8 +3148,8 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 
 ### Memory dream internals
 
-1. Channels are opened using the provided SLON/JSON definitions (skipped for the global store when `memorymdroot` is set).
-2. Global memory (and optionally session memory) is loaded via `MiniAMemoryManager.loadFromChannel`, or `loadFromMarkdown` for the global store when `memorymdroot` is set.
+1. Channels are opened using the provided SLON/JSON definitions.
+2. Global memory (and optionally session memory) is loaded via `MiniAMemoryManager.loadFromChannel`, or `loadFromMarkdownChannel` for the global store when `memorymd=true`.
 3. If `auditch` is provided, the most recent `maxauditrecords` audit entries are loaded.
 4. The LLM receives a system prompt describing the consolidation rules, the full memory snapshot, and the audit events.
 5. Consolidation rules:
@@ -3161,7 +3159,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
    - **SURFACE** new cross-cutting insights as new `summaries` entries.
    - **PRESERVE** all IDs of retained entries unchanged; assign new 16-char hex IDs to new entries.
 6. The consolidated snapshot is validated against the `MiniAMemoryManager` schema.
-7. Unless `dryrun=true`, the pre-dream state is backed up — to a sibling namespace (`<ns>::predream-<ISO-timestamp>`) for the channel-backed store, or to `<memorymdroot>/.predream-<ISO-timestamp>/` for the markdown-backed store — then the consolidated snapshot is written back.
+7. Unless `dryrun=true`, the pre-dream state is backed up — to a sibling namespace (`<ns>::predream-<ISO-timestamp>`) for ordinary channel records, or below `.predream-<ISO-timestamp>/` for Markdown channel records — then the consolidated snapshot is written back.
 8. A summary is printed: entries before/after, dropped count, stale-marked count.
 
 ### Wiki dream internals
@@ -3212,9 +3210,10 @@ mini-a dream=true \
   memorysessionid='research-2026' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
-# Memory dream against a markdown-backed global store (memorymdroot instead of memorych)
+# Memory dream against markdown records in the global memory channel
 mini-a dream=true \
-  memorymdroot=/path/to/memory \
+  memorymd=true \
+  memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
   model='(type: anthropic, model: claude-sonnet-4-6)'
 
 # Wiki dream

@@ -681,10 +681,11 @@ help:
     desc     : Maximum memory_write calls allowed per run
     example  : "20"
     mandatory: false
-  - name     : memorymdroot
-    desc     : Directory root for markdown-backed global memory persistence; replaces memorych for the global store when set
-    example  : "/tmp/mini-a-memory"
+  - name     : memorymd
+    desc     : Store global memory as path-keyed markdown strings in memorych
+    example  : "true"
     mandatory: false
+    options  : ["true", "false"]
   - name     : usewiki
     desc     : Enable the wiki knowledge base
     example  : "true"
@@ -1902,7 +1903,7 @@ jobs:
       memoryrelevantcap: toNumber().isNumber().default(__)
       usememorywrite : toBoolean().isBoolean().default(__)
       memorywritemax : toNumber().isNumber().default(__)
-      memorymdroot   : isString().default(__)
+      memorymd       : toBoolean().isBoolean().default(false)
       usewiki        : toBoolean().isBoolean().default(false)
       wikiaccess     : isString().default(__)
       wikibackend    : isString().default(__)
