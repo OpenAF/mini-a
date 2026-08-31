@@ -351,6 +351,25 @@
     ow.test.assert(res.reason, "approval-required", "reason should be approval-required")
   }
 
+  exports.testDreamWikiReorgContextProfileDefaultsAndOverrides = function() {
+    var runner = new MiniADreams({}, function() {})
+    var defaults = {}
+    var profile = runner._applyReorgContextProfile(defaults)
+    ow.test.assert(defaults.maxcontext, 24000, "reorg should default to a 24k context budget")
+    ow.test.assert(defaults.contextguard, true, "reorg should enable context guardrails")
+    ow.test.assert(defaults.toolresultmaxinline, 4096, "reorg should bound inline tool results")
+    ow.test.assert(defaults.readresultmaxmatches, 20, "reorg should bound readresult grep matches")
+    ow.test.assert(profile.source.maxcontext, "reorg-default", "profile should report the default source")
+
+    var explicit = { maxcontext: 32000, contextguard: false, toolresultmaxinline: 8192, readresultmaxmatches: 7 }
+    var overridden = runner._applyReorgContextProfile(explicit)
+    ow.test.assert(explicit.maxcontext, 32000, "explicit maxcontext must be preserved")
+    ow.test.assert(explicit.contextguard, false, "explicit contextguard must be preserved")
+    ow.test.assert(explicit.toolresultmaxinline, 8192, "explicit inline limit must be preserved")
+    ow.test.assert(explicit.readresultmaxmatches, 7, "explicit match limit must be preserved")
+    ow.test.assert(overridden.source.maxcontext, "explicit", "profile should report explicit overrides")
+  }
+
   exports.testCreateChannelFromDefInvalidInput = function() {
     var runner = new MiniADreams({}, function() {})
     ow.test.assert(isUnDef(runner._createChannelFromDef("", "fallback", "simple")), true, "empty string → undefined")

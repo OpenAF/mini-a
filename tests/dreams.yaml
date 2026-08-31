@@ -63,6 +63,10 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testDreamWikiReorgApprovalGate
 
+- name: MiniA Dreams Tests::DreamWikiReorgContextProfileDefaultsAndOverrides
+  to  : oJob Test
+  exec: args.func = require("tests/dreams.js").testDreamWikiReorgContextProfileDefaultsAndOverrides
+
 - name: MiniA Dreams Tests::CreateChannelFromDefInvalidInput
   to  : oJob Test
   exec: args.func = require("tests/dreams.js").testCreateChannelFromDefInvalidInput
@@ -203,6 +207,7 @@ todo:
 - MiniA Dreams Tests::DreamWikiPlanModeProposalShape
 - MiniA Dreams Tests::DreamWikiDryRunOptsOutOfApply
 - MiniA Dreams Tests::DreamWikiReorgApprovalGate
+- MiniA Dreams Tests::DreamWikiReorgContextProfileDefaultsAndOverrides
 - MiniA Dreams Tests::CreateChannelFromDefInvalidInput
 - MiniA Dreams Tests::ValidateMemorySchemaValid
 - MiniA Dreams Tests::ValidateMemorySchemaMissingSection

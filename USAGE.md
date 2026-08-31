@@ -3143,6 +3143,7 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 | `dreamwikidryrun` | boolean | `false` | Propose wiki changes without writing (opt-out of `apply`) |
 | `dreamwikiapproval` | string | `ask` | Reorg approval mode: `auto`, `ask`, `never` |
 | `dreamwikireorg` | boolean | `false` | Allow structural reorg operations |
+| `dreammaxsteps` | number | `40` for `reorg` | Maximum structural-reorg agent steps; other wiki dream modes are deterministic or proposal-only |
 | `dreamreport` | string | - | Optional file path to write JSON run report |
 | `libs` | string | - | Extra comma-separated libraries to load |
 
@@ -3169,14 +3170,14 @@ Think of it as REM sleep for your agent: the active session ends, then the dream
 3. Use `dreamwikimode=plan` for explicit mode selection; use `dryrun=true` when you want the generic safety flag (it also affects memory dreams).
 4. Proposal output includes `new_tree`, `move_table`, `indexes_to_create`, `indexes_to_update`, and lint before/after summaries.
 5. `dreamwikimode=apply` is the default. It performs safe non-structural index work and needs no extra write gate; use `dreamwikidryrun=true` to opt out.
-6. `dreamwikimode=reorg` is structural and still gated: it requires `dreamwikireorg=true` and `dreamwikiapproval=auto`.
+6. `dreamwikimode=reorg` is structural and still gated: it requires `dreamwikireorg=true` and `dreamwikiapproval=auto`. It uses a bounded profile by default: `maxcontext=24000`, `contextguard=true`, `toolresultmaxinline=4096`, `readresultmaxmatches=20`, and `dreammaxsteps=40`. These values limit repeated prompt growth and oversized tool observations; an explicitly supplied value overrides only its corresponding default. The effective values and whether each came from the reorg default or an explicit argument are logged and included as `context_profile` in `dreamreport`.
 6b. Every `apply` and `reorg` run finishes with a deterministic finalize pass: root and section `index.md` are regenerated from live page metadata, the metadata shards and full-text index are rebuilt, and the knowledge graph is rebuilt when `usegraph=true`.
 6c. `repair`, `reindex`, `graph`, and `indexes` are isolated building blocks that `apply`'s finalize pass composes together — none of them call an LLM by default. `dreamwikimode=repair` runs only the deterministic lint fixer (no AGENTS.md upgrade, no index/search/graph finalize). `dreamwikimode=reindex` rebuilds only the Lucene search index (`wm.reindex()`, which also rebuilds its own lightweight internal graph-hint index). `dreamwikimode=graph` rebuilds only the `usewikigraph` knowledge graph (fails with `reason: "graph-failed"` when `usewikigraph` isn't configured). `dreamwikimode=indexes` unconditionally regenerates every section/root `index.md` from current directory structure, independent of what lint happens to flag.
 
 6d. `apply` and `plan` default `wikigraphsemantic=true` whenever `usewikigraph=true` (an explicit `wikigraphsemantic=false` still opts out); `graph` and `reorg` leave it strictly opt-in. When semantic extraction runs, `MiniADreams` resolves an LLM the same way the memory dream does (`model=` or `OAF_MODEL`); if neither is configured it falls back to a deterministic regex/heuristic extractor instead of erroring, so the graph still gets semantic-style edges (provenance `AMBIGUOUS`) without an LLM call. `plan`'s dry-run proposal includes a graph preview under the same rules — it makes the same LLM calls `apply` would, but never writes `graph.json`. This resolution applies the same way whether the dream pass was started from the CLI (`mini-a dream=true ...`) or an interactive console's `/dream apply`/`/dream plan`.
 7. A `MiniAWikiManager` exposes hierarchy-aware `tree`, `browse`, `backlinks`, `move`, and `lint()` operations.
-8. A full `MiniA` agent is spawned with `maxsteps=60` and the following goal:
-   - Discover the hierarchy with `tree`/`browse`, search related content, inspect backlinks, and list lint issues.
+8. A full `MiniA` agent is spawned with `maxsteps=40` by default and the following goal:
+   - Start with compact context and bounded lint results; inspect one affected issue/page at a time. Use `tree`/`browse` or backlinks only when targeted evidence requires them.
    - Apply only high-confidence category moves with `move`; skip uncertain relocations.
    - Create missing section indexes and fix index links for local pages and child sections.
    - For each near-duplicate pair: read both pages, merge content into the primary, delete or supersede the duplicate when confidence is high.
@@ -3248,6 +3249,11 @@ mini-a dream=true \
   dreamwikiapproval=auto \
   dreamreport=/var/log/mini-a/dream-wiki-reorg.json \
   model='(type: anthropic, model: claude-sonnet-4-6)'
+
+# Optional: raise only the limits needed for an unusually large reorg
+mini-a dream=true usewiki=true wikiroot=/shared/wiki \
+  dreamwikimode=reorg dreamwikireorg=true dreamwikiapproval=auto \
+  maxcontext=32000 dreammaxsteps=60
 
 # Non-interactive deterministic repair only (lint fixes, no index/search/graph work; no LLM)
 mini-a dream=true usewiki=true wikiroot=/shared/wiki dreamwikimode=repair
