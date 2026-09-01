@@ -528,13 +528,39 @@ var _WIKI_DREAM_GOAL =
   "- A wiki write replaces the whole page. For an existing page, use a bounded line/section edit; do not rewrite a page merely to fix a link or frontmatter.\n" +
   "- Lint results are paged. Filter by severity/type/page and inspect only the affected issue before changing a page.\n\n" +
   "Follow these steps in order:\n" +
-  "1. Discovery: use wiki op=\"context\" for a compact overview, then op=\"lint\" for all issues, op=\"tree\" and op=\"browse\" for structure, op=\"backlinks\" for cross-references.\n" +
+  "1. Discovery: use wiki op=\"context\" for a compact overview, then a bounded wiki op=\"lint\" request. Inspect one affected issue/page at a time. Use op=\"tree\", op=\"browse\", or op=\"backlinks\" only when that targeted issue needs structural or cross-reference evidence.\n" +
   "2. Plan: produce a short reorganisation plan in your context before writing. Folders with index.md are section sub-wikis. Keep existing paths valid unless you intentionally move them.\n" +
   "3. Apply only high-confidence changes. Use wiki op=\"move\" for relocations so links are repaired. Skip uncertain moves, record them as skipped_uncertain_moves.\n" +
   "4. For near_duplicate pairs: use wiki op=\"read\" on both, write a merged version to the primary, then delete or supersede the duplicate only when confidence is high.\n" +
   "5. For broken_link, missing_frontmatter, heading_hierarchy, and orphan issues: read the affected pages, make the minimal correction, write back.\n" +
   "6. Re-run wiki op=\"lint\" to confirm zero errors and no avoidable warnings remain. Info items are acceptable when deliberately skipped.\n" +
   "7. Finish with action=\"final\" and include a summary with keys: pages_moved, pages_changed, pages_deleted, issues_fixed, skipped_uncertain_moves."
+
+// Reorgs run a long-lived, tool-heavy agent loop. Give them a safe bounded profile
+// unless an operator explicitly supplied the corresponding control. Keep this separate
+// from the general defaults so ordinary dreams preserve their existing behaviour.
+MiniADreams.prototype._applyReorgContextProfile = function(dreamArgs) {
+  var args = isMap(dreamArgs) ? dreamArgs : {}
+  var supplied = function(key) { return Object.prototype.hasOwnProperty.call(args, key) && isDef(args[key]) }
+  var source = {}
+  var setDefault = function(key, value) {
+    if (supplied(key)) { source[key] = "explicit"; return }
+    args[key] = value
+    source[key] = "reorg-default"
+  }
+
+  setDefault("maxcontext", 24000)
+  setDefault("contextguard", true)
+  setDefault("toolresultmaxinline", 4096)
+  setDefault("readresultmaxmatches", 20)
+  return {
+    maxcontext: args.maxcontext,
+    contextguard: args.contextguard,
+    toolresultmaxinline: args.toolresultmaxinline,
+    readresultmaxmatches: args.readresultmaxmatches,
+    source: source
+  }
+}
 
 // _wikiLintMemoryManager: the memory manager lint() needs to detect memory_conflict issues.
 // Without it that check can never fire. Reuses the manager built by the memory dream when
@@ -892,8 +918,17 @@ MiniADreams.prototype.dreamWiki = function(opts) {
     ? Math.round(self._args.dreamwikilintresultlimit) : 25
   dreamArgs.usememory   = (isDef(self._args.memorych) && String(self._args.memorych).trim().length > 0) ? "true" : "false"
   dreamArgs.memoryscope = "global"
-  dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 60
+  dreamArgs.maxsteps    = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? Math.round(self._args.dreammaxsteps) : 40
   dreamArgs.goal        = _WIKI_DREAM_GOAL
+  var reorgContextProfile = self._applyReorgContextProfile(dreamArgs)
+  reorgContextProfile.maxsteps = dreamArgs.maxsteps
+  reorgContextProfile.source.maxsteps = isNumber(self._args.dreammaxsteps) && self._args.dreammaxsteps > 0 ? "explicit" : "reorg-default"
+  defaultResult.context_profile = reorgContextProfile
+  self._log("[dreams:wiki] Reorg context profile: maxcontext=" + reorgContextProfile.maxcontext +
+    ", contextguard=" + reorgContextProfile.contextguard +
+    ", toolresultmaxinline=" + reorgContextProfile.toolresultmaxinline +
+    ", readresultmaxmatches=" + reorgContextProfile.readresultmaxmatches +
+    ", maxsteps=" + reorgContextProfile.maxsteps + ".")
 
   try {
     // Safety gate: reorg mode requires AGENTS.md to be loaded first.
@@ -1478,7 +1513,7 @@ MiniADreams.prototype.run = function() {
     self._log("  wikiroot=       Wiki filesystem root path")
     self._log("  model=          JSSLON model config e.g. '{\"type\":\"anthropic\",\"model\":\"claude-sonnet-4-6\"}'")
     self._log("  dryrun=true     Report what would change without writing")
-    self._log("  dreammaxsteps=  Maximum agent steps for wiki dream pass (default: 60)")
+    self._log("  dreammaxsteps=  Maximum agent steps for wiki reorg pass (default: 40; other modes do not use an agent loop)")
     self._log("  dreammode=      Explicit run mode: memory, wiki or both")
     self._log("  dreamwiki=true  Force wiki dream when memorych is also configured")
     self._log("  dreamwikimode=  Wiki mode: plan, apply (default), reorg, repair, reindex, graph, indexes")
