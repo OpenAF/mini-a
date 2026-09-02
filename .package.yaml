@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260901'
+version: '20260902'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -170,9 +170,9 @@ filesHash:
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
-  METRICS.md: 30257a423e1bf9ed01dea0010dd881475331c9cf
-  README.md: df2f9e45563213f1089511156fe891e6be3db73d
-  USAGE.md: b0f525914ac4ce3b27b865aa8f672440364886f2
+  METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
+  README.md: ffd4c4c214266e083931cf02770aef165d8c0a81
+  USAGE.md: 3fe9440d0bc61b903bc04fe16f30d5a574307af4
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
@@ -182,7 +182,7 @@ filesHash:
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: 63118eecfcc6cacc2706efd9d7c80e422e746340
+  docs/WHATS-NEW.md: d702dc6690cb118101fda91d5d0b1de3345b1d59
   docs/WIKI.md: 87deb353608e07c3b03b2c39d9b3383161acb179
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
@@ -242,7 +242,7 @@ filesHash:
   mini-a-ingest.yaml: cf5a318d4a4bba6ff548d5400cf741d577c011e8
   mini-a-mcp-wiki.js: 41677f2f4b75a03ee8b617d2d0a79655a75883ac
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
-  mini-a-memory.js: 717ea52d4ec2a79e0d8eda06b8516b014e79050f
+  mini-a-memory.js: 9cfa9a66c3798124f34933bf0a7f8f7f23dc57a7
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
   mini-a-modelman.js: 521d0a5f93e97d137d71c22617b15ea312beb7a2
   mini-a-modes.yaml: 21ca620188ca14eabc2f35a4e99d724f28e7de9b
@@ -255,13 +255,13 @@ filesHash:
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
   mini-a-utils.js: 8cf41b93ec521ddb79353942f2ad8fd8ef8f3431
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 152b20803ce1e14e9bd600839f45e2b28e4934ae
+  mini-a-web.yaml: 752e9eb8d2663fdc04bc3540e63939f20132a949
   mini-a-wiki-knowledge.js: e829fee9d76c16715c10415752a964166e023cd5
   mini-a-wiki.js: 57790405c0af07333caeaa4891d67a9ddce5c1c7
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: 56b07ab82c7b22680650f3fbdc1eb9d061e5ea70
+  mini-a.js: cd896e0e6bf0a6321ca7d2e7467edc863fa301af
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: da67bda74ba32d9a0db392a09b0ecf35dec9aaa5
+  mini-a.yaml: 4ba3ad48fa31a16b5f2b22f971cb00c137f05a11
   public/index.md: ff492f66c8bfafb8534ba74f95c76c1c0401c46f
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   utils/graphStats.yaml: ab05b70a991ac6d5440ea12487ab8d10db53ec69
