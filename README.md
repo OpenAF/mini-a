@@ -507,6 +507,9 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `toolargcheck` | Preflight-reject schema-declared missing parameters and unknown parameters only when `additionalProperties=false`. | `true` |
 | `toolargrepair` | Before dispatch, repair obvious parameter-key typos, a single `arguments`/`params`/`input` wrapper, and parseable JSON object/array strings. | `true` |
 | `memoryusersession` | Convenience shorthand: enables `usememory`, defaults `memoryscope=session`, and sets `memorysessionch` to a file-backed store under `~/.openaf-mini-a/` (only when not already defined; directory auto-created). | `false` |
+| `memoryinject` | Controls what reaches the model: `summary` (counts only), `relevant` (adds a score-ranked, budget-capped block of durable memory), or `full` (the whole compact store every step) | `relevant` when `usememory=true`, else `summary` |
+| `memoryreflect` | After a successful, non-trivial run, makes one extra LLM call that extracts durable memories from it (the main source of durable knowledge, since the model rarely calls `memory_write` unprompted) | `true` when `usememory=true` |
+| `memoryreflectmodel` | Model config for the reflection pass, so it can use a cheaper model than the main run (falls back to `OAF_REFLECT_MODEL`, then the low-cost model, then the main model) | - |
 | `metricsch` | JSSLON definition for an OpenAF channel used to record periodic Mini-A metrics snapshots (for example `{name:'mini-a-metrics',type:'mvs',options:{file:'/tmp/mini-a-metrics.db'}}`). By default Mini-A stores only the `mini-a` metric; optional `period`, `some`, and `noDate` fields mirror `ow.metrics.startCollecting`. | - |
 | `memorymaxpersection` | Per-section memory cap before compaction | `80` |
 | `memorymaxentries` | Total memory-entry cap across all sections | `500` |
@@ -514,6 +517,9 @@ mini-a "Refactor the parser and keep iterating until validation passes" \
 | `memorydedup` | Deduplicate near-identical memory entries before append | `true` |
 | `memoryartifactttldays` | TTL for normalized tool/network observations before expiry removal | `7` |
 | `memoryindexttldays` | TTL for list/search/index observation snapshots | `1` |
+
+See [USAGE.md](USAGE.md#working-memory-structured-runtime-state) for the full memory reference, including candidate/active promotion (`memorycandidatedays`), the `memory_search`/`memory_write` actions, context-injection budgets (`memoryrelevantcap`, `memorybudget`, `memorysearchbudget`), session namespace GC (`memorysessionmaxdays`), and persistence cadence (`memorypersistevery`).
+
 | `usewiki` | Enable persistent Markdown wiki knowledge base (`wiki` action and `/wiki` console commands) | `false` |
 | `wikiaccess` | Wiki access mode (`ro` or `rw`) | `ro` |
 | `wikibackend` | Wiki backend: `fs`, `s3`, `s3fs`, `es`, or read-only `http` (`https` alias) | `fs` |

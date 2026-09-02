@@ -2,6 +2,20 @@
 
 ## Recent Updates
 
+### Memory: reflection pass, cross-session candidate promotion, and tighter context budgets
+
+**Problem**: the model rarely calls `memory_write` on its own, so a fresh `usememory` store stayed cold across runs. What did get promoted to global storage was gated on the *same session* confirming its own write twice — something a new CLI/console run (a fresh random session id every time) could essentially never do — while bookkeeping entries (run-outcome summaries, tool observations) promoted ungated and could get injected into the prompt as if they were durable knowledge. The `relevant`-mode injection block and `memory_search` had no token budget, and the per-step state snapshot was duplicated in the prompt under `memoryinject=full`.
+
+**Change**:
+- **Reflection** (`memoryreflect`, default `true`): one extra LLM call at the end of a successful, non-trivial run extracts 0-5 durable memories, validated (kind/length/near-duplicate/secret checks) before being written through the normal `memory_write` path. Use `memoryreflectmodel`/`OAF_REFLECT_MODEL` to point it at a cheaper model.
+- **Candidate promotion** replaces the same-session confirmCount>=2 gate: a model-authored write promotes to global immediately as an unconfirmed `status:"candidate"` (labeled `unconfirmed` when injected) and only becomes `active` once a *different* session writes the same key. Unconfirmed candidates expire after `memorycandidatedays` (default `30`).
+- **Noise reduction**: content-free "tool completed" evidence entries are gone; shell output is now one keyed, TTL'd artifact instead of two untitled ones; compaction no longer writes its own summary notes; run-outcome entries are keyed per goal instead of accumulating one per run; tool contracts record parameter *shape* (key names/types) instead of literal call values; a `merge()` array-concatenation bug that duplicated `meta.rejected`/`meta.confirmedBy` entries on repeated writes is fixed.
+- **Context budgets**: `memoryinject=relevant` now ranks candidates by score across all sections (not a fixed slice per section in section order) and stops at `memoryrelevantcap` entries or `memorybudget` tokens (default `1500`), truncating long values; `memory_search` stops at `memorysearchbudget` tokens (default `1200`) and reports how many matches were omitted; `memory_search` stays available under `memoryinject=full`; the per-step state snapshot is no longer duplicated in the prompt.
+- **Retrieval**: keyword matching keeps short all-caps/alphanumeric tokens (`S3`, `CI`, `k8s`) that a plain length filter used to drop, applies light stemming, and boosts entries naming a tool in play; a tool failure now surfaces a one-shot `[MEMORY]` hint from remembered pitfalls/procedures for that tool.
+- **Housekeeping**: session namespaces under `memorysessionch` older than `memorysessionmaxdays` (default `14`) are garbage-collected once per process; memory persistence can be debounced via `memorypersistevery` (default `1`, i.e. unchanged synchronous behavior) instead of rewriting the whole channel on every append/upsert.
+
+**Related parameters**: `memoryreflect`, `memoryreflectmodel`, `memoryreflectmin`, `memorycandidatedays`, `memorybudget`, `memorysearchbudget`, `memorysessionmaxdays`, `memorypersistevery`
+
 ### Low-cost model gets a JSON-retry before falling back to the main model
 
 **Change**: Previously, when the low-cost model's response failed to parse as valid JSON, Mini-A fell back to the main model immediately (zero retries). It now gives the low-cost model `lcjsonretries` (default: `1`) extra same-step attempts, re-prompted with a corrective note about valid JSON formatting, before escalating to the main model. Retries are "free" — they don't consume a step from `maxsteps` — and each retry attempt's token usage is tracked against `lcbudget` and the session's LC cost tracker like any other low-cost call. Set `lcjsonretries=0` to restore the previous immediate-fallback behavior.

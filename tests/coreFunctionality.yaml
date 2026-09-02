@@ -642,10 +642,35 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMemoryWriteDerivesStableKeyAndConfirms
 
-- name: MiniA Core Tests::AutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice
+- name: MiniA Core Tests::ReflectionValidatorRejectsBadEntries
   from: MiniA Core Tests::Init
   to  : oJob Test
-  exec: args.func = args.tests.testAutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice
+  exec: args.func = args.tests.testReflectionValidatorRejectsBadEntries
+
+- name: MiniA Core Tests::ReflectionWritesDurableEntriesWithReflectionProvenance
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReflectionWritesDurableEntriesWithReflectionProvenance
+
+- name: MiniA Core Tests::ReflectionSkippedWithoutToolUse
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testReflectionSkippedWithoutToolUse
+
+- name: MiniA Core Tests::FinalizeRunMemoryNeverThrowsWhenReflectionFails
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testFinalizeRunMemoryNeverThrowsWhenReflectionFails
+
+- name: MiniA Core Tests::ModelWritesPromoteAsCandidatesAndActivateOnSecondSession
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testModelWritesPromoteAsCandidatesAndActivateOnSecondSession
+
+- name: MiniA Core Tests::MemoryWriteWorksWithGlobalOnlyScope
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemoryWriteWorksWithGlobalOnlyScope
 
 - name: MiniA Core Tests::BuildRelevantMemoryBlockFiltersDurableAndCaps
   from: MiniA Core Tests::Init
@@ -661,6 +686,21 @@ jobs:
   from: MiniA Core Tests::Init
   to  : oJob Test
   exec: args.func = args.tests.testMemorySearchScorerRanksConfirmedRecentOverSingleOld
+
+- name: MiniA Core Tests::MemorySearchScoredReturnsScoresAndSectionsFilter
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testMemorySearchScoredReturnsScoresAndSectionsFilter
+
+- name: MiniA Core Tests::ToolContractStoresParameterShapeNotValues
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testToolContractStoresParameterShapeNotValues
+
+- name: MiniA Core Tests::RejectedArgsDoNotDuplicateAcrossUpserts
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testRejectedArgsDoNotDuplicateAcrossUpserts
 
 - name: MiniA Core Tests::MemoryInitializationOrderInjectsRelevantMemoryIntoSystemPrompt
   from: MiniA Core Tests::Init
@@ -1042,10 +1082,18 @@ todo:
 - MiniA Core Tests::MemoryWriteRecordsDurableKindWithTags
 - MiniA Core Tests::MemoryWriteRejectsInvalidKindAndEnforcesPerRunCap
 - MiniA Core Tests::MemoryWriteDerivesStableKeyAndConfirms
-- MiniA Core Tests::AutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice
+- MiniA Core Tests::ReflectionValidatorRejectsBadEntries
+- MiniA Core Tests::ReflectionWritesDurableEntriesWithReflectionProvenance
+- MiniA Core Tests::ReflectionSkippedWithoutToolUse
+- MiniA Core Tests::FinalizeRunMemoryNeverThrowsWhenReflectionFails
+- MiniA Core Tests::ModelWritesPromoteAsCandidatesAndActivateOnSecondSession
+- MiniA Core Tests::MemoryWriteWorksWithGlobalOnlyScope
 - MiniA Core Tests::BuildRelevantMemoryBlockFiltersDurableAndCaps
 - MiniA Core Tests::ResolveMemoryInjectModeDefaultsToRelevantWhenUseMemory
 - MiniA Core Tests::MemorySearchScorerRanksConfirmedRecentOverSingleOld
+- MiniA Core Tests::MemorySearchScoredReturnsScoresAndSectionsFilter
+- MiniA Core Tests::ToolContractStoresParameterShapeNotValues
+- MiniA Core Tests::RejectedArgsDoNotDuplicateAcrossUpserts
 - MiniA Core Tests::MemoryInitializationOrderInjectsRelevantMemoryIntoSystemPrompt
 - MiniA Core Tests::MemoryInitSkipsReloadWhenInitCalledTwiceWithSameArgs
 - MiniA Core Tests::AgentCapabilitiesEnableUndefinedFlags

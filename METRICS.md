@@ -251,6 +251,27 @@ Reported only when the provider returns cache figures in its usage block.
 | `session_clears` | Full session memory clears (e.g. `/clear` or programmatic reset). |
 | `compactions` | Compaction operations run (consolidate and prune low-value entries). |
 | `compaction_entries_dropped` | Total entries dropped across all compaction runs. |
+| `upserts` | Keyed upsert operations (create-or-refresh by key), separate from plain `appends`. |
+| `expirations` | Entries removed because their `expiresAt` passed. |
+| `raw_bytes_rejected` | Bytes trimmed from a tool observation before it was stored (preview truncation). |
+| `injected_tokens` | Estimated tokens added to the system prompt by validated-contract and relevant-memory injection. |
+| `validated_contracts_used` | Validated tool-call contracts actually injected into a run's system prompt. |
+| `unvalidated_contracts_suppressed` | Unvalidated/stale/superseded contract entries excluded from injection. |
+| `relevant_injected` | Entries included in the `memoryinject=relevant` block. |
+| `writes` / `writes_rejected` | Successful / rejected `memory_write` action calls. |
+| `reflections` | Reflection passes that ran (see `memoryreflect`). |
+| `reflection_entries` | Durable entries actually written by reflection passes. |
+| `reflection_rejected` | Reflection output items dropped by validation (bad kind, too short/long, near-duplicate, secret pattern, etc). |
+| `reflection_failures` | Reflection passes that failed (LLM error, unparsable response) — always swallowed, never fails the run. |
+| `reflection_tokens` | Estimated tokens consumed by reflection LLM calls. |
+| `candidates_created` | Model-authored entries newly promoted to global storage as an unconfirmed candidate. |
+| `candidates_activated` | Candidates that reached a second confirming session and became `active`. |
+| `candidates_expired` | Reserved for future finer-grained candidate-expiry tracking; expired candidates currently fall under `expirations`. |
+| `session_namespaces_gc` | Session namespaces removed by the `memorysessionmaxdays` garbage collector. |
+| `jit_injections` | Just-in-time pitfall/procedure hints appended to a tool-failure observation. |
+| `search_results_truncated` | `memory_search` calls whose results were cut off by `memorysearchbudget`. |
+| `persist_deferred` | Memory mutations that were debounced rather than persisted immediately (`memorypersistevery > 1`). |
+| `persist_flushes` | Actual channel writes performed, whether immediate or from a debounce flush. |
 
 ### I/O counters
 
@@ -264,6 +285,8 @@ Reported only when the provider returns cache figures in its usage block.
 **Nuance — `promotions` vs `promoted_entries`:** `promotions` is the number of times the promotion routine ran; `promoted_entries` is the cumulative count of entries that were actually moved. If one promotion sweep moves 5 entries, `promotions += 1` and `promoted_entries += 5`.
 
 **Nuance — `resolved_entries` vs `session_entries + global_entries`:** The resolved view merges session and global stores, applying deduplication and overrides. `resolved_entries` can be less than the sum of the other two when entries overlap.
+
+**Nuance — candidates vs promotions:** as of the candidate-promotion model, a model-authored (`memory_write`/reflection) entry always counts under `candidates_created`/`candidates_activated`, never under the generic `promotions`/`promoted_entries` pair — those remain for non-model-authored (tool/runtime) entries promoted via `memorypromote`.
 
 ---
 

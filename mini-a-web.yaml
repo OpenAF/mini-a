@@ -686,6 +686,38 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : memoryreflect
+    desc     : After a successful run, make one extra LLM call to extract durable memories (default true when usememory=true)
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : memoryreflectmodel
+    desc     : "Model config for the reflection pass (falls back to OAF_REFLECT_MODEL, then the low-cost model, then the main model)"
+    mandatory: false
+  - name     : memoryreflectmin
+    desc     : Minimum total tool/shell calls a run must have made to qualify for reflection
+    example  : "2"
+    mandatory: false
+  - name     : memorycandidatedays
+    desc     : Expiry window for an unconfirmed model-authored global candidate before a second session confirms it
+    example  : "30"
+    mandatory: false
+  - name     : memorybudget
+    desc     : Token budget for the memoryinject=relevant durable-memory block
+    example  : "1500"
+    mandatory: false
+  - name     : memorysearchbudget
+    desc     : Token budget for a single memory_search action's results
+    example  : "1200"
+    mandatory: false
+  - name     : memorysessionmaxdays
+    desc     : Session namespaces under memorysessionch older than this (and not the current session) are garbage-collected on init
+    example  : "14"
+    mandatory: false
+  - name     : memorypersistevery
+    desc     : Persist the memory store every Nth mutation instead of every single append/upsert (1 = unchanged synchronous behavior)
+    example  : "1"
+    mandatory: false
   - name     : usewiki
     desc     : Enable the wiki knowledge base
     example  : "true"
@@ -1904,6 +1936,14 @@ jobs:
       usememorywrite : toBoolean().isBoolean().default(__)
       memorywritemax : toNumber().isNumber().default(__)
       memorymd       : toBoolean().isBoolean().default(false)
+      memoryreflect  : toBoolean().isBoolean().default(__)
+      memoryreflectmodel: isString().default(__)
+      memoryreflectmin: toNumber().isNumber().default(__)
+      memorycandidatedays: toNumber().isNumber().default(__)
+      memorybudget   : toNumber().isNumber().default(__)
+      memorysearchbudget: toNumber().isNumber().default(__)
+      memorysessionmaxdays: toNumber().isNumber().default(__)
+      memorypersistevery: toNumber().isNumber().default(__)
       usewiki        : toBoolean().isBoolean().default(false)
       wikiaccess     : isString().default(__)
       wikibackend    : isString().default(__)

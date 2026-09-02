@@ -883,7 +883,16 @@ The `start()` method accepts various configuration options:
 - **`memoryindexttldays`** (number, default: `1`): Shorter expiry window for list, search, and index snapshots.
 - **`memorypromote`** (string, default: `""`): Comma-separated list of memory sections to auto-promote from the session store to the global store at session end. Uses a refresh-or-append strategy: near-duplicate global entries have their `confirmedAt` and `confirmCount` updated rather than duplicated; entirely new entries are appended. `memoryuser=true` sets this to `facts,decisions,summaries`. Set to `""` to disable promotion.
 - **`memorystaledays`** (number, default: `0`): Number of days after which a global memory entry that has not been re-confirmed by any session is marked `stale=true`. The sweep runs automatically after each auto-promotion pass. Stale entries are not deleted immediately — they are evicted by compaction when a section overflows `memorymaxpersection`, giving recently confirmed entries priority. Set to `0` to disable staleness tracking. `memoryuser=true` sets this to `30`.
-- **`memoryinject`** (string, one of `"summary"` or `"full"`, default: `"summary"`): Controls how working memory is embedded in the step context. `summary` (default) injects only section entry counts (e.g. `{facts:12,decisions:3}`) and enables the `memory_search` action for on-demand retrieval — reducing per-step memory token cost by ~95%. Matching validated tool contracts are injected in both modes. `full` restores the previous behaviour of embedding all compact entries in every step prompt.
+- **`memoryinject`** (string, one of `"summary"`, `"relevant"`, or `"full"`; defaults to `"relevant"` when `usememory=true`, otherwise `"summary"`): Controls how working memory reaches the model. `summary` injects only section entry counts (e.g. `{facts:12,decisions:3}`); the model must call `memory_search` to see anything. `relevant` (the default under `usememory=true`) adds a one-time, token-budgeted block of goal-relevant durable knowledge injected into the system rules at run start, ranked by score across sections rather than a fixed per-section slice — see "Durable Knowledge" below. `full` embeds every compact entry in every step prompt; `memory_search` remains available in all three modes.
+- **`memoryrelevantcap`** (number, default: `8`): Maximum number of durable entries in the `relevant`-mode injection block.
+- **`memorybudget`** (number, default: `1500`): Token budget for the `relevant`-mode injection block; entries are added by score until either this or `memoryrelevantcap` is hit, and each value is truncated to 300 characters.
+- **`memorysearchbudget`** (number, default: `1200`): Token budget for a single `memory_search` action's results; matches beyond the budget are reported as omitted rather than dropped silently, with a hint to narrow the query or fetch one full entry with `{"id":"..."}`.
+- **`memoryreflect`** (boolean, default: `true` when `usememory=true`): After a successful run that used at least `memoryreflectmin` tool calls, makes one extra LLM call that extracts 0-5 durable memories (typed the same as `memory_write`) from the run — the primary source of durable knowledge in practice, since the model rarely calls `memory_write` unprompted. Never runs on a missing-final-answer, error, or shutdown exit.
+- **`memoryreflectmodel`** (string, optional): SLON/JSON model config for the reflection pass, so it can use a cheaper model than the main run. Falls back to `OAF_REFLECT_MODEL`, then the low-cost model (`modellc`/`OAF_LC_MODEL`) if configured, then the main model.
+- **`memoryreflectmin`** (number, default: `2`): Minimum total tool/shell calls a run must have made before it qualifies for reflection.
+- **`memorycandidatedays`** (number, default: `30`): Expiry window for an unconfirmed candidate promoted to global storage (see "Durable Knowledge" below) before a second session confirms it.
+- **`memorysessionmaxdays`** (number, default: `14`): Session namespaces under `memorysessionch` older than this (and not the current session) are garbage-collected once per process on `_initWorkingMemory`.
+- **`memorypersistevery`** (number, default: `1`): Persist the memory store to its channel every Nth mutation instead of after every single append/upsert. `1` (the default) preserves the original synchronous-every-write behavior; a higher value trades a small durability window (flushed unconditionally at run end, promotion, an explicit `memory_write`, or `/clear`) for fewer full-channel rewrites on long runs.
 - **`toolargcheck`** (boolean, default: true): Rejects a tool call before dispatch when schema-declared required keys are missing, or when unknown keys are present and the schema explicitly sets `additionalProperties: false`. Loose schemas and type mismatches remain pass-through.
 - **`toolargrepair`** (boolean, default: true): Before checking, repairs an unambiguous near-typo, unwraps a sole `arguments`/`params`/`input` object, and parses JSON strings for object/array parameters. Repairs are traced so they remain visible to diagnostics.
 - **`usewiki`** (boolean, default: `false`): Enable the persistent Markdown wiki knowledge base.
@@ -2916,7 +2925,7 @@ Each entry carries metadata (`id`, `value`, timestamps, `status`, optional `prov
 
 ### Durable Knowledge (`memory_write`)
 
-By default, almost every memory write is runtime bookkeeping — tool observations, run outcomes, validated tool-call contracts. None of that is knowledge the model chose to remember. When `usememory=true` and `usememorywrite=true` (the default), the model also gets a **`memory_write`** action for deliberately recording durable, typed knowledge:
+By default, almost every memory write is runtime bookkeeping — tool observations, run outcomes, validated tool-call contracts. None of that is knowledge the model chose to remember. When `usememory=true` and `usememorywrite=true` (the default), the model also gets a **`memory_write`** action for deliberately recording durable, typed knowledge. In practice the model rarely calls it unprompted, so Mini-A also runs an automatic **reflection pass** (`memoryreflect`, see below) at the end of a successful run that writes durable memories on the model's behalf, through the same path and the same promotion rules.
 
 ```json
 {
@@ -2942,7 +2951,7 @@ By default, almost every memory write is runtime bookkeeping — tool observatio
 - `tags` (optional array) — free-form labels, used by `memory_search`'s scorer.
 - `ttlDays` (optional) — expire the record after N days.
 
-**Writes are always session-scoped and gated before reaching global storage.** A `memory_write` call can be driven by untrusted tool output (a web page, an MCP response), so a single call is never enough to plant a permanent global "fact": `_autoPromoteSessionToGlobal` only promotes a model-authored (`provenance.source==="model"`) entry once its `confirmCount` reaches 2 — i.e. the same keyed record was written independently in two separate runs. Durable kinds promote regardless of `memorypromote` (so `pitfall`→`risks` and `reference`→`artifacts` promote even though those sections aren't in the default promote list), but always subject to that confirmation gate. `usememorywrite=false` disables the action entirely; `memorywritemax` (default `20`) caps writes per run.
+**Writes are session-scoped (or written straight to global under `memoryscope=global`, where no session store exists) and reach global storage as an unconfirmed candidate, gated before becoming trusted.** A `memory_write` call can be driven by untrusted tool output (a web page, an MCP response), so a single call is never enough to plant a permanent, trusted global "fact": on promotion, a model-authored (`provenance.source==="model"`) entry lands in the global store with `status:"candidate"` and `meta.confirmedBy` listing the writing session, expiring after `memorycandidatedays` (default `30`) if never confirmed again. A **different** session writing the same key activates it (`status:"active"`, `confirmCount` reflecting the number of distinct confirming sessions, expiry cleared); the same session repeating its own write only refreshes the candidate's value, it cannot self-confirm. Candidates are still eligible for injection (see "Context Injection" below) but rendered with an `unconfirmed` label so the model knows to verify before relying on them. Durable kinds promote regardless of `memorypromote` (so `pitfall`→`risks` and `reference`→`artifacts` promote even though those sections aren't in the default promote list), but always subject to the candidate gate above. `usememorywrite=false` disables the `memory_write` action entirely; `memorywritemax` (default `20`) caps model-initiated writes per run (the reflection pass has its own 5-item-per-run cap and does not count against it).
 
 ### Lifecycle Hooks
 
@@ -2965,15 +2974,19 @@ Mini-A then updates memory incrementally after:
 - delegated subtask completion,
 - final answer synthesis.
 
+### Reflection
+
+The model rarely calls `memory_write` on its own mid-task, so a cold `usememory` store tends to stay cold. `memoryreflect` (default `true` under `usememory=true`) closes that gap: at the end of a **successful** run that made at least `memoryreflectmin` (default `2`) tool/shell calls, Mini-A makes one extra LLM call — using `memoryreflectmodel`/`OAF_REFLECT_MODEL` if configured, else the low-cost model if one is set, else the main model, always as a bare instance with no conversation history attached — asking it to extract 0-5 durable memories (same `kind`s as `memory_write`) from the goal, final answer, tools used, errors seen, and recent actions. Each candidate entry is validated before it can reach memory: kind must be one of the five `memory_write` kinds, value length 10-400 chars, no near-duplicate of the goal or final answer (so it can't just restate the task), no obvious secret pattern, and an optional `supersedes` key is honored only when it names a durable-memory key that was actually shown to the model in the prompt (never a tool-contract key). Accepted entries are written through the same `memory_write` path (provenance `event:"reflection"`, bypassing `memorywritemax`) and therefore follow the same session→candidate→active promotion described above. Reflection never runs on a missing-final-answer, error, or shutdown exit, and a failure in the reflection call itself is always swallowed — it never fails or delays the run.
+
 ### Context Injection and `memory_search`
 
 `memoryinject` controls how much of working memory reaches the model automatically, and defaults to `relevant` when `usememory=true` (explicitly passing `summary` keeps the older behaviour byte-for-byte):
 
 - **`summary`** — the step context carries only a compact section-count map, e.g. `workingMemory:{facts:12,decisions:3}`. Nothing is auto-injected; the model must call `memory_search`.
-- **`relevant`** (default under `usememory=true`) — same lean state block, **plus** a one-time block of goal-relevant durable memory injected into the system rules at run start (mirrors how validated tool-call contracts are injected), so the model doesn't have to guess to search for what it already knows. Only durable `memory_write` kinds and validated entries are eligible — runtime bookkeeping (tool observations, run outcomes) is never auto-injected. Stale and superseded entries are excluded. Capped by `memoryrelevantcap` (default `8`). On a cold store with no durable records this costs nothing.
-- **`full`** — every compact entry is embedded in every step prompt (the pre-`relevant` behaviour for users who want the whole store visible at all times).
+- **`relevant`** (default under `usememory=true`) — same lean state block, **plus** a one-time block of goal-relevant durable memory injected into the system rules at run start (mirrors how validated tool-call contracts are injected), so the model doesn't have to guess to search for what it already knows. Only durable `memory_write`/reflection kinds are eligible — runtime bookkeeping (tool observations, run outcomes, validated-but-non-durable entries) is never auto-injected. Stale and superseded entries are excluded. Selection is **score-ranked across all sections** (not a fixed slice per section in a fixed section order), stopping at whichever of `memoryrelevantcap` (default `8` entries) or `memorybudget` (default `1500` tokens) is hit first; each value is truncated to 300 characters. Unconfirmed candidate entries are included but rendered with an `unconfirmed` label. On a cold store with no durable records this costs nothing.
+- **`full`** — every compact entry is embedded in every step prompt (the pre-`relevant` behaviour for users who want the whole store visible at all times). `memory_search` stays available in this mode too.
 
-`memory_search` remains available in `summary` and `relevant` modes for on-demand lookups beyond what was auto-injected:
+`memory_search` is available in all three modes for on-demand lookups beyond what was auto-injected:
 
 ```json
 {
@@ -2984,13 +2997,15 @@ Mini-A then updates memory incrementally after:
 ```
 
 `memory_search` params:
-- `query` (required) — keyword string matched against entry values
+- `query` (required unless `id` is given) — keyword string matched against entry values
 - `section` (optional) — restrict to one section (`facts`, `decisions`, `evidence`, `openQuestions`, `hypotheses`, `artifacts`, `risks`, `summaries`)
-- `limit` (optional, default `10`) — max results per section
+- `limit` (optional, default `5`) — max results per section before the token budget below applies
+- `id` (optional) — skip search and fetch one specific entry's full (untruncated) value by id, e.g. after a truncated result
+- `full` (optional boolean) — return full (untruncated) values for a query instead of the default 200-char preview
 
-Results are keyword-scored (word overlap, plus bonuses for key match, `validated`, matching `taskScope`, tag overlap, confirmation count, and recency; a `stale` penalty) and returned as TOON text in the step context.
+Results are keyword-scored — word/stem overlap (short all-caps/alphanumeric tokens like `S3`/`CI`/`k8s` are kept, not dropped), plus bonuses for key match, tag overlap, a tool named in the query, confirmation count, recency, and matching goal family; a `stale` and `candidate` penalty — then flattened and re-ranked across sections (not returned as a fixed slice per section) and rendered as TOON text, stopping once `memorysearchbudget` (default `1200` tokens) is reached; when results are cut off, a trailing note tells the model how many matches were omitted and to narrow the query or fetch one entry by `id`.
 
-Tool output is retained as a keyed, bounded observation rather than a raw response. Repeating the same operation and target refreshes that record; large output remains in the existing temporary spill file. A successful call may create a validated procedural contract in `decisions`; schema failures only create short-lived risks and never teach an invocation shape.
+Tool output is retained as a keyed, bounded observation rather than a raw response. Repeating the same operation and target refreshes that record; large output remains in the existing temporary spill file. A successful call may create a validated procedural contract in `decisions` — recorded as the call's **parameter shape** (key names and coarse types, e.g. `{"query":"string:latest AWS outage…"}`) rather than the literal values, so a contract teaches structure without persisting arbitrary call content; short values are kept verbatim (up to 40 chars) for readability. Schema failures only create short-lived risks and never teach an invocation shape. On a tool failure, Mini-A also does a one-shot lookup of remembered pitfalls/procedures for that tool name and appends a short `[MEMORY]` hint to the failure's observation, once per tool per run.
 
 ### Extension Points
 
@@ -3001,8 +3016,11 @@ Runtime helpers available in code:
 - `_memoryAttachEvidence(section, id, evidenceId)`
 - `_memoryMarkStatus(section, id, status, supersededBy)`
 - `_memorySearch(query, { section, maxPerSection, kind, taskScope })` — keyword search across all active managers; returns `{ sectionName: [compactEntries] }`
-- `_memoryWrite(params, args)` — the `memory_write` action's implementation; always session-scoped and keyed
-- `_buildRelevantMemoryBlock(args)` — the goal-relevant durable-memory block injected under `memoryinject=relevant`
+- `_memorySearchScored(query, { section|sections, maxPerSection, kind|kinds, taskScope, toolNames })` — same search, returns `{ sectionName: [{score, entry}] }` for cross-section ranking; `_memorySearch` is a thin wrapper over this
+- `_memoryWrite(params, args, opts)` — the `memory_write` action's implementation; session-scoped when a session store exists, else written straight to global; `opts.event`/`opts.bypassRunCap` are used by the reflection pass
+- `_buildRelevantMemoryBlock(args)` — the goal-relevant, score-ranked, budget-capped durable-memory block injected under `memoryinject=relevant`
+- `_upsertModelCandidateInGlobal(section, key, entry, sessionId)` — the session→candidate→active promotion primitive behind auto-promotion and global-only `memory_write`
+- `_reflectRunMemory(args)` / `_validateReflectionEntries(raw, allowedKeys, goal, answer)` — the reflection pass and its output validator
 - `promoteSessionMemory(section, ids)` (explicit session → global promotion)
 - `clearSessionMemory(sessionId)` (session cleanup hook)
 
@@ -3013,16 +3031,17 @@ These wrappers keep state sync/persistence centralized (instead of ad-hoc direct
 By default the durable (global) store persists to the `memorych` channel as JSON records. Setting `memorymd=true` switches the global store to Markdown strings in that same channel (session memory is unaffected — it stays on ordinary `memorych`/`memorysessionch` records, which fits its higher write frequency better):
 
 ```bash
-# persisted session memory, via an explicit dedicated channel — needed for memory_write
-# records to ever promote: promotion requires the same keyed record to be written in two
-# separate runs (confirmCount >= 2), which can't happen if session memory resets each run
+# persisted session memory, via an explicit dedicated channel — needed for a memory_write
+# candidate to ever *activate*: activation requires a second, different memorysessionid
+# to write the same key, which can't happen if session memory resets every run
 mini-a goal="..." usememory=true memorymd=true \
   memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))' \
   memorysessionch='(name: mini_a_session_mem, type: file, options: (file: /tmp/mini-a-session.json))'
 
 # global store is markdown, session memory is in-process only (no persistence across runs) --
-# fine for read-only use of existing durable memory, but model-authored memory_write records
-# can never reach confirmCount >= 2 and so never promote to the global store
+# fine for read-only use of existing durable memory, and model-authored memory_write records
+# still promote as candidates on their first write, but each run gets a fresh session id, so
+# they can never be *activated* by a second sighting from that same (never-reused) session
 mini-a goal="..." usememory=true memorymd=true \
   memorych='(name: mini_a_global_mem, type: file, options: (file: /tmp/mini-a-memory.json))'
 ```

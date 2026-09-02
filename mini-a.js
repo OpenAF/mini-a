@@ -299,6 +299,19 @@ var MiniA = function() {
     memory_relevant_injected: $atomic(0, "long"),
     memory_writes: $atomic(0, "long"),
     memory_writes_rejected: $atomic(0, "long"),
+    memory_reflections: $atomic(0, "long"),
+    memory_reflection_entries: $atomic(0, "long"),
+    memory_reflection_rejected: $atomic(0, "long"),
+    memory_reflection_failures: $atomic(0, "long"),
+    memory_reflection_tokens: $atomic(0, "long"),
+    memory_candidates_created: $atomic(0, "long"),
+    memory_candidates_activated: $atomic(0, "long"),
+    memory_candidates_expired: $atomic(0, "long"),
+    memory_session_namespaces_gc: $atomic(0, "long"),
+    memory_jit_injections: $atomic(0, "long"),
+    memory_search_results_truncated: $atomic(0, "long"),
+    memory_persist_deferred: $atomic(0, "long"),
+    memory_persist_flushes: $atomic(0, "long"),
     tool_args_prevalidation_failures: $atomic(0, "long"),
     wiki_ops_list: $atomic(0, "long"),
     wiki_ops_read: $atomic(0, "long"),
@@ -1886,6 +1899,19 @@ MiniA.prototype.getMetrics = function() {
             relevant_injected: global.__mini_a_metrics.memory_relevant_injected.get(),
             writes: global.__mini_a_metrics.memory_writes.get(),
             writes_rejected: global.__mini_a_metrics.memory_writes_rejected.get(),
+            reflections: global.__mini_a_metrics.memory_reflections.get(),
+            reflection_entries: global.__mini_a_metrics.memory_reflection_entries.get(),
+            reflection_rejected: global.__mini_a_metrics.memory_reflection_rejected.get(),
+            reflection_failures: global.__mini_a_metrics.memory_reflection_failures.get(),
+            reflection_tokens: global.__mini_a_metrics.memory_reflection_tokens.get(),
+            candidates_created: global.__mini_a_metrics.memory_candidates_created.get(),
+            candidates_activated: global.__mini_a_metrics.memory_candidates_activated.get(),
+            candidates_expired: global.__mini_a_metrics.memory_candidates_expired.get(),
+            session_namespaces_gc: global.__mini_a_metrics.memory_session_namespaces_gc.get(),
+            jit_injections: global.__mini_a_metrics.memory_jit_injections.get(),
+            search_results_truncated: global.__mini_a_metrics.memory_search_results_truncated.get(),
+            persist_deferred: global.__mini_a_metrics.memory_persist_deferred.get(),
+            persist_flushes: global.__mini_a_metrics.memory_persist_flushes.get(),
             resolved_entries: memorySnapshot.resolvedEntries,
             session_entries: memorySnapshot.sessionEntries,
             global_entries: memorySnapshot.globalEntries,
@@ -5657,10 +5683,11 @@ MiniA.prototype._critiquePlanWithLLM = function(payload, args, controls) {
     if (summary.length > 0) this.fnI("plan", `Critique summary: ${summary}`)
     this._memoryAppend("decisions", `Plan critique verdict: ${verdict}`, {
       provenance: { source: "planning", event: "plan-critique" },
+      expiresAt: this._memoryExpiry(1),
       meta: { issues: issues, missingWork: missing, qualityRisks: risks }
     })
     if (summary.length > 0) {
-      this._memoryAppend("summaries", summary, { provenance: { source: "planning", event: "plan-critique-summary" } })
+      this._memoryAppend("summaries", summary, { provenance: { source: "planning", event: "plan-critique-summary" }, expiresAt: this._memoryExpiry(1) })
     }
   } catch (critiqueErr) {
     this.fnI("warn", `Plan critique failed: ${critiqueErr}`)
@@ -6060,6 +6087,7 @@ MiniA.prototype._runValidationMode = function(planPayload, args, controls) {
   this.fnI("plan", "\n=== Overall Status: " + (overallPass ? "PASS" : "NEEDS REVISION") + " ===\n")
   this._memoryAppend("summaries", `Plan validation ${overallPass ? "passed" : "needs revision"}.`, {
     provenance: { source: "validation", event: "plan-validation" },
+    expiresAt: this._memoryExpiry(1),
     meta: { structureValid: validation.valid, critiqueVerdict: isObject(critique) ? critique.verdict : __ }
   })
 
@@ -7196,7 +7224,7 @@ MiniA.prototype._normalizeActionParams = function(actionName, message, params) {
   var keysByAction = {
     wiki: ["op", "path", "query", "pattern", "section", "lineStart", "lineEnd", "maxLines", "maxChars", "countLines", "limit", "offset", "regex", "caseSensitive", "contextLines", "searchIn", "depth", "withMeta", "content", "append", "lineInsert", "to", "leaveRedirect", "redirect", "overwrite", "name", "backend", "root", "bucket", "prefix", "url", "accessKey", "secret", "region", "severity", "types", "page"],
     graph: ["op", "path", "query", "limit", "semantic", "community", "format"],
-    memory_search: ["query", "section", "limit"]
+    memory_search: ["query", "section", "limit", "id", "full"]
   }
   var keys = keysByAction[action]
   if (!isArray(keys)) return params
@@ -7386,9 +7414,14 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
     promoteSections: isString(args.memorypromote) ? args.memorypromote : "",
     staleDays      : isNumber(args.memorystaledays) ? args.memorystaledays : 0,
     artifactTtlDays: isNumber(args.memoryartifactttldays) ? args.memoryartifactttldays : 7,
-    indexTtlDays   : isNumber(args.memoryindexttldays) ? args.memoryindexttldays : 1
+    indexTtlDays   : isNumber(args.memoryindexttldays) ? args.memoryindexttldays : 1,
+    candidateDays  : isNumber(args.memorycandidatedays) ? args.memorycandidatedays : 30,
+    persistEvery   : isNumber(args.memorypersistevery) ? args.memorypersistevery : 1
   }
   this._memoryConfig = cfg
+  this._memoryGlobalDirty = false
+  this._memorySessionDirty = false
+  this._memoryMutations = 0
   this._memoryScope = scope
   this._sessionMemoryId = sessionId
   this._memoryManager = __
@@ -7520,6 +7553,40 @@ MiniA.prototype._initWorkingMemory = function(args, seedState) {
 
   this._memoryManager = this._getDefaultMemoryWriteManager()
   this._syncWorkingMemoryState()
+  this._gcSessionNamespaces(args)
+}
+
+// Session namespaces (one per conversation/CLI-run id) are never reclaimed by compaction
+// or staleness sweeps -- those operate on entries within a namespace, not on namespaces
+// themselves. Without this, a long-lived memorysessionch file channel accumulates one
+// namespace per process forever. Runs once per process per channel.
+MiniA.prototype._gcSessionNamespaces = function(args) {
+  var ch = this._memorysessionChEffective
+  if (!isString(ch) || ch.length === 0) return
+  var days = isNumber(args.memorysessionmaxdays) ? args.memorysessionmaxdays : 14
+  if (days <= 0) return
+  if (!isObject(MiniA._sessionGcDoneFor)) MiniA._sessionGcDoneFor = {}
+  if (MiniA._sessionGcDoneFor[ch] === true) return
+  MiniA._sessionGcDoneFor[ch] = true
+  try {
+    var namespaces = MiniAMemoryManager.listChannelNamespaces(ch)
+    var thresholdMs = days * 86400000
+    var removed = 0
+    namespaces.forEach(function(ns) {
+      if (ns.namespace === this._sessionMemoryId) return
+      var anchor = isObject(ns.meta) && isString(ns.meta.updatedAt) ? ns.meta.updatedAt : (isObject(ns.meta) && isString(ns.meta.createdAt) ? ns.meta.createdAt : __)
+      if (!isString(anchor)) return
+      var anchorMs = new Date(anchor).getTime()
+      if (isNaN(anchorMs) || (Date.now() - anchorMs) <= thresholdMs) return
+      if (MiniAMemoryManager.deleteChannelNamespace(ch, ns.namespace) > 0) removed++
+    }.bind(this))
+    if (removed > 0) {
+      if (isObject(global.__mini_a_metrics.memory_session_namespaces_gc)) global.__mini_a_metrics.memory_session_namespaces_gc.getAdd(removed)
+      this.fnI("info", `🧹 [mem:gc] removed ${removed} session namespace(s) older than ${days}d`)
+    }
+  } catch(gcErr) {
+    this.fnI("warn", `[memory] session namespace gc failed: ${__miniAErrMsg(gcErr)}`)
+  }
 }
 
 MiniA.prototype._initWiki = function(args) {
@@ -7727,27 +7794,95 @@ MiniA.prototype._buildMemorySummaryForLLM = function() {
   return counts
 }
 
-// Keyword search across all active memory managers. Returns matching entries per section.
-MiniA.prototype._memorySearch = function(query, opts) {
+// Scans full (non-compact) entries directly for pending fetches, so summary/relevant
+// injection modes don't have to build the whole compact memory tree just to find them.
+MiniA.prototype._collectPendingFetches = function() {
+  var pf = []
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  if (!isArray(managers) || managers.length === 0) return pf
+  var sections = managers[0]._sections()
+  managers.forEach(function(manager) {
+    sections.forEach(function(sec) {
+      manager.getSectionEntries(sec).forEach(function(e) {
+        if (e.pendingReadresult === true) pf.push({ type: "readresult", tool: e.sourceTool || "unknown", resultFile: e.resultFile, id: e.id, section: sec })
+        else if (e.truncated === true) pf.push({ type: "truncated", tool: e.sourceTool || "unknown", params: e.sourceParams, fullSize: e.fullSize, id: e.id, section: sec })
+      })
+    })
+  })
+  return pf
+}
+
+// Counts-only state snapshot for the permanent [STATE n] entries logged into runtime.context
+// when the model updates state mid-run. Unlike getStateSnapshot() (used for the per-step
+// CURRENT STATE prompt slot), this never embeds the full compact memory tree even under
+// memoryinject="full" -- otherwise every state update would permanently duplicate the whole
+// memory store into the running context log.
+MiniA.prototype._buildLeanStateSnapshot = function(args) {
+  if (args.usememory && isObject(this._agentState) && isObject(this._agentState.workingMemory)) {
+    var stateForLLM = {}
+    var self = this
+    Object.keys(this._agentState).forEach(function(k) {
+      if (k !== "workingMemorySession" && k !== "workingMemoryGlobal") stateForLLM[k] = self._agentState[k]
+    })
+    stateForLLM.workingMemory = this._buildMemorySummaryForLLM()
+    var pf = this._collectPendingFetches()
+    if (pf.length > 0) stateForLLM.pendingFetches = pf
+    return af.toTOON(stateForLLM)
+  }
+  return stringify(this._agentState, __, "")
+}
+
+// Tokenizes text for memory search/scoring: keeps tokens longer than 2 chars, plus 2-char
+// tokens that carry an uppercase letter or digit (S3, CI, k8s) that a plain lowercase-only
+// length filter would otherwise drop; applies light suffix stemming so "buckets"/"deployed"
+// match "bucket"/"deploy".
+MiniA.prototype._memoryTokenize = function(text) {
+  var raw = String(isDef(text) ? text : "")
+  var parts = raw.split(/[^a-zA-Z0-9]+/).filter(function(w) { return w.length > 0 })
+  var kept = parts.filter(function(w) { return w.length > 2 || (w.length === 2 && /[A-Z0-9]/.test(w)) })
+  return kept.map(function(w) {
+    var lw = w.toLowerCase()
+    if (lw.length > 5 && /ing$/.test(lw)) return lw.substring(0, lw.length - 3)
+    if (lw.length > 4 && /ed$/.test(lw)) return lw.substring(0, lw.length - 2)
+    if (lw.length > 3 && /es$/.test(lw) && !/ss$/.test(lw)) return lw.substring(0, lw.length - 2)
+    if (lw.length > 3 && /s$/.test(lw) && !/ss$/.test(lw)) return lw.substring(0, lw.length - 1)
+    return lw
+  })
+}
+
+// Same keyword search as _memorySearch but returns { section: [{score, entry}] } instead of
+// discarding the score, so callers (relevant-block builder, memory_search formatter) can
+// rank/truncate across sections instead of picking a fixed number per section in a fixed
+// section order. opts.sections/opts.kinds accept arrays in addition to the single
+// opts.section/opts.kind strings; opts.toolNames boosts entries naming a tool in play this
+// run; opts.taskScope (a goal-family prefix, e.g. "fix-the-ci::") boosts same-family entries.
+MiniA.prototype._memorySearchScored = function(query, opts) {
   var options = isObject(opts) ? opts : {}
   var maxPerSection = isNumber(options.maxPerSection) && options.maxPerSection > 0 ? options.maxPerSection : 10
-  var filterSection = isString(options.section) && options.section.length > 0 ? options.section.toLowerCase().trim() : null
-  var filterKind = isString(options.kind) && options.kind.length > 0 ? options.kind.toLowerCase().trim() : null
+  var filterSections = isArray(options.sections) ? options.sections.map(function(s) { return String(s).toLowerCase().trim() }) :
+    (isString(options.section) && options.section.length > 0 ? [options.section.toLowerCase().trim()] : null)
+  var filterKinds = isArray(options.kinds) ? options.kinds.map(function(k) { return String(k).toLowerCase().trim() }) :
+    (isString(options.kind) && options.kind.length > 0 ? [options.kind.toLowerCase().trim()] : null)
   if (!isString(query) || query.trim().length === 0) return {}
 
   var managers = this._getMemoryReadManagers(this._memoryScope)
   if (!isArray(managers) || managers.length === 0) return {}
 
-  var qWords = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(function(w) { return w.length > 2 })
+  var self = this
+  var qWords = this._memoryTokenize(query)
   if (qWords.length === 0) return {}
   var qWordSet = {}
   qWords.forEach(function(w) { qWordSet[w] = true })
+  var toolNameSet = {}
+  if (isArray(options.toolNames)) options.toolNames.forEach(function(t) { toolNameSet[String(t).toLowerCase()] = true })
+  var queryLower = query.toLowerCase().trim()
+  var taskScopePrefix = isString(options.taskScope) && options.taskScope.length > 0 ? options.taskScope + "::" : __
 
   var sectionNames = managers[0]._sections()
   var results = {}
 
   sectionNames.forEach(function(section) {
-    if (filterSection && section !== filterSection) return
+    if (filterSections && filterSections.indexOf(section) < 0) return
     var seen = {}
     var scored = []
     managers.forEach(function(manager) {
@@ -7762,38 +7897,143 @@ MiniA.prototype._memorySearch = function(query, opts) {
         var key = entry.id || entry.v
         if (seen[key]) return
         seen[key] = true
-        if (filterKind && String(entry.k || "").toLowerCase() !== filterKind) return
-        var text = (String(entry.v || "") + " " + String(entry.key || "") + " " + String(entry.scope || "")).toLowerCase().replace(/[^a-z0-9\s]/g, " ")
+        if (filterKinds && filterKinds.indexOf(String(entry.k || "").toLowerCase()) < 0) return
+        var rawText = String(entry.v || "") + " " + String(entry.key || "") + " " + String(entry.scope || "")
+        var textLower = rawText.toLowerCase()
+        var entryTokenSet = {}
+        self._memoryTokenize(rawText).forEach(function(t) { entryTokenSet[t] = true })
         var matchCount = 0
-        qWords.forEach(function(w) { if (text.indexOf(w) >= 0) matchCount++ })
-        if (matchCount > 0) {
-          var score = matchCount
-          if (String(entry.key || "").toLowerCase().indexOf(query.toLowerCase().trim()) >= 0) score += 8
-          if (entry.val === true) score += 4
-          if (isString(entry.scope) && isString(options.taskScope) && entry.scope === options.taskScope) score += 3
-          if (isString(entry.exp) && new Date(entry.exp).getTime() > Date.now()) score += 1
-          var full = fullById[entry.id]
-          if (isObject(full)) {
-            if (isNumber(full.confirmCount) && full.confirmCount > 1) score += Math.min(4, Math.log2(full.confirmCount) * 2)
-            if (isString(full.confirmedAt)) {
-              var ageDays = (Date.now() - new Date(full.confirmedAt).getTime()) / 86400000
-              if (ageDays >= 0 && ageDays < 30) score += (1 - ageDays / 30) * 2
-            }
+        qWords.forEach(function(w) { if (entryTokenSet[w] === true || textLower.indexOf(w) >= 0) matchCount++ })
+        if (matchCount === 0) return
+        var score = matchCount
+        if (String(entry.key || "").toLowerCase().indexOf(queryLower) >= 0) score += 8
+        if (entry.val === true) score += 4
+        if (isString(taskScopePrefix) && isString(entry.scope) && entry.scope.indexOf(taskScopePrefix) === 0) score += 3
+        if (isString(entry.exp) && new Date(entry.exp).getTime() > Date.now()) score += 1
+        var full = fullById[entry.id]
+        if (isObject(full)) {
+          if (isNumber(full.confirmCount) && full.confirmCount > 1) score += Math.min(4, Math.log2(full.confirmCount) * 2)
+          if (isString(full.confirmedAt)) {
+            var ageDays = (Date.now() - new Date(full.confirmedAt).getTime()) / 86400000
+            if (ageDays >= 0 && ageDays < 30) score += (1 - ageDays / 30) * 2
           }
-          if (isArray(entry.tg) && entry.tg.length > 0) {
-            var tagHits = entry.tg.filter(function(t) { return qWordSet[String(t).toLowerCase()] === true }).length
-            if (tagHits > 0) score += tagHits * 2
-          }
-          if (entry.stale === true) score -= 5
-          scored.push({ score: score, entry: entry })
         }
+        if (isArray(entry.tg) && entry.tg.length > 0) {
+          var tagHits = entry.tg.filter(function(t) { return qWordSet[String(t).toLowerCase()] === true }).length
+          if (tagHits > 0) score += tagHits * 2
+        }
+        if (Object.keys(toolNameSet).length > 0) {
+          var toolHit = (isString(entry.key) && toolNameSet[entry.key.toLowerCase()] === true) ||
+            (isArray(entry.tg) && entry.tg.some(function(t) { return toolNameSet[String(t).toLowerCase()] === true })) ||
+            (isString(entry.scope) && Object.keys(toolNameSet).some(function(t) { return entry.scope.toLowerCase().indexOf(t) >= 0 }))
+          if (toolHit) {
+            score += 3
+            if (entry.k === "pitfall" || entry.k === "procedure") score += 2
+          }
+        }
+        if (entry.stale === true) score -= 5
+        if (entry.st === "candidate") score -= 2
+        scored.push({ score: score, entry: entry })
       })
     })
     if (scored.length === 0) return
     scored.sort(function(a, b) { return b.score - a.score })
-    results[section] = scored.slice(0, maxPerSection).map(function(s) { return s.entry })
+    results[section] = scored.slice(0, maxPerSection)
   })
   return results
+}
+
+// Keyword search across all active memory managers. Returns matching entries per section
+// (scores dropped -- use _memorySearchScored when cross-section ranking is needed).
+MiniA.prototype._memorySearch = function(query, opts) {
+  var scored = this._memorySearchScored(query, opts)
+  var results = {}
+  Object.keys(scored).forEach(function(section) {
+    results[section] = scored[section].map(function(s) { return s.entry })
+  })
+  return results
+}
+
+// Fetches one full entry (uncompacted value) by id across every active memory manager and
+// section, for the memory_search action's {"id":"..."} fetch-one form.
+MiniA.prototype._fetchMemoryEntryById = function(id) {
+  if (!isString(id) || id.trim().length === 0) return __
+  var targetId = id.trim()
+  var managers = this._getMemoryReadManagers(this._memoryScope)
+  if (!isArray(managers) || managers.length === 0) return __
+  var sections = managers[0]._sections()
+  for (var m = 0; m < managers.length; m++) {
+    for (var s = 0; s < sections.length; s++) {
+      var entries = managers[m].getSectionEntries(sections[s])
+      for (var e = 0; e < entries.length; e++) {
+        if (entries[e].id === targetId) return { section: sections[s], entry: entries[e] }
+      }
+    }
+  }
+  return __
+}
+
+// Renders _memorySearchScored's output for the model: flattened and re-ranked across
+// sections by score, each value truncated to 200 chars (unless opts.full), stopping once
+// the estimated TOON size would exceed opts.budget tokens. Returns the still-compact
+// {section: [entry...]} shape memory_search has always returned, plus how many matches
+// were left out so the model knows to narrow its query or fetch one entry by id.
+MiniA.prototype._formatMemorySearchResults = function(scored, opts) {
+  var options = isObject(opts) ? opts : {}
+  var budget = isNumber(options.budget) && options.budget > 0 ? options.budget : 1200
+  var full = options.full === true
+  var flat = []
+  Object.keys(scored).forEach(function(section) {
+    scored[section].forEach(function(item) { flat.push({ score: item.score, section: section, entry: item.entry }) })
+  })
+  flat.sort(function(a, b) { return b.score - a.score })
+
+  var kept = {}
+  var used = 0
+  var omitted = 0
+  var self = this
+  flat.forEach(function(item) {
+    var e = item.entry
+    var v = String(e.v || "")
+    var compact = { id: e.id, k: e.k, key: e.key, v: full ? v : (v.length > 200 ? v.substring(0, 200) + "…" : v) }
+    if (isString(e.st)) compact.st = e.st
+    if (isArray(e.tg) && e.tg.length > 0) compact.tg = e.tg
+    if (isString(e.scope)) compact.scope = e.scope
+    if (isString(e.exp)) compact.exp = e.exp
+    var t = self._estimateTokens(stringify(compact, __, ""))
+    if (used + t > budget) { omitted++; return }
+    if (!isArray(kept[item.section])) kept[item.section] = []
+    kept[item.section].push(compact)
+    used += t
+  })
+  if (omitted > 0 && isObject(global.__mini_a_metrics.memory_search_results_truncated)) global.__mini_a_metrics.memory_search_results_truncated.inc()
+  return { results: kept, omitted: omitted, tokens: used }
+}
+
+// Just-in-time recall: on a tool failure, surface any remembered pitfall/procedure for that
+// tool once per tool per phase per run, so the correction reaches the model in the same step
+// rather than requiring it to guess to call memory_search. Returns a short text block (or ""
+// when nothing qualifies / already shown this run).
+MiniA.prototype._injectJustInTimeMemory = function(runtime, toolName, phase) {
+  if (this._memoryConfig.enabled !== true || !isObject(runtime) || !isString(toolName) || toolName.length === 0) return ""
+  if (!isObject(runtime.jitMemoryDone)) runtime.jitMemoryDone = {}
+  var doneKey = toolName + ":" + phase
+  if (runtime.jitMemoryDone[doneKey] === true) return ""
+  runtime.jitMemoryDone[doneKey] = true
+
+  var scored = this._memorySearchScored(toolName, { sections: ["risks", "decisions"], kinds: ["pitfall", "procedure"], maxPerSection: 2 })
+  var flat = []
+  Object.keys(scored).forEach(function(section) {
+    scored[section].forEach(function(item) { flat.push(item) })
+  })
+  if (flat.length === 0) return ""
+  flat.sort(function(a, b) { return b.score - a.score })
+  var lines = flat.slice(0, 2).map(function(item) {
+    var v = String(item.entry.v || "")
+    return "(" + (item.entry.k || "memory") + ") " + (v.length > 160 ? v.substring(0, 160) + "…" : v)
+  })
+  if (isObject(global.__mini_a_metrics.memory_jit_injections)) global.__mini_a_metrics.memory_jit_injections.inc()
+  return "[MEMORY] '" + toolName + "': " + lines.join(" | ")
 }
 
 MiniA.prototype._syncWorkingMemoryState = function() {
@@ -7825,7 +8065,7 @@ MiniA.prototype._syncWorkingMemoryState = function() {
   } else delete this._agentState.workingMemory
 }
 
-MiniA.prototype._persistWorkingMemory = function(reason) {
+MiniA.prototype._persistWorkingMemoryNow = function(reason) {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._globalMemoryManager)) return
   this._syncWorkingMemoryState()
@@ -7848,7 +8088,7 @@ MiniA.prototype._persistWorkingMemory = function(reason) {
   }
 }
 
-MiniA.prototype._persistSessionMemory = function(reason) {
+MiniA.prototype._persistSessionMemoryNow = function(reason) {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._sessionMemoryManager)) return
   this._syncWorkingMemoryState()
@@ -7858,6 +8098,60 @@ MiniA.prototype._persistSessionMemory = function(reason) {
     if (this._memoryConfig.debug) this.fnI("info", `[memory] session persisted to channel '${this._memorysessionChEffective}' key '${this._memorysessionChNamespace}' (${reason || "update"})`)
   } catch(e) {
     this.fnI("warn", `[memory] session persistence failed: ${__miniAErrMsg(e)}`)
+  }
+}
+
+// Reasons that must always persist immediately -- run completion/interruption, promotion,
+// a deliberate model memory_write, an explicit clear, and test fixtures that expect
+// synchronous writes. Everything else (routine tool-call bookkeeping) is debounced.
+var _MINI_A_IMMEDIATE_PERSIST_REASONS = { "run-finalize": true, "auto-promotion": true, "memory-write": true, "clear": true, "test": true }
+
+// Debounced entry points: every append/upsert used to trigger a full-channel rewrite
+// (gzip + lock for the default memoryuser file channels), up to ~3x per tool call. These
+// mark the store dirty and only persist immediately on the reasons above or every
+// memorypersistevery-th mutation (default 10); _finalizeRunMemory always flushes via the
+// "run-finalize" reason, so a run never ends with unpersisted memory.
+MiniA.prototype._persistWorkingMemory = function(reason) {
+  if (this._memoryConfig.enabled !== true) return
+  this._memoryGlobalDirty = true
+  this._memoryMutations = (this._memoryMutations || 0) + 1
+  var every = isNumber(this._memoryConfig.persistEvery) && this._memoryConfig.persistEvery > 0 ? this._memoryConfig.persistEvery : 10
+  if (_MINI_A_IMMEDIATE_PERSIST_REASONS[reason] === true || every <= 1 || (this._memoryMutations % every) === 0) {
+    this._persistWorkingMemoryNow(reason)
+    this._memoryGlobalDirty = false
+    if (isObject(global.__mini_a_metrics.memory_persist_flushes)) global.__mini_a_metrics.memory_persist_flushes.inc()
+  } else if (isObject(global.__mini_a_metrics.memory_persist_deferred)) {
+    global.__mini_a_metrics.memory_persist_deferred.inc()
+  }
+}
+
+MiniA.prototype._persistSessionMemory = function(reason) {
+  if (this._memoryConfig.enabled !== true) return
+  this._memorySessionDirty = true
+  this._memoryMutations = (this._memoryMutations || 0) + 1
+  var every = isNumber(this._memoryConfig.persistEvery) && this._memoryConfig.persistEvery > 0 ? this._memoryConfig.persistEvery : 10
+  if (_MINI_A_IMMEDIATE_PERSIST_REASONS[reason] === true || every <= 1 || (this._memoryMutations % every) === 0) {
+    this._persistSessionMemoryNow(reason)
+    this._memorySessionDirty = false
+    if (isObject(global.__mini_a_metrics.memory_persist_flushes)) global.__mini_a_metrics.memory_persist_flushes.inc()
+  } else if (isObject(global.__mini_a_metrics.memory_persist_deferred)) {
+    global.__mini_a_metrics.memory_persist_deferred.inc()
+  }
+}
+
+// Last-resort flush for any store left dirty by the debounce above (e.g. a shutdown that
+// bypasses the normal finalize reasons).
+MiniA.prototype._flushMemoryPersist = function(reason) {
+  if (this._memoryConfig.enabled !== true) return
+  if (this._memoryGlobalDirty === true) {
+    this._persistWorkingMemoryNow(reason || "flush")
+    this._memoryGlobalDirty = false
+    if (isObject(global.__mini_a_metrics.memory_persist_flushes)) global.__mini_a_metrics.memory_persist_flushes.inc()
+  }
+  if (this._memorySessionDirty === true) {
+    this._persistSessionMemoryNow(reason || "flush")
+    this._memorySessionDirty = false
+    if (isObject(global.__mini_a_metrics.memory_persist_flushes)) global.__mini_a_metrics.memory_persist_flushes.inc()
   }
 }
 
@@ -7916,7 +8210,15 @@ MiniA.prototype._memoryUpsert = function(section, key, value, meta, upsertOpts) 
   var baseEntry = isObject(value) ? merge({}, value) : { value: value }
   var entry = isObject(meta) ? merge(baseEntry, meta) : baseEntry
   delete entry.memoryScope
-  var saved = targetManager.upsert(section, key, entry, isObject(upsertOpts) ? upsertOpts : {})
+  // A caller may pass "replaceKeys" as a sibling of the meta fields (rather than as a
+  // separate upsertOpts argument) so the entry-building object literal reads naturally.
+  // Pull it out here instead of letting it merge into the persisted entry as a stray field.
+  var opts = isObject(upsertOpts) ? merge({}, upsertOpts) : {}
+  if (isArray(entry.replaceKeys)) {
+    opts.replaceKeys = isArray(opts.replaceKeys) ? opts.replaceKeys.concat(entry.replaceKeys) : entry.replaceKeys
+    delete entry.replaceKeys
+  }
+  var saved = targetManager.upsert(section, key, entry, opts)
   if (isObject(saved)) {
     this._syncWorkingMemoryState()
     if (targetManager === this._globalMemoryManager) this._persistWorkingMemory("upsert")
@@ -7950,12 +8252,19 @@ MiniA.prototype._resolveMemoryInjectMode = function(usememory, requested) {
   return mode
 }
 
-// Model-facing durable memory write (the "memory_write" action). Always session-scoped
-// and keyed, so it only reaches global storage via _autoPromoteSessionToGlobal's
-// confirmCount>=2 gate on provenance.source==="model" entries — a single call from a
-// run reading untrusted tool output cannot plant a permanent global "fact".
-MiniA.prototype._memoryWrite = function(params, args) {
+// Model-facing durable memory write (the "memory_write" action). Session-scoped and keyed
+// whenever a session manager exists; promotion to global storage (via
+// _autoPromoteSessionToGlobal / _upsertModelCandidateInGlobal) lands the entry as an
+// unconfirmed "candidate" from this session and only activates it once a *different*
+// session writes the same key — a single call from a run reading untrusted tool output
+// cannot plant a confirmed global "fact" on its own. Under memoryscope=global (no session
+// manager) the write goes straight to the global store, still as a candidate.
+// opts.event overrides the provenance event (used by the reflection pass to write
+// provenance.event="reflection" instead of "memory-write"); opts.bypassRunCap skips the
+// memorywritemax check/counter (reflection has its own 5-item cap).
+MiniA.prototype._memoryWrite = function(params, args, opts) {
   if (this._memoryConfig.enabled !== true) return { ok: false, message: "Memory is disabled (usememory=false)." }
+  var writeOpts = isObject(opts) ? opts : {}
   var p = isObject(params) ? params : {}
   var kind = isString(p.kind) ? p.kind.trim().toLowerCase() : ""
   var section = _MINI_A_DURABLE_MEMORY_KINDS[kind]
@@ -7968,27 +8277,33 @@ MiniA.prototype._memoryWrite = function(params, args) {
     if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
     return { ok: false, message: "Missing 'value' to remember." }
   }
-  if (this._memoryWriteCount >= this._memoryWriteMax) {
+  if (writeOpts.bypassRunCap !== true && this._memoryWriteCount >= this._memoryWriteMax) {
     if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
     return { ok: false, message: `memory_write limit reached for this run (${this._memoryWriteMax}).` }
   }
   var key = isString(p.key) && p.key.trim().length > 0 ? p.key.trim() : (kind + "::" + this._slugifyMemoryValue(value))
   var tags = isArray(p.tags) ? p.tags.filter(isString).map(function(t) { return t.trim().toLowerCase() }).filter(function(t) { return t.length > 0 }) : []
-  var meta = {
-    memoryScope: "session",
-    kind        : kind,
-    key         : key,
-    tags        : tags,
-    observedAt  : new Date().toISOString(),
-    provenance  : { source: "model", event: "memory-write" }
+  var hasSessionManager = isObject(this._sessionMemoryManager)
+  var provenance = { source: "model", event: isString(writeOpts.event) ? writeOpts.event : "memory-write" }
+  var entryMeta = { kind: kind, key: key, tags: tags, observedAt: new Date().toISOString(), provenance: provenance }
+  if (isNumber(p.ttlDays) && p.ttlDays > 0) entryMeta.expiresAt = this._memoryExpiry(p.ttlDays)
+
+  var saved
+  if (hasSessionManager) {
+    saved = this._memoryUpsert(section, key, value, merge(merge({}, entryMeta), { memoryScope: "session" }))
+  } else if (isObject(this._globalMemoryManager)) {
+    // No dedicated/effective session manager (memoryscope=global): write straight to the
+    // global store as a candidate instead of failing every call (_memoryUpsert has no
+    // fallback target when the session manager is absent).
+    var outcome = this._upsertModelCandidateInGlobal(section, key, { value: value, meta: entryMeta, provenance: provenance }, this._sessionMemoryId)
+    saved = isString(outcome) ? this._globalMemoryManager.getSectionEntries(section).filter(function(e) { return e.key === key })[0] : __
+    if (isObject(saved)) this._persistWorkingMemory("memory-write")
   }
-  if (isNumber(p.ttlDays) && p.ttlDays > 0) meta.expiresAt = this._memoryExpiry(p.ttlDays)
-  var saved = this._memoryUpsert(section, key, value, meta)
   if (!isObject(saved)) {
     if (isObject(global.__mini_a_metrics.memory_writes_rejected)) global.__mini_a_metrics.memory_writes_rejected.inc()
     return { ok: false, message: "Memory write failed." }
   }
-  this._memoryWriteCount++
+  if (writeOpts.bypassRunCap !== true) this._memoryWriteCount++
   if (isObject(global.__mini_a_metrics.memory_writes)) global.__mini_a_metrics.memory_writes.inc()
   return { ok: true, section: section, key: key, id: saved.id, confirmCount: saved.confirmCount }
 }
@@ -8021,12 +8336,57 @@ MiniA.prototype._buildToolObservation = function(toolName, params, rawResult, ob
   }
 }
 
+// Records a shell command's output as a single keyed, TTL'd artifact instead of a pair of
+// content-free evidence + artifact appends. Re-running the same command refreshes the same
+// entry (confirmCount++) rather than piling up duplicates.
+MiniA.prototype._recordShellObservation = function(command, output, stepLabel, args) {
+  var cmd = isString(command) ? command : ""
+  var out = (isString(output) ? output : "(no output)").trim()
+  var key = "artifact:shell:" + sha1(cmd).substring(0, 12)
+  var value = "Shell: " + cmd.substring(0, 120) + " -> " + out.substring(0, 380)
+  return this._memoryUpsert("artifacts", key, value, {
+    kind: "artifact:shell",
+    observedAt: new Date().toISOString(),
+    expiresAt: this._memoryExpiry(this._memoryConfig.artifactTtlDays),
+    taskScope: this._deriveMemoryTaskScope(args, "shell"),
+    sourceTool: "shell",
+    sourceParams: cmd.substring(0, 240),
+    provenance: { source: "shell", event: "shell-output", step: stepLabel, command: cmd }
+  })
+}
+
+// Reduces a tool-call parameter value to its shape (key names + coarse types) rather than
+// its literal content, so tool contracts teach argument structure without persisting
+// possibly-sensitive or run-specific values (question text, file contents, tokens...).
+MiniA.prototype._buildParamShape = function(value, depth) {
+  var d = isNumber(depth) ? depth : 0
+  if (isUnDef(value) || value === null) return "null"
+  if (isString(value)) {
+    var trimmed = value.replace(/\s+/g, " ").trim()
+    return "string:" + trimmed.substring(0, 40) + (trimmed.length > 40 ? "…" : "")
+  }
+  if (isNumber(value)) return "number:" + value
+  if (isBoolean(value)) return "boolean:" + value
+  if (isArray(value)) {
+    if (d > 2) return "array"
+    return value.length > 0 ? [this._buildParamShape(value[0], d + 1)] : []
+  }
+  if (isMap(value)) {
+    if (d > 2) return "object"
+    var shaped = {}, keys = Object.keys(value).slice(0, 12)
+    var self = this
+    keys.forEach(function(k) { shaped[k] = self._buildParamShape(value[k], d + 1) })
+    return shaped
+  }
+  return "object"
+}
+
 MiniA.prototype._recordValidatedToolContract = function(toolName, params, evidenceId, args) {
   if (!isMap(params)) return __
   var proxy = toolName === "proxy-dispatch" && params.action === "call" && isString(params.tool)
   var actualTool = proxy ? params.tool : toolName
   if (!isString(actualTool) || actualTool.length === 0) return __
-  var invocation = proxy ? { action: "proxy-dispatch", params: { action: "call", tool: actualTool, arguments: isMap(params.arguments) ? params.arguments : {} } } : { action: actualTool, params: params }
+  var invocation = proxy ? { action: "proxy-dispatch", params: { action: "call", tool: actualTool, arguments: this._buildParamShape(isMap(params.arguments) ? params.arguments : {}) } } : { action: actualTool, params: this._buildParamShape(params) }
   var key = "tool-contract:" + (proxy ? "proxy-dispatch:call:" : "call:") + actualTool
   var existingRejected = []
   this._getMemoryReadManagers(this._memoryScope).forEach(function(manager) {
@@ -8034,11 +8394,11 @@ MiniA.prototype._recordValidatedToolContract = function(toolName, params, eviden
       if (entry.key === key && isObject(entry.meta) && isArray(entry.meta.rejected)) existingRejected = entry.meta.rejected
     })
   })
-  var record = this._memoryUpsert("decisions", key, "Validated tool contract for " + actualTool + ": " + stringify(invocation, __, ""), {
+  var record = this._memoryUpsert("decisions", key, "Validated tool contract for " + actualTool + " (parameter shape): " + stringify(invocation, __, ""), {
     kind: "tool-contract", validated: true, taskScope: "general::" + actualTool,
     provenance: { source: "tool", event: "validated-contract", tool: actualTool }, evidenceRefs: isString(evidenceId) ? [evidenceId] : [],
     meta: { tool: actualTool, action: proxy ? "proxy-dispatch" : actualTool, version: 1, invocation: invocation, rejected: existingRejected,
-      goalScope: this._deriveMemoryTaskScope(args, actualTool) }, replaceKeys: ["meta.invocation"]
+      goalScope: this._deriveMemoryTaskScope(args, actualTool) }, replaceKeys: ["meta.invocation", "meta.rejected"]
   })
   // A confirmed contract makes prior speculative advice for the same key non-authoritative.
   var managers = this._getMemoryReadManagers(this._memoryScope)
@@ -8076,26 +8436,52 @@ MiniA.prototype._buildValidatedToolContracts = function(args) {
 }
 
 // Goal-relevant durable memory, auto-injected at run start so the model doesn't have to
-// guess to call memory_search. Mirrors _buildValidatedToolContracts: same cap, same
-// metric. Only durable model-authored kinds and validated entries are eligible — never
-// runtime bookkeeping (e.g. "tool-failure" risks, tool-observation artifacts).
+// guess to call memory_search. Mirrors _buildValidatedToolContracts: same metric. Only
+// durable model-authored kinds are eligible -- never runtime bookkeeping (tool-failure
+// risks, tool-observation artifacts, un-flagged validated entries like run outcomes).
+// Selection is score-ranked across sections (not a fixed per-section slice in a fixed
+// section order) and stops at whichever of memoryrelevantcap (entry count) or memorybudget
+// (estimated tokens) is hit first; each value is truncated to keep one bad long entry from
+// eating the whole budget. Sets this._memoryPromptTokens so the step-context budget can
+// account for what was actually injected into the system prompt.
 MiniA.prototype._buildRelevantMemoryBlock = function(args) {
+  this._memoryPromptTokens = 0
   if (this._memoryConfig.enabled !== true) return []
   var goal = isString(args.goal) ? args.goal.trim() : ""
   if (goal.length === 0) return []
   var cap = isNumber(args.memoryrelevantcap) && args.memoryrelevantcap > 0 ? args.memoryrelevantcap : 8
-  var results = this._memorySearch(goal, { maxPerSection: cap })
-  var picked = []
+  var budget = isNumber(args.memorybudget) && args.memorybudget > 0 ? args.memorybudget : 1500
+  var maxChars = 300
+  var scope = this._deriveMemoryTaskScope(args, "")
+  var taskFamily = scope.replace(/::[^:]*$/, "")
+  var results = this._memorySearchScored(goal, { maxPerSection: cap, taskScope: taskFamily })
+
+  var flat = []
   Object.keys(results).forEach(function(section) {
-    results[section].forEach(function(entry) {
-      if (picked.length >= cap) return
+    results[section].forEach(function(item) {
+      var entry = item.entry
       var isDurableKind = isString(entry.k) && isString(_MINI_A_DURABLE_MEMORY_KINDS[entry.k])
-      if (!isDurableKind && entry.val !== true) return
+      if (!isDurableKind) return
       if (entry.stale === true) return
       if (isString(entry.sup) && entry.sup.length > 0) return
-      picked.push({ section: section, kind: isString(entry.k) ? entry.k : __, key: entry.key, value: entry.v })
+      flat.push({ score: item.score, section: section, kind: entry.k, key: entry.key, value: String(entry.v || ""), candidate: entry.st === "candidate" })
     })
   })
+  flat.sort(function(a, b) { return b.score - a.score })
+
+  var picked = []
+  var used = 0
+  var self = this
+  for (var i = 0; i < flat.length; i++) {
+    if (picked.length >= cap) break
+    var item = flat[i]
+    var text = item.value.length > maxChars ? item.value.substring(0, maxChars) + "…" : item.value
+    var t = self._estimateTokens(text)
+    if (used + t > budget) continue
+    picked.push({ section: item.section, kind: item.kind, key: item.key, value: text, candidate: item.candidate })
+    used += t
+  }
+  this._memoryPromptTokens = used
   if (picked.length > 0 && isObject(global.__mini_a_metrics.memory_relevant_injected)) global.__mini_a_metrics.memory_relevant_injected.getAdd(picked.length)
   return picked
 }
@@ -8116,7 +8502,8 @@ MiniA.prototype._recordRejectedToolArgs = function(toolName, params, message, ar
   if (rejected.length > 5) rejected = rejected.slice(-5)
   this._memoryUpsert("decisions", key, previous && isString(previous.value) ? previous.value : "Pending corrective tool contract for " + actualTool + ".", {
     kind: "tool-contract", validated: previous && previous.validated === true, taskScope: "general::" + actualTool,
-    meta: merge(previous && isObject(previous.meta) ? previous.meta : {}, { tool: actualTool, rejected: rejected, goalScope: this._deriveMemoryTaskScope(args, actualTool) })
+    meta: merge(previous && isObject(previous.meta) ? previous.meta : {}, { tool: actualTool, rejected: rejected, goalScope: this._deriveMemoryTaskScope(args, actualTool) }),
+    replaceKeys: ["meta.rejected"]
   })
 }
 
@@ -8268,6 +8655,57 @@ MiniA.prototype.promoteSessionMemory = function(section, ids) {
   return { promoted: promoted }
 }
 
+// Model-authored entries (memory_write, reflection) promote to the global store immediately
+// as an unconfirmed "candidate" from the writing session; a second sighting from a
+// *different* session activates it. This replaces the old confirmCount>=2-within-one-session
+// gate, which a fresh session/CLI run (a new random session id, mini-a.js:_initWorkingMemory)
+// could essentially never satisfy on its own. Uses update() (plain field assignment) rather
+// than upsert()'s merge() for candidates so confirmedBy arrays never concatenate across
+// sightings -- OpenAF's merge() concatenates arrays instead of replacing them.
+// Shallow-clones meta and overwrites (never merges) the given fields -- OpenAF's merge()
+// concatenates arrays instead of replacing them, which would silently duplicate
+// confirmedBy on every re-confirmation from the same session.
+MiniA.prototype._overwriteMetaFields = function(meta, overrides) {
+  var out = merge({}, isObject(meta) ? meta : {})
+  Object.keys(overrides).forEach(function(k) { out[k] = overrides[k] })
+  return out
+}
+
+MiniA.prototype._upsertModelCandidateInGlobal = function(section, key, entry, sessionId) {
+  var g = this._globalMemoryManager
+  if (!isObject(g) || !isString(key) || key.length === 0) return __
+  var existing = g.getSectionEntries(section).filter(function(e) { return e.key === key })[0]
+  var nowIso = new Date().toISOString()
+  var sid = isString(sessionId) && sessionId.length > 0 ? sessionId : "unknown"
+  var candidateDays = isNumber(this._memoryConfig.candidateDays) && this._memoryConfig.candidateDays > 0 ? this._memoryConfig.candidateDays : 30
+
+  if (!isObject(existing)) {
+    var newMeta = this._overwriteMetaFields(entry.meta, { confirmedBy: [sid], candidateSince: nowIso })
+    var newEntry = this._overwriteMetaFields(entry, { status: "candidate", confirmCount: 1, expiresAt: this._memoryExpiry(candidateDays), meta: newMeta })
+    g.upsert(section, key, newEntry, { silent: true })
+    if (isObject(global.__mini_a_metrics.memory_candidates_created)) global.__mini_a_metrics.memory_candidates_created.inc()
+    return "candidate"
+  }
+
+  if (existing.status === "candidate") {
+    var by = isObject(existing.meta) && isArray(existing.meta.confirmedBy) ? existing.meta.confirmedBy.slice() : []
+    if (by.indexOf(sid) < 0) by.push(sid)
+    if (by.length >= 2) {
+      g.update(section, existing.id, {
+        status: "active", expiresAt: __, confirmedAt: nowIso, confirmCount: by.length, stale: false,
+        value: entry.value, meta: this._overwriteMetaFields(existing.meta, { confirmedBy: by, activatedAt: nowIso })
+      })
+      if (isObject(global.__mini_a_metrics.memory_candidates_activated)) global.__mini_a_metrics.memory_candidates_activated.inc()
+      return "activated"
+    }
+    g.update(section, existing.id, { value: entry.value, meta: this._overwriteMetaFields(existing.meta, { confirmedBy: by }) })
+    return "refreshed-candidate"
+  }
+
+  g.upsert(section, key, entry, { silent: true, replaceKeys: ["meta.invocation", "meta.rejected", "meta.confirmedBy"] })
+  return "refreshed"
+}
+
 MiniA.prototype._autoPromoteSessionToGlobal = function() {
   if (this._memoryConfig.enabled !== true) return
   if (!isObject(this._sessionMemoryManager) || !isObject(this._globalMemoryManager)) return
@@ -8289,7 +8727,8 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
 
   var totalNew = 0
   var totalRefreshed = 0
-  var totalGated = 0
+  var totalCandidates = 0
+  var totalActivated = 0
   sectionsToScan.forEach(function(section) {
     var inConfiguredList = promoteSections.indexOf(section) >= 0
     var entries = this._sessionMemoryManager.getSectionEntries(section)
@@ -8297,13 +8736,17 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
       var isDurableKind = isString(entry.kind) && isString(_MINI_A_DURABLE_MEMORY_KINDS[entry.kind])
       if (!inConfiguredList && !isDurableKind) return
       var isModelAuthored = isObject(entry.provenance) && entry.provenance.source === "model"
-      if (isModelAuthored && (!isNumber(entry.confirmCount) || entry.confirmCount < 2)) {
-        totalGated++
+      if (isModelAuthored) {
+        var candidateKey = isString(entry.key) && entry.key.length > 0 ? entry.key : (entry.kind + "::" + this._slugifyMemoryValue(entry.value))
+        var outcome = this._upsertModelCandidateInGlobal(section, candidateKey, entry, this._sessionMemoryId)
+        if (outcome === "candidate") totalCandidates++
+        else if (outcome === "activated") totalActivated++
+        else if (outcome === "refreshed" || outcome === "refreshed-candidate") totalRefreshed++
         return
       }
       if (isString(entry.key) && entry.key.length > 0) {
         var existing = this._globalMemoryManager.getSectionEntries(section).filter(function(globalEntry) { return globalEntry.key === entry.key })[0]
-        this._globalMemoryManager.upsert(section, entry.key, entry, { silent: true, replaceKeys: ["meta.invocation"] })
+        this._globalMemoryManager.upsert(section, entry.key, entry, { silent: true, replaceKeys: ["meta.invocation", "meta.rejected"] })
         if (isObject(existing)) totalRefreshed++
         else totalNew++
         return
@@ -8323,8 +8766,13 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
   if (isNumber(this._memoryConfig.staleDays) && this._memoryConfig.staleDays > 0) {
     totalSweepMarked = this._globalMemoryManager.sweepStale(this._memoryConfig.staleDays)
   }
+  // Purges any expired global entry, including unconfirmed candidates past
+  // memorycandidatedays -- counted under the general memory_expirations metric
+  // (via the manager's own "expire" event) rather than a candidate-specific one,
+  // since purgeExpired() cannot distinguish candidates from other expiring kinds.
+  this._globalMemoryManager.purgeExpired()
 
-  if (totalNew > 0 || totalRefreshed > 0 || totalSweepMarked > 0) {
+  if (totalNew > 0 || totalRefreshed > 0 || totalSweepMarked > 0 || totalCandidates > 0 || totalActivated > 0) {
     if (isObject(global.__mini_a_metrics)) {
       if (totalNew > 0 && isObject(global.__mini_a_metrics.memory_promotions)) global.__mini_a_metrics.memory_promotions.inc()
       if (totalNew > 0 && isObject(global.__mini_a_metrics.memory_promoted_entries)) global.__mini_a_metrics.memory_promoted_entries.getAdd(totalNew)
@@ -8334,6 +8782,8 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
     var parts = []
     if (totalNew > 0) parts.push(`${totalNew} new`)
     if (totalRefreshed > 0) parts.push(`${totalRefreshed} refreshed`)
+    if (totalCandidates > 0) parts.push(`${totalCandidates} candidate`)
+    if (totalActivated > 0) parts.push(`${totalActivated} activated`)
     if (totalSweepMarked > 0) parts.push(`${totalSweepMarked} marked stale`)
     this.fnI("info", `📤 [mem:promote] session → global: ${parts.join(", ")}`)
     this._syncWorkingMemoryState()
@@ -8341,10 +8791,176 @@ MiniA.prototype._autoPromoteSessionToGlobal = function() {
   }
 }
 
-MiniA.prototype._finalizeRunMemory = function(args) {
+// Lazily builds a bare (no-conversation) LLM instance for the reflection pass, so
+// reflecting never resends the run's whole conversation. Prefers memoryreflectmodel/
+// OAF_REFLECT_MODEL, falls back to the low-cost model if one is configured, then the
+// main model -- same fallback order as _oaf_reflect_model's own resolution intends.
+MiniA.prototype._getReflectionLlm = function() {
+  if (isObject(this._reflectLlm)) return this._reflectLlm
+  var cfg = isMap(this._oaf_reflect_model) ? this._oaf_reflect_model : (this._use_lc && isMap(this._oaf_lc_model) ? this._oaf_lc_model : this._oaf_model)
+  if (!isMap(cfg)) return __
+  this._reflectModelConfig = cfg
+  this._reflectLlm = this._createBareLlmInstance(cfg, this._debugchConfig, "__mini_a_reflect_llm_debug", "Reflection LLM")
+  return this._reflectLlm
+}
+
+var _MINI_A_REFLECTION_SECRET_RE = /(api[_-]?key|secret|password|token)\s*[:=]\s*\S{6,}/i
+var _MINI_A_REFLECTION_KEY_RE = /^[a-z0-9][a-z0-9:._\/-]*$/i
+
+// Validates the reflection LLM's raw JSON array against a strict allow-list before any of
+// it reaches memory: valid kind/value shape, no near-duplicates of the goal/answer (that
+// would just restate the task instead of teaching something reusable), no obvious secrets,
+// and "supersedes" only accepted when it names an existing durable-memory key that was
+// actually shown to the model (never a tool-contract key).
+MiniA.prototype._validateReflectionEntries = function(raw, allowedSupersedeKeys, goal, answer) {
+  var accepted = []
+  var rejected = 0
+  if (!isArray(raw)) return { accepted: accepted, rejected: 0 }
+  var dupChecker = new MiniAMemoryManager({})
+  var allowed = isArray(allowedSupersedeKeys) ? allowedSupersedeKeys : []
+  var seenKeys = {}
+  var self = this
+  raw.slice(0, 5).forEach(function(item) {
+    if (!isObject(item)) { rejected++; return }
+    var kind = isString(item.kind) ? item.kind.trim().toLowerCase() : ""
+    if (!isString(_MINI_A_DURABLE_MEMORY_KINDS[kind])) { rejected++; return }
+    var value = isString(item.value) ? item.value.trim() : ""
+    if (value.length < 10 || value.length > 400) { rejected++; return }
+    if (_MINI_A_REFLECTION_SECRET_RE.test(value)) { rejected++; return }
+    // Only checked against the final answer, not the goal: durable memory is *expected* to
+    // share vocabulary with the goal (that's what makes it relevant), so comparing against
+    // the goal produced false positives -- a short goal has few significant words, so any
+    // entry mentioning one of them could hit the word-overlap ratio. The answer check is
+    // gated on length for the same reason (an unstable ratio on a short answer).
+    if (isString(answer) && answer.length >= 20 && dupChecker._isNearDuplicate(value, answer.substring(0, 400))) { rejected++; return }
+    var key = isString(item.key) && item.key.trim().length > 0 && item.key.trim().length <= 80 && _MINI_A_REFLECTION_KEY_RE.test(item.key.trim())
+      ? item.key.trim() : (kind + "::" + self._slugifyMemoryValue(value))
+    if (seenKeys[key]) { rejected++; return }
+    seenKeys[key] = true
+    var tags = isArray(item.tags) ? item.tags.filter(isString).map(function(t) { return t.trim().toLowerCase() }).filter(function(t) { return t.length > 0 && t.length <= 30 }).slice(0, 5) : []
+    var supersedes = isString(item.supersedes) ? item.supersedes.trim() : ""
+    if (supersedes.length === 0 || allowed.indexOf(supersedes) < 0 || supersedes.indexOf("tool-contract:") === 0) supersedes = __
+    accepted.push({ kind: kind, value: value, key: key, tags: tags, supersedes: supersedes })
+  })
+  return { accepted: accepted, rejected: rejected }
+}
+
+// End-of-run reflection: one extra LLM call (a cheap/dedicated model when configured) that
+// extracts 0-5 durable memories from a successful run -- the model rarely calls memory_write
+// on its own mid-task, so this is the primary source of durable knowledge in practice.
+// Only runs on a genuinely successful, non-trivial run (never on a missing-final-answer or
+// abnormal-termination exit); writes go through the normal candidate-promotion path, so a
+// single reflection is never enough to plant a confirmed global fact by itself.
+MiniA.prototype._reflectRunMemory = function(args) {
+  if (!isObject(args) || args.memoryreflect !== true || args.chatbotmode === true) return
+  if (this._memoryConfig.enabled !== true) return
+  var runtime = this._runtime
+  if (!isObject(runtime) || !isObject(runtime.toolsUsed)) return
+  var totalToolUses = Object.keys(runtime.toolsUsed).reduce(function(sum, k) { return sum + (runtime.toolsUsed[k] || 0) }, 0)
+  var minSteps = isNumber(args.memoryreflectmin) ? args.memoryreflectmin : 2
+  if (totalToolUses < minSteps) return
+  if (!isObject(this._lastRunOutcome) || this._lastRunOutcome.status !== "succeeded") return
+
+  var llm = this._getReflectionLlm()
+  if (!isObject(llm) || (typeof llm.promptWithStats !== "function" && typeof llm.promptJSONWithStats !== "function")) return
+
+  var goal = isString(args.goal) ? args.goal.substring(0, 1500) : ""
+  var answer = isString(this._lastRunOutcome.answerPreview) ? this._lastRunOutcome.answerPreview.substring(0, 1200) : ""
+  var toolsText = Object.keys(runtime.toolsUsed).map(function(t) { return t + "(" + runtime.toolsUsed[t] + ")" }).join(", ")
+  var errorsText = (isArray(runtime.errorHistory) ? runtime.errorHistory.slice(-6) : [])
+    .map(function(e) { return "- [" + (e.category || "error") + "] " + (isObject(e.context) && isString(e.context.toolName) ? e.context.toolName + ": " : "") + String(e.message || "").substring(0, 160) })
+    .join("\n")
+  var actsText = (isArray(runtime.context) ? runtime.context.filter(function(l) { return isString(l) && l.indexOf("[ACT") === 0 }).slice(-15) : [])
+    .map(function(l) { return "- " + l.substring(0, 160) })
+    .join("\n")
+  var existingMemory = this._buildRelevantMemoryBlock(args)
+  var existingKeys = existingMemory.map(function(m) { return m.key }).filter(isString)
+  var existingText = existingMemory.map(function(m) { return "- " + (m.key || "?") + ": " + String(m.value || "").substring(0, 160) }).join("\n")
+
+  var systemInstructions = "You extract durable, reusable knowledge from one finished agent run. Return ONLY a JSON array (0 to 5 items) of objects with shape " +
+    "{\"kind\":\"preference|environment|procedure|pitfall|reference\",\"value\":\"<=300 chars, self-contained\",\"key\":\"optional stable slug\",\"tags\":[\"optional\"],\"supersedes\":\"<optional key from EXISTING MEMORY below>\"}. " +
+    "Only include things that will still be true and useful in a future, unrelated run: setup facts about this machine/repo/service, validated how-tos, things that failed and why, or pointers to docs/URLs. " +
+    "Never narrate the steps taken, never restate the goal or the final answer, never include secrets/tokens/passwords. Return [] if nothing qualifies."
+  var userPrompt = "GOAL:\n" + goal +
+    "\n\nOUTCOME: " + this._lastRunOutcome.status +
+    "\n\nFINAL ANSWER (excerpt):\n" + answer +
+    (toolsText.length > 0 ? "\n\nTOOLS USED: " + toolsText : "") +
+    (errorsText.length > 0 ? "\n\nERRORS SEEN:\n" + errorsText : "") +
+    (actsText.length > 0 ? "\n\nACTIONS:\n" + actsText : "") +
+    (existingText.length > 0 ? "\n\nEXISTING MEMORY (key -> value):\n" + existingText : "")
+  var prompt = (systemInstructions + "\n\n" + userPrompt).substring(0, 8000)
+  var noJsonPrompt = isObject(this._reflectModelConfig) && this._reflectModelConfig.type === "gemini"
+
+  var responseWithStats
+  try {
+    responseWithStats = this._withExponentialBackoff(function() {
+      if (!noJsonPrompt && isFunction(llm.promptJSONWithStats)) return llm.promptJSONWithStats(prompt)
+      return llm.promptWithStats(prompt)
+    }, this._llmRetryOptions("Memory reflection", { operation: "reflect" }, { maxAttempts: 2 }))
+  } catch (callErr) {
+    if (isObject(global.__mini_a_metrics.memory_reflection_failures)) global.__mini_a_metrics.memory_reflection_failures.inc()
+    return
+  }
+
+  var stats = isObject(responseWithStats) ? responseWithStats.stats : {}
+  var totalTokens = this._getTotalTokens(stats)
+  if (isNumber(totalTokens) && totalTokens > 0 && isObject(global.__mini_a_metrics.memory_reflection_tokens)) global.__mini_a_metrics.memory_reflection_tokens.getAdd(totalTokens)
+
+  var content = isObject(responseWithStats) ? responseWithStats.response : responseWithStats
+  if (isObject(content) && isString(content.response)) content = content.response
+  if (isString(content)) content = this._cleanCodeBlocks(content)
+  var parsed = isObject(content) ? content : jsonParse(String(content || ""), __, __, true)
+  if (isUnDef(parsed)) {
+    var fallback = String(content || "")
+    var arrMatch = fallback.match(/\[[\s\S]*\]/)
+    if (arrMatch) parsed = jsonParse(arrMatch[0], __, __, true)
+  }
+  var rawItems = isArray(parsed) ? parsed
+    : (isObject(parsed) && isArray(parsed.items) ? parsed.items
+    : (isObject(parsed) && isArray(parsed.memories) ? parsed.memories : __))
+  if (!isArray(rawItems)) {
+    if (isObject(global.__mini_a_metrics.memory_reflection_failures)) global.__mini_a_metrics.memory_reflection_failures.inc()
+    return
+  }
+
+  var validated = this._validateReflectionEntries(rawItems, existingKeys, goal, answer)
+  if (validated.rejected > 0 && isObject(global.__mini_a_metrics.memory_reflection_rejected)) global.__mini_a_metrics.memory_reflection_rejected.getAdd(validated.rejected)
+  if (validated.accepted.length === 0) return
+
+  if (isObject(global.__mini_a_metrics.memory_reflections)) global.__mini_a_metrics.memory_reflections.inc()
+  var writtenCount = 0
+  var readManagers = this._getMemoryReadManagers(this._memoryScope)
+  validated.accepted.forEach(function(item) {
+    var result = this._memoryWrite({ kind: item.kind, value: item.value, key: item.key, tags: item.tags }, args, { event: "reflection", bypassRunCap: true })
+    if (!isObject(result) || result.ok !== true) return
+    writtenCount++
+    if (isString(item.supersedes)) {
+      readManagers.forEach(function(manager) {
+        manager._sections().forEach(function(sec) {
+          manager.getSectionEntries(sec).forEach(function(e) {
+            if (e.key === item.supersedes && e.id !== result.id && isObject(e.provenance) && e.provenance.source === "model") {
+              manager.mark(sec, e.id, "status", "superseded")
+              manager.mark(sec, e.id, "supersededBy", result.id)
+            }
+          })
+        })
+      })
+    }
+  }.bind(this))
+  if (writtenCount > 0 && isObject(global.__mini_a_metrics.memory_reflection_entries)) global.__mini_a_metrics.memory_reflection_entries.getAdd(writtenCount)
+  this.fnI("info", `🧠 [mem:reflect] ${writtenCount} durable memories extracted (${validated.rejected} rejected)`)
+}
+
+MiniA.prototype._finalizeRunMemory = function(args, opts) {
   if (this._runMemoryFinalized === true || !isObject(this._memoryConfig) || this._memoryConfig.enabled !== true) return
   this._runMemoryFinalized = true
   if (this._runMemoryOutcomeRecorded !== true) this._recordRunOutcome(args, "failed", "", "abnormal-termination")
+  if (isObject(opts) && opts.reflect === true) {
+    try { this._reflectRunMemory(args) } catch (reflectErr) {
+      if (isObject(global.__mini_a_metrics.memory_reflection_failures)) global.__mini_a_metrics.memory_reflection_failures.inc()
+      this.fnI("warn", `[memory] reflection pass failed: ${__miniAErrMsg(reflectErr)}`)
+    }
+  }
   this._persistWorkingMemory("run-finalize")
   this._persistSessionMemory("run-finalize")
   this._autoPromoteSessionToGlobal()
@@ -8568,11 +9184,11 @@ MiniA.prototype._appendExecutionNotesToPlan = function(args) {
 MiniA.prototype._recordRunOutcome = function(args, status, answer, errorClass) {
   this._runMemoryOutcomeRecorded = true
   var goal = isObject(args) && isString(args.goal) ? args.goal : ""
-  var runId = this._id || new Date().toISOString()
-  var key = "run-outcome:" + sha1(goal).substring(0, 16) + ":" + runId
-  return this._memoryUpsert("summaries", key, "Run " + status + (isString(answer) && answer.length > 0 ? ": " + answer.substring(0, 500) : ""), {
-    kind: "run-outcome", taskScope: this._deriveMemoryTaskScope(args, "runtime"), validated: status === "succeeded",
-    observedAt: new Date().toISOString(), expiresAt: status === "succeeded" ? __ : this._memoryExpiry(1),
+  var key = "run-outcome:" + sha1(goal).substring(0, 16)
+  this._lastRunOutcome = { status: status, errorClass: errorClass || __, answerPreview: isString(answer) ? answer.substring(0, 1200) : "" }
+  return this._memoryUpsert("summaries", key, "Run " + status + (isString(answer) && answer.length > 0 ? ": " + answer.substring(0, 300) : ""), {
+    kind: "run-outcome", taskScope: this._deriveMemoryTaskScope(args, "runtime"), validated: false,
+    observedAt: new Date().toISOString(), expiresAt: this._memoryExpiry(status === "succeeded" ? 30 : 1),
     provenance: { source: "runtime", event: "run-outcome" }, meta: { status: status, validation: status === "succeeded" ? "passed" : "not-produced", errorClass: errorClass || __ }
   })
 }
@@ -8636,9 +9252,9 @@ MiniA.prototype._processFinalAnswer = function(answer, args) {
     return answer
   }
   this.fnI("final", `Final answer determined (size: ${stringify(answer).length}). Goal achieved.`)
-  if (args.debug || args.verbose) this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" }, validated: true })
+  if (args.debug || args.verbose) this._memoryAppend("decisions", "Final answer synthesis completed.", { provenance: { source: "synthesis", event: "process-final-answer" }, expiresAt: this._memoryExpiry(1) })
   this._recordRunOutcome(args, "succeeded", finalPreview)
-  this._finalizeRunMemory(args)
+  this._finalizeRunMemory(args, { reflect: true })
 
   this._recordPlanActivity("final", {
     step       : this._runtime && this._runtime.currentStepNumber,
@@ -14149,6 +14765,8 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memoryartifactttldays", "memoryindexttldays", "memoryinject",
     "usememorywrite", "memorywritemax", "memorymd", "memoryrelevantcap",
+    "memoryreflect", "memoryreflectmodel", "memoryreflectmin", "memorycandidatedays", "memorysessionmaxdays",
+    "memorybudget", "memorysearchbudget", "memorypersistevery",
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
     "validationthreshold", "persistlearnings", "valtools", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
@@ -15182,11 +15800,31 @@ MiniA.prototype.init = function(args) {
       this._use_val = false
     }
 
+    // Re-evaluate the memory-reflection model config on every init() call, same pattern
+    // as the LC/validation models. Not instantiated here -- _getReflectionLlm() builds a
+    // bare (no-conversation) instance lazily, only if a run actually reflects.
+    this._oaf_reflect_model = __
+    this._reflectLlm = __
+
+    if (isUnDef(this._oaf_reflect_model) || isDef(args.memoryreflectmodel)) {
+      var overrideReflectModel = parseModelConfig(args.memoryreflectmodel, "memoryreflectmodel parameter", true)
+      if (isDef(overrideReflectModel)) this._oaf_reflect_model = overrideReflectModel
+    }
+
+    if (isUnDef(this._oaf_reflect_model)) {
+      var envReflectModel = parseModelConfig(getEnv("OAF_REFLECT_MODEL"), "OAF_REFLECT_MODEL environment variable", true)
+      if (isDef(envReflectModel)) this._oaf_reflect_model = envReflectModel
+    }
+
+    if (isMap(this._oaf_reflect_model)) {
+      this.fnI("info", `Memory-reflection model enabled: ${this._getConfiguredModelName(this._oaf_reflect_model, "unknown")} (${this._oaf_reflect_model.type})`)
+    }
+
     var needsBedrock = function(modelConfig) {
       return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "bedrock"
     }
 
-    if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model) || needsBedrock(this._oaf_val_model)) {
+    if (needsBedrock(this._oaf_model) || needsBedrock(this._oaf_lc_model) || needsBedrock(this._oaf_val_model) || needsBedrock(this._oaf_reflect_model)) {
       includeOPack("AWS")
       loadLib("aws.js")
     }
@@ -15195,7 +15833,7 @@ MiniA.prototype.init = function(args) {
       return isMap(modelConfig) && isString(modelConfig.type) && modelConfig.type.toLowerCase() === "ghcopilot"
     }
 
-    if (needsGhcopilot(this._oaf_model) || needsGhcopilot(this._oaf_lc_model) || needsGhcopilot(this._oaf_val_model)) {
+    if (needsGhcopilot(this._oaf_model) || needsGhcopilot(this._oaf_lc_model) || needsGhcopilot(this._oaf_val_model) || needsGhcopilot(this._oaf_reflect_model)) {
       includeOPack("ghcopilot")
       loadLib("ghcopilot.js")
     }
@@ -15214,6 +15852,7 @@ MiniA.prototype.init = function(args) {
     applyPromptCachingDefault(this._oaf_model)
     applyPromptCachingDefault(this._oaf_lc_model)
     applyPromptCachingDefault(this._oaf_val_model)
+    applyPromptCachingDefault(this._oaf_reflect_model)
 
     this.llm = $llm(this._oaf_model)
     if (this._use_lc) this.lc_llm = $llm(this._oaf_lc_model)
@@ -15548,7 +16187,7 @@ MiniA.prototype.init = function(args) {
         }
         return text
       }).join("\n")
-      baseRules.push("Validated tool-call contracts from prior runs. Reuse their shape exactly when applicable. The listed rejected keys are known-bad; never re-send them:\n" + contractText)
+      baseRules.push("Validated tool-call contracts from prior runs. Reuse their parameter shape (key names and types) when applicable. The listed rejected keys are known-bad; never re-send them:\n" + contractText)
       if (isObject(global.__mini_a_metrics.memory_injected_tokens)) global.__mini_a_metrics.memory_injected_tokens.getAdd(Math.ceil(contractText.length / 4))
     }
 
@@ -15556,9 +16195,9 @@ MiniA.prototype.init = function(args) {
       var relevantMemory = this._buildRelevantMemoryBlock(args)
       if (relevantMemory.length > 0) {
         var relevantMemoryText = relevantMemory.map(function(m) {
-          return "[" + m.section + (m.kind ? "/" + m.kind : "") + "] " + m.value
+          return "[" + m.section + (m.kind ? "/" + m.kind : "") + (m.candidate ? "/unconfirmed" : "") + "] " + m.value
         }).join("\n")
-        baseRules.push("Durable knowledge remembered from prior runs, relevant to this goal. Treat as background; verify before acting on anything time-sensitive:\n" + relevantMemoryText)
+        baseRules.push("Durable knowledge remembered from prior runs, relevant to this goal. Entries marked 'unconfirmed' come from a single session and have not yet been independently confirmed. Treat as background; verify before acting on anything time-sensitive:\n" + relevantMemoryText)
         if (isObject(global.__mini_a_metrics.memory_injected_tokens)) global.__mini_a_metrics.memory_injected_tokens.getAdd(Math.ceil(relevantMemoryText.length / 4))
       }
     }
@@ -15709,7 +16348,7 @@ MiniA.prototype.init = function(args) {
       chatActions.concat(chatbotVisibleToolNames).forEach(name => {
         if (isString(name) && name.length > 0) chatActionSet[name] = true
       })
-      if (args.usememory && args.memoryinject !== "full") chatActionSet["memory_search"] = true
+      if (args.usememory) chatActionSet["memory_search"] = true
       if (args.usememory && args.usememorywrite) chatActionSet["memory_write"] = true
       if (args.usewiki && isObject(this._wikiManager)) chatActionSet["wiki"] = true
       if ((args.usewikigraph === true || (isString(args.wikigraphfalkorhost) && args.wikigraphfalkorhost.trim().length > 0)) && isObject(this._wikiManager)) chatActionSet["graph"] = true
@@ -15750,7 +16389,7 @@ MiniA.prototype.init = function(args) {
       this._actionsList = $t("think{{#if useshell}} | shell{{/if}}{{#if useMemorySearch}} | memory_search{{/if}}{{#if useMemoryWrite}} | memory_write{{/if}}{{#if useWiki}} | wiki{{/if}}{{#if useWikiGraph}} | graph{{/if}}{{#if actionsList}} | {{{actionsList}}}{{/if}} | final (string or array for chaining)", {
         actionsList     : promptActionsList,
         useshell        : args.useshell,
-        useMemorySearch : args.usememory && args.memoryinject !== "full",
+        useMemorySearch : args.usememory,
         useMemoryWrite  : args.usememory && args.usememorywrite,
         useWiki         : args.usewiki && isObject(this._wikiManager),
         useWikiGraph    : promptUseWikiGraph
@@ -15824,7 +16463,7 @@ MiniA.prototype.init = function(args) {
         remainingSteps   : stepContext ? stepContext.remainingSteps : "",
         availableSkills    : skillPromptEntries.length > 0,
         availableSkillsList: skillPromptEntries,
-        useMemorySearch    : args.usememory && args.memoryinject !== "full",
+        useMemorySearch    : args.usememory,
         useMemoryWrite     : args.usememory && args.usememorywrite,
         useWiki            : args.usewiki && isObject(this._wikiManager),
         useWikiGraph       : promptUseWikiGraph,
@@ -16148,6 +16787,14 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "usememorywrite", type: "boolean", default: true },
       { name: "memorywritemax", type: "number", default: 20 },
       { name: "memorymd", type: "boolean", default: false },
+      { name: "memoryreflect", type: "boolean", default: true },
+      { name: "memoryreflectmodel", type: "string", default: __ },
+      { name: "memoryreflectmin", type: "number", default: 2 },
+      { name: "memorycandidatedays", type: "number", default: 30 },
+      { name: "memorysessionmaxdays", type: "number", default: 14 },
+      { name: "memorybudget", type: "number", default: 1500 },
+      { name: "memorysearchbudget", type: "number", default: 1200 },
+      { name: "memorypersistevery", type: "number", default: 1 },
       { name: "valtools", type: "boolean", default: false }
     ])
 
@@ -16263,6 +16910,20 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.memorywritemax = _$(args.memorywritemax, "args.memorywritemax").isNumber().default(20)
     if (args.memorywritemax < 1) args.memorywritemax = 20
     args.memorymd = _$(toBoolean(args.memorymd), "args.memorymd").isBoolean().default(false)
+    args.memoryreflect = _$(toBoolean(args.memoryreflect), "args.memoryreflect").isBoolean().default(true)
+    args.memoryreflectmodel = _$(args.memoryreflectmodel, "args.memoryreflectmodel").isString().default(__)
+    args.memoryreflectmin = _$(args.memoryreflectmin, "args.memoryreflectmin").isNumber().default(2)
+    if (args.memoryreflectmin < 0) args.memoryreflectmin = 2
+    args.memorycandidatedays = _$(args.memorycandidatedays, "args.memorycandidatedays").isNumber().default(30)
+    if (args.memorycandidatedays < 1) args.memorycandidatedays = 30
+    args.memorysessionmaxdays = _$(args.memorysessionmaxdays, "args.memorysessionmaxdays").isNumber().default(14)
+    if (args.memorysessionmaxdays < 0) args.memorysessionmaxdays = 14
+    args.memorybudget = _$(args.memorybudget, "args.memorybudget").isNumber().default(1500)
+    if (args.memorybudget < 1) args.memorybudget = 1500
+    args.memorysearchbudget = _$(args.memorysearchbudget, "args.memorysearchbudget").isNumber().default(1200)
+    if (args.memorysearchbudget < 1) args.memorysearchbudget = 1200
+    args.memorypersistevery = _$(args.memorypersistevery, "args.memorypersistevery").isNumber().default(1)
+    if (args.memorypersistevery < 1) args.memorypersistevery = 1
     args.usewiki = _$(toBoolean(args.usewiki), "args.usewiki").isBoolean().default(false)
     args.wikiaccess = _$(args.wikiaccess, "args.wikiaccess").isString().default("ro")
     if (["ro", "rw"].indexOf(String(args.wikiaccess).toLowerCase().trim()) < 0) args.wikiaccess = "ro"
@@ -16867,10 +17528,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var planResponse = this._generateInitialPlan(args.goal, strategy, args)
         if (isObject(planResponse) && isObject(planResponse.plan)) {
           this._agentState.plan = planResponse.plan
-          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" } })
+          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" }, expiresAt: this._memoryExpiry(1) })
         } else if (isObject(planResponse)) {
           this._agentState.plan = planResponse
-          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" } })
+          this._memoryAppend("summaries", "Initial execution plan generated.", { provenance: { source: "planning", event: "plan-generated" }, expiresAt: this._memoryExpiry(1) })
         } else if (isObject(this._agentState) && isUnDef(this._agentState.plan)) {
           this._agentState.plan = []
         }
@@ -16958,6 +17619,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       clearedConsecutiveErrors: false,
       currentTool         : null,
       toolContexts        : {},
+      toolsUsed           : {},
       errorHistory        : [],
       restoredFromCheckpoint: false,
       successfulActionDetected: false,
@@ -17093,13 +17755,18 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         var _memCompact = args.memoryinject === "full" ? this._buildCompactMemoryForLLM() : null
         stateForLLM.workingMemory = _memCompact !== null ? _memCompact : this._buildMemorySummaryForLLM()
         var _pf = []
-        var _pfCompact = _memCompact !== null ? _memCompact : this._buildCompactMemoryForLLM()
-        Object.keys(_pfCompact).forEach(function(sec) {
-          (_pfCompact[sec] || []).forEach(function(e) {
-            if (e.pr === true)  _pf.push({ type: "readresult", tool: e.tn || "unknown", resultFile: e.rf, id: e.id, section: sec })
-            else if (e.tr === true) _pf.push({ type: "truncated", tool: e.tn || "unknown", params: e.tp, fullSize: e.fs, id: e.id, section: sec })
+        if (_memCompact !== null) {
+          // Already built above for the workingMemory block -- scan it instead of
+          // rebuilding the whole compact store a second time.
+          Object.keys(_memCompact).forEach(function(sec) {
+            (_memCompact[sec] || []).forEach(function(e) {
+              if (e.pr === true)  _pf.push({ type: "readresult", tool: e.tn || "unknown", resultFile: e.rf, id: e.id, section: sec })
+              else if (e.tr === true) _pf.push({ type: "truncated", tool: e.tn || "unknown", params: e.tp, fullSize: e.fs, id: e.id, section: sec })
+            })
           })
-        })
+        } else {
+          _pf = this._collectPendingFetches()
+        }
         if (_pf.length > 0) stateForLLM.pendingFetches = _pf
         runtime.lastStateSnapshot = af.toTOON(stateForLLM)
       } else {
@@ -17512,6 +18179,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           var knownGood = "Last known-good invocation for '" + effectiveToolName + "': " + stringify(knownContract.invocation, __, "")
           observation = (isString(observation) && observation.length > 0 ? observation + "\n" : "") + knownGood
         }
+        var jitHint = this._injectJustInTimeMemory(runtime, effectiveToolName, "failure")
+        if (isString(jitHint) && jitHint.length > 0) observation = (isString(observation) && observation.length > 0 ? observation + "\n" : "") + jitHint
       }
       if (!hasError && isString(observation) && observation.length > 0) {
         var inlineLimit = this._getToolResultInlineLimit(args, 0)
@@ -17544,22 +18213,21 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
         }
       }
       if (!hasError && isString(toolName) && toolName.length > 0) {
-        var evidenceEntry = this._memoryAppend("evidence", `Tool '${toolName}' completed at step ${stepLabel}.`, {
-          provenance: { source: "tool", event: "tool-success", step: stepLabel, tool: toolName }
-        })
-        if (isObject(evidenceEntry) && isString(evidenceEntry.id) && isString(observation) && observation.length > 0) {
+        var _toolsUsedName = (toolName === "proxy-dispatch" && isMap(params) && isString(params.tool)) ? params.tool : toolName
+        if (isObject(runtime.toolsUsed)) runtime.toolsUsed[_toolsUsedName] = (runtime.toolsUsed[_toolsUsedName] || 0) + 1
+        if (isString(observation) && observation.length > 0) {
           var _observationRecord = this._buildToolObservation(toolName, params, rawResult, observation, args, stepLabel)
           var _rawBytesRejected = Math.max(0, observation.length - String(_observationRecord.value || "").length)
           if (_rawBytesRejected > 0 && isObject(global.__mini_a_metrics.memory_raw_bytes_rejected)) global.__mini_a_metrics.memory_raw_bytes_rejected.getAdd(_rawBytesRejected)
           var _artMeta = {
-            evidenceRefs: [evidenceEntry.id],
+            evidenceRefs: [],
             provenance  : { source: "tool", event: "tool-output", step: stepLabel, tool: toolName },
             kind: _observationRecord.kind, observedAt: _observationRecord.observedAt, expiresAt: _observationRecord.expiresAt,
             taskScope: _observationRecord.taskScope, sourceTool: _observationRecord.sourceTool, sourceParams: _observationRecord.sourceParams,
             resultFile: _observationRecord.resultFile, pendingReadresult: _observationRecord.pendingReadresult, meta: _observationRecord.meta
           }
           this._memoryUpsert("artifacts", _observationRecord.key, _observationRecord.value, _artMeta)
-          this._recordValidatedToolContract(toolName, params, evidenceEntry.id, args)
+          this._recordValidatedToolContract(toolName, params, __, args)
         }
         this._clearPendingFetchFlags(toolName, params, rawResult, observation)
         var readresultGuardKey = buildReadresultGuardKey(params, toolName)
@@ -17848,11 +18516,13 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       if (args.debug || args.verbose) {
         this.fnI("info", `[STATE before step ${step + 1}] ${stateSnapshot}`)
       }
-      // Use selective context to reduce prompt size while preserving key information
-      var contextMaxTokens = getEffectiveContextBudget() || 4000
+      // Use selective context to reduce prompt size while preserving key information.
+      // The state snapshot is rendered once via CURRENT STATE: {{{state}}} below -- it is
+      // deliberately not also unshifted into progressEntries (that duplicated the entire
+      // memory snapshot in "full" inject mode on every step).
+      var contextMaxTokens = (getEffectiveContextBudget() || 4000) - (this._memoryPromptTokens || 0)
       var promptContextBudget = Math.max(2000, contextMaxTokens - Math.max(this._estimateTokens(stateSnapshot) + 500, 1000))
       var progressEntries = selectPromptContext(promptContextBudget)
-      progressEntries.unshift(`[STATE] ${stateSnapshot}`)
       var prompt = $t(this._STEP_PROMPT_TEMPLATE.trim(), {
         goalBlock      : cachedGoalBlock,
         hookContextBlock: cachedHookContextBlock,
@@ -18806,7 +19476,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             this._agentState = mergedState
           }
           runtime.stateSnapshotDirty = true
-          updatedStateSnapshot = getStateSnapshot()
+          updatedStateSnapshot = this._buildLeanStateSnapshot(args)
           stateUpdatedThisStep = true
           if (this._enablePlanning) this._handlePlanUpdate()
           if (args.debug || args.verbose) this._memoryAppend("facts", "Model updated runtime state.", { provenance: { source: "runtime", event: "state-update", step: step + 1 } })
@@ -18990,13 +19660,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             var shellOutput = isString(res.output) ? res.output : "(no output)"
             runtime.context.push(`[ACT ${entry.stepLabel}] shell: ${entry.command}`)
             runtime.context.push(`[OBS ${entry.stepLabel}] ${shellOutput.trim() || "(no output)"}`)
-            var shellEvidence = parent._memoryAppend("evidence", `Shell command executed: ${entry.command}`, {
-              provenance: { source: "shell", event: "shell-exec", step: entry.stepLabel, command: entry.command }
-            })
-            parent._memoryAppend("artifacts", (shellOutput || "(no output)").trim().substring(0, 500), {
-              evidenceRefs: isObject(shellEvidence) && isString(shellEvidence.id) ? [shellEvidence.id] : [],
-              provenance  : { source: "shell", event: "shell-output", step: entry.stepLabel }
-            })
+            if (isObject(runtime.toolsUsed)) runtime.toolsUsed.shell = (runtime.toolsUsed.shell || 0) + 1
+            parent._recordShellObservation(entry.command, shellOutput, entry.stepLabel, args)
           })
         }
         runtime.consecutiveThoughts = 0
@@ -19313,13 +19978,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
           }).output
           runtime.context.push(`[ACT ${stepLabel}] shell: ${commandValue}`)
           runtime.context.push(`[OBS ${stepLabel}] ${shellOutput.trim() || "(no output)"}`)
-          var shellEvidence = this._memoryAppend("evidence", `Shell command executed: ${commandValue}`, {
-            provenance: { source: "shell", event: "shell-exec", step: stepLabel, command: commandValue }
-          })
-          this._memoryAppend("artifacts", (shellOutput || "(no output)").trim().substring(0, 500), {
-            evidenceRefs: isObject(shellEvidence) && isString(shellEvidence.id) ? [shellEvidence.id] : [],
-            provenance  : { source: "shell", event: "shell-output", step: stepLabel }
-          })
+          if (isObject(runtime.toolsUsed)) runtime.toolsUsed.shell = (runtime.toolsUsed.shell || 0) + 1
+          this._recordShellObservation(commandValue, shellOutput, stepLabel, args)
 
           runtime.consecutiveThoughts = 0
           runtime.stepsWithoutAction = 0
@@ -19450,19 +20110,31 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
         if (action == "memory_search" && args.usememory) {
           var msParams = isMap(currentMsg.params) ? currentMsg.params : {}
-          var msQuery = isString(msParams.query) ? msParams.query.trim() : (isString(currentMsg.query) ? currentMsg.query.trim() : "")
-          var msSection = isString(msParams.section) ? msParams.section.trim() : __
-          var msLimit = isNumber(msParams.limit) && msParams.limit > 0 ? msParams.limit : 10
-          if (msQuery.length === 0) {
-            runtime.context.push(`[OBS ${stepLabel}] (memory_search) Missing 'query' param. Provide: {"query":"keyword(s)"[,"section":"..."][,"limit":N]}`)
-          } else {
-            var msResults = this._memorySearch(msQuery, { section: msSection, maxPerSection: msLimit })
-            var msSections = Object.keys(msResults)
-            if (msSections.length === 0) {
-              runtime.context.push(`[OBS ${stepLabel}] (memory_search) No memory entries match query "${msQuery}".`)
+          var msId = isString(msParams.id) ? msParams.id.trim() : ""
+          if (msId.length > 0) {
+            var msFetched = this._fetchMemoryEntryById(msId)
+            if (isObject(msFetched)) {
+              runtime.context.push(`[OBS ${stepLabel}] (memory_search) ${msFetched.section}/${msFetched.entry.id}: ${String(msFetched.entry.value || "").substring(0, 4000)}`)
             } else {
-              var msSummary = msSections.map(function(s) { return s + "(" + msResults[s].length + ")" }).join(", ")
-              runtime.context.push(`[OBS ${stepLabel}] (memory_search) Results for "${msQuery}" [${msSummary}]:\n${af.toTOON(msResults)}`)
+              runtime.context.push(`[OBS ${stepLabel}] (memory_search) No memory entry found with id "${msId}".`)
+            }
+          } else {
+            var msQuery = isString(msParams.query) ? msParams.query.trim() : (isString(currentMsg.query) ? currentMsg.query.trim() : "")
+            var msSection = isString(msParams.section) ? msParams.section.trim() : __
+            var msLimit = isNumber(msParams.limit) && msParams.limit > 0 ? msParams.limit : 5
+            if (msQuery.length === 0) {
+              runtime.context.push(`[OBS ${stepLabel}] (memory_search) Missing 'query' param. Provide: {"query":"keyword(s)"[,"section":"..."][,"limit":N][,"id":"..."][,"full":true]}`)
+            } else {
+              var msScored = this._memorySearchScored(msQuery, { section: msSection, maxPerSection: msLimit })
+              var msFormatted = this._formatMemorySearchResults(msScored, { budget: args.memorysearchbudget, full: msParams.full === true })
+              var msSections = Object.keys(msFormatted.results)
+              if (msSections.length === 0) {
+                runtime.context.push(`[OBS ${stepLabel}] (memory_search) No memory entries match query "${msQuery}".`)
+              } else {
+                var msSummary = msSections.map(function(s) { return s + "(" + msFormatted.results[s].length + ")" }).join(", ")
+                var msFooter = msFormatted.omitted > 0 ? `\n(${msFormatted.omitted} more match(es) omitted; narrow with section/limit or fetch one with {"id":"..."})` : ""
+                runtime.context.push(`[OBS ${stepLabel}] (memory_search) Results for "${msQuery}" [${msSummary}]:\n${af.toTOON(msFormatted.results)}${msFooter}`)
+              }
             }
           }
           runtime.consecutiveThoughts = 0
@@ -20250,19 +20922,29 @@ MiniA.prototype._runChatbotMode = function(options) {
 
           if (lowerAction === "memory_search" && args.usememory) {
             var cbMsParams = isMap(currentMsg.params) ? currentMsg.params : {}
-            var cbMsQuery = isString(cbMsParams.query) ? cbMsParams.query.trim() : (isString(currentMsg.query) ? currentMsg.query.trim() : "")
-            var cbMsSection = isString(cbMsParams.section) ? cbMsParams.section.trim() : __
-            var cbMsLimit = isNumber(cbMsParams.limit) && cbMsParams.limit > 0 ? cbMsParams.limit : 10
-            if (cbMsQuery.length === 0) {
-              pendingPrompt = `memory_search requires a 'query' param. Provide: {"query":"keyword(s)"[,"section":"..."][,"limit":N]}`
+            var cbMsId = isString(cbMsParams.id) ? cbMsParams.id.trim() : ""
+            if (cbMsId.length > 0) {
+              var cbMsFetched = this._fetchMemoryEntryById(cbMsId)
+              pendingPrompt = isObject(cbMsFetched)
+                ? `${cbMsFetched.section}/${cbMsFetched.entry.id}: ${String(cbMsFetched.entry.value || "").substring(0, 4000)}`
+                : `No memory entry found with id "${cbMsId}".`
             } else {
-              var cbMsResults = this._memorySearch(cbMsQuery, { section: cbMsSection, maxPerSection: cbMsLimit })
-              var cbMsSections = Object.keys(cbMsResults)
-              if (cbMsSections.length === 0) {
-                pendingPrompt = `No memory entries match query "${cbMsQuery}". Continue with what you know or provide the final answer.`
+              var cbMsQuery = isString(cbMsParams.query) ? cbMsParams.query.trim() : (isString(currentMsg.query) ? currentMsg.query.trim() : "")
+              var cbMsSection = isString(cbMsParams.section) ? cbMsParams.section.trim() : __
+              var cbMsLimit = isNumber(cbMsParams.limit) && cbMsParams.limit > 0 ? cbMsParams.limit : 5
+              if (cbMsQuery.length === 0) {
+                pendingPrompt = `memory_search requires a 'query' param. Provide: {"query":"keyword(s)"[,"section":"..."][,"limit":N][,"id":"..."][,"full":true]}`
               } else {
-                var cbMsSummary = cbMsSections.map(function(s) { return s + "(" + cbMsResults[s].length + ")" }).join(", ")
-                pendingPrompt = `memory_search results for "${cbMsQuery}" [${cbMsSummary}]:\n${af.toTOON(cbMsResults)}\nUse this information to continue.`
+                var cbMsScored = this._memorySearchScored(cbMsQuery, { section: cbMsSection, maxPerSection: cbMsLimit })
+                var cbMsFormatted = this._formatMemorySearchResults(cbMsScored, { budget: args.memorysearchbudget, full: cbMsParams.full === true })
+                var cbMsSections = Object.keys(cbMsFormatted.results)
+                if (cbMsSections.length === 0) {
+                  pendingPrompt = `No memory entries match query "${cbMsQuery}". Continue with what you know or provide the final answer.`
+                } else {
+                  var cbMsSummary = cbMsSections.map(function(s) { return s + "(" + cbMsFormatted.results[s].length + ")" }).join(", ")
+                  var cbMsFooter = cbMsFormatted.omitted > 0 ? `\n(${cbMsFormatted.omitted} more match(es) omitted; narrow with section/limit or fetch one with {"id":"..."})` : ""
+                  pendingPrompt = `memory_search results for "${cbMsQuery}" [${cbMsSummary}]:\n${af.toTOON(cbMsFormatted.results)}${cbMsFooter}\nUse this information to continue.`
+                }
               }
             }
             handled = true
@@ -20840,18 +21522,21 @@ MiniA.prototype._validateResearchOutcome = function(researchOutput, validationGo
     var specificIssues = isArray(validation.specificIssues) ? validation.specificIssues.filter(isString) : []
     var suggestions = isArray(validation.suggestions) ? validation.suggestions.filter(isString) : []
     this._memoryAppend("summaries", `Validation verdict: ${verdict}${feedback.length > 0 ? " - " + feedback : ""}`, {
-      provenance: { source: "validation", event: "deep-research-validation" }
+      provenance: { source: "validation", event: "deep-research-validation" },
+      expiresAt: this._memoryExpiry(1)
     })
     if (specificIssues.length > 0) {
       this._memoryAppend("risks", specificIssues.join("; "), {
         unresolved: verdict !== "PASS",
-        provenance: { source: "validation", event: "validation-issues" }
+        provenance: { source: "validation", event: "validation-issues" },
+        expiresAt: this._memoryExpiry(1)
       })
     }
     if (suggestions.length > 0) {
       this._memoryAppend("openQuestions", suggestions.join("; "), {
         unresolved: true,
-        provenance: { source: "validation", event: "validation-suggestions" }
+        provenance: { source: "validation", event: "validation-suggestions" },
+        expiresAt: this._memoryExpiry(1)
       })
     }
 
