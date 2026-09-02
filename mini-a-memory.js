@@ -65,6 +65,19 @@ MiniAMemoryManager.prototype._normalizeEntry = function(entry, defaults) {
   if (val.length === 0) val = "(empty)"
 
   var id = isString(e.id) && e.id.trim().length > 0 ? e.id.trim() : sha1(val + "::" + nowNano()).substring(0, 16)
+  // Self-heal stores written before the replaceKeys plumbing fix, where OpenAF's
+  // array-concatenating merge() could duplicate meta.rejected entries on every upsert.
+  if (isObject(e.meta) && isArray(e.meta.rejected) && e.meta.rejected.length > 0) {
+    var seenSig = {}, dedupedRejected = []
+    e.meta.rejected.forEach(function(item) {
+      var sig = isObject(item) && isString(item.signature) ? item.signature : stringify(item, __, "")
+      if (seenSig[sig]) return
+      seenSig[sig] = true
+      dedupedRejected.push(item)
+    })
+    if (dedupedRejected.length > 5) dedupedRejected = dedupedRejected.slice(-5)
+    e.meta.rejected = dedupedRejected
+  }
   return {
     id               : id,
     value            : val,
@@ -446,11 +459,6 @@ MiniAMemoryManager.prototype.compact = function() {
     if (dropped.length > 0) {
       droppedEntries += dropped.length
       sectionDrops[section] = (sectionDrops[section] || 0) + dropped.length
-      self._memory.sections.summaries.push(self._normalizeEntry({
-        value: "Compacted " + dropped.length + " older " + section + " entr" + (dropped.length === 1 ? "y" : "ies"),
-        status: "active",
-        provenance: { source: "compaction", section: section }
-      }, { silent: true }))
     }
   })
 

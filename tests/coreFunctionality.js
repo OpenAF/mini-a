@@ -3181,49 +3181,160 @@
     ow.test.assert(second.confirmCount, 2, "Re-writing the same key should bump confirmCount rather than duplicate")
   }
 
-  exports.testAutoPromoteGatesModelAuthoredEntriesUntilConfirmedTwice = function() {
-    var channelName = "__mini_a_test_gate_memory_" + nowNano()
-    var sessionChannelName = "__mini_a_test_gate_session_memory_" + nowNano()
+  exports.testReflectionValidatorRejectsBadEntries = function() {
+    var agent = createAgent()
+    var goal = "Investigate the flaky CI job and fix it"
+    var answer = "Fixed the flaky CI job by increasing the test timeout to 30 seconds"
+    var raw = [
+      { kind: "preference", value: "Fixed the flaky CI job by increasing the test timeout to 30 seconds" }, // near-dup of answer
+      { kind: "bogus-kind", value: "Some value that is definitely long enough to pass the length check" }, // invalid kind
+      { kind: "environment", value: "API_KEY: sk-abcdef123456" }, // secret pattern
+      { kind: "procedure", value: "Run npm test with --retries=3 to work around network flakiness in CI" }, // valid, no supersedes
+      { kind: "pitfall", value: "Do not lower the CI timeout below 20s, tests start failing again", supersedes: "not-an-allowed-key" } // valid, disallowed supersedes
+    ]
+    var result = agent._validateReflectionEntries(raw, ["existing::key"], goal, answer)
+    ow.test.assert(result.accepted.length, 2, "Only the structurally valid, non-duplicate, non-secret entries should be accepted")
+    ow.test.assert(result.rejected, 3, "The duplicate/invalid-kind/secret entries should all be rejected")
+    var supersedeItem = result.accepted.filter(function(a) { return a.kind === "pitfall" })[0]
+    ow.test.assert(isUnDef(supersedeItem.supersedes), true, "A supersedes key not present in the allowed list must be stripped, not honored")
+  }
+
+  exports.testReflectionWritesDurableEntriesWithReflectionProvenance = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    agent._memoryConfig.enabled = true
+    agent._runtime = { toolsUsed: { shell: 3 }, errorHistory: [], context: ["[ACT 1] shell: npm test"] }
+    agent._lastRunOutcome = { status: "succeeded", answerPreview: "All tests pass now." }
+    agent._getReflectionLlm = function() {
+      return { promptJSONWithStats: function() {
+        return { response: [{ kind: "procedure", value: "Run 'npm test -- --retries=3' to avoid CI flakiness on network calls" }], stats: {} }
+      } }
+    }
+    var writesBefore = agent._memoryWriteCount
+    agent._reflectRunMemory({ goal: "fix flaky CI", memoryreflect: true, memoryreflectmin: 1, chatbotmode: false })
+    var entries = agent._sessionMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.kind === "procedure" })
+    ow.test.assert(entries.length, 1, "A durable procedure entry should be written from the reflection response")
+    ow.test.assert(entries[0].provenance.event, "reflection", "Reflection writes should carry provenance.event='reflection'")
+    ow.test.assert(agent._memoryWriteCount, writesBefore, "Reflection writes must bypass the per-run memory_write cap counter")
+  }
+
+  exports.testReflectionSkippedWithoutToolUse = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    agent._runtime = { toolsUsed: {}, errorHistory: [], context: [] }
+    agent._lastRunOutcome = { status: "succeeded", answerPreview: "Done." }
+    var called = false
+    agent._getReflectionLlm = function() { called = true; return { promptJSONWithStats: function() { return { response: [], stats: {} } } } }
+    agent._reflectRunMemory({ goal: "trivial goal", memoryreflect: true, memoryreflectmin: 2, chatbotmode: false })
+    ow.test.assert(called, false, "Reflection must not call the LLM when the run used fewer tools than memoryreflectmin")
+
+    agent._runtime = { toolsUsed: { shell: 5 }, errorHistory: [], context: [] }
+    agent._lastRunOutcome = { status: "failed", answerPreview: "" }
+    agent._reflectRunMemory({ goal: "failed goal", memoryreflect: true, memoryreflectmin: 1, chatbotmode: false })
+    ow.test.assert(called, false, "Reflection must not call the LLM when the run did not succeed")
+  }
+
+  exports.testFinalizeRunMemoryNeverThrowsWhenReflectionFails = function() {
+    var channelName = "__mini_a_test_reflect_finalize_" + nowNano()
     try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
-    try { $ch(sessionChannelName).create("simple") } catch(ignoreCreate) {}
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "reflect-finalize",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""), debug: false, verbose: false
+    }, agent._agentState)
+    agent._runtime = { toolsUsed: { shell: 3 }, errorHistory: [], context: [] }
+    agent._lastRunOutcome = { status: "succeeded", answerPreview: "Done." }
+    agent._runMemoryOutcomeRecorded = true
+    agent._getReflectionLlm = function() { throw "reflection model unavailable" }
+    var threw = false
+    try {
+      agent._finalizeRunMemory({ goal: "goal" }, { reflect: true })
+    } catch (e) { threw = true }
+    ow.test.assert(threw, false, "_finalizeRunMemory must never throw when the reflection pass fails")
+    ow.test.assert(agent._runMemoryFinalized, true, "Finalization should still complete (persist + promote) after a reflection failure")
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testModelWritesPromoteAsCandidatesAndActivateOnSecondSession = function() {
+    var channelName = "__mini_a_test_gate_memory_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
+
+    var agentA = createAgent()
+    agentA._agentState = {}
+    agentA._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "gate-session-a",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      debug: false, verbose: false
+    }, agentA._agentState)
+
+    var write1 = agentA._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
+    ow.test.assert(write1.ok, true, "First memory_write should succeed")
+    agentA._autoPromoteSessionToGlobal()
+    var globalAfterFirst = agentA._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })[0]
+    ow.test.assert(isObject(globalAfterFirst), true, "A single model-authored write should promote immediately, as an unconfirmed candidate")
+    ow.test.assert(globalAfterFirst.status, "candidate", "A single-session write must land as status=candidate, not active")
+    ow.test.assert(isString(globalAfterFirst.expiresAt), true, "A candidate entry should carry an expiry so it doesn't linger forever unconfirmed")
+    ow.test.assert(isObject(globalAfterFirst.meta) && isArray(globalAfterFirst.meta.confirmedBy) && globalAfterFirst.meta.confirmedBy.length === 1, true, "confirmedBy should list the writing session")
+
+    // Same session writing again keeps it a candidate -- it must not self-confirm.
+    agentA._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
+    agentA._autoPromoteSessionToGlobal()
+    var stillCandidate = agentA._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })[0]
+    ow.test.assert(stillCandidate.status, "candidate", "The same session confirming its own write again must not activate it")
+    ow.test.assert(stillCandidate.meta.confirmedBy.length, 1, "confirmedBy should still list only the one session")
+
+    // A different session writing the same key activates it.
+    var agentB = createAgent()
+    agentB._agentState = {}
+    agentB._initWorkingMemory({
+      usememory: true, memoryscope: "both", memorysessionid: "gate-session-b",
+      memorych: stringify({ name: channelName, type: "simple" }, __, ""),
+      debug: false, verbose: false
+    }, agentB._agentState)
+    agentB._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
+    agentB._autoPromoteSessionToGlobal()
+    var activated = agentB._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })[0]
+    ow.test.assert(activated.status, "active", "A second, different session confirming the same key should activate it")
+    ow.test.assert(isUnDef(activated.expiresAt), true, "An activated entry should no longer carry a candidate expiry")
+    ow.test.assert(activated.confirmCount, 2, "confirmCount should reflect the two distinct confirming sessions")
+
+    // "pitfall" -> risks is not in the default (empty) memorypromote list; it must still
+    // promote (as a candidate) regardless, because durable kinds promote unconditionally.
+    var pitfall1 = agentA._memoryWrite({ kind: "pitfall", value: "Do not deploy on Fridays" }, {})
+    agentA._autoPromoteSessionToGlobal()
+    var globalPitfall = agentA._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.key === pitfall1.key })[0]
+    ow.test.assert(isObject(globalPitfall) && globalPitfall.status === "candidate", true, "A pitfall should promote to the risks section as a candidate despite not being in memorypromote")
+
+    // Runtime-generated risks (e.g. tool-failure) must not be swept up by the pitfall promotion path
+    agentA._memoryUpsert("risks", "tool-failure:some-tool", "Tool 'some-tool' failed: timeout", { kind: "tool-failure", memoryScope: "session" })
+    agentA._autoPromoteSessionToGlobal()
+    ow.test.assert(agentA._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.kind === "tool-failure" }).length === 0, true, "Non-durable-kind risks entries must not be promoted")
+
+    try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
+  }
+
+  exports.testMemoryWriteWorksWithGlobalOnlyScope = function() {
+    var channelName = "__mini_a_test_global_only_write_" + nowNano()
+    try { $ch(channelName).create("simple") } catch(ignoreCreate) {}
 
     var agent = createAgent()
     agent._agentState = {}
     agent._initWorkingMemory({
-      usememory: true, memoryscope: "both", memorysessionid: "gate-1",
+      usememory: true, memoryscope: "global",
       memorych: stringify({ name: channelName, type: "simple" }, __, ""),
-      memorysessionch: stringify({ name: sessionChannelName, type: "simple" }, __, ""),
       debug: false, verbose: false
     }, agent._agentState)
+    ow.test.assert(isUnDef(agent._sessionMemoryManager), true, "memoryscope=global should not create a session manager")
 
-    var write1 = agent._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
-    ow.test.assert(write1.ok, true, "First memory_write should succeed")
-    agent._autoPromoteSessionToGlobal()
-    var globalAfterFirst = agent._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })
-    ow.test.assert(globalAfterFirst.length === 0, true, "A single model-authored write must not promote to global (confirmCount<2 gate)")
-
-    var write2 = agent._memoryWrite({ kind: "preference", value: "Always squash commits before merging" }, {})
-    ow.test.assert(write2.confirmCount, 2, "A second identical write should bump confirmCount to 2")
-    agent._autoPromoteSessionToGlobal()
-    var globalAfterSecond = agent._globalMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === write1.key })
-    ow.test.assert(globalAfterSecond.length === 1, true, "A twice-confirmed model-authored entry should promote to global")
-
-    // "pitfall" -> risks is not in the default (empty) memorypromote list; it must still
-    // promote once confirmed, because durable kinds promote regardless of memorypromote.
-    var pitfall1 = agent._memoryWrite({ kind: "pitfall", value: "Do not deploy on Fridays" }, {})
-    agent._autoPromoteSessionToGlobal()
-    ow.test.assert(agent._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.key === pitfall1.key }).length === 0, true, "An unconfirmed pitfall must not promote")
-    agent._memoryWrite({ kind: "pitfall", value: "Do not deploy on Fridays" }, {})
-    agent._autoPromoteSessionToGlobal()
-    ow.test.assert(agent._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.key === pitfall1.key }).length === 1, true, "A confirmed pitfall should promote to the risks section despite not being in memorypromote")
-
-    // Runtime-generated risks (e.g. tool-failure) must not be swept up by the pitfall promotion path
-    agent._memoryUpsert("risks", "tool-failure:some-tool", "Tool 'some-tool' failed: timeout", { kind: "tool-failure", memoryScope: "session" })
-    agent._autoPromoteSessionToGlobal()
-    ow.test.assert(agent._globalMemoryManager.getSectionEntries("risks").filter(function(e) { return e.kind === "tool-failure" }).length === 0, true, "Non-durable-kind risks entries must not be promoted")
+    var result = agent._memoryWrite({ kind: "environment", value: "This repo's CI runs on self-hosted runners" }, {})
+    ow.test.assert(result.ok, true, "memory_write must succeed under memoryscope=global instead of failing for lack of a session manager")
+    var entry = agent._globalMemoryManager.getSectionEntries("facts").filter(function(e) { return e.key === result.key })[0]
+    ow.test.assert(isObject(entry) && entry.status === "candidate", true, "A global-only write should land directly in the global store as a candidate")
 
     try { $ch(channelName).destroy() } catch(ignoreDestroy) {}
-    try { $ch(sessionChannelName).destroy() } catch(ignoreDestroy) {}
   }
 
   exports.testBuildRelevantMemoryBlockFiltersDurableAndCaps = function() {
@@ -3272,6 +3383,64 @@
     var results = agent._memorySearch("deploy pipeline canary rollout strategy", { section: "facts", maxPerSection: 5 })
     ow.test.assert(isArray(results.facts) && results.facts.length >= 2, true, "Both entries should match the query")
     ow.test.assert(results.facts[0].v.indexOf("variant") >= 0, true, "A recently-confirmed (confirmCount=2) entry should outrank an old single-confirmation entry")
+  }
+
+  exports.testMemorySearchScoredReturnsScoresAndSectionsFilter = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+
+    agent._memoryWrite({ kind: "pitfall", value: "The deploy script times out on slow networks" }, {})
+    agent._memoryWrite({ kind: "environment", value: "The deploy script lives in scripts/deploy.sh" }, {})
+
+    var scored = agent._memorySearchScored("deploy script", { maxPerSection: 5 })
+    ow.test.assert(isArray(scored.risks) && scored.risks.length > 0, true, "Scored results should include the risks section")
+    ow.test.assert(isNumber(scored.risks[0].score), true, "Each scored result must carry a numeric score")
+    ow.test.assert(isObject(scored.risks[0].entry), true, "Each scored result must carry the compact entry")
+
+    var kindFiltered = agent._memorySearchScored("deploy script", { kinds: ["pitfall"], maxPerSection: 5 })
+    var allKinds = []
+    Object.keys(kindFiltered).forEach(function(sec) { kindFiltered[sec].forEach(function(item) { allKinds.push(item.entry.k) }) })
+    ow.test.assert(allKinds.every(function(k) { return k === "pitfall" }), true, "opts.kinds should restrict results to the named kinds across all sections")
+
+    var sectionFiltered = agent._memorySearchScored("deploy script", { sections: ["facts"], maxPerSection: 5 })
+    ow.test.assert(Object.keys(sectionFiltered).every(function(s) { return s === "facts" }), true, "opts.sections should restrict which sections are searched")
+
+    // _memorySearch (the pre-existing keyword-only wrapper) must keep returning bare entries.
+    var plain = agent._memorySearch("deploy script", { maxPerSection: 5 })
+    ow.test.assert(isDef(plain.risks[0].v) && isUnDef(plain.risks[0].score), true, "_memorySearch should still return bare compact entries, not {score, entry} pairs")
+  }
+
+  exports.testToolContractStoresParameterShapeNotValues = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+    agent.mcpTools = [{ name: "showMessage" }]
+
+    var longMessage = "This is a long confirmation message that goes well past the forty character truncation limit"
+    agent._recordValidatedToolContract("showMessage", { message: longMessage, level: "info" }, __, { goal: "notify" })
+    var contracts = agent._buildValidatedToolContracts({ goal: "notify" })
+    ow.test.assert(contracts.length === 1, true, "One validated contract should be recorded")
+    var invocationText = stringify(contracts[0].invocation, __, "")
+    ow.test.assert(invocationText.indexOf(longMessage) < 0, true, "A parameter value longer than the shape's 40-char preview must be truncated, not persisted in full")
+    ow.test.assert(invocationText.indexOf("string:") >= 0, true, "The contract should record the parameter's type shape")
+    ow.test.assert(invocationText.indexOf("…") >= 0, true, "A truncated value should be marked with an ellipsis")
+    ow.test.assert(contracts[0].invocation.action === "showMessage", true, "The action/tool name itself should remain literal")
+    ow.test.assert(contracts[0].invocation.params.level, "string:info", "A short parameter value is kept verbatim (with its type prefix) for readability")
+  }
+
+  exports.testRejectedArgsDoNotDuplicateAcrossUpserts = function() {
+    var agent = createAgent()
+    agent._agentState = {}
+    agent._initWorkingMemory({ usememory: true, memoryscope: "session", debug: false, verbose: false }, agent._agentState)
+
+    agent._recordRejectedToolArgs("showMessage", {}, "Still missing required: 'message'. Valid parameters: message, level, title.", { goal: "notify" })
+    agent._recordRejectedToolArgs("showMessage", {}, "Still missing required: 'message'. Valid parameters: message, level, title.", { goal: "notify" })
+    agent._recordRejectedToolArgs("showMessage", {}, "Still missing required: 'message'. Valid parameters: message, level, title.", { goal: "notify" })
+
+    var entry = agent._sessionMemoryManager.getSectionEntries("decisions").filter(function(e) { return e.key === "tool-contract:call:showMessage" })[0]
+    ow.test.assert(isObject(entry), true, "A pending corrective contract should be recorded")
+    ow.test.assert(entry.meta.rejected.length, 1, "Repeating the same rejection signature must not duplicate the rejected-keys entry")
   }
 
   // Regression test: init() must initialize memory (_initWorkingMemory) BEFORE it builds the
