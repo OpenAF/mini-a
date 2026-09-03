@@ -416,6 +416,9 @@ function __miniAMcpWikiBuildConfig(args, options) {
     wikihttptimeout     : isNumber(Number(args.wikihttptimeout)) ? Number(args.wikihttptimeout) : 30000,
     wikiartifactrefreshsecs: isNumber(Number(args.wikiartifactrefreshsecs)) ? Number(args.wikiartifactrefreshsecs) : 0,
     wikimetacache       : isDef(args.wikimetacache) ? toBoolean(args.wikimetacache) : true,
+    wikisourceurl       : isString(args.wikisourceurl) && args.wikisourceurl.trim().length > 0 ? args.wikisourceurl.trim() : __,
+    wikisourcefield     : isString(args.wikisourcefield) && args.wikisourcefield.trim().length > 0 ? args.wikisourcefield.trim() : __,
+    wikisourceinline    : toBoolean(args.wikisourceinline) === true,
     usegraph            : (isDef(args.usewikigraph) ? toBoolean(args.usewikigraph) : false) || isString(wikiGraphFalkorHost),
     wikigraphcommunity  : isString(args.wikigraphcommunity) && args.wikigraphcommunity.trim().length > 0 ? args.wikigraphcommunity.trim() : __,
     wikigraphsearchhints: isDef(args.wikigraphsearchhints) ? toBoolean(args.wikigraphsearchhints) : true,
@@ -567,7 +570,21 @@ function __miniAMcpWikiInit(args, options) {
     // server may explicitly opt in, while still returning graph hits only as
     // opaque read references through the restricted search result filter.
     cfg.wikigraphsearchhints = options.allowRestrictedGraphHints === true && toBoolean(args.usewikigraph) === true
+    // A citation URL embeds the real page path -- exactly what restricted mode's
+    // opaque-reference contract exists to hide. Never let wikisourceurl leak it.
+    delete cfg.wikisourceurl
   }
+  // Registers the Handlebars helper sets (addOpenAFHelpers/addConditionalHelpers) so
+  // oJobMCP's tplDesc templification of tool descriptions ({{#if ($wikiHasSourceUrl)}}...)
+  // can use them too, not just wikisourceurl page-URL templates.
+  __miniAWikiEnsureTemplateHelpers()
+  // Tool descriptions read live global.__wikiManager state through these two helpers
+  // rather than through args.wikisourceurl/args.wikisourcefield directly: oJobMCP's
+  // httpdMCP job renders descriptions against its own args snapshot, which does not see
+  // mutations this Init job makes to args, nor OAF_MINI_A_WIKI_SOURCE_URL (an env var
+  // MiniAWikiManager.configure() itself resolves, invisible to args either way).
+  ow.template.addHelper("$wikiHasSourceUrl", function() { return isObject(global.__wikiManager) && isDef(global.__wikiManager._sourceUrlTpl) })
+  ow.template.addHelper("$wikiSourceField", function() { return isObject(global.__wikiManager) && isString(global.__wikiManager._sourceField) ? global.__wikiManager._sourceField : "sourceUrl" })
   var restriction = restricted ? new MiniAMcpWikiRestriction(args, cfg) : { enabled: false }
   var logPrefix = isString(options.logPrefix) ? options.logPrefix : "mcp-wiki"
   var auditEnabled = __miniAMcpWikiAuditEnabled(args)

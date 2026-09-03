@@ -2,6 +2,14 @@
 
 ## Recent Updates
 
+### Wiki: citation URLs on retrieval results
+
+**Problem**: wiki retrieval results only ever carried a wiki-relative path (`guides/setup.md`) and a non-opaque `wiki:` reference, so an agent answering from wiki content had no canonical origin URL to cite back to a human, even when the wiki was itself published somewhere (an internal docs site, a GitHub repo, Confluence).
+
+**Change**: `wikisourceurl` is an optional Handlebars template (`https://docs.example.com/{{$encodePath pathNoExt}}`) that renders a page's citation URL onto `search`, `read`, `open`, `grep`, and `related` results, in a `sourceUrl` field (`wikisourcefield` to rename it). MCP tool descriptions (`mcp-wiki.yaml`) and the main agent's `wiki` action gain a sentence telling the model to cite it when set. `wikisourceinline` additionally appends the URL into search results' description text, for smaller models that attend to prose more reliably than to a sibling JSON key. A `wikimounts` entry may set its own `wikisourceurl`, so a mounted page cites its own wiki instead of guessing at the parent's URL space. Off by default; never applied under `mcp-wiki-safe.yaml`'s restricted retrieval, whose whole contract is hiding the real page path a citation URL would otherwise embed.
+
+**Related parameters**: `wikisourceurl`, `wikisourcefield`, `wikisourceinline`, `OAF_MINI_A_WIKI_SOURCE_URL`
+
 ### Memory: reflection pass, cross-session candidate promotion, and tighter context budgets
 
 **Problem**: the model rarely calls `memory_write` on its own, so a fresh `usememory` store stayed cold across runs. What did get promoted to global storage was gated on the *same session* confirming its own write twice — something a new CLI/console run (a fresh random session id every time) could essentially never do — while bookkeeping entries (run-outcome summaries, tool observations) promoted ungated and could get injected into the prompt as if they were durable knowledge. The `relevant`-mode injection block and `memory_search` had no token budget, and the per-step state snapshot was duplicated in the prompt under `memoryinject=full`.

@@ -1683,7 +1683,11 @@ MiniUtilsTool.prototype.wiki = function(params) {
       }
       var page = (params.agentic === true || this._wikiAgenticRetrieval === true) ? wm.agenticRead(params.path.trim(), merge({}, readOpts, { maxChars: isNumber(params.maxChars) ? params.maxChars : __ })) : wm.read(params.path.trim(), readOpts)
       if (!isObject(page)) return "[ERROR] Page not found: " + params.path
-      if (params.compact === true) return { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
+      if (params.compact === true) {
+        var compactPage = { path: page.path, title: isString(page.meta && page.meta.title) ? page.meta.title : page.path, body: page.body }
+        if (isDef(page[wm._sourceField])) compactPage[wm._sourceField] = page[wm._sourceField]
+        return compactPage
+      }
       return page
     }
 

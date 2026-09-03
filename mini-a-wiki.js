@@ -108,6 +108,26 @@ var __miniAWikiBasicAuth = function(accessKey, secret) {
   return "Basic " + java.util.Base64.getEncoder().encodeToString(raw.getBytes("UTF-8"))
 }
 
+// ── Citation URL templating (wikisourceurl) ────────────────────────────────
+// Handlebars is already used for MCP tool descriptions (oJobMCP's tplDesc/$t), so
+// wikisourceurl reuses the same engine instead of inventing a syntax. Neither
+// addOpenAFHelpers() nor addConditionalHelpers() is registered by templify() unless
+// ow.template was previously undefined, so both are wired explicitly here. $escape
+// (ow.template's built-in) only escapes quotes, not URL-unsafe characters, hence the
+// three encoding helpers below.
+var __miniAWikiTemplateHelpersReady = false
+var __miniAWikiEnsureTemplateHelpers = function() {
+  if (__miniAWikiTemplateHelpersReady) return
+  ow.loadTemplate()
+  ow.template.addOpenAFHelpers()
+  ow.template.addConditionalHelpers()
+  ow.template.addHelper("$encodeURI", function(v) { return encodeURI(String(v)) })
+  ow.template.addHelper("$encodeURIComponent", function(v) { return encodeURIComponent(String(v)) })
+  // per-segment percent-encoding that keeps "/" as a path separator
+  ow.template.addHelper("$encodePath", function(v) { return String(v).split("/").map(encodeURIComponent).join("/") })
+  __miniAWikiTemplateHelpersReady = true
+}
+
 // v1 stock fingerprint phrase — if AGENTS.md contains this verbatim it was never user-edited
 var __MINI_A_WIKI_V1_STOCK_PHRASE = "This file defines how agents should read, distil, and contribute knowledge to this wiki."
 
@@ -1583,6 +1603,85 @@ MiniAWikiManager.prototype._resolveMountPath = function(path) {
   return { mount: null, localPath: localPath, name: name }
 }
 
+// ── Citation URLs (wikisourceurl) ──────────────────────────────────────────
+// Renders this manager's compiled wikisourceurl template for a wiki-relative path.
+// Returns __ when no template is configured (feature off) or rendering fails (a bad
+// template degrades to "no URL" rather than throwing on every result).
+MiniAWikiManager.prototype.sourceUrl = function(path, extra) {
+  if (isUnDef(this._sourceUrlTpl) || !isString(path) || path.length === 0) return __
+  var data = merge({
+    path       : path,
+    pathNoExt  : path.replace(/\.[^./]+$/, ""),
+    encodedPath: path.split("/").map(encodeURIComponent).join("/"),
+    label      : isString(this._config.label) ? this._config.label : __,
+    backend    : this._backendType,
+    root       : isString(this._config.root) ? this._config.root : __,
+    bucket     : isString(this._config.bucket) ? this._config.bucket : __,
+    prefix     : isString(this._config.prefix) ? this._config.prefix : __,
+    url        : isString(this._config.url) ? this._config.url : __
+  }, isMap(extra) ? extra : {})
+  try {
+    return String(this._sourceUrlTpl(data))
+  } catch(e) {
+    this._logFn("warn", "wikisourceurl render failed; citation URLs disabled: " + __miniAErrMsg(e))
+    this._sourceUrlTpl = __
+    return __
+  }
+}
+
+// Resolves which manager should render a (possibly @mount/-prefixed) path's citation
+// URL, and the path local to that manager. Returns __ for an unknown mount name.
+MiniAWikiManager.prototype._resolveSourceManager = function(path) {
+  if (!isString(path) || path.charAt(0) !== "@") return { manager: this, localPath: path, mount: __ }
+  var mr = this._resolveMountPath(path)
+  if (!mr || !mr.mount) return __
+  return { manager: mr.mount.manager, localPath: mr.localPath, mount: mr.name }
+}
+
+// Sets this._sourceField on entry from the owning manager's template, unless already
+// present (e.g. copied through from a delegated read()/mount search() call). Resolves
+// @mount/ paths to the mount's own manager/template so a mounted page never gets a
+// confidently-wrong local URL. No-op when entry has no string path.
+MiniAWikiManager.prototype._decorateEntry = function(entry, extra) {
+  if (!isMap(entry) || !isString(entry.path) || entry.path.length === 0) return entry
+  var field = this._sourceField
+  if (isDef(entry[field])) return entry
+  var res = this._resolveSourceManager(entry.path)
+  if (!res || isUnDef(res.manager._sourceUrlTpl)) return entry
+  var data = merge({}, isMap(extra) ? extra : {})
+  if (isUnDef(data.mount) && isString(res.mount)) data.mount = res.mount
+  // search/agenticSearch hits carry entry.title; read()'s page object carries
+  // meta.title instead (open/agenticRead/grep build their results from read()).
+  if (isUnDef(data.title)) {
+    if (isString(entry.title)) data.title = entry.title
+    else if (isMap(entry.meta) && isString(entry.meta.title)) data.title = entry.meta.title
+  }
+  var rendered = res.manager.sourceUrl(res.localPath, data)
+  if (isDef(rendered)) entry[field] = rendered
+  return entry
+}
+
+MiniAWikiManager.prototype._decorateEntries = function(list, extra) {
+  if (!isArray(list)) return list
+  var self = this
+  list.forEach(function(entry) { self._decorateEntry(entry, extra) })
+  return list
+}
+
+// Opt-in (wikisourceinline): appends the rendered URL into a result's prose field too,
+// for models that attend to text more reliably than to sibling JSON keys. Only applied
+// to discovery results (search description / agenticSearch summary), never to read/open
+// bodies.
+MiniAWikiManager.prototype._applyInlineSource = function(list, textField) {
+  if (this._sourceInline !== true || !isArray(list)) return list
+  var field = this._sourceField
+  list.forEach(function(entry) {
+    if (!isMap(entry) || isUnDef(entry[field]) || !isString(entry[textField])) return
+    entry[textField] = entry[textField] + " [" + field + ": " + entry[field] + "]"
+  })
+  return list
+}
+
 MiniAWikiManager.prototype.configure = function(config) {
   var cfg = isMap(config) ? config : {}
   // The explicit runtime value wins. The environment form is intentionally
@@ -1591,6 +1690,26 @@ MiniAWikiManager.prototype.configure = function(config) {
   if (isUnDef(cfg.wikilexical) && isString(getEnv("OAF_MINI_A_WIKI_LEXICAL"))) cfg.wikilexical = getEnv("OAF_MINI_A_WIKI_LEXICAL")
   this._lexicalConfig = __miniAWikiLexicalConfig(cfg.wikilexical, cfg.root)
   this._lexicalFingerprint = __miniAWikiLexicalFingerprint(this._lexicalConfig)
+  // Citation URLs (wikisourceurl): opt-in Handlebars template rendering a canonical
+  // origin URL onto retrieval results. See "Citation URL templating" helpers above.
+  if (isUnDef(cfg.wikisourceurl) && isString(getEnv("OAF_MINI_A_WIKI_SOURCE_URL"))) cfg.wikisourceurl = getEnv("OAF_MINI_A_WIKI_SOURCE_URL")
+  this._sourceField  = isString(cfg.wikisourcefield) && cfg.wikisourcefield.trim().length > 0 ? cfg.wikisourcefield.trim() : "sourceUrl"
+  this._sourceInline = toBoolean(cfg.wikisourceinline) === true
+  this._sourceUrlTpl = __
+  if (isString(cfg.wikisourceurl) && cfg.wikisourceurl.trim().length > 0) {
+    try {
+      __miniAWikiEnsureTemplateHelpers()
+      // Compiled once here, not per-result: ow.template.parse()/getTemplate() both
+      // re-enter __requireHB() on every call, which would mean ~20 Handlebars compiles
+      // per search. Handlebars may not be thread-safe (see ow.template.parse's own
+      // docstring), so this compiled template is only ever invoked from the single-
+      // threaded decoration pass, never from the wikisearchparallel scan fan-out.
+      this._sourceUrlTpl = ow.template.getTemplate(cfg.wikisourceurl.trim())
+    } catch(e) {
+      this._logFn("warn", "Invalid wikisourceurl template; citation URLs disabled: " + __miniAErrMsg(e))
+      this._sourceUrlTpl = __
+    }
+  }
   var accessRaw  = isDef(cfg.access) ? String(cfg.access).toLowerCase().trim() : "ro"
   var backendRaw = isDef(cfg.backend) ? String(cfg.backend).toLowerCase().trim() : "fs"
   this._access      = accessRaw === "rw" ? "rw" : "ro"
@@ -2820,17 +2939,17 @@ MiniAWikiManager.prototype.read = function(path, options) {
         resolvedLinks.push(resolved)
       }
     })
-    return { path: npath, meta: parsed.meta, body: parsed.body, raw: raw, links: resolvedLinks }
+    return this._decorateEntry({ path: npath, meta: parsed.meta, body: parsed.body, raw: raw, links: resolvedLinks })
   }
 
   var lines  = raw.split("\n")
   var sliced = this._sliceLines(lines, opts)
 
   if (opts.countLines === true) {
-    return { path: path.trim(), meta: parsed.meta, linesTotal: sliced.linesTotal }
+    return this._decorateEntry({ path: path.trim(), meta: parsed.meta, linesTotal: sliced.linesTotal })
   }
 
-  return {
+  return this._decorateEntry({
     path      : path.trim(),
     meta      : parsed.meta,
     body      : sliced.content,
@@ -2839,7 +2958,7 @@ MiniAWikiManager.prototype.read = function(path, options) {
     lineEnd   : sliced.lineEnd,
     linesTotal: sliced.linesTotal,
     linesRead : sliced.linesRead
-  }
+  }, { section: opts.section })
 }
 
 // ── Agentic retrieval ───────────────────────────────────────────────────────
@@ -2869,12 +2988,16 @@ MiniAWikiManager.prototype.agenticSearch = function(query, options) {
   var opts = isObject(options) ? options : {}
   var limit = isNumber(opts.limit) && opts.limit > 0 ? Math.min(Math.floor(opts.limit), 20) : 8
   var hits = this.search(query, merge({}, opts, { limit: limit, compact: true, contextLines: 0 }))
+  var self = this
   var results = hits.map(function(hit) {
     var out = { ref: this._agenticRef(hit.path), path: hit.path, title: hit.title || hit.path, summary: hit.description || "" }
     if (isDef(hit.score)) out.score = hit.score // native Lucene relevance; scan results intentionally have none
     if (isDef(hit.mount)) out.mount = hit.mount
+    if (isDef(hit[self._sourceField])) out[self._sourceField] = hit[self._sourceField] // hits already decorated by search()
     return out
   }.bind(this))
+  // summary inherits hit.description verbatim, incl. any wikisourceinline marker
+  // search() already appended -- do not apply it again here.
   var engine = this._searchIndexStatus()
   this._agenticLog("search", { query: query, backend: engine, results: results.length, topScore: results.length > 0 ? results[0].score : __ })
   var out = { query: query, backend: engine, results: results }
@@ -2901,6 +3024,7 @@ MiniAWikiManager.prototype.open = function(pathOrRef, options) {
   var out = { ref: this._agenticRef(page.path), path: page.path, title: (page.meta && page.meta.title) || page.path, description: (page.meta && page.meta.description) || "", size: size, frontmatter: page.meta || {}, headings: headings.slice(0, maxHeadings), links: links }
   if (headings.length > maxHeadings) out.headingsTruncated = true
   if (links.length < (page.links || []).length) out.linksTruncated = true
+  if (isDef(page[this._sourceField])) out[this._sourceField] = page[this._sourceField] // page already decorated by read(), incl. mount delegation
   this._agenticLog("open", { path: page.path, size: size, headings: headings.length })
   return out
 }
@@ -2940,6 +3064,7 @@ MiniAWikiManager.prototype.agenticRead = function(pathOrRef, options) {
   }
   var out = { ref: this._agenticRef(page.path), path: page.path, title: (page.meta && page.meta.title) || page.path, body: body, lineStart: page.lineStart || 1, lineEnd: page.lineStart ? page.lineStart + body.split("\n").length - 1 : __, linesTotal: page.linesTotal, chars: body.length }
   if (truncated) { out.truncated = true; out.next = { path: this._agenticRef(page.path), startLine: out.lineEnd + 1, maxChars: maxChars } }
+  if (isDef(page[this._sourceField])) out[this._sourceField] = page[this._sourceField] // page already decorated by read(), incl. mount delegation
   this._agenticLog("read", { path: page.path, section: opts.section, chars: body.length, truncated: truncated })
   return out
 }
@@ -2960,16 +3085,24 @@ MiniAWikiManager.prototype.grep = function(pathOrRef, pattern, options) {
   var rx
   try { rx = new RegExp(opts.regex === true ? pattern : pattern.replace(/([.*+?^${}()|[\]\\])/g, "\\$1"), opts.caseSensitive === true ? "" : "i") } catch(e) { return { error: "invalid pattern", matches: [] } }
   var matches = [], scanned = 0, budget = Number(this._config.wikisearchscanbudget) > 0 ? Number(this._config.wikisearchscanbudget) : 1000
+  var sourceField = this._sourceField
   for (var i = 0; i < pages.length && matches.length < limit && scanned < budget; i++) {
     scanned++; var page = this.read(pages[i]); if (!isObject(page)) continue
     var lines = String(page.raw || "").split("\n")
     for (var l = 0; l < lines.length && matches.length < limit; l++) {
       rx.lastIndex = 0
-      if (rx.test(lines[l])) matches.push({ path: page.path, ref: this._agenticRef(page.path), line: l + 1, text: lines[l], contextBefore: lines.slice(Math.max(0, l - context), l), contextAfter: lines.slice(l + 1, Math.min(lines.length, l + 1 + context)) })
+      if (rx.test(lines[l])) {
+        var match = { path: page.path, ref: this._agenticRef(page.path), line: l + 1, text: lines[l], contextBefore: lines.slice(Math.max(0, l - context), l), contextAfter: lines.slice(l + 1, Math.min(lines.length, l + 1 + context)) }
+        if (isDef(page[sourceField])) match[sourceField] = page[sourceField] // page already decorated by read(), incl. mount delegation
+        matches.push(match)
+      }
     }
   }
   var out = { path: path, pattern: pattern, matches: matches, scanned: scanned }
   if (matches.length >= limit || scanned < pages.length) { out.truncated = true; out.next = { path: pathOrRef, pattern: pattern, offset: matches.length } }
+  // handles both a plain local path/folder (renders via this template) and the
+  // @mount/file.md single-file bypass above (resolves the mount's own template)
+  this._decorateEntry(out, { pattern: pattern })
   this._agenticLog("grep", { path: path, pattern: pattern, matches: matches.length })
   return out
 }
@@ -2978,6 +3111,7 @@ MiniAWikiManager.prototype.related = function(pathOrRef, options) {
   var path = this._agenticPath(pathOrRef), links = this.backlinks(path)
   var limit = isNumber(options && options.limit) ? options.limit : 10
   var out = { path: path, backlinks: links.backlinks.map(function(b) { return { ref: this._agenticRef(b.path), path: b.path, title: b.title } }.bind(this)), graph: [] }
+  this._decorateEntries(out.backlinks)
   try {
     var neighbors = this.graph("neighbors", { path: path })
     if (isArray(neighbors)) out.graph = neighbors.slice(0, limit)
@@ -2985,7 +3119,7 @@ MiniAWikiManager.prototype.related = function(pathOrRef, options) {
   try {
     if (isObject(this._graph) && isArray(this._mounts) && this._mounts.length > 0) {
       var cross = this._crossWikiExpand([path], { cap: limit })
-      if (isArray(cross) && cross.length > 0) out.cross = cross
+      if (isArray(cross) && cross.length > 0) out.cross = this._decorateEntries(cross)
     }
   } catch(e) {}
   return out
@@ -3319,6 +3453,11 @@ MiniAWikiManager.prototype.search = function(query, options) {
           var mountResults = this._searchMounts(query, opts, compact, limit - validHits.length, scanState)
           var luceneOut = this._withGraphHints(validHits.concat(mountResults), opts)
           if (scanState.truncated === true) { luceneOut.truncated = true; luceneOut.scanned = scanState.scanned; luceneOut.scanBudget = scanState.budget }
+          // Decorated before knowledgeRank (not after): knowledgeRank's own re-ranked
+          // array is built via merge({}, hit, {score}) per entry, which preserves
+          // whatever keys are already on hit -- so decorating here still survives.
+          this._decorateEntries(luceneOut)
+          this._applyInlineSource(luceneOut, "description")
           if (isFunction(this.knowledgeRank)) luceneOut = this.knowledgeRank(query, luceneOut, opts.debug === true)
           if (isFunction(this.knowledgeRecordTelemetry)) this.knowledgeRecordTelemetry(query, luceneOut, toBoolean(this._config.wikitelemetry) === true)
           return luceneOut
@@ -3422,6 +3561,8 @@ MiniAWikiManager.prototype.search = function(query, options) {
   var mountResults = this._searchMounts(query, opts, compact, limit - results.length, scanState)
   var out = this._withGraphHints(results.concat(mountResults), opts)
   if (scanState.truncated === true) { out.truncated = true; out.scanned = scanState.scanned; out.scanBudget = scanState.budget }
+  this._decorateEntries(out)
+  this._applyInlineSource(out, "description")
   if (isFunction(this.knowledgeRank)) out = this.knowledgeRank(query, out, opts.debug === true)
   if (isFunction(this.knowledgeRecordTelemetry)) this.knowledgeRecordTelemetry(query, out, toBoolean(this._config.wikitelemetry) === true)
   return out

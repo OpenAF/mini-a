@@ -363,6 +363,42 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testAgenticOpenAndReadEdgeCases
 
+- name: MiniA Wiki Tests::WikiSourceUrlDecoratesRetrievalResults
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlDecoratesRetrievalResults
+
+- name: MiniA Wiki Tests::WikiSourceUrlPreservesArraySideProperties
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlPreservesArraySideProperties
+
+- name: MiniA Wiki Tests::WikiSourceUrlOmittedWhenUnset
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlOmittedWhenUnset
+
+- name: MiniA Wiki Tests::WikiSourceUrlPerMountTemplates
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlPerMountTemplates
+
+- name: MiniA Wiki Tests::WikiSourceUrlGraphHintsUseMountTemplate
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlGraphHintsUseMountTemplate
+
+- name: MiniA Wiki Tests::WikiSourceUrlFieldNameAndInline
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlFieldNameAndInline
+
+- name: MiniA Wiki Tests::WikiSourceUrlTemplateHelpers
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlTemplateHelpers
+
+- name: MiniA Wiki Tests::WikiSourceUrlHandlebarsEscaping
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testWikiSourceUrlHandlebarsEscaping
+
+- name: MiniA Wiki Tests::McpWikiSourceUrlConfigAndSafeExclusion
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testMcpWikiSourceUrlConfigAndSafeExclusion
+
 - name: MiniA Wiki Tests::WriteAppend
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testWriteAppend
@@ -663,6 +699,15 @@ todo:
 - MiniA Wiki Tests::ReadMaxLines
 - MiniA Wiki Tests::AgenticRetrievalFiveOperations
 - MiniA Wiki Tests::AgenticOpenAndReadEdgeCases
+- MiniA Wiki Tests::WikiSourceUrlDecoratesRetrievalResults
+- MiniA Wiki Tests::WikiSourceUrlPreservesArraySideProperties
+- MiniA Wiki Tests::WikiSourceUrlOmittedWhenUnset
+- MiniA Wiki Tests::WikiSourceUrlPerMountTemplates
+- MiniA Wiki Tests::WikiSourceUrlGraphHintsUseMountTemplate
+- MiniA Wiki Tests::WikiSourceUrlFieldNameAndInline
+- MiniA Wiki Tests::WikiSourceUrlTemplateHelpers
+- MiniA Wiki Tests::WikiSourceUrlHandlebarsEscaping
+- MiniA Wiki Tests::McpWikiSourceUrlConfigAndSafeExclusion
 - MiniA Wiki Tests::WriteAppend
 - MiniA Wiki Tests::WriteLineInsert
 - MiniA Wiki Tests::WriteReplaceLineRange

@@ -534,6 +534,9 @@ See [USAGE.md](USAGE.md#working-memory-structured-runtime-state) for the full me
 | `wikiignorecertcheck` | Disable TLS certificate checks for wiki S3 access | `false` |
 | `wikiindexdir` | Override local index/cache root for non-filesystem wiki indexes | - |
 | `wikilexical` | SLON/JSON lexical configuration for Lucene (`language` defaults to `english`; inline `synonyms` and optional `synonymsFile` rules supported; enhanced features are opt-in) | `{ language: "english" }` |
+| `wikisourceurl` | Optional Handlebars template rendering a page's canonical citation URL onto retrieval results (field `sourceUrl`, or `wikisourcefield`); never applied under `mcp-wiki-safe.yaml` restriction | - |
+| `wikisourcefield` | Result field name the rendered citation URL is written to | `sourceUrl` |
+| `wikisourceinline` | Also append the rendered URL into search results' description text | `false` |
 | `wikis3artifactprefix` | Optional S3 prefix containing a published `.mini-a-wiki-lucene/` cache and, for `mcp-wiki`, `.mini-a-wiki-graph/graph.json`; downloaded into `wikiindexdir` on startup | - |
 | `s3artifactbundle` | Use `<wikis3artifactprefix>/mini-a-wiki-index.zip` for S3 cache hydration | `false` |
 | `wikihttpindexurl` | Optional HTTP artifact-bundle URL; defaults to `<wikiurl>/mini-a-wiki-index.zip` | - |

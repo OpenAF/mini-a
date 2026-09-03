@@ -2537,5 +2537,201 @@
     } finally { cleanupTestDir(dir) }
   }
 
+  // ── Citation URLs (wikisourceurl) ────────────────────────────────────────────
+
+  exports.testWikiSourceUrlDecoratesRetrievalResults = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisourceurl: "https://docs.example.com/{{$encodePath pathNoExt}}" })
+      wm.write("guides/setup.md", { title: "Setup", description: "setup page" }, "# Setup\nHello unique-setup-keyword world.\n## Details\nMore detail here.")
+
+      var hits = wm.search("unique-setup-keyword", { forceScan: true })
+      ow.test.assert(hits.length > 0, true, "search should find the page")
+      ow.test.assert(hits[0].sourceUrl, "https://docs.example.com/guides/setup", "search results should carry the rendered citation URL")
+
+      var agentic = wm.agenticSearch("unique-setup-keyword")
+      ow.test.assert(agentic.results[0].sourceUrl, "https://docs.example.com/guides/setup", "agenticSearch results should carry the citation URL")
+
+      var page = wm.read("guides/setup.md")
+      ow.test.assert(page.sourceUrl, "https://docs.example.com/guides/setup", "read should carry the citation URL")
+
+      var aread = wm.agenticRead("guides/setup.md")
+      ow.test.assert(aread.sourceUrl, "https://docs.example.com/guides/setup", "agenticRead should carry the citation URL")
+
+      var opened = wm.open("guides/setup.md")
+      ow.test.assert(opened.sourceUrl, "https://docs.example.com/guides/setup", "open should carry the citation URL")
+
+      var grep = wm.grep("guides/setup.md", "unique-setup-keyword")
+      ow.test.assert(grep.sourceUrl, "https://docs.example.com/guides/setup", "grep top-level result should carry the citation URL")
+      ow.test.assert(grep.matches[0].sourceUrl, "https://docs.example.com/guides/setup", "grep matches should carry the citation URL")
+
+      wm.write("other.md", { title: "Other" }, "links to [Setup](guides/setup.md)")
+      var related = wm.related("guides/setup.md")
+      ow.test.assert(related.backlinks.length > 0, true, "related should find backlinks")
+      ow.test.assert(related.backlinks[0].path, "other.md", "backlink should point to the linking page, not guides/setup.md itself")
+      ow.test.assert(related.backlinks[0].sourceUrl, "https://docs.example.com/other", "related backlinks should carry the citation URL of the linking page")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSourceUrlPreservesArraySideProperties = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "ro", wikisourceurl: "https://docs.example.com/{{pathNoExt}}" })
+      var arr = [{ path: "a.md", title: "A" }, { path: "b.md", title: "B" }]
+      arr.truncated = true
+      arr.scanned = 42
+      arr.scanBudget = 1000
+      wm._decorateEntries(arr)
+      ow.test.assert(arr[0].sourceUrl, "https://docs.example.com/a", "entry 0 should be decorated")
+      ow.test.assert(arr[1].sourceUrl, "https://docs.example.com/b", "entry 1 should be decorated")
+      ow.test.assert(arr.truncated, true, "array-level truncated flag should survive decoration")
+      ow.test.assert(arr.scanned, 42, "array-level scanned count should survive decoration")
+      ow.test.assert(arr.scanBudget, 1000, "array-level scanBudget should survive decoration")
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSourceUrlOmittedWhenUnset = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("plain.md", { title: "Plain" }, "# Plain\nunique-plain-keyword content")
+      var hits = wm.search("unique-plain-keyword", { forceScan: true })
+      ow.test.assert(isDef(hits[0].sourceUrl), false, "search results should not carry sourceUrl when wikisourceurl is unset")
+      var page = wm.read("plain.md")
+      ow.test.assert(isDef(page.sourceUrl), false, "read should not carry sourceUrl when wikisourceurl is unset")
+      var opened = wm.open("plain.md")
+      ow.test.assert(isDef(opened.sourceUrl), false, "open should not carry sourceUrl when wikisourceurl is unset")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSourceUrlPerMountTemplates = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir(), dir3 = createTestDir()
+    try {
+      writePage(dir2, "mounted.md", "---\ntitle: Mounted\ndescription: mounted page\n---\n# Mounted\nunique-mounted-keyword content")
+      writePage(dir3, "other.md", "---\ntitle: Other Mount\n---\n# Other\nunique-othermount-keyword content")
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw", wikisourceurl: "https://primary.example.com/{{pathNoExt}}" })
+      primary.attach("team", { backend: "fs", root: dir2, wikisourceurl: "https://team.example.com/{{pathNoExt}}" })
+      primary.attach("silent", { backend: "fs", root: dir3 })
+
+      var read = primary.read("@team/mounted.md")
+      ow.test.assert(read.sourceUrl, "https://team.example.com/mounted", "a mounted page with its own template should render via the mount's own URL, not the parent's")
+
+      var openSilent = primary.open("@silent/other.md")
+      ow.test.assert(isDef(openSilent.sourceUrl), false, "a mount without its own template should carry no citation URL")
+
+      // Single-file mount bypass: grep("@mount/x.md") skips the directory-mount branch
+      // (it ends in .md) and falls through to read()-based scanning, whose result's
+      // path is already mount-local/stripped -- exactly the trap this feature must avoid.
+      var grepMount = primary.grep("@team/mounted.md", "unique-mounted-keyword")
+      ow.test.assert(grepMount.sourceUrl, "https://team.example.com/mounted", "grep on a single mounted .md file should still resolve the mount's own template")
+      ow.test.assert(grepMount.matches[0].sourceUrl, "https://team.example.com/mounted", "grep matches on a single mounted .md file should carry the mount's citation URL")
+
+      // Directory-mount branch: recurses into the mount's own grep(), which decorates
+      // using its own manager before the parent re-prefixes match paths with @team/.
+      var grepDir = primary.grep("@team/", "unique-mounted-keyword")
+      ow.test.assert(grepDir.matches[0].sourceUrl, "https://team.example.com/mounted", "grep on a mounted directory should carry the mount's citation URL on matches")
+
+      var searchHits = primary.search("unique-mounted-keyword", { forceScan: true })
+      var mountedHit = searchHits.filter(function(h) { return h.path === "@team/mounted.md" })[0]
+      ow.test.assert(isDef(mountedHit), true, "mounted page should appear in federated search")
+      ow.test.assert(mountedHit.sourceUrl, "https://team.example.com/mounted", "federated search hit should carry the mount's own citation URL")
+
+      primary.close()
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2); cleanupTestDir(dir3) }
+  }
+
+  exports.testWikiSourceUrlGraphHintsUseMountTemplate = function() {
+    var dir = createTestDir()
+    try {
+      var archive = createArchiveWiki(dir, ".zip")
+      var primary = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      primary.attach("reference", { backend: "fs", root: archive, access: "rw", wikisourceurl: "https://ref.example.com/{{pathNoExt}}" })
+      var graphHints = primary.search("archive-root-keyword", { forceScan: true })
+      var hint = graphHints.filter(function(hit) { return hit.path === "@reference/guides/setup.md" && String(hit.description).indexOf("[Related pages (graph @reference)]") === 0 })[0]
+      ow.test.assert(isDef(hint), true, "archive mount graph hint should be present")
+      ow.test.assert(hint.sourceUrl, "https://ref.example.com/guides/setup", "a bare @mount/ graph-hint entry (no recursive search call behind it) should still resolve the mount's own citation template, not the parent's")
+      primary.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSourceUrlFieldNameAndInline = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisourceurl: "https://docs.example.com/{{pathNoExt}}", wikisourcefield: "citation", wikisourceinline: true })
+      wm.write("page.md", { title: "Page", description: "desc" }, "# Page\nunique-inline-keyword content")
+
+      var hits = wm.search("unique-inline-keyword", { forceScan: true })
+      ow.test.assert(hits[0].citation, "https://docs.example.com/page", "renamed field should be used instead of sourceUrl")
+      ow.test.assert(isDef(hits[0].sourceUrl), false, "default field name should not also be present")
+      ow.test.assert(hits[0].description.indexOf("[citation: https://docs.example.com/page]") >= 0, true, "inline mode should append the marker into the description text")
+
+      var agentic = wm.agenticSearch("unique-inline-keyword")
+      ow.test.assert(agentic.results[0].summary.indexOf("[citation: https://docs.example.com/page]") >= 0, true, "inline mode should append the marker into agenticSearch's summary text")
+      ow.test.assert(agentic.results[0].summary.split("[citation:").length, 2, "agenticSearch must inherit search's inline marker once, not append it a second time")
+
+      var page = wm.read("page.md")
+      ow.test.assert(page.citation, "https://docs.example.com/page", "read should use the renamed field")
+      ow.test.assert(page.body.indexOf("[citation:") < 0, true, "inline mode should never touch read's body")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSourceUrlTemplateHelpers = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisourceurl: 'https://docs.example.com/{{$encodePath pathNoExt}}{{#$startsWith path "guides/"}}?section=guides{{/$startsWith}}' })
+      wm.write("guides/a b.md", { title: "A B" }, "# A B\nunique-helper-keyword content")
+      wm.write("root.md", { title: "Root" }, "# Root\nunique-helper2-keyword content")
+
+      var guidesPage = wm.read("guides/a b.md")
+      ow.test.assert(guidesPage.sourceUrl, "https://docs.example.com/guides/a%20b?section=guides", "$encodePath should percent-encode a space per segment and the registered conditional helper should fire for a guides/ path")
+
+      var rootPage = wm.read("root.md")
+      ow.test.assert(rootPage.sourceUrl, "https://docs.example.com/root", "the conditional helper should not fire for a non-guides/ path")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testWikiSourceUrlHandlebarsEscaping = function() {
+    var dir1 = createTestDir(), dir2 = createTestDir()
+    try {
+      var wmEscaped = new MiniAWikiManager({ backend: "fs", root: dir1, access: "rw", wikisourceurl: "https://docs.example.com/{{path}}" })
+      wmEscaped.write("a&b.md", { title: "A and B" }, "# A and B")
+      var escaped = wmEscaped.read("a&b.md")
+      ow.test.assert(escaped.sourceUrl, "https://docs.example.com/a&amp;b.md", "double-brace {{path}} should HTML-escape special characters -- the documented pitfall")
+
+      var wmRaw = new MiniAWikiManager({ backend: "fs", root: dir2, access: "rw", wikisourceurl: "https://docs.example.com/{{{path}}}" })
+      wmRaw.write("a&b.md", { title: "A and B" }, "# A and B")
+      var raw = wmRaw.read("a&b.md")
+      ow.test.assert(raw.sourceUrl, "https://docs.example.com/a&b.md", "triple-brace {{{path}}} should not HTML-escape, though it still does not percent-encode")
+      wmEscaped.close(); wmRaw.close()
+    } finally { cleanupTestDir(dir1); cleanupTestDir(dir2) }
+  }
+
+  exports.testMcpWikiSourceUrlConfigAndSafeExclusion = function() {
+    var dir = createTestDir()
+    try {
+      var cfg = __miniAMcpWikiBuildConfig({ wikisourceurl: "https://docs.example.com/{{pathNoExt}}", wikisourcefield: "citation", wikisourceinline: true }, { access: "ro" })
+      ow.test.assert(cfg.wikisourceurl, "https://docs.example.com/{{pathNoExt}}", "MCP configuration should pass wikisourceurl through")
+      ow.test.assert(cfg.wikisourcefield, "citation", "MCP configuration should pass wikisourcefield through")
+      ow.test.assert(cfg.wikisourceinline, true, "MCP configuration should pass wikisourceinline through")
+
+      var restricted = __miniAMcpWikiInit({ wikirestrict: true, wikiroot: dir, wikisourceurl: "https://docs.example.com/{{pathNoExt}}", wikirestrictminquerychars: 4, wikirestrictpagecooldown: 1 }, { access: "ro", readonly: true })
+      ow.test.assert(isDef(restricted.config.wikisourceurl), false, "restricted mode must strip wikisourceurl from the manager config")
+      ow.test.assert(isDef(global.__wikiManager._sourceUrlTpl), false, "restricted mode's wiki manager must never compile a citation template")
+
+      var searchResult = __miniAMcpWikiRestrictedSearch({ query: "unique" })
+      var allClean = !isDef(searchResult.results) || searchResult.results.every(function(r) { return isUnDef(r.sourceUrl) })
+      ow.test.assert(allClean, true, "restricted search results must never carry a citation URL field")
+
+      var mcpWiki = io.readFileString("mcps/mcp-wiki.yaml")
+      ow.test.assert(mcpWiki.indexOf("wikisourceurl") >= 0, true, "mcp-wiki.yaml should declare wikisourceurl")
+      var safe = io.readFileString("mcps/mcp-wiki-safe.yaml")
+      ow.test.assert(safe.indexOf("wikisourceurl") < 0, true, "mcp-wiki-safe.yaml must not declare wikisourceurl")
+    } finally { cleanupTestDir(dir) }
+  }
+
   return exports
 })()
