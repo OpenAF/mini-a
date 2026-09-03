@@ -52,7 +52,7 @@ name: mini-a
 main: mini-a-con.js
 mainJob: ''
 license: Apache 2.0 license
-version: '20260902'
+version: '20260903'
 dependencies:
   openaf: '>=20250915'
 files:
@@ -166,13 +166,13 @@ filesHash:
   .odoc.db: c34866edd2a38fc05b81884dbdd56e083959f65a
   AGENT-CHEATSHEET.md: 0ff48393f3d140ed8d22c8fa0dddb1b5397aa217
   AGENTS.md: 108ea2ac09a8fa0f5b1f72bf9511082f619c2a43
-  CHEATSHEET.md: 806aae78b2fb45e6d0fb96c2b4830516bbe10ef6
+  CHEATSHEET.md: 97dbcad3a2fc6d835c9b0bd11594c621cc9799e3
   CODE_OF_CONDUCT.md: 727a666bab2c5aaf18086b12026a14e3cf77615b
   CONTRIBUTING.md: d363719aece9628552ff5b49a10d88f896ac5bdf
   LICENSE: 7df059597099bb7dcf25d2a9aedfaf4465f72d8d
   METRICS.md: d69659b54963e9437929d15bdd2038ef48e50ae4
-  README.md: ffd4c4c214266e083931cf02770aef165d8c0a81
-  USAGE.md: 3fe9440d0bc61b903bc04fe16f30d5a574307af4
+  README.md: fe481c6e71938d898129351e0d8f49a35d08545b
+  USAGE.md: 8ff1973c6b66f7b397229830d580bf3946d7a476
   docs/ADAPTIVE-ROUTER.md: 6f62a00121a0670ad63992fea8f02a28edadc6f1
   docs/AGENT-PLUGINS.md: af8f692ac4bc690ac9df180e86bb1a1307a5aae5
   docs/BACKEND-ENDPOINTS.md: a7fb28ac82a1a05960b995db60f2ce210a2b3b1b
@@ -182,8 +182,8 @@ filesHash:
   docs/OPTIMIZATIONS.md: 9260f4e2a8c4f5d7f33efbc3e7888d72bcc96157
   docs/SKILLS-YAML-FORMAT.md: bcf2c5d36a17eded4af7dcfa6c2c5a5f4209ceed
   docs/TESTS_MODELS.md: 29800ca499350bc0eae8ced2bf0b8cf53256f546
-  docs/WHATS-NEW.md: d702dc6690cb118101fda91d5d0b1de3345b1d59
-  docs/WIKI.md: 87deb353608e07c3b03b2c39d9b3383161acb179
+  docs/WHATS-NEW.md: cd6423ca6a2d9a8ab4cbb636119ddfc4d3b06db0
+  docs/WIKI.md: eb056d524ef09b6116957ba876a97ef09a9ce4e0
   examples/README.md: 1c0da3c9a1a4376bef36a2f3bb6f25fc043d1941
   examples/agent-template-v2.agent.md: 30d094c72042f21c0ddd0f4df8012a7b7e2f215d
   examples/agent-template-v2.yaml: 80e3c3717e77813d81307461056f412be35931e7
@@ -231,16 +231,16 @@ filesHash:
   mcps/mcp-time.yaml: 8df5af4746cfa16a7b4c6020d232adbc6d2f76c3
   mcps/mcp-weather.yaml: dd339672ebcd6094e8f2ef87fc32a6d95b53bc68
   mcps/mcp-web.yaml: 9edd0937bf0b9d57e0ba92b6e73c67685370de12
-  mcps/mcp-wiki-ops.yaml: 80e6437842a152917a30f4e391b2c1b124c48218
+  mcps/mcp-wiki-ops.yaml: 08a729e9f3aee2eb9c09f95bc4a7d05b7b1a7f80
   mcps/mcp-wiki-safe.yaml: c449a76831d3509d976e275b24b0a8a9ab9fa003
-  mcps/mcp-wiki.yaml: 11dd4bbdfca988dfbfe2dca425cc920592623280
+  mcps/mcp-wiki.yaml: b90e1324072df7dcb1c726fa4a4019ca3a5865e4
   mini-a-common.js: 68d8d816da79b6368efb20fe808f5f52fd0cde29
   mini-a-con.js: 12b166b9452a91d73841b3dd16f57c39a9b7ed77
   mini-a-dreams.js: 3861e7e3a9488192f84710f137c7ff2501e3d6a1
   mini-a-graph.js: 0feadb999bf18d5e4c1a00010f1be4f49f4e3745
   mini-a-ingest.js: d6b9b66ba8e187b112fccb802c22c77782982482
   mini-a-ingest.yaml: cf5a318d4a4bba6ff548d5400cf741d577c011e8
-  mini-a-mcp-wiki.js: 41677f2f4b75a03ee8b617d2d0a79655a75883ac
+  mini-a-mcp-wiki.js: 70b54a75e0d09143502dc30463f56dc01d001efd
   mini-a-mcptest.js: 45cce7094ee972104a61991af43f87629c915569
   mini-a-memory.js: 9cfa9a66c3798124f34933bf0a7f8f7f23dc57a7
   mini-a-memoryman.js: a943c4a3f946140f3585940d53eda148fc47e4ab
@@ -253,15 +253,15 @@ filesHash:
   mini-a-sandbox.js: 2844520cfb6595675d7773b29af0943fcc6ed6dd
   mini-a-subtask.js: d43902c21f8cf1038de4958ae5e1a9e095012beb
   mini-a-tool-selection.js: 0e3d8ecf2182833daef108c5e8fed7cf2271590c
-  mini-a-utils.js: 8cf41b93ec521ddb79353942f2ad8fd8ef8f3431
+  mini-a-utils.js: 16e1c1aeade08d41527ec0a878c02b6f6ba0c64c
   mini-a-web.sh: 31c3f5a5b5cf0b6795f2079ed5821091c48b4184
-  mini-a-web.yaml: 752e9eb8d2663fdc04bc3540e63939f20132a949
+  mini-a-web.yaml: 540572ef6d86d634c57d2d0e5203af038c4e7c30
   mini-a-wiki-knowledge.js: e829fee9d76c16715c10415752a964166e023cd5
-  mini-a-wiki.js: 57790405c0af07333caeaa4891d67a9ddce5c1c7
+  mini-a-wiki.js: 9f66f8db524b02dae2acb1593332546847b222d6
   mini-a-worker.yaml: e9a893c50335ff23161b9d1655fee9a176dc6775
-  mini-a.js: cd896e0e6bf0a6321ca7d2e7467edc863fa301af
+  mini-a.js: 8470447b063155b982acddb1cc74ff0b435d6a88
   mini-a.sh: 0b8991af4014610f24260d0db202a2cd9f6e9f33
-  mini-a.yaml: 4ba3ad48fa31a16b5f2b22f971cb00c137f05a11
+  mini-a.yaml: 7c0b556af5d50c35b0e10bfef6031c07627066a0
   public/index.md: ff492f66c8bfafb8534ba74f95c76c1c0401c46f
   public/showdown.min.js: ecd6a073e7584a8f2d8babe895c8a2190776012f
   utils/graphStats.yaml: ab05b70a991ac6d5440ea12487ab8d10db53ec69
