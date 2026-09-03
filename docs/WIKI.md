@@ -50,6 +50,54 @@ search("OpenAF memory increase")
 
 Do not read every search hit, retrieve whole long documents merely because they matched, or keep issuing broad searches after a promising page is open. Prefer `grep` for exact configuration names, identifiers, and errors; use `related` only if normal lexical and structural evidence is insufficient. In debug/verbose mode the manager logs retrieval metadata (engine, result count/top score, section and character count, and grep match count) without logging page contents.
 
+## Citation URLs
+
+`wikisourceurl` is an optional Handlebars template that renders a page's canonical origin
+URL (a published docs site, a GitHub blob URL, whatever the wiki's real home is) onto
+retrieval results, so an agent can cite where an answer came from. It is off by default.
+When set, `search`, `read`, `open`, `grep`, and `related` results carry the rendered URL in
+a `sourceUrl` field (rename it with `wikisourcefield`), and the MCP tool descriptions gain
+a sentence telling the model to cite it. `list`, `tree`, `browse`, `backlinks`, and
+`context` are navigation aids, not retrieval evidence, and never carry it.
+
+Available template variables: `path`, `pathNoExt` (path without its extension),
+`encodedPath` (every segment percent-encoded), `backend`, `root`, `bucket`, `prefix`,
+`url` (the backend's own endpoint config, not the rendered result), `mount` (the mount
+name, for `@name/`-prefixed pages), `section`, `anchor`, and `title`. Handlebars is the
+same engine used for MCP tool-description templating (`ow.template`); mini-a registers
+`ow.template.addOpenAFHelpers()` and `ow.template.addConditionalHelpers()` for it (see
+`ow.template`'s own `odoc` for the full helper list — `$eq`/`$startsWith`/`$compare`/etc.
+from the conditional set (Handlebars' own built-in `{{#if}}` still applies as usual),
+`$toJSON`/`$date`/etc. from the OpenAF set), plus three helpers just
+for URL building: `$encodeURI`, `$encodeURIComponent`, and `$encodePath` (per-segment
+percent-encoding that keeps `/` as a separator).
+
+**Use `{{$encodePath pathNoExt}}`, not `{{{pathNoExt}}}`.** Handlebars HTML-escapes
+`{{x}}` by default (so a path containing `&` breaks unless you triple-brace it), and
+neither form percent-encodes — a path containing a space produces a broken URL either way.
+`{{$encodePath ...}}` percent-encodes first, which leaves nothing for Handlebars to escape
+and handles spaces correctly, so it is the recommended default over triple-brace escaping:
+
+```
+wikisourceurl="https://docs.example.com/{{$encodePath pathNoExt}}"
+```
+
+A `wikimounts` entry may set its own `wikisourceurl`; a mounted page then cites its own
+wiki's URL space instead of the parent's. A mount without one simply carries no citation
+URL for its pages — deliberately, since guessing a local URL for a page that actually
+lives elsewhere would be a confidently wrong citation.
+
+`wikisourceinline` (default `false`) additionally appends `[sourceUrl: <url>]` (or your
+renamed field) into search results' `description`/`summary` text. Capable models cite from
+the `sourceUrl` field and the tool-description instruction alone; smaller local models
+often attend to text more reliably than to a sibling JSON key, so `wikisourceinline` is the
+lever for those deployments — at the cost of a few dozen extra characters per result.
+
+`wikisourceurl` is never applied under `mcp-wiki-safe.yaml`'s restricted retrieval: that
+server's whole contract is opaque, budgeted references that hide the real page path, and a
+citation URL necessarily embeds it. `mcp-wiki-safe.yaml` does not accept `wikisourceurl` at
+all.
+
 ## Console command reference
 
 ### `/wiki [op] [args]`

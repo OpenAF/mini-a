@@ -1009,6 +1009,18 @@ help:
     desc     : #SLON/JSON Lucene lexical configuration (default `{language: 'english'}`); supports language, explicit synonyms, shingles, ngrams, queryExpansion and pseudoRelevanceFeedback"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
     mandatory: false
+  - name     : wikisourceurl
+    desc     : "Optional Handlebars template rendering a page's canonical citation URL onto wiki retrieval results. Available: path, pathNoExt, encodedPath, backend, root, bucket, prefix, url, mount, section, anchor, title. $encodeURI/$encodeURIComponent/$encodePath helpers are registered; {{$encodePath ...}} is recommended over triple-brace escaping. A wikimounts entry may set its own wikisourceurl."
+    example  : "https://docs.example.com/{{$encodePath pathNoExt}}"
+    mandatory: false
+  - name     : wikisourcefield
+    desc     : Result field name the rendered citation URL is written to
+    example  : "sourceUrl"
+    mandatory: false
+  - name     : wikisourceinline
+    desc     : "Also append the rendered URL into search results' description text, for models that attend to prose more reliably than to sibling JSON keys"
+    example  : "false"
+    mandatory: false
   - name     : ingestmode
     desc     : "Wiki ingestion mode: auto (deterministic first), normalize, distill or raw"
     example  : "auto"
@@ -1400,6 +1412,9 @@ jobs:
         wikihttptimeout: wikihttptimeout
         wikiartifactrefreshsecs: wikiartifactrefreshsecs
         wikilexical    : wikilexical
+        wikisourceurl  : wikisourceurl
+        wikisourcefield: wikisourcefield
+        wikisourceinline: wikisourceinline
         wikilintstaleddays: wikilintstaleddays
         wikimounts     : wikimounts
         mode           : mode
@@ -1655,6 +1670,9 @@ jobs:
       wikihttptimeout: toNumber.isNumber.default(__)
       wikiartifactrefreshsecs: toNumber.isNumber.default(__)
       wikilexical    : isString.default(__)
+      wikisourceurl  : isString.default(__)
+      wikisourcefield: isString.default(__)
+      wikisourceinline: toBoolean.isBoolean.default(false)
       wikilintstaleddays: toNumber.isNumber.default(__)
       wikimounts     : isString.default(__)
       mode           : isString.default(__)

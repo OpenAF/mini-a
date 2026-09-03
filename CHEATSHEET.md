@@ -947,6 +947,9 @@ Common folder names: `topics/`, `concepts/`, `entities/`, `comparisons/`. Use th
 | `wikihttptimeout` | number | `30000` | HTTP wiki request timeout in milliseconds |
 | `wikiartifactrefreshsecs` | number | `0` | Recheck HTTP or bundled-S3 artifact metadata between wiki requests; `0` disables periodic refresh |
 | `wikilexical` | SLON/JSON | `{ language: "english" }` | Lucene lexical configuration: language, synonym rules, and opt-in enhanced retrieval features |
+| `wikisourceurl` | Handlebars string | - | Renders a page's canonical citation URL onto retrieval results (see the wiki guide); never applied under `mcp-wiki-safe.yaml` restriction |
+| `wikisourcefield` | string | `sourceUrl` | Result field name the rendered citation URL is written to |
+| `wikisourceinline` | boolean | `false` | Also append the rendered URL into search results' description text |
 | `wikimetacache` | boolean | `true` | Enable the sharded wiki page metadata cache |
 | `wikisearchscanbudget` | number | `1000` | Max pages the wiki search scan-fallback path reads (shared across mounts) |
 | `wikisearchscanmaxms` | number | `15000` | Wall-clock budget in milliseconds for the scan-fallback path (shared across mounts) |
@@ -999,6 +1002,18 @@ If you are looking for `esurl=`, use `wikiurl=` with `wikibackend=es`.
 | `pseudoRelevanceFeedback` | boolean | `false` | Enable pseudo-relevance-feedback expansion |
 
 `OAF_MINI_A_WIKI_LEXICAL` is the environment-variable equivalent. An explicit `wikilexical=` value takes precedence. A relative `synonymsFile` is resolved from a filesystem wiki root; non-filesystem backends require an absolute path.
+
+### Citation URLs
+
+`wikisourceurl` renders a page's canonical origin URL onto retrieval results via
+Handlebars, e.g. `wikisourceurl="https://docs.example.com/{{$encodePath pathNoExt}}"`.
+Available variables: `path`, `pathNoExt`, `encodedPath`, `backend`, `root`, `bucket`,
+`prefix`, `url`, `mount`, `section`, `anchor`, `title`. `wikisourcefield` (default
+`sourceUrl`) renames the result field; `wikisourceinline` also appends it into search
+results' description text for models that attend to prose over sibling JSON keys. A
+`wikimounts` entry may set its own `wikisourceurl`. See the wiki guide's "Citation URLs"
+section for the full helper list and the escaping/encoding caveat. `OAF_MINI_A_WIKI_SOURCE_URL`
+is the environment-variable equivalent; never applied under `mcp-wiki-safe.yaml` restriction.
 
 After changing this configuration, run writable `/wiki reindex`: Mini-A records the index contract in `.mini-a-wiki-lucene/mini-a-lexical.json`. Read-only or hydrated indexes with a legacy/mismatched contract fall back to ordinary Lucene search and log a publisher-reindex warning.
 

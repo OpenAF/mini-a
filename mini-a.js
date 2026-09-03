@@ -384,7 +384,7 @@ Always respond with exactly one valid JSON object adhering to this schema:
 • "shell" - Execute POSIX commands (ls, cat, grep, curl, etc.){{/if}}{{#if useMemorySearch}}
 • "memory_search" - Search working memory by keyword (params: {"query":"...","section":"facts|decisions|evidence|openQuestions|hypotheses|artifacts|risks|summaries","limit":N}; section and limit are optional); the state shows only entry counts — use this to retrieve content{{/if}}{{#if useMemoryWrite}}
 • "memory_write" - Record durable knowledge that should survive across runs (params: {"kind":"preference|environment|procedure|pitfall|reference","value":"...","key":"optional stable key","tags":["optional"],"ttlDays":N}); use "preference" for what the user/team wants, "environment" for how this machine/repo/service is set up, "procedure" for a validated how-to, "pitfall" for something that failed and why, "reference" for a pointer to a doc/URL. Only write things worth remembering next time, not step-by-step narration.{{/if}}{{#if useWiki}}
-• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{/if}}{{#if useWikiGraph}}
+• "wiki" - Interact with the wiki knowledge base (params: {"op":"search|open|navigate|read|grep|related|context|list|tree|browse|backlinks|lint|mounts|attach|detach{{#if wikiRw}}|write|move|delete|init|reindex{{/if}}","path":"page.md or wiki:ref","query":"...","pattern":"...","section":"Heading Name","startLine":N,"endLine":N,"maxChars":N,"limit":N,"contextLines":N}); Retrieval strategy: SEARCH compact candidates, OPEN promising pages, NAVIGATE headings, then READ one section/range. Use GREP for exact identifiers/errors in a known page. Do not read every search result or whole long pages; use RELATED only when lexical evidence is insufficient.{{#if wikiRw}} Before write/move/delete read AGENTS.md for rules.{{/if}}{{#if wikiSourceUrl}} Results also carry a {{wikiSourceField}} URL, that page's canonical citation source; cite it when you use the page's content.{{/if}}{{/if}}{{#if useWikiGraph}}
 • "graph" - Query the wiki knowledge graph (params: {"op":"stats|query|neighbors|path|communities|surprise|retrieve|answer|export|build|cross", ...}); use for relationship/graph-shaped questions, not as a substitute for wiki search. "cross" (params: {"path":"page.md"} or {"query":"..."}) joins into mounted wikis' graphs via explicit @-links and shared tags/aliases/concepts.{{/if}}{{#if actionsList}}
 • Use available actions only when essential for achieving your goal{{/if}}
 {{#if shellViaActionPreferred}}• When shell and MCP tools are both enabled, ALWAYS execute shell via "action":"shell" with a top-level "command" (do not call shell via MCP function/tools).{{/if}}
@@ -7605,6 +7605,9 @@ MiniA.prototype._initWiki = function(args) {
       wikihttptimeout: args.wikihttptimeout,
       wikiartifactrefreshsecs: args.wikiartifactrefreshsecs,
       wikilexical: args.wikilexical,
+      wikisourceurl: args.wikisourceurl,
+      wikisourcefield: args.wikisourcefield,
+      wikisourceinline: args.wikisourceinline,
       wikimetacache: args.wikimetacache,
       wikigraphsemantic: toBoolean(args.wikigraphsemantic) === true,
       wikigraphcommunity: args.wikigraphcommunity,
@@ -14780,7 +14783,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "lcescalatedefer", "lcbudget", "lcjsonretries", "llmcomplexity",
     "usewiki", "wikiaccess", "wikibackend", "wikiroot", "wikibucket", "wikiprefix", "wikiindexdir", "wikis3artifactprefix", "s3artifactbundle", "wikihttpindexurl", "wikihttptimeout", "wikiartifactrefreshsecs",
     "wikiurl", "wikiaccesskey", "wikisecret", "wikiregion", "wikiuseversion1",
-    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
+    "wikiignorecertcheck", "wikilintstaleddays", "wikimounts", "wikilexical", "wikisourceurl", "wikisourcefield", "wikisourceinline", "usewikigraph", "wikigraphsemantic", "wikigraphcommunity", "wikigraphsearchhints", "wikigraphhintcap", "wikigraphmounts", "wikimountgraphttlms", "wikigraphcross", "wikigraphcrossjoin", "wikigraphcrosscap", "wikigraphcrossdepth", "wikigraphcrossmaxdf", "wikigraphcrossminkeylen", "wikigraphfalkorhost", "wikigraphfalkorport", "wikigraphfalkorgraph", "wikigraphfalkoruser", "wikigraphfalkorpass", "dreammode", "dreamwiki",
     "dreamwikimode", "dreammemorymode", "dreamwikidryrun", "dreamwikiapproval", "dreamwikireorg",
     "dreamwikiminpages", "dreamwikimaxdepth", "dreamwikilintresultlimit", "dreamwikisurgical", "wikilintresultlimit", "dreamreport"
   ].forEach(function(name) {
@@ -16467,7 +16470,9 @@ MiniA.prototype.init = function(args) {
         useMemoryWrite     : args.usememory && args.usememorywrite,
         useWiki            : args.usewiki && isObject(this._wikiManager),
         useWikiGraph       : promptUseWikiGraph,
-        wikiRw             : args.usewiki && args.wikiaccess === "rw" && isObject(this._wikiManager)
+        wikiRw             : args.usewiki && args.wikiaccess === "rw" && isObject(this._wikiManager),
+        wikiSourceUrl      : args.usewiki && isObject(this._wikiManager) && isDef(this._wikiManager._sourceUrlTpl),
+        wikiSourceField    : isObject(this._wikiManager) ? this._wikiManager._sourceField : "sourceUrl"
       }
       this._systemInst = this._buildSystemPromptWithBudget("agent", agentPayload, this._SYSTEM_PROMPT, {
         args: args,

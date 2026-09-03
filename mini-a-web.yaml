@@ -773,6 +773,18 @@ help:
     desc     : "SLON/JSON Lucene lexical configuration (default `{language: 'english'}`)"
     example  : "{ language: 'english', synonyms: [['js', 'javascript']] }"
     mandatory: false
+  - name     : wikisourceurl
+    desc     : "Optional Handlebars template rendering a page's canonical citation URL onto wiki retrieval results"
+    example  : "https://docs.example.com/{{$encodePath pathNoExt}}"
+    mandatory: false
+  - name     : wikisourcefield
+    desc     : Result field name the rendered citation URL is written to
+    example  : "sourceUrl"
+    mandatory: false
+  - name     : wikisourceinline
+    desc     : Also append the rendered URL into search results' description text
+    example  : "false"
+    mandatory: false
   - name     : wikilintstaleddays
     desc     : Default stale-page threshold in days for wiki lint
     example  : "90"
@@ -1957,6 +1969,9 @@ jobs:
       wikiuseversion1: toBoolean().isBoolean().default(false)
       wikiignorecertcheck: toBoolean().isBoolean().default(false)
       wikilexical    : isString().default(__)
+      wikisourceurl  : isString().default(__)
+      wikisourcefield: isString().default(__)
+      wikisourceinline: toBoolean().isBoolean().default(false)
       wikilintstaleddays: toNumber().isNumber().default(__)
       wikimounts     : isString().default(__)
       promptprofile  : isString().default(__)
