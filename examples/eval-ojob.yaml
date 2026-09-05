@@ -1,0 +1,33 @@
+# Run from the Mini-A checkout: ojob examples/eval-ojob.yaml
+# Uses the configured OAF_MODEL. Include paths also resolve via installed oPacks.
+include:
+- mini-a-eval.yaml
+
+ojob:
+  catch: |
+    logErr(exception)
+    exit(1)
+
+todo:
+- name: MiniA Eval
+  args:
+    suite: Answer checks
+    evalArgs:
+      useshell: false
+      usetools: false
+    scenarios:
+    - name: Capital of Portugal
+      goal: Reply with only the capital of Portugal.
+      expected:
+        contains: Lisbon
+      limits:
+        steps: 3
+- oJob Test Results
+- name: oJob Generate JUnit XML
+  args:
+    resultsFile: eval-results.xml
+- Eval exit status
+
+jobs:
+- name: Eval exit status
+  exec: if (ow.loadTest().getCountFail() > 0) exit(1)

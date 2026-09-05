@@ -3365,3 +3365,116 @@ tokens; choose `normalize`, `raw`, or `distill` explicitly when needed. Wiki sta
 to `.mini-a-wiki-state/manifest.json` and tracks section hashes, allowing a small edit to reuse
 unchanged chunks. `wikillmbudget`, `wikiingestbudget`, and `wikimaxprompttokens` defer
 over-budget enrichment. `/dream plan` is always zero-LLM and returns estimates.
+# Evaluation suites
+
+Run a YAML or JSON evaluation suite with the normal Mini-A entry point:
+
+```bash
+mini-a eval=true evalfile=evals/core.yaml
+```
+
+Each scenario requires `goal` and may include `args` (normal Mini-A arguments),
+`setup.context`, `expected` answer/metric assertions, `assertions`, `llm_judge`,
+and `limits` (`cost`, `tokens`, `steps`, `time`). The runner writes a versioned
+machine-readable report with scenario events and normalized metrics. It only
+reports provider token fields Mini-A received; unknown cost remains unset.
+
+Use `evalout=/tmp/eval.json` to save a report, `evalwritebaseline=evals/base.json`
+to create a baseline, and `evalbaseline=evals/base.json` to detect success or
+tool-failure regressions. A scenario may also set `regression` maximum deltas
+(for example `elapsed_ms` or `input_tokens`) to make resource regressions
+explicit. CI-safe tests use an injected deterministic agent;
+the CLI uses the configured model and therefore requires normal model setup.
+Set `llm_judge: { enabled: true }` for an opt-in isolated judge call; tests can
+instead inject `judgeFn` and remain fully deterministic.
+
+## Evals in oJob tests
+
+Include `mini-a-eval.yaml` to register eval scenarios as ordinary OpenAF tests.
+It also includes `oJobTest.yaml` from `oJob-common`, so evals and unit tests share
+OpenAF counters, profiling, failure history, and JSON, Markdown or JUnit reports.
+Each scenario is one test, named `suite::scenario name` (falling back to its goal).
+Use distinct scenario names within a suite for clear reports.
+
+```yaml
+include:
+- mini-a-eval.yaml
+
+ojob:
+  catch: |
+    logErr(exception)
+    exit(1)
+
+todo:
+- name: MiniA Eval
+  args:
+    suite: Answers
+    evalArgs:
+      useshell: false
+      usetools: false
+    scenarios:
+    - name: Portugal capital
+      goal: Reply with only the capital of Portugal.
+      expected: { contains: Lisbon }
+      limits: { steps: 3 }
+- oJob Test Results
+- name: oJob Generate JUnit XML
+  args:
+    resultsFile: eval-results.xml
+- Eval exit status
+
+jobs:
+- name: Eval exit status
+  exec: if (ow.loadTest().getCountFail() > 0) exit(1)
+```
+
+Run the complete example with `ojob examples/eval-ojob.yaml`. Set `OAF_MODEL`
+as for normal Mini-A runs; these scenarios call the configured provider.
+From another directory, install the Mini-A and oJob-common oPacks so their
+include files and JavaScript can be resolved.
+
+Supply exactly one of `scenario` (a single map), `scenarios` (a non-empty array),
+or `file` (an existing scenario YAML/JSON file or directory). The scenario schema
+is identical to `eval=true`; no separate assertion language is needed. For example,
+replace `scenarios` above with `file: evals/core.yaml`. Shared Mini-A settings go
+in `evalArgs`; scenario `args` and then `setup.args` override them. Top-level oJob
+arguments are not automatically passed to the agent.
+
+Optional job arguments:
+
+| Argument | Purpose |
+| --- | --- |
+| `suite` | OpenAF suite name; defaults to `Mini-A evaluations` |
+| `baseline` | Baseline report JSON filename; adds a separate baseline comparison test |
+| `output` | Write the existing full Mini-A evaluation JSON report |
+| `key` | Store that report with `$set(key, report)` for later jobs |
+
+The job also returns `args.evalReport`. Scenario failures, including invalid
+scenario definitions and agent errors, are recorded and execution continues to
+later scenarios. Missing/unreadable files, ambiguous inputs and empty suites are
+configuration errors that throw before running tests. OpenAF records test failures
+without throwing them back to oJob: place the exit-status job **after** report
+jobs to make CI fail while still saving reports. A baseline regression fails its
+own OpenAF test; `evalReport.summary` continues to count only scenario outcomes.
+
+For JavaScript tests, reuse the same adapter directly:
+
+```javascript
+load("mini-a.js")
+load("mini-a-eval.js")
+var evaluator = new MiniAEval()
+var report = evaluator.runTests(evaluator.load("evals/core.yaml"), {
+  suite: "Answers",
+  args: { useshell: false }
+})
+```
+
+Inside an existing `ow.test.test` or `oJob Test` callback, use
+`evaluator.assertResult(evaluator.runScenario(scenario, sharedArgs))` to assert
+an eval result without registering a nested test. `runTests` reuses the existing
+scenario runner and baseline comparison; it never resets OpenAF's test state.
+For deterministic tests, the existing `agentFactory`, `judgeFn`, and `nowFn`
+constructor options still work. Programmatic oJobs can pass these functions in
+`evaluatorOptions` (for example from a setup job); plain YAML does not evaluate
+function strings. Run `ojob tests/evalOpenAF.yaml` for provider-free integration
+coverage and `ojob tests/eval.yaml` for the scenario engine tests.

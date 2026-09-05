@@ -2015,3 +2015,12 @@ mini-a ➤ Follow these instructions @docs/guide.md and apply rules from @polici
 `mini-a ingest=true ingestsource=./docs usewiki=true wikiaccess=rw ingestmode=auto`
 
 `mini-a dream=true usewiki=true dreamwikimode=plan` — estimates only; never calls a model.
+# Evaluation
+
+```bash
+mini-a eval=true evalfile=evals/core.yaml evalout=/tmp/mini-a-eval.json
+mini-a eval=true evalfile=evals/core.yaml evalbaseline=evals/baseline.json
+```
+
+Suites can be YAML/JSON files or a directory of them. See `USAGE.md` for the
+scenario schema and baseline workflow.

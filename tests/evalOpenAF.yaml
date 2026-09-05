@@ -1,0 +1,117 @@
+# Standalone integration test: expected failures are verified and then reset.
+# Do not include in a shared test process; run with ojob tests/evalOpenAF.yaml.
+include:
+- mini-a-eval.yaml
+
+jobs:
+- name: Eval bridge fixtures
+  exec: |
+    args.evaluatorOptions = {
+      agentFactory: function(scenario) {
+        if (scenario.name === "Factory error") throw new Error("fixture factory error")
+        return {
+          init: function(runArgs) { this.runArgs = runArgs },
+          start: function() { return this.runArgs.answer },
+          getMetrics: function() { return {} }
+        }
+      }
+    }
+
+- name: Inline eval bridge
+  from: Eval bridge fixtures
+  to: MiniA Eval
+  args:
+    suite: Bridge fixture
+    key: evalBridgeReport
+    evalArgs:
+      answer: shared
+    scenarios:
+    - name: Shared arguments
+      goal: respond
+      expected: { equals: shared }
+    - name: Answer mismatch
+      goal: respond
+      expected: { equals: different }
+    - name: Factory error
+      goal: respond
+    - name: Invalid definition
+    - name: Later scenario
+      goal: respond
+      args: { answer: scenario }
+      setup:
+        args: { answer: setup }
+      expected: { equals: setup }
+
+- name: File eval bridge
+  from: Eval bridge fixtures
+  to: MiniA Eval
+  exec: |
+    var root = String(java.lang.System.getProperty("java.io.tmpdir")) + "/mini-a-eval-" + genUUID()
+    args.file = root + ".yaml"
+    args.baseline = root + "-baseline.json"
+    args.output = root + "-report.json"
+    args.key = "evalFileReport"
+    args.suite = "File fixture"
+    $set("evalFilePaths", [args.file, args.baseline, args.output])
+    io.writeFileString(args.file, "scenarios:\n- name: File scenario\n  goal: respond\n  args: { answer: file }\n  expected: { equals: file }\n")
+    io.writeFileJSON(args.baseline, { scenarios: [{ name: "File scenario", success: true, metrics: {} }] })
+
+- name: Single eval bridge
+  from: Eval bridge fixtures
+  to: MiniA Eval
+  args:
+    suite: Single fixture
+    scenario:
+      goal: Single scenario
+      args: { answer: single }
+      expected: { equals: single }
+
+- name: Verify bridge
+  exec: |
+    try {
+      var report = $get("evalBridgeReport")
+      ow.test.assert(report.summary.total, 5, "Retain every scenario")
+      ow.test.assert(report.summary.failed, 3, "Count mismatch, factory and definition failures")
+      ow.test.assert(ow.test.getCountTest(), 8, "Register each scenario exactly once")
+      ow.test.assert(ow.test.getCountFail(), 3, "OpenAF failures agree with eval report")
+      var fileReport = $get("evalFileReport")
+      ow.test.assert(fileReport.summary.passed, 1, "Run an existing YAML suite through the job")
+      ow.test.assert(fileReport.comparison.regressions.length, 0, "Load baseline JSON through the job")
+      var paths = $get("evalFilePaths")
+      ow.test.assert(io.readFileJSON(paths[2]).summary.passed, 1, "Persist full evaluation report")
+      paths.forEach(function(path) { io.rm(path) })
+      var xml = ow.test.toJUnitXML("eval", "eval")
+      ow.test.assert(xml.indexOf("Answer mismatch") >= 0, true, "JUnit includes scenario names")
+      ow.test.assert(xml.indexOf("expected") >= 0, true, "JUnit includes assertion diagnostics")
+      ow.test.assert(xml.indexOf("fixture factory error") >= 0, true, "JUnit includes execution errors")
+      var evaluator = new MiniAEval({ agentFactory: function() { return { start: function() { return "ok" } } } })
+      var baseline = { scenarios: [{ name: "baseline", success: true, metrics: { elapsed_ms: -100000 } }] }
+      var compared = evaluator.runTests([{ name: "baseline", goal: "respond", regression: { elapsed_ms: 0 } }], { baseline: baseline })
+      ow.test.assert(compared.comparison.regressions.length, 1, "Reuse baseline regression checks")
+      ow.test.assert(ow.test.getCountFail(), 4, "Baseline regression registers a failed OpenAF test")
+      ow.test.assert(ow.test.getCountTest(), 10, "Keep previously registered tests")
+      var rejected = false
+      try { evaluator.runTests([]) } catch(e) { rejected = true }
+      ow.test.assert(rejected, true, "Reject empty suites")
+      ow.test.test("Existing test callback", function() {
+        evaluator.assertResult(evaluator.runScenario({ goal: "respond", expected: { equals: "ok" } }))
+      })
+      ow.test.assert(ow.test.getCountTest(), 11, "assertResult does not create nested tests")
+    } catch(e) {
+      logErr(e)
+      exit(1)
+    }
+    // Expected failures above are fixtures, not failures of this integration test.
+    ow.test.reset()
+    ow.test.test("MiniA Eval::OpenAF integration", function() { ow.test.assert(true, true, "Bridge verified") })
+
+- name: Exit on failures
+  exec: if (ow.test.getCountFail() > 0) exit(1)
+
+todo:
+- Inline eval bridge
+- File eval bridge
+- Single eval bridge
+- Verify bridge
+- oJob Test Results
+- Exit on failures

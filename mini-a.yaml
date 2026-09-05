@@ -15,7 +15,28 @@ help:
   - name     : goal
     desc     : Goal for the agent to achieve
     example  : aValueExample
-    mandatory: true
+    mandatory: false
+  - name     : eval
+    desc     : Run a native Mini-A evaluation suite instead of one agent goal
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : evalfile
+    desc     : Evaluation YAML/JSON file or directory containing evaluation definitions
+    example  : "evals/core.yaml"
+    mandatory: false
+  - name     : evalbaseline
+    desc     : Optional baseline JSON report for current-versus-baseline comparison
+    example  : "evals/baseline.json"
+    mandatory: false
+  - name     : evalwritebaseline
+    desc     : Optional JSON path to write the current evaluation report as a baseline
+    example  : "evals/baseline.json"
+    mandatory: false
+  - name     : evalout
+    desc     : Optional JSON path for the full machine-readable evaluation report
+    example  : "/tmp/mini-a-eval.json"
+    mandatory: false
   - name     : mcp
     desc     : A MCP connection object (or array of objects) using OpenAF's $mcp() function in SLON or JSON format
     example  : "(url: 'http://127.0.0.1:17879/mcp', type: remote, debug: false)"
@@ -1165,6 +1186,7 @@ ojob:
   #logToConsole: false   # to change when finished
   loadLibs    :
   - mini-a.js
+  - mini-a-eval.js
 
 jobs:
 # -------------------------
@@ -1186,6 +1208,11 @@ jobs:
       keyArg: goal
       args  :
         mcp            : mcp
+        eval           : eval
+        evalfile       : evalfile
+        evalbaseline   : evalbaseline
+        evalwritebaseline: evalwritebaseline
+        evalout        : evalout
         verbose        : verbose
         rpm            : rpm
         rtm            : rtm
@@ -1438,7 +1465,12 @@ jobs:
         dreamreport    : dreamreport
   check:
     in:
-      goal           : isString
+      goal           : isString.default("")
+      eval           : toBoolean.isBoolean.default(false)
+      evalfile       : isString.default(__)
+      evalbaseline   : isString.default(__)
+      evalwritebaseline: isString.default(__)
+      evalout        : isString.default(__)
       mcp            : default(__)
       verbose        : toBoolean.isBoolean.default(false)
       rpm            : toNumber.isNumber.default(__)
@@ -1695,6 +1727,20 @@ jobs:
       dreamwikireorg : toBoolean.isBoolean.default(false)
       dreamreport    : isString.default(__)
   exec : | #js
+    if (args.eval === true) {
+      if (!isString(args.evalfile) || args.evalfile.trim().length === 0) throw "evalfile is required when eval=true"
+      var _eval = new MiniAEval()
+      var _evalReport = _eval.run(_eval.load(args.evalfile), { args: { __evaluation: true } })
+      if (isString(args.evalbaseline) && args.evalbaseline.trim().length > 0) {
+        _evalReport.comparison = _eval.compare(_evalReport, io.readFileJSON(args.evalbaseline))
+      }
+      if (isString(args.evalout) && args.evalout.trim().length > 0) io.writeFileJSON(args.evalout, _evalReport)
+      if (isString(args.evalwritebaseline) && args.evalwritebaseline.trim().length > 0) io.writeFileJSON(args.evalwritebaseline, _evalReport)
+      print(_eval.format(_evalReport))
+      if (_evalReport.summary.failed > 0 || (isMap(_evalReport.comparison) && _evalReport.comparison.regressions.length > 0)) throw "Evaluation failed"
+      return
+    }
+    if (!isString(args.goal) || args.goal.trim().length === 0) throw "goal is required unless eval=true"
     log(`🎯 goal: ${args.goal}`)
     MiniA.applyLibEnvDefault(args)
     var _ma = new MiniA()

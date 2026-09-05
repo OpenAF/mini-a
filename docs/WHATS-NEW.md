@@ -1418,3 +1418,10 @@ Found an issue or have suggestions?
 ✅ **Production Ready** - Thoroughly tested and validated
 
 Upgrade now and enjoy the benefits!
+# Native evaluation suites
+
+Mini-A now has a lightweight native evaluation runner. Use `eval=true` with
+`evalfile=<YAML-or-JSON-suite>` to run scenarios, capture existing execution
+metrics, apply deterministic assertions and limits, emit JSON reports, and
+compare against a saved baseline. The event and metrics report shapes are
+versioned so later observability and orchestration work can reuse them.

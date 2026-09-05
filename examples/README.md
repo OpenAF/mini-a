@@ -2,7 +2,7 @@
 
 This folder contains runnable examples that showcase how to use the mini-a (Mini Agent) with OpenAF oJob workflows.
 
-Each `*.yaml` example now has a parallel `*.agent.md` file with YAML frontmatter so you can run equivalent setups via:
+The agent orchestration examples have parallel `*.agent.md` files with YAML frontmatter so you can run equivalent setups via:
 
 ```sh
 mini-a agent=examples/<name>.agent.md goal="..."
@@ -20,6 +20,15 @@ opack install Mermaid  # For summary.yaml
 ```
 
 ---
+
+## OpenAF evaluation tests (eval-ojob.yaml)
+
+Run `ojob examples/eval-ojob.yaml` with `OAF_MODEL` configured to evaluate inline
+scenarios as OpenAF tests. The example includes `mini-a-eval.yaml`, prints test
+results, writes JUnit XML, and returns a non-zero exit code for failed tests.
+It requires `oJob-common`. See [the oJob eval guide](../USAGE.md#evals-in-ojob-tests)
+for suite files, baselines, and deterministic test injection. This test workflow
+has no agent-file equivalent.
 
 ## Git Changelog generator (changelog-gen.yaml)
 

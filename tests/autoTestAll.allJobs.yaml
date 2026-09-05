@@ -5,6 +5,7 @@ include:
 - tests/agentPlugins.yaml
 - tests/coreFunctionality.yaml
 - tests/dreams.yaml
+- tests/eval.yaml
 - tests/graph.yaml
 - tests/mcpAuth.yaml
 - tests/miniAUtils.yaml

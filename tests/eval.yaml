@@ -1,0 +1,36 @@
+jobs:
+- name: MiniA Eval Tests::Init
+  exec: args.tests = require("tests/eval.js")
+
+- name: MiniA Eval Tests::ScenarioMetrics
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalScenarioCollectsMetricsAndAssertions
+
+- name: MiniA Eval Tests::FailuresAndJudge
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalScenarioReportsFailuresAndOptionalJudge
+
+- name: MiniA Eval Tests::SuiteAndBaseline
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalSuiteAndBaselineComparison
+
+- name: MiniA Eval Tests::YamlLoad
+  from: MiniA Eval Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testEvalYamlDefinitionLoads
+
+include:
+- oJobTest.yaml
+
+ojob:
+  opacks:
+  - oJob-common
+
+todo:
+- MiniA Eval Tests::ScenarioMetrics
+- MiniA Eval Tests::FailuresAndJudge
+- MiniA Eval Tests::SuiteAndBaseline
+- MiniA Eval Tests::YamlLoad
