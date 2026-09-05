@@ -255,7 +255,7 @@ help:
     example  : "run-20260905-abc123"
     mandatory: false
   - name     : runroot
-    desc     : Optional durable-run storage root (default: <homedir>/.openaf-mini-a/runs)
+    desc     : "Optional durable-run storage root (default: <homedir>/.openaf-mini-a/runs)"
     example  : "/var/lib/mini-a/runs"
     mandatory: false
   - name     : outerloopinstructions
