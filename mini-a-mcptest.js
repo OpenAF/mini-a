@@ -55,6 +55,26 @@ function summarizeMCPConfig(config) {
     return type + ": " + target
 }
 
+function stripNullAndUndef(value) {
+    if (isArray(value)) {
+        return value.filter(v => !isUnDef(v) && !isNull(v)).map(stripNullAndUndef)
+    }
+    if (isMap(value)) {
+        var _res = {}
+        Object.keys(value).forEach(function(key) {
+            var v = value[key]
+            if (isUnDef(v) || isNull(v)) return
+            _res[key] = stripNullAndUndef(v)
+        })
+        return _res
+    }
+    return value
+}
+
+function buildMcpParamString(config) {
+    return af.toSLON(stripNullAndUndef(config))
+}
+
 function normalizeMCPConfigInput(rawConfig) {
     var config = rawConfig
 
@@ -536,8 +556,10 @@ function mainMCPTest(args) {
             try {
                 if (sessionOptions.debug) {
                     _currentConfig.debug = true
+                    if (isDef(_currentConfigRaw)) _currentConfigRaw.debug = true
                 } else {
                     _currentConfig.debug = false
+                    if (isDef(_currentConfigRaw)) _currentConfigRaw.debug = false
                 }
                 print("🔌 Connecting to MCP server: " + summarizeMCPConfig(_currentConfig))
                 _mcpClient = $mcp(_currentConfig)
@@ -551,6 +573,7 @@ function mainMCPTest(args) {
                 print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
                 _mcpClient = __
                 _currentConfig = __
+                _currentConfigRaw = __
             }
         }
     }
@@ -582,8 +605,10 @@ function mainMCPTest(args) {
             try {
                 if (sessionOptions.debug) {
                     _currentConfig.debug = true
+                    if (isDef(_currentConfigRaw)) _currentConfigRaw.debug = true
                 } else {
                     _currentConfig.debug = false
+                    if (isDef(_currentConfigRaw)) _currentConfigRaw.debug = false
                 }
                 print("🔌 Connecting to MCP server: " + summarizeMCPConfig(_currentConfig))
                 _mcpClient = $mcp(_currentConfig)
@@ -597,6 +622,7 @@ function mainMCPTest(args) {
                 print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
                 _mcpClient = __
                 _currentConfig = __
+                _currentConfigRaw = __
             }
         }
     }
@@ -636,6 +662,7 @@ function mainMCPTest(args) {
     var _shouldExit = false
     var _mcpClient = __
     var _currentConfig = __
+    var _currentConfigRaw = __ // config as provided, before $mcp() fills in its defaults in-place
 
     addOnOpenAFShutdown(() => {
         if (isDef(_mcpClient)) {
@@ -657,6 +684,7 @@ function mainMCPTest(args) {
                 } else {
                     config.debug = false
                 }
+                var _rawSnapshot = clone(config)
                 print("🔌 Connecting to MCP server from mcp= parameter: " + summarizeMCPConfig(config))
                 _mcpClient = $mcp(config)
                 var startTime = now()
@@ -665,12 +693,14 @@ function mainMCPTest(args) {
                     printElapsedTime(startTime, "Initialize MCP connection")
                 }
                 _currentConfig = config
+                _currentConfigRaw = _rawSnapshot
                 print("✅ Connected successfully!\n")
             }
         } catch(e) {
             print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
             _mcpClient = __
             _currentConfig = __
+            _currentConfigRaw = __
         }
     }
 
@@ -693,6 +723,7 @@ function mainMCPTest(args) {
                 "🖥️  Show MCP server info",
                 "🔧 Call a tool",
                 "🔍 Show tool details",
+                "🔤 Show mcp= parameter string",
                 "🔌 New connection",
                 "❌ Disconnect",
                 "⚙️  Show options",
@@ -721,11 +752,13 @@ function mainMCPTest(args) {
                     } catch(e) {}
                     _mcpClient = __
                     _currentConfig = __
+                    _currentConfigRaw = __
                 }
 
                 var config = buildMCPConfig(args)
                 if (isDef(config)) {
                     config = merge(config, { debug: sessionOptions.debug })
+                    var _rawSnapshot = clone(config)
                     print("\n🔌 Connecting to MCP server: " + summarizeMCPConfig(config))
                     try {
                         _mcpClient = $mcp(config)
@@ -735,11 +768,13 @@ function mainMCPTest(args) {
                             printElapsedTime(startTime, "Initialize MCP connection")
                         }
                         _currentConfig = config
+                        _currentConfigRaw = _rawSnapshot
                         print("✅ Connected successfully!\n")
                     } catch(e) {
                         print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" Connection failed: " + e.message, errorColor) + "\n")
                         _mcpClient = __
                         _currentConfig = __
+                        _currentConfigRaw = __
                     }
                 }
             } else if (optionText.indexOf("List tools") >= 0) {
@@ -802,6 +837,14 @@ function mainMCPTest(args) {
                         }
                     }
                 }
+            } else if (optionText.indexOf("Show mcp= parameter string") >= 0) {
+                if (isUnDef(_currentConfigRaw)) {
+                    print(ansiColor("ITALIC," + errorColor, "!!") + colorifyText(" No MCP configuration available yet. Please create a new connection first.", errorColor) + "\n")
+                } else {
+                    print("\n" + ansiColor("FAINT", "-----\nUse the following command-line parameter to reconnect to this MCP server:") + "\n")
+                    print(ansiColor("FAINT,ITALIC", `mcp="${buildMcpParamString(_currentConfigRaw)}"`))
+                    print(ansiColor("FAINT", "-----") + "\n")
+                }
             } else if (optionText.indexOf("Disconnect") >= 0) {
                 if (isDef(_mcpClient)) {
                     try {
@@ -812,6 +855,7 @@ function mainMCPTest(args) {
                     }
                     _mcpClient = __
                     _currentConfig = __
+                    _currentConfigRaw = __
                 }
             } else if (optionText.indexOf("Show options") >= 0) {
                 describeOptions()

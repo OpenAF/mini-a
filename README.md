@@ -307,6 +307,7 @@ The interactive tester provides:
 - **Interactive Tool Calling** - Call any MCP tool with custom parameters through guided prompts
 - **Advanced Config Support** - Merge extra `$mcp` options such as `shared`, `clientInfo`, `auth`, `strict`, `blacklist`, or future transport flags via JSSLON/JSON
 - **Configuration Options** - Adjust settings like debug mode, tool selection display size, and result parsing
+- **Reusable `mcp=` Output** - "Show mcp= parameter string" prints the active connection's config as a SLON string ready to paste into `mini-a mcp="..."` (mirrors how `modelman=true` prints `OAF_MODEL`/`OAF_LC_MODEL`)
 - **Library Loading** - Load additional OpenAF libraries for extended functionality using `libs=` parameter
 
 ### Available Options
