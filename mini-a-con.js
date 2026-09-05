@@ -4390,13 +4390,12 @@ try {
 
     var termWidth = _getConsoleRenderWidth()
     var contentWidth = Math.max(8, termWidth - 3)
-    var safeMessage = isString(messageText) ? messageText : String(messageText || "")
+    var safeMessage = __miniANormalizeConsoleEventText(messageText)
     var extra = isString(extraPrefix) ? extraPrefix : ""
-    safeMessage = safeMessage.replace(/\n/g, "↵").trim()
-    safeMessage = safeMessage.replace(/↵/g, colorifyText("↵", "FG(238)"))
     var textStyle = hintColor + ",ITALIC"
     var separatorStyle = "FG(240)"
     var separatorChar = "╌"
+    if (!/\s$/.test(_stripAnsiText(iconPart))) iconPart += " "
     var iconPlain = _stripAnsiText(iconPart)
     var normalizedIconPlain = iconPlain.replace(/\s{2,}$/, " ")
     var iconIndent = repeat(Math.max(0, visibleLength(iconPlain)), " ")
@@ -4404,7 +4403,13 @@ try {
     var firstLineWidth = Math.max(8, contentWidth - visibleLength(extra + iconPlain))
     var continuationWidth = Math.max(8, contentWidth - visibleLength(extra + iconIndent))
     var separatorWidth = Math.max(8, contentWidth - visibleLength(extra + separatorIndent))
-    var wrappedLines = _carryAnsiState(format.string.wordWrap(safeMessage, firstLineWidth).split("\n"))
+    var wrappedLines = []
+    safeMessage.split("\n").forEach(function(sourceLine) {
+      var lineWidth = wrappedLines.length === 0 ? firstLineWidth : continuationWidth
+      var lineParts = format.string.wordWrap(sourceLine, lineWidth).split("\n")
+      lineParts.forEach(function(linePart) { wrappedLines.push(linePart) })
+    })
+    wrappedLines = _carryAnsiState(wrappedLines)
     var renderedLines = []
 
     if (wrappedLines.length > 0) {
@@ -4414,10 +4419,7 @@ try {
     }
 
     for (var wi = 1; wi < wrappedLines.length; wi++) {
-      var continuationText = format.string.wordWrap(wrappedLines[wi], continuationWidth)
-      continuationText.split("\n").forEach(function(line) {
-        renderedLines.push(extra + iconIndent + colorifyText(line, textStyle))
-      })
+      renderedLines.push(extra + iconIndent + colorifyText(wrappedLines[wi], textStyle))
     }
 
     if (toBoolean(sessionOptions.showseparator) !== false) {

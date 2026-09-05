@@ -11,6 +11,17 @@ function __miniAErrMsg(e) {
 }
 
 /**
+ * Normalizes console event text while preserving message line boundaries.
+ * Providers can supply either actual line feeds or escaped `\\n` sequences.
+ */
+function __miniANormalizeConsoleEventText(value) {
+  return (isString(value) ? value : String(value || ""))
+    .replace(/\r\n?/g, "\n")
+    .replace(/\\n/g, "\n")
+    .trim()
+}
+
+/**
  * Buffers a Markdown stream until it has complete renderable units. Markdown
  * renderers are line-oriented, so handing them provider-sized token fragments
  * loses inline formatting such as emphasis and links.

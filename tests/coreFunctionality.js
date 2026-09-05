@@ -4276,4 +4276,9 @@
     ow.test.assert(isUnDef(thrown), true, "Markdown stream rendering must not pass width as OpenAF's defaultAnsi argument: " + thrown)
     ow.test.assert(isString(rendered), true, "Markdown stream rendering should return text")
   }
+
+  exports.testConsoleEventTextPreservesNewlines = function() {
+    var normalized = __miniANormalizeConsoleEventText(" first\\nsecond\r\nthird ")
+    ow.test.assert(normalized, "first\nsecond\nthird", "console events must render escaped and actual newlines as separate lines")
+  }
 })()

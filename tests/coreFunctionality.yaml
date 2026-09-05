@@ -127,6 +127,11 @@ jobs:
   to  : oJob Test
   exec: args.func = args.tests.testMarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
 
+- name: MiniA Core Tests::ConsoleEventTextPreservesNewlines
+  from: MiniA Core Tests::Init
+  to  : oJob Test
+  exec: args.func = args.tests.testConsoleEventTextPreservesNewlines
+
 - name: MiniA Core Tests::TraceFnReceivesEventsAndPayloads
   from: MiniA Core Tests::Init
   to  : oJob Test
@@ -980,6 +985,7 @@ todo:
 - MiniA Core Tests::MarkdownStreamPreviewGeometry
 - MiniA Core Tests::ConsoleStreamReceivesPartialDeltasForPreview
 - MiniA Core Tests::MarkdownStreamRenderDoesNotPassWidthAsAnsiStyle
+- MiniA Core Tests::ConsoleEventTextPreservesNewlines
 - MiniA Core Tests::TraceFnReceivesEventsAndPayloads
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatForRawPromptStreamProviders
 - MiniA Core Tests::SupportsPromptStreamWithStatsCompatFallsBackToDirectMethods
