@@ -1438,6 +1438,18 @@ The session ID (e.g. `session-20240601-120000-abc123`) is printed at the start o
 
 You can set `OAF_VAL_MODEL` or pass `modelval=...` to route the validation step to a dedicated model; otherwise the main model is used.
 
+## Durable Runs and Structured Traces (`durable=true`)
+
+For work that needs to survive an interrupted process outside the outer loop, enable `durable=true`. Mini-A assigns (or accepts) a stable `runid` and writes redacted state plus JSONL events under `~/.openaf-mini-a/runs/<runid>/`. Existing `resume=true` conversation behaviour is unchanged; use `resumerun=<runid>` for durable-run recovery.
+
+```bash
+mini-a goal="Review and update the implementation" durable=true runid=review-20260905
+mini-a goal="Review and update the implementation" resumerun=review-20260905
+mini-a runstatus=review-20260905
+```
+
+State records run status, safe agent/plan snapshots, checkpoints, task-DAG-compatible task records, result metadata, and metrics. The trace records run start/end, planning, validation, replan, orchestration decisions, LLM/tool/shell/wiki activity, and checkpoints with timestamps and run IDs. Durable traces redact secret-like fields, shell commands, tool arguments, and full LLM prompts/responses; they are intended for operational reconstruction, not credential storage.
+
 ### How It Works
 
 Deep research mode runs a loop of research-validate-learn cycles:

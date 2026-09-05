@@ -2,6 +2,10 @@
 
 ## Recent Updates
 
+### Durable runs and unified trace events
+
+`durable=true` adds stable run IDs, resumable state, safe checkpoints, and a redacted JSONL trace without changing ordinary one-shot or `resume=true` conversation behaviour. The trace is built on Mini-A's existing trace/hooks seam and records lifecycle, planning, validation, replan, model/tool/shell/wiki, and orchestration events for durable runs. Use `resumerun=<runid>` to continue an interrupted run and `runstatus=<runid>` to inspect it.
+
 ### Wiki: citation URLs on retrieval results
 
 **Problem**: wiki retrieval results only ever carried a wiki-relative path (`guides/setup.md`) and a non-opaque `wiki:` reference, so an agent answering from wiki content had no canonical origin URL to cite back to a human, even when the wiki was itself published somewhere (an internal docs site, a GitHub repo, Confluence).

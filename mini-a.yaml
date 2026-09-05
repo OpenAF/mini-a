@@ -220,6 +220,27 @@ help:
     example  : "true"
     mandatory: false
     options  : ["true", "false"]
+  - name     : durable
+    desc     : Persist a resumable run state and structured JSONL trace under the Mini-A home directory
+    example  : "true"
+    mandatory: false
+    options  : ["true", "false"]
+  - name     : runid
+    desc     : Stable identifier for a durable run (auto-generated when omitted)
+    example  : "run-20260905-abc123"
+    mandatory: false
+  - name     : resumerun
+    desc     : Resume an interrupted durable run by run identifier; does not change the existing resume option
+    example  : "run-20260905-abc123"
+    mandatory: false
+  - name     : runstatus
+    desc     : Inspect persisted durable run status by run identifier
+    example  : "run-20260905-abc123"
+    mandatory: false
+  - name     : runroot
+    desc     : Optional durable-run storage root (default: <homedir>/.openaf-mini-a/runs)
+    example  : "/var/lib/mini-a/runs"
+    mandatory: false
   - name     : outerloopinstructions
     desc     : Path to persistent outer loop instructions markdown file
     example  : "./TASKS.md"
@@ -1269,6 +1290,11 @@ jobs:
         valgoal        : valgoal
         deepresearch   : deepresearch
         outerloop      : outerloop
+        durable        : durable
+        runid          : runid
+        resumerun      : resumerun
+        runstatus      : runstatus
+        runroot        : runroot
         outerloopinstructions: outerloopinstructions
         outerloopsessionid: outerloopsessionid
         taskfile       : taskfile
@@ -1533,6 +1559,11 @@ jobs:
       valgoal        : isString.default(__)
       deepresearch   : toBoolean.isBoolean.default(false)
       outerloop      : toBoolean.isBoolean.default(false)
+      durable        : toBoolean.isBoolean.default(false)
+      runid          : isString.default(__)
+      resumerun      : isString.default(__)
+      runstatus      : isString.default(__)
+      runroot        : isString.default(__)
       outerloopinstructions: isString.default(__)
       outerloopsessionid: isString.default(__)
       taskfile       : isString.default(__)

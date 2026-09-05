@@ -79,6 +79,56 @@
     } finally { rmTempDir(tmpDir) }
   }
 
+  // ─── Durable runs / structured traces ───────────────────────────────────────
+
+  exports.testDurableRunPersistsSafeStateAndTrace = function() {
+    var a = createAgent()
+    var tmpDir = mkTempDir()
+    try {
+      a._startInternal = function() {
+        this._agentState = { phase: "done", apiToken: "must-not-persist", plan: { steps: [{ id: "inspect", status: "completed", meta: { idempotent: true } }] } }
+        this._trace("tool_call", { name: "test", params: { token: "must-not-persist" } })
+        return "done"
+      }
+      a.start({ goal: "durable test", durable: true, homedir: tmpDir, runid: "run-test" })
+      var statePath = tmpDir + "/.openaf-mini-a/runs/run-test/state.json"
+      var tracePath = tmpDir + "/.openaf-mini-a/runs/run-test/trace.jsonl"
+      var state = io.readFileJSON(statePath)
+      var trace = io.readFileString(tracePath)
+      ow.test.assert(state.status, "complete", "durable run should finish as complete")
+      ow.test.assert(state.agent_state.apiToken, "[redacted]", "durable state must redact secret-like keys")
+      ow.test.assert(state.tasks.inspect.idempotent, true, "plan tasks should persist in the task-DAG-compatible run state")
+      ow.test.assert(trace.indexOf("run_start") >= 0, true, "durable trace should include run_start")
+      ow.test.assert(trace.indexOf("must-not-persist") < 0, true, "durable trace must not retain sensitive tool arguments")
+      ow.test.assert(a.getRunStatus("run-test", { homedir: tmpDir }).ok, true, "run status should load persisted state")
+    } finally { rmTempDir(tmpDir) }
+  }
+
+  exports.testDurableRunResumesInterruptedState = function() {
+    var first = createAgent()
+    var second = createAgent()
+    var tmpDir = mkTempDir()
+    try {
+      first._startInternal = function() {
+        this._agentState = { completed: ["idempotent-read"] }
+        return "interrupted"
+      }
+      first.start({ goal: "resume test", durable: true, homedir: tmpDir, runid: "run-resume" })
+      var statePath = tmpDir + "/.openaf-mini-a/runs/run-resume/state.json"
+      var state = io.readFileJSON(statePath)
+      state.status = "stopped"
+      state.tasks = { "idempotent-read": { id: "idempotent-read", status: "completed", idempotent: true, attempts: 1 } }
+      io.writeFileJSON(statePath, state)
+      var restored
+      second._startInternal = function(args) { restored = args.state; return "resumed" }
+      second.start({ goal: "resume test", homedir: tmpDir, resumerun: "run-resume" })
+      var resumed = io.readFileJSON(statePath)
+      ow.test.assert(restored.completed[0], "idempotent-read", "resume should restore persisted agent state")
+      ow.test.assert(resumed.tasks["idempotent-read"].status, "completed", "resume must retain completed idempotent task state")
+      ow.test.assert(resumed.resume_count, 1, "resume count should be recorded")
+    } finally { rmTempDir(tmpDir) }
+  }
+
   // ─── _padOuterLoopCycle ──────────────────────────────────────────────────────
 
   exports.testOuterLoopPadCycle = function() {

@@ -468,6 +468,8 @@ Mini-A ships with complementary components:
 
 Mini-A now supports an optional durable autonomous loop with `outerloop=true`. This keeps per-session state under `~/.openaf-mini-a/sessions/<session-id>/`, reruns fresh agent cycles, persists plan/validation artifacts, and stops only when completion + validation succeed (or safety limits are reached).
 
+For a single resumable run without enabling the outer loop, use `durable=true`. It writes redacted state and structured JSONL events to `~/.openaf-mini-a/runs/<runid>/`; resume with `resumerun=<runid>` and inspect with `runstatus=<runid>`. The existing `resume=true` conversation option retains its original meaning.
+
 Example with external instructions:
 
 ```bash

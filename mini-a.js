@@ -99,6 +99,7 @@ var MiniA = function() {
   this._debuglcchConfig = __
   this._debugvalchConfig = __
   this._traceFn = __
+  this._runState = __
   this._adaptiveRouting = false
   this._toolRouter = new MiniAToolRouter({ enabled: false })
   this._routeHistory = {}
@@ -1564,10 +1565,163 @@ MiniA.prototype.setTraceFn = function(fn) {
 }
 
 MiniA.prototype._trace = function(kind, payload) {
+  this._recordRunEvent(kind, payload)
   if (!isFunction(this._traceFn)) return
   try {
     this._traceFn(kind, payload)
   } catch(ignoreTraceError) {}
+}
+
+// Durable run state deliberately builds on the existing plan/state and trace
+// seams. It is opt-in so ordinary one-shot invocations retain their historical
+// storage and resume behaviour.
+MiniA.prototype._runHome = function(args) {
+  if (isString(args.runroot) && args.runroot.trim().length > 0) return args.runroot.trim()
+  return this._outerLoopHome(args) + "/runs"
+}
+
+MiniA.prototype._runSafeValue = function(value, depth) {
+  depth = isNumber(depth) ? depth : 0
+  if (depth > 5) return "[truncated]"
+  if (isUnDef(value) || value === null || isNumber(value) || isBoolean(value)) return value
+  if (isString(value)) return value.length > 2000 ? value.substring(0, 2000) + "... [truncated]" : value
+  if (isArray(value)) return value.slice(0, 20).map(function(entry) { return this._runSafeValue(entry, depth + 1) }.bind(this))
+  if (!isObject(value)) return String(value)
+  var out = {}
+  Object.keys(value).slice(0, 40).forEach(function(key) {
+    var lower = String(key).toLowerCase()
+    if (/(key|token|secret|password|credential|authorization)/.test(lower)) out[key] = "[redacted]"
+    else out[key] = this._runSafeValue(value[key], depth + 1)
+  }.bind(this))
+  return out
+}
+
+MiniA.prototype._runTracePayload = function(kind, payload) {
+  var safe = this._runSafeValue(payload)
+  // Durable traces must be useful without becoming a second secret store. The
+  // existing debug trace remains unchanged for its local, explicit use case.
+  if (kind === "shell_call" && isObject(safe)) {
+    safe.command = "[redacted]"
+    safe.executedCommand = "[redacted]"
+  }
+  if ((kind === "tool_call" || kind === "wiki_call") && isObject(safe)) {
+    if (isDef(safe.params)) safe.params = "[redacted]"
+  }
+  if ((kind === "llm_prompt" || kind === "llm_response") && isObject(safe)) {
+    if (isDef(safe.content)) safe.content = "[omitted from durable trace]"
+    if (isDef(safe.response)) safe.response = "[omitted from durable trace]"
+  }
+  return safe
+}
+
+MiniA.prototype._writeRunState = function() {
+  if (!isObject(this._runState) || this._runState.persist !== true) return
+  this._runState.state.updated_at = (new Date()).toISOString()
+  io.writeFileJSON(this._runState.statePath, this._runState.state)
+}
+
+MiniA.prototype._checkpointRun = function(reason) {
+  if (!isObject(this._runState) || this._runState.persist !== true) return
+  var state = this._runState.state
+  state.checkpoints = (isNumber(state.checkpoints) ? state.checkpoints : 0) + 1
+  state.last_checkpoint = { reason: reason, at: (new Date()).toISOString() }
+  state.agent_state = this._runSafeValue(this._agentState || {})
+  this._syncRunTasksFromPlan()
+  if (isString(this._lastPlanSnapshot) && this._lastPlanSnapshot.length > 0) state.plan_snapshot = this._lastPlanSnapshot
+  this._writeRunState()
+  this._recordRunEvent("checkpoint", { reason: reason })
+}
+
+MiniA.prototype._syncRunTasksFromPlan = function() {
+  if (!isObject(this._runState) || this._runState.persist !== true) return
+  var plan = isDef(this._agentState) ? this._agentState.plan : __
+  if (isUnDef(plan) || !isArray(plan.steps)) return
+  var tasks = isObject(this._runState.state.tasks) ? this._runState.state.tasks : (this._runState.state.tasks = {})
+  var visit = function(nodes, parentId) {
+    if (!isArray(nodes)) return
+    nodes.forEach(function(node, index) {
+      if (isUnDef(node) || node === null) return
+      var taskId = isString(node.id) && node.id.length > 0 ? node.id : (parentId ? parentId + "." + (index + 1) : "task-" + (index + 1))
+      var existing = isObject(tasks[taskId]) ? tasks[taskId] : {}
+      existing.id = taskId
+      existing.status = isString(node.status) ? node.status : (existing.status || "pending")
+      existing.dependencies = isArray(node.dependencies) ? node.dependencies : (parentId ? [parentId] : [])
+      existing.idempotent = isDef(node.meta) && node.meta !== null && node.meta.idempotent === true
+      existing.updated_at = (new Date()).toISOString()
+      tasks[taskId] = existing
+      visit(node.children, taskId)
+    })
+  }
+  visit(plan.steps, "")
+}
+
+MiniA.prototype._recordRunTask = function(taskId, patch) {
+  if (!isObject(this._runState) || this._runState.persist !== true || !isString(taskId) || taskId.length === 0) return
+  var tasks = this._runState.state.tasks
+  if (!isObject(tasks)) tasks = this._runState.state.tasks = {}
+  var current = isObject(tasks[taskId]) ? tasks[taskId] : { id: taskId, status: "pending", dependencies: [], attempts: 0, created_at: (new Date()).toISOString() }
+  var next = merge({}, current, this._runSafeValue(isObject(patch) ? patch : {}))
+  next.updated_at = (new Date()).toISOString()
+  if (next.status === "running") next.attempts = (isNumber(current.attempts) ? current.attempts : 0) + 1
+  tasks[taskId] = next
+  this._checkpointRun("task_" + next.status)
+}
+
+MiniA.prototype.getRunStatus = function(runId, args) {
+  var root = this._runHome(isObject(args) ? args : {})
+  if (!isString(runId) || runId.length === 0) return { ok: false, error: "run id is required" }
+  var statePath = root + "/" + runId + "/state.json"
+  if (!io.fileExists(statePath)) return { ok: false, error: "run not found", run_id: runId }
+  var state = io.readFileJSON(statePath)
+  return { ok: true, run_id: runId, state: state, trace: root + "/" + runId + "/trace.jsonl" }
+}
+
+MiniA.prototype._beginRun = function(args) {
+  var requestedResume = isString(args.resumerun) && args.resumerun.trim().length > 0 ? args.resumerun.trim() : ""
+  var requestedId = requestedResume || (isString(args.runid) && args.runid.trim().length > 0 ? args.runid.trim() : "")
+  var persist = toBoolean(args.durable) === true || requestedResume.length > 0 || requestedId.length > 0
+  var runId = requestedId || "run-" + (new java.text.SimpleDateFormat("yyyyMMdd-HHmmss")).format(new java.util.Date()) + "-" + this._id
+  var root = this._runHome(args), runDir = root + "/" + runId, statePath = runDir + "/state.json"
+  var resumed = requestedResume.length > 0
+  if (persist && !io.fileExists(root)) io.mkdir(root)
+  if (persist && !io.fileExists(runDir)) io.mkdir(runDir)
+  var state = persist && io.fileExists(statePath) ? io.readFileJSON(statePath) : __
+  if (resumed && !isObject(state)) throw "Run not found: " + runId
+  if (!isObject(state)) state = { version: 1, run_id: runId, parent_run_id: isString(args.parentrunid) ? args.parentrunid : __, goal: this._runSafeValue(args.goal || ""), status: "running", created_at: (new Date()).toISOString(), tasks: {}, checkpoints: 0, resume_count: 0 }
+  if (resumed) {
+    if (state.status === "complete") throw "Run is already complete: " + runId
+    state.resume_count = (isNumber(state.resume_count) ? state.resume_count : 0) + 1
+    if (isObject(state.agent_state) && isUnDef(args.state)) args.state = state.agent_state
+    if (isString(state.planfile) && state.planfile.length > 0 && isUnDef(args.planfile)) args.planfile = state.planfile
+  }
+  state.status = "running"
+  state.last_started_at = (new Date()).toISOString()
+  this._runState = { runId: runId, runDir: runDir, statePath: statePath, tracePath: runDir + "/trace.jsonl", persist: persist, state: state, startedAt: now() }
+  args.runid = runId
+  if (persist) this._writeRunState()
+  this._recordRunEvent("run_start", { resumed: resumed, goal: args.goal })
+  if (persist) this.fnI("info", "Durable run " + runId + (resumed ? " resumed" : " started"))
+}
+
+MiniA.prototype._finishRun = function(status, result) {
+  if (!isObject(this._runState)) return
+  var run = this._runState
+  run.state.status = status
+  run.state.finished_at = (new Date()).toISOString()
+  run.state.elapsed_ms = now() - run.startedAt
+  run.state.result = this._runSafeValue(result)
+  try { run.state.metrics = this._runSafeValue(this.getMetrics()) } catch(ignoreMetricsError) {}
+  this._checkpointRun("run_" + status)
+  this._recordRunEvent("run_end", { status: status, elapsed_ms: run.state.elapsed_ms })
+  this._writeRunState()
+}
+
+MiniA.prototype._recordRunEvent = function(kind, payload) {
+  if (!isObject(this._runState) || this._runState.persist !== true) return
+  var run = this._runState
+  var event = { version: 1, run_id: run.runId, parent_run_id: run.state.parent_run_id, event_type: kind, timestamp: (new Date()).toISOString(), payload: this._runTracePayload(kind, payload) }
+  try { io.writeFileString(run.tracePath, stringify(event, __, "") + "\n", __, true) } catch(ignoreTraceWriteError) {}
+  if (["tool_call", "shell_result", "wiki_result", "orchestration_decision"].indexOf(kind) >= 0) this._checkpointRun(kind)
 }
 
 MiniA.prototype._isExplicitArgument = function(name, rawArgs) {
@@ -4643,7 +4797,7 @@ MiniA.prototype._preparePreloadedPlan = function(preloadedPlan, args) {
   var hasRequestedExternalPlan = (isString(args.planfile) && args.planfile.trim().length > 0) ||
     (isString(args.plancontent) && args.plancontent.trim().length > 0)
   if (toBoolean(args.useplanning) === true && !hasRequestedExternalPlan) {
-    this.fnI("plan", "will generate a plan automatically during execution.")
+    this.fnI("plan", "Will generate a plan automatically during execution.")
   }
   this._hasExternalPlan = false
   return false
@@ -6038,6 +6192,8 @@ MiniA.prototype._runPlanningMode = function(args, controls) {
   if (isObject(global.__mini_a_metrics) && isObject(global.__mini_a_metrics.plans_generated)) {
     global.__mini_a_metrics.plans_generated.inc()
   }
+  this._trace("planning", { status: "created", format: payload.format, path: payload.path })
+  this._checkpointRun("plan_created")
 
   this._critiquePlanWithLLM(payload, args, controls)
 
@@ -6089,6 +6245,8 @@ MiniA.prototype._runValidationMode = function(planPayload, args, controls) {
       global.__mini_a_metrics.plans_validation_failed.inc()
     }
   }
+  this._trace("validation", { target: "plan", valid: validation.valid === true, issues: isArray(validation.issues) ? validation.issues.length : 0 })
+  this._checkpointRun("plan_validation")
 
   // Run LLM critique
   this._critiquePlanWithLLM(planPayload, args, controls)
@@ -6685,6 +6843,8 @@ MiniA.prototype._handlePlanningObstacle = function(details) {
   }
 
   this._applyDynamicReplanAdjustments(obstacleEntry)
+  this._trace("replan", { category: obstacleEntry.category, message: obstacleEntry.message })
+  this._checkpointRun("replan")
   this._handlePlanUpdate()
 }
 MiniA.prototype._handlePlanUpdate = function() {
@@ -6770,6 +6930,7 @@ MiniA.prototype._handlePlanUpdate = function() {
     this._logMessageWithCounter("plan", "\n" + message)
     this._lastPlanSnapshot = snapshot
     this._persistExternalPlan()
+    this._checkpointRun("plan_update")
 }
 
 /**
@@ -14823,7 +14984,8 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "memoryreflect", "memoryreflectmodel", "memoryreflectmin", "memorycandidatedays", "memorysessionmaxdays",
     "memorybudget", "memorysearchbudget", "memorypersistevery",
     "memorysessionheader", "goal", "mcp", "validationgoal", "valgoal", "deepresearch", "maxcycles",
-    "validationthreshold", "persistlearnings", "valtools", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
+    "validationthreshold", "persistlearnings", "valtools", "outerloop", "outerloopinstructions", "outerloopsessionid", "outerloopmaxcycles", "outerloopmaxtime", "outerloopstoponrepeat", "outerloopmaxnochange",
+    "durable", "runid", "resumerun", "runstatus", "runroot", "showseparator", "goalprefix", "shellprefix", "resume", "mode",
     "onport", "web", "modelman", "mcptest", "memoryman", "workermode", "path", "usehistory", "useattach", "historypath",
     "historykeep", "historykeepperiod", "historykeepcount", "historyretention", "ssequeuetimeout",
     "logpromptheaders", "historys3bucket", "historys3prefix", "historys3url", "historys3accesskey",
@@ -16620,9 +16782,17 @@ MiniA.prototype._supportsConsoleUserInput = function(args) {
 MiniA.prototype.start = function(args) {
     this._lastStartArgs = args
     var sessionStartTime = now()
+    var runResult = __
+    var runStatus = "failed"
     try {
+        if (isString(args.runstatus) && args.runstatus.trim().length > 0) return this.getRunStatus(args.runstatus.trim(), args)
+        this._beginRun(args)
         var outerLoopResult = this._runOuterLoop(args, sessionStartTime)
-        if (isDef(outerLoopResult) && outerLoopResult !== null) return outerLoopResult
+        if (isDef(outerLoopResult) && outerLoopResult !== null) {
+          runResult = outerLoopResult
+          runStatus = "complete"
+          return runResult
+        }
 
         // Check if deep research mode is enabled
         var deepResearchState = this._initDeepResearch(args)
@@ -16685,10 +16855,14 @@ MiniA.prototype.start = function(args) {
                 print($o("\n" + formattedResult, args, __, true))
             }
 
-            return isDef(args.outfile) ? (finalOutput || "(no output)") : $o("\n" + formattedResult, args, __, true)
+            runResult = isDef(args.outfile) ? (finalOutput || "(no output)") : $o("\n" + formattedResult, args, __, true)
+            runStatus = deepResearchState.finalVerdict === "PASS" ? "complete" : "stopped"
+            return runResult
         } else {
             // Normal mode: run once
-            return this._startInternal(args, sessionStartTime)
+            runResult = this._startInternal(args, sessionStartTime)
+            runStatus = this.state === "stop" ? "stopped" : "complete"
+            return runResult
         }
     } catch (e) {
         global.__mini_a_metrics.goals_failed.inc()
@@ -16697,8 +16871,10 @@ MiniA.prototype.start = function(args) {
         this._logLcCostSummary()
         var errMsg = (isDef(e) && isDef(e.message)) ? e.message : e
         this.fnI("error", `Agent failed: ${errMsg}`)
+        runStatus = "failed"
         return
     } finally {
+        try { this._finishRun(runStatus, runResult) } catch(ignoreFinishRunError) {}
         try { this._finalizeRunMemory(args) } catch(ignoreFinalizeErr) {}
     }
 }
@@ -16712,6 +16888,10 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
 
     // Load plan FIRST, before any validation that might reset knowledge
     var preloadedPlan = this._loadPlanFromArgs(args)
+    if (isObject(this._runState) && this._runState.persist === true && isString(args.planfile) && args.planfile.length > 0) {
+      this._runState.state.planfile = args.planfile
+      this._checkpointRun("plan_load")
+    }
     
     // Add plan content to knowledge BEFORE validation
     if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
@@ -16856,7 +17036,12 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       { name: "memorybudget", type: "number", default: 1500 },
       { name: "memorysearchbudget", type: "number", default: 1200 },
       { name: "memorypersistevery", type: "number", default: 1 },
-      { name: "valtools", type: "boolean", default: false }
+      { name: "valtools", type: "boolean", default: false },
+      { name: "durable", type: "boolean", default: false },
+      { name: "runid", type: "string", default: __ },
+      { name: "resumerun", type: "string", default: __ },
+      { name: "runstatus", type: "string", default: __ },
+      { name: "runroot", type: "string", default: __ }
     ])
 
     // Removed verbose knowledge length logging after validation
@@ -16869,6 +17054,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.debugfile = _$(args.debugfile, "args.debugfile").isString().default("")
     if (args.debugfile.length > 0) args.debug = true
     args.debugtrace = _$(toBoolean(args.debugtrace), "args.debugtrace").isBoolean().default(true)
+    args.durable = _$(toBoolean(args.durable), "args.durable").isBoolean().default(false)
     this._debugFile = args.debugfile
     args.useshell = _$(toBoolean(args.useshell), "args.useshell").isBoolean().default(false)
     args.usesandbox = _$(args.usesandbox, "args.usesandbox").isString().default(__)
