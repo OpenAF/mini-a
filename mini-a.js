@@ -730,6 +730,7 @@ MiniA._terminalSubtaskStates = {
 load("mini-a-response.js")
 load("mini-a-sandbox.js")
 load("mini-a-tool-selection.js")
+load("mini-a-orchestration.js")
 
 MiniA.prototype._stopAgentResources = function() {
   // This is invoked both by the console finalizer and by the OpenAF shutdown
@@ -1567,6 +1568,38 @@ MiniA.prototype._trace = function(kind, payload) {
   try {
     this._traceFn(kind, payload)
   } catch(ignoreTraceError) {}
+}
+
+MiniA.prototype._isExplicitArgument = function(name, rawArgs) {
+  var normalized = isString(name) ? name.toLowerCase() : ""
+  if (normalized.length === 0) return false
+  var keys = rawArgs && rawArgs.__explicitargkeys
+  if (isArray(keys)) return keys.some(function(key) { return String(key).toLowerCase() === normalized })
+  if (isMap(keys)) return keys[normalized] === true || keys[name] === true
+  return isMap(rawArgs) && Object.prototype.hasOwnProperty.call(rawArgs, name)
+}
+
+MiniA.prototype._applyOrchestration = function(args, rawArgs) {
+  var mode = isString(args.orchestration) ? args.orchestration.trim().toLowerCase() : "manual"
+  if (mode !== "auto") mode = "manual"
+  args.orchestration = mode
+  var assessment = this._assessGoalComplexity(args.goal)
+  var orchestrator = new MiniAOrchestrator({
+    mode: mode,
+    isExplicit: function(name) { return this._isExplicitArgument(name, rawArgs) }.bind(this)
+  })
+  var decisions = orchestrator.assess(assessment, args, {
+    lowCostModel: isDef(args.modellc) || isDef(getEnv("OAF_LC_MODEL"))
+  })
+  this._orchestrationDecisions = decisions
+  if (mode !== "auto") return decisions
+  decisions.forEach(function(decision) {
+    if (decision.decision === "planning" && !this._isExplicitArgument("useplanning", rawArgs)) args.useplanning = decision.selected !== "off"
+    if (decision.decision === "advisor" && !this._isExplicitArgument("modelstrategy", rawArgs)) args.modelstrategy = decision.selected === "enabled" ? "advisor" : "default"
+    if (decision.decision === "validation" && !this._isExplicitArgument("evidencegate", rawArgs)) args.evidencegate = decision.selected === "enabled"
+    this._trace("orchestration_decision", decision)
+  }, this)
+  return decisions
 }
 
 MiniA.prototype._debugOut = function(label, text) {
@@ -4595,6 +4628,25 @@ MiniA.prototype._loadPlanFromArgs = function(args) {
   }
 
   return __
+}
+
+// Applies the execution state and status message for an optionally supplied plan.
+// Planning with no external plan is expected: it falls back to plan generation.
+MiniA.prototype._preparePreloadedPlan = function(preloadedPlan, args) {
+  if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
+    this._prepareExternalPlanExecution(preloadedPlan, args)
+    this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
+    this._hasExternalPlan = true
+    return true
+  }
+
+  var hasRequestedExternalPlan = (isString(args.planfile) && args.planfile.trim().length > 0) ||
+    (isString(args.plancontent) && args.plancontent.trim().length > 0)
+  if (toBoolean(args.useplanning) === true && !hasRequestedExternalPlan) {
+    this.fnI("plan", "No external plan provided; will generate a plan automatically during execution.")
+  }
+  this._hasExternalPlan = false
+  return false
 }
 
 MiniA.prototype._convertPlanObject = function(planObject, format) {
@@ -14763,7 +14815,7 @@ MiniA._KNOWN_ARGUMENT_NAMES = (function() {
     "shellbatch", "usetools", "usetoolslc", "toolfallback", "useutils", "usediagrams", "usemermaid", "usecharts", "useascii", "usemaps",
     "usemath", "usesvg", "usevectors", "browsercontext", "chatbotmode", "useplanning", "planmode", "validateplan",
     "convertplan", "resumefailed", "showexecs", "usestream", "format", "maxcontext", "compressgoal", "compressgoaltokens", "compressgoalchars", "maxpromptchars", "rules",
-    "state", "maxcontent", "earlystopthreshold", "adaptiverouting", "routerorder",
+    "state", "maxcontent", "earlystopthreshold", "orchestration", "adaptiverouting", "routerorder",
     "routerallow", "routerdeny", "routerproxythreshold", "usememory", "memoryscope", "memorysessionid", "memorych",
     "memorysessionch", "memoryuser", "memoryusersession", "memorymaxpersection", "memorymaxentries", "memorycompactevery", "memorydedup",
     "memorypromote", "memorystaledays", "memoryartifactttldays", "memoryindexttldays", "memoryinject",
@@ -16653,6 +16705,10 @@ MiniA.prototype.start = function(args) {
 
 MiniA.prototype._startInternal = function(args, sessionStartTime) {
     _$(args.goal, "args.goal").isString().$_()
+    // Keep the caller-provided values before this method enriches args with
+    // plan and runtime state. Auto orchestration uses this to honor explicit
+    // command-line overrides after initialization.
+    var explicitExternalArgs = jsonParse(stringify(args, __, ""), __, __, true)
 
     // Load plan FIRST, before any validation that might reset knowledge
     var preloadedPlan = this._loadPlanFromArgs(args)
@@ -16845,6 +16901,8 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
     args.usestream = _$(toBoolean(args.usestream), "args.usestream").isBoolean().default(false)
     args.chatbotmode = _$(toBoolean(args.chatbotmode), "args.chatbotmode").isBoolean().default(false)
     args.useplanning = _$(toBoolean(args.useplanning), "args.useplanning").isBoolean().default(false)
+    args.orchestration = _$(args.orchestration, "args.orchestration").isString().default("manual").toLowerCase().trim()
+    if (["manual", "auto"].indexOf(args.orchestration) < 0) args.orchestration = "manual"
     args.planmode = _$(toBoolean(args.planmode), "args.planmode").isBoolean().default(false)
     args.convertplan = _$(toBoolean(args.convertplan), "args.convertplan").isBoolean().default(false)
     args.resumefailed = _$(toBoolean(args.resumefailed), "args.resumefailed").isBoolean().default(false)
@@ -17031,6 +17089,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       }
     }
 
+    this._applyOrchestration(args, explicitExternalArgs)
     this._planningAssessment = null
     this._planningStrategy = "off"
     this._planningProgress = { overall: 0, completed: 0, total: 0, checkpoints: { reached: 0, total: 0 } }
@@ -17154,23 +17213,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
       return planResult
     }
 
-    if (args.useplanning && !isObject(preloadedPlan)) {
-      // useplanning=true but no plan found - just inform and continue with auto-generated plan
-      this.fnI("plan", "No plan file found; will generate plan automatically during execution.")
-    }
-    
-    // If we have a preloaded plan, prepare it for execution
-    if (isObject(preloadedPlan) && isObject(preloadedPlan.plan)) {
-      this._prepareExternalPlanExecution(preloadedPlan, args)
-      this.fnI("plan", `Plan loaded and prepared for execution (${stringify(preloadedPlan.plan).length} chars).`)
-      // Mark that external plan is loaded to skip auto-generation later
-      this._hasExternalPlan = true
-    } else {
-      if (args.useplanning || isString(args.planfile)) {
-        this.fnI("warn", `Plan file specified but plan object is invalid.`)
-      }
-      this._hasExternalPlan = false
-    }
+    // Missing or invalid requested files already produce precise loader errors.
+    // With no external plan, planning normally falls back to automatic generation.
+    this._preparePreloadedPlan(preloadedPlan, args)
 
     this._alwaysExec = args.readwrite
     if (isDef(args.outfile) && isUnDef(args.format)) args.format = "json"

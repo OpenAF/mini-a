@@ -713,6 +713,10 @@ Mini-A also supports reusable YAML/JSON evaluation suites: run
 `mini-a eval=true evalfile=evals/core.yaml` (or `ojob mini-a.yaml ...`) to
 collect normalized execution metrics, assertions, and optional baseline
 comparison. See [USAGE.md](USAGE.md#evaluation-suites) for the scenario schema.
+
+For conservative automatic strategy selection, add `orchestration=auto` to a
+goal. It reuses Mini-A's existing planning, advisor, and validation paths;
+manual remains the default and explicit flags always take precedence.
 For ordinary OpenAF test jobs, include `mini-a-eval.yaml` and call `MiniA Eval`
 with inline scenarios or a suite file. See the [oJob eval guide](USAGE.md#evals-in-ojob-tests)
 and [complete YAML example](examples/eval-ojob.yaml).

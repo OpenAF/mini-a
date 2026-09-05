@@ -3365,6 +3365,16 @@ tokens; choose `normalize`, `raw`, or `distill` explicitly when needed. Wiki sta
 to `.mini-a-wiki-state/manifest.json` and tracks section hashes, allowing a small edit to reuse
 unchanged chunks. `wikillmbudget`, `wikiingestbudget`, and `wikimaxprompttokens` defer
 over-budget enrichment. `/dream plan` is always zero-LLM and returns estimates.
+# Adaptive orchestration
+
+`orchestration=manual` is the default and preserves the current behavior.
+`orchestration=auto` applies deterministic goal-complexity and risk heuristics
+to the existing planning, advisor/model-strategy, and evidence-gate controls.
+Explicit flags such as `useplanning=false`, `modelstrategy=default`, and
+`evidencegate=false` always win. Auto decisions are available through the
+existing trace sink as structured `orchestration_decision` records; no extra
+LLM routing call is made.
+
 # Evaluation suites
 
 Run a YAML or JSON evaluation suite with the normal Mini-A entry point:

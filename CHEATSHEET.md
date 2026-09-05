@@ -2024,3 +2024,9 @@ mini-a eval=true evalfile=evals/core.yaml evalbaseline=evals/baseline.json
 
 Suites can be YAML/JSON files or a directory of them. See `USAGE.md` for the
 scenario schema and baseline workflow.
+
+# Adaptive orchestration
+
+`mini-a goal="..." orchestration=auto` enables deterministic selection of the
+existing planning, advisor, and evidence-gate controls. The default is
+`orchestration=manual`; explicit flags override automatic selections.

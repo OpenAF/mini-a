@@ -45,6 +45,44 @@
     ow.test.assert(result.signals.indexOf("entity-count") >= 0, true, "Should detect entity count signal")
   }
 
+  exports.testAutoOrchestrationSelectsExistingControls = function() {
+    var agent = createAgent()
+    var traces = []
+    agent.setTraceFn(function(kind, payload) { traces.push({ kind: kind, payload: payload }) })
+    var args = { goal: "Refactor and validate the security pipeline across 20 services", orchestration: "auto", useplanning: false, modelstrategy: "default", evidencegate: false, chatbotmode: false, lcbudget: 0 }
+    agent._applyOrchestration(args, { goal: args.goal, orchestration: "auto", __explicitargkeys: ["goal", "orchestration"] })
+    ow.test.assert(args.useplanning, true, "Auto orchestration should enable existing planning for complex work")
+    ow.test.assert(args.evidencegate, true, "Auto orchestration should enable the existing evidence gate for risk signals")
+    ow.test.assert(agent._orchestrationDecisions.length >= 6, true, "Automatic routing should retain structured decision records")
+    ow.test.assert(traces.filter(function(record) { return record.kind === "orchestration_decision" }).length >= 6, true, "Automatic decisions should be emitted to the existing trace sink")
+  }
+
+  exports.testAutoOrchestrationRespectsExplicitOverrides = function() {
+    var agent = createAgent()
+    var args = { goal: "Refactor and validate the security pipeline", orchestration: "auto", useplanning: false, modelstrategy: "default", evidencegate: false, chatbotmode: false }
+    agent._applyOrchestration(args, { goal: args.goal, orchestration: "auto", useplanning: false, modelstrategy: "default", evidencegate: false, __explicitargkeys: ["goal", "orchestration", "useplanning", "modelstrategy", "evidencegate"] })
+    ow.test.assert(args.useplanning, false, "Explicit useplanning=false must override automatic orchestration")
+    ow.test.assert(args.modelstrategy, "default", "Explicit model strategy must remain unchanged")
+    ow.test.assert(args.evidencegate, false, "Explicit evidencegate=false must remain unchanged")
+  }
+
+  exports.testPlanningWithoutExternalPlanIsNotInvalid = function() {
+    var agent = createAgent()
+    var messages = []
+    agent.fnI = function(type, message) { messages.push({ type: type, message: message }) }
+
+    var loaded = agent._preparePreloadedPlan(__, { useplanning: true })
+
+    ow.test.assert(loaded, false, "No external plan should not be reported as loaded")
+    ow.test.assert(messages.length, 1, "Auto-planning without an external plan should emit one status message")
+    ow.test.assert(messages[0].type, "plan", "Auto-planning without an external plan must not be a warning")
+    ow.test.assert(messages[0].message.indexOf("invalid") < 0, true, "Auto-planning without an external plan must not describe a plan as invalid")
+
+    messages = []
+    agent._preparePreloadedPlan(__, { useplanning: true, planfile: "missing-plan.md" })
+    ow.test.assert(messages.length, 0, "A requested plan should rely on the loader's specific error instead of a generic invalid-plan message")
+  }
+
   exports.testSimplePlanGeneration = function() {
     var agent = createAgent()
     var goal = "Summarize repository README"

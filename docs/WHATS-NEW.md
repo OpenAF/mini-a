@@ -1425,3 +1425,10 @@ Mini-A now has a lightweight native evaluation runner. Use `eval=true` with
 metrics, apply deterministic assertions and limits, emit JSON reports, and
 compare against a saved baseline. The event and metrics report shapes are
 versioned so later observability and orchestration work can reuse them.
+
+# Adaptive orchestration foundation
+
+`orchestration=auto` now selects existing planning, advisor/model strategy,
+and evidence-gate controls using deterministic complexity and risk signals.
+Manual remains the default and explicit configuration wins. Every automatic
+selection is emitted as a structured trace decision without adding an LLM call.

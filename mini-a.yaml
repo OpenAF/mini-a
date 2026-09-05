@@ -508,6 +508,11 @@ help:
     example  : "false"
     mandatory: false
     options  : ["true", "false"]
+  - name     : orchestration
+    desc     : "Execution strategy selection mode: manual preserves explicit behavior; auto uses deterministic existing-capability routing"
+    example  : "auto"
+    mandatory: false
+    options  : ["manual", "auto"]
   - name     : adaptiverouting
     desc     : Enable rule-based route selection via mini-a-router.js
     example  : "true"
@@ -1309,6 +1314,7 @@ jobs:
         mcpprogcalltools: mcpprogcalltools
         mcpprogcallbatchmax: mcpprogcallbatchmax
         useplanning    : useplanning
+        orchestration  : orchestration
         forceplanning  : forceplanning
         planstyle      : planstyle
         earlystopthreshold: earlystopthreshold
@@ -1572,6 +1578,7 @@ jobs:
       mcpprogcalltools: isString.default(__)
       mcpprogcallbatchmax: toNumber.isNumber.default(10)
       useplanning    : toBoolean.isBoolean.default(false)
+      orchestration  : isString.default("manual")
       forceplanning  : toBoolean.isBoolean.default(false)
       planstyle      : isString.default(__)
       earlystopthreshold: toNumber.isNumber.default(__)
