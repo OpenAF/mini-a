@@ -158,10 +158,11 @@ var __miniAWikiAgentsTemplate = function(now) {
     "## Operations in this surface",
     "",
     "Available agent action ops (`wiki op=\"...\"`):  ",
-    "`context` · `search` · `open` · `navigate` · `read` · `grep` · `related` · `list` · `browse` · `tree` · `backlinks` · `write` · `delete` · `move` · `init` · `lint` · `reindex` · `attach` · `detach` · `mounts`",
+    "`context` · `retrieve` · `search` · `open` · `navigate` · `read` · `grep` · `related` · `list` · `browse` · `tree` · `backlinks` · `write` · `delete` · `move` · `init` · `lint` · `reindex` · `attach` · `detach` · `mounts`",
     "",
     "- `wiki op=\"context\"` — compact wiki overview (page count, sections, mounts, recent changes).",
     "- `wiki op=\"search\" query=\"...\"` — compact candidates with path/reference/title/summary and Lucene score when available.",
+    "- `wiki op=\"retrieve\" query=\"...\"` — bounded Search → Inspect evidence with citations and inspectable score components.",
     "- `wiki op=\"open\" path=\"...\"` — inspect front matter, links, headings and ranges without body content.",
     "- `wiki op=\"navigate\" path=\"...\" section=\"...\"` — browse folders or heading relationships without body content.",
     "- `wiki op=\"read\" path=\"...\" section=\"...\"` — read one heading or range; bounded output has a continuation.",
@@ -697,7 +698,7 @@ MiniAWikiManager.prototype._luceneStoredDoc = function(searcher, docId) {
   return __
 }
 
-MiniAWikiManager.prototype._openLucene = function(forceEphemeral) {
+MiniAWikiManager.prototype._openLucene = function() {
   if (!this._ensureLucene()) return __
   // $ch(...).create("searchdb") always opens an IndexWriter (CREATE_OR_APPEND), which would
   // take the write lock and create the index directory. Read-only wikis must never get here;
@@ -705,19 +706,22 @@ MiniAWikiManager.prototype._openLucene = function(forceEphemeral) {
   if (this._access !== "rw") return __
   this._ensureIndexRuntime()
   var chName = this._luceneChName()
-  if (forceEphemeral !== true && this._luceneChannel === chName) return chName
+  if (this._luceneChannel === chName) return chName
   try {
     $ch(chName).create("searchdb", this._luceneOptions())
-    if (forceEphemeral !== true) this._luceneChannel = chName
+    this._luceneChannel = chName
     return chName
   } catch(e) {
     var msg = __miniAErrMsg(e)
     if (msg.toLowerCase().indexOf("lock") >= 0 || msg.indexOf("LockObtainFailedException") >= 0) {
       if (this._luceneFallbackWarned !== true) {
-        this._logFn("warn", "Lucene writer lock held by another process; falling back to per-operation open/close.")
+        this._logFn("warn", "Lucene writer lock held by another process; skipping incremental updates until it is released.")
         this._luceneFallbackWarned = true
       }
-      return "__ephemeral__"
+      // There is no safe per-operation writer when another process owns the
+      // directory lock. Never return a fake channel name: callers would pass
+      // it to $ch() and hide the actual lock with an unrelated channel error.
+      return __
     }
     throw e
   }
@@ -725,7 +729,7 @@ MiniAWikiManager.prototype._openLucene = function(forceEphemeral) {
 
 MiniAWikiManager.prototype._closeLucene = function(chName) {
   var name = isString(chName) && chName.length > 0 ? chName : this._luceneChannel
-  if (!isString(name) || name.length === 0 || name === "__ephemeral__") return
+  if (!isString(name) || name.length === 0) return
   try { $ch(name).destroy() } catch(ignoreDestroy) {}
   if (name === this._luceneChannel) this._luceneChannel = ""
 }
@@ -755,10 +759,20 @@ MiniAWikiManager.prototype._luceneSet = function(path, raw, title) {
   this._ensureIndexRuntime()
   try {
     var chName = this._openLucene(false)
-    if (chName === "__ephemeral__") chName = this._openLucene(true)
-    $ch(chName).set({ id: path }, { content: raw, payload: { path: path, title: title } })
-    if (chName !== this._luceneChannel) this._closeLucene(chName)
-    this._stats.luceneSets++
+    if (!isString(chName) || chName.length === 0) {
+      this._luceneNeedsRebuild = true
+      return false
+    }
+    try {
+      $ch(chName).set({ id: path }, { content: raw, payload: { path: path, title: title } })
+      this._stats.luceneSets++
+      return true
+    } finally {
+      // A long-lived interactive agent performs many reads between writes.
+      // Do not retain an IndexWriter (and its filesystem lock) during those
+      // reads; another manager can then safely rebuild or update the index.
+      this._closeLucene(chName)
+    }
   } catch(e) {
     this._handleLuceneIncrementalFailure("update", e)
   }
@@ -770,10 +784,17 @@ MiniAWikiManager.prototype._luceneUnset = function(path) {
   this._ensureIndexRuntime()
   try {
     var chName = this._openLucene(false)
-    if (chName === "__ephemeral__") chName = this._openLucene(true)
-    $ch(chName).unset({ id: path })
-    if (chName !== this._luceneChannel) this._closeLucene(chName)
-    this._stats.luceneUnsets++
+    if (!isString(chName) || chName.length === 0) {
+      this._luceneNeedsRebuild = true
+      return false
+    }
+    try {
+      $ch(chName).unset({ id: path })
+      this._stats.luceneUnsets++
+      return true
+    } finally {
+      this._closeLucene(chName)
+    }
   } catch(e) {
     this._handleLuceneIncrementalFailure("delete", e)
   }
@@ -1328,14 +1349,10 @@ MiniAWikiManager.prototype._makeLuceneSearchIndex = function() {
         // IndexWriter lock. Keep read-only/hydrated managers mutation-free.
         return self._luceneQueryReadOnly(q, limit)
       }
-      var chName = self._openLucene(false)
-      if (chName === "__ephemeral__") chName = self._openLucene(true)
-      if (!isString(chName) || chName.length === 0) return []
-      var hits = manifestStatus.compatible && self._hasEnhancedLexicalSupport()
-        ? ow.ch.__types.searchdb.search(chName, { mode: "lexicalEnhanced", query: q, lexical: self._luceneLexicalOptions(), limit: limit })
-        : $ch(chName).getAll({ query: q, limit: limit })
-      if (chName !== self._luceneChannel) self._closeLucene(chName)
-      return isArray(hits) ? hits : []
+      // Searching must not acquire an IndexWriter.  A reader can search the
+      // last committed index while an ingest/reindex writer is active, and it
+      // prevents a quiet search from blocking a later write-mode manager.
+      return self._luceneQueryReadOnly(q, limit)
     },
     set      : function(path, raw, title) { self._luceneSet(path, raw, title) },
     unset    : function(path) { self._luceneUnset(path) },
@@ -3122,6 +3139,109 @@ MiniAWikiManager.prototype.related = function(pathOrRef, options) {
       if (isArray(cross) && cross.length > 0) out.cross = this._decorateEntries(cross)
     }
   } catch(e) {}
+  return out
+}
+
+// Bounded, inspectable retrieval composition. This intentionally delegates to
+// the established agentic search/read/related primitives rather than building
+// another index or returning whole pages to the model.
+MiniAWikiManager.prototype._retrievalTerms = function(query) {
+  var seen = {}, terms = []
+  String(query || "").toLowerCase().split(/[^a-z0-9_-]+/).forEach(function(term) {
+    if (term.length < 2 || seen[term] === true) return
+    seen[term] = true; terms.push(term)
+  })
+  return terms
+}
+
+MiniAWikiManager.prototype._rankRetrievalCandidates = function(results, query) {
+  var terms = this._retrievalTerms(query)
+  return (isArray(results) ? results : []).map(function(candidate, index) {
+    var pathText = (String(candidate.path || "") + " " + String(candidate.title || "")).toLowerCase()
+    var structural = terms.reduce(function(total, term) { return total + (pathText.indexOf(term) >= 0 ? 1 : 0) }, 0)
+    var lexical = isNumber(candidate.score) && isFinite(candidate.score) ? candidate.score : __
+    var combined = (isNumber(lexical) ? lexical : 0) + structural * 0.01
+    return { candidate: candidate, score: combined, components: { lexical: lexical, structural: structural, metadata: 0, graph: 0, recency: 0 }, originalIndex: index }
+  }).sort(function(a, b) {
+    if (a.score !== b.score) return b.score - a.score
+    return a.originalIndex - b.originalIndex
+  })
+}
+
+MiniAWikiManager.prototype.retrieve = function(query, options) {
+  var opts = isObject(options) ? options : {}
+  var budgets = {
+    queries: isNumber(opts.maxQueries) ? Math.max(1, Math.floor(opts.maxQueries)) : 1,
+    candidatePages: isNumber(opts.maxCandidates) ? Math.max(1, Math.min(20, Math.floor(opts.maxCandidates))) : 8,
+    inspectedPages: isNumber(opts.maxInspected) ? Math.max(1, Math.min(12, Math.floor(opts.maxInspected))) : 3,
+    graphExpansion: isNumber(opts.maxGraphExpansion) ? Math.max(0, Math.min(10, Math.floor(opts.maxGraphExpansion))) : 0,
+    bytes: isNumber(opts.maxBytes) ? Math.max(512, Math.min(64000, Math.floor(opts.maxBytes))) : 16000
+  }
+  var search = this.agenticSearch(query, { limit: budgets.candidatePages })
+  var ranked = this._rankRetrievalCandidates(search.results, query)
+  var graphExpansion = []
+  // Graph/backlink traversal remains opt-in. Search is the deterministic first
+  // pass; callers that have evidence a relationship matters can spend this
+  // separate budget without making every retrieval wider or more expensive.
+  if (opts.expandGraph === true && budgets.graphExpansion > 0 && ranked.length > 0) {
+    var knownPaths = {}
+    ranked.forEach(function(item) { knownPaths[item.candidate.path] = true })
+    for (var seed = 0; seed < ranked.length && graphExpansion.length < budgets.graphExpansion; seed++) {
+      var related = this.related(ranked[seed].candidate.ref, { limit: budgets.graphExpansion - graphExpansion.length })
+      var addGraphCandidate = function(path, relation) {
+        if (!isString(path) || path.length === 0 || knownPaths[path] === true || graphExpansion.length >= budgets.graphExpansion) return
+        knownPaths[path] = true
+        var candidate = { ref: this._agenticRef(path), path: path, title: path.replace(/\.md$/i, "").replace(/[-_/]/g, " ") }
+        ranked.push({ candidate: candidate, score: 0.001, components: { lexical: __, structural: 0, metadata: 0, graph: 1, recency: 0 }, originalIndex: ranked.length })
+        graphExpansion.push({ path: path, relation: relation })
+      }.bind(this)
+      if (isArray(related.backlinks)) related.backlinks.forEach(function(item) { addGraphCandidate(item.path, "backlink") })
+      if (isArray(related.cross)) related.cross.forEach(function(item) { addGraphCandidate(item.path, "cross-wiki") })
+      if (isArray(related.graph)) related.graph.forEach(function(edge) {
+        var from = isString(edge.from) ? edge.from.replace(/^doc:/, "") : ""
+        var to = isString(edge.to) ? edge.to.replace(/^doc:/, "") : ""
+        var seedPath = ranked[seed].candidate.path
+        addGraphCandidate(from === seedPath ? to : from, "graph")
+      })
+    }
+  }
+  var evidence = [], citations = [], usedBytes = 0
+  for (var i = 0; i < ranked.length && evidence.length < budgets.inspectedPages && usedBytes < budgets.bytes; i++) {
+    var remaining = budgets.bytes - usedBytes
+    var read = this.agenticRead(ranked[i].candidate.ref, { maxChars: Math.min(6000, remaining) })
+    if (!isObject(read) || !isString(read.body) || read.body.length === 0) continue
+    var bodyBytes = new java.lang.String(read.body).getBytes("UTF-8").length
+    // maxChars is intentionally a compatibility-preserving character limit;
+    // enforce the public byte budget separately for multi-byte content.
+    if (bodyBytes > remaining) {
+      var bodyLength = Math.max(0, Math.floor(read.body.length * remaining / bodyBytes))
+      read.body = read.body.substring(0, bodyLength)
+      bodyBytes = new java.lang.String(read.body).getBytes("UTF-8").length
+      while (bodyBytes > remaining && read.body.length > 0) {
+        read.body = read.body.substring(0, read.body.length - 1)
+        bodyBytes = new java.lang.String(read.body).getBytes("UTF-8").length
+      }
+      read.truncated = true
+    }
+    if (read.body.length === 0) continue
+    usedBytes += bodyBytes
+    var source = read[this._sourceField] || ranked[i].candidate[this._sourceField]
+    var item = { ref: read.ref, path: read.path, title: read.title, content: read.body, lineStart: read.lineStart, lineEnd: read.lineEnd, score: ranked[i].score, scoreComponents: ranked[i].components }
+    if (isDef(source)) { item.citation = source; citations.push(source) }
+    if (read.truncated === true) item.next = read.next
+    evidence.push(item)
+  }
+  var out = {
+    query: query,
+    stages: ["query", "search", "inspect", "expand", "synthesize"],
+    ranking: ranked.map(function(item) { return { ref: item.candidate.ref, path: item.candidate.path, title: item.candidate.title, score: item.score, scoreComponents: item.components } }),
+    evidence: evidence,
+    citations: citations.filter(function(value, index, all) { return all.indexOf(value) === index }),
+    expansion: graphExpansion,
+    budget: { limits: budgets, used: { queries: 1, candidatePages: search.results.length, inspectedPages: evidence.length, graphExpansion: graphExpansion.length, bytes: usedBytes } }
+  }
+  if (search.truncated === true || evidence.length < ranked.length || usedBytes >= budgets.bytes) out.truncated = true
+  this._agenticLog("retrieve", { query: query, candidates: ranked.length, inspected: evidence.length, bytes: usedBytes })
   return out
 }
 

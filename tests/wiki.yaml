@@ -11,6 +11,18 @@ jobs:
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testParseFrontmatterWithoutBlock
 
+- name: MiniA Wiki Tests::LuceneWriterLockSkipsFakeChannel
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneWriterLockSkipsFakeChannel
+
+- name: MiniA Wiki Tests::LuceneIncrementalWriteReleasesWriter
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testLuceneIncrementalWriteReleasesWriter
+
+- name: MiniA Wiki Tests::BoundedRetrievalPipelineRanksEvidenceAndCitations
+  to  : oJob Test
+  exec: args.func = require("tests/wiki.js").testBoundedRetrievalPipelineRanksEvidenceAndCitations
+
 - name: MiniA Wiki Tests::ExtractMarkdownLinks
   to  : oJob Test
   exec: args.func = require("tests/wiki.js").testExtractMarkdownLinks
@@ -616,6 +628,9 @@ jobs:
 todo:
 - MiniA Wiki Tests::ParseFrontmatterWithYaml
 - MiniA Wiki Tests::ParseFrontmatterWithoutBlock
+- MiniA Wiki Tests::LuceneWriterLockSkipsFakeChannel
+- MiniA Wiki Tests::LuceneIncrementalWriteReleasesWriter
+- MiniA Wiki Tests::BoundedRetrievalPipelineRanksEvidenceAndCitations
 - MiniA Wiki Tests::ExtractMarkdownLinks
 - MiniA Wiki Tests::ExtractWikiStyleLinks
 - MiniA Wiki Tests::ExtractLinksDeduplicates

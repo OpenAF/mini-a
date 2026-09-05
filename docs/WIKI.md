@@ -392,3 +392,16 @@ and section digests; it asks for selected context only when the extractor reques
 retains page compatibility while adding deterministic title/path/heading/recency score details
 with `debug=true`; `assembleContext()` returns token-bounded chunk context. Set
 `wikitelemetry=true` only to retain local aggregate query hashes/frequencies.
+# Bounded agentic retrieval
+
+`wiki op="retrieve" query="..."` composes the established Wiki primitives
+into a bounded Query → Search → Inspect → Expand → Synthesize-preparation workflow. It
+returns compact evidence entries, source citations, line ranges, ranking score
+components, and used-versus-configured budgets; it does not return whole Wiki
+content or generate an ungrounded answer.
+
+Optional bounds are `maxCandidates`, `maxInspected`, `maxGraphExpansion`, and
+`maxBytes`. Set `expandGraph=true` to spend the separate graph-expansion budget
+on backlinks, graph neighbors, and eligible mounted Wiki relations. Native
+Lucene score is retained where available; structural relevance is shown
+separately, so selection remains deterministic and inspectable.

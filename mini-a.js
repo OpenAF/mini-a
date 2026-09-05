@@ -4643,7 +4643,7 @@ MiniA.prototype._preparePreloadedPlan = function(preloadedPlan, args) {
   var hasRequestedExternalPlan = (isString(args.planfile) && args.planfile.trim().length > 0) ||
     (isString(args.plancontent) && args.plancontent.trim().length > 0)
   if (toBoolean(args.useplanning) === true && !hasRequestedExternalPlan) {
-    this.fnI("plan", "No external plan provided; will generate a plan automatically during execution.")
+    this.fnI("plan", "will generate a plan automatically during execution.")
   }
   this._hasExternalPlan = false
   return false
@@ -20283,6 +20283,9 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
             } else if (wkOp === "related") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               wkResult = wkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(wkPath, { limit: wkParams.limit }))
+            } else if (wkOp === "retrieve") {
+              global.__mini_a_metrics.wiki_ops_search.inc()
+              wkResult = wkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : af.toTOON(this._wikiManager.retrieve(wkQuery, { maxCandidates: wkParams.maxCandidates, maxInspected: wkParams.maxInspected, maxGraphExpansion: wkParams.maxGraphExpansion, maxBytes: wkParams.maxBytes, expandGraph: wkParams.expandGraph === true }))
             } else if (wkOp === "search") {
               global.__mini_a_metrics.wiki_ops_search.inc()
               if (wkQuery.length === 0) {
@@ -20395,7 +20398,7 @@ MiniA.prototype._startInternal = function(args, sessionStartTime) {
               global.__mini_a_metrics.wiki_ops_write.inc()
               wkResult = af.toTOON(this._wikiManager.reindex())
             } else {
-              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
+              wkResult = "[ERROR] Unknown wiki op: " + wkOp + ". Use retrieve, search, open, navigate, read, grep, related, context, list, tree, browse, backlinks, lint, mounts, attach, detach" + (args.wikiaccess === "rw" ? ", write, move, delete, init, reindex" : "")
             }
             if (isString(wkResult) && wkResult.indexOf("[ERROR]") === 0) global.__mini_a_metrics.wiki_ops_errors.inc()
             this._trace("wiki_result", { op: wkOp, params: wkParams, result: wkResult, error: isString(wkResult) && wkResult.indexOf("[ERROR]") === 0 })
@@ -21065,6 +21068,8 @@ MiniA.prototype._runChatbotMode = function(options) {
                 cbWkResult = cbWkPath.length === 0 || !isString(cbWkParams.pattern) ? "[ERROR] wiki grep requires 'path' and 'pattern'" : af.toTOON(this._wikiManager.grep(cbWkPath, cbWkParams.pattern, cbWkSearchOpts))
               } else if (cbWkOp === "related") {
                 cbWkResult = cbWkPath.length === 0 ? "[ERROR] wiki related requires 'path'" : af.toTOON(this._wikiManager.related(cbWkPath, { limit: cbWkParams.limit }))
+              } else if (cbWkOp === "retrieve") {
+                cbWkResult = cbWkQuery.length === 0 ? "[ERROR] wiki retrieve requires 'query'" : af.toTOON(this._wikiManager.retrieve(cbWkQuery, { maxCandidates: cbWkParams.maxCandidates, maxInspected: cbWkParams.maxInspected, maxGraphExpansion: cbWkParams.maxGraphExpansion, maxBytes: cbWkParams.maxBytes, expandGraph: cbWkParams.expandGraph === true }))
               } else if (cbWkOp === "search") {
                 if (cbWkQuery.length === 0) { cbWkResult = "[ERROR] wiki search requires 'query'" }
                 else {

@@ -447,9 +447,13 @@ MiniAIngest.prototype.run = function() {
     if (!isMap(wikiCfg)) return merge(result, { ok: false, reason: "no-wiki-config" })
     loadLib("mini-a-wiki.js")
     loadLib("mini-a-wiki-knowledge.js")
-    var wm = new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[ingest:wiki] " + msg) })
+    // The interactive console can already own this wiki's Lucene writer. Reuse
+    // that manager so ingestion and its finalization do not contend with it.
+    var wm = isObject(this._args.wikimanager) ? this._args.wikimanager : new MiniAWikiManager(wikiCfg, function(level, msg) { self._log("[ingest:wiki] " + msg) })
+    var ownsWikiManager = wm !== this._args.wikimanager
+    var closeWikiManager = function() { if (ownsWikiManager) wm.close() }
     if (wm._access !== "rw") {
-      wm.close()
+      closeWikiManager()
       this._log("[ingest] Wiki is read-only. Set wikiaccess=rw to ingest.")
       return merge(result, { ok: false, reason: "wiki-read-only" })
     }
@@ -490,7 +494,7 @@ MiniAIngest.prototype.run = function() {
 
     if (pending.length === 0) {
       this._log("[ingest] Nothing to do — all " + result.skipped_unchanged + " source(s) unchanged (use ingestforce=true to re-ingest).")
-      wm.close()
+      closeWikiManager()
       return result
     }
     this._log("[ingest] " + pending.length + " source(s) to distill (" + result.skipped_unchanged + " unchanged).")
@@ -498,7 +502,7 @@ MiniAIngest.prototype.run = function() {
     if (isDryRun) {
       result.written = pending.map(function(p) { return self._wikiPathFor(section, p.src) })
       this._log("[ingest] Dry-run: would write " + result.written.length + " page(s) into '" + section + "/'.")
-      wm.close()
+      closeWikiManager()
       return result
     }
 
@@ -519,7 +523,7 @@ MiniAIngest.prototype.run = function() {
     var distilled = deterministic
     if (llmPending.length > 0) {
       var llm = this._buildLlm()
-      if (!isObject(llm)) { wm.close(); return merge(result, { ok: false, reason: "no-llm", deferred: result.deferred }) }
+      if (!isObject(llm)) { closeWikiManager(); return merge(result, { ok: false, reason: "no-llm", deferred: result.deferred }) }
       var siblingTitles = pending.map(function(p) { return String(p.src.rel) })
       distilled = distilled.concat(this._distillAll(llm, llmPending, siblingTitles, Math.max(1, Math.round(this._num("ingestconcurrency", 4)))))
       result.llm_calls = llmPending.length
@@ -572,7 +576,7 @@ MiniAIngest.prototype.run = function() {
     try { wm.appendLog("ingest", section, result.written.length + " page(s) from " + source) } catch(el) {}
     if (budget) result.budget = budget.stats()
     result.finalize = this._finalize(wm)
-    wm.close()
+    closeWikiManager()
     return result
   } catch(e) {
     this._log("[ingest] Error: " + __miniAErrMsg(e))

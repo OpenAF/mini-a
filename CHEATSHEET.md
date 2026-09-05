@@ -918,7 +918,7 @@ When a brand-new wiki is opened with `wikiaccess=rw`, Mini-A bootstraps three st
 - `index.md` — catalog of all pages with summaries, section links, and recent changes
 - `log.md` — append-only journal of every write, delete, and move operation
 
-Folders become browsable sub-wikis when they contain a local `index.md`. Start with `wiki op="context"` for a compact wiki overview, then `search` before reading any page.
+Folders become browsable sub-wikis when they contain a local `index.md`. Start with `wiki op="context"` for a compact wiki overview, then `search` before reading any page. For a bounded evidence packet instead, use `wiki op="retrieve" query="..."`; it returns ranked excerpts with citations and explicit candidate/inspection/byte budgets. Add `expandGraph=true maxGraphExpansion=N` only when relationship traversal is justified.
 
 ### Folder taxonomy (recommended, never enforced)
 

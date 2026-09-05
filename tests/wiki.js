@@ -896,6 +896,25 @@
     ow.test.assert(warnings[0].indexOf("Failed incremental Lucene delete:") === 0, true, "generic warning should keep the original wording")
   }
 
+  exports.testLuceneWriterLockSkipsFakeChannel = function() {
+    var wm = new MiniAWikiManager({ backend: "fs", root: ".", access: "rw" })
+    wm._ensureLucene = function() { return true }
+    wm._ensureIndexRuntime = function() {}
+    wm._openLucene = function() { return __ }
+    ow.test.assert(wm._luceneSet("locked.md", "# Locked", "Locked"), false, "a held writer lock should skip the incremental write")
+    ow.test.assert(wm._luceneNeedsRebuild, true, "a skipped incremental write should request a later rebuild")
+  }
+
+  exports.testLuceneIncrementalWriteReleasesWriter = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw" })
+      wm.write("locked.md", { title: "Locked" }, "# Locked")
+      ow.test.assert(wm._luceneChannel, "", "an incremental write must release the Lucene writer immediately")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
   // ── Serialise round-trip ──────────────────────────────────────────────────────
 
   exports.testWriteReadRoundTrip = function() {
@@ -2533,6 +2552,33 @@
       ow.test.assert(missing.error, "section not found: missing", "read should report invalid sections explicitly")
       var noMatches = wm.grep("plain.md", "absent", {})
       ow.test.assert(noMatches.matches.length, 0, "grep should report no matches compactly")
+      wm.close()
+    } finally { cleanupTestDir(dir) }
+  }
+
+  exports.testBoundedRetrievalPipelineRanksEvidenceAndCitations = function() {
+    var dir = createTestDir()
+    try {
+      var wm = new MiniAWikiManager({ backend: "fs", root: dir, access: "rw", wikisourceurl: "https://docs.example.com/{{pathNoExt}}" })
+      wm.write("guides/cache.md", { title: "Cache guide" }, "# Cache\n\nUse cache-control max-age for static assets.")
+      wm.write("guides/database.md", { title: "Database" }, "# Database\n\nUse connection pooling for SQL queries.")
+      var result = wm.retrieve("cache", { maxCandidates: 5, maxInspected: 1, maxBytes: 300 })
+      ow.test.assert(result.stages.join(","), "query,search,inspect,expand,synthesize", "retrieval should expose the bounded pipeline stages")
+      ow.test.assert(result.evidence.length, 1, "inspect budget should cap returned evidence")
+      ow.test.assert(result.evidence[0].path, "guides/cache.md", "relevance ranking should suppress unrelated documents")
+      ow.test.assert(result.evidence[0].scoreComponents.structural > 0, true, "ranking should expose deterministic structural relevance")
+      ow.test.assert(result.citations[0], "https://docs.example.com/guides/cache", "evidence should retain the source citation")
+      ow.test.assert(result.budget.used.bytes <= result.budget.limits.bytes, true, "retrieval must honor its byte budget")
+      wm.write("guides/unicode.md", { title: "Unicode" }, "# Unicode\n\n" + new Array(401).join("é"))
+      var unicode = wm.retrieve("unicode", { maxCandidates: 1, maxInspected: 1, maxBytes: 512 })
+      ow.test.assert(unicode.budget.used.bytes <= unicode.budget.limits.bytes, true, "byte budgets must also hold for multi-byte evidence")
+      wm.write("guides/related.md", { title: "Related guide" }, "# Related\n\nEvidence discovered through the knowledge graph.")
+      var nativeRelated = wm.related
+      wm.related = function() { return { backlinks: [{ path: "guides/related.md" }], graph: [] } }
+      var expanded = wm.retrieve("cache", { maxCandidates: 1, maxInspected: 2, maxGraphExpansion: 1, maxBytes: 600, expandGraph: true })
+      wm.related = nativeRelated
+      ow.test.assert(expanded.budget.used.graphExpansion, 1, "graph expansion must honor and report its separate budget")
+      ow.test.assert(expanded.ranking[1].scoreComponents.graph, 1, "graph-discovered candidates should expose graph relevance")
       wm.close()
     } finally { cleanupTestDir(dir) }
   }

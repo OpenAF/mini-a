@@ -6211,6 +6211,10 @@ try {
     }
 
     var ingestArgs = merge({}, sessionOptions)
+    // Reuse the active agent's wiki manager. It can keep the Lucene writer
+    // open for interactive search, so a second manager would contend for it.
+    var ingestWikiManager = isObject(activeAgent) && isObject(activeAgent._wikiManager) ? activeAgent._wikiManager : __
+    if (isObject(ingestWikiManager)) ingestArgs.wikimanager = ingestWikiManager
     ingestArgs.ingestsource = operands[0]
     if (operands.length > 1) ingestArgs.ingestsection = operands[1]
     if (flags.dryrun) ingestArgs.ingestdryrun = "true"
